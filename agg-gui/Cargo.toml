@@ -1,0 +1,12 @@
+[package]
+name = "agg-gui"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "MIT"
+description = "A Rust GUI framework built on AGG (Anti-Grain Geometry)"
+repository = "https://github.com/larsbrubaker/agg-gui"
+
+[dependencies]
+agg-rust = { path = "../../agg-rust" }
+clipper2-rust = { path = "../../clipper2-rust" }

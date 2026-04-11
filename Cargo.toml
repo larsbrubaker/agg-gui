@@ -1,0 +1,3 @@
+[workspace]
+members = ["agg-gui", "demo-native", "demo-wasm"]
+resolver = "2"

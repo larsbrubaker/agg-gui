@@ -1,0 +1,16 @@
+[package]
+name = "demo-native"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "demo-native"
+path = "src/main.rs"
+
+[dependencies]
+agg-gui = { path = "../agg-gui" }
+winit = "0.30"
+glutin = "0.32"
+glutin-winit = "0.5"
+glow = "0.13"
+raw-window-handle = "0.6"
