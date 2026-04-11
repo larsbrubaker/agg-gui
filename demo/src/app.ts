@@ -52,7 +52,11 @@ ro.observe(canvas.parentElement!);
 async function init() {
   try {
     const wasm = await import("../public/pkg/demo_wasm.js");
-    await wasm.default();
+    // Bun bundles demo_wasm.js inline, so import.meta.url inside it points to
+    // bundle.js (public/dist/), not to public/pkg/ where the .wasm lives.
+    // Pass the URL explicitly so wasm-bindgen fetches from the right location.
+    const wasmUrl = new URL("./public/pkg/demo_wasm_bg.wasm", location.href);
+    await wasm.default({ module_or_path: wasmUrl });
     renderFrame = wasm.render_frame as (w: number, h: number) => Uint8Array;
     loadingEl.classList.add("hidden");
     render();
