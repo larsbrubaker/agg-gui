@@ -724,7 +724,7 @@ pub fn render(width: u32, height: u32) {
 
         // --- 3D cube on top (rendered during widget draw pass sequence) ---
         let cube_rect = CUBE_SCREEN_RECT.with(|r| r.get());
-        unsafe { state.draw_cube_only(cube_rect, height as f64, width as i32, height as i32); }
+        unsafe { state.draw_cube_only(cube_rect, width as i32, height as i32); }
     });
 }
 

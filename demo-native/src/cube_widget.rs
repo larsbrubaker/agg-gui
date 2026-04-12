@@ -209,11 +209,12 @@ impl CubeGlRenderer {
     ) {
         if fb_rect.width < 1.0 || fb_rect.height < 1.0 { return; }
 
-        // Y-up → GL (Y-down) conversion
+        // GL viewport/scissor use window coords: Y=0 at bottom-left — matches Y-up directly.
         let gl_x = fb_rect.x as i32;
-        let gl_y = (viewport_h - fb_rect.y - fb_rect.height) as i32;
+        let gl_y = fb_rect.y as i32;
         let gl_w = fb_rect.width as i32;
         let gl_h = fb_rect.height as i32;
+        let _ = viewport_h; // no longer needed
 
         gl.viewport(gl_x, gl_y, gl_w, gl_h);
         gl.enable(glow::SCISSOR_TEST);

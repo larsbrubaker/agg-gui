@@ -332,17 +332,17 @@ impl CubeGlRenderer {
     /// AGG blit to the default framebuffer (the cube is drawn on top of it).
     pub unsafe fn draw_gl(
         &mut self,
-        gl:         &glow::Context,
-        fb_rect:    Rect,
-        viewport_h: f64,
-        full_w:     i32,
-        full_h:     i32,
+        gl:     &glow::Context,
+        fb_rect: Rect,
+        full_w:  i32,
+        full_h:  i32,
     ) {
         if fb_rect.width < 1.0 || fb_rect.height < 1.0 { return; }
 
-        // Y-up → GL (Y-down) viewport conversion.
+        // GL viewport/scissor use window coordinates: Y=0 at BOTTOM-LEFT.
+        // Our Y-up screen coords match directly — no flip needed.
         let gl_x = fb_rect.x as i32;
-        let gl_y = (viewport_h - fb_rect.y - fb_rect.height) as i32;
+        let gl_y = fb_rect.y as i32;
         let gl_w = fb_rect.width  as i32;
         let gl_h = fb_rect.height as i32;
 
@@ -408,14 +408,8 @@ impl GlState {
 
     /// Draw only the 3D cube into `cube_rect` (for use after GlGfxCtx has
     /// already rendered the 2D widget tree to the same GL surface).
-    pub unsafe fn draw_cube_only(
-        &mut self,
-        cube_rect: Rect,
-        viewport_h: f64,
-        full_w: i32,
-        full_h: i32,
-    ) {
-        self.cube.draw_gl(&self.gl, cube_rect, viewport_h, full_w, full_h);
+    pub unsafe fn draw_cube_only(&mut self, cube_rect: Rect, full_w: i32, full_h: i32) {
+        self.cube.draw_gl(&self.gl, cube_rect, full_w, full_h);
     }
 
     /// Legacy full render pass (AGG texture blit + cube).  Kept for reference.
@@ -428,13 +422,7 @@ impl GlState {
         cube_rect: Rect,
     ) {
         self.presenter.present(&self.gl, pixels, width, height);
-        self.cube.draw_gl(
-            &self.gl,
-            cube_rect,
-            height as f64,
-            width  as i32,
-            height as i32,
-        );
+        self.cube.draw_gl(&self.gl, cube_rect, width as i32, height as i32);
     }
 }
 
