@@ -23,7 +23,7 @@ pub struct Modifiers {
     pub alt: bool,
 }
 
-/// A logical keyboard key — the minimal set needed for Phase 4 text input.
+/// A logical keyboard key.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Key {
     /// A printable character, already translated through the keyboard layout.
@@ -32,6 +32,8 @@ pub enum Key {
     Delete,
     ArrowLeft,
     ArrowRight,
+    ArrowUp,
+    ArrowDown,
     Home,
     End,
     Tab,

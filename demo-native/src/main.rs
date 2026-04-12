@@ -1,16 +1,15 @@
-//! Native WGL demo for agg-gui — Phase 5.
+//! Native WGL demo for agg-gui — Phase 6.
 //!
-//! Renders the Phase 5 interactive layout demo (TabView with Flex, Scroll,
-//! Split tabs) via AGG → Framebuffer → GL texture → full-screen quad.
-//! Winit mouse, wheel, and keyboard events are forwarded to the [`App`].
+//! Renders a TabView demo (Flex, Scroll, Split, Tree) via AGG → Framebuffer
+//! → GL texture → full-screen quad.  Winit events are forwarded to [`App`].
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use agg_gui::{
     App, Button, Color, FlexColumn, FlexRow, Font, Framebuffer, GfxCtx,
-    Modifiers, MouseButton as AggMouseButton, ScrollView, Size, SizedBox,
-    Spacer, Splitter, TabView, TextField,
+    Key as AggKey, Modifiers, MouseButton as AggMouseButton, NodeIcon,
+    ScrollView, Size, SizedBox, Spacer, Splitter, TabView, TextField, TreeView,
 };
 
 use glutin::config::ConfigTemplateBuilder;
@@ -24,6 +23,7 @@ use raw_window_handle::HasWindowHandle;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::WindowAttributes;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
@@ -134,8 +134,63 @@ fn build_layout_ui(font: Arc<Font>) -> App {
         .with_font_size(13.0)
         .add_tab("Flex",   Box::new(build_flex_demo(Arc::clone(&font))))
         .add_tab("Scroll", Box::new(build_scroll_demo(Arc::clone(&font))))
-        .add_tab("Split",  Box::new(build_split_demo(Arc::clone(&font))));
+        .add_tab("Split",  Box::new(build_split_demo(Arc::clone(&font))))
+        .add_tab("Tree",   Box::new(build_tree_demo(Arc::clone(&font))));
     App::new(Box::new(tab_view))
+}
+
+fn build_tree_demo(font: Arc<Font>) -> TreeView {
+    let mut tv = TreeView::new(Arc::clone(&font))
+        .with_row_height(26.0)
+        .with_font_size(13.0)
+        .with_indent_width(18.0);
+
+    let alpha = tv.add_root("Project Alpha", NodeIcon::Package);
+    tv.expand(alpha);
+    let src = tv.add_child(alpha, "src", NodeIcon::Folder);
+    tv.expand(src);
+    tv.add_child(src, "main.rs", NodeIcon::File);
+    tv.add_child(src, "lib.rs", NodeIcon::File);
+    let widgets_dir = tv.add_child(src, "widgets", NodeIcon::Folder);
+    tv.expand(widgets_dir);
+    tv.add_child(widgets_dir, "button.rs", NodeIcon::File);
+    tv.add_child(widgets_dir, "scroll_view.rs", NodeIcon::File);
+    tv.add_child(widgets_dir, "tree_view.rs", NodeIcon::File);
+    let tests = tv.add_child(alpha, "tests", NodeIcon::Folder);
+    tv.expand(tests);
+    tv.add_child(tests, "integration.rs", NodeIcon::File);
+    tv.add_child(tests, "unit.rs", NodeIcon::File);
+    tv.add_child(alpha, "Cargo.toml", NodeIcon::File);
+
+    let beta = tv.add_root("Project Beta", NodeIcon::Package);
+    let bsrc = tv.add_child(beta, "src", NodeIcon::Folder);
+    tv.add_child(bsrc, "app.rs", NodeIcon::File);
+    tv.add_child(bsrc, "config.rs", NodeIcon::File);
+    tv.add_child(beta, "Cargo.toml", NodeIcon::File);
+
+    let gamma = tv.add_root("Project Gamma", NodeIcon::Package);
+    let gsrc = tv.add_child(gamma, "src", NodeIcon::Folder);
+    tv.add_child(gsrc, "main.rs", NodeIcon::File);
+    tv.add_child(gsrc, "render.rs", NodeIcon::File);
+    tv.add_child(gamma, "Cargo.toml", NodeIcon::File);
+
+    tv
+}
+
+fn map_key(key: &WinitKey) -> Option<AggKey> {
+    Some(match key {
+        WinitKey::Named(NamedKey::ArrowUp)    => AggKey::ArrowUp,
+        WinitKey::Named(NamedKey::ArrowDown)  => AggKey::ArrowDown,
+        WinitKey::Named(NamedKey::ArrowLeft)  => AggKey::ArrowLeft,
+        WinitKey::Named(NamedKey::ArrowRight) => AggKey::ArrowRight,
+        WinitKey::Named(NamedKey::Enter)      => AggKey::Enter,
+        WinitKey::Named(NamedKey::Space)      => AggKey::Char(' '),
+        WinitKey::Named(NamedKey::Tab)        => AggKey::Tab,
+        WinitKey::Named(NamedKey::Escape)     => AggKey::Escape,
+        WinitKey::Named(NamedKey::Backspace)  => AggKey::Backspace,
+        WinitKey::Character(s) => AggKey::Char(s.chars().next()?),
+        _ => return None,
+    })
 }
 
 fn build_flex_demo(font: Arc<Font>) -> FlexColumn {
@@ -237,7 +292,7 @@ fn main() {
     let event_loop = EventLoop::new().expect("EventLoop::new");
 
     let window_attributes = WindowAttributes::default()
-        .with_title("agg-gui — Phase 5 Demo")
+        .with_title("agg-gui — Phase 6 Demo")
         .with_inner_size(LogicalSize::new(1280u32, 720u32));
 
     let template = ConfigTemplateBuilder::new().with_alpha_size(0);
@@ -344,6 +399,15 @@ fn main() {
                     }
                 }
                 Event::WindowEvent {
+                    event: WindowEvent::KeyboardInput { event: key_event, .. }, ..
+                } => {
+                    if key_event.state == ElementState::Pressed {
+                        if let Some(key) = map_key(&key_event.logical_key) {
+                            app.on_key_down(key, Modifiers::default());
+                        }
+                    }
+                }
+                Event::WindowEvent {
                     event: WindowEvent::MouseWheel { delta, .. }, ..
                 } => {
                     // Positive delta_y = scroll up = increase scroll_offset in ScrollView.
@@ -374,7 +438,7 @@ fn render_frame(app: &mut App, fb: &mut Framebuffer, presenter: &mut GlPresenter
 
         let lsize = (w as f64 * 0.012).clamp(9.0, 13.0);
         ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.3));
-        ctx.fill_text_gsv("agg-gui  Phase 5 — Layout", 12.0, 6.0, lsize);
+        ctx.fill_text_gsv("agg-gui  Phase 6 — Layout & Tree", 12.0, 6.0, lsize);
     }
     unsafe { presenter.update_texture(fb) };
 }

@@ -1,13 +1,8 @@
-//! WASM demo crate for agg-gui — Phase 5.
+//! WASM demo crate for agg-gui — Phase 6.
 //!
 //! Exports:
-//! - `render_basics(w, h)` — interactive widget demo (buttons + text fields)
-//! - `render_text(w, h)` — Phase 3 text showcase (stateless)
-//! - `render_layout(w, h)` — Phase 5 layout demo (FlexColumn, ScrollView, Splitter, TabView)
-//! - `on_mouse_move`, `on_mouse_down`, `on_mouse_up`, `on_key_down`,
-//!   `on_mouse_leave` — Basics tab events
-//! - `on_layout_mouse_move`, `on_layout_mouse_down`, `on_layout_mouse_up`,
-//!   `on_layout_mouse_wheel`, `on_layout_mouse_leave` — Layout tab events
+//! - `render_basics`, `render_text`, `render_layout`, `render_tree`
+//! - Per-tab event exports (see source for full list)
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -15,8 +10,8 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use agg_gui::{
     App, Button, Color, CompOp, Container, FlexColumn, FlexRow, Font, Framebuffer,
-    GfxCtx, Modifiers, MouseButton, ScrollView, Size, SizedBox, Spacer,
-    Splitter, TabView, TextField, Widget,
+    GfxCtx, Key, Modifiers, MouseButton, NodeIcon, ScrollView, Size, SizedBox, Spacer,
+    Splitter, TabView, TextField, TreeView, Widget,
 };
 
 // Embed the font at compile time.
@@ -574,4 +569,136 @@ fn build_split_demo(font: Arc<Font>) -> Splitter {
         .add_flex(Box::new(Spacer::new()), 1.0);
 
     Splitter::new(Box::new(left), Box::new(right)).with_ratio(0.4)
+}
+
+// ---------------------------------------------------------------------------
+// Persistent widget tree for the Tree tab
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    static TREE_APP: RefCell<Option<App>> = RefCell::new(None);
+}
+
+fn ensure_tree_app(width: u32, height: u32) {
+    let _ = (width, height);
+    TREE_APP.with(|cell| {
+        if cell.borrow().is_none() {
+            *cell.borrow_mut() = Some(build_tree_ui(make_font()));
+        }
+    });
+}
+
+#[wasm_bindgen] pub fn on_tree_mouse_move(x: f64, y: f64) {
+    TREE_APP.with(|c| { if let Some(a) = c.borrow_mut().as_mut() { a.on_mouse_move(x, y); } });
+}
+#[wasm_bindgen] pub fn on_tree_mouse_down(x: f64, y: f64, button: u8) {
+    let btn = match button { 0=>MouseButton::Left, 1=>MouseButton::Middle, 2=>MouseButton::Right, n=>MouseButton::Other(n) };
+    TREE_APP.with(|c| { if let Some(a) = c.borrow_mut().as_mut() { a.on_mouse_down(x, y, btn, Modifiers::default()); } });
+}
+#[wasm_bindgen] pub fn on_tree_mouse_up(x: f64, y: f64, button: u8) {
+    let btn = match button { 0=>MouseButton::Left, 1=>MouseButton::Middle, 2=>MouseButton::Right, n=>MouseButton::Other(n) };
+    TREE_APP.with(|c| { if let Some(a) = c.borrow_mut().as_mut() { a.on_mouse_up(x, y, btn, Modifiers::default()); } });
+}
+#[wasm_bindgen] pub fn on_tree_mouse_wheel(x: f64, y: f64, delta_y: f64) {
+    TREE_APP.with(|c| { if let Some(a) = c.borrow_mut().as_mut() { a.on_mouse_wheel(x, y, delta_y); } });
+}
+#[wasm_bindgen] pub fn on_tree_mouse_leave() {
+    TREE_APP.with(|c| { if let Some(a) = c.borrow_mut().as_mut() { a.on_mouse_leave(); } });
+}
+#[wasm_bindgen] pub fn on_tree_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool) {
+    let mods = Modifiers { shift, ctrl, alt };
+    let key = parse_js_key_tree(key_str);
+    if let Some(k) = key {
+        TREE_APP.with(|c| { if let Some(a) = c.borrow_mut().as_mut() { a.on_key_down(k, mods); } });
+    }
+}
+
+fn parse_js_key_tree(key: &str) -> Option<Key> {
+    Some(match key {
+        "ArrowUp"    => Key::ArrowUp,
+        "ArrowDown"  => Key::ArrowDown,
+        "ArrowLeft"  => Key::ArrowLeft,
+        "ArrowRight" => Key::ArrowRight,
+        "Enter"      => Key::Enter,
+        " "          => Key::Char(' '),
+        "Tab"        => Key::Tab,
+        "Escape"     => Key::Escape,
+        _ => return None,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Tab: Tree — Phase 6 interactive tree demo
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen]
+pub fn render_tree(width: u32, height: u32) -> Vec<u8> {
+    ensure_tree_app(width, height);
+    TREE_APP.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let app = borrow.as_mut().unwrap();
+        app.layout(Size::new(width as f64, height as f64));
+
+        let mut fb = Framebuffer::new(width, height);
+        {
+            let mut ctx = GfxCtx::new(&mut fb);
+            app.paint(&mut ctx);
+            let lsize = (width as f64 * 0.012).clamp(9.0, 13.0);
+            ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.3));
+            ctx.fill_text_gsv("agg-gui  Phase 6 — TreeView", 12.0, 6.0, lsize);
+        }
+        fb.pixels_flipped()
+    })
+}
+
+fn build_tree_ui(font: Arc<Font>) -> App {
+    let mut tv = TreeView::new(Arc::clone(&font))
+        .with_row_height(26.0)
+        .with_font_size(13.0)
+        .with_indent_width(18.0);
+
+    // Project Alpha — expanded
+    let alpha = tv.add_root("Project Alpha", NodeIcon::Package);
+    tv.expand(alpha);
+
+    let src = tv.add_child(alpha, "src", NodeIcon::Folder);
+    tv.expand(src);
+    tv.add_child(src, "main.rs", NodeIcon::File);
+    tv.add_child(src, "lib.rs", NodeIcon::File);
+    let widgets_dir = tv.add_child(src, "widgets", NodeIcon::Folder);
+    tv.expand(widgets_dir);
+    tv.add_child(widgets_dir, "button.rs", NodeIcon::File);
+    tv.add_child(widgets_dir, "scroll_view.rs", NodeIcon::File);
+    tv.add_child(widgets_dir, "tree_view.rs", NodeIcon::File);
+
+    let tests = tv.add_child(alpha, "tests", NodeIcon::Folder);
+    tv.expand(tests);
+    tv.add_child(tests, "integration.rs", NodeIcon::File);
+    tv.add_child(tests, "unit.rs", NodeIcon::File);
+
+    tv.add_child(alpha, "Cargo.toml", NodeIcon::File);
+    tv.add_child(alpha, "README.md", NodeIcon::File);
+
+    // Project Beta — collapsed
+    let beta = tv.add_root("Project Beta", NodeIcon::Package);
+    let assets = tv.add_child(beta, "assets", NodeIcon::Folder);
+    tv.add_child(assets, "logo.svg", NodeIcon::File);
+    tv.add_child(assets, "icons.png", NodeIcon::File);
+    let bsrc = tv.add_child(beta, "src", NodeIcon::Folder);
+    tv.add_child(bsrc, "app.rs", NodeIcon::File);
+    tv.add_child(bsrc, "config.rs", NodeIcon::File);
+    tv.add_child(beta, "Cargo.toml", NodeIcon::File);
+
+    // Project Gamma — collapsed
+    let gamma = tv.add_root("Project Gamma", NodeIcon::Package);
+    let gsrc = tv.add_child(gamma, "src", NodeIcon::Folder);
+    tv.add_child(gsrc, "main.rs", NodeIcon::File);
+    tv.add_child(gsrc, "render.rs", NodeIcon::File);
+    tv.add_child(gsrc, "scene.rs", NodeIcon::File);
+    let shaders = tv.add_child(gsrc, "shaders", NodeIcon::Folder);
+    tv.add_child(shaders, "vert.glsl", NodeIcon::File);
+    tv.add_child(shaders, "frag.glsl", NodeIcon::File);
+    tv.add_child(gamma, "Cargo.toml", NodeIcon::File);
+
+    App::new(Box::new(tv))
 }
