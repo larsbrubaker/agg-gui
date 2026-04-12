@@ -393,7 +393,12 @@ impl Widget for TextDemoWidget {
 
 fn draw_text_tab(ctx: &mut GfxCtx, w: f64, h: f64, font: &Arc<Font>) {
     ctx.set_font(Arc::clone(font));
-    ctx.clear(Color::rgb(0.94, 0.94, 0.96));
+    // Fill only the widget's local area, not the entire framebuffer.
+    // ctx.clear() would erase the tab bar already painted by the parent TabView.
+    ctx.set_fill_color(Color::rgb(0.94, 0.94, 0.96));
+    ctx.begin_path();
+    ctx.rect(0.0, 0.0, w, h);
+    ctx.fill();
 
     let pad = (w.min(h) * 0.03).max(10.0);
     let gap = pad * 0.6;

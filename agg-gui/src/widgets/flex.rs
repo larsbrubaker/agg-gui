@@ -264,7 +264,17 @@ impl Widget for FlexRow {
             cursor_x += cw + gap;
         }
 
-        available
+        // Return the natural (intrinsic) height: tallest child + vertical padding.
+        // Returning `available` would propagate a huge height (e.g. f64::MAX/2 from
+        // ScrollView) when this FlexRow is a fixed child of a FlexColumn, causing
+        // the FlexColumn to place all sibling widgets at near-zero or negative Y and
+        // making the scroll content appear astronomically tall — which in turn gives
+        // AGG coordinates near ±4.5e15, overflowing its rasterizer.
+        let max_child_h = self.children.iter()
+            .map(|c| c.bounds().height)
+            .fold(0.0_f64, f64::max);
+        let natural_h = max_child_h + pad * 2.0;
+        Size::new(available.width, natural_h)
     }
 
     fn paint(&mut self, ctx: &mut GfxCtx) {
