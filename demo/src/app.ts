@@ -1,10 +1,12 @@
-// agg-gui demo — Phase 1 frontend
+// agg-gui demo — Phase 3 frontend
 //
-// Loads the WASM module, renders the demo into a pixel buffer, and
-// displays it on an HTML canvas. Handles resize so the canvas always
-// fills the container.
+// Loads the WASM module, renders the active tab's scene, and handles
+// tab switching. Handles resize so the canvas always fills the container.
 
-let renderFrame: ((width: number, height: number) => Uint8Array) | null = null;
+type RenderFn = (width: number, height: number) => Uint8Array;
+
+let renderers: Record<string, RenderFn> = {};
+let activeTab = "basics";
 
 // --- Canvas setup ---
 
@@ -16,7 +18,8 @@ const statusEl = document.getElementById("status")!;
 // --- Render loop ---
 
 function render() {
-  if (!renderFrame) return;
+  const fn = renderers[activeTab] ?? renderers["basics"];
+  if (!fn) return;
 
   const wrap = canvas.parentElement!;
   const dpr = window.devicePixelRatio || 1;
@@ -31,16 +34,28 @@ function render() {
   if (w === 0 || h === 0) return;
 
   const t0 = performance.now();
-
-  // WASM renders in Y-up, lib.rs applies pixels_flipped() so the returned
-  // buffer is already in top-down (Y-down) order for putImageData.
-  const pixels = renderFrame(w, h);
-  const imageData = new ImageData(new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength), w, h);
+  const pixels = fn(w, h);
+  const imageData = new ImageData(
+    new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength),
+    w,
+    h,
+  );
   ctx2d.putImageData(imageData, 0, 0);
 
   const ms = (performance.now() - t0).toFixed(1);
   statusEl.textContent = `${w}×${h}  ${ms}ms`;
 }
+
+// --- Tab handling ---
+
+document.querySelectorAll<HTMLElement>(".tab:not(.disabled)").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    activeTab = tab.dataset.tab!;
+    render();
+  });
+});
 
 // --- Resize observer ---
 
@@ -52,12 +67,13 @@ ro.observe(canvas.parentElement!);
 async function init() {
   try {
     const wasm = await import("../public/pkg/demo_wasm.js");
-    // Bun bundles demo_wasm.js inline, so import.meta.url inside it points to
-    // bundle.js (public/dist/), not to public/pkg/ where the .wasm lives.
-    // Pass the URL explicitly so wasm-bindgen fetches from the right location.
     const wasmUrl = new URL("./public/pkg/demo_wasm_bg.wasm", location.href);
     await wasm.default({ module_or_path: wasmUrl });
-    renderFrame = wasm.render_frame as (w: number, h: number) => Uint8Array;
+
+    // Register each tab's render function.
+    renderers["basics"] = wasm.render_basics as RenderFn;
+    renderers["text"]   = wasm.render_text   as RenderFn;
+
     loadingEl.classList.add("hidden");
     render();
   } catch (e) {

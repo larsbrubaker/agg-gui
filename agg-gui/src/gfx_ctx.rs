@@ -9,11 +9,9 @@
 //! All coordinates are **first-quadrant (Y-up)**. Origin is the bottom-left
 //! corner of the framebuffer. Positive X goes right, positive Y goes up.
 //! Positive angles rotate counter-clockwise (mathematically standard).
-//!
-//! AGG is configured for bottom-up memory layout, so there is no Y-flip at
-//! the rasterizer boundary.
 
 use std::f64::consts::PI;
+use std::sync::Arc;
 
 use agg_rust::arc::Arc as AggArc;
 use agg_rust::basics::PATH_FLAGS_NONE;
@@ -34,6 +32,7 @@ use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
 use crate::framebuffer::Framebuffer;
+use crate::text::{shape_text, measure_advance, Font, TextMetrics};
 
 // Re-export so callers don't need to import agg_rust directly.
 pub use agg_rust::comp_op::CompOp as BlendMode;
@@ -48,11 +47,14 @@ struct GfxState {
     line_join: LineJoin,
     line_cap: LineCap,
     blend_mode: CompOp,
-    /// Scissor clip in Y-up screen space: (x, y, width, height).
-    /// Applied to RendererBase before each rasterization call.
+    /// Scissor clip in Y-up screen space: `(x, y, width, height)`.
     clip: Option<(f64, f64, f64, f64)>,
-    /// Multiplied into fill and stroke alpha at draw time.
+    /// Global alpha multiplier applied to fill and stroke at draw time.
     global_alpha: f64,
+    /// Current font (shared).
+    font: Option<Arc<Font>>,
+    /// Font size in pixels (height from baseline to top of cap height).
+    font_size: f64,
 }
 
 impl Default for GfxState {
@@ -67,6 +69,8 @@ impl Default for GfxState {
             blend_mode: CompOp::SrcOver,
             clip: None,
             global_alpha: 1.0,
+            font: None,
+            font_size: 16.0,
         }
     }
 }
@@ -99,12 +103,10 @@ impl<'a> GfxCtx<'a> {
     // State stack
     // -------------------------------------------------------------------------
 
-    /// Push the current drawing state onto the stack.
     pub fn save(&mut self) {
         self.state_stack.push(self.state.clone());
     }
 
-    /// Pop and restore the drawing state from the stack.
     pub fn restore(&mut self) {
         if let Some(state) = self.state_stack.pop() {
             self.state = state;
@@ -115,92 +117,62 @@ impl<'a> GfxCtx<'a> {
     // Transform (Y-up, CCW-positive rotations)
     // -------------------------------------------------------------------------
 
-    /// Append a translation to the current transform.
-    ///
-    /// Uses **pre-multiply** (Cairo semantics): `transform = T × transform`.
-    /// This means `translate` + `rotate` rotates within the translated space,
-    /// matching the behaviour of Cairo, HTML5 Canvas, and most GUI toolkits.
+    /// Append a translation. Uses pre-multiply (Cairo semantics).
     pub fn translate(&mut self, tx: f64, ty: f64) {
         self.state.transform.premultiply(&TransAffine::new_translation(tx, ty));
     }
 
-    /// Append a rotation (radians, counter-clockwise in Y-up space).
-    ///
-    /// Uses pre-multiply semantics — see [`translate`](Self::translate).
+    /// Append a CCW rotation in radians. Uses pre-multiply semantics.
     pub fn rotate(&mut self, radians: f64) {
         self.state.transform.premultiply(&TransAffine::new_rotation(radians));
     }
 
-    /// Append a uniform scale.
-    ///
-    /// Uses pre-multiply semantics — see [`translate`](Self::translate).
+    /// Append a scale. Uses pre-multiply semantics.
     pub fn scale(&mut self, sx: f64, sy: f64) {
         self.state.transform.premultiply(&TransAffine::new_scaling(sx, sy));
     }
 
-    /// Replace the current transform entirely.
-    pub fn set_transform(&mut self, m: TransAffine) {
-        self.state.transform = m;
-    }
-
-    /// Reset the current transform to identity.
-    pub fn reset_transform(&mut self) {
-        self.state.transform = TransAffine::new();
-    }
+    pub fn set_transform(&mut self, m: TransAffine) { self.state.transform = m; }
+    pub fn reset_transform(&mut self) { self.state.transform = TransAffine::new(); }
 
     // -------------------------------------------------------------------------
     // Style
     // -------------------------------------------------------------------------
 
-    pub fn set_fill_color(&mut self, color: Color) {
-        self.state.fill_color = color;
-    }
+    pub fn set_fill_color(&mut self, color: Color) { self.state.fill_color = color; }
+    pub fn set_stroke_color(&mut self, color: Color) { self.state.stroke_color = color; }
+    pub fn set_line_width(&mut self, w: f64) { self.state.line_width = w; }
+    pub fn set_line_join(&mut self, join: LineJoin) { self.state.line_join = join; }
+    pub fn set_line_cap(&mut self, cap: LineCap) { self.state.line_cap = cap; }
 
-    pub fn set_stroke_color(&mut self, color: Color) {
-        self.state.stroke_color = color;
-    }
+    /// Set the Porter-Duff compositing mode. Default: `SrcOver`.
+    pub fn set_blend_mode(&mut self, mode: CompOp) { self.state.blend_mode = mode; }
 
-    pub fn set_line_width(&mut self, w: f64) {
-        self.state.line_width = w;
-    }
-
-    pub fn set_line_join(&mut self, join: LineJoin) {
-        self.state.line_join = join;
-    }
-
-    pub fn set_line_cap(&mut self, cap: LineCap) {
-        self.state.line_cap = cap;
-    }
-
-    /// Set the Porter-Duff compositing mode for subsequent fill and stroke calls.
-    ///
-    /// Defaults to `CompOp::SrcOver` (standard alpha-over blending).
-    pub fn set_blend_mode(&mut self, mode: CompOp) {
-        self.state.blend_mode = mode;
-    }
-
-    /// Set a global alpha multiplier (0.0 = transparent, 1.0 = opaque).
-    ///
-    /// Multiplied into fill and stroke colors at draw time. Saved/restored
-    /// with the state stack.
+    /// Global alpha multiplier (0.0–1.0) applied on top of each color's alpha.
     pub fn set_global_alpha(&mut self, alpha: f64) {
         self.state.global_alpha = alpha.clamp(0.0, 1.0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Font
+    // -------------------------------------------------------------------------
+
+    /// Set the current font. Shared via `Arc` — cheap to clone across widgets.
+    pub fn set_font(&mut self, font: Arc<Font>) {
+        self.state.font = Some(font);
+    }
+
+    /// Set the font size in pixels (distance from baseline to cap height).
+    pub fn set_font_size(&mut self, size: f64) {
+        self.state.font_size = size.max(1.0);
     }
 
     // -------------------------------------------------------------------------
     // Clipping
     // -------------------------------------------------------------------------
 
-    /// Set a rectangular scissor clip in Y-up screen space.
-    ///
-    /// Only pixels inside `(x, y, x+w, y+h)` are affected by subsequent draws.
-    /// The clip is pixel-aligned (AGG `RendererBase::clip_box_i`). It is
-    /// saved and restored with the state stack.
-    ///
-    /// To combine clips (intersection), call `clip_rect` multiple times — each
-    /// call intersects with the existing clip. Use `save`/`restore` to scope.
+    /// Intersect the current clip with a Y-up screen-space rectangle.
     pub fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
-        // Intersect with existing clip if present.
         if let Some((cx, cy, cw, ch)) = self.state.clip {
             let x1 = x.max(cx);
             let y1 = y.max(cy);
@@ -212,16 +184,13 @@ impl<'a> GfxCtx<'a> {
         }
     }
 
-    /// Remove the clip region — subsequent draws cover the full framebuffer.
-    pub fn reset_clip(&mut self) {
-        self.state.clip = None;
-    }
+    pub fn reset_clip(&mut self) { self.state.clip = None; }
 
     // -------------------------------------------------------------------------
     // Clear
     // -------------------------------------------------------------------------
 
-    /// Fill the entire framebuffer with `color`, ignoring any transform or clip.
+    /// Fill the entire framebuffer with `color`, ignoring transform and clip.
     pub fn clear(&mut self, color: Color) {
         let rgba = color.to_rgba8();
         for chunk in self.fb.pixels_mut().chunks_exact_mut(4) {
@@ -236,47 +205,31 @@ impl<'a> GfxCtx<'a> {
     // Path construction
     // -------------------------------------------------------------------------
 
-    /// Start a new path, discarding any previously accumulated path data.
-    pub fn begin_path(&mut self) {
-        self.path = PathStorage::new();
-    }
+    pub fn begin_path(&mut self) { self.path = PathStorage::new(); }
 
-    /// Move the current point without drawing.
-    pub fn move_to(&mut self, x: f64, y: f64) {
-        self.path.move_to(x, y);
-    }
+    pub fn move_to(&mut self, x: f64, y: f64) { self.path.move_to(x, y); }
+    pub fn line_to(&mut self, x: f64, y: f64) { self.path.line_to(x, y); }
 
-    /// Add a straight line from the current point to `(x, y)`.
-    pub fn line_to(&mut self, x: f64, y: f64) {
-        self.path.line_to(x, y);
-    }
-
-    /// Add a cubic Bézier curve to `(x, y)` with control points `(cx1,cy1)` and `(cx2,cy2)`.
     pub fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64) {
         self.path.curve4(cx1, cy1, cx2, cy2, x, y);
     }
 
-    /// Add a quadratic Bézier curve to `(x, y)` with control point `(cx, cy)`.
     pub fn quad_to(&mut self, cx: f64, cy: f64, x: f64, y: f64) {
         self.path.curve3(cx, cy, x, y);
     }
 
-    /// Add an arc segment.
-    ///
-    /// Center `(cx, cy)`, radius `r`, from `start_angle` to `end_angle` in radians.
-    /// Angles are measured CCW from the +X axis (standard mathematical convention).
     pub fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool) {
         let mut arc = AggArc::new(cx, cy, r, r, start_angle, end_angle, ccw);
         self.path.concat_path(&mut arc, 0);
     }
 
-    /// Convenience: add a full circle at `(cx, cy)` with radius `r`.
+    /// Full circle at `(cx, cy)` with radius `r`.
     pub fn circle(&mut self, cx: f64, cy: f64, r: f64) {
         self.arc_to(cx, cy, r, 0.0, 2.0 * PI, true);
         self.path.close_polygon(PATH_FLAGS_NONE);
     }
 
-    /// Add a rectangle (bottom-left corner `(x, y)`, size `w × h`).
+    /// Axis-aligned rectangle — bottom-left `(x, y)`, size `w × h`.
     pub fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
         self.path.move_to(x, y);
         self.path.line_to(x + w, y);
@@ -285,10 +238,7 @@ impl<'a> GfxCtx<'a> {
         self.path.close_polygon(PATH_FLAGS_NONE);
     }
 
-    /// Add a rectangle with uniform corner radius `r`.
-    ///
-    /// Bottom-left corner at `(x, y)`, size `w × h`. Corners are smoothed
-    /// with circular arcs via AGG's `RoundedRect`.
+    /// Rounded rectangle — bottom-left `(x, y)`, size `w × h`, corner radius `r`.
     pub fn rounded_rect(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
         let r = r.min(w * 0.5).min(h * 0.5).max(0.0);
         let mut rr = RoundedRect::new(x, y, x + w, y + h, r);
@@ -296,16 +246,13 @@ impl<'a> GfxCtx<'a> {
         self.path.concat_path(&mut rr, 0);
     }
 
-    /// Close the current sub-path with a straight line back to its start.
-    pub fn close_path(&mut self) {
-        self.path.close_polygon(PATH_FLAGS_NONE);
-    }
+    pub fn close_path(&mut self) { self.path.close_polygon(PATH_FLAGS_NONE); }
 
     // -------------------------------------------------------------------------
     // Drawing
     // -------------------------------------------------------------------------
 
-    /// Fill the accumulated path with the current fill color.
+    /// Fill the accumulated path.
     pub fn fill(&mut self) {
         let mut color = self.state.fill_color;
         color.a *= self.state.global_alpha as f32;
@@ -313,10 +260,10 @@ impl<'a> GfxCtx<'a> {
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
-        self.rasterize_fill(&rgba, mode, clip, &transform);
+        rasterize_fill(self.fb, &mut self.path, &rgba, mode, clip, &transform);
     }
 
-    /// Stroke the accumulated path with the current stroke color and line width.
+    /// Stroke the accumulated path.
     pub fn stroke(&mut self) {
         let mut color = self.state.stroke_color;
         color.a *= self.state.global_alpha as f32;
@@ -327,7 +274,7 @@ impl<'a> GfxCtx<'a> {
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
-        self.rasterize_stroke(&rgba, width, join, cap, mode, clip, &transform);
+        rasterize_stroke(self.fb, &mut self.path, &rgba, width, join, cap, mode, clip, &transform);
     }
 
     /// Fill then stroke the accumulated path in one call.
@@ -337,13 +284,60 @@ impl<'a> GfxCtx<'a> {
     }
 
     // -------------------------------------------------------------------------
-    // Text (vector font via GsvText — Phase 1/2 only, full text in Phase 3)
+    // Text
     // -------------------------------------------------------------------------
 
-    /// Draw a string at `(x, y)` using the built-in AGG vector font.
+    /// Draw `text` at position `(x, y)` using the current font and fill color.
     ///
-    /// `size` is the font height in pixels. The baseline is at Y = `y`.
-    /// Ascenders go upward (higher Y) — correct in Y-up space.
+    /// `(x, y)` is the **baseline-left** position in Y-up screen coordinates.
+    /// Glyphs extend upward (higher Y) for ascenders and downward (lower Y)
+    /// for descenders — correct for Y-up rendering with no Y-flip.
+    ///
+    /// Requires a font to be set via [`set_font`](Self::set_font). Does nothing
+    /// if no font has been set.
+    pub fn fill_text(&mut self, text: &str, x: f64, y: f64) {
+        let font = match self.state.font.clone() {
+            Some(f) => f,
+            None => return,
+        };
+        let font_size = self.state.font_size;
+
+        let mut color = self.state.fill_color;
+        color.a *= self.state.global_alpha as f32;
+        let rgba = color.to_rgba8();
+        let mode = self.state.blend_mode;
+        let clip = self.state.clip;
+        let transform = self.state.transform.clone();
+
+        // Shape text and collect per-glyph outline paths.
+        let (glyph_paths, _) = shape_text(&font, text, font_size, x, y);
+
+        for mut path in glyph_paths {
+            rasterize_fill(self.fb, &mut path, &rgba, mode, clip, &transform);
+        }
+    }
+
+    /// Measure the advance width and metrics of `text` in the current font.
+    ///
+    /// Returns `None` if no font has been set.
+    pub fn measure_text(&self, text: &str) -> Option<TextMetrics> {
+        let font = self.state.font.as_ref()?;
+        let size = self.state.font_size;
+        Some(TextMetrics {
+            width: measure_advance(font, text, size),
+            ascent: font.ascender_px(size),
+            descent: font.descender_px(size),
+            line_height: font.line_height_px(size),
+        })
+    }
+
+    // -------------------------------------------------------------------------
+    // Convenience: built-in stroked vector font (no font file required)
+    // -------------------------------------------------------------------------
+
+    /// Draw text using AGG's built-in vector font (no external font needed).
+    ///
+    /// Useful for labels before a full font is loaded.
     pub fn fill_text_gsv(&mut self, text: &str, x: f64, y: f64, size: f64) {
         let mut color = self.state.fill_color;
         color.a *= self.state.global_alpha as f32;
@@ -357,8 +351,7 @@ impl<'a> GfxCtx<'a> {
         let stride = (w * 4) as i32;
         let mut ra = RowAccessor::new();
         unsafe { ra.attach(self.fb.pixels_mut().as_mut_ptr(), w, h, stride) };
-        let mut pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
-        pf.set_comp_op(mode);
+        let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
         let mut rb = RendererBase::new(pf);
         apply_clip(&mut rb, clip);
 
@@ -376,71 +369,73 @@ impl<'a> GfxCtx<'a> {
         ras.add_path(&mut transformed, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &rgba);
     }
-
-    // -------------------------------------------------------------------------
-    // Internal: AGG rasterization helpers
-    // -------------------------------------------------------------------------
-
-    fn rasterize_fill(
-        &mut self,
-        color: &agg_rust::color::Rgba8,
-        mode: CompOp,
-        clip: Option<(f64, f64, f64, f64)>,
-        transform: &TransAffine,
-    ) {
-        let w = self.fb.width();
-        let h = self.fb.height();
-        let stride = (w * 4) as i32;
-        let mut ra = RowAccessor::new();
-        unsafe { ra.attach(self.fb.pixels_mut().as_mut_ptr(), w, h, stride) };
-        let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
-        let mut rb = RendererBase::new(pf);
-        apply_clip(&mut rb, clip);
-
-        let mut ras = RasterizerScanlineAa::new();
-        let mut sl = ScanlineU8::new();
-
-        let mut curves = ConvCurve::new(&mut self.path);
-        let mut transformed = ConvTransform::new(&mut curves, transform.clone());
-        ras.add_path(&mut transformed, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
-    }
-
-    fn rasterize_stroke(
-        &mut self,
-        color: &agg_rust::color::Rgba8,
-        width: f64,
-        join: LineJoin,
-        cap: LineCap,
-        mode: CompOp,
-        clip: Option<(f64, f64, f64, f64)>,
-        transform: &TransAffine,
-    ) {
-        let w = self.fb.width();
-        let h = self.fb.height();
-        let stride = (w * 4) as i32;
-        let mut ra = RowAccessor::new();
-        unsafe { ra.attach(self.fb.pixels_mut().as_mut_ptr(), w, h, stride) };
-        let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
-        let mut rb = RendererBase::new(pf);
-        apply_clip(&mut rb, clip);
-
-        let mut ras = RasterizerScanlineAa::new();
-        let mut sl = ScanlineU8::new();
-
-        let mut curves = ConvCurve::new(&mut self.path);
-        let mut stroke = ConvStroke::new(&mut curves);
-        stroke.set_width(width);
-        stroke.set_line_join(join);
-        stroke.set_line_cap(cap);
-        let mut transformed = ConvTransform::new(&mut stroke, transform.clone());
-        ras.add_path(&mut transformed, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
-    }
 }
 
-/// Apply a Y-up scissor clip to the renderer, converting to inclusive pixel coordinates.
-fn apply_clip<PF: agg_rust::pixfmt_rgba::PixelFormat>(
+// ---------------------------------------------------------------------------
+// Free rasterization helpers — take explicit path and fb references so they
+// can be called for both self.path draws and per-glyph text draws without
+// borrow-checker conflicts.
+// ---------------------------------------------------------------------------
+
+pub(crate) fn rasterize_fill(
+    fb: &mut Framebuffer,
+    path: &mut PathStorage,
+    color: &agg_rust::color::Rgba8,
+    mode: CompOp,
+    clip: Option<(f64, f64, f64, f64)>,
+    transform: &TransAffine,
+) {
+    let w = fb.width();
+    let h = fb.height();
+    let stride = (w * 4) as i32;
+    let mut ra = RowAccessor::new();
+    unsafe { ra.attach(fb.pixels_mut().as_mut_ptr(), w, h, stride) };
+    let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
+    let mut rb = RendererBase::new(pf);
+    apply_clip(&mut rb, clip);
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut curves = ConvCurve::new(path);
+    let mut transformed = ConvTransform::new(&mut curves, transform.clone());
+    ras.add_path(&mut transformed, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+}
+
+pub(crate) fn rasterize_stroke(
+    fb: &mut Framebuffer,
+    path: &mut PathStorage,
+    color: &agg_rust::color::Rgba8,
+    width: f64,
+    join: LineJoin,
+    cap: LineCap,
+    mode: CompOp,
+    clip: Option<(f64, f64, f64, f64)>,
+    transform: &TransAffine,
+) {
+    let w = fb.width();
+    let h = fb.height();
+    let stride = (w * 4) as i32;
+    let mut ra = RowAccessor::new();
+    unsafe { ra.attach(fb.pixels_mut().as_mut_ptr(), w, h, stride) };
+    let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
+    let mut rb = RendererBase::new(pf);
+    apply_clip(&mut rb, clip);
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut curves = ConvCurve::new(path);
+    let mut stroke = ConvStroke::new(&mut curves);
+    stroke.set_width(width);
+    stroke.set_line_join(join);
+    stroke.set_line_cap(cap);
+    let mut transformed = ConvTransform::new(&mut stroke, transform.clone());
+    ras.add_path(&mut transformed, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+}
+
+/// Apply a Y-up scissor clip to a `RendererBase` (pixel-inclusive coordinates).
+pub(crate) fn apply_clip<PF: agg_rust::pixfmt_rgba::PixelFormat>(
     rb: &mut RendererBase<PF>,
     clip: Option<(f64, f64, f64, f64)>,
 ) {

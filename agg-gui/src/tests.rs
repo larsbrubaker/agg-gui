@@ -265,6 +265,7 @@ fn test_blend_mode_src_over_alpha() {
 /// global_alpha multiplies into fill alpha.
 #[test]
 fn test_global_alpha() {
+
     let size = 40u32;
     let mut fb = Framebuffer::new(size, size);
     let mut ctx = GfxCtx::new(&mut fb);
@@ -282,4 +283,77 @@ fn test_global_alpha() {
     // Red channel should be high, green/blue non-zero (blended with white).
     assert!(p[0] > 200, "Red channel should be high; got {p:?}");
     assert!(p[1] > 100, "Green channel should be non-zero (blended with white); got {p:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — text rendering
+// ---------------------------------------------------------------------------
+
+const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+
+/// `measure_text` returns a wider advance for a longer string.
+#[test]
+fn test_measure_text_longer_is_wider() {
+    use std::sync::Arc;
+    use crate::text::Font;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut fb = Framebuffer::new(400, 100);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.set_font(font);
+    ctx.set_font_size(20.0);
+
+    let short  = ctx.measure_text("Hi").unwrap();
+    let longer = ctx.measure_text("Hello, World!").unwrap();
+    assert!(
+        longer.width > short.width,
+        "longer string should have greater advance: {} > {}",
+        longer.width,
+        short.width,
+    );
+}
+
+/// `fill_text` must paint at least some non-white pixels when drawing text
+/// on a white background.
+#[test]
+fn test_fill_text_paints_pixels() {
+    use std::sync::Arc;
+    use crate::text::Font;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut fb = Framebuffer::new(300, 60);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.clear(Color::white());
+    ctx.set_fill_color(Color::black());
+    ctx.set_font(font);
+    ctx.set_font_size(24.0);
+    // Draw at baseline Y=30, which is within the buffer.
+    ctx.fill_text("Test", 10.0, 30.0);
+    drop(ctx);
+
+    // At least one pixel should be non-white.
+    let dark_count = (0..300_u32)
+        .flat_map(|x| (0..60_u32).map(move |y| (x, y)))
+        .filter(|&(x, y)| !is_white(sample(&fb, x, y)))
+        .count();
+    assert!(dark_count > 10, "fill_text should paint dark pixels; got {dark_count}");
+}
+
+/// `measure_text` returns positive ascent and line_height values.
+#[test]
+fn test_measure_text_metrics_positive() {
+    use std::sync::Arc;
+    use crate::text::Font;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut fb = Framebuffer::new(200, 60);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.set_font(font);
+    ctx.set_font_size(16.0);
+
+    let m = ctx.measure_text("Ag").unwrap();
+    assert!(m.ascent > 0.0, "ascent must be positive; got {}", m.ascent);
+    assert!(m.descent > 0.0, "descent must be positive; got {}", m.descent);
+    assert!(m.line_height >= m.ascent + m.descent,
+        "line_height ({}) should be >= ascent + descent ({})", m.line_height, m.ascent + m.descent);
 }

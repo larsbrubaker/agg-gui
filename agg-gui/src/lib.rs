@@ -28,12 +28,14 @@ pub mod color;
 pub mod framebuffer;
 pub mod geometry;
 pub mod gfx_ctx;
+pub mod text;
 
 // Re-export the most commonly used types at the crate root.
 pub use color::Color;
 pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};
 pub use gfx_ctx::GfxCtx;
+pub use text::{Font, TextMetrics};
 
 // Re-export AGG types so callers don't need to import agg-rust directly.
 pub use agg_rust::trans_affine::TransAffine;

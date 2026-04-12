@@ -10,3 +10,5 @@ repository = "https://github.com/larsbrubaker/agg-gui"
 [dependencies]
 agg-rust = "1.0.2"
 clipper2-rust = "1.0.3"
+ttf-parser = "0.25"
+rustybuzz = "0.20"
