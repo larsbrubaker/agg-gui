@@ -302,7 +302,8 @@ impl FlatContourBuilder {
 
     fn flatten_quad(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         let p0 = [self.pen[0] as f32, self.pen[1] as f32];
-        subdivide_quad(p0, [x1, y1], [x, y], self.flatness_sq, &mut self.current);
+        subdivide_quad(p0, [x1, y1], [x, y], self.flatness_sq, &mut self.current,
+                       self.ox, self.oy, self.scale);
         let pt = self.screen(x, y);
         self.current.push(pt);
         self.pen = [x as f64, y as f64];
@@ -347,31 +348,37 @@ impl ttf_parser::OutlineBuilder for FlatContourBuilder {
     }
 }
 
-/// Recursively subdivide a quadratic Bézier until flat.
+/// Recursively subdivide a quadratic Bézier until flat (in screen space).
+///
+/// Control points are in **font units**; flatness_sq and output are in
+/// **screen pixels**.  Mirrors the same approach used in `subdivide_cubic`.
 fn subdivide_quad(
-    p0: [f32; 2],
-    p1: [f32; 2],
-    p2: [f32; 2],
+    p0: [f32; 2], p1: [f32; 2], p2: [f32; 2],
     flatness_sq: f64,
     out: &mut Vec<[f32; 2]>,
+    ox: f64, oy: f64, scale: f64,
 ) {
-    // Midpoint of control polygon vs. midpoint on curve
-    let mx = (p0[0] + 2.0 * p1[0] + p2[0]) * 0.25;
-    let my = (p0[1] + 2.0 * p1[1] + p2[1]) * 0.25;
-    let mid_x = (p0[0] + p2[0]) * 0.5;
-    let mid_y = (p0[1] + p2[1]) * 0.5;
+    // Convert to screen space for the flatness test.
+    let s = |v: [f32; 2]| -> [f32; 2] {
+        [(ox + v[0] as f64 * scale) as f32, (oy + v[1] as f64 * scale) as f32]
+    };
+    let sp0 = s(p0); let sp1 = s(p1); let sp2 = s(p2);
+    let mx = (sp0[0] + 2.0 * sp1[0] + sp2[0]) * 0.25;
+    let my = (sp0[1] + 2.0 * sp1[1] + sp2[1]) * 0.25;
+    let mid_x = (sp0[0] + sp2[0]) * 0.5;
+    let mid_y = (sp0[1] + sp2[1]) * 0.5;
     let dx = (mx - mid_x) as f64;
     let dy = (my - mid_y) as f64;
     if dx * dx + dy * dy <= flatness_sq {
         return; // flat enough
     }
-    // Split at t=0.5
-    let q0 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
-    let q1 = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
-    let mid  = [(q0[0] + q1[0]) * 0.5, (q0[1] + q1[1]) * 0.5];
-    subdivide_quad(p0, q0, mid, flatness_sq, out);
-    out.push(mid);
-    subdivide_quad(mid, q1, p2, flatness_sq, out);
+    // Split in font units, push midpoint in screen pixels.
+    let q0  = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
+    let q1  = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
+    let mid = [(q0[0] + q1[0]) * 0.5, (q0[1] + q1[1]) * 0.5];
+    subdivide_quad(p0,  q0, mid, flatness_sq, out, ox, oy, scale);
+    out.push(s(mid));
+    subdivide_quad(mid, q1, p2,  flatness_sq, out, ox, oy, scale);
 }
 
 /// Recursively subdivide a cubic Bézier until flat (in screen space).
