@@ -1,10 +1,11 @@
-// agg-gui demo — Phase 3 frontend
+// agg-gui demo — Phase 4 frontend
 //
 // Loads the WASM module, renders the active tab's scene, and handles
-// tab switching. Handles resize so the canvas always fills the container.
+// tab switching + event forwarding to the widget tree.
 
 type RenderFn = (width: number, height: number) => Uint8Array;
 
+let wasmModule: Record<string, unknown> | null = null;
 let renderers: Record<string, RenderFn> = {};
 let activeTab = "basics";
 
@@ -57,6 +58,65 @@ document.querySelectorAll<HTMLElement>(".tab:not(.disabled)").forEach((tab) => {
   });
 });
 
+// --- Canvas event forwarding to WASM widget tree ---
+
+// Convert a MouseEvent's clientX/Y to canvas physical pixels (Y-down from
+// canvas top-left, matching what App::on_mouse_* expects before Y-flip).
+function canvasPos(e: MouseEvent): [number, number] {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const x = (e.clientX - rect.left) * dpr;
+  const y = (e.clientY - rect.top)  * dpr;
+  return [x, y];
+}
+
+function isBasicsTab(): boolean {
+  return activeTab === "basics" && wasmModule !== null;
+}
+
+canvas.addEventListener("mousemove", (e) => {
+  if (!isBasicsTab()) return;
+  const [x, y] = canvasPos(e);
+  (wasmModule as Record<string, (x: number, y: number) => void>).on_mouse_move(x, y);
+  render();
+});
+
+canvas.addEventListener("mousedown", (e) => {
+  if (!isBasicsTab()) return;
+  e.preventDefault();
+  canvas.focus();
+  const [x, y] = canvasPos(e);
+  (wasmModule as Record<string, (x: number, y: number, b: number) => void>).on_mouse_down(x, y, e.button);
+  render();
+});
+
+canvas.addEventListener("mouseup", (e) => {
+  if (!isBasicsTab()) return;
+  const [x, y] = canvasPos(e);
+  (wasmModule as Record<string, (x: number, y: number, b: number) => void>).on_mouse_up(x, y, e.button);
+  render();
+});
+
+canvas.addEventListener("mouseleave", () => {
+  if (!isBasicsTab()) return;
+  (wasmModule as Record<string, () => void>).on_mouse_leave();
+  render();
+});
+
+// Keyboard — canvas must be focusable (tabindex="0" set on canvas in HTML)
+canvas.addEventListener("keydown", (e) => {
+  if (!isBasicsTab()) return;
+  // Let Tab propagate so focus cycles; prevent default for other keys that
+  // would scroll the page (arrow keys, space, backspace).
+  if (e.key !== "Tab") e.preventDefault();
+  (wasmModule as Record<string, (k: string, s: boolean, c: boolean, a: boolean) => void>)
+    .on_key_down(e.key, e.shiftKey, e.ctrlKey, e.altKey);
+  render();
+});
+
+// Prevent right-click context menu on canvas.
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
 // --- Resize observer ---
 
 const ro = new ResizeObserver(() => render());
@@ -70,7 +130,7 @@ async function init() {
     const wasmUrl = new URL("./public/pkg/demo_wasm_bg.wasm", location.href);
     await wasm.default({ module_or_path: wasmUrl });
 
-    // Register each tab's render function.
+    wasmModule = wasm as unknown as Record<string, unknown>;
     renderers["basics"] = wasm.render_basics as RenderFn;
     renderers["text"]   = wasm.render_text   as RenderFn;
 

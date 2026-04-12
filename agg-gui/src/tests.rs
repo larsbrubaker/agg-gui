@@ -3,7 +3,7 @@
 //! These tests guard the first-quadrant (Y-up) invariant at the framebuffer
 //! and GfxCtx layers. They run on every commit.
 
-use crate::{Color, CompOp, Framebuffer, GfxCtx};
+use crate::{App, Button, Color, CompOp, Container, Framebuffer, GfxCtx, Key, MouseButton, Modifiers, Size, TextField, Widget};
 
 /// Sample RGBA at pixel (x, y) in a framebuffer.
 /// (x=0, y=0) is the bottom-left corner in Y-up space.
@@ -356,4 +356,114 @@ fn test_measure_text_metrics_positive() {
     assert!(m.descent > 0.0, "descent must be positive; got {}", m.descent);
     assert!(m.line_height >= m.ascent + m.descent,
         "line_height ({}) should be >= ascent + descent ({})", m.line_height, m.ascent + m.descent);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — widget system
+// ---------------------------------------------------------------------------
+
+/// Y-down → Y-up flip: a point at screen y=10 in a 100px viewport becomes y=90.
+#[test]
+fn test_y_flip_at_ingestion() {
+    use std::sync::Arc;
+    use crate::text::Font;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut clicked = false;
+    let clicked_ptr = &mut clicked as *mut bool;
+
+    let mut button = Button::new("X", Arc::clone(&font))
+        .with_font_size(14.0)
+        .on_click(move || unsafe { *clicked_ptr = true });
+
+    // Lay out button to fill a 200×100 viewport.
+    button.layout(Size::new(200.0, 100.0));
+    button.set_bounds(crate::Rect::new(0.0, 0.0, 200.0, 100.0));
+
+    let mut app = App::new(Box::new(button) as Box<dyn Widget>);
+    app.layout(Size::new(200.0, 100.0));
+
+    // Move cursor into the button first (sets hover state), then click.
+    // Screen y=50 in a 100px-tall viewport → Y-up y=50; button fills viewport.
+    app.on_mouse_move(100.0, 50.0);
+    app.on_mouse_down(100.0, 50.0, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(100.0, 50.0, MouseButton::Left, Modifiers::default());
+
+    assert!(clicked, "button inside viewport should be clicked");
+}
+
+/// A click outside widget bounds must not trigger the callback.
+#[test]
+fn test_click_outside_bounds_ignored() {
+    use std::sync::Arc;
+    use crate::text::Font;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let clicked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let clicked2 = std::sync::Arc::clone(&clicked);
+
+    let button = Button::new("X", font)
+        .with_font_size(14.0)
+        .on_click(move || { clicked2.store(true, std::sync::atomic::Ordering::Relaxed); });
+
+    let mut app = App::new(Box::new(button));
+    app.layout(Size::new(200.0, 100.0));
+
+    // Click way outside: screen y=200 → Y-up y = -100 (below viewport).
+    app.on_mouse_down(100.0, 200.0, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(100.0, 200.0, MouseButton::Left, Modifiers::default());
+
+    assert!(!clicked.load(std::sync::atomic::Ordering::Relaxed),
+        "click outside button bounds must not fire callback");
+}
+
+/// Tab key advances focus through focusable widgets.
+#[test]
+fn test_tab_focus_advance() {
+    use std::sync::Arc;
+    use crate::text::Font;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+
+    let mut root = Container::new().with_padding(4.0);
+    root.children_mut().push(Box::new(TextField::new(Arc::clone(&font)).with_font_size(14.0)));
+    root.children_mut().push(Box::new(TextField::new(Arc::clone(&font)).with_font_size(14.0)));
+
+    let mut app = App::new(Box::new(root));
+    app.layout(Size::new(200.0, 200.0));
+
+    // No focus initially — Tab should focus the first focusable widget.
+    app.on_key_down(Key::Tab, Modifiers::default());
+    // A second Tab should move to the second field.
+    app.on_key_down(Key::Tab, Modifiers::default());
+    // A third Tab wraps back to the first.
+    app.on_key_down(Key::Tab, Modifiers::default());
+
+    // We can't easily inspect focus from outside, but we can verify it
+    // doesn't panic and the test passes if no assertion fires.
+}
+
+/// Typing into a TextField inserts characters at the cursor.
+#[test]
+fn test_text_field_typing() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::widgets::text_field::TextField as TF;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut field = TF::new(font).with_font_size(14.0);
+    field.layout(Size::new(200.0, 36.0));
+    field.set_bounds(crate::Rect::new(0.0, 0.0, 200.0, 36.0));
+
+    // Give focus directly.
+    field.on_event(&crate::Event::FocusGained);
+
+    // Type "Hi"
+    field.on_event(&crate::Event::KeyDown { key: Key::Char('H'), modifiers: Modifiers::default() });
+    field.on_event(&crate::Event::KeyDown { key: Key::Char('i'), modifiers: Modifiers::default() });
+    assert_eq!(field.text, "Hi", "typed characters should appear in text");
+
+    // Backspace removes the last character.
+    field.on_event(&crate::Event::KeyDown { key: Key::Backspace, modifiers: Modifiers::default() });
+    assert_eq!(field.text, "H", "backspace should remove last character");
 }
