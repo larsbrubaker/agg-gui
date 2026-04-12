@@ -29,6 +29,7 @@ pub mod event;
 pub mod framebuffer;
 pub mod geometry;
 pub mod gfx_ctx;
+pub mod gl_renderer;
 pub mod text;
 pub mod widget;
 pub mod widgets;

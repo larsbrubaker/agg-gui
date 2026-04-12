@@ -1,8 +1,11 @@
-//! Native WGL demo for agg-gui — Phase 7.
+//! Native WGL demo for agg-gui — Phase 8 (GL cube).
 //!
 //! The entire demo UI (tab bar + content) is rendered by agg-gui via AGG →
 //! Framebuffer → GL texture → full-screen quad. Winit events are forwarded
 //! to a single [`App`] that owns a top-level TabView (Basics, Text, Layout, Tree).
+
+mod cube_widget;
+use cube_widget::{CubeGlRenderer, GlCubeWidget, CUBE_SCREEN_RECT};
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -181,7 +184,7 @@ fn build_demo_ui(font: Arc<Font>) -> App {
         .add_tab("Layout",  Box::new(build_layout_content(Arc::clone(&font))))
         .add_tab("Tree",    Box::new(build_tree_demo(Arc::clone(&font))));
 
-    let window = build_demo_window(Arc::clone(&font));
+    let window = build_cube_window(Arc::clone(&font));
 
     let root = Stack::new()
         .add(Box::new(tab_view))
@@ -190,40 +193,13 @@ fn build_demo_ui(font: Arc<Font>) -> App {
     App::new(Box::new(root))
 }
 
-fn build_demo_window(font: Arc<Font>) -> Window {
-    let mut content = FlexColumn::new()
-        .with_gap(10.0)
-        .with_padding(14.0)
-        .with_background(Color::rgb(0.97, 0.97, 0.98));
-
-    content.push(Box::new(Label::new("agg-gui — Phase 8", Arc::clone(&font))
-        .with_font_size(15.0)
-        .with_color(Color::rgb(0.1, 0.1, 0.12))), 0.0);
-
-    content.push(Box::new(Label::new("Floating Window widget", Arc::clone(&font))
-        .with_font_size(12.0)
-        .with_color(Color::rgb(0.4, 0.4, 0.45))), 0.0);
-
-    content.push(Box::new(Separator::horizontal()), 0.0);
-
-    content.push(Box::new(Label::new("Drag the title bar to move.", Arc::clone(&font))
-        .with_font_size(12.0)
-        .with_color(Color::rgb(0.3, 0.3, 0.35))), 0.0);
-
-    content.push(Box::new(Label::new("Click × to close.", Arc::clone(&font))
-        .with_font_size(12.0)
-        .with_color(Color::rgb(0.3, 0.3, 0.35))), 0.0);
-
-    content.push(Box::new(Separator::horizontal()), 0.0);
-
-    content.push(Box::new(
-        Button::new("OK", Arc::clone(&font))
-            .with_font_size(13.0)
-            .on_click(|| println!("OK"))
-    ), 0.0);
-
-    Window::new("About", font, Box::new(content))
-        .with_bounds(Rect::new(60.0, 200.0, 280.0, 220.0))
+fn build_cube_window(font: Arc<Font>) -> Window {
+    // The GlCubeWidget fills the window's content area. It draws a dark
+    // placeholder in the AGG pass and records its screen rect; the GL cube
+    // is drawn on top by CubeGlRenderer after the AGG texture is uploaded.
+    let cube = GlCubeWidget::new();
+    Window::new("3D Cube", font, Box::new(cube))
+        .with_bounds(Rect::new(60.0, 120.0, 320.0, 280.0))
 }
 
 fn build_basics_content(font: Arc<Font>) -> Container {
@@ -705,7 +681,7 @@ fn main() {
     let event_loop = EventLoop::new().expect("EventLoop::new");
 
     let window_attributes = WindowAttributes::default()
-        .with_title("agg-gui — Phase 7 Demo")
+        .with_title("agg-gui — Phase 8 Demo (GL Cube)")
         .with_inner_size(LogicalSize::new(1280u32, 720u32));
 
     let template = ConfigTemplateBuilder::new().with_alpha_size(0);
@@ -757,6 +733,7 @@ fn main() {
 
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("parse CascadiaCode.ttf"));
     let mut presenter = unsafe { GlPresenter::new(gl) };
+    let mut cube_renderer = unsafe { CubeGlRenderer::new(&presenter.gl) };
     let mut fb = Framebuffer::new(size.width.max(1), size.height.max(1));
     let mut app = build_demo_ui(Arc::clone(&font));
 
@@ -764,7 +741,7 @@ fn main() {
     let mut cursor_x = 0.0f64;
     let mut cursor_y = 0.0f64;
 
-    render_frame(&mut app, &mut fb, &mut presenter);
+    render_frame(&mut app, &mut fb, &mut presenter, &mut cube_renderer);
 
     #[allow(deprecated)]
     event_loop
@@ -832,8 +809,14 @@ fn main() {
                     app.on_mouse_wheel(cursor_x, cursor_y, delta_y);
                 }
                 Event::AboutToWait => {
-                    render_frame(&mut app, &mut fb, &mut presenter);
+                    render_frame(&mut app, &mut fb, &mut presenter, &mut cube_renderer);
                     unsafe { presenter.present() };
+                    // Draw the GL cube on top of the uploaded AGG texture.
+                    let cube_rect = CUBE_SCREEN_RECT.with(|r| r.get());
+                    let h = fb.height() as f64;
+                    let fw = fb.width() as i32;
+                    let fh = fb.height() as i32;
+                    unsafe { cube_renderer.draw_gl(&presenter.gl, cube_rect, h, fw, fh) };
                     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
                 }
                 _ => {}
@@ -842,7 +825,12 @@ fn main() {
         .expect("event_loop.run");
 }
 
-fn render_frame(app: &mut App, fb: &mut Framebuffer, presenter: &mut GlPresenter) {
+fn render_frame(
+    app: &mut App,
+    fb: &mut Framebuffer,
+    presenter: &mut GlPresenter,
+    _cube: &mut CubeGlRenderer,
+) {
     let w = fb.width();
     let h = fb.height();
     app.layout(Size::new(w as f64, h as f64));
@@ -852,7 +840,8 @@ fn render_frame(app: &mut App, fb: &mut Framebuffer, presenter: &mut GlPresenter
 
         let lsize = (w as f64 * 0.012).clamp(9.0, 13.0);
         ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.3));
-        ctx.fill_text_gsv("agg-gui  Phase 7 — Full Widget UI", 12.0, 6.0, lsize);
+        ctx.fill_text_gsv("agg-gui  Phase 8 — GL Cube", 12.0, 6.0, lsize);
     }
+    // Upload AGG framebuffer to GL texture (cube will overdraw its area next).
     unsafe { presenter.update_texture(fb) };
 }

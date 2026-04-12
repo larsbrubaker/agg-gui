@@ -8,7 +8,7 @@ resolver = "2"
 # Uncomment these to develop agg-gui alongside the library sources.
 # Leave commented for normal builds (CI uses the crates.io versions).
 #
-# [patch.crates-io]
+[patch.crates-io]
 # agg-rust = { path = "../../agg-rust" }
 # clipper2-rust = { path = "../../clipper2-rust" }
-# tess2-rust = { path = "../../tess2-rust" }
+tess2-rust = { path = "../tess2-rust" }

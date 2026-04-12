@@ -134,6 +134,10 @@ impl<'a> GfxCtx<'a> {
 
     pub fn set_transform(&mut self, m: TransAffine) { self.state.transform = m; }
     pub fn reset_transform(&mut self) { self.state.transform = TransAffine::new(); }
+    /// Return the current accumulated transform (cumulative translation + scale
+    /// from all parent `save/translate/restore` calls). The `tx`/`ty` fields
+    /// give the widget's bottom-left corner in framebuffer (Y-up) coordinates.
+    pub fn transform(&self) -> TransAffine { self.state.transform }
 
     // -------------------------------------------------------------------------
     // Style

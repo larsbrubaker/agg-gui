@@ -1,3 +1,0 @@
-- Make a tab that reproduces the same demo result in our agg-gui system using our controls as the one at https://www.egui.rs/#demo.
-- Make sure we can have web-gl 3d content inside any of our widgets with correct clipping and layering. This is a big part of the goal of this project.
-- Write a popup window (in gui system, with z-order keep on top) for showing widget hierarchy much like F12 in the chrome browser. It should have similar featrues like picking and drilling in and showing details and editing attributes. This will help us debug the widget system and validate functionality.

@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 agg-gui = { path = "../agg-gui" }
+bytemuck = "1"
 winit = "0.30"
 glutin = "0.32"
 glutin-winit = "0.5"
