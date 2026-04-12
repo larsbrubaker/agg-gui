@@ -83,8 +83,10 @@ pub struct GlGfxCtx {
     line_width:   f64,
     global_alpha: f64,
 
-    // Transform stack.  The top of the stack is the current CTM.
-    transforms: Vec<TransAffine>,
+    // State stack: each entry holds a saved (transform, clip) pair.
+    // The last entry is the current state.
+    // clip: GL scissor rect (x, y_down, w, h), or None = no scissor.
+    state_stack: Vec<(TransAffine, Option<[i32; 4]>)>,
 
     // Path builder — contours stored in screen-space Y-up pixels.
     contours:        Vec<Vec<[f32; 2]>>,
@@ -94,10 +96,6 @@ pub struct GlGfxCtx {
     // Font
     font:      Option<Arc<Font>>,
     font_size: f64,
-
-    // Scissor clip stack: each entry is an *absolute* GL scissor rect
-    // (x, y, w, h) in Y-down GL coordinates, or None for no clip.
-    clip_stack: Vec<Option<[i32; 4]>>,
 }
 
 impl GlGfxCtx {
@@ -133,13 +131,12 @@ impl GlGfxCtx {
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
             global_alpha: 1.0,
-            transforms:   vec![TransAffine::new()],
+            state_stack:  vec![(TransAffine::new(), None)],
             contours:     Vec::new(),
             current_contour: Vec::new(),
             pen:          [0.0; 2],
             font:         None,
             font_size:    16.0,
-            clip_stack:   Vec::new(),
         }
     }
 
@@ -151,7 +148,25 @@ impl GlGfxCtx {
     // ---- internal helpers --------------------------------------------------
 
     fn ctm(&self) -> &TransAffine {
-        self.transforms.last().expect("transform stack never empty")
+        &self.state_stack.last().expect("state stack never empty").0
+    }
+
+    fn current_clip(&self) -> Option<[i32; 4]> {
+        self.state_stack.last().expect("state stack never empty").1
+    }
+
+    fn apply_scissor(&self) {
+        unsafe {
+            match self.current_clip() {
+                Some([x, y, w, h]) => {
+                    self.gl.enable(glow::SCISSOR_TEST);
+                    self.gl.scissor(x, y, w, h);
+                }
+                None => {
+                    self.gl.disable(glow::SCISSOR_TEST);
+                }
+            }
+        }
     }
 
     /// Transform a local Y-up point to screen-space Y-up pixels.
@@ -341,12 +356,20 @@ impl DrawCtx for GlGfxCtx {
     // ── Clipping ─────────────────────────────────────────────────────────────
 
     fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
-        // Convert Y-up pixel coords to GL (Y-down) scissor rect.
-        let gl_x = x as i32;
-        let gl_y = (self.viewport.1 - (y + h) as f32) as i32;
-        let gl_w = w as i32;
-        let gl_h = h as i32;
-        self.clip_stack.push(Some([gl_x, gl_y, gl_w, gl_h]));
+        // Transform the clip rect corners through the CTM to screen space.
+        let (mut x0, mut y0) = (x, y);
+        let (mut x1, mut y1) = (x + w, y + h);
+        self.ctm().transform(&mut x0, &mut y0);
+        self.ctm().transform(&mut x1, &mut y1);
+        let (lx, rx) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
+        let (by, ty2) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
+        // Y-up → GL Y-down: scissor y is measured from the bottom.
+        let gl_x = lx.floor() as i32;
+        let gl_y = (self.viewport.1 as f64 - ty2).floor() as i32;
+        let gl_w = (rx - lx).ceil() as i32;
+        let gl_h = (ty2 - by).ceil() as i32;
+        let scissor = [gl_x, gl_y, gl_w, gl_h];
+        self.state_stack.last_mut().unwrap().1 = Some(scissor);
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             self.gl.scissor(gl_x, gl_y, gl_w, gl_h);
@@ -354,13 +377,8 @@ impl DrawCtx for GlGfxCtx {
     }
 
     fn reset_clip(&mut self) {
-        self.clip_stack.pop();
-        match self.clip_stack.last() {
-            Some(Some([x, y, w, h])) => unsafe {
-                self.gl.scissor(*x, *y, *w, *h);
-            },
-            _ => unsafe { self.gl.disable(glow::SCISSOR_TEST); },
-        }
+        self.state_stack.last_mut().unwrap().1 = None;
+        unsafe { self.gl.disable(glow::SCISSOR_TEST); }
     }
 
     // ── Clear ─────────────────────────────────────────────────────────────────
@@ -536,37 +554,39 @@ impl DrawCtx for GlGfxCtx {
     }
 
     fn save(&mut self) {
-        let top = *self.ctm();
-        self.transforms.push(top);
+        let top = *self.state_stack.last().unwrap();
+        self.state_stack.push(top);
     }
 
     fn restore(&mut self) {
-        if self.transforms.len() > 1 {
-            self.transforms.pop();
+        if self.state_stack.len() > 1 {
+            self.state_stack.pop();
+            // Re-apply scissor to whatever state we restored to.
+            self.apply_scissor();
         }
     }
 
     fn translate(&mut self, tx: f64, ty: f64) {
-        self.transforms.last_mut().unwrap()
+        self.state_stack.last_mut().unwrap().0
             .premultiply(&TransAffine::new_translation(tx, ty));
     }
 
     fn rotate(&mut self, radians: f64) {
-        self.transforms.last_mut().unwrap()
+        self.state_stack.last_mut().unwrap().0
             .premultiply(&TransAffine::new_rotation(radians));
     }
 
     fn scale(&mut self, sx: f64, sy: f64) {
-        self.transforms.last_mut().unwrap()
+        self.state_stack.last_mut().unwrap().0
             .premultiply(&TransAffine::new_scaling(sx, sy));
     }
 
     fn set_transform(&mut self, m: TransAffine) {
-        *self.transforms.last_mut().unwrap() = m;
+        self.state_stack.last_mut().unwrap().0 = m;
     }
 
     fn reset_transform(&mut self) {
-        *self.transforms.last_mut().unwrap() = TransAffine::new();
+        self.state_stack.last_mut().unwrap().0 = TransAffine::new();
     }
 }
 
