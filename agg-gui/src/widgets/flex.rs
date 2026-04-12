@@ -123,9 +123,17 @@ impl Widget for FlexColumn {
             };
         }
 
+        // Natural content height: the actual extent of all children + gaps.
+        // When there are no flex children this fully determines the column's
+        // size regardless of how much space the parent offered.  When flex
+        // children are present the parent-supplied inner_h is used so they
+        // can expand to fill.  This avoids placing children at astronomically
+        // large Y coordinates when a ScrollView passes f64::MAX / 2.0.
+        let natural_content_h = total_fixed + total_gap;
+        let effective_h = if total_flex > 0.0 { inner_h } else { natural_content_h };
+
         // Step 4: place children top-to-bottom in Y-up.
-        // "Top" = high Y. Start cursor at the top of the inner area.
-        let mut cursor_y = pad + inner_h; // top of inner area in local coords
+        let mut cursor_y = pad + effective_h;
         for i in 0..n {
             let ch = assigned_heights[i];
             let child_y = cursor_y - ch; // bottom-left of this child
@@ -135,7 +143,13 @@ impl Widget for FlexColumn {
             cursor_y = child_y - gap;
         }
 
-        available
+        // Return natural size for all-fixed layouts.  This lets ScrollView
+        // read the true content_height from layout()'s return value.
+        if total_flex > 0.0 {
+            available
+        } else {
+            Size::new(available.width, natural_content_h + pad * 2.0)
+        }
     }
 
     fn paint(&mut self, ctx: &mut GfxCtx) {
