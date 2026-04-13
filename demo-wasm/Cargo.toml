@@ -8,6 +8,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 agg-gui                 = { path = "../agg-gui" }
+demo-gl                 = { path = "../demo-gl" }
+demo-ui                 = { path = "../demo-ui" }
 wasm-bindgen            = "0.2"
 glow                    = "0.13"
 bytemuck                = "1"

@@ -1,7 +1,16 @@
 [workspace]
-members = ["agg-gui", "demo-native", "demo-wasm"]
-default-members = ["agg-gui", "demo-native"]
+members = ["agg-gui", "demo-native", "demo-wasm", "demo-gl", "demo-ui"]
+default-members = ["agg-gui", "demo-native", "demo-gl", "demo-ui"]
 resolver = "2"
+
+# ---------------------------------------------------------------------------
+# Optimize dependencies in debug builds so the GL/tess2/rustybuzz render path
+# runs at near-release speed while your own code stays unoptimized (fast
+# incremental compile, usable backtraces).
+# ---------------------------------------------------------------------------
+
+[profile.dev.package."*"]
+opt-level = 2
 
 # ---------------------------------------------------------------------------
 # Local development overrides

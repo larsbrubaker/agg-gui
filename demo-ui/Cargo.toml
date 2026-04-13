@@ -1,0 +1,8 @@
+[package]
+name = "demo-ui"
+version = "0.1.0"
+edition = "2021"
+description = "Shared demo UI builders — identical widget trees for native and WASM"
+
+[dependencies]
+agg-gui = { path = "../agg-gui" }

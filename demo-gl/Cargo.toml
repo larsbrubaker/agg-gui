@@ -1,0 +1,10 @@
+[package]
+name = "demo-gl"
+version = "0.1.0"
+edition = "2021"
+description = "Shared GlGfxCtx — DrawCtx implementation via glow (WebGL2 + native OpenGL)"
+
+[dependencies]
+agg-gui  = { path = "../agg-gui" }
+glow     = "0.13"
+bytemuck = "1"
