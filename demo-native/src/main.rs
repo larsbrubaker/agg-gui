@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{App, Color, DrawCtx, Font, Key as AggKey, Modifiers,
-              MouseButton as AggMouseButton, Size};
+              MouseButton as AggMouseButton, Rect, Size};
 
 use demo_gl::GlGfxCtx;
 
@@ -218,6 +218,10 @@ fn render_frame(
         gl.disable(glow::DEPTH_TEST);
         gl.disable(glow::SCISSOR_TEST);
     }
+
+    // Reset cube rect so a hidden GlCubeWidget leaves it zeroed — draw_gl
+    // skips automatically when width < 1.
+    CUBE_SCREEN_RECT.with(|r| r.set(Rect::default()));
 
     gl_ctx.reset(w as f32, h as f32);
     app.layout(Size::new(w as f64, h as f64));
