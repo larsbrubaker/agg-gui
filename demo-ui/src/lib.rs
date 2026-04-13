@@ -213,7 +213,10 @@ pub fn build_layout_content(font: Arc<Font>) -> impl Widget {
 
 pub fn build_tree_content(font: Arc<Font>) -> impl Widget {
     let mut tv = TreeView::new(Arc::clone(&font))
-        .with_row_height(26.0).with_font_size(13.0).with_indent_width(18.0);
+        .with_row_height(26.0)
+        .with_font_size(13.0)
+        .with_indent_width(18.0)
+        .with_drag_enabled();
 
     let alpha = tv.add_root("Project Alpha", NodeIcon::Package);
     tv.expand(alpha);

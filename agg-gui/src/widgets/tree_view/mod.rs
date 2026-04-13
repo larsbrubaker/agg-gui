@@ -50,6 +50,7 @@ pub struct TreeView {
     pub font_size: f64,
 
     // Interaction
+    pub drag_enabled: bool,
     focused: bool,
     /// Flat-row index of the row under the cursor.
     hovered_row: Option<usize>,
@@ -83,6 +84,7 @@ impl TreeView {
             indent_width: 16.0,
             font,
             font_size: 13.0,
+            drag_enabled: false,
             focused: false,
             hovered_row: None,
             cursor_node: None,
@@ -98,6 +100,7 @@ impl TreeView {
     pub fn with_row_height(mut self, h: f64) -> Self { self.row_height = h; self }
     pub fn with_indent_width(mut self, w: f64) -> Self { self.indent_width = w; self }
     pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
+    pub fn with_drag_enabled(mut self) -> Self { self.drag_enabled = true; self }
 
     /// Add a root-level node; returns its index.
     pub fn add_root(&mut self, label: impl Into<String>, icon: NodeIcon) -> usize {
@@ -221,6 +224,12 @@ impl TreeView {
         self.select_single(ni);
         // Scroll to keep the new row visible.
         self.scroll_to_row(new_flat);
+    }
+
+    /// Returns the node index currently under the cursor, or `None`.
+    pub fn hovered_node_idx(&self) -> Option<usize> {
+        let rows = flatten_visible(&self.nodes);
+        self.hovered_row.and_then(|ri| rows.get(ri).map(|r| r.node_idx))
     }
 
     fn scroll_to_row(&mut self, flat_idx: usize) {
@@ -531,17 +540,15 @@ impl TreeView {
                 self.select_single(node_idx);
             }
         } else {
-            if !self.nodes[node_idx].is_selected {
-                self.select_single(node_idx);
+            self.select_single(node_idx);
+            if self.drag_enabled {
+                self.drag = Some(DragState {
+                    node_idx,
+                    _cursor_row_offset: pos.y - self.row_y_bottom(flat_i),
+                    current_pos: pos,
+                    live: false,
+                });
             }
-            // Start drag potential
-            let y_bot = self.row_y_bottom(flat_i);
-            self.drag = Some(DragState {
-                node_idx,
-                _cursor_row_offset: pos.y - y_bot,
-                current_pos: pos,
-                live: false,
-            });
         }
 
         EventResult::Consumed
