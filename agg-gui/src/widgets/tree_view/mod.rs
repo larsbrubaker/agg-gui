@@ -241,6 +241,7 @@ impl TreeView {
 // ---------------------------------------------------------------------------
 
 impl Widget for TreeView {
+    fn type_name(&self) -> &'static str { "TreeView" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self._children }

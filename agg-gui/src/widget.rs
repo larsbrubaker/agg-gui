@@ -75,6 +75,11 @@ pub trait Widget {
     fn is_focusable(&self) -> bool {
         false
     }
+
+    /// A static name for this widget type, used by the inspector. Default: "Widget".
+    fn type_name(&self) -> &'static str {
+        "Widget"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +174,43 @@ fn translate_event(event: &Event, new_pos: Point) -> Event {
         },
         Event::MouseWheel { delta_y, .. } => Event::MouseWheel { pos: new_pos, delta_y: *delta_y },
         other => other.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inspector support
+// ---------------------------------------------------------------------------
+
+/// Flat snapshot of one widget for the inspector panel.
+#[derive(Clone)]
+pub struct InspectorNode {
+    pub type_name: &'static str,
+    /// Absolute screen bounds (Y-up), accumulated as the tree is walked.
+    pub screen_bounds: Rect,
+    pub depth: usize,
+}
+
+/// Walk the subtree rooted at `widget` and collect an `InspectorNode` per
+/// widget in DFS paint order (root first).
+///
+/// `screen_origin` is the accumulated parent offset in screen Y-up coords.
+pub fn collect_inspector_nodes(
+    widget: &dyn Widget,
+    depth: usize,
+    screen_origin: Point,
+    out: &mut Vec<InspectorNode>,
+) {
+    let b = widget.bounds();
+    let abs = Rect::new(
+        screen_origin.x + b.x,
+        screen_origin.y + b.y,
+        b.width,
+        b.height,
+    );
+    out.push(InspectorNode { type_name: widget.type_name(), screen_bounds: abs, depth });
+    let child_origin = Point::new(abs.x, abs.y);
+    for child in widget.children() {
+        collect_inspector_nodes(child.as_ref(), depth + 1, child_origin, out);
     }
 }
 
@@ -306,6 +348,13 @@ impl App {
         if let Some(path) = hit {
             dispatch_event(&mut self.root, &path, &event, pos);
         }
+    }
+
+    /// Snapshot the entire widget tree for the inspector.
+    pub fn collect_inspector_nodes(&self) -> Vec<InspectorNode> {
+        let mut out = Vec::new();
+        collect_inspector_nodes(self.root.as_ref(), 0, Point::ORIGIN, &mut out);
+        out
     }
 
     /// Call when the cursor leaves the window to clear hover state.

@@ -85,6 +85,7 @@ impl RadioGroup {
 }
 
 impl Widget for RadioGroup {
+    fn type_name(&self) -> &'static str { "RadioGroup" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }

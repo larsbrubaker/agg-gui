@@ -22,7 +22,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use agg_gui::{
     App, Button, Checkbox, Color, CompOp, Container, DrawCtx, Event, EventResult, FlexColumn, FlexRow,
-    Font, Key, Label, Modifiers, MouseButton, NodeIcon, ProgressBar,
+    Font, InspectorNode, InspectorPanel, Key, Label, Modifiers, MouseButton, NodeIcon, ProgressBar,
     RadioGroup, Rect, ScrollView, Separator, Size, SizedBox, Slider, Spacer, Splitter,
     Stack, TabView, TextField, TreeView, Widget, Window,
 };
@@ -44,6 +44,10 @@ thread_local! {
     static GL_STATE:  RefCell<Option<GlState>>   = RefCell::new(None);
     /// Persistent GL 2-D drawing context — created once, reset each frame.
     static GL_CTX:    RefCell<Option<GlGfxCtx>>  = RefCell::new(None);
+
+    // Inspector shared state — set once by build_demo_ui, read each frame.
+    static SHOW_INSPECTOR:  RefCell<Option<Rc<Cell<bool>>>>                     = RefCell::new(None);
+    static INSPECTOR_NODES: RefCell<Option<Rc<RefCell<Vec<InspectorNode>>>>>    = RefCell::new(None);
 }
 
 /// Initialise panic hook so Rust panics appear in the browser console.
@@ -105,6 +109,12 @@ fn init_webgl2() -> glow::Context {
 }
 
 fn build_demo_ui(font: Arc<Font>) -> App {
+    // Shared state: inspector visibility + node snapshot
+    let show_inspector  = Rc::new(Cell::new(false));
+    let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
+
+    // Toggle callback used by the tab-bar action button
+    let show_clone = Rc::clone(&show_inspector);
     let tab_view = TabView::new(Arc::clone(&font))
         .with_tab_bar_height(40.0)
         .with_font_size(13.0)
@@ -112,13 +122,27 @@ fn build_demo_ui(font: Arc<Font>) -> App {
         .add_tab("Widgets", Box::new(build_widgets_content(Arc::clone(&font))))
         .add_tab("Text",    Box::new(TextDemoWidget::new(Arc::clone(&font))))
         .add_tab("Layout",  Box::new(build_layout_content(Arc::clone(&font))))
-        .add_tab("Tree",    Box::new(build_tree_content(Arc::clone(&font))));
+        .add_tab("Tree",    Box::new(build_tree_content(Arc::clone(&font))))
+        .with_action_button("Inspector", move || {
+            show_clone.set(!show_clone.get());
+        });
 
     let window = build_demo_window(Arc::clone(&font));
 
+    let inspector = InspectorPanel::new(
+        Arc::clone(&font),
+        Rc::clone(&show_inspector),
+        Rc::clone(&inspector_nodes),
+    );
+
+    // Store shared state in thread_locals so render() can update the snapshot
+    SHOW_INSPECTOR.with(|c| *c.borrow_mut() = Some(Rc::clone(&show_inspector)));
+    INSPECTOR_NODES.with(|c| *c.borrow_mut() = Some(Rc::clone(&inspector_nodes)));
+
     let root = Stack::new()
         .add(Box::new(tab_view))
-        .add(Box::new(window));
+        .add(Box::new(window))
+        .add(Box::new(inspector));   // on top — paints over everything when visible
 
     App::new(Box::new(root))
 }
@@ -731,7 +755,22 @@ pub fn render(width: u32, height: u32) {
         }
     });
 
-    // ── 2. Reset GL_CTX for this frame then paint ────────────────────────────
+    // ── 2. Sync inspector nodes snapshot (before paint) ─────────────────────
+    let show_inspector = SHOW_INSPECTOR.with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
+    if show_inspector {
+        let nodes = DEMO_APP.with(|cell| {
+            cell.borrow().as_ref().map(|app| app.collect_inspector_nodes())
+        });
+        if let Some(nodes) = nodes {
+            INSPECTOR_NODES.with(|c| {
+                if let Some(ref rc) = *c.borrow() {
+                    *rc.borrow_mut() = nodes;
+                }
+            });
+        }
+    }
+
+    // ── 3. Reset GL_CTX for this frame then paint ────────────────────────────
     GL_CTX.with(|ctx_cell| {
         let mut ctx_borrow = ctx_cell.borrow_mut();
         if let Some(gl_ctx) = ctx_borrow.as_mut() {
@@ -747,7 +786,7 @@ pub fn render(width: u32, height: u32) {
         }
     });
 
-    // ── 3. Draw rotating 3D cube on top ─────────────────────────────────────
+    // ── 4. Draw rotating 3D cube on top ─────────────────────────────────────
     let cube_rect = CUBE_SCREEN_RECT.with(|r| r.get());
     GL_STATE.with(|gl_cell| {
         if let Some(state) = gl_cell.borrow_mut().as_mut() {

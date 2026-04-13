@@ -99,6 +99,7 @@ impl TextField {
 }
 
 impl Widget for TextField {
+    fn type_name(&self) -> &'static str { "TextField" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, bounds: Rect) { self.bounds = bounds; }
 

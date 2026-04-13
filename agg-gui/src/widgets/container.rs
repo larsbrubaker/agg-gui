@@ -75,6 +75,7 @@ impl Default for Container {
 }
 
 impl Widget for Container {
+    fn type_name(&self) -> &'static str { "Container" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, bounds: Rect) { self.bounds = bounds; }
 

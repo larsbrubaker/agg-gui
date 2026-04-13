@@ -50,6 +50,7 @@ impl Label {
 }
 
 impl Widget for Label {
+    fn type_name(&self) -> &'static str { "Label" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }

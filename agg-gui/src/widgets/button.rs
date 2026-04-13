@@ -96,6 +96,7 @@ impl Button {
 }
 
 impl Widget for Button {
+    fn type_name(&self) -> &'static str { "Button" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, bounds: Rect) { self.bounds = bounds; }
 

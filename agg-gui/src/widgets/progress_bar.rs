@@ -47,6 +47,7 @@ impl ProgressBar {
 }
 
 impl Widget for ProgressBar {
+    fn type_name(&self) -> &'static str { "ProgressBar" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }

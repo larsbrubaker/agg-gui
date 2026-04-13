@@ -4,3 +4,6 @@ demo/public/dist/
 demo/dist/
 demo/node_modules/
 *.lock
+demo/tests/snapshots/
+demo-wasm/test-results/
+demo/test-results/

@@ -79,6 +79,7 @@ impl FlexColumn {
 impl Default for FlexColumn { fn default() -> Self { Self::new() } }
 
 impl Widget for FlexColumn {
+    fn type_name(&self) -> &'static str { "FlexColumn" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
@@ -217,6 +218,7 @@ impl FlexRow {
 impl Default for FlexRow { fn default() -> Self { Self::new() } }
 
 impl Widget for FlexRow {
+    fn type_name(&self) -> &'static str { "FlexRow" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }

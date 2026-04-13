@@ -33,6 +33,7 @@ impl Stack {
 impl Default for Stack { fn default() -> Self { Self::new() } }
 
 impl Widget for Stack {
+    fn type_name(&self) -> &'static str { "Stack" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
@@ -69,6 +70,7 @@ impl Padding {
 }
 
 impl Widget for Padding {
+    fn type_name(&self) -> &'static str { "Padding" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
@@ -130,6 +132,7 @@ impl SizedBox {
 impl Default for SizedBox { fn default() -> Self { Self::new() } }
 
 impl Widget for SizedBox {
+    fn type_name(&self) -> &'static str { "SizedBox" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
@@ -172,6 +175,7 @@ impl Spacer {
 impl Default for Spacer { fn default() -> Self { Self::new() } }
 
 impl Widget for Spacer {
+    fn type_name(&self) -> &'static str { "Spacer" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
@@ -219,6 +223,7 @@ impl Separator {
 }
 
 impl Widget for Separator {
+    fn type_name(&self) -> &'static str { "Separator" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }

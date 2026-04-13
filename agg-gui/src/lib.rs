@@ -43,11 +43,11 @@ pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};
 pub use gfx_ctx::GfxCtx;
 pub use text::{Font, TextMetrics};
-pub use widget::{App, Widget};
-pub use widgets::{Button, Checkbox, Container, FlexColumn, FlexRow, Label, LabelAlign,
-                  NodeIcon, Padding, ProgressBar, RadioGroup, ScrollView, Separator,
-                  SizedBox, Slider, Spacer, Splitter, Stack, TabView, TextField, TreeView,
-                  Window};
+pub use widget::{App, InspectorNode, Widget, collect_inspector_nodes};
+pub use widgets::{Button, Checkbox, Container, FlexColumn, FlexRow, InspectorPanel,
+                  Label, LabelAlign, NodeIcon, Padding, ProgressBar, RadioGroup,
+                  ScrollView, Separator, SizedBox, Slider, Spacer, Splitter, Stack,
+                  TabView, TextField, TreeView, Window};
 
 // Re-export AGG types so callers don't need to import agg-rust directly.
 pub use agg_rust::trans_affine::TransAffine;
