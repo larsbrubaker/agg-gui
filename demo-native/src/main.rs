@@ -15,9 +15,10 @@ use std::rc::Rc;
 
 use agg_gui::{
     App, Button, Checkbox, Color, CompOp, Container, DrawCtx, FlexColumn, FlexRow,
-    Font, Framebuffer, GfxCtx, Key as AggKey, Label, Modifiers, MouseButton as AggMouseButton,
-    NodeIcon, ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox, Slider,
-    Spacer, Splitter, Stack, TabView, TextField, TreeView, Widget, Window,
+    Font, Framebuffer, GfxCtx, InspectorNode, InspectorPanel, Key as AggKey, Label,
+    Modifiers, MouseButton as AggMouseButton, NodeIcon, ProgressBar, RadioGroup, Rect,
+    ScrollView, Separator, Size, SizedBox, Slider, Spacer, Splitter, Stack, TabView,
+    TextField, TreeView, Widget, Window,
 };
 use agg_gui::event::{Event as AggEvent, EventResult as AggEventResult};
 
@@ -174,7 +175,15 @@ impl Widget for TextDemoWidget {
 // Widget tree — Phase 7: single TabView with all four tabs
 // ---------------------------------------------------------------------------
 
-fn build_demo_ui(font: Arc<Font>) -> App {
+fn build_demo_ui(font: Arc<Font>)
+    -> (App, Rc<Cell<bool>>, Rc<std::cell::RefCell<Vec<InspectorNode>>>)
+{
+    use std::cell::RefCell;
+
+    let show_inspector  = Rc::new(Cell::new(false));
+    let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
+
+    let show_clone = Rc::clone(&show_inspector);
     let tab_view = TabView::new(Arc::clone(&font))
         .with_tab_bar_height(40.0)
         .with_font_size(13.0)
@@ -182,15 +191,25 @@ fn build_demo_ui(font: Arc<Font>) -> App {
         .add_tab("Widgets", Box::new(build_widgets_content(Arc::clone(&font))))
         .add_tab("Text",    Box::new(TextDemoWidget::new(Arc::clone(&font))))
         .add_tab("Layout",  Box::new(build_layout_content(Arc::clone(&font))))
-        .add_tab("Tree",    Box::new(build_tree_demo(Arc::clone(&font))));
+        .add_tab("Tree",    Box::new(build_tree_demo(Arc::clone(&font))))
+        .with_action_button("Inspector", move || {
+            show_clone.set(!show_clone.get());
+        });
 
     let window = build_cube_window(Arc::clone(&font));
 
+    let inspector = InspectorPanel::new(
+        Arc::clone(&font),
+        Rc::clone(&show_inspector),
+        Rc::clone(&inspector_nodes),
+    );
+
     let root = Stack::new()
         .add(Box::new(tab_view))
-        .add(Box::new(window));
+        .add(Box::new(window))
+        .add(Box::new(inspector));
 
-    App::new(Box::new(root))
+    (App::new(Box::new(root)), show_inspector, inspector_nodes)
 }
 
 fn build_cube_window(font: Arc<Font>) -> Window {
@@ -739,13 +758,14 @@ fn main() {
     let mut presenter = unsafe { GlPresenter::new(gl) };
     let mut cube_renderer = unsafe { CubeGlRenderer::new(&presenter.gl) };
     let mut fb = Framebuffer::new(size.width.max(1), size.height.max(1));
-    let mut app = build_demo_ui(Arc::clone(&font));
+    let (mut app, show_inspector, inspector_nodes) = build_demo_ui(Arc::clone(&font));
 
     // Last known cursor position (Y-down, physical pixels).
     let mut cursor_x = 0.0f64;
     let mut cursor_y = 0.0f64;
+    let mut last_frame_ms = 0.0f64;
 
-    render_frame(&mut app, &mut fb, &mut presenter, &mut cube_renderer);
+    render_frame(&mut app, &mut fb, &mut presenter, &mut cube_renderer, last_frame_ms);
 
     #[allow(deprecated)]
     event_loop
@@ -813,7 +833,14 @@ fn main() {
                     app.on_mouse_wheel(cursor_x, cursor_y, delta_y);
                 }
                 Event::AboutToWait => {
-                    render_frame(&mut app, &mut fb, &mut presenter, &mut cube_renderer);
+                    let t0 = std::time::Instant::now();
+
+                    // Sync inspector node snapshot before painting.
+                    if show_inspector.get() {
+                        *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
+                    }
+
+                    render_frame(&mut app, &mut fb, &mut presenter, &mut cube_renderer, last_frame_ms);
                     unsafe { presenter.present() };
                     // Draw the GL cube on top of the uploaded AGG texture.
                     let cube_rect = CUBE_SCREEN_RECT.with(|r| r.get());
@@ -822,6 +849,8 @@ fn main() {
                     let fh = fb.height() as i32;
                     unsafe { cube_renderer.draw_gl(&presenter.gl, cube_rect, h, fw, fh) };
                     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
+
+                    last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
                 }
                 _ => {}
             }
@@ -834,6 +863,7 @@ fn render_frame(
     fb: &mut Framebuffer,
     presenter: &mut GlPresenter,
     _cube: &mut CubeGlRenderer,
+    frame_ms: f64,
 ) {
     let w = fb.width();
     let h = fb.height();
@@ -842,9 +872,10 @@ fn render_frame(
         let mut ctx = GfxCtx::new(fb);
         app.paint(&mut ctx);
 
-        let lsize = (w as f64 * 0.012).clamp(9.0, 13.0);
-        ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.3));
-        ctx.fill_text_gsv("agg-gui  Phase 8 — GL Cube", 12.0, 6.0, lsize);
+        // Status overlay matching the web version: "WxH  X.Xms"
+        let status = format!("{}×{}   {:.1}ms", w, h, frame_ms);
+        ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.30));
+        ctx.fill_text_gsv(&status, 12.0, 6.0, 11.0);
     }
     // Upload AGG framebuffer to GL texture (cube will overdraw its area next).
     unsafe { presenter.update_texture(fb) };
