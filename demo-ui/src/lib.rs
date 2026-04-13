@@ -25,7 +25,7 @@ use agg_gui::widgets::button::ButtonTheme;
 pub fn build_demo_ui(
     font:        Arc<Font>,
     cube_widget: Box<dyn Widget>,
-) -> (App, Rc<Cell<bool>>, Rc<RefCell<Vec<InspectorNode>>>) {
+) -> (App, Rc<Cell<bool>>, Rc<RefCell<Vec<InspectorNode>>>, Rc<RefCell<Option<Rect>>>) {
     let show_inspector  = Rc::new(Cell::new(false));
     let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
     let hovered_bounds  = Rc::new(RefCell::new(None::<Rect>));
@@ -56,7 +56,7 @@ pub fn build_demo_ui(
         .add(Box::new(tab_view))
         .add(Box::new(window));
 
-    (App::new(Box::new(root)), show_inspector, inspector_nodes)
+    (App::new(Box::new(root)), show_inspector, inspector_nodes, hovered_bounds)
 }
 
 

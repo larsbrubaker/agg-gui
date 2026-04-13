@@ -7,6 +7,7 @@
 mod cube_widget;
 use cube_widget::{CubeGlRenderer, GlCubeWidget, CUBE_SCREEN_RECT};
 
+use std::cell::RefCell;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -98,7 +99,7 @@ fn main() {
     let init_h = size.height.max(1) as f32;
     let mut gl_ctx = unsafe { GlGfxCtx::new(Rc::clone(&gl), init_w, init_h) };
 
-    let (mut app, show_inspector, inspector_nodes) =
+    let (mut app, show_inspector, inspector_nodes, hovered_bounds) =
         demo_ui::build_demo_ui(Arc::clone(&font), Box::new(GlCubeWidget::new()));
 
     let mut cursor_x    = 0.0f64;
@@ -109,7 +110,7 @@ fn main() {
 
     // Initial frame
     render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
-                 win_w, win_h, last_frame_ms, Arc::clone(&font));
+                 win_w, win_h, last_frame_ms, Arc::clone(&font), &hovered_bounds);
     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
 
     #[allow(deprecated)]
@@ -184,7 +185,7 @@ fn main() {
                     }
 
                     render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
-                                 win_w, win_h, last_frame_ms, Arc::clone(&font));
+                                 win_w, win_h, last_frame_ms, Arc::clone(&font), &hovered_bounds);
                     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
 
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -200,14 +201,15 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 fn render_frame(
-    app:      &mut App,
-    gl_ctx:   &mut GlGfxCtx,
-    cube:     &mut CubeGlRenderer,
-    gl:       &glow::Context,
-    w:        u32,
-    h:        u32,
-    frame_ms: f64,
-    font:     Arc<Font>,
+    app:            &mut App,
+    gl_ctx:         &mut GlGfxCtx,
+    cube:           &mut CubeGlRenderer,
+    gl:             &glow::Context,
+    w:              u32,
+    h:              u32,
+    frame_ms:       f64,
+    font:           Arc<Font>,
+    hovered_bounds: &Rc<RefCell<Option<Rect>>>,
 ) {
     unsafe {
         gl.viewport(0, 0, w as i32, h as i32);
@@ -227,6 +229,11 @@ fn render_frame(
     app.layout(Size::new(w as f64, h as f64));
     app.paint(gl_ctx);
 
+    // Draw inspector hover overlay — Chrome-style bounds highlight.
+    if let Some(rect) = *hovered_bounds.borrow() {
+        draw_hover_overlay(gl_ctx, rect);
+    }
+
     // Status bar overlay: "WxH  X.Xms"
     let status = format!("{}×{}   {:.1}ms", w, h, frame_ms);
     gl_ctx.set_font(font);
@@ -237,6 +244,29 @@ fn render_frame(
     // Draw the rotating cube on top, inside its widget rect.
     let cube_rect = CUBE_SCREEN_RECT.with(|r| r.get());
     unsafe { cube.draw_gl(gl, cube_rect, h as f64, w as i32, h as i32) };
+}
+
+// ---------------------------------------------------------------------------
+// Inspector hover overlay
+// ---------------------------------------------------------------------------
+
+fn draw_hover_overlay(ctx: &mut GlGfxCtx, rect: Rect) {
+    if rect.width < 1.0 || rect.height < 1.0 { return; }
+    // Teal fill
+    ctx.set_fill_color(Color::rgba(0.05, 0.65, 0.85, 0.18));
+    ctx.begin_path();
+    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+    ctx.fill();
+    // Teal border
+    ctx.set_stroke_color(Color::rgba(0.05, 0.65, 0.85, 0.80));
+    ctx.set_line_width(1.5);
+    ctx.begin_path();
+    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+    ctx.stroke();
+    // Size label
+    let label = format!("{:.0} × {:.0}", rect.width, rect.height);
+    ctx.set_fill_color(Color::rgba(0.05, 0.65, 0.85, 1.00));
+    ctx.fill_text_gsv(&label, rect.x + 2.0, rect.y + rect.height + 2.0, 9.0);
 }
 
 // ---------------------------------------------------------------------------

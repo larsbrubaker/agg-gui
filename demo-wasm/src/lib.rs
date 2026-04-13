@@ -56,7 +56,7 @@ fn ensure_demo_app() {
     DEMO_APP.with(|cell| {
         if cell.borrow().is_none() {
             let font = make_font();
-            let (app, show_inspector, inspector_nodes) =
+            let (app, show_inspector, inspector_nodes, _hovered_bounds) =
                 demo_ui::build_demo_ui(font, Box::new(GlCubeWidget::new()));
             SHOW_INSPECTOR.with(|c| *c.borrow_mut() = Some(Rc::clone(&show_inspector)));
             INSPECTOR_NODES.with(|c| *c.borrow_mut() = Some(Rc::clone(&inspector_nodes)));
