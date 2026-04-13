@@ -182,6 +182,9 @@ fn main() {
                     // Sync inspector node snapshot before painting.
                     if show_inspector.get() {
                         *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
+                    } else {
+                        // Inspector hidden — clear any hover overlay immediately.
+                        *hovered_bounds.borrow_mut() = None;
                     }
 
                     render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,

@@ -286,18 +286,6 @@ pub fn render_text_gl_pixels(width: u32, height: u32) -> Vec<u8> {
         }
     });
 
-    let font = make_font();
-    GL_CTX.with(|ctx_cell| {
-        let mut ctx_borrow = ctx_cell.borrow_mut();
-        if let Some(gl_ctx) = ctx_borrow.as_mut() {
-            gl_ctx.reset(width as f32, height as f32);
-            gl_ctx.set_font(Arc::clone(&font));
-            gl_ctx.set_font_size(24.0);
-            gl_ctx.set_fill_color(agg_gui::Color::rgba(0.0, 0.0, 0.0, 1.0));
-            gl_ctx.fill_text("TESTING FONT RENDERING", 20.0, 40.0);
-        }
-    });
-
     let byte_count = (width * height * 4) as usize;
     let mut raw = vec![0u8; byte_count];
     GL_STATE.with(|gl_cell| {
