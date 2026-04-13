@@ -1,5 +1,6 @@
 [workspace]
 members = ["agg-gui", "demo-native", "demo-wasm"]
+default-members = ["agg-gui", "demo-native"]
 resolver = "2"
 
 # ---------------------------------------------------------------------------
