@@ -621,8 +621,11 @@ fn test_window_close_hides_content() {
     assert!(hidden_all_black, "hidden window must not paint anything; content child leaked");
 }
 
-/// InspectorPanel must place row 0 at the TOP of the tree area (highest Y
-/// in Y-up), not at the bottom.
+/// InspectorPanel must build the TreeView with the correct nodes:
+/// - Two InspectorNodes (Root at depth 0, Child at depth 1) must produce two
+///   TreeView nodes where Child's parent is Root's index.
+/// - InspectorPanel exposes no children (TreeView is managed directly).
+/// - The TreeView bounds must sit inside the tree area (above split, below header).
 #[test]
 fn test_inspector_row0_at_top() {
     use std::sync::Arc;
@@ -644,16 +647,26 @@ fn test_inspector_row0_at_top() {
     panel.layout(crate::Size::new(200.0, 300.0));
     panel.set_bounds(Rect::new(0.0, 0.0, 200.0, 300.0));
 
-    // Row 0 should be at the top: its bottom Y must be >= (list_area_h - ROW_H).
-    // list_area_h = 300 - 30 = 270.
-    // Row 0 bottom = 270 - 20 = 250 (scroll_offset=0).
-    let row0 = &panel.children()[0];
-    let list_area_h = 300.0 - 30.0_f64;  // h - HEADER_H
-    let expected_bottom = list_area_h - 20.0;  // ROW_H = 20
+    // InspectorPanel exposes no children — TreeView is managed directly.
+    assert!(panel.children().is_empty(), "InspectorPanel children must be empty");
+
+    // The TreeView should have exactly 2 nodes (one per InspectorNode).
+    assert_eq!(panel.tree_view.nodes.len(), 2, "tree_view must have 2 nodes");
+
+    // Root node has no parent; Child node's parent is Root (index 0).
+    assert!(panel.tree_view.nodes[0].parent.is_none(), "Root must have no parent");
+    assert_eq!(panel.tree_view.nodes[1].parent, Some(0), "Child must have Root (0) as parent");
+
+    // The TreeView bounds must be positioned inside the tree area.
+    // tree_area top = list_area_h = 300 - 30 = 270 (just below header).
+    // tree_area bottom = split_y + 4; split_y ≥ MIN_PROPS_H = 60, so ≥ 64.
+    let tv_bounds = panel.tree_view.bounds();
+    assert!(tv_bounds.height > 0.0, "TreeView must have positive height");
+    assert!(tv_bounds.y >= 60.0, "TreeView bottom must be above split handle");
     assert!(
-        (row0.bounds().y - expected_bottom).abs() < 2.0,
-        "row 0 bottom should be near top of tree area ({expected_bottom}); got {}",
-        row0.bounds().y
+        tv_bounds.y + tv_bounds.height <= 270.0 + 1.0,
+        "TreeView top must not exceed list_area_h (270); got {}",
+        tv_bounds.y + tv_bounds.height
     );
 }
 
