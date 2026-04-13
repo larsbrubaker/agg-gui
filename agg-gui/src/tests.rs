@@ -670,6 +670,92 @@ fn test_inspector_row0_at_top() {
     );
 }
 
+/// InspectorPanel must populate tree_view.nodes from the InspectorNode list,
+/// building a correct parent-child structure from the depth information.
+#[test]
+fn test_inspector_tree_populates_from_nodes() {
+    use std::sync::Arc;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use crate::text::Font;
+    use crate::widgets::inspector::InspectorPanel;
+    use crate::widget::{InspectorNode, Widget};
+    use crate::geometry::Rect;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let hovered_bounds = Rc::new(RefCell::new(None));
+    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
+        InspectorNode { type_name: "Root",    screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
+        InspectorNode { type_name: "Child",   screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1 },
+        InspectorNode { type_name: "Sibling", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 0 },
+    ]));
+
+    let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
+    panel.layout(crate::Size::new(200.0, 400.0));
+
+    // Panel exposes TreeView via tree_view field.
+    assert_eq!(panel.tree_view.nodes.len(), 3, "must have 3 tree nodes");
+
+    // Root is a root-level node (no parent).
+    assert!(panel.tree_view.nodes[0].parent.is_none(), "node 0 must be root-level");
+
+    // Child has Root as parent.
+    assert_eq!(panel.tree_view.nodes[1].parent, Some(0), "node 1 must be child of node 0");
+
+    // Sibling is another root-level node.
+    assert!(panel.tree_view.nodes[2].parent.is_none(), "node 2 must be root-level");
+
+    // InspectorPanel.children() returns empty — TreeView is not in child slice.
+    assert!(panel.children().is_empty(), "InspectorPanel.children() must be empty");
+}
+
+/// All nodes must be expanded by default so the full tree is visible on first show.
+#[test]
+fn test_inspector_tree_default_expanded() {
+    use std::sync::Arc;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use crate::text::Font;
+    use crate::widgets::inspector::InspectorPanel;
+    use crate::widget::{InspectorNode, Widget};
+    use crate::geometry::Rect;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let hovered_bounds = Rc::new(RefCell::new(None));
+    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
+        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
+        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1 },
+    ]));
+
+    let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
+    panel.layout(crate::Size::new(200.0, 400.0));
+
+    for (i, node) in panel.tree_view.nodes.iter().enumerate() {
+        assert!(node.is_expanded, "node {} must be expanded by default", i);
+    }
+}
+
+/// Inspector's TreeView must have drag-and-drop disabled by default.
+#[test]
+fn test_inspector_tree_drag_disabled() {
+    use std::sync::Arc;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use crate::text::Font;
+    use crate::widgets::inspector::InspectorPanel;
+    use crate::widget::{InspectorNode, Widget};
+    use crate::geometry::Rect;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let hovered_bounds = Rc::new(RefCell::new(None));
+    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
+        InspectorNode { type_name: "Root", screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
+    ]));
+
+    let panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
+    assert!(!panel.tree_view.drag_enabled, "inspector TreeView must have drag disabled");
+}
+
 /// Typing into a TextField inserts characters at the cursor.
 #[test]
 fn test_text_field_typing() {
