@@ -1,9 +1,10 @@
-//! `TreeView` — virtualized tree widget with expand/collapse, multi-select,
+//! `TreeView` — compositional tree widget with expand/collapse, multi-select,
 //! keyboard navigation, and drag-and-drop reordering.
 //!
-//! The widget is **monolithic**: it draws all visible rows itself without
-//! any child widgets, enabling O(visible_rows) painting regardless of total
-//! tree size.
+//! Each visible row is represented by a `TreeRow` child widget stored in
+//! `row_widgets`.  The framework recurses into these children after `paint()`
+//! returns, so the `clip_rect` set at the end of `paint()` is active during
+//! child painting.
 
 mod node;
 mod drag;
@@ -14,7 +15,7 @@ pub use row::{ExpandToggle, NodeIconWidget, TreeRow};
 use node::{DragState, DropPosition, FlatRow, flatten_visible};
 use drag::{apply_drop, compute_drop_target, paint_drop_child_highlight,
            paint_drop_line, paint_ghost};
-use row::{EXPAND_W, ICON_W, ICON_GAP, icon_color};
+use row::{EXPAND_W, icon_color};
 
 use std::sync::Arc;
 
@@ -29,13 +30,28 @@ const SCROLLBAR_W: f64 = 10.0;
 const DRAG_THRESHOLD: f64 = 4.0;
 
 // ---------------------------------------------------------------------------
+// RowMeta
+// ---------------------------------------------------------------------------
+
+/// Metadata for one visible row; parallel to `row_widgets` after `layout()`.
+struct RowMeta {
+    /// Index into `self.nodes` for this row.
+    node_idx: usize,
+    /// Bounds of the `ExpandToggle` in **TreeView-local** coordinates.
+    /// `None` if the node has no children.
+    toggle_rect: Option<Rect>,
+}
+
+// ---------------------------------------------------------------------------
 // TreeView struct
 // ---------------------------------------------------------------------------
 
 pub struct TreeView {
     bounds: Rect,
-    // Always empty — TreeView is a monolithic (leaf) widget.
-    _children: Vec<Box<dyn Widget>>,
+    /// One `TreeRow` per currently-visible node; rebuilt each `layout()` call.
+    row_widgets: Vec<Box<dyn Widget>>,
+    /// Parallel to `row_widgets` — metadata for hit-testing in `on_event()`.
+    row_metas: Vec<RowMeta>,
 
     pub nodes: Vec<TreeNode>,
 
@@ -76,7 +92,8 @@ impl TreeView {
     pub fn new(font: Arc<Font>) -> Self {
         Self {
             bounds: Rect::default(),
-            _children: Vec::new(),
+            row_widgets: Vec::new(),
+            row_metas: Vec::new(),
             nodes: Vec::new(),
             scroll_offset: 0.0,
             content_height: 0.0,
@@ -137,31 +154,6 @@ impl TreeView {
 // ---------------------------------------------------------------------------
 
 impl TreeView {
-    /// Y coordinate of the bottom edge of flat row `i` in local (Y-up) space.
-    fn row_y_bottom(&self, i: usize) -> f64 {
-        self.bounds.height - (i as f64 + 1.0) * self.row_height + self.scroll_offset
-    }
-
-    /// Flat-row index under `local_y`, or `None`.
-    fn row_at_y(&self, local_y: f64, n_rows: usize) -> Option<usize> {
-        if n_rows == 0 { return None; }
-        let raw = (self.bounds.height - local_y + self.scroll_offset) / self.row_height;
-        if raw < 0.0 { return None; }
-        let i = raw as usize;
-        if i >= n_rows { None } else { Some(i) }
-    }
-
-    /// First and last flat-row indices that overlap the viewport.
-    fn visible_range(&self, n_rows: usize) -> (usize, usize) {
-        if n_rows == 0 { return (0, 0); }
-        let h = self.bounds.height;
-        let rh = self.row_height;
-        let off = self.scroll_offset;
-        let first = ((off / rh) as usize).min(n_rows - 1);
-        let last = (((h + off) / rh) as usize + 1).min(n_rows - 1);
-        (first, last)
-    }
-
     fn scrollbar_x(&self) -> f64 { self.bounds.width - SCROLLBAR_W }
 
     fn max_scroll(&self) -> f64 {
@@ -181,6 +173,20 @@ impl TreeView {
     /// Is `local_pos` in the scrollbar strip?
     fn in_scrollbar(&self, local_pos: Point) -> bool {
         local_pos.x >= self.scrollbar_x()
+    }
+
+    /// Returns the flat-row index (into `row_metas`/`row_widgets`) for the row
+    /// under `pos` in TreeView-local coordinates, or `None`.
+    fn row_index_at(&self, pos: Point) -> Option<usize> {
+        for (i, widget) in self.row_widgets.iter().enumerate() {
+            let b = widget.bounds();
+            if pos.y >= b.y && pos.y < b.y + b.height
+                && pos.x >= 0.0 && pos.x < self.bounds.width - SCROLLBAR_W
+            {
+                return Some(i);
+            }
+        }
+        None
     }
 }
 
@@ -253,8 +259,8 @@ impl Widget for TreeView {
     fn type_name(&self) -> &'static str { "TreeView" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self._children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self._children }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.row_widgets }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.row_widgets }
     fn is_focusable(&self) -> bool { true }
 
     fn hit_test(&self, local_pos: Point) -> bool {
@@ -269,28 +275,68 @@ impl Widget for TreeView {
         let rows = flatten_visible(&self.nodes);
         self.content_height = rows.len() as f64 * self.row_height;
         self.scroll_offset = self.scroll_offset.clamp(0.0, self.max_scroll());
+
+        let h         = available.height;
+        let w         = available.width - SCROLLBAR_W;
+        let rh        = self.row_height;
+        let ind       = self.indent_width;
+        let font_size = self.font_size;
+
+        self.row_widgets.clear();
+        self.row_metas.clear();
+
+        for (i, flat) in rows.iter().enumerate() {
+            let node = &self.nodes[flat.node_idx];
+
+            // Y position of this row in TreeView-local (Y-up) coordinates.
+            let y_bot = h - (i as f64 + 1.0) * rh + self.scroll_offset;
+
+            let mut tree_row = TreeRow::new(
+                flat.node_idx,
+                flat.depth,
+                flat.has_children,
+                node.is_expanded,
+                node.is_selected,
+                self.hovered_row == Some(i),
+                self.focused,
+                node.icon,
+                node.label.clone(),
+                Arc::clone(&self.font),
+                font_size,
+                ind,
+                rh,
+            );
+
+            tree_row.layout(Size::new(w, rh));
+            tree_row.set_bounds(Rect::new(0.0, y_bot, w, rh));
+
+            // toggle_rect in TreeView-local coords = row's y_bot + toggle's local y offset.
+            let toggle_rect = if flat.has_children {
+                let tlb = tree_row.toggle_local_bounds;
+                Some(Rect::new(tlb.x, y_bot + tlb.y, tlb.width, tlb.height))
+            } else {
+                None
+            };
+
+            self.row_metas.push(RowMeta { node_idx: flat.node_idx, toggle_rect });
+            self.row_widgets.push(Box::new(tree_row));
+        }
+
         available
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        // TODO(compositional-treeview): The selection/hover colours and triangle geometry
-        // below duplicate code in row.rs.  This duplication is intentional and temporary:
-        // once row_widgets replace the monolithic loop (Task 2), this block will be removed.
-
         let h = self.bounds.height;
         let w = self.bounds.width;
         let content_w = w - SCROLLBAR_W;
-        let rh = self.row_height;
-        let ind = self.indent_width;
-        let font_size = self.font_size;
 
-        // --- Background ---
+        // Background
         ctx.set_fill_color(Color::rgb(1.0, 1.0, 1.0));
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
 
-        // --- Scrollbar (drawn before content clip) ---
+        // Scrollbar
         let sb_x = self.scrollbar_x();
         if self.content_height > h {
             ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.04));
@@ -312,107 +358,24 @@ impl Widget for TreeView {
             }
         }
 
-        // --- Content clip ---
+        // Content clip — rows must not bleed into the scrollbar strip.
+        // This clip is active during framework recursion into row_widgets (after paint() returns).
         ctx.clip_rect(0.0, 0.0, content_w, h);
 
-        // --- Compute visible rows ---
+        // Drop indicator and ghost (drag feedback)
         let rows = flatten_visible(&self.nodes);
-        if rows.is_empty() { return; }
-        let (first, last) = self.visible_range(rows.len());
-        let scroll_off = self.scroll_offset;
-        let hovered = self.hovered_row;
-        let focused = self.focused;
-        let drag_node = self.drag.as_ref().map(|d| d.node_idx);
-        let drop_target = self.drop_target;
-
-        // Collect data needed per row to avoid borrow issues.
-        let font = Arc::clone(&self.font);
-        ctx.set_font(Arc::clone(&font));
-        ctx.set_font_size(font_size);
-
-        for i in first..=last {
-            let row = &rows[i];
-            let node = &self.nodes[row.node_idx];
-            let y_bot = h - (i as f64 + 1.0) * rh + scroll_off;
-            let is_dragged = drag_node == Some(row.node_idx);
-
-            if is_dragged { continue; } // draw ghost on top instead
-
-            // Selection / hover background
-            if node.is_selected {
-                let c = if focused {
-                    Color::rgba(0.22, 0.45, 0.88, 0.15)
-                } else {
-                    Color::rgba(0.0, 0.0, 0.0, 0.07)
-                };
-                ctx.set_fill_color(c);
-                ctx.begin_path();
-                ctx.rect(0.0, y_bot, content_w, rh);
-                ctx.fill();
-            } else if hovered == Some(i) {
-                ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.04));
-                ctx.begin_path();
-                ctx.rect(0.0, y_bot, content_w, rh);
-                ctx.fill();
-            }
-
-            // Expand arrow
-            let ax = row.depth as f64 * ind + 2.0;
-            if row.has_children {
-                let cx = ax + 7.0;
-                let cy = y_bot + rh * 0.5;
-                ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.45));
-                ctx.begin_path();
-                if node.is_expanded {
-                    // Down-pointing ▼
-                    ctx.move_to(cx - 4.5, cy + 2.0);
-                    ctx.line_to(cx + 4.5, cy + 2.0);
-                    ctx.line_to(cx, cy - 3.0);
-                    ctx.close_path();
-                } else {
-                    // Right-pointing ▶
-                    ctx.move_to(cx - 2.5, cy - 4.5);
-                    ctx.line_to(cx - 2.5, cy + 4.5);
-                    ctx.line_to(cx + 3.5, cy);
-                    ctx.close_path();
-                }
-                ctx.fill();
-            }
-
-            // Icon
-            let ix = ax + EXPAND_W;
-            let iy = y_bot + (rh - ICON_W) * 0.5;
-            ctx.set_fill_color(icon_color(node.icon));
-            ctx.begin_path();
-            ctx.rounded_rect(ix, iy, ICON_W, ICON_W, 2.0);
-            ctx.fill();
-            // folder tab nub
-            if matches!(node.icon, NodeIcon::Folder) {
-                ctx.begin_path();
-                ctx.rounded_rect(ix, iy + ICON_W * 0.55, ICON_W * 0.45, ICON_W * 0.5, 1.0);
-                ctx.fill();
-            }
-
-            // Label
-            let lx = ix + ICON_W + ICON_GAP;
-            let label = &node.label;
-            if let Some(m) = ctx.measure_text(label) {
-                let ty = y_bot + (rh - m.ascent - m.descent) * 0.5 + m.descent;
-                ctx.set_fill_color(Color::rgba(0.05, 0.05, 0.1, 0.87));
-                ctx.fill_text(label, lx, ty);
-            }
-        }
-
-        // --- Drop indicator ---
-        if let Some(dt) = drop_target {
+        if let Some(drop_target) = self.drop_target {
             if self.drag.as_ref().map_or(false, |d| d.live) {
-                let ref_node = match dt {
+                let rh  = self.row_height;
+                let off = self.scroll_offset;
+                let ind = self.indent_width;
+                let ref_node = match drop_target {
                     DropPosition::Before(ni) | DropPosition::After(ni) | DropPosition::AsChild(ni) => ni,
                 };
                 if let Some(ri) = rows.iter().position(|r| r.node_idx == ref_node) {
-                    let y_bot = h - (ri as f64 + 1.0) * rh + scroll_off;
+                    let y_bot = h - (ri as f64 + 1.0) * rh + off;
                     let indent = rows[ri].depth as f64 * ind + EXPAND_W;
-                    match dt {
+                    match drop_target {
                         DropPosition::Before(_) => paint_drop_line(ctx, indent, y_bot + rh, content_w - indent),
                         DropPosition::After(_)  => paint_drop_line(ctx, indent, y_bot, content_w - indent),
                         DropPosition::AsChild(_) => paint_drop_child_highlight(ctx, y_bot, content_w, rh),
@@ -420,14 +383,15 @@ impl Widget for TreeView {
                 }
             }
         }
-
-        // --- Ghost ---
         if let Some(drag) = &self.drag {
             if drag.live {
                 let label = self.nodes[drag.node_idx].label.clone();
-                let ic = icon_color(self.nodes[drag.node_idx].icon);
-                let pos = drag.current_pos;
-                paint_ghost(ctx, &label, pos, content_w, rh, &font, font_size, ic);
+                let ic    = icon_color(self.nodes[drag.node_idx].icon);
+                let pos   = drag.current_pos;
+                let rh    = self.row_height;
+                let font  = Arc::clone(&self.font);
+                let fs    = self.font_size;
+                paint_ghost(ctx, &label, pos, content_w, rh, &font, fs, ic);
             }
         }
     }
@@ -466,7 +430,6 @@ impl TreeView {
     fn handle_mouse_move(&mut self, pos: Point) -> EventResult {
         self.hovered_scrollbar = self.in_scrollbar(pos);
 
-        // Scrollbar drag
         if self.dragging_scrollbar {
             if let Some((_, thumb_h)) = self.thumb_metrics() {
                 let h = self.bounds.height;
@@ -479,7 +442,6 @@ impl TreeView {
             return EventResult::Consumed;
         }
 
-        // Node drag
         if let Some(drag) = &mut self.drag {
             let dx = pos.x - drag.current_pos.x;
             let dy = pos.y - drag.current_pos.y;
@@ -500,14 +462,11 @@ impl TreeView {
             return EventResult::Consumed;
         }
 
-        // Update hover row
-        let rows = flatten_visible(&self.nodes);
-        self.hovered_row = self.row_at_y(pos.y, rows.len());
+        self.hovered_row = self.row_index_at(pos);
         EventResult::Ignored
     }
 
     fn handle_mouse_down(&mut self, pos: Point, mods: Modifiers) -> EventResult {
-        // Scrollbar
         if self.in_scrollbar(pos) {
             self.dragging_scrollbar = true;
             self.sb_drag_start_y = pos.y;
@@ -515,26 +474,27 @@ impl TreeView {
             return EventResult::Consumed;
         }
 
-        let rows = flatten_visible(&self.nodes);
-        let Some(flat_i) = self.row_at_y(pos.y, rows.len()) else {
+        let Some(flat_i) = self.row_index_at(pos) else {
             return EventResult::Ignored;
         };
-        let row = &rows[flat_i];
-        let node_idx = row.node_idx;
+        let meta     = &self.row_metas[flat_i];
+        let node_idx = meta.node_idx;
 
-        // Click on expand arrow?
-        let arrow_x = row.depth as f64 * self.indent_width;
-        if pos.x >= arrow_x && pos.x < arrow_x + EXPAND_W && row.has_children {
-            self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
-            return EventResult::Consumed;
+        // Click on expand toggle?
+        if let Some(tr) = meta.toggle_rect {
+            if pos.x >= tr.x && pos.x < tr.x + tr.width
+                && pos.y >= tr.y && pos.y < tr.y + tr.height
+            {
+                self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
+                return EventResult::Consumed;
+            }
         }
 
         // Selection
         if mods.ctrl {
             self.toggle_select(node_idx);
         } else if mods.shift {
-            let anchor = self.cursor_node;
-            if let Some(a) = anchor {
+            if let Some(a) = self.cursor_node {
                 let rows2 = flatten_visible(&self.nodes);
                 self.range_select(a, node_idx, &rows2);
             } else {
@@ -543,9 +503,10 @@ impl TreeView {
         } else {
             self.select_single(node_idx);
             if self.drag_enabled {
+                let y_bot = self.row_widgets[flat_i].bounds().y;
                 self.drag = Some(DragState {
                     node_idx,
-                    _cursor_row_offset: pos.y - self.row_y_bottom(flat_i),
+                    _cursor_row_offset: pos.y - y_bot,
                     current_pos: pos,
                     live: false,
                 });

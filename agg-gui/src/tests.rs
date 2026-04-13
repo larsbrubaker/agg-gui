@@ -810,3 +810,36 @@ fn test_text_field_typing() {
     field.on_event(&crate::Event::KeyDown { key: Key::Backspace, modifiers: Modifiers::default() });
     assert_eq!(field.text, "H", "backspace should remove last character");
 }
+
+/// After layout(), TreeView children() returns one TreeRow per visible node.
+#[test]
+fn test_treeview_children_count_equals_visible_rows() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::widgets::tree_view::{NodeIcon, TreeView};
+    use crate::geometry::Size;
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut tv = TreeView::new(Arc::clone(&font));
+    let root = tv.add_root("Root", NodeIcon::Folder);
+    tv.add_child(root, "Child A", NodeIcon::File);
+    tv.add_child(root, "Child B", NodeIcon::File);
+    tv.nodes[root].is_expanded = true;
+    tv.layout(Size::new(300.0, 200.0));
+    // root + 2 children = 3 visible rows
+    assert_eq!(tv.children().len(), 3, "expected 3 children after expanding root with 2 children");
+}
+
+/// Each TreeRow child has type_name "TreeRow".
+#[test]
+fn test_treeview_row_node_idx() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::widgets::tree_view::{NodeIcon, TreeView};
+    use crate::geometry::Size;
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut tv = TreeView::new(Arc::clone(&font));
+    tv.add_root("Only Root", NodeIcon::Package);
+    tv.layout(Size::new(200.0, 100.0));
+    assert_eq!(tv.children().len(), 1);
+    assert_eq!(tv.children()[0].type_name(), "TreeRow");
+}
