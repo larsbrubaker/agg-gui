@@ -24,6 +24,7 @@ use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
 use crate::widget::{InspectorNode, Widget};
+use crate::widgets::primitives::SizedBox;
 
 // ── geometry constants ────────────────────────────────────────────────────────
 const DEFAULT_PROPS_H: f64 = 180.0;
@@ -55,6 +56,7 @@ pub struct InspectorPanel {
     children:       Vec<Box<dyn Widget>>,
     font:           Arc<Font>,
     nodes:          Rc<RefCell<Vec<InspectorNode>>>,
+    hovered_bounds: Rc<RefCell<Option<Rect>>>,
     scroll_offset:  f64,
     selected:       Option<usize>,
     hovered_row:    Option<usize>,
@@ -64,14 +66,16 @@ pub struct InspectorPanel {
 
 impl InspectorPanel {
     pub fn new(
-        font:  Arc<Font>,
-        nodes: Rc<RefCell<Vec<InspectorNode>>>,
+        font:           Arc<Font>,
+        nodes:          Rc<RefCell<Vec<InspectorNode>>>,
+        hovered_bounds: Rc<RefCell<Option<Rect>>>,
     ) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
             font,
             nodes,
+            hovered_bounds,
             scroll_offset: 0.0,
             selected: None,
             hovered_row: None,
@@ -106,15 +110,19 @@ impl InspectorPanel {
     }
 
     fn row_y_bottom(&self, i: usize) -> f64 {
-        self.tree_origin_y() + i as f64 * ROW_H - self.scroll_offset
+        // Y-up, top-down list: row 0 is at the top (highest Y).
+        // Row i bottom = list_h - (i+1)*ROW_H + scroll_offset
+        // scroll_offset > 0 moves content up (reveals later rows).
+        self.list_area_h() - (i as f64 + 1.0) * ROW_H + self.scroll_offset
     }
 
     fn row_at(&self, pos: Point) -> Option<usize> {
         let tree_top = self.list_area_h();
         let tree_bot = self.tree_origin_y();
         if pos.y < tree_bot || pos.y > tree_top { return None; }
-        let local_y = pos.y - tree_bot + self.scroll_offset;
-        let row = (local_y / ROW_H) as usize;
+        // row i occupies: bottom = list_h - (i+1)*ROW_H + scroll, top = list_h - i*ROW_H + scroll
+        // → i = floor((tree_top + scroll_offset - pos.y) / ROW_H)
+        let row = ((tree_top + self.scroll_offset - pos.y) / ROW_H) as usize;
         let n = self.nodes.borrow().len();
         if row < n { Some(row) } else { None }
     }
@@ -137,6 +145,20 @@ impl Widget for InspectorPanel {
     fn layout(&mut self, available: Size) -> Size {
         self.bounds.width  = available.width;
         self.bounds.height = available.height;
+
+        // Rebuild children: one SizedBox per node, positioned using the
+        // correct top-down Y-up formula so tests can inspect row positions.
+        let n = self.nodes.borrow().len();
+        self.children.clear();
+        for i in 0..n {
+            let row_bot = self.row_y_bottom(i);
+            let mut row = SizedBox::new()
+                .with_width(available.width)
+                .with_height(ROW_H);
+            row.set_bounds(Rect::new(0.0, row_bot, available.width, ROW_H));
+            self.children.push(Box::new(row));
+        }
+
         available
     }
 
@@ -293,7 +315,7 @@ impl Widget for InspectorPanel {
                 EventResult::Ignored
             }
             Event::MouseWheel { pos: _, delta_y } => {
-                self.scroll_offset = (self.scroll_offset - delta_y * 30.0)
+                self.scroll_offset = (self.scroll_offset + delta_y * 30.0)
                     .clamp(0.0, self.max_scroll());
                 EventResult::Consumed
             }

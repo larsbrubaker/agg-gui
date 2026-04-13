@@ -28,10 +28,12 @@ pub fn build_demo_ui(
 ) -> (App, Rc<Cell<bool>>, Rc<RefCell<Vec<InspectorNode>>>) {
     let show_inspector  = Rc::new(Cell::new(false));
     let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
+    let hovered_bounds  = Rc::new(RefCell::new(None::<Rect>));
 
     let inspector = InspectorPanel::new(
         Arc::clone(&font),
         Rc::clone(&inspector_nodes),
+        Rc::clone(&hovered_bounds),
     );
 
     let show_clone = Rc::clone(&show_inspector);

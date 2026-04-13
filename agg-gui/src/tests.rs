@@ -621,6 +621,42 @@ fn test_window_close_hides_content() {
     assert!(hidden_all_black, "hidden window must not paint anything; content child leaked");
 }
 
+/// InspectorPanel must place row 0 at the TOP of the tree area (highest Y
+/// in Y-up), not at the bottom.
+#[test]
+fn test_inspector_row0_at_top() {
+    use std::sync::Arc;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use crate::text::Font;
+    use crate::widgets::inspector::InspectorPanel;
+    use crate::widget::{InspectorNode, Widget};
+    use crate::geometry::Rect;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let hovered_bounds = Rc::new(RefCell::new(None));
+    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
+        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
+        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1 },
+    ]));
+
+    let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), Rc::clone(&hovered_bounds));
+    panel.layout(crate::Size::new(200.0, 300.0));
+    panel.set_bounds(Rect::new(0.0, 0.0, 200.0, 300.0));
+
+    // Row 0 should be at the top: its bottom Y must be >= (list_area_h - ROW_H).
+    // list_area_h = 300 - 30 = 270.
+    // Row 0 bottom = 270 - 20 = 250 (scroll_offset=0).
+    let row0 = &panel.children()[0];
+    let list_area_h = 300.0 - 30.0_f64;  // h - HEADER_H
+    let expected_bottom = list_area_h - 20.0;  // ROW_H = 20
+    assert!(
+        (row0.bounds().y - expected_bottom).abs() < 2.0,
+        "row 0 bottom should be near top of tree area ({expected_bottom}); got {}",
+        row0.bounds().y
+    );
+}
+
 /// Typing into a TextField inserts characters at the cursor.
 #[test]
 fn test_text_field_typing() {
