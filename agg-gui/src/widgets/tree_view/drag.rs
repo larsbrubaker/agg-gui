@@ -199,12 +199,5 @@ pub fn paint_ghost(
     ctx.set_global_alpha(1.0);
 }
 
-/// Compute the icon color for a node icon type.
-pub fn icon_color(icon: super::node::NodeIcon) -> Color {
-    match icon {
-        super::node::NodeIcon::Folder  => Color::rgb(0.95, 0.75, 0.20),
-        super::node::NodeIcon::File    => Color::rgb(0.60, 0.70, 0.85),
-        super::node::NodeIcon::Package => Color::rgb(0.30, 0.70, 0.50),
-    }
-}
+
 

@@ -756,6 +756,36 @@ fn test_inspector_tree_drag_disabled() {
     assert!(!panel.tree_view.drag_enabled, "inspector TreeView must have drag disabled");
 }
 
+/// ExpandToggle paints a filled triangle when has_children=true, nothing when false.
+#[test]
+fn test_expand_toggle_paints_arrow_only_when_has_children() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::widgets::tree_view::row::ExpandToggle;
+    use crate::widget::paint_subtree;
+
+    let mut fb_with = Framebuffer::new(20, 20);
+    let mut fb_without = Framebuffer::new(20, 20);
+    {
+        let mut ctx = GfxCtx::new(&mut fb_with);
+        ctx.clear(Color::rgba(1.0, 1.0, 1.0, 1.0));
+        let mut toggle = ExpandToggle::new(true, false);
+        toggle.layout(Size::new(20.0, 20.0));
+        toggle.set_bounds(crate::Rect::new(0.0, 0.0, 20.0, 20.0));
+        paint_subtree(&mut toggle, &mut ctx);
+    }
+    {
+        let mut ctx = GfxCtx::new(&mut fb_without);
+        ctx.clear(Color::rgba(1.0, 1.0, 1.0, 1.0));
+        let mut toggle = ExpandToggle::new(false, false);
+        toggle.layout(Size::new(20.0, 20.0));
+        toggle.set_bounds(crate::Rect::new(0.0, 0.0, 20.0, 20.0));
+        paint_subtree(&mut toggle, &mut ctx);
+    }
+    // toggle with has_children=true must differ from has_children=false
+    assert_ne!(fb_with.pixels(), fb_without.pixels());
+}
+
 /// Typing into a TextField inserts characters at the cursor.
 #[test]
 fn test_text_field_typing() {

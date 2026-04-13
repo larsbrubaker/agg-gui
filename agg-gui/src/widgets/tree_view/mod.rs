@@ -7,11 +7,14 @@
 
 mod node;
 mod drag;
+pub mod row;
 
 pub use node::{NodeIcon, TreeNode};
+pub use row::{ExpandToggle, NodeIconWidget, TreeRow};
 use node::{DragState, DropPosition, FlatRow, flatten_visible};
-use drag::{apply_drop, compute_drop_target, icon_color, paint_drop_child_highlight,
+use drag::{apply_drop, compute_drop_target, paint_drop_child_highlight,
            paint_drop_line, paint_ghost};
+use row::{EXPAND_W, ICON_W, ICON_GAP, icon_color};
 
 use std::sync::Arc;
 
@@ -23,9 +26,6 @@ use crate::text::Font;
 use crate::widget::Widget;
 
 const SCROLLBAR_W: f64 = 10.0;
-const EXPAND_W: f64 = 18.0;  // space reserved for expand arrow
-const ICON_W: f64 = 14.0;
-const ICON_GAP: f64 = 4.0;
 const DRAG_THRESHOLD: f64 = 4.0;
 
 // ---------------------------------------------------------------------------
