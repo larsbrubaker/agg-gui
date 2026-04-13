@@ -80,6 +80,12 @@ pub trait Widget {
     fn type_name(&self) -> &'static str {
         "Widget"
     }
+
+    /// Return `false` to suppress painting this widget **and all its children**.
+    /// The widget's own `paint()` will not be called.  Default: `true`.
+    fn is_visible(&self) -> bool {
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +95,7 @@ pub trait Widget {
 /// Paint `widget` and all its descendants. The caller must ensure `ctx` is
 /// already translated so that (0,0) maps to `widget`'s bottom-left corner.
 pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
+    if !widget.is_visible() { return; }   // suppress self AND children
     widget.paint(ctx);
     // Iterate over indices to avoid holding a reference while recursing.
     let n = widget.children().len();

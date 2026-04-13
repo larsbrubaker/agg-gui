@@ -114,6 +114,7 @@ impl Window {
 
 impl Widget for Window {
     fn type_name(&self) -> &'static str { "Window" }
+    fn is_visible(&self) -> bool { self.visible }
     fn bounds(&self) -> Rect { self.bounds }
 
     fn set_bounds(&mut self, b: Rect) {

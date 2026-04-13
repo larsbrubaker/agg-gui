@@ -572,6 +572,55 @@ fn test_tab_view_always_has_one_child() {
     assert_eq!(tv.children().len(), 1, "TabView should still have exactly 1 active child after switch");
 }
 
+/// Closing a Window (visible = false) must prevent its content from being painted.
+#[test]
+fn test_window_close_hides_content() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::widgets::window::Window;
+    use crate::widget::paint_subtree;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+
+    // A window whose content is a Button — Button.paint() fills its bounds with
+    // a visible background, so a leak is detectable as non-black pixels.
+    let content = Button::new("Content", Arc::clone(&font)).with_font_size(14.0);
+    let mut win = Window::new("Test", Arc::clone(&font), Box::new(content))
+        .with_bounds(crate::Rect::new(0.0, 0.0, 200.0, 200.0));
+
+    // Run layout so child bounds are set.
+    win.layout(Size::new(200.0, 200.0));
+
+    // First paint with window visible — content area should have some pixel.
+    let mut fb_visible = Framebuffer::new(200, 200);
+    {
+        let mut ctx = GfxCtx::new(&mut fb_visible);
+        ctx.clear(Color::black());
+        paint_subtree(&mut win, &mut ctx);
+    }
+
+    // Hide the window, paint again — should revert to all-black.
+    win.hide();
+    let mut fb_hidden = Framebuffer::new(200, 200);
+    {
+        let mut ctx = GfxCtx::new(&mut fb_hidden);
+        ctx.clear(Color::black());
+        paint_subtree(&mut win, &mut ctx);
+    }
+
+    // The visible framebuffer should have non-black pixels (window chrome).
+    let visible_has_pixels = fb_visible.pixels()
+        .chunks(4)
+        .any(|p| p[0] > 50 || p[1] > 50 || p[2] > 50);
+    assert!(visible_has_pixels, "visible window must paint something");
+
+    // The hidden framebuffer must be completely black.
+    let hidden_all_black = fb_hidden.pixels()
+        .chunks(4)
+        .all(|p| p[0] < 10 && p[1] < 10 && p[2] < 10);
+    assert!(hidden_all_black, "hidden window must not paint anything; content child leaked");
+}
+
 /// Typing into a TextField inserts characters at the cursor.
 #[test]
 fn test_text_field_typing() {
