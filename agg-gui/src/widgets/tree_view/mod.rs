@@ -293,6 +293,11 @@ impl Widget for TreeView {
         self.row_metas.clear();
 
         for (i, flat) in rows.iter().enumerate() {
+            // Skip the node being dragged — its ghost is painted at the cursor instead.
+            if self.drag.as_ref().map_or(false, |d| d.live && d.node_idx == flat.node_idx) {
+                continue;
+            }
+
             let node = &self.nodes[flat.node_idx];
 
             // Y position of this row in TreeView-local (Y-up) coordinates.
@@ -413,6 +418,7 @@ impl Widget for TreeView {
                 // Increasing scroll_offset shifts content UP → reveals lower rows. ✓
                 self.scroll_offset =
                     (self.scroll_offset + delta_y * 40.0).clamp(0.0, self.max_scroll());
+                self.hovered_row = None; // stale after layout rebuild on next frame
                 EventResult::Consumed
             }
 

@@ -905,3 +905,37 @@ fn test_inspector_top_row_appears_at_top_of_tree_area() {
         row_y_down
     );
 }
+
+/// During a live drag, the dragged node must not appear in row_widgets
+/// (to avoid double-rendering behind the ghost).
+#[test]
+fn test_treeview_drag_node_excluded_from_row_widgets() {
+    use std::sync::Arc;
+    use crate::widgets::tree_view::{NodeIcon, TreeView};
+    use crate::geometry::{Point, Size};
+    use crate::event::{Event, Modifiers, MouseButton};
+    let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
+    use crate::geometry::Rect;
+    let mut tv = TreeView::new(Arc::clone(&font)).with_drag_enabled();
+    tv.add_root("Node A", NodeIcon::File);
+    tv.add_root("Node B", NodeIcon::File);
+    tv.layout(Size::new(200.0, 100.0));
+    tv.set_bounds(Rect::new(0.0, 0.0, 200.0, 100.0));
+    // 2 rows before drag
+    assert_eq!(tv.children().len(), 2);
+
+    // Start a drag on the first row (click at row-center in Y-up: h - 0.5*rh = 100 - 12 = 88)
+    tv.on_event(&Event::MouseDown {
+        pos: Point::new(50.0, 88.0),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    // Move far enough to exceed drag threshold (>4px)
+    tv.on_event(&Event::MouseMove { pos: Point::new(50.0, 78.0) });
+
+    // Re-layout with live drag active
+    tv.layout(Size::new(200.0, 100.0));
+    // The dragged node should be excluded → only 1 row widget
+    assert_eq!(tv.children().len(), 1,
+        "dragged node must be excluded from row_widgets during live drag");
+}

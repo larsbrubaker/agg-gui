@@ -174,8 +174,9 @@ impl Widget for NodeIconWidget {
 pub struct TreeRow {
     bounds: Rect,
     pub node_idx: usize,
-    /// Bounds of the ExpandToggle in row-local coordinates (X offset, full height).
-    /// Cached during `layout` so the `TreeView` can do hit-testing for toggle clicks.
+    /// Bounds of the `ExpandToggle` in row-local coordinates (set in `layout()`).
+    /// For leaf nodes (`has_children = false`), this field is `Rect::default()` (all zeros)
+    /// and is never read — `TreeView` uses `None` for the corresponding `RowMeta::toggle_rect`.
     pub toggle_local_bounds: Rect,
     is_selected: bool,
     is_hovered: bool,
