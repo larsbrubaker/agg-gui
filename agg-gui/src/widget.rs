@@ -480,6 +480,10 @@ impl App {
         out
     }
 
+    /// Returns `true` if any widget currently holds keyboard focus.
+    /// Used by the render loop to schedule cursor-blink repaints.
+    pub fn has_focus(&self) -> bool { self.focus.is_some() }
+
     /// Call when the cursor leaves the window to clear hover state.
     pub fn on_mouse_leave(&mut self) {
         self.dispatch_mouse_move(Point::new(-1.0, -1.0));

@@ -811,11 +811,11 @@ fn test_text_field_typing() {
     // Type "Hi"
     field.on_event(&crate::Event::KeyDown { key: Key::Char('H'), modifiers: Modifiers::default() });
     field.on_event(&crate::Event::KeyDown { key: Key::Char('i'), modifiers: Modifiers::default() });
-    assert_eq!(field.text, "Hi", "typed characters should appear in text");
+    assert_eq!(field.text(), "Hi", "typed characters should appear in text");
 
     // Backspace removes the last character.
     field.on_event(&crate::Event::KeyDown { key: Key::Backspace, modifiers: Modifiers::default() });
-    assert_eq!(field.text, "H", "backspace should remove last character");
+    assert_eq!(field.text(), "H", "backspace should remove last character");
 }
 
 /// After layout(), TreeView children() returns one TreeRow per visible node.

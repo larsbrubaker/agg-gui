@@ -12,6 +12,7 @@ pub mod slider;
 pub mod splitter;
 pub mod tab_view;
 pub mod text_field;
+pub mod text_field_core;
 pub mod tree_view;
 pub mod window;
 

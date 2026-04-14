@@ -106,6 +106,8 @@ fn main() {
     let mut last_frame_ms = 0.0f64;
     let mut win_w       = size.width.max(1);
     let mut win_h       = size.height.max(1);
+    // Tracks the live modifier state from ModifiersChanged events.
+    let mut current_mods = Modifiers::default();
 
     // Initial frame
     render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
@@ -151,13 +153,22 @@ fn main() {
                     app.on_mouse_leave();
                 }
                 Event::WindowEvent {
+                    event: WindowEvent::ModifiersChanged(mods_state), ..
+                } => {
+                    let s = mods_state.state();
+                    current_mods = Modifiers {
+                        shift: s.shift_key(),
+                        ctrl:  s.control_key(),
+                        alt:   s.alt_key(),
+                    };
+                }
+                Event::WindowEvent {
                     event: WindowEvent::MouseInput { state, button, .. }, ..
                 } => {
                     let btn = map_mouse_button(&button);
-                    let mods = Modifiers::default();
                     match state {
-                        ElementState::Pressed  => app.on_mouse_down(cursor_x, cursor_y, btn, mods),
-                        ElementState::Released => app.on_mouse_up(cursor_x, cursor_y, btn, mods),
+                        ElementState::Pressed  => app.on_mouse_down(cursor_x, cursor_y, btn, current_mods),
+                        ElementState::Released => app.on_mouse_up(cursor_x, cursor_y, btn, current_mods),
                     }
                 }
                 Event::WindowEvent {
@@ -165,7 +176,7 @@ fn main() {
                 } => {
                     if key_event.state == ElementState::Pressed {
                         if let Some(key) = map_key(&key_event.logical_key) {
-                            app.on_key_down(key, Modifiers::default());
+                            app.on_key_down(key, current_mods);
                         }
                     }
                 }
@@ -180,10 +191,15 @@ fn main() {
                     app.on_mouse_wheel(cursor_x, cursor_y, delta_y);
                 }
                 Event::AboutToWait => {
-                    // Animate every frame while the 3D Demo window is open;
-                    // switch to event-driven rendering once it is closed.
+                    // Poll while cube animates; WaitUntil(500ms) when a text
+                    // field has focus so the cursor blink fires; Wait otherwise.
                     elwt.set_control_flow(if cube_visible.get() {
                         ControlFlow::Poll
+                    } else if app.has_focus() {
+                        ControlFlow::WaitUntil(
+                            std::time::Instant::now()
+                                + std::time::Duration::from_millis(500),
+                        )
                     } else {
                         ControlFlow::Wait
                     });
@@ -250,6 +266,11 @@ fn map_key(key: &WinitKey) -> Option<AggKey> {
         WinitKey::Named(NamedKey::Tab)        => AggKey::Tab,
         WinitKey::Named(NamedKey::Escape)     => AggKey::Escape,
         WinitKey::Named(NamedKey::Backspace)  => AggKey::Backspace,
+        WinitKey::Named(NamedKey::Home)       => AggKey::Home,
+        WinitKey::Named(NamedKey::End)        => AggKey::End,
+        WinitKey::Named(NamedKey::Delete)     => AggKey::Delete,
+        WinitKey::Named(NamedKey::PageUp)     => AggKey::Other("PageUp".into()),
+        WinitKey::Named(NamedKey::PageDown)   => AggKey::Other("PageDown".into()),
         WinitKey::Character(s) => AggKey::Char(s.chars().next()?),
         _ => return None,
     })
