@@ -23,14 +23,7 @@ const WIDGET_H: f64 = 28.0;
 /// Half-width of the left/right arrow indicator text.
 const ARROW_MARGIN: f64 = 8.0;
 
-// ── Colors ─────────────────────────────────────────────────────────────────
-
-const COLOR_BG: Color          = Color::rgba(0.22, 0.45, 0.88, 0.08);
-const COLOR_BG_HOVER: Color    = Color::rgba(0.22, 0.45, 0.88, 0.14);
-const COLOR_BG_DRAG: Color     = Color::rgba(0.22, 0.45, 0.88, 0.22);
-const COLOR_BORDER: Color      = Color::rgba(0.22, 0.45, 0.88, 0.35);
-const COLOR_TEXT: Color        = Color::rgb(0.1, 0.1, 0.1);
-const COLOR_ARROW: Color       = Color::rgba(0.22, 0.45, 0.88, 0.45);
+// Colors are now resolved from ctx.visuals() at paint time.
 
 // ── Struct ─────────────────────────────────────────────────────────────────
 
@@ -179,24 +172,30 @@ impl Widget for DragValue {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        // ── Background ─────────────────────────────────────────────────────
+        // Derive drag-value background from accent with varying opacity.
+        let a = v.accent;
         let bg = if self.dragging {
-            COLOR_BG_DRAG
+            Color::rgba(a.r, a.g, a.b, 0.22)
         } else if self.hovered {
-            COLOR_BG_HOVER
+            Color::rgba(a.r, a.g, a.b, 0.14)
         } else {
-            COLOR_BG
+            Color::rgba(a.r, a.g, a.b, 0.08)
         };
+        let border = Color::rgba(a.r, a.g, a.b, 0.35);
+        let arrow   = Color::rgba(a.r, a.g, a.b, 0.45);
+
+        // ── Background ─────────────────────────────────────────────────────
         ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
         ctx.fill();
 
         // ── Border ─────────────────────────────────────────────────────────
-        ctx.set_stroke_color(COLOR_BORDER);
+        ctx.set_stroke_color(border);
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
@@ -205,7 +204,7 @@ impl Widget for DragValue {
         // ── Arrow indicators ───────────────────────────────────────────────
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
-        ctx.set_fill_color(COLOR_ARROW);
+        ctx.set_fill_color(arrow);
 
         // Left arrow ("◀") near the left edge.
         if let Some(lm) = ctx.measure_text("◀") {
@@ -222,7 +221,7 @@ impl Widget for DragValue {
 
         // ── Centered value text ────────────────────────────────────────────
         let label = self.format_value();
-        ctx.set_fill_color(COLOR_TEXT);
+        ctx.set_fill_color(v.text_color);
         if let Some(m) = ctx.measure_text(&label) {
             let tx = (w - m.width) * 0.5;
             let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;

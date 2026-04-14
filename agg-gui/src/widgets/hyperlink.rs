@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::color::Color;
+
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
@@ -14,8 +14,7 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
-const LINK_COLOR:         Color = Color::rgba(0.22, 0.45, 0.88, 1.0);
-const LINK_HOVERED_COLOR: Color = Color::rgba(0.18, 0.36, 0.72, 1.0);
+// Colors are resolved from ctx.visuals() at paint time.
 
 /// A text label that looks like a hyperlink (blue, underlined) and fires a
 /// callback when clicked.
@@ -79,7 +78,8 @@ impl Widget for Hyperlink {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let color = if self.hovered { LINK_HOVERED_COLOR } else { LINK_COLOR };
+        let v = ctx.visuals();
+        let color = if self.hovered { v.text_link_hovered } else { v.text_link };
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
         ctx.set_fill_color(color);

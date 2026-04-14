@@ -120,12 +120,13 @@ impl Widget for Slider {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
         let cy = h * 0.5;
 
         // Track (background)
-        ctx.set_fill_color(Color::rgb(0.85, 0.86, 0.88));
+        ctx.set_fill_color(v.track_bg);
         ctx.begin_path();
         ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, w - THUMB_R * 2.0, TRACK_H, TRACK_H * 0.5);
         ctx.fill();
@@ -133,7 +134,7 @@ impl Widget for Slider {
         // Track (filled portion up to thumb)
         let tx = self.thumb_x();
         if tx > THUMB_R {
-            ctx.set_fill_color(Color::rgb(0.22, 0.45, 0.88));
+            ctx.set_fill_color(v.accent);
             ctx.begin_path();
             ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, tx - THUMB_R, TRACK_H, TRACK_H * 0.5);
             ctx.fill();
@@ -141,7 +142,7 @@ impl Widget for Slider {
 
         // Focus ring
         if self.focused {
-            ctx.set_stroke_color(Color::rgba(0.22, 0.45, 0.88, 0.45));
+            ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(2.0);
             ctx.begin_path();
             ctx.circle(tx, cy, THUMB_R + 3.0);
@@ -150,11 +151,11 @@ impl Widget for Slider {
 
         // Thumb
         let thumb_color = if self.dragging || self.focused {
-            Color::rgb(0.16, 0.36, 0.72)
+            v.accent_pressed
         } else if self.hovered {
-            Color::rgb(0.26, 0.50, 0.92)
+            v.accent_hovered
         } else {
-            Color::rgb(0.22, 0.45, 0.88)
+            v.accent
         };
         ctx.set_fill_color(thumb_color);
         ctx.begin_path();
@@ -177,7 +178,7 @@ impl Widget for Slider {
             };
             ctx.set_font(Arc::clone(&self.font));
             ctx.set_font_size(self.font_size);
-            ctx.set_fill_color(Color::rgb(0.4, 0.4, 0.42));
+            ctx.set_fill_color(v.text_dim);
             if let Some(m) = ctx.measure_text(&label) {
                 let lx = w - m.width;
                 let ly = self.font_size * 0.5 + 1.0;

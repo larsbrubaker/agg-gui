@@ -23,7 +23,8 @@ pub struct Checkbox {
     label: String,
     font: Arc<Font>,
     font_size: f64,
-    label_color: Color,
+    /// `None` → use `ctx.visuals().text_color` at paint time.
+    label_color: Option<Color>,
     checked: bool,
     /// When set, this cell is the authoritative checked state.  `paint` reads
     /// from it and `toggle` writes to it so the checkbox stays in sync with
@@ -43,7 +44,7 @@ impl Checkbox {
             label: label.into(),
             font,
             font_size: 14.0,
-            label_color: Color::rgb(0.1, 0.1, 0.1),
+            label_color: None,
             checked,
             state_cell: None,
             hovered: false,
@@ -53,7 +54,7 @@ impl Checkbox {
     }
 
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
-    pub fn with_label_color(mut self, c: Color) -> Self { self.label_color = c; self }
+    pub fn with_label_color(mut self, c: Color) -> Self { self.label_color = Some(c); self }
 
     /// Bind checked state to a shared cell.
     ///
@@ -115,12 +116,13 @@ impl Widget for Checkbox {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
         let h = self.bounds.height;
         let box_y = (h - BOX_SIZE) * 0.5;
 
         // Focus ring
         if self.focused {
-            ctx.set_stroke_color(Color::rgba(0.22, 0.45, 0.88, 0.55));
+            ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(2.0);
             ctx.begin_path();
             ctx.rounded_rect(-1.5, box_y - 1.5, BOX_SIZE + 3.0, BOX_SIZE + 3.0, 4.0);
@@ -131,11 +133,11 @@ impl Widget for Checkbox {
 
         // Box background
         let bg = if checked {
-            Color::rgb(0.22, 0.45, 0.88)
+            v.accent
         } else if self.hovered {
-            Color::rgb(0.92, 0.93, 0.95)
+            v.widget_bg_hovered
         } else {
-            Color::rgb(1.0, 1.0, 1.0)
+            v.widget_bg
         };
         ctx.set_fill_color(bg);
         ctx.begin_path();
@@ -143,11 +145,7 @@ impl Widget for Checkbox {
         ctx.fill();
 
         // Box border
-        let border = if checked {
-            Color::rgb(0.16, 0.36, 0.72)
-        } else {
-            Color::rgb(0.75, 0.76, 0.78)
-        };
+        let border = if checked { v.widget_stroke_active } else { v.widget_stroke };
         ctx.set_stroke_color(border);
         ctx.set_line_width(1.5);
         ctx.begin_path();
@@ -169,9 +167,10 @@ impl Widget for Checkbox {
         }
 
         // Label text
+        let label_color = self.label_color.unwrap_or(v.text_color);
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
-        ctx.set_fill_color(self.label_color);
+        ctx.set_fill_color(label_color);
         let tx = BOX_SIZE + GAP;
         if let Some(m) = ctx.measure_text(&self.label) {
             let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;

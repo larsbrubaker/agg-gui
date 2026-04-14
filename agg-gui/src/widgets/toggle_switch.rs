@@ -26,13 +26,7 @@ const CIRCLE_MARGIN: f64 = 3.0;
 /// Circle radius derived from pill height and the margin.
 const CIRCLE_R: f64 = PILL_H / 2.0 - CIRCLE_MARGIN;
 
-// ── Colors ─────────────────────────────────────────────────────────────────
-
-const COLOR_OFF: Color         = Color::rgba(0.55, 0.55, 0.60, 1.0);
-const COLOR_OFF_HOVER: Color   = Color::rgba(0.65, 0.65, 0.70, 1.0);
-const COLOR_ON: Color          = Color::rgb(0.22, 0.45, 0.88);
-const COLOR_ON_HOVER: Color    = Color::rgb(0.30, 0.53, 0.95);
-const COLOR_FOCUS_RING: Color  = Color::rgba(0.22, 0.45, 0.88, 0.45);
+// Colors are resolved from ctx.visuals() at paint time.
 
 // ── Struct ─────────────────────────────────────────────────────────────────
 
@@ -144,6 +138,7 @@ impl Widget for ToggleSwitch {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
         let on = self.is_on();
 
         // The pill is drawn at (0, 0) in local coordinates; the framework has
@@ -153,7 +148,7 @@ impl Widget for ToggleSwitch {
 
         // ── Focus ring (drawn first, behind the pill) ──────────────────────
         if self.focused {
-            ctx.set_stroke_color(COLOR_FOCUS_RING);
+            ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(2.5);
             ctx.begin_path();
             ctx.rounded_rect(
@@ -167,11 +162,12 @@ impl Widget for ToggleSwitch {
         }
 
         // ── Pill background ────────────────────────────────────────────────
+        // Off state uses the widget_bg / widget_bg_hovered colors.
         let bg = match (on, self.hovered) {
-            (true,  true)  => COLOR_ON_HOVER,
-            (true,  false) => COLOR_ON,
-            (false, true)  => COLOR_OFF_HOVER,
-            (false, false) => COLOR_OFF,
+            (true,  true)  => v.accent_hovered,
+            (true,  false) => v.accent,
+            (false, true)  => v.widget_bg_hovered,
+            (false, false) => v.widget_stroke, // mid-gray pill when off
         };
         ctx.set_fill_color(bg);
         ctx.begin_path();

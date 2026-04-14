@@ -8,3 +8,4 @@ demo/tests/snapshots/
 demo-wasm/test-results/
 demo/test-results/
 .worktrees/
+agg-gui/reference-egui-main/

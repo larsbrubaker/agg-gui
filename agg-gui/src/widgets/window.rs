@@ -27,7 +27,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::color::Color;
+
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
@@ -215,12 +215,13 @@ impl Widget for Window {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         if !self.visible { return; }
 
+        let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
         let tb = self.title_bar_bottom();
 
         // Shadow (painted slightly offset and larger, semi-transparent).
-        ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.18));
+        ctx.set_fill_color(v.window_shadow);
         ctx.begin_path();
         ctx.rounded_rect(
             SHADOW_BLUR, -SHADOW_BLUR,
@@ -230,16 +231,16 @@ impl Widget for Window {
         ctx.fill();
 
         // Window body background (content area).
-        ctx.set_fill_color(Color::rgb(0.97, 0.97, 0.98));
+        ctx.set_fill_color(v.window_fill);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
         ctx.fill();
 
         // Title bar.
         let bar_color = if self.dragging {
-            Color::rgb(0.22, 0.22, 0.26)
+            v.window_title_fill_drag
         } else {
-            Color::rgb(0.28, 0.28, 0.32)
+            v.window_title_fill
         };
         ctx.set_fill_color(bar_color);
         ctx.begin_path();
@@ -254,7 +255,7 @@ impl Widget for Window {
         ctx.fill();
 
         // Thin separator line between title bar and content.
-        ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.15));
+        ctx.set_fill_color(v.window_stroke);
         ctx.begin_path();
         ctx.rect(0.0, tb - 1.0, w, 1.0);
         ctx.fill();
@@ -262,7 +263,7 @@ impl Widget for Window {
         // Title text.
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
-        ctx.set_fill_color(Color::rgba(1.0, 1.0, 1.0, 0.90));
+        ctx.set_fill_color(v.window_title_text);
         let title_cy = tb + TITLE_H * 0.5;
         if let Some(m) = ctx.measure_text(&self.title) {
             let tx = 12.0;
@@ -273,9 +274,9 @@ impl Widget for Window {
         // Close button.
         let cc = self.close_center();
         let close_bg = if self.close_hovered {
-            Color::rgba(1.0, 1.0, 1.0, 0.25)
+            v.window_close_bg_hovered
         } else {
-            Color::rgba(1.0, 1.0, 1.0, 0.12)
+            v.window_close_bg
         };
         ctx.set_fill_color(close_bg);
         ctx.begin_path();
@@ -284,7 +285,7 @@ impl Widget for Window {
 
         // × glyph on close button.
         let arm = CLOSE_R * 0.5;
-        ctx.set_stroke_color(Color::rgba(1.0, 1.0, 1.0, 0.80));
+        ctx.set_stroke_color(v.window_close_fg);
         ctx.set_line_width(1.5);
         ctx.begin_path();
         ctx.move_to(cc.x - arm, cc.y - arm);
@@ -296,7 +297,7 @@ impl Widget for Window {
         ctx.stroke();
 
         // Thin border around the whole window.
-        ctx.set_stroke_color(Color::rgba(0.0, 0.0, 0.0, 0.15));
+        ctx.set_stroke_color(v.window_stroke);
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);

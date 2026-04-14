@@ -11,7 +11,7 @@
 //! `(bounds.x, bounds.y)` — which shifts the content up or down according to
 //! the scroll offset. Drawing outside the installed clip is discarded by AGG.
 
-use crate::color::Color;
+
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
@@ -131,7 +131,8 @@ impl Widget for ScrollView {
 
         // Scrollbar track
         if self.content_height > h {
-            ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.05));
+            let v = ctx.visuals();
+            ctx.set_fill_color(v.scroll_track);
             ctx.begin_path();
             ctx.rect(sb_x, 0.0, SCROLLBAR_W, h);
             ctx.fill();
@@ -139,11 +140,11 @@ impl Widget for ScrollView {
             // Scrollbar thumb
             if let Some((thumb_y, thumb_h)) = self.thumb_metrics() {
                 let thumb_color = if self.dragging_scrollbar {
-                    Color::rgba(0.0, 0.0, 0.0, 0.45)
+                    v.scroll_thumb_dragging
                 } else if self.hovered_scrollbar {
-                    Color::rgba(0.0, 0.0, 0.0, 0.32)
+                    v.scroll_thumb_hovered
                 } else {
-                    Color::rgba(0.0, 0.0, 0.0, 0.18)
+                    v.scroll_thumb
                 };
                 ctx.set_fill_color(thumb_color);
                 ctx.begin_path();

@@ -73,28 +73,29 @@ impl Widget for ProgressBar {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
         let bar_y = (h - BAR_H) * 0.5;
         let r = BAR_H * 0.5;
 
         // Track
-        ctx.set_fill_color(Color::rgb(0.88, 0.89, 0.91));
+        ctx.set_fill_color(v.track_bg);
         ctx.begin_path();
         ctx.rounded_rect(0.0, bar_y, w, BAR_H, r);
         ctx.fill();
 
-        // Fill
+        // Fill — use explicit fill_color if set, otherwise fall back to accent.
+        let fill_color = if self.fill_color != Color::rgb(0.22, 0.45, 0.88) {
+            self.fill_color
+        } else {
+            v.accent
+        };
         let fill_w = (w * self.value).max(0.0);
         if fill_w >= 1.0 {
-            ctx.set_fill_color(self.fill_color);
+            ctx.set_fill_color(fill_color);
             ctx.begin_path();
-            if fill_w >= w - 0.5 {
-                ctx.rounded_rect(0.0, bar_y, fill_w, BAR_H, r);
-            } else {
-                // Only round left side when not full
-                ctx.rounded_rect(0.0, bar_y, fill_w, BAR_H, r);
-            }
+            ctx.rounded_rect(0.0, bar_y, fill_w, BAR_H, r);
             ctx.fill();
         }
 
@@ -103,12 +104,12 @@ impl Widget for ProgressBar {
             let label = format!("{:.0}%", self.value * 100.0);
             ctx.set_font(Arc::clone(&self.font));
             ctx.set_font_size(self.font_size);
-            // Text color: white when covered by fill, dark otherwise
+            // Text color: always use theme text contrasted against the bar.
             let mid = w * 0.5;
             let text_color = if fill_w > mid {
                 Color::rgba(1.0, 1.0, 1.0, 0.9)
             } else {
-                Color::rgba(0.2, 0.2, 0.22, 0.8)
+                v.text_dim
             };
             ctx.set_fill_color(text_color);
             if let Some(m) = ctx.measure_text(&label) {

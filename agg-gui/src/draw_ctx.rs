@@ -17,6 +17,7 @@ use std::sync::Arc;
 use crate::color::Color;
 use crate::geometry::Rect;
 use crate::text::{Font, TextMetrics};
+use crate::theme::Visuals;
 use agg_rust::comp_op::CompOp;
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
@@ -165,4 +166,38 @@ pub trait DrawCtx {
     /// placeholder before calling this method so the software render has
     /// something visible.
     fn gl_paint(&mut self, _screen_rect: Rect, _painter: &mut dyn GlPaint) {}
+
+    // ── Image blitting ────────────────────────────────────────────────────────
+
+    /// Draw raw RGBA pixel data into `dst_rect` (Y-up local coordinates).
+    ///
+    /// `data` must be `img_w * img_h * 4` bytes of tightly-packed RGBA8 data
+    /// in row-major order, **top-row first** (Y-down image storage convention).
+    /// The image is scaled to fit `(dst_x, dst_y, dst_w, dst_h)`.
+    ///
+    /// Default implementation: no-op (GL path or software paths that do not
+    /// implement blitting can leave this as a placeholder).
+    fn draw_image_rgba(
+        &mut self,
+        data:  &[u8],
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        let _ = (data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
+    }
+
+    // ── Theme / Visuals ───────────────────────────────────────────────────────
+
+    /// Return the currently-active [`Visuals`] palette.
+    ///
+    /// Delegates to [`crate::theme::current_visuals`], which reads the
+    /// thread-local set by [`crate::theme::set_visuals`].  Widget `paint()`
+    /// implementations call this to get colours instead of hardcoding them.
+    fn visuals(&self) -> Visuals {
+        crate::theme::current_visuals()
+    }
 }

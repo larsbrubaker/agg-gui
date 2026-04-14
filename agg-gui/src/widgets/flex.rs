@@ -152,6 +152,9 @@ pub struct FlexColumn {
     pub gap: f64,
     pub inner_padding: Insets,
     pub background: Color,
+    /// When `true`, paint background using `ctx.visuals().panel_fill`
+    /// regardless of the stored `background` colour.
+    pub use_panel_bg: bool,
 }
 
 impl FlexColumn {
@@ -164,6 +167,7 @@ impl FlexColumn {
             gap: 0.0,
             inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
+            use_panel_bg: false,
         }
     }
 
@@ -171,6 +175,8 @@ impl FlexColumn {
     pub fn with_padding(mut self, p: f64) -> Self { self.inner_padding = Insets::all(p); self }
     pub fn with_inner_padding(mut self, p: Insets) -> Self { self.inner_padding = p; self }
     pub fn with_background(mut self, c: Color) -> Self { self.background = c; self }
+    /// Use `ctx.visuals().panel_fill` as background instead of the stored color.
+    pub fn with_panel_bg(mut self) -> Self { self.use_panel_bg = true; self }
 
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
@@ -331,10 +337,17 @@ impl Widget for FlexColumn {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        if self.background.a > 0.001 {
+        let bg = if self.use_panel_bg {
+            Some(ctx.visuals().panel_fill)
+        } else if self.background.a > 0.001 {
+            Some(self.background)
+        } else {
+            None
+        };
+        if let Some(color) = bg {
             let w = self.bounds.width;
             let h = self.bounds.height;
-            ctx.set_fill_color(self.background);
+            ctx.set_fill_color(color);
             ctx.begin_path();
             ctx.rect(0.0, 0.0, w, h);
             ctx.fill();

@@ -316,13 +316,18 @@ impl Widget for Spacer {
 // ---------------------------------------------------------------------------
 
 /// A thin horizontal or vertical divider line.
+///
+/// When no explicit colour is set via [`with_color`](Separator::with_color),
+/// the separator reads its colour from the active theme's `separator` field at
+/// paint time, so it automatically adapts to dark / light mode.
 pub struct Separator {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
     vertical: bool,
     line_inset: f64,
-    color: Color,
+    /// `None` → use `ctx.visuals().separator` at paint time.
+    color: Option<Color>,
 }
 
 impl Separator {
@@ -334,7 +339,7 @@ impl Separator {
             base: WidgetBase::new(),
             vertical: false,
             line_inset: 4.0,
-            color: Color::rgba(0.0, 0.0, 0.0, 0.12),
+            color: None,
         }
     }
 
@@ -344,7 +349,7 @@ impl Separator {
     }
 
     pub fn with_line_inset(mut self, m: f64) -> Self { self.line_inset = m; self }
-    pub fn with_color(mut self, c: Color) -> Self { self.color = c; self }
+    pub fn with_color(mut self, c: Color) -> Self { self.color = Some(c); self }
 
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
@@ -377,7 +382,8 @@ impl Widget for Separator {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
-        ctx.set_fill_color(self.color);
+        let color = self.color.unwrap_or_else(|| ctx.visuals().separator);
+        ctx.set_fill_color(color);
         ctx.begin_path();
         if self.vertical {
             ctx.rect(self.line_inset, 0.0, 1.0, h);

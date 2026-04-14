@@ -38,6 +38,11 @@ pub enum LabelAlign {
 ///
 /// Used directly as a standalone label, and as a child of composite widgets
 /// such as [`Button`] and (in the future) `Checkbox`, `RadioGroup`, etc.
+///
+/// When no explicit color is set via [`with_color`](Label::with_color), the
+/// label reads its text color from the active [`Visuals`](crate::theme::Visuals)
+/// at paint time (`ctx.visuals().text_color`), so it automatically adapts to
+/// dark / light mode switches.
 pub struct Label {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
@@ -45,7 +50,9 @@ pub struct Label {
     text: String,
     font: Arc<Font>,
     font_size: f64,
-    color: Color,
+    /// `None` → use `ctx.visuals().text_color` at paint time.
+    /// `Some(c)` → explicit override (e.g. accent-coloured or dimmed text).
+    color: Option<Color>,
     align: LabelAlign,
     /// When `true`, the text is pre-rendered to an offscreen backbuffer and
     /// blitted each frame.  Currently display-only; full backbuffer path is
@@ -62,7 +69,7 @@ impl Label {
             text: text.into(),
             font,
             font_size: 14.0,
-            color: Color::rgb(0.1, 0.1, 0.1),
+            color: None, // resolved from ctx.visuals() at paint time
             align: LabelAlign::Left,
             buffered: false,
         }
@@ -71,7 +78,10 @@ impl Label {
     // ── builder methods ───────────────────────────────────────────────────────
 
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
-    pub fn with_color(mut self, color: Color) -> Self { self.color = color; self }
+    /// Override the label colour.  Pass an explicit `Color` to always use that
+    /// colour regardless of the active theme.  Omit this call to follow the
+    /// theme's `text_color` automatically.
+    pub fn with_color(mut self, color: Color) -> Self { self.color = Some(color); self }
     pub fn with_align(mut self, align: LabelAlign) -> Self { self.align = align; self }
     pub fn with_has_backbuffer(mut self, v: bool) -> Self { self.buffered = v; self }
 
@@ -84,7 +94,8 @@ impl Label {
     // ── setter methods (for post-construction mutation) ───────────────────────
 
     pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
-    pub fn set_color(&mut self, color: Color) { self.color = color; }
+    pub fn set_color(&mut self, color: Color) { self.color = Some(color); }
+    pub fn clear_color(&mut self) { self.color = None; }
     pub fn set_align(&mut self, align: LabelAlign) { self.align = align; }
 }
 
@@ -115,7 +126,9 @@ impl Widget for Label {
 
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
-        ctx.set_fill_color(self.color);
+        // If no explicit colour was set, follow the active theme.
+        let color = self.color.unwrap_or_else(|| ctx.visuals().text_color);
+        ctx.set_fill_color(color);
 
         if let Some(m) = ctx.measure_text(&self.text) {
             let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;

@@ -114,11 +114,12 @@ impl Widget for RadioGroup {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
         let h = self.bounds.height;
 
         // Focus outline around whole widget
         if self.focused {
-            ctx.set_stroke_color(Color::rgba(0.22, 0.45, 0.88, 0.45));
+            ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(1.5);
             ctx.begin_path();
             ctx.rounded_rect(-2.0, -2.0, self.bounds.width + 4.0, h + 4.0, 4.0);
@@ -135,13 +136,13 @@ impl Widget for RadioGroup {
 
             // Outer circle
             let border = if checked {
-                Color::rgb(0.22, 0.45, 0.88)
+                v.accent
             } else if hovered {
-                Color::rgb(0.70, 0.71, 0.73)
+                v.widget_bg_hovered
             } else {
-                Color::rgb(0.75, 0.76, 0.78)
+                v.widget_stroke
             };
-            let bg = if checked { Color::rgb(0.22, 0.45, 0.88) } else { Color::white() };
+            let bg = if checked { v.accent } else { v.widget_bg };
 
             ctx.set_fill_color(bg);
             ctx.begin_path();
@@ -163,7 +164,7 @@ impl Widget for RadioGroup {
             }
 
             // Label
-            ctx.set_fill_color(Color::rgb(0.1, 0.1, 0.1));
+            ctx.set_fill_color(v.text_color);
             if let Some(m) = ctx.measure_text(label) {
                 let ty = cy - (m.ascent - m.descent) * 0.5 + m.descent;
                 ctx.fill_text(label, DOT_R * 2.0 + GAP, ty);

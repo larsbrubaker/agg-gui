@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use agg_gui::{
     Button, Checkbox, Color, DragValue, DrawCtx, Event, EventResult,
-    FlexColumn, FlexRow, Font, Hyperlink, Label, ProgressBar, RadioGroup,
+    FlexColumn, FlexRow, Font, Hyperlink, Label, MarkdownView, ProgressBar, RadioGroup,
     Rect, ScrollView, Separator, Size, SizedBox, Slider, TextField, ToggleSwitch, Widget,
 };
 use agg_gui::widgets::button::ButtonTheme;
@@ -274,79 +274,6 @@ pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
 }
 
 // ---------------------------------------------------------------------------
-// Password demo
-// ---------------------------------------------------------------------------
-
-pub fn password(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new()
-        .with_gap(14.0)
-        .with_padding(16.0)
-        .with_background(Color::rgb(0.97, 0.97, 0.98));
-
-    col.push(Box::new(Label::new("Password", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-        TextField::new(Arc::clone(&font))
-            .with_font_size(13.0)
-            .with_placeholder("Enter password…")
-            .with_password_mode(true)
-    ))), 0.0);
-
-    col.push(Box::new(Label::new("Normal text field (for comparison)", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-        TextField::new(Arc::clone(&font))
-            .with_font_size(13.0)
-            .with_placeholder("Visible text…")
-    ))), 0.0);
-
-    col.push(Box::new(Label::new(
-        "Password fields mask input with • (bullet) characters.",
-        Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.35))), 0.0);
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(col)
-}
-
-// ---------------------------------------------------------------------------
-// Toggle Switch demo
-// ---------------------------------------------------------------------------
-
-pub fn toggle_switch_demo(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new()
-        .with_gap(16.0)
-        .with_padding(16.0)
-        .with_background(Color::rgb(0.97, 0.97, 0.98));
-
-    col.push(Box::new(Label::new("Basic toggles", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-
-    for (label, initial) in [
-        ("Wi-Fi",        true),
-        ("Bluetooth",    true),
-        ("Notifications",false),
-        ("Dark Mode",    false),
-        ("Auto-update",  true),
-    ] {
-        let cell = Rc::new(Cell::new(initial));
-        let row = FlexRow::new().with_gap(12.0)
-            .add(Box::new(ToggleSwitch::new(initial).with_state_cell(Rc::clone(&cell))))
-            .add(Box::new(Label::new(label, Arc::clone(&font)).with_font_size(13.0)));
-        col.push(Box::new(row), 0.0);
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new(
-        "Click or Space/Enter to toggle. Tab to focus.",
-        Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.35))), 0.0);
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(ScrollView::new(Box::new(col)))
-}
-
-// ---------------------------------------------------------------------------
 // Code Editor demo
 // ---------------------------------------------------------------------------
 
@@ -440,6 +367,22 @@ pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
 // ---------------------------------------------------------------------------
 // 3D Cube window content (wraps a platform-provided GL widget)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// About window
+// ---------------------------------------------------------------------------
+
+/// About window content: renders README.md via `MarkdownView` inside a scroll view.
+pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
+    // Embed README.md at compile time.
+    let readme = include_str!("../../README.md");
+
+    let md_view = MarkdownView::new(readme, Arc::clone(&font))
+        .with_font_size(13.0)
+        .with_padding(12.0);
+
+    Box::new(ScrollView::new(Box::new(md_view)))
+}
 
 pub fn cube_content(font: Arc<Font>, cube_widget: Box<dyn Widget>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()

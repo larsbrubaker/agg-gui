@@ -661,6 +661,52 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn reset_transform(&mut self)                             { self.reset_transform() }
     fn push_layer(&mut self, w: f64, h: f64)                 { self.push_layer(w, h) }
     fn pop_layer(&mut self)                                   { self.pop_layer() }
+
+    fn draw_image_rgba(
+        &mut self,
+        data:  &[u8],
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        // Scale the source image into a temporary Framebuffer at dst size,
+        // then composite it onto the current render target using the CTM origin.
+        if img_w == 0 || img_h == 0 || dst_w < 1.0 || dst_h < 1.0 { return; }
+
+        let out_w = dst_w.round() as u32;
+        let out_h = dst_h.round() as u32;
+        let mut scaled = crate::framebuffer::Framebuffer::new(out_w, out_h);
+
+        // Nearest-neighbour scale — sufficient for README screenshots / badges.
+        let px = scaled.pixels_mut();
+        for dy in 0..out_h {
+            for dx in 0..out_w {
+                let sx = (dx as f64 / out_w as f64 * img_w as f64) as u32;
+                // Image is top-row-first; Y-up dst means we flip sy.
+                let sy_img = ((1.0 - (dy as f64 + 0.5) / out_h as f64) * img_h as f64)
+                    .floor()
+                    .clamp(0.0, (img_h - 1) as f64) as u32;
+                let si = ((sy_img * img_w + sx) * 4) as usize;
+                let di = ((dy * out_w + dx) * 4) as usize;
+                if si + 3 < data.len() && di + 3 < px.len() {
+                    px[di]     = data[si];
+                    px[di + 1] = data[si + 1];
+                    px[di + 2] = data[si + 2];
+                    px[di + 3] = data[si + 3];
+                }
+            }
+        }
+
+        // Apply CTM translation to get screen-space origin.
+        let (tx, ty) = { let t = self.transform(); (t.tx, t.ty) };
+        let screen_x = (tx + dst_x).round() as i32;
+        let screen_y = (ty + dst_y).round() as i32;
+        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        composite_framebuffers(fb, &scaled, screen_x, screen_y);
+    }
 }
 
 /// Apply a Y-up scissor clip to a `RendererBase` (pixel-inclusive coordinates).

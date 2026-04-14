@@ -37,6 +37,7 @@ pub mod gfx_ctx;
 pub mod gl_renderer;
 pub mod layout_props;
 pub mod text;
+pub mod theme;
 pub mod widget;
 pub mod widgets;
 
@@ -44,6 +45,7 @@ pub mod widgets;
 pub use color::Color;
 pub use device_scale::{device_scale, set_device_scale};
 pub use draw_ctx::{DrawCtx, GlPaint};
+pub use theme::{ThemePreference, Visuals, current_visuals, set_visuals};
 pub use event::{Event, EventResult, Key, Modifiers, MouseButton};
 pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};
@@ -54,7 +56,7 @@ pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
 pub use widget::{App, InspectorNode, Widget, collect_inspector_nodes};
 pub use widgets::{Button, Checkbox, Container, DragValue, FlexColumn, FlexRow,
                   Hyperlink, InspectorPanel,
-                  Label, LabelAlign, NodeIcon, Padding, ProgressBar, RadioGroup,
+                  Label, LabelAlign, MarkdownView, NodeIcon, Padding, ProgressBar, RadioGroup,
                   ScrollView, Separator, SizedBox, Slider, Spacer, Splitter, Stack,
                   TabView, TextField, ToggleSwitch, TreeView, Window};
 
