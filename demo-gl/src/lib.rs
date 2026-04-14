@@ -259,35 +259,7 @@ impl GlGfxCtx {
         if contours.is_empty() { return; }
 
         let hw = (self.line_width * 0.5) as f32;
-        let mut verts: Vec<[f32; 2]> = Vec::new();
-        let mut indices: Vec<u32> = Vec::new();
-
-        for contour in &contours {
-            if contour.len() < 2 { continue; }
-            let n = contour.len();
-            for i in 0..n {
-                let a = contour[i];
-                let b = contour[(i + 1) % n];
-                if i + 1 == n && contour.first() != contour.last() {
-                    // open path — skip wrap-around segment
-                    break;
-                }
-                let dx = b[0] - a[0];
-                let dy = b[1] - a[1];
-                let len = (dx * dx + dy * dy).sqrt();
-                if len < 1e-6 { continue; }
-                let nx = -dy / len * hw;
-                let ny =  dx / len * hw;
-
-                let base = verts.len() as u32;
-                verts.push([a[0] + nx, a[1] + ny]);
-                verts.push([a[0] - nx, a[1] - ny]);
-                verts.push([b[0] + nx, b[1] + ny]);
-                verts.push([b[0] - nx, b[1] - ny]);
-                indices.extend_from_slice(&[base, base+1, base+2, base+1, base+3, base+2]);
-            }
-        }
-
+        let (verts, indices) = build_stroke_quads(&contours, hw);
         let color = self.stroke_color;
         self.draw_triangles(&verts, &indices, color);
     }
@@ -443,30 +415,36 @@ impl DrawCtx for GlGfxCtx {
         let ctm = *self.ctm();
         let scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt();
         let segments = (std::f64::consts::TAU * r * scale).max(12.0).min(128.0) as usize;
-        let contour: Vec<[f32; 2]> = (0..segments).map(|i| {
+        let mut contour: Vec<[f32; 2]> = (0..segments).map(|i| {
             let angle = i as f64 / segments as f64 * std::f64::consts::TAU;
             let lx = cx + r * angle.cos();
             let ly = cy + r * angle.sin();
             self.transform_pt(lx, ly)
         }).collect();
         if contour.len() >= 3 {
+            // Close the contour so do_stroke draws the segment that joins the
+            // last arc point back to the first (otherwise the circle has a gap).
+            let first = contour[0];
+            contour.push(first);
             self.contours.push(contour);
         }
     }
 
     fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
-        // 4-point contour (CTM-transformed corners), CCW winding.
+        // 5-point closed contour (CTM-transformed corners + repeated first),
+        // CCW winding.  The closing point ensures do_stroke draws all four
+        // sides including the left edge (the tl→bl wrap-around segment).
         let bl = self.transform_pt(x,     y);
         let br = self.transform_pt(x + w, y);
         let tr = self.transform_pt(x + w, y + h);
         let tl = self.transform_pt(x,     y + h);
-        self.contours.push(vec![bl, br, tr, tl]);
+        self.contours.push(vec![bl, br, tr, tl, bl]);
     }
 
     fn rounded_rect(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
         let r = r.min(w * 0.5).min(h * 0.5);
         let seg = 8usize;
-        let mut contour: Vec<[f32; 2]> = Vec::with_capacity(seg * 4 + 4);
+        let mut contour: Vec<[f32; 2]> = Vec::with_capacity(seg * 4 + 5);
         use std::f64::consts::FRAC_PI_2;
         // Four corner arcs, CCW winding, starting from bottom-left corner.
         let corners: [(f64, f64, f64, f64); 4] = [
@@ -485,6 +463,10 @@ impl DrawCtx for GlGfxCtx {
             }
         }
         if contour.len() >= 3 {
+            // Close the contour so do_stroke draws the left-side segment
+            // that joins the last arc point back to the starting point.
+            let first = contour[0];
+            contour.push(first);
             self.contours.push(contour);
         }
     }
@@ -704,6 +686,54 @@ unsafe fn compile_program(
 }
 
 // ---------------------------------------------------------------------------
+// Stroke helpers
+// ---------------------------------------------------------------------------
+
+/// Expand `contours` into stroke quads (two triangles per segment) with the
+/// given half-width.
+///
+/// Contours with `first == last` are **closed**: all segments are drawn,
+/// including the wrap-around from the last interior point back to the first.
+/// Contours with `first != last` are **open**: the wrap-around segment is
+/// skipped.  Shape helpers (`rect`, `rounded_rect`, `circle`) produce closed
+/// contours so that every side is always stroked.
+fn build_stroke_quads(
+    contours: &[Vec<[f32; 2]>],
+    hw: f32,
+) -> (Vec<[f32; 2]>, Vec<u32>) {
+    let mut verts: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for contour in contours {
+        if contour.len() < 2 { continue; }
+        let n = contour.len();
+        for i in 0..n {
+            let a = contour[i];
+            let b = contour[(i + 1) % n];
+            if i + 1 == n && contour.first() != contour.last() {
+                // open path — skip wrap-around segment
+                break;
+            }
+            let dx = b[0] - a[0];
+            let dy = b[1] - a[1];
+            let len = (dx * dx + dy * dy).sqrt();
+            if len < 1e-6 { continue; }
+            let nx = -dy / len * hw;
+            let ny =  dx / len * hw;
+
+            let base = verts.len() as u32;
+            verts.push([a[0] + nx, a[1] + ny]);
+            verts.push([a[0] - nx, a[1] - ny]);
+            verts.push([b[0] + nx, b[1] + ny]);
+            verts.push([b[0] - nx, b[1] - ny]);
+            indices.extend_from_slice(&[base, base+1, base+2, base+1, base+3, base+2]);
+        }
+    }
+
+    (verts, indices)
+}
+
+// ---------------------------------------------------------------------------
 // Scissor helpers
 // ---------------------------------------------------------------------------
 
@@ -727,7 +757,41 @@ fn compute_gl_scissor(lx: f64, by: f64, rx: f64, ty2: f64) -> [i32; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_gl_scissor;
+    use super::{build_stroke_quads, compute_gl_scissor};
+
+    /// Before the fix, `rect()` / `rounded_rect()` built open contours.
+    /// `build_stroke_quads` skips the wrap-around for open paths, so the left
+    /// side (last→first segment) was never emitted.  This test documents the
+    /// broken behaviour so it fails before the fix and passes after.
+    #[test]
+    fn test_stroke_open_rect_missing_left_side() {
+        // 4-point open rect: first != last → wrap-around (left side) is skipped.
+        let contour = vec![
+            [0.0f32,  0.0f32],   // bl
+            [10.0,    0.0],       // br
+            [10.0,    10.0],      // tr
+            [0.0,     10.0],      // tl — tl→bl (left side) will be skipped!
+        ];
+        let (verts, _) = build_stroke_quads(&[contour], 0.5);
+        let segments = verts.len() / 4;
+        assert_eq!(segments, 3, "open rect produces only 3 segments (left side missing)");
+    }
+
+    /// After closing the contour (first == last), all four sides are drawn.
+    #[test]
+    fn test_stroke_closed_rect_has_all_four_sides() {
+        // 5-point closed rect: last point repeats first → wrap-around runs.
+        let contour = vec![
+            [0.0f32,  0.0f32],   // bl
+            [10.0,    0.0],       // br
+            [10.0,    10.0],      // tr
+            [0.0,     10.0],      // tl
+            [0.0,     0.0],       // bl repeated — closes the path
+        ];
+        let (verts, _) = build_stroke_quads(&[contour], 0.5);
+        let segments = verts.len() / 4;
+        assert_eq!(segments, 4, "closed rect must produce 4 segments (all sides)");
+    }
 
     /// The inspector tree area spans Y-up [184, 650] in a 720-tall viewport.
     /// The GL scissor must cover exactly that band (y=184 from bottom, h=466).

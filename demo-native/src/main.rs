@@ -262,16 +262,25 @@ fn render_frame(
 
 fn draw_hover_overlay(ctx: &mut GlGfxCtx, rect: Rect) {
     if rect.width < 1.0 || rect.height < 1.0 { return; }
-    // Teal fill
+    // Teal fill — covers the full widget bounds.
     ctx.set_fill_color(Color::rgba(0.05, 0.65, 0.85, 0.18));
     ctx.begin_path();
     ctx.rect(rect.x, rect.y, rect.width, rect.height);
     ctx.fill();
-    // Teal border
+    // Teal border — inset by half the stroke width so the outer stroke edge
+    // stays within the widget bounds and never falls below x=0 / y=0 (which
+    // would be clipped by the GL viewport for widgets at the screen edge).
+    let sw = 1.5_f64;
+    let half = sw * 0.5;
     ctx.set_stroke_color(Color::rgba(0.05, 0.65, 0.85, 0.80));
-    ctx.set_line_width(1.5);
+    ctx.set_line_width(sw);
     ctx.begin_path();
-    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+    ctx.rect(
+        rect.x + half,
+        rect.y + half,
+        (rect.width  - sw).max(0.0),
+        (rect.height - sw).max(0.0),
+    );
     ctx.stroke();
     // Size label
     let label = format!("{:.0} × {:.0}", rect.width, rect.height);
