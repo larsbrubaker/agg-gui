@@ -13,7 +13,7 @@
 
 mod gl_resources;
 
-use demo_gl::GlGfxCtx;
+use demo_gl::{GlGfxCtx, begin_frame, sync_inspector, render_app_frame};
 use gl_resources::{GlCubeWidget, GlState, CUBE_SCREEN_RECT};
 
 use std::cell::{Cell, RefCell};
@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use agg_gui::{App, Font, InspectorNode, Key, Modifiers, MouseButton, Size, Widget};
+use agg_gui::{App, Font, InspectorNode, Key, Modifiers, MouseButton, Rect, Size, Widget};
 
 // Embed the font at compile time.
 const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
@@ -44,6 +44,10 @@ thread_local! {
     // Inspector shared state — set once by build_demo_app, read each frame.
     static SHOW_INSPECTOR:  RefCell<Option<Rc<Cell<bool>>>>                     = RefCell::new(None);
     static INSPECTOR_NODES: RefCell<Option<Rc<RefCell<Vec<InspectorNode>>>>>    = RefCell::new(None);
+    /// Shared hover-bounds handle — written by the inspector, read by render().
+    static HOVERED_BOUNDS: RefCell<Option<Rc<RefCell<Option<Rect>>>>>           = RefCell::new(None);
+    /// Font reference kept for the status overlay.
+    static FONT: RefCell<Option<Arc<Font>>>                                      = RefCell::new(None);
 }
 
 /// Initialise panic hook so Rust panics appear in the browser console.
@@ -56,10 +60,12 @@ fn ensure_demo_app() {
     DEMO_APP.with(|cell| {
         if cell.borrow().is_none() {
             let font = make_font();
-            let (app, show_inspector, inspector_nodes, _hovered_bounds, _cube_visible) =
-                demo_ui::build_demo_ui(font, Box::new(GlCubeWidget::new()));
+            let (app, show_inspector, inspector_nodes, hovered_bounds, _cube_visible) =
+                demo_ui::build_demo_ui(Arc::clone(&font), Box::new(GlCubeWidget::new()));
             SHOW_INSPECTOR.with(|c| *c.borrow_mut() = Some(Rc::clone(&show_inspector)));
             INSPECTOR_NODES.with(|c| *c.borrow_mut() = Some(Rc::clone(&inspector_nodes)));
+            HOVERED_BOUNDS.with(|c| *c.borrow_mut() = Some(Rc::clone(&hovered_bounds)));
+            FONT.with(|c| *c.borrow_mut() = Some(font));
             *cell.borrow_mut() = Some(app);
         }
     });
@@ -116,8 +122,12 @@ fn init_webgl2() -> glow::Context {
 /// Full-frame render.  Direct GL path: the widget tree is painted via
 /// `GlGfxCtx` (tess2 tessellation → WebGL2 draw calls).  No off-screen
 /// framebuffer is used.  The rotating 3D cube is drawn last, on top.
+///
+/// `frame_ms` is the render time of the *previous* frame, measured by the JS
+/// caller.  It is shown in the bottom-left status overlay (identical to the
+/// native path).
 #[wasm_bindgen]
-pub fn render(width: u32, height: u32) {
+pub fn render(width: u32, height: u32, frame_ms: f64) {
     ensure_demo_app();
     ensure_gl_state();
     ensure_gl_ctx(width as f32, height as f32);
@@ -125,48 +135,43 @@ pub fn render(width: u32, height: u32) {
     // ── 1. GL clear ─────────────────────────────────────────────────────────
     GL_STATE.with(|gl_cell| {
         if let Some(state) = gl_cell.borrow().as_ref() {
-            let gl = state.gl_rc();
-            unsafe {
-                use glow::HasContext;
-                gl.viewport(0, 0, width as i32, height as i32);
-                gl.clear_color(0.1, 0.1, 0.1, 1.0);
-                gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
-                gl.enable(glow::BLEND);
-                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-                gl.disable(glow::DEPTH_TEST);
-                gl.disable(glow::SCISSOR_TEST);
-            }
+            begin_frame(&state.gl_rc(), width, height);
         }
     });
 
     // ── 2. Sync inspector nodes snapshot (before paint) ─────────────────────
     let show_inspector = SHOW_INSPECTOR.with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
-    if show_inspector {
-        let nodes = DEMO_APP.with(|cell| {
-            cell.borrow().as_ref().map(|app| app.collect_inspector_nodes())
-        });
-        if let Some(nodes) = nodes {
-            INSPECTOR_NODES.with(|c| {
-                if let Some(ref rc) = *c.borrow() {
-                    *rc.borrow_mut() = nodes;
+    DEMO_APP.with(|app_cell| {
+        if let Some(app) = app_cell.borrow().as_ref() {
+            INSPECTOR_NODES.with(|nodes_cell| {
+                if let Some(ref nodes_rc) = *nodes_cell.borrow() {
+                    HOVERED_BOUNDS.with(|hb_cell| {
+                        if let Some(ref hb_rc) = *hb_cell.borrow() {
+                            sync_inspector(app, show_inspector, nodes_rc, hb_rc);
+                        }
+                    });
                 }
             });
         }
-    }
+    });
 
     // ── 3. Reset GL_CTX for this frame then paint ────────────────────────────
     GL_CTX.with(|ctx_cell| {
         let mut ctx_borrow = ctx_cell.borrow_mut();
         if let Some(gl_ctx) = ctx_borrow.as_mut() {
-            gl_ctx.reset(width as f32, height as f32);
-
-            DEMO_APP.with(|app_cell| {
-                let mut app_borrow = app_cell.borrow_mut();
-                if let Some(app) = app_borrow.as_mut() {
-                    app.layout(Size::new(width as f64, height as f64));
-                    app.paint(gl_ctx);
-                }
+            let hovered = HOVERED_BOUNDS.with(|c| {
+                c.borrow().as_ref().and_then(|rc| *rc.borrow())
             });
+            let font = FONT.with(|c| c.borrow().as_ref().map(Arc::clone));
+
+            if let Some(font) = font {
+                DEMO_APP.with(|app_cell| {
+                    let mut app_borrow = app_cell.borrow_mut();
+                    if let Some(app) = app_borrow.as_mut() {
+                        render_app_frame(gl_ctx, app, font, width, height, frame_ms, hovered);
+                    }
+                });
+            }
         }
     });
 

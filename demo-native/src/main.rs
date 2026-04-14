@@ -12,10 +12,10 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{App, Color, DrawCtx, Font, Key as AggKey, Modifiers,
-              MouseButton as AggMouseButton, Rect, Size};
+use agg_gui::{App, Font, Key as AggKey, Modifiers,
+              MouseButton as AggMouseButton, Rect};
 
-use demo_gl::GlGfxCtx;
+use demo_gl::{GlGfxCtx, begin_frame, sync_inspector, render_app_frame};
 
 use glutin::config::ConfigTemplateBuilder;
 use glutin::context::{ContextApi, ContextAttributesBuilder, Version};
@@ -23,7 +23,6 @@ use glutin::display::GetGlDisplay;
 use glutin::prelude::*;
 use glutin::surface::{GlSurface, SurfaceAttributesBuilder, WindowSurface};
 use glutin_winit::DisplayBuilder;
-use glow::HasContext;
 use raw_window_handle::HasWindowHandle;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, WindowEvent};
@@ -129,9 +128,14 @@ fn main() {
                             NonZeroU32::new(new_size.width).unwrap(),
                             NonZeroU32::new(new_size.height).unwrap(),
                         );
-                        unsafe { gl.viewport(0, 0, new_size.width as i32, new_size.height as i32); }
                         win_w = new_size.width;
                         win_h = new_size.height;
+                        // Render immediately so content tracks the drag handle.
+                        sync_inspector(&app, show_inspector.get(),
+                                       &inspector_nodes, &hovered_bounds);
+                        render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
+                                     win_w, win_h, last_frame_ms, Arc::clone(&font), &hovered_bounds);
+                        gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
                     }
                 }
                 Event::WindowEvent {
@@ -187,12 +191,8 @@ fn main() {
                     let t0 = std::time::Instant::now();
 
                     // Sync inspector node snapshot before painting.
-                    if show_inspector.get() {
-                        *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
-                    } else {
-                        // Inspector hidden — clear any hover overlay immediately.
-                        *hovered_bounds.borrow_mut() = None;
-                    }
+                    sync_inspector(&app, show_inspector.get(),
+                                   &inspector_nodes, &hovered_bounds);
 
                     render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
                                  win_w, win_h, last_frame_ms, Arc::clone(&font), &hovered_bounds);
@@ -221,71 +221,18 @@ fn render_frame(
     font:           Arc<Font>,
     hovered_bounds: &Rc<RefCell<Option<Rect>>>,
 ) {
-    unsafe {
-        gl.viewport(0, 0, w as i32, h as i32);
-        gl.clear_color(0.1, 0.1, 0.1, 1.0);
-        gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
-        gl.enable(glow::BLEND);
-        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-        gl.disable(glow::DEPTH_TEST);
-        gl.disable(glow::SCISSOR_TEST);
-    }
+    begin_frame(gl, w, h);
 
     // Reset cube rect so a hidden GlCubeWidget leaves it zeroed — draw_gl
     // skips automatically when width < 1.
     CUBE_SCREEN_RECT.with(|r| r.set(Rect::default()));
 
-    gl_ctx.reset(w as f32, h as f32);
-    app.layout(Size::new(w as f64, h as f64));
-    app.paint(gl_ctx);
-
-    // Draw inspector hover overlay — Chrome-style bounds highlight.
-    if let Some(rect) = *hovered_bounds.borrow() {
-        draw_hover_overlay(gl_ctx, rect);
-    }
-
-    // Status bar overlay: "WxH  X.Xms"
-    let status = format!("{}×{}   {:.1}ms", w, h, frame_ms);
-    gl_ctx.set_font(font);
-    gl_ctx.set_font_size(11.0);
-    gl_ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.30));
-    gl_ctx.fill_text(&status, 12.0, 6.0);
+    let hovered = *hovered_bounds.borrow();
+    render_app_frame(gl_ctx, app, font, w, h, frame_ms, hovered);
 
     // Draw the rotating cube on top, inside its widget rect.
     let cube_rect = CUBE_SCREEN_RECT.with(|r| r.get());
     unsafe { cube.draw_gl(gl, cube_rect, h as f64, w as i32, h as i32) };
-}
-
-// ---------------------------------------------------------------------------
-// Inspector hover overlay
-// ---------------------------------------------------------------------------
-
-fn draw_hover_overlay(ctx: &mut GlGfxCtx, rect: Rect) {
-    if rect.width < 1.0 || rect.height < 1.0 { return; }
-    // Teal fill — covers the full widget bounds.
-    ctx.set_fill_color(Color::rgba(0.05, 0.65, 0.85, 0.18));
-    ctx.begin_path();
-    ctx.rect(rect.x, rect.y, rect.width, rect.height);
-    ctx.fill();
-    // Teal border — inset by half the stroke width so the outer stroke edge
-    // stays within the widget bounds and never falls below x=0 / y=0 (which
-    // would be clipped by the GL viewport for widgets at the screen edge).
-    let sw = 1.5_f64;
-    let half = sw * 0.5;
-    ctx.set_stroke_color(Color::rgba(0.05, 0.65, 0.85, 0.80));
-    ctx.set_line_width(sw);
-    ctx.begin_path();
-    ctx.rect(
-        rect.x + half,
-        rect.y + half,
-        (rect.width  - sw).max(0.0),
-        (rect.height - sw).max(0.0),
-    );
-    ctx.stroke();
-    // Size label
-    let label = format!("{:.0} × {:.0}", rect.width, rect.height);
-    ctx.set_fill_color(Color::rgba(0.05, 0.65, 0.85, 1.00));
-    ctx.fill_text_gsv(&label, rect.x + 2.0, rect.y + rect.height + 2.0, 9.0);
 }
 
 // ---------------------------------------------------------------------------

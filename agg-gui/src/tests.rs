@@ -1281,3 +1281,71 @@ fn test_label_backbuffer_renders_text() {
     assert!(dark_direct > 0, "direct render must produce dark (text) pixels");
     assert!(dark_layer  > 0, "backbuffer render must produce dark (text) pixels");
 }
+
+// ---------------------------------------------------------------------------
+// Slider mouse-capture tests
+// ---------------------------------------------------------------------------
+
+/// Dragging a slider outside its bounds must continue to track the cursor —
+/// clamping at the range limits — and must NOT snap to the near edge when the
+/// pointer first leaves the widget.
+///
+/// Root cause of the old bug: `dispatch_mouse_move` sent a synthetic
+/// `MouseMove { pos: (-1.0, -1.0) }` to the previously-hovered widget when
+/// the cursor left its bounds.  The slider's `on_event` called
+/// `value_from_x(-1.0)` which clamped to `min`, snapping the thumb to the
+/// left edge regardless of the actual cursor position.
+///
+/// This test reproduces the snap-to-zero bug and guards the mouse-capture fix.
+#[test]
+fn test_slider_drag_outside_bounds_tracks_cursor() {
+    use std::rc::Rc;
+    use std::cell::Cell;
+    use std::sync::Arc;
+    use crate::widgets::slider::Slider;
+    use crate::text::Font;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+
+    let last_val = Rc::new(Cell::new(0.5_f64));
+    let lv = Rc::clone(&last_val);
+
+    // 200 × 36 px slider, value range [0, 1].
+    let slider = Slider::new(0.5, 0.0, 1.0, Arc::clone(&font))
+        .on_change(move |v| lv.set(v));
+
+    let mut app = App::new(Box::new(
+        SizedBox::new().with_width(200.0).with_height(36.0)
+            .with_child(Box::new(slider)),
+    ));
+    app.layout(Size::new(200.0, 36.0));
+
+    // Press the thumb in the middle.  Y-down input: viewport_height(36) − 18 = 18 Y-up.
+    app.on_mouse_down(100.0, 18.0, MouseButton::Left, Modifiers::default());
+
+    // Drag far to the right (outside slider bounds) — value must clamp to max.
+    app.on_mouse_move(9999.0, 18.0);
+    assert_eq!(
+        last_val.get(), 1.0,
+        "dragging outside right must clamp to max (1.0), not snap to 0.0"
+    );
+
+    // Drag far to the left — value must clamp to min.
+    app.on_mouse_move(-9999.0, 18.0);
+    assert_eq!(
+        last_val.get(), 0.0,
+        "dragging outside left must clamp to min (0.0)"
+    );
+
+    // Release outside bounds — drag ends.
+    app.on_mouse_up(0.0, 18.0, MouseButton::Left, Modifiers::default());
+
+    // After release: moving the mouse must NOT fire the callback.
+    last_val.set(999.0); // sentinel
+    app.on_mouse_move(100.0, 18.0);
+    assert_eq!(
+        last_val.get(), 999.0,
+        "after mouse-up the slider must stop tracking cursor movement"
+    );
+}

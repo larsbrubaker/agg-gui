@@ -4,7 +4,7 @@
 // render() returns void — GL writes to the canvas; we no longer use 2D ctx.
 // A requestAnimationFrame loop drives the cube animation continuously.
 
-type RenderFn  = (width: number, height: number) => void;
+type RenderFn  = (width: number, height: number, frame_ms: number) => void;
 type MouseXYFn = (x: number, y: number) => void;
 type MouseXYBFn = (x: number, y: number, button: number) => void;
 type WheelFn   = (x: number, y: number, delta_y: number) => void;
@@ -17,9 +17,8 @@ let wasmModule: Record<string, unknown> | null = null;
 // The WASM module calls getContext("webgl2") on this element internally.
 // We must NOT call getContext("2d") here — a canvas can only have one context.
 
-const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const canvas    = document.getElementById("canvas") as HTMLCanvasElement;
 const loadingEl = document.getElementById("loading")!;
-const statusEl  = document.getElementById("status")!;
 
 // --- Canvas size helper ---
 
@@ -38,14 +37,18 @@ function updateCanvasSize(): boolean {
 
 // --- Render ---
 
+// Frame time of the previous render call, displayed in the GL status overlay.
+// Using the previous frame's time (like the native path) avoids the overhead
+// of the overlay itself appearing in its own measurement.
+let lastFrameMs = 0;
+
 function render() {
   if (!wasmModule) return;
   if (!updateCanvasSize()) return;
 
   const t0 = performance.now();
-  (wasmModule["render"] as RenderFn)(canvas.width, canvas.height);
-  const ms = (performance.now() - t0).toFixed(1);
-  statusEl.textContent = `${canvas.width}×${canvas.height}  ${ms}ms`;
+  (wasmModule["render"] as RenderFn)(canvas.width, canvas.height, lastFrameMs);
+  lastFrameMs = performance.now() - t0;
 }
 
 // --- Animation loop (drives cube rotation) ---

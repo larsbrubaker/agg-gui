@@ -328,6 +328,10 @@ pub struct App {
     focus: Option<Vec<usize>>,
     /// Path to the widget last seen under the cursor (for hover clearing).
     hovered: Option<Vec<usize>>,
+    /// Mouse-captured widget path. Set when a widget consumes `MouseDown`;
+    /// cleared on `MouseUp`. While set, `MouseMove` events go to the captured
+    /// widget regardless of cursor position — enabling slider drag-outside-bounds.
+    captured: Option<Vec<usize>>,
     /// Viewport height in pixels — used for Y-down → Y-up conversion.
     viewport_height: f64,
 }
@@ -339,6 +343,7 @@ impl App {
             root,
             focus: None,
             hovered: None,
+            captured: None,
             viewport_height: 1.0,
         }
     }
@@ -383,17 +388,25 @@ impl App {
 
         let event = Event::MouseDown { pos, button, modifiers: mods };
         if let Some(path) = hit {
-            dispatch_event(&mut self.root, &path, &event, pos);
+            let result = dispatch_event(&mut self.root, &path, &event, pos);
+            if result == EventResult::Consumed {
+                self.captured = Some(path);
+            }
         }
     }
 
     /// Mouse button released. `screen_y` is Y-down.
     pub fn on_mouse_up(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
         let pos = self.flip_y(screen_x, screen_y);
-        let hit = self.compute_hit(pos);
         let event = Event::MouseUp { pos, button, modifiers: mods };
-        if let Some(path) = hit {
+        // Deliver release to captured widget first (if any), then clear capture.
+        if let Some(path) = self.captured.take() {
             dispatch_event(&mut self.root, &path, &event, pos);
+        } else {
+            let hit = self.compute_hit(pos);
+            if let Some(path) = hit {
+                dispatch_event(&mut self.root, &path, &event, pos);
+            }
         }
     }
 
@@ -453,18 +466,27 @@ impl App {
     fn dispatch_mouse_move(&mut self, pos: Point) {
         let new_hit = self.compute_hit(pos);
 
-        // If the hovered widget changed, clear the old one.
+        // If the hovered widget changed, clear the old one — but skip the clear
+        // event when the old widget still has mouse capture (it should keep
+        // receiving real positions, not a (-1,-1) sentinel that snaps state).
         if new_hit != self.hovered {
             if let Some(old_path) = self.hovered.take() {
-                // Send an out-of-bounds move to the old widget to clear hover.
-                let clear = Event::MouseMove { pos: Point::new(-1.0, -1.0) };
-                dispatch_event(&mut self.root, &old_path, &clear, Point::new(-1.0, -1.0));
+                let is_captured = self.captured.as_ref() == Some(&old_path);
+                if !is_captured {
+                    let clear = Event::MouseMove { pos: Point::new(-1.0, -1.0) };
+                    dispatch_event(&mut self.root, &old_path, &clear, Point::new(-1.0, -1.0));
+                }
             }
             self.hovered = new_hit.clone();
         }
 
         let event = Event::MouseMove { pos };
-        if let Some(path) = new_hit {
+        if let Some(ref cap_path) = self.captured.clone() {
+            // Captured widget always receives the real position, regardless of
+            // whether the cursor is over it — this is what keeps a slider
+            // tracking the cursor when dragged outside its bounds.
+            dispatch_event(&mut self.root, cap_path, &event, pos);
+        } else if let Some(path) = new_hit {
             dispatch_event(&mut self.root, &path, &event, pos);
         }
     }

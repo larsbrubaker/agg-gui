@@ -109,17 +109,17 @@ impl Widget for Checkbox {
         ctx.rounded_rect(0.0, box_y, BOX_SIZE, BOX_SIZE, 3.0);
         ctx.stroke();
 
-        // Checkmark
+        // Checkmark — coordinates in Y-up space (origin = box bottom-left).
+        // Fractions are (1 - Y-down-fraction) so the tick reads correctly.
         if self.checked {
             ctx.set_stroke_color(Color::white());
             ctx.set_line_width(2.0);
             ctx.begin_path();
-            // Simple tick: from (3, box_y+7) to (7, box_y+11) to (13, box_y+4)
             let bx = 0.0;
             let by = box_y;
-            ctx.move_to(bx + 3.0, by + BOX_SIZE * 0.45);
-            ctx.line_to(bx + BOX_SIZE * 0.42, by + BOX_SIZE * 0.72);
-            ctx.line_to(bx + BOX_SIZE - 3.0, by + BOX_SIZE * 0.25);
+            ctx.move_to(bx + 3.0,              by + BOX_SIZE * 0.55); // left, mid-high
+            ctx.line_to(bx + BOX_SIZE * 0.42,  by + BOX_SIZE * 0.28); // bend at bottom
+            ctx.line_to(bx + BOX_SIZE - 3.0,   by + BOX_SIZE * 0.75); // right, upper
             ctx.stroke();
         }
 

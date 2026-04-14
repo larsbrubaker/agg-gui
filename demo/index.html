@@ -73,15 +73,6 @@
       image-rendering: pixelated;
     }
 
-    #status {
-      position: absolute;
-      bottom: 12px;
-      right: 16px;
-      font-size: 0.72rem;
-      color: #9ca3af;
-      pointer-events: none;
-    }
-
     #loading {
       position: absolute;
       inset: 0;
@@ -107,7 +98,6 @@
   <div class="canvas-wrap">
     <canvas id="canvas" tabindex="0"></canvas>
     <div id="loading">Loading WASM…</div>
-    <div id="status"></div>
   </div>
 
   <script type="module" src="./public/dist/bundle.js"></script>
