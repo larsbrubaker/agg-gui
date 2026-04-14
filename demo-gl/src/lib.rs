@@ -603,6 +603,21 @@ impl DrawCtx for GlGfxCtx {
     fn reset_transform(&mut self) {
         self.state_stack.last_mut().unwrap().0 = TransAffine::new();
     }
+
+    /// Execute GPU content inline at the correct painter-order depth.
+    ///
+    /// Passes `&*self.gl` as `&dyn Any` — the caller downcasts to
+    /// `glow::Context`.  Viewport dimensions come from `self.viewport`.
+    fn gl_paint(&mut self, screen_rect: agg_gui::Rect, painter: &mut dyn agg_gui::GlPaint) {
+        let full_w = self.viewport.0 as i32;
+        let full_h = self.viewport.1 as i32;
+        painter.gl_paint(
+            self.gl.as_ref() as &dyn std::any::Any,
+            screen_rect,
+            full_w,
+            full_h,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

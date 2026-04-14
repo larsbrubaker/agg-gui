@@ -204,7 +204,7 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 /// Returns `Some(vec![])` if `widget` itself is hit but no child is.
 /// Returns `None` if nothing is hit.
 pub fn hit_test_subtree(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usize>> {
-    if !widget.hit_test(local_pos) {
+    if !widget.is_visible() || !widget.hit_test(local_pos) {
         return None;
     }
     // Check children in reverse order (last drawn = topmost = highest priority).

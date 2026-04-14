@@ -15,10 +15,36 @@
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::geometry::Rect;
 use crate::text::{Font, TextMetrics};
 use agg_rust::comp_op::CompOp;
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
+
+// ---------------------------------------------------------------------------
+// GL paint hook
+// ---------------------------------------------------------------------------
+
+/// Trait for widgets that want to render 3-D (or other GPU) content inline
+/// during the widget paint pass.
+///
+/// `DrawCtx::gl_paint` calls this with an opaque `gl` handle — implementations
+/// downcast it to `glow::Context` (or whatever GL type the platform provides).
+/// The software `GfxCtx` never calls `paint`; see [`DrawCtx::gl_paint`].
+pub trait GlPaint {
+    /// Execute GPU draw calls for the widget's 3-D content.
+    ///
+    /// `gl` — opaque platform GL context; downcast via `std::any::Any`.
+    /// `screen_rect` — Y-up screen-space rect for this widget (for viewport/scissor).
+    /// `full_w`, `full_h` — full viewport dimensions (for restoring after).
+    fn gl_paint(
+        &mut self,
+        gl:          &dyn std::any::Any,
+        screen_rect: Rect,
+        full_w:      i32,
+        full_h:      i32,
+    );
+}
 
 /// Unified 2-D drawing context.
 ///
@@ -122,4 +148,21 @@ pub trait DrawCtx {
     ///
     /// Must be called after a matching `push_layer`.  Unmatched calls are ignored.
     fn pop_layer(&mut self) {}
+
+    // ── GL / GPU content ──────────────────────────────────────────────────────
+
+    /// Render GPU content (3-D scene, video frame, etc.) inline at the correct
+    /// painter-order position.
+    ///
+    /// `screen_rect` is the widget's screen-space rect in Y-up coordinates
+    /// (i.e. `ctx.transform()` origin + `widget.bounds().size`).
+    ///
+    /// The GL implementation executes `painter.gl_paint()` immediately so that
+    /// any 2-D widgets painted after this call naturally overdraw the GPU
+    /// content — correct back-to-front ordering with no post-frame fixup.
+    ///
+    /// The **software (`GfxCtx`) path is a no-op**: widgets should draw a 2-D
+    /// placeholder before calling this method so the software render has
+    /// something visible.
+    fn gl_paint(&mut self, _screen_rect: Rect, _painter: &mut dyn GlPaint) {}
 }

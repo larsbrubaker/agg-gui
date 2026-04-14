@@ -5,7 +5,7 @@
 //! A rotating 3D cube widget is drawn on top each frame.
 
 mod cube_widget;
-use cube_widget::{CubeGlRenderer, GlCubeWidget, CUBE_SCREEN_RECT, set_cube_painter, clear_cube_painter};
+use cube_widget::{GlCubeWidget, CUBE_SCREEN_RECT};
 
 use std::cell::RefCell;
 use std::num::NonZeroU32;
@@ -93,7 +93,6 @@ fn main() {
 
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("parse CascadiaCode.ttf"));
 
-    let mut cube_renderer = unsafe { CubeGlRenderer::new(&gl) };
     let init_w = size.width.max(1) as f32;
     let init_h = size.height.max(1) as f32;
     let mut gl_ctx = unsafe { GlGfxCtx::new(Rc::clone(&gl), init_w, init_h) };
@@ -110,8 +109,8 @@ fn main() {
     let mut current_mods = Modifiers::default();
 
     // Initial frame
-    render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
-                 win_w, win_h, last_frame_ms, Arc::clone(&font), &hovered_bounds);
+    render_frame(&mut app, &mut gl_ctx, &gl, win_w, win_h, last_frame_ms,
+                 Arc::clone(&font), &hovered_bounds);
     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
 
     #[allow(deprecated)]
@@ -135,7 +134,7 @@ fn main() {
                         // Render immediately so content tracks the drag handle.
                         sync_inspector(&app, show_inspector.get(),
                                        &inspector_nodes, &hovered_bounds);
-                        render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
+                        render_frame(&mut app, &mut gl_ctx, &gl,
                                      win_w, win_h, last_frame_ms, Arc::clone(&font), &hovered_bounds);
                         gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
                     }
@@ -210,7 +209,7 @@ fn main() {
                     sync_inspector(&app, show_inspector.get(),
                                    &inspector_nodes, &hovered_bounds);
 
-                    render_frame(&mut app, &mut gl_ctx, &mut cube_renderer, &gl,
+                    render_frame(&mut app, &mut gl_ctx, &gl,
                                  win_w, win_h, last_frame_ms, Arc::clone(&font), &hovered_bounds);
                     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
 
@@ -229,7 +228,6 @@ fn main() {
 fn render_frame(
     app:            &mut App,
     gl_ctx:         &mut GlGfxCtx,
-    cube:           &mut CubeGlRenderer,
     gl:             &glow::Context,
     w:              u32,
     h:              u32,
@@ -238,30 +236,9 @@ fn render_frame(
     hovered_bounds: &Rc<RefCell<Option<Rect>>>,
 ) {
     begin_frame(gl, w, h);
-
-    // Reset cube rect so a hidden GlCubeWidget leaves it zeroed.
     CUBE_SCREEN_RECT.with(|r| r.set(Rect::default()));
-
-    // Register the cube's GL draw as an inline painter.  The widget tree calls
-    // it during paint() at the correct painter-order depth, so windows that
-    // are in front of the cube overdraw it naturally via subsequent GL calls.
-    //
-    // Safety: `cube` and `gl` live for the entire synchronous duration of
-    // `render_app_frame`.  `clear_cube_painter()` drops the closure immediately
-    // after, so no dangling pointers escape.
-    let cube_ptr: *mut CubeGlRenderer = cube;
-    let gl_ptr:   *const glow::Context = gl;
-    let fw = w as i32;
-    let fh = h as i32;
-    set_cube_painter(move |rect: Rect| {
-        unsafe { (*cube_ptr).draw_gl(&*gl_ptr, rect, h as f64, fw, fh) };
-    });
-
     let hovered = *hovered_bounds.borrow();
     render_app_frame(gl_ctx, app, font, w, h, frame_ms, hovered);
-
-    // Drop the painter — the raw pointers inside are no longer valid after this.
-    clear_cube_painter();
 }
 
 // ---------------------------------------------------------------------------

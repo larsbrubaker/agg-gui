@@ -43,7 +43,7 @@ pub mod widgets;
 // Re-export the most commonly used types at the crate root.
 pub use color::Color;
 pub use device_scale::{device_scale, set_device_scale};
-pub use draw_ctx::DrawCtx;
+pub use draw_ctx::{DrawCtx, GlPaint};
 pub use event::{Event, EventResult, Key, Modifiers, MouseButton};
 pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};

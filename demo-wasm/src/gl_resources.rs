@@ -23,10 +23,10 @@
 //! correctly, the fullscreen quad uses `UV.y = 0` at the top of the screen
 //! (NDC `y = +1`) so that `t=0` (data row 0 = top of image) maps to the top.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 
-use agg_gui::{Color, Rect, Size};
+use agg_gui::{Color, GlPaint, Rect, Size};
 use agg_gui::event::{Event, EventResult};
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::widget::Widget;
@@ -37,44 +37,34 @@ use glow::HasContext;
 // ---------------------------------------------------------------------------
 
 thread_local! {
-    /// Written each frame by `GlCubeWidget::paint`, read by `GlState::render`.
+    /// Written each frame by `GlCubeWidget::paint`.
     pub static CUBE_SCREEN_RECT: Cell<Rect> = Cell::new(Rect::default());
-
-    /// GL paint callback — invoked inline from `GlCubeWidget::paint()` so the
-    /// cube renders at its correct painter-order depth, not always on top.
-    static CUBE_PAINTER: RefCell<Option<Box<dyn FnMut(Rect)>>> = RefCell::new(None);
-}
-
-/// Register a per-frame cube paint callback.
-///
-/// # Safety
-/// The closure must remain valid for the synchronous duration of
-/// `render_app_frame`.  Call [`clear_cube_painter`] immediately after.
-pub fn set_cube_painter(f: impl FnMut(Rect) + 'static) {
-    CUBE_PAINTER.with(|p| *p.borrow_mut() = Some(Box::new(f)));
-}
-
-/// Remove the cube painter after the frame, releasing any captured raw pointers.
-pub fn clear_cube_painter() {
-    CUBE_PAINTER.with(|p| *p.borrow_mut() = None);
 }
 
 // ---------------------------------------------------------------------------
 // GlCubeWidget — widget-tree placeholder
 // ---------------------------------------------------------------------------
 
+/// Widget that renders a rotating 3-D cube via `DrawCtx::gl_paint`.
+///
+/// The `CubeGlRenderer` is created lazily on the first `gl_paint()` call so no
+/// GL context is needed at widget construction time.  On the software path
+/// `gl_paint` is a no-op; only the dark placeholder rectangle is visible.
 pub struct GlCubeWidget {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
+    /// Created lazily on first GL paint call.
+    renderer: Option<CubeGlRenderer>,
 }
 
 impl GlCubeWidget {
     pub fn new() -> Self {
-        Self { bounds: Rect::default(), children: Vec::new() }
+        Self { bounds: Rect::default(), children: Vec::new(), renderer: None }
     }
 }
 
 impl Widget for GlCubeWidget {
+    fn type_name(&self) -> &'static str { "GlCubeWidget" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
@@ -82,38 +72,39 @@ impl Widget for GlCubeWidget {
     fn layout(&mut self, available: Size) -> Size { available }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        // Capture screen-space rect for the GL renderer.
         let t = ctx.transform();
         let screen_rect = Rect::new(t.tx, t.ty, self.bounds.width, self.bounds.height);
         CUBE_SCREEN_RECT.with(|r| r.set(screen_rect));
 
-        // If a GL painter is registered, invoke it inline so the cube renders
-        // at the correct painter-order position (windows painted after will
-        // overdraw it via later GL calls).
-        let painted = CUBE_PAINTER.with(|p| {
-            if let Ok(mut borrow) = p.try_borrow_mut() {
-                if let Some(f) = borrow.as_mut() {
-                    f(screen_rect);
-                    return true;
-                }
-            }
-            false
-        });
+        // 2-D placeholder — visible on software path; on the GL path the cube
+        // renders inline on top of it via ctx.gl_paint() below.
+        ctx.set_fill_color(Color::rgb(0.08, 0.08, 0.12));
+        ctx.begin_path();
+        ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
+        ctx.fill();
 
-        if !painted {
-            // Fallback dark placeholder when no GL painter is attached.
-            ctx.set_fill_color(Color::rgb(0.08, 0.08, 0.12));
-            ctx.begin_path();
-            ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
-            ctx.fill();
-            ctx.set_fill_color(Color::rgba(1.0, 1.0, 1.0, 0.20));
-            let cx = self.bounds.width  * 0.5 - 8.0;
-            let cy = self.bounds.height * 0.5 - 5.0;
-            ctx.fill_text_gsv("3D", cx, cy, 10.0);
-        }
+        ctx.gl_paint(screen_rect, self);
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+}
+
+/// Lazy-init GL painter: creates the renderer on first call, then draws.
+impl GlPaint for GlCubeWidget {
+    fn gl_paint(
+        &mut self,
+        gl:          &dyn std::any::Any,
+        screen_rect: Rect,
+        full_w:      i32,
+        full_h:      i32,
+    ) {
+        if let Some(gl_ctx) = gl.downcast_ref::<glow::Context>() {
+            let renderer = self.renderer.get_or_insert_with(|| {
+                unsafe { CubeGlRenderer::new(gl_ctx) }
+            });
+            unsafe { renderer.draw_gl(gl_ctx, screen_rect, full_w, full_h) };
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -414,21 +405,19 @@ impl CubeGlRenderer {
 }
 
 // ---------------------------------------------------------------------------
-// GlState — owns the context and both renderers
+// GlState — owns the WebGL context
 // ---------------------------------------------------------------------------
 
 pub struct GlState {
     gl:        Rc<glow::Context>,
     presenter: GlPresenter,
-    cube:      CubeGlRenderer,
 }
 
 impl GlState {
     pub unsafe fn new(gl: glow::Context) -> Self {
         let gl = Rc::new(gl);
         let presenter = GlPresenter::new(&gl);
-        let cube      = CubeGlRenderer::new(&gl);
-        Self { gl, presenter, cube }
+        Self { gl, presenter }
     }
 
     /// Reference-counted clone of the GL context (cheap Rc increment).
@@ -436,33 +425,15 @@ impl GlState {
         Rc::clone(&self.gl)
     }
 
-    /// Draw only the 3D cube into `cube_rect` (for use after GlGfxCtx has
-    /// already rendered the 2D widget tree to the same GL surface).
-    pub unsafe fn draw_cube_only(&mut self, cube_rect: Rect, full_w: i32, full_h: i32) {
-        self.cube.draw_gl(&self.gl, cube_rect, full_w, full_h);
-    }
-
-    /// Raw pointers to the GL context and cube renderer.
-    ///
-    /// # Safety
-    /// Pointers are valid only while this `GlState` is alive (thread-local).
-    /// Must not be used after `GlState` is dropped or while it is mutably
-    /// borrowed through another path.
-    pub fn raw_gl_and_cube(&mut self) -> (*const glow::Context, *mut CubeGlRenderer) {
-        (self.gl.as_ref() as *const _, &mut self.cube as *mut _)
-    }
-
-    /// Legacy full render pass (AGG texture blit + cube).  Kept for reference.
+    /// Legacy full render pass (AGG texture blit).  Kept for reference.
     #[allow(dead_code)]
     pub unsafe fn render_legacy(
         &mut self,
-        pixels:    &[u8],
-        width:     u32,
-        height:    u32,
-        cube_rect: Rect,
+        pixels: &[u8],
+        width:  u32,
+        height: u32,
     ) {
         self.presenter.present(&self.gl, pixels, width, height);
-        self.cube.draw_gl(&self.gl, cube_rect, width as i32, height as i32);
     }
 }
 
