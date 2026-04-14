@@ -6,3 +6,4 @@ description = "Shared demo UI builders — identical widget trees for native and
 
 [dependencies]
 agg-gui = { path = "../agg-gui" }
+png = "0.17"

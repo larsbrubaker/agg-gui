@@ -377,11 +377,78 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
     // Embed README.md at compile time.
     let readme = include_str!("../../README.md");
 
+    // Base directory for resolving relative image paths (agg-gui workspace root).
+    // On native targets we can load files at runtime; on WASM this will always
+    // return None (files not accessible), showing placeholder boxes instead.
+    let base_dir = {
+        // CARGO_MANIFEST_DIR is set at compile time for demo-ui; its parent is agg-gui/.
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        std::path::PathBuf::from(manifest)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    };
+
     let md_view = MarkdownView::new(readme, Arc::clone(&font))
         .with_font_size(13.0)
-        .with_padding(12.0);
+        .with_padding(12.0)
+        .with_image_provider(move |url| {
+            // Only handle relative paths / local file URLs on native.
+            let path = if url.starts_with("http://") || url.starts_with("https://") {
+                // Remote URL — not supported at runtime; return None for placeholder.
+                return None;
+            } else {
+                base_dir.join(url)
+            };
+            load_png(&path)
+        });
 
     Box::new(ScrollView::new(Box::new(md_view)))
+}
+
+/// Decode a PNG file to raw RGBA8 pixel data (top-row first).
+/// Returns `None` if the file doesn't exist or can't be decoded.
+fn load_png(path: &std::path::Path) -> Option<(Vec<u8>, u32, u32)> {
+    use std::io::BufReader;
+    let file = std::fs::File::open(path).ok()?;
+    let decoder = png::Decoder::new(BufReader::new(file));
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let w = info.width;
+    let h = info.height;
+    // Convert to RGBA8 regardless of source format.
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
+        png::ColorType::Rgb => {
+            let src = &buf[..info.buffer_size()];
+            let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+            for chunk in src.chunks(3) {
+                out.extend_from_slice(chunk);
+                out.push(255);
+            }
+            out
+        }
+        png::ColorType::Grayscale => {
+            let src = &buf[..info.buffer_size()];
+            let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+            for &v in src {
+                out.extend_from_slice(&[v, v, v, 255]);
+            }
+            out
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let src = &buf[..info.buffer_size()];
+            let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+            for chunk in src.chunks(2) {
+                out.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
+            }
+            out
+        }
+        // Indexed/other formats — show placeholder.
+        _ => return None,
+    };
+    Some((rgba, w, h))
 }
 
 pub fn cube_content(font: Arc<Font>, cube_widget: Box<dyn Widget>) -> Box<dyn Widget> {
