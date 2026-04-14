@@ -13,7 +13,8 @@ clipper2-rust = "1.0.3"
 ttf-parser = "0.25"
 rustybuzz = "0.20"
 tess2-rust = "1.0.3"
-arboard = { version = "3", optional = true }
+arboard  = { version = "3", optional = true }
+web-time = "1"
 
 [features]
 clipboard = ["dep:arboard"]

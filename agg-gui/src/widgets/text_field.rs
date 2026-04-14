@@ -20,6 +20,10 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::Arc;
 
+// web-time provides a WASM-compatible Instant (uses performance.now() in the
+// browser; falls back to Instant on native).
+use web_time::Instant;
+
 use crate::color::Color;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Rect, Size};
@@ -89,10 +93,10 @@ pub struct TextField {
     scroll_x:   f64,
 
     // Cursor blink: set to Some(Instant::now()) on FocusGained.
-    focus_time: Option<std::time::Instant>,
+    focus_time: Option<Instant>,
 
     // Double-click detection.
-    last_click_time: Option<std::time::Instant>,
+    last_click_time: Option<Instant>,
 
     // Content
     pub placeholder: String,
@@ -630,7 +634,7 @@ impl Widget for TextField {
                 let is_double = self.last_click_time
                     .map(|t| t.elapsed().as_millis() < 350)
                     .unwrap_or(false);
-                self.last_click_time = Some(std::time::Instant::now());
+                self.last_click_time = Some(Instant::now());
 
                 if is_double && !mods.shift {
                     let (ws, we) = word_range_at(&text, new_cur);
@@ -643,7 +647,7 @@ impl Widget for TextField {
                     self.edit.borrow_mut().anchor = new_cur;
                 }
                 // Reset blink phase on click so cursor is immediately visible.
-                self.focus_time = Some(std::time::Instant::now());
+                self.focus_time = Some(Instant::now());
                 EventResult::Consumed
             }
 
@@ -654,7 +658,7 @@ impl Widget for TextField {
 
             Event::FocusGained => {
                 self.focused        = true;
-                self.focus_time     = Some(std::time::Instant::now());
+                self.focus_time     = Some(Instant::now());
                 self.text_on_focus  = self.text();
                 if self.select_all_on_focus {
                     let len = self.edit.borrow().text.len();
@@ -675,7 +679,7 @@ impl Widget for TextField {
 
             Event::KeyDown { key, modifiers } if self.focused => {
                 // Reset blink on any keypress so cursor is visible immediately.
-                self.focus_time = Some(std::time::Instant::now());
+                self.focus_time = Some(Instant::now());
                 self.handle_key(key, *modifiers)
             }
 
