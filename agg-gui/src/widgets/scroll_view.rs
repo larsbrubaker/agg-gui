@@ -15,6 +15,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 const SCROLLBAR_W: f64 = 10.0;
@@ -22,6 +23,7 @@ const SCROLLBAR_W: f64 = 10.0;
 pub struct ScrollView {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,  // always 0 or 1
+    base: WidgetBase,
     scroll_offset: f64,
     content_height: f64,
 
@@ -36,6 +38,7 @@ impl ScrollView {
         Self {
             bounds: Rect::default(),
             children: vec![content],
+            base: WidgetBase::new(),
             scroll_offset: 0.0,
             content_height: 0.0,
             hovered_scrollbar: false,
@@ -63,6 +66,12 @@ impl ScrollView {
     fn max_scroll(&self) -> f64 {
         (self.content_height - self.bounds.height).max(0.0)
     }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 }
 
 impl Widget for ScrollView {
@@ -71,6 +80,12 @@ impl Widget for ScrollView {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn hit_test(&self, local_pos: Point) -> bool {
         // Keep capturing during scrollbar drag even if cursor leaves bounds.

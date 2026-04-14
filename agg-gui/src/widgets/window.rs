@@ -29,6 +29,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
@@ -42,6 +43,7 @@ const CLOSE_PAD: f64 = 10.0;  // padding from right edge to close button center
 pub struct Window {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always exactly 1: the content
+    base: WidgetBase,
 
     title: String,
     font: Arc<Font>,
@@ -69,6 +71,7 @@ impl Window {
         Self {
             bounds: Rect::new(60.0, 60.0, 360.0, 280.0),
             children: vec![content],
+            base: WidgetBase::new(),
             title: title.into(),
             font,
             font_size: 13.0,
@@ -83,6 +86,12 @@ impl Window {
 
     pub fn with_bounds(mut self, b: Rect) -> Self { self.bounds = b; self }
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     /// Register a callback fired once when the close button is clicked.
     pub fn on_close(mut self, cb: impl FnMut() + 'static) -> Self {
@@ -125,6 +134,12 @@ impl Widget for Window {
     fn type_name(&self) -> &'static str { "Window" }
     fn is_visible(&self) -> bool { self.visible }
     fn bounds(&self) -> Rect { self.bounds }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn set_bounds(&mut self, b: Rect) {
         // Preserve our position — only update size if zero (first call from Stack layout).

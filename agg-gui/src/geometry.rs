@@ -28,6 +28,12 @@ pub struct Size {
 impl Size {
     pub const ZERO: Self = Self { width: 0.0, height: 0.0 };
 
+    /// A very large size used as the default `max_size` in [`WidgetBase`].
+    ///
+    /// Uses `f64::MAX / 2` rather than `f64::MAX` so that summing sizes with
+    /// margins or gaps never overflows to infinity.
+    pub const MAX: Self = Self { width: f64::MAX / 2.0, height: f64::MAX / 2.0 };
+
     pub const fn new(width: f64, height: f64) -> Self {
         Self { width, height }
     }

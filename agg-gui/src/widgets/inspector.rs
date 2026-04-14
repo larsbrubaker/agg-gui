@@ -18,6 +18,7 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::{InspectorNode, Widget};
 use crate::widgets::tree_view::{NodeIcon, TreeNode, TreeView};
@@ -40,6 +41,7 @@ use crate::widgets::tree_view::{NodeIcon, TreeNode, TreeView};
 struct InternalPresenceNode {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
+    base:     WidgetBase,
     name:     &'static str,
 }
 
@@ -49,6 +51,11 @@ impl Widget for InternalPresenceNode {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
     fn layout(&mut self, _: Size) -> Size { Size::new(self.bounds.width, self.bounds.height) }
     fn paint(&mut self, _: &mut dyn DrawCtx) {}
     fn hit_test(&self, _: Point) -> bool { false }
@@ -108,6 +115,7 @@ pub struct InspectorPanel {
     /// internal `TreeView`).  This makes InspectorPanel non-leaf in the inspector
     /// so the user can see it has internal structure.
     _children:      Vec<Box<dyn Widget>>,
+    base:           WidgetBase,
     font:           Arc<Font>,
     nodes:          Rc<RefCell<Vec<InspectorNode>>>,
     /// Selected: original node index; synced from TreeView selection.
@@ -135,8 +143,10 @@ impl InspectorPanel {
             _children: vec![Box::new(InternalPresenceNode {
                 bounds:   Rect::default(),
                 children: Vec::new(),
+                base:     WidgetBase::new(),
                 name:     "TreeView",
             })],
+            base: WidgetBase::new(),
             font,
             nodes,
             selected: None,
@@ -187,12 +197,26 @@ impl InspectorPanel {
 
 // ── Widget impl ───────────────────────────────────────────────────────────────
 
+impl InspectorPanel {
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+}
+
 impl Widget for InspectorPanel {
     fn type_name(&self) -> &'static str { "InspectorPanel" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self._children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self._children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds.width  = available.width;

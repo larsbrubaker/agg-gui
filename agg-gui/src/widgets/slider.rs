@@ -6,6 +6,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
@@ -17,6 +18,7 @@ const WIDGET_H: f64 = 36.0;
 pub struct Slider {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
+    base: WidgetBase,
     value: f64,
     min: f64,
     max: f64,
@@ -35,6 +37,7 @@ impl Slider {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
+            base: WidgetBase::new(),
             value: value.clamp(min, max),
             min,
             max,
@@ -51,6 +54,12 @@ impl Slider {
 
     pub fn with_step(mut self, step: f64) -> Self { self.step = step; self }
     pub fn with_show_value(mut self, show: bool) -> Self { self.show_value = show; self }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     pub fn on_change(mut self, cb: impl FnMut(f64) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
@@ -99,6 +108,12 @@ impl Widget for Slider {
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
     fn is_focusable(&self) -> bool { true }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
         Size::new(available.width, WIDGET_H)

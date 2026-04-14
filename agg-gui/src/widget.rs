@@ -20,6 +20,7 @@
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Rect, Size};
+use crate::layout_props::{HAnchor, Insets, VAnchor};
 
 // ---------------------------------------------------------------------------
 // Widget trait
@@ -120,6 +121,38 @@ pub trait Widget {
     fn contributes_children_to_inspector(&self) -> bool {
         true
     }
+
+    // -------------------------------------------------------------------------
+    // Layout properties (universal — every widget carries these)
+    // -------------------------------------------------------------------------
+
+    /// Outer margin around this widget in logical units.
+    ///
+    /// The parent layout reads this to compute spacing and position.
+    /// Default: [`Insets::ZERO`].
+    fn margin(&self) -> Insets { Insets::ZERO }
+
+    /// Horizontal anchor: how this widget sizes/positions itself horizontally
+    /// within the slot the parent assigns.
+    /// Default: [`HAnchor::FIT`] (take natural content width).
+    fn h_anchor(&self) -> HAnchor { HAnchor::FIT }
+
+    /// Vertical anchor: how this widget sizes/positions itself vertically
+    /// within the slot the parent assigns.
+    /// Default: [`VAnchor::FIT`] (take natural content height).
+    fn v_anchor(&self) -> VAnchor { VAnchor::FIT }
+
+    /// Minimum size constraint (logical units).
+    ///
+    /// The parent will never assign a slot smaller than this.
+    /// Default: [`Size::ZERO`] (no minimum).
+    fn min_size(&self) -> Size { Size::ZERO }
+
+    /// Maximum size constraint (logical units).
+    ///
+    /// The parent will never assign a slot larger than this.
+    /// Default: [`Size::MAX`] (no maximum).
+    fn max_size(&self) -> Size { Size::MAX }
 }
 
 // ---------------------------------------------------------------------------

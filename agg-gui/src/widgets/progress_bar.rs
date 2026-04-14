@@ -6,6 +6,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
@@ -16,6 +17,7 @@ const WIDGET_H: f64 = 24.0;
 pub struct ProgressBar {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
+    base: WidgetBase,
     value: f64,
     show_text: bool,
     font: Arc<Font>,
@@ -28,6 +30,7 @@ impl ProgressBar {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
+            base: WidgetBase::new(),
             value: value.clamp(0.0, 1.0),
             show_text: true,
             font,
@@ -38,6 +41,12 @@ impl ProgressBar {
 
     pub fn with_show_text(mut self, show: bool) -> Self { self.show_text = show; self }
     pub fn with_fill_color(mut self, color: Color) -> Self { self.fill_color = color; self }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     pub fn set_value(&mut self, v: f64) {
         self.value = v.clamp(0.0, 1.0);
@@ -52,6 +61,12 @@ impl Widget for ProgressBar {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
         Size::new(available.width, WIDGET_H)

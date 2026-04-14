@@ -10,6 +10,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::label::Label;
@@ -52,6 +53,7 @@ pub struct ExpandToggle {
     pub has_children: bool,
     pub is_expanded: bool,
     children: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
 }
 
 impl ExpandToggle {
@@ -61,6 +63,7 @@ impl ExpandToggle {
             has_children,
             is_expanded,
             children: Vec::new(),
+            base: WidgetBase::new(),
         }
     }
 }
@@ -71,6 +74,12 @@ impl Widget for ExpandToggle {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
         Size::new(EXPAND_W, available.height)
@@ -117,6 +126,7 @@ pub struct NodeIconWidget {
     bounds: Rect,
     pub icon: NodeIcon,
     children: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
 }
 
 impl NodeIconWidget {
@@ -125,6 +135,7 @@ impl NodeIconWidget {
             bounds: Rect::default(),
             icon,
             children: Vec::new(),
+            base: WidgetBase::new(),
         }
     }
 }
@@ -135,6 +146,12 @@ impl Widget for NodeIconWidget {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
         Size::new(ICON_W + ICON_GAP, available.height)
@@ -182,6 +199,7 @@ pub struct TreeRow {
     is_hovered: bool,
     focused: bool,
     children: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
 }
 
 impl TreeRow {
@@ -216,6 +234,7 @@ impl TreeRow {
             is_hovered,
             focused,
             children,
+            base: WidgetBase::new(),
         }
     }
 }
@@ -226,6 +245,12 @@ impl Widget for TreeRow {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
         let h = available.height;

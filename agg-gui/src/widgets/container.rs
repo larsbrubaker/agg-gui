@@ -6,9 +6,11 @@
 //! layout arrives in Phase 5.
 
 use crate::color::Color;
+use crate::device_scale::device_scale;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 /// A rectangular container widget.
@@ -19,11 +21,12 @@ use crate::widget::Widget;
 pub struct Container {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
     pub background: Color,
     pub border_color: Option<Color>,
     pub border_width: f64,
     pub corner_radius: f64,
-    pub padding: f64,
+    pub inner_padding: Insets,
 }
 
 impl Container {
@@ -32,11 +35,12 @@ impl Container {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
+            base: WidgetBase::new(),
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
             border_color: None,
             border_width: 1.0,
             corner_radius: 0.0,
-            padding: 0.0,
+            inner_padding: Insets::ZERO,
         }
     }
 
@@ -63,9 +67,20 @@ impl Container {
     }
 
     pub fn with_padding(mut self, p: f64) -> Self {
-        self.padding = p;
+        self.inner_padding = Insets::all(p);
         self
     }
+
+    pub fn with_inner_padding(mut self, p: Insets) -> Self {
+        self.inner_padding = p;
+        self
+    }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 }
 
 impl Default for Container {
@@ -82,23 +97,45 @@ impl Widget for Container {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
+
     fn layout(&mut self, available: Size) -> Size {
-        let pad = self.padding;
-        let inner_w = (available.width - pad * 2.0).max(0.0);
+        let pad_l = self.inner_padding.left;
+        let pad_r = self.inner_padding.right;
+        let pad_t = self.inner_padding.top;
+        let pad_b = self.inner_padding.bottom;
+        let inner_w = (available.width - pad_l - pad_r).max(0.0);
 
         // Stack children top-to-bottom (first child = visually highest).
         // In Y-up coordinates, "top" = higher Y values.
         // Start cursor at the top of the inner area; move it downward each step.
-        let mut cursor_y = available.height - pad;
+        // Child margins are additive: top margin pushes the cursor down before
+        // placing the child; bottom margin is consumed after it.
+        let scale = device_scale();
+        let mut cursor_y = available.height - pad_t;
 
         for child in self.children.iter_mut() {
-            let child_avail = Size::new(inner_w, cursor_y - pad);
-            let desired = child.layout(child_avail);
-            // Place child: its top edge is at cursor_y, bottom is cursor_y - height.
+            let m = child.margin().scale(scale);
+            let avail_w = (inner_w - m.left - m.right).max(0.0);
+            let avail_h = (cursor_y - pad_b - m.top - m.bottom).max(0.0);
+            let desired = child.layout(Size::new(avail_w, avail_h));
+
+            // Top margin moves the cursor down before the child is placed.
+            cursor_y -= m.top;
             let child_y = cursor_y - desired.height;
-            let child_bounds = Rect::new(pad, child_y, desired.width.min(inner_w), desired.height);
+            let child_bounds = Rect::new(
+                pad_l + m.left,
+                child_y,
+                desired.width.min(avail_w),
+                desired.height,
+            );
             child.set_bounds(child_bounds);
-            cursor_y = child_y - pad; // gap below this child
+            // Bottom margin is consumed below the child.
+            cursor_y = child_y - m.bottom;
         }
 
         // Container fills all available space.

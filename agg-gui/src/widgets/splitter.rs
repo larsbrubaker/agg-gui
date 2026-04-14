@@ -6,6 +6,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 /// A draggable divider that splits its two children horizontally.
@@ -14,6 +15,7 @@ use crate::widget::Widget;
 pub struct Splitter {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,  // exactly 2
+    base: WidgetBase,
     /// Split position as a fraction of total width. Clamped to [0.05, 0.95].
     pub ratio: f64,
     /// Width of the draggable divider strip.
@@ -28,6 +30,7 @@ impl Splitter {
         Self {
             bounds: Rect::default(),
             children: vec![left, right],
+            base: WidgetBase::new(),
             ratio: 0.5,
             divider_width: 6.0,
             hovered: false,
@@ -45,6 +48,12 @@ impl Splitter {
         self
     }
 
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+
     fn divider_x(&self) -> f64 {
         (self.bounds.width - self.divider_width) * self.ratio
     }
@@ -56,6 +65,12 @@ impl Widget for Splitter {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn hit_test(&self, local_pos: Point) -> bool {
         // Capture all events during drag, even if cursor leaves bounds.

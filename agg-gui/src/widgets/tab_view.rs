@@ -12,6 +12,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::primitives::Spacer;
@@ -28,6 +29,7 @@ pub struct TabView {
     bounds:           Rect,
     /// children[0]=active content, children[1]=sidebar (if any)
     children:         Vec<Box<dyn Widget>>,
+    base:             WidgetBase,
     tab_contents:     Vec<Box<dyn Widget>>,
     tab_labels:       Vec<String>,
     active_tab:       usize,
@@ -50,6 +52,7 @@ impl TabView {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
+            base: WidgetBase::new(),
             tab_contents: Vec::new(),
             tab_labels: Vec::new(),
             active_tab: 0,
@@ -69,6 +72,12 @@ impl TabView {
 
     pub fn with_tab_bar_height(mut self, h: f64) -> Self { self.tab_bar_height = h; self }
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     /// Add an action button at the right end of the tab bar.
     pub fn with_action_button(
@@ -171,6 +180,12 @@ impl Widget for TabView {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
         let content_h = (available.height - self.tab_bar_height).max(0.0);

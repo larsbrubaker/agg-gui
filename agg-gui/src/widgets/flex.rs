@@ -17,12 +17,126 @@
 //!   the remaining space after all fixed children are measured.
 //!
 //! Children with equal `flex` values split remaining space equally.
+//!
+//! # Child margin support
+//!
+//! Each child's `margin()` (scaled by `device_scale`) contributes to the slot
+//! size on the main axis and is respected for cross-axis placement.
+//! Margins are **additive** — child A's `margin.top` and child B's
+//! `margin.bottom` both contribute gap space between those children (in
+//! addition to `self.gap`).
+//!
+//! # Cross-axis anchoring
+//!
+//! `FlexColumn` reads each child's `h_anchor()` to place it horizontally
+//! within the column's inner width.  `FlexRow` reads `v_anchor()` to place
+//! children vertically within the row's inner height.
 
 use crate::color::Color;
+use crate::device_scale::device_scale;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase, resolve_fit_or_stretch};
 use crate::widget::Widget;
+
+// ---------------------------------------------------------------------------
+// Cross-axis placement helpers
+// ---------------------------------------------------------------------------
+
+/// Compute `(x, actual_width)` for a child in a `FlexColumn` (horizontal
+/// cross-axis placement).
+///
+/// - `pad_l`     — column's left inner-padding offset.
+/// - `inner_w`   — column's usable width (after padding, before margins).
+/// - `margin_l/r` — child's scaled left/right margins.
+/// - `natural_w` — width returned by `child.layout()`.
+/// - `min_w/max_w` — child's min/max width constraints.
+fn place_cross_h(
+    anchor: HAnchor,
+    pad_l:    f64,
+    inner_w:  f64,
+    margin_l: f64,
+    margin_r: f64,
+    natural_w: f64,
+    min_w: f64,
+    max_w: f64,
+) -> (f64, f64) {
+    let slot_w = (inner_w - margin_l - margin_r).max(0.0);
+
+    // Determine width.
+    let actual_w = if anchor.is_stretch() {
+        // LEFT | RIGHT → fill slot
+        slot_w.clamp(min_w, max_w)
+    } else if anchor == HAnchor::MAX_FIT_OR_STRETCH {
+        resolve_fit_or_stretch(natural_w, slot_w, true).clamp(min_w, max_w)
+    } else if anchor == HAnchor::MIN_FIT_OR_STRETCH {
+        resolve_fit_or_stretch(natural_w, slot_w, false).clamp(min_w, max_w)
+    } else {
+        // FIT, LEFT, RIGHT, CENTER, ABSOLUTE — use natural width.
+        natural_w.clamp(min_w, max_w)
+    };
+
+    // Determine x position.
+    let x = if anchor.contains(HAnchor::RIGHT) && !anchor.contains(HAnchor::LEFT) {
+        // RIGHT only (not stretch): right-align within margin slot.
+        (pad_l + inner_w - margin_r - actual_w).max(pad_l)
+    } else if anchor.contains(HAnchor::CENTER) && !anchor.is_stretch() {
+        // CENTER: center within margin slot.
+        pad_l + margin_l + (slot_w - actual_w) * 0.5
+    } else {
+        // LEFT, STRETCH, FIT, ABSOLUTE, MIN/MAX_FIT_OR_STRETCH — left-align.
+        pad_l + margin_l
+    };
+
+    (x, actual_w)
+}
+
+/// Compute `(y, actual_height)` for a child in a `FlexRow` (vertical
+/// cross-axis placement, Y-up).
+///
+/// - `pad_b`     — row's bottom inner-padding offset.
+/// - `inner_h`   — row's usable height (after padding, before margins).
+/// - `margin_b/t` — child's scaled bottom/top margins.
+/// - `natural_h` — height returned by `child.layout()`.
+/// - `min_h/max_h` — child's min/max height constraints.
+fn place_cross_v(
+    anchor: VAnchor,
+    pad_b:    f64,
+    inner_h:  f64,
+    margin_b: f64,
+    margin_t: f64,
+    natural_h: f64,
+    min_h: f64,
+    max_h: f64,
+) -> (f64, f64) {
+    let slot_h = (inner_h - margin_b - margin_t).max(0.0);
+
+    // Determine height.
+    let actual_h = if anchor.is_stretch() {
+        slot_h.clamp(min_h, max_h)
+    } else if anchor == VAnchor::MAX_FIT_OR_STRETCH {
+        resolve_fit_or_stretch(natural_h, slot_h, true).clamp(min_h, max_h)
+    } else if anchor == VAnchor::MIN_FIT_OR_STRETCH {
+        resolve_fit_or_stretch(natural_h, slot_h, false).clamp(min_h, max_h)
+    } else {
+        natural_h.clamp(min_h, max_h)
+    };
+
+    // Determine y position (Y-up: BOTTOM = low Y, TOP = high Y).
+    let y = if anchor.contains(VAnchor::TOP) && !anchor.contains(VAnchor::BOTTOM) {
+        // TOP only: top-align in slot.
+        (pad_b + inner_h - margin_t - actual_h).max(pad_b)
+    } else if anchor.contains(VAnchor::CENTER) && !anchor.is_stretch() {
+        // CENTER: center within margin slot.
+        pad_b + margin_b + (slot_h - actual_h) * 0.5
+    } else {
+        // BOTTOM, STRETCH, FIT, ABSOLUTE — bottom-align.
+        pad_b + margin_b
+    };
+
+    (y, actual_h)
+}
 
 // ---------------------------------------------------------------------------
 // FlexColumn
@@ -34,8 +148,9 @@ pub struct FlexColumn {
     children: Vec<Box<dyn Widget>>,
     /// Parallel to `children`. 0.0 = fixed; >0 = flex fraction.
     flex_factors: Vec<f64>,
+    base: WidgetBase,
     pub gap: f64,
-    pub padding: f64,
+    pub inner_padding: Insets,
     pub background: Color,
 }
 
@@ -45,15 +160,23 @@ impl FlexColumn {
             bounds: Rect::default(),
             children: Vec::new(),
             flex_factors: Vec::new(),
+            base: WidgetBase::new(),
             gap: 0.0,
-            padding: 0.0,
+            inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
         }
     }
 
     pub fn with_gap(mut self, gap: f64) -> Self { self.gap = gap; self }
-    pub fn with_padding(mut self, p: f64) -> Self { self.padding = p; self }
+    pub fn with_padding(mut self, p: f64) -> Self { self.inner_padding = Insets::all(p); self }
+    pub fn with_inner_padding(mut self, p: Insets) -> Self { self.inner_padding = p; self }
     pub fn with_background(mut self, c: Color) -> Self { self.background = c; self }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     /// Add a fixed-size child (flex = 0).
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
@@ -69,7 +192,7 @@ impl FlexColumn {
         self
     }
 
-    /// Push a child directly (for use with `children_mut()`).
+    /// Push a child directly (for use without builder chaining).
     pub fn push(&mut self, child: Box<dyn Widget>, flex: f64) {
         self.children.push(child);
         self.flex_factors.push(flex.max(0.0));
@@ -85,71 +208,125 @@ impl Widget for FlexColumn {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
+
     fn layout(&mut self, available: Size) -> Size {
-        let pad = self.padding;
-        let gap = self.gap;
-        let n = self.children.len();
+        let pad_l = self.inner_padding.left;
+        let pad_r = self.inner_padding.right;
+        let pad_t = self.inner_padding.top;
+        let pad_b = self.inner_padding.bottom;
+        let gap   = self.gap;
+        let n     = self.children.len();
         if n == 0 { return available; }
 
-        let inner_w = (available.width - pad * 2.0).max(0.0);
-        let inner_h = (available.height - pad * 2.0).max(0.0);
+        let inner_w = (available.width  - pad_l - pad_r).max(0.0);
+        let inner_h = (available.height - pad_t - pad_b).max(0.0);
+
+        // Scaled margins for all children (physical units).
+        let scale    = device_scale();
+        let margins: Vec<Insets> = self.children.iter()
+            .map(|c| c.margin().scale(scale))
+            .collect();
+
         let total_gap = if n > 1 { gap * (n - 1) as f64 } else { 0.0 };
 
-        // Step 1: measure fixed children.
-        let mut fixed_heights = vec![0.0f64; n];
-        let mut total_fixed = 0.0f64;
-        let mut total_flex = 0.0f64;
+        // -------------------------------------------------------------------
+        // Step 1: measure fixed children on the main (vertical) axis.
+        //
+        // The slot for each fixed child = content_h + margin_top + margin_bottom.
+        // Flex children contribute only their margins to the space budget.
+        // -------------------------------------------------------------------
+        let mut content_heights         = vec![0.0f64; n];
+        let mut total_fixed_with_margins = 0.0f64;
+        let mut total_flex               = 0.0f64;
+        let mut total_flex_margin_v      = 0.0f64;
+
         for i in 0..n {
+            let m     = &margins[i];
+            let slot_w = (inner_w - m.left - m.right).max(0.0);
             if self.flex_factors[i] == 0.0 {
-                // Give fixed children the full inner_w; height = inf for natural measure.
-                let desired = self.children[i].layout(Size::new(inner_w, inner_h));
-                fixed_heights[i] = desired.height;
-                total_fixed += desired.height;
+                // Measure at natural height; pass inner_h as the available
+                // height so the child can self-report its natural size.
+                let desired    = self.children[i].layout(Size::new(slot_w, inner_h));
+                let clamped_h  = desired.height
+                    .clamp(self.children[i].min_size().height,
+                           self.children[i].max_size().height);
+                content_heights[i]       = clamped_h;
+                total_fixed_with_margins += clamped_h + m.vertical();
             } else {
-                total_flex += self.flex_factors[i];
+                total_flex          += self.flex_factors[i];
+                total_flex_margin_v += m.vertical();
             }
         }
 
+        // -------------------------------------------------------------------
         // Step 2: distribute remaining space to flex children.
-        let remaining = (inner_h - total_fixed - total_gap).max(0.0);
+        // -------------------------------------------------------------------
+        let remaining = (inner_h
+            - total_fixed_with_margins
+            - total_gap
+            - total_flex_margin_v)
+            .max(0.0);
         let flex_unit = if total_flex > 0.0 { remaining / total_flex } else { 0.0 };
 
-        // Step 3: assign heights and lay out all children.
-        let mut assigned_heights = vec![0.0f64; n];
         for i in 0..n {
-            assigned_heights[i] = if self.flex_factors[i] == 0.0 {
-                fixed_heights[i]
-            } else {
-                self.flex_factors[i] * flex_unit
-            };
+            if self.flex_factors[i] > 0.0 {
+                let raw = self.flex_factors[i] * flex_unit;
+                content_heights[i] = raw
+                    .clamp(self.children[i].min_size().height,
+                           self.children[i].max_size().height);
+            }
         }
 
-        // Natural content height: the actual extent of all children + gaps.
-        // When there are no flex children this fully determines the column's
-        // size regardless of how much space the parent offered.  When flex
-        // children are present the parent-supplied inner_h is used so they
-        // can expand to fill.  This avoids placing children at astronomically
-        // large Y coordinates when a ScrollView passes f64::MAX / 2.0.
-        let natural_content_h = total_fixed + total_gap;
+        // Natural content height (all-fixed case) determines the column's
+        // reported size when there are no flex children.
+        let natural_content_h = total_fixed_with_margins + total_gap;
         let effective_h = if total_flex > 0.0 { inner_h } else { natural_content_h };
 
-        // Step 4: place children top-to-bottom in Y-up.
-        let mut cursor_y = pad + effective_h;
+        // -------------------------------------------------------------------
+        // Step 3: place children top-to-bottom.
+        //
+        // In Y-up coordinates "top" = high Y.  The cursor starts at the top
+        // of the inner area and decrements for each child.
+        // -------------------------------------------------------------------
+        let mut cursor_y = pad_b + effective_h;
+
         for i in 0..n {
-            let ch = assigned_heights[i];
-            let child_y = cursor_y - ch; // bottom-left of this child
-            let desired = self.children[i].layout(Size::new(inner_w, ch));
-            let actual_w = desired.width.min(inner_w);
-            self.children[i].set_bounds(Rect::new(pad, child_y, actual_w, ch));
-            cursor_y = child_y - gap;
+            let m          = &margins[i];
+            let slot_w     = (inner_w - m.left - m.right).max(0.0);
+            let content_h  = content_heights[i];
+
+            // Subtract top margin first (moves cursor toward lower Y = downward).
+            cursor_y -= m.top;
+            let child_bottom = cursor_y - content_h;
+
+            // Layout child to obtain its natural width for cross-axis placement.
+            let desired   = self.children[i].layout(Size::new(slot_w, content_h));
+            let natural_w = desired.width;
+            let h_anchor  = self.children[i].h_anchor();
+            let min_w     = self.children[i].min_size().width;
+            let max_w     = self.children[i].max_size().width;
+
+            let (child_x, child_w) = place_cross_h(
+                h_anchor, pad_l, inner_w, m.left, m.right, natural_w, min_w, max_w,
+            );
+
+            self.children[i].set_bounds(Rect::new(child_x, child_bottom, child_w, content_h));
+
+            // Advance cursor past bottom margin and inter-child gap.
+            cursor_y = child_bottom - m.bottom - gap;
         }
 
-        // Return natural size for all-fixed layouts.  This lets ScrollView
-        // read the true content_height from layout()'s return value.
+        // Return natural size for all-fixed layouts so ScrollView can read
+        // the true content height from layout()'s return value.
         if total_flex > 0.0 {
             available
         } else {
-            Size::new(available.width, natural_content_h + pad * 2.0)
+            Size::new(available.width, natural_content_h + pad_t + pad_b)
         }
     }
 
@@ -176,8 +353,9 @@ pub struct FlexRow {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     flex_factors: Vec<f64>,
+    base: WidgetBase,
     pub gap: f64,
-    pub padding: f64,
+    pub inner_padding: Insets,
     pub background: Color,
 }
 
@@ -187,15 +365,23 @@ impl FlexRow {
             bounds: Rect::default(),
             children: Vec::new(),
             flex_factors: Vec::new(),
+            base: WidgetBase::new(),
             gap: 0.0,
-            padding: 0.0,
+            inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
         }
     }
 
     pub fn with_gap(mut self, gap: f64) -> Self { self.gap = gap; self }
-    pub fn with_padding(mut self, p: f64) -> Self { self.padding = p; self }
+    pub fn with_padding(mut self, p: f64) -> Self { self.inner_padding = Insets::all(p); self }
+    pub fn with_inner_padding(mut self, p: Insets) -> Self { self.inner_padding = p; self }
     pub fn with_background(mut self, c: Color) -> Self { self.background = c; self }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
@@ -224,58 +410,111 @@ impl Widget for FlexRow {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
+
     fn layout(&mut self, available: Size) -> Size {
-        let pad = self.padding;
-        let gap = self.gap;
-        let n = self.children.len();
+        let pad_l = self.inner_padding.left;
+        let pad_r = self.inner_padding.right;
+        let pad_t = self.inner_padding.top;
+        let pad_b = self.inner_padding.bottom;
+        let gap   = self.gap;
+        let n     = self.children.len();
         if n == 0 { return available; }
 
-        let inner_w = (available.width - pad * 2.0).max(0.0);
-        let inner_h = (available.height - pad * 2.0).max(0.0);
+        let inner_w = (available.width  - pad_l - pad_r).max(0.0);
+        let inner_h = (available.height - pad_t - pad_b).max(0.0);
+
+        let scale   = device_scale();
+        let margins: Vec<Insets> = self.children.iter()
+            .map(|c| c.margin().scale(scale))
+            .collect();
+
         let total_gap = if n > 1 { gap * (n - 1) as f64 } else { 0.0 };
 
-        // Measure fixed children.
-        let mut fixed_widths = vec![0.0f64; n];
-        let mut total_fixed = 0.0f64;
-        let mut total_flex = 0.0f64;
+        // -------------------------------------------------------------------
+        // Step 1: measure fixed children on the main (horizontal) axis.
+        // -------------------------------------------------------------------
+        let mut content_widths           = vec![0.0f64; n];
+        let mut total_fixed_with_margins  = 0.0f64;
+        let mut total_flex               = 0.0f64;
+        let mut total_flex_margin_h      = 0.0f64;
+
         for i in 0..n {
+            let m      = &margins[i];
+            let slot_h = (inner_h - m.bottom - m.top).max(0.0);
             if self.flex_factors[i] == 0.0 {
-                let desired = self.children[i].layout(Size::new(inner_w, inner_h));
-                fixed_widths[i] = desired.width;
-                total_fixed += desired.width;
+                // Pass inner_w as available width so the child can report its
+                // natural width.
+                let desired   = self.children[i].layout(Size::new(inner_w, slot_h));
+                let clamped_w = desired.width
+                    .clamp(self.children[i].min_size().width,
+                           self.children[i].max_size().width);
+                content_widths[i]          = clamped_w;
+                total_fixed_with_margins   += clamped_w + m.horizontal();
             } else {
-                total_flex += self.flex_factors[i];
+                total_flex          += self.flex_factors[i];
+                total_flex_margin_h += m.horizontal();
             }
         }
 
-        let remaining = (inner_w - total_fixed - total_gap).max(0.0);
+        // -------------------------------------------------------------------
+        // Step 2: distribute remaining space to flex children.
+        // -------------------------------------------------------------------
+        let remaining = (inner_w
+            - total_fixed_with_margins
+            - total_gap
+            - total_flex_margin_h)
+            .max(0.0);
         let flex_unit = if total_flex > 0.0 { remaining / total_flex } else { 0.0 };
 
-        // Assign widths and lay out left-to-right.
-        let mut cursor_x = pad;
         for i in 0..n {
-            let cw = if self.flex_factors[i] == 0.0 {
-                fixed_widths[i]
-            } else {
-                self.flex_factors[i] * flex_unit
-            };
-            let desired = self.children[i].layout(Size::new(cw, inner_h));
-            let actual_h = desired.height.min(inner_h);
-            // Align to the bottom of the row (y = pad).
-            self.children[i].set_bounds(Rect::new(cursor_x, pad, cw, actual_h));
-            cursor_x += cw + gap;
+            if self.flex_factors[i] > 0.0 {
+                let raw = self.flex_factors[i] * flex_unit;
+                content_widths[i] = raw
+                    .clamp(self.children[i].min_size().width,
+                           self.children[i].max_size().width);
+            }
         }
 
-        // Return the natural (intrinsic) height: tallest child + vertical padding.
-        // Returning `available` would propagate a huge height (e.g. f64::MAX/2 from
-        // ScrollView) when this FlexRow is a fixed child of a FlexColumn, causing
-        // the FlexColumn to place all sibling widgets at near-zero or negative Y and
-        // making the scroll content appear astronomically tall — which in turn gives
-        // AGG coordinates near ±4.5e15, overflowing its rasterizer.
-        let max_child_h = self.children.iter()
-            .map(|c| c.bounds().height)
-            .fold(0.0_f64, f64::max);
-        let natural_h = max_child_h + pad * 2.0;
+        // -------------------------------------------------------------------
+        // Step 3: place children left-to-right with cross-axis anchoring.
+        // -------------------------------------------------------------------
+        let mut cursor_x         = pad_l;
+        let mut max_slot_h       = 0.0f64; // tallest slot (content + margins)
+
+        for i in 0..n {
+            let m          = &margins[i];
+            let slot_h     = (inner_h - m.bottom - m.top).max(0.0);
+            let content_w  = content_widths[i];
+
+            // Advance past left margin.
+            cursor_x += m.left;
+
+            // Layout child to get natural height for cross-axis placement.
+            let desired   = self.children[i].layout(Size::new(content_w, slot_h));
+            let natural_h = desired.height;
+            let v_anchor  = self.children[i].v_anchor();
+            let min_h     = self.children[i].min_size().height;
+            let max_h     = self.children[i].max_size().height;
+
+            let (child_y, child_h) = place_cross_v(
+                v_anchor, pad_b, inner_h, m.bottom, m.top, natural_h, min_h, max_h,
+            );
+
+            self.children[i].set_bounds(Rect::new(cursor_x, child_y, content_w, child_h));
+            max_slot_h = max_slot_h.max(child_h + m.vertical());
+
+            // Advance past content width, right margin, and inter-child gap.
+            cursor_x += content_w + m.right + gap;
+        }
+
+        // Return the natural (intrinsic) height to avoid propagating huge
+        // heights from ScrollView (which passes f64::MAX/2) through fixed rows.
+        let natural_h = max_slot_h + pad_t + pad_b;
         Size::new(available.width, natural_h)
     }
 

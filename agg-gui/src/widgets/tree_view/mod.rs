@@ -23,6 +23,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
@@ -50,6 +51,7 @@ pub struct TreeView {
     bounds: Rect,
     /// One `TreeRow` per currently-visible node; rebuilt each `layout()` call.
     row_widgets: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
     /// Parallel to `row_widgets` — metadata for hit-testing in `on_event()`.
     row_metas: Vec<RowMeta>,
 
@@ -101,6 +103,7 @@ impl TreeView {
         Self {
             bounds: Rect::default(),
             row_widgets: Vec::new(),
+            base: WidgetBase::new(),
             row_metas: Vec::new(),
             nodes: Vec::new(),
             scroll_offset: 0.0,
@@ -128,6 +131,12 @@ impl TreeView {
     pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
     pub fn with_drag_enabled(mut self) -> Self { self.drag_enabled = true; self }
     pub fn with_toggle_on_row_click(mut self) -> Self { self.toggle_on_row_click = true; self }
+
+    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
+    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     /// Add a root-level node; returns its index.
     pub fn add_root(&mut self, label: impl Into<String>, icon: NodeIcon) -> usize {
@@ -279,6 +288,12 @@ impl Widget for TreeView {
     fn children(&self) -> &[Box<dyn Widget>] { &self.row_widgets }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.row_widgets }
     fn is_focusable(&self) -> bool { true }
+
+    fn margin(&self)   -> Insets  { self.base.margin }
+    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
+    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn min_size(&self) -> Size    { self.base.min_size }
+    fn max_size(&self) -> Size    { self.base.max_size }
 
     fn hit_test(&self, local_pos: Point) -> bool {
         // Capture all events during drags even if cursor leaves bounds.

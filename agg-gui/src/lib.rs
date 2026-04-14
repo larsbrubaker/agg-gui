@@ -25,23 +25,27 @@
 //! the rationale.
 
 pub mod color;
+pub mod device_scale;
 pub mod draw_ctx;
 pub mod event;
 pub mod framebuffer;
 pub mod geometry;
 pub mod gfx_ctx;
 pub mod gl_renderer;
+pub mod layout_props;
 pub mod text;
 pub mod widget;
 pub mod widgets;
 
 // Re-export the most commonly used types at the crate root.
 pub use color::Color;
+pub use device_scale::{device_scale, set_device_scale};
 pub use draw_ctx::DrawCtx;
 pub use event::{Event, EventResult, Key, Modifiers, MouseButton};
 pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};
 pub use gfx_ctx::GfxCtx;
+pub use layout_props::{HAnchor, Insets, VAnchor, WidgetBase, resolve_fit_or_stretch};
 pub use text::{Font, TextMetrics};
 pub use widget::{App, InspectorNode, Widget, collect_inspector_nodes};
 pub use widgets::{Button, Checkbox, Container, FlexColumn, FlexRow, InspectorPanel,
