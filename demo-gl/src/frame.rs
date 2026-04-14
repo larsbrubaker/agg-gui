@@ -28,8 +28,17 @@ use crate::{GlGfxCtx, draw_hover_overlay, draw_status_overlay};
 /// Clear the GL framebuffer and configure blend state for a new frame.
 ///
 /// Sets the viewport to `(0, 0, width, height)`, clears colour + depth,
-/// enables `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` blending, and disables depth
-/// testing and scissor — the standard 2-D UI render state.
+/// enables standard alpha blending, and disables depth testing and scissor.
+///
+/// Uses `blend_func_separate` so that the RGB channels blend with
+/// `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` (normal Porter-Duff over) while the
+/// **alpha channel** of the framebuffer is always kept at 1.0 (`ZERO / ONE`).
+/// This prevents the WebGL canvas from becoming semi-transparent when widgets
+/// with alpha < 1 are drawn — if the framebuffer alpha dropped below 1 the
+/// browser would composite the semi-transparent canvas over the white webpage
+/// background, making semi-transparent colours (e.g. the text-selection
+/// highlight) appear washed out or invisible.  On native OpenGL the alpha
+/// channel of the default framebuffer is unused, so this setting is harmless.
 ///
 /// Call once per frame before any draw calls on both native and WASM paths.
 pub fn begin_frame(gl: &glow::Context, width: u32, height: u32) {
@@ -38,7 +47,12 @@ pub fn begin_frame(gl: &glow::Context, width: u32, height: u32) {
         gl.clear_color(0.1, 0.1, 0.1, 1.0);
         gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         gl.enable(glow::BLEND);
-        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+        // RGB: standard alpha compositing.
+        // Alpha: keep framebuffer alpha at 1.0 (no change from destination).
+        gl.blend_func_separate(
+            glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA,  // RGB factors
+            glow::ZERO,      glow::ONE,                   // alpha factors
+        );
         gl.disable(glow::DEPTH_TEST);
         gl.disable(glow::SCISSOR_TEST);
     }
