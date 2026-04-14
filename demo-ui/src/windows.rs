@@ -310,6 +310,134 @@ pub fn password(font: Arc<Font>) -> Box<dyn Widget> {
 }
 
 // ---------------------------------------------------------------------------
+// Toggle Switch demo
+// ---------------------------------------------------------------------------
+
+pub fn toggle_switch_demo(font: Arc<Font>) -> Box<dyn Widget> {
+    let mut col = FlexColumn::new()
+        .with_gap(16.0)
+        .with_padding(16.0)
+        .with_background(Color::rgb(0.97, 0.97, 0.98));
+
+    col.push(Box::new(Label::new("Basic toggles", Arc::clone(&font))
+        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+
+    for (label, initial) in [
+        ("Wi-Fi",        true),
+        ("Bluetooth",    true),
+        ("Notifications",false),
+        ("Dark Mode",    false),
+        ("Auto-update",  true),
+    ] {
+        let cell = Rc::new(Cell::new(initial));
+        let row = FlexRow::new().with_gap(12.0)
+            .add(Box::new(ToggleSwitch::new(initial).with_state_cell(Rc::clone(&cell))))
+            .add(Box::new(Label::new(label, Arc::clone(&font)).with_font_size(13.0)));
+        col.push(Box::new(row), 0.0);
+    }
+
+    col.push(Box::new(Separator::horizontal()), 0.0);
+    col.push(Box::new(Label::new(
+        "Click or Space/Enter to toggle. Tab to focus.",
+        Arc::clone(&font),
+    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.35))), 0.0);
+
+    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+    Box::new(ScrollView::new(Box::new(col)))
+}
+
+// ---------------------------------------------------------------------------
+// Code Editor demo
+// ---------------------------------------------------------------------------
+
+pub fn code_editor(font: Arc<Font>) -> Box<dyn Widget> {
+    const SAMPLE: &str = "\
+fn main() {\n\
+    let greeting = \"Hello, agg-gui!\";\n\
+    println!(\"{}\", greeting);\n\
+\n\
+    let values: Vec<f64> = (0..10)\n\
+        .map(|i| i as f64 * 0.1)\n\
+        .collect();\n\
+\n\
+    for (i, v) in values.iter().enumerate() {\n\
+        println!(\"[{i}] {v:.2}\");\n\
+    }\n\
+}";
+
+    let bg = Color::rgb(0.12, 0.13, 0.15);
+    let mut col = FlexColumn::new()
+        .with_gap(0.0)
+        .with_background(bg);
+
+    col.push(Box::new(Label::new("main.rs", Arc::clone(&font))
+        .with_font_size(11.0)
+        .with_color(Color::rgba(1.0, 1.0, 1.0, 0.45))), 0.0);
+    col.push(Box::new(Separator::horizontal()), 0.0);
+
+    // Render each line as a label — simple but effective without a real editor widget.
+    for (i, line) in SAMPLE.lines().enumerate() {
+        let line_num = format!("{:>3}  ", i + 1);
+        let row = FlexRow::new().with_gap(0.0)
+            .add(Box::new(Label::new(line_num, Arc::clone(&font))
+                .with_font_size(12.5)
+                .with_color(Color::rgba(1.0, 1.0, 1.0, 0.22))))
+            .add(Box::new(Label::new(line, Arc::clone(&font))
+                .with_font_size(12.5)
+                .with_color(Color::rgba(0.85, 0.90, 0.95, 1.0))));
+        col.push(Box::new(row), 0.0);
+    }
+
+    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+
+    // Editable single-line command bar at the bottom.
+    let bar = FlexRow::new().with_gap(8.0)
+        .add(Box::new(Label::new(">", Arc::clone(&font))
+            .with_font_size(13.0)
+            .with_color(Color::rgb(0.4, 0.8, 0.4))))
+        .add_flex(Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
+            TextField::new(Arc::clone(&font))
+                .with_font_size(13.0)
+                .with_placeholder("command…")
+        ))), 1.0);
+    col.push(Box::new(bar), 0.0);
+
+    Box::new(ScrollView::new(Box::new(col)))
+}
+
+// ---------------------------------------------------------------------------
+// Tooltips demo
+// ---------------------------------------------------------------------------
+
+pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
+    let mut col = FlexColumn::new()
+        .with_gap(14.0)
+        .with_padding(16.0)
+        .with_background(Color::rgb(0.97, 0.97, 0.98));
+
+    col.push(Box::new(Label::new("Tooltip demos", Arc::clone(&font))
+        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+
+    for label in ["Hover me (A)", "Hover me (B)", "Hover me (C)"] {
+        col.push(Box::new(SizedBox::new().with_height(30.0).with_child(Box::new(
+            Button::new(label, Arc::clone(&font))
+                .with_font_size(13.0)
+                .on_click(|| {})
+        ))), 0.0);
+    }
+
+    col.push(Box::new(Separator::horizontal()), 0.0);
+    col.push(Box::new(Label::new(
+        "Tooltip widget not yet implemented — hover state tracked, \
+         overlay rendering planned for Phase 5.",
+        Arc::clone(&font),
+    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+
+    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+    Box::new(col)
+}
+
+// ---------------------------------------------------------------------------
 // 3D Cube window content (wraps a platform-provided GL widget)
 // ---------------------------------------------------------------------------
 

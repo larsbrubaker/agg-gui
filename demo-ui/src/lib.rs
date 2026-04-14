@@ -315,9 +315,12 @@ pub fn build_demo_ui(
 fn build_demo_content(title: &str, font: Arc<Font>) -> Box<dyn Widget> {
     match title {
         "Widget Gallery" => windows::widget_gallery(font),
+        "Code Editor"    => windows::code_editor(font),
         "Password"       => windows::password(font),
         "Sliders"        => windows::sliders(font),
         "Text Edit"      => windows::text_edit(font),
+        "Toggle Switch"  => windows::toggle_switch_demo(font),
+        "Tooltips"       => windows::tooltips(font),
         _                => windows::coming_soon(),
     }
 }
