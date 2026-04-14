@@ -101,4 +101,25 @@ pub trait DrawCtx {
     fn scale(&mut self, sx: f64, sy: f64);
     fn set_transform(&mut self, m: TransAffine);
     fn reset_transform(&mut self);
+
+    // ── Compositing layers ────────────────────────────────────────────────────
+
+    /// Begin a new transparent compositing layer of the given pixel dimensions.
+    ///
+    /// All subsequent drawing (by this widget and its descendants) is redirected
+    /// into the new layer until [`pop_layer`] is called.  Layers nest: each
+    /// `push_layer` must be matched by exactly one `pop_layer`.
+    ///
+    /// The current accumulated transform records the layer's screen-space origin;
+    /// drawing inside the layer uses a fresh local-space transform (origin 0,0).
+    ///
+    /// Implementations that do not support layers (e.g. the GL path) may leave
+    /// this as a no-op — the widget renders pass-through into the parent target.
+    fn push_layer(&mut self, _width: f64, _height: f64) {}
+
+    /// Composite the current layer back into the previous render target using
+    /// SrcOver alpha blending, then discard the layer.
+    ///
+    /// Must be called after a matching `push_layer`.  Unmatched calls are ignored.
+    fn pop_layer(&mut self) {}
 }

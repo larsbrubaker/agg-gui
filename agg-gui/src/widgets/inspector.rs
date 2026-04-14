@@ -22,6 +22,40 @@ use crate::text::Font;
 use crate::widget::{InspectorNode, Widget};
 use crate::widgets::tree_view::{NodeIcon, TreeNode, TreeView};
 
+// ── InternalPresenceNode ──────────────────────────────────────────────────────
+
+/// Transparent placeholder child representing the inspector's internal `TreeView`
+/// in the widget inspector tree.
+///
+/// This makes `InspectorPanel` appear as an expandable node (with one child) in
+/// the inspector rather than a leaf, so the user can see that the panel contains
+/// an internal tree.
+///
+/// Hit-test is always `false` (no event interception).  Paint is a no-op (the
+/// real `TreeView` is painted directly by `InspectorPanel`).
+/// `contributes_children_to_inspector` returns `false` to stop the inspector
+/// from recursing into row_widgets, which would grow the node list exponentially.
+///
+/// Bounds are kept in sync with the real `TreeView` by `InspectorPanel::layout`.
+struct InternalPresenceNode {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+    name:     &'static str,
+}
+
+impl Widget for InternalPresenceNode {
+    fn type_name(&self) -> &'static str { self.name }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn layout(&mut self, _: Size) -> Size { Size::new(self.bounds.width, self.bounds.height) }
+    fn paint(&mut self, _: &mut dyn DrawCtx) {}
+    fn hit_test(&self, _: Point) -> bool { false }
+    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn contributes_children_to_inspector(&self) -> bool { false }
+}
+
 // ── geometry constants ────────────────────────────────────────────────────────
 const DEFAULT_PROPS_H: f64 = 180.0;
 const FONT_SIZE:       f64 = 12.0;
@@ -70,7 +104,9 @@ fn translate_event(event: &Event, offset_y: f64) -> Event {
 
 pub struct InspectorPanel {
     bounds:         Rect,
-    /// Always empty — children are not exposed; TreeView is managed directly.
+    /// Contains exactly one `InternalPresenceNode` (a transparent proxy for the
+    /// internal `TreeView`).  This makes InspectorPanel non-leaf in the inspector
+    /// so the user can see it has internal structure.
     _children:      Vec<Box<dyn Widget>>,
     font:           Arc<Font>,
     nodes:          Rc<RefCell<Vec<InspectorNode>>>,
@@ -96,7 +132,11 @@ impl InspectorPanel {
             .with_indent_width(14.0);
         Self {
             bounds: Rect::default(),
-            _children: Vec::new(),
+            _children: vec![Box::new(InternalPresenceNode {
+                bounds:   Rect::default(),
+                children: Vec::new(),
+                name:     "TreeView",
+            })],
             font,
             nodes,
             selected: None,
@@ -224,6 +264,10 @@ impl Widget for InspectorPanel {
         let tree_h   = (tree_top - tree_bot).max(0.0);
         self.tree_view.set_bounds(Rect::new(0.0, tree_bot, tree_w, tree_h));
         self.tree_view.layout(Size::new(tree_w, tree_h));
+
+        // Keep the presence node's bounds in sync with the real TreeView so the
+        // inspector displays accurate bounds for this proxy entry.
+        self._children[0].set_bounds(self.tree_view.bounds());
 
         available
     }
@@ -424,8 +468,39 @@ impl InspectorPanel {
             ctx.stroke();
         }
 
+        // Type-specific widget properties (from Widget::properties()).
+        let prop_start_y = row_start_y - rows.len() as f64 * 18.0 - 4.0;
+        for (j, (prop_label, prop_value)) in node.properties.iter().enumerate() {
+            let ry = prop_start_y - j as f64 * 18.0;
+            if ry < 4.0 { break; }
+            ctx.set_fill_color(c_dim_text());
+            ctx.fill_text(prop_label, 12.0, ry);
+            // Bool properties: green=true, red=false; others use normal text color.
+            let is_bool = prop_value == "true" || prop_value == "false";
+            if is_bool {
+                let bool_color = if prop_value == "true" {
+                    Color::rgb(0.10, 0.52, 0.10)
+                } else {
+                    Color::rgb(0.65, 0.18, 0.18)
+                };
+                ctx.set_fill_color(bool_color);
+            } else {
+                ctx.set_fill_color(c_text());
+            }
+            if let Some(m) = ctx.measure_text(prop_value) {
+                ctx.fill_text(prop_value, w - m.width - 10.0, ry);
+            }
+            ctx.set_stroke_color(c_border());
+            ctx.set_line_width(0.5);
+            ctx.begin_path();
+            ctx.move_to(8.0, ry - 4.0);
+            ctx.line_to(w - 8.0, ry - 4.0);
+            ctx.stroke();
+        }
+
         // Box-model mini diagram
-        let diag_h = (row_start_y - rows.len() as f64 * 18.0 - 12.0).min(80.0);
+        let total_rows = rows.len() + node.properties.len();
+        let diag_h = (row_start_y - total_rows as f64 * 18.0 - 12.0).min(80.0);
         if diag_h > 30.0 {
             let diag_y_top = diag_h - 4.0;
             let diag_w     = w - 20.0;

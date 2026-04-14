@@ -639,16 +639,19 @@ fn test_inspector_row0_at_top() {
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
     let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
-        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1 },
+        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
+        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1, properties: vec![] },
     ]));
 
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), Rc::clone(&hovered_bounds));
     panel.layout(crate::Size::new(200.0, 300.0));
     panel.set_bounds(Rect::new(0.0, 0.0, 200.0, 300.0));
 
-    // InspectorPanel exposes no children — TreeView is managed directly.
-    assert!(panel.children().is_empty(), "InspectorPanel children must be empty");
+    // InspectorPanel exposes one InternalPresenceNode child so it appears
+    // expandable in the inspector (not a leaf node).
+    assert_eq!(panel.children().len(), 1, "InspectorPanel must have one presence child");
+    assert_eq!(panel.children()[0].type_name(), "TreeView",
+               "The presence child must report type_name 'TreeView'");
 
     // The TreeView should have exactly 2 nodes (one per InspectorNode).
     assert_eq!(panel.tree_view.nodes.len(), 2, "tree_view must have 2 nodes");
@@ -685,9 +688,9 @@ fn test_inspector_tree_populates_from_nodes() {
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
     let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root",    screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
-        InspectorNode { type_name: "Child",   screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1 },
-        InspectorNode { type_name: "Sibling", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 0 },
+        InspectorNode { type_name: "Root",    screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
+        InspectorNode { type_name: "Child",   screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1, properties: vec![] },
+        InspectorNode { type_name: "Sibling", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 0, properties: vec![] },
     ]));
 
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
@@ -705,8 +708,12 @@ fn test_inspector_tree_populates_from_nodes() {
     // Sibling is another root-level node.
     assert!(panel.tree_view.nodes[2].parent.is_none(), "node 2 must be root-level");
 
-    // InspectorPanel.children() returns empty — TreeView is not in child slice.
-    assert!(panel.children().is_empty(), "InspectorPanel.children() must be empty");
+    // InspectorPanel.children() exposes one InternalPresenceNode so it is
+    // non-leaf in the inspector tree; the proxy reports type_name "TreeView".
+    assert_eq!(panel.children().len(), 1,
+               "InspectorPanel must have one presence child");
+    assert_eq!(panel.children()[0].type_name(), "TreeView",
+               "Presence child must report type_name 'TreeView'");
 }
 
 /// All nodes must be expanded by default so the full tree is visible on first show.
@@ -723,8 +730,8 @@ fn test_inspector_tree_default_expanded() {
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
     let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
-        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1 },
+        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
+        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1, properties: vec![] },
     ]));
 
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
@@ -749,7 +756,7 @@ fn test_inspector_tree_drag_disabled() {
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
     let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root", screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0 },
+        InspectorNode { type_name: "Root", screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
     ]));
 
     let panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
@@ -862,6 +869,7 @@ fn test_inspector_top_row_appears_at_top_of_tree_area() {
             type_name: "Window",
             screen_bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
             depth: 0,
+            properties: vec![],
         },
     ]));
     let hovered = Rc::new(RefCell::new(None));
@@ -938,4 +946,338 @@ fn test_treeview_drag_node_excluded_from_row_widgets() {
     // The dragged node should be excluded → only 1 row widget
     assert_eq!(tv.children().len(), 1,
         "dragged node must be excluded from row_widgets during live drag");
+}
+
+// ---------------------------------------------------------------------------
+// Composition tests — Button with Label child
+// ---------------------------------------------------------------------------
+
+/// Button must have exactly one child widget of type "Label" after layout.
+#[test]
+fn test_button_has_label_child() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+    let mut btn = Button::new("Click me", font);
+    btn.layout(Size::new(200.0, 40.0));
+    assert_eq!(btn.children().len(), 1, "Button must expose exactly one Label child");
+    assert_eq!(btn.children()[0].type_name(), "Label",
+               "Button's child must be a Label widget");
+}
+
+/// After layout(), the Label child must have tight text bounds and be centred
+/// within the button area.
+#[test]
+fn test_button_label_child_fills_button() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+    let mut btn = Button::new("Click me", font);
+    let size = btn.layout(Size::new(300.0, 50.0));
+    let label_bounds = btn.children()[0].bounds();
+    // Tight bounds: label width must be less than button width.
+    assert!(label_bounds.width < size.width,
+            "Label width must be tight (less than button width); got label_w={} btn_w={}",
+            label_bounds.width, size.width);
+    assert!(label_bounds.width > 0.0, "Label width must be positive");
+    assert!(label_bounds.height > 0.0, "Label height must be positive");
+    // Label must be horizontally centred: x ≈ (button_w - label_w) / 2.
+    let expected_x = (size.width - label_bounds.width) * 0.5;
+    assert!((label_bounds.x - expected_x).abs() < 1.0,
+            "Label must be horizontally centred; expected x≈{:.1}, got x={:.1}",
+            expected_x, label_bounds.x);
+    // Label must be vertically centred.
+    let expected_y = (size.height - label_bounds.height) * 0.5;
+    assert!((label_bounds.y - expected_y).abs() < 1.0,
+            "Label must be vertically centred; expected y≈{:.1}, got y={:.1}",
+            expected_y, label_bounds.y);
+}
+
+/// Label::properties() must include text, font_size, and has_backbuffer.
+#[test]
+fn test_label_properties() {
+    use std::sync::Arc;
+    use crate::{Label, text::Font};
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+    let label = Label::new("Hello", font).with_font_size(13.0);
+    let props: std::collections::HashMap<_, _> = label.properties().into_iter().collect();
+    assert!(props.contains_key("text"), "Label must expose 'text' property");
+    assert_eq!(props["text"], "Hello");
+    assert!(props.contains_key("has_backbuffer"), "Label must expose 'has_backbuffer'");
+    assert_eq!(props["has_backbuffer"], "false");
+}
+
+/// Button properties must include the label text.
+#[test]
+fn test_button_properties() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+    let btn = Button::new("Primary Action", font);
+    let props: std::collections::HashMap<_, _> = btn.properties().into_iter().collect();
+    assert!(props.contains_key("label"), "Button must expose 'label' property");
+    assert_eq!(props["label"], "Primary Action");
+}
+
+/// collect_inspector_nodes must show Button at depth 0 and Label at depth 1.
+#[test]
+fn test_button_inspector_hierarchy() {
+    use std::sync::Arc;
+    use crate::{text::Font, widget::collect_inspector_nodes, geometry::{Point, Rect}};
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+    let mut btn = Button::new("OK", font);
+    btn.layout(Size::new(200.0, 40.0));
+    btn.set_bounds(Rect::new(0.0, 0.0, 200.0, 40.0));
+    let mut nodes = Vec::new();
+    let boxed: Box<dyn Widget> = Box::new(btn);
+    collect_inspector_nodes(boxed.as_ref(), 0, Point::new(0.0, 0.0), &mut nodes);
+    assert!(nodes.len() >= 2, "Must have at least Button + Label nodes");
+    assert_eq!(nodes[0].type_name, "Button");
+    assert_eq!(nodes[0].depth, 0);
+    assert_eq!(nodes[1].type_name, "Label");
+    assert_eq!(nodes[1].depth, 1);
+}
+
+/// Invisible widgets must be excluded from the inspector snapshot (and their
+/// entire subtrees must be omitted).  A closed Window should disappear from
+/// the inspector just as it disappears from the rendered scene.
+#[test]
+fn test_invisible_widget_excluded_from_inspector() {
+    use crate::widget::{collect_inspector_nodes, Widget};
+    use crate::geometry::{Point, Rect, Size};
+    use crate::event::{Event, EventResult};
+    use crate::draw_ctx::DrawCtx;
+
+    /// Minimal widget whose visibility can be toggled.
+    struct ToggleWidget {
+        bounds:   Rect,
+        visible:  bool,
+        children: Vec<Box<dyn Widget>>,
+    }
+    impl Widget for ToggleWidget {
+        fn type_name(&self) -> &'static str { "ToggleWidget" }
+        fn is_visible(&self) -> bool { self.visible }
+        fn bounds(&self) -> Rect { self.bounds }
+        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+        fn layout(&mut self, available: Size) -> Size { available }
+        fn paint(&mut self, _: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    }
+
+    let visible = ToggleWidget {
+        bounds: Rect::new(0.0, 0.0, 100.0, 40.0),
+        visible: true,
+        children: Vec::new(),
+    };
+    let hidden = ToggleWidget {
+        bounds: Rect::new(0.0, 50.0, 100.0, 40.0),
+        visible: false,
+        children: Vec::new(),
+    };
+
+    let mut nodes = Vec::new();
+    collect_inspector_nodes(&visible, 0, Point::ORIGIN, &mut nodes);
+    assert_eq!(nodes.len(), 1, "visible widget appears once");
+    assert_eq!(nodes[0].type_name, "ToggleWidget");
+
+    nodes.clear();
+    collect_inspector_nodes(&hidden, 0, Point::ORIGIN, &mut nodes);
+    assert!(nodes.is_empty(), "invisible widget produces no inspector nodes");
+}
+
+/// `toggle_on_row_click = false` (the inspector's mode): clicking a row
+/// SELECTS it but does NOT toggle its expansion state.  This prevents the
+/// inspector tree from collapsing to one visible line when the user clicks on
+/// the root node to inspect it.
+#[test]
+fn test_treeview_click_selects_without_collapsing_when_flag_off() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::geometry::{Point, Size};
+    use crate::event::Modifiers;
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+
+    let mut tv = crate::widgets::tree_view::TreeView::new(Arc::clone(&font))
+        .with_row_height(20.0);
+    // toggle_on_row_click defaults to false — inspector mode.
+
+    let root = tv.add_root("Root", crate::widgets::tree_view::NodeIcon::Package);
+    tv.expand(root);
+    tv.add_child(root, "Child A", crate::widgets::tree_view::NodeIcon::File);
+    tv.add_child(root, "Child B", crate::widgets::tree_view::NodeIcon::File);
+
+    use crate::widget::Widget;
+    tv.layout(Size::new(300.0, 200.0));
+    tv.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 300.0, 200.0));
+
+    // 3 visible rows (Root expanded, 2 children).
+    assert_eq!(tv.children().len(), 3, "should have Root + 2 children visible");
+
+    // Click on the ROOT row body — well past the expand icon (EXPAND_W=18,
+    // ICON_W+GAP=18) so x=80 is clearly in the label area, not on the toggle.
+    let root_row_y = 200.0 - 20.0 * 0.5; // centre of first row (Y-up)
+    tv.on_event(&crate::event::Event::MouseDown {
+        pos: Point::new(80.0, root_row_y),
+        button: crate::event::MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+
+    // Re-layout to reflect any expansion change.
+    tv.layout(Size::new(300.0, 200.0));
+
+    // Root must still be expanded: children must still be visible.
+    assert_eq!(
+        tv.children().len(), 3,
+        "clicking root row must NOT collapse it when toggle_on_row_click = false"
+    );
+}
+
+/// `toggle_on_row_click = true` (file-explorer mode): clicking anywhere on a
+/// row with children ALSO toggles its expansion — consistent with VS Code /
+/// Cursor file-tree behaviour.
+#[test]
+fn test_treeview_click_collapses_when_flag_on() {
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::geometry::{Point, Size};
+    use crate::event::Modifiers;
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+
+    let mut tv = crate::widgets::tree_view::TreeView::new(Arc::clone(&font))
+        .with_row_height(20.0)
+        .with_toggle_on_row_click();  // file-explorer mode
+
+    let root = tv.add_root("Root", crate::widgets::tree_view::NodeIcon::Package);
+    tv.expand(root);
+    tv.add_child(root, "Child A", crate::widgets::tree_view::NodeIcon::File);
+
+    use crate::widget::Widget;
+    tv.layout(Size::new(300.0, 200.0));
+    tv.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 300.0, 200.0));
+
+    assert_eq!(tv.children().len(), 2, "Root + 1 child visible initially");
+
+    // Click the root row body (not the toggle icon).
+    let root_row_y = 200.0 - 20.0 * 0.5;
+    tv.on_event(&crate::event::Event::MouseDown {
+        pos: Point::new(80.0, root_row_y), // well to the right of the expand icon
+        button: crate::event::MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+
+    tv.layout(Size::new(300.0, 200.0));
+
+    assert_eq!(
+        tv.children().len(), 1,
+        "clicking root row body must collapse it when toggle_on_row_click = true"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase N — layer compositing
+// ---------------------------------------------------------------------------
+
+/// `push_layer` / `pop_layer` must composite a solid red square into a white
+/// framebuffer.  The composited pixels must be red, not white or black.
+#[test]
+fn test_push_pop_layer_solid_composites_correctly() {
+    let mut fb = Framebuffer::new(20, 20);
+    let mut ctx = GfxCtx::new(&mut fb);
+    // White background.
+    ctx.clear(Color::white());
+
+    // Draw a red square via a layer — the layer sits at (0,0) so the full fb
+    // is covered.
+    ctx.push_layer(20.0, 20.0);
+    ctx.set_fill_color(Color::rgba(1.0, 0.0, 0.0, 1.0));
+    ctx.begin_path();
+    ctx.rect(0.0, 0.0, 20.0, 20.0);
+    ctx.fill();
+    ctx.pop_layer();
+
+    drop(ctx);
+
+    let center = sample(&fb, 10, 10);
+    assert!(is_red(center), "After layer composite, centre must be red; got {center:?}");
+}
+
+/// A layer with 50 % alpha blended onto a white background must produce a
+/// pixel that is neither fully red nor fully white (i.e. a pink mid-tone).
+#[test]
+fn test_push_pop_layer_alpha_blends_into_parent() {
+    let mut fb = Framebuffer::new(20, 20);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.clear(Color::white());
+
+    ctx.push_layer(20.0, 20.0);
+    // 50 % opaque red.
+    ctx.set_fill_color(Color::rgba(1.0, 0.0, 0.0, 0.5));
+    ctx.begin_path();
+    ctx.rect(0.0, 0.0, 20.0, 20.0);
+    ctx.fill();
+    ctx.pop_layer();
+
+    drop(ctx);
+
+    let [r, g, b, _] = sample(&fb, 10, 10);
+    // Result should be pink: R high, G and B ~midway (not 0, not 255).
+    assert!(r > 200, "Red channel must be high; got {r}");
+    assert!(g > 80 && g < 200, "Green channel must be mid-tone (pink); got {g}");
+    assert!(b > 80 && b < 200, "Blue channel must be mid-tone (pink); got {b}");
+}
+
+/// A `Label` with `has_backbuffer = true` must render identically to one
+/// without when drawn on a plain white background — the compositing must
+/// preserve the text pixels.
+#[test]
+fn test_label_backbuffer_renders_text() {
+    use std::sync::Arc;
+    use crate::{Label, text::Font};
+    use crate::widget::Widget;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+
+    // Render without backbuffer.
+    let mut fb_direct = Framebuffer::new(200, 60);
+    {
+        let mut ctx = GfxCtx::new(&mut fb_direct);
+        ctx.clear(Color::white());
+        let mut lbl = Label::new("Hi", Arc::clone(&font)).with_font_size(20.0);
+        lbl.layout(Size::new(200.0, 60.0));
+        lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
+        crate::widget::paint_subtree(&mut lbl, &mut ctx);
+    }
+
+    // Render with backbuffer.
+    let mut fb_layer = Framebuffer::new(200, 60);
+    {
+        let mut ctx = GfxCtx::new(&mut fb_layer);
+        ctx.clear(Color::white());
+        let mut lbl = Label::new("Hi", Arc::clone(&font))
+            .with_font_size(20.0)
+            .with_has_backbuffer(true);
+        lbl.layout(Size::new(200.0, 60.0));
+        lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
+        crate::widget::paint_subtree(&mut lbl, &mut ctx);
+    }
+
+    // Both framebuffers must contain at least some dark pixels (rendered text).
+    let dark_direct = fb_direct.pixels().chunks_exact(4)
+        .filter(|p| (p[0] as u32 + p[1] as u32 + p[2] as u32) < 300)
+        .count();
+    let dark_layer = fb_layer.pixels().chunks_exact(4)
+        .filter(|p| (p[0] as u32 + p[1] as u32 + p[2] as u32) < 300)
+        .count();
+    assert!(dark_direct > 0, "direct render must produce dark (text) pixels");
+    assert!(dark_layer  > 0, "backbuffer render must produce dark (text) pixels");
 }

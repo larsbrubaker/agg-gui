@@ -34,6 +34,25 @@ use crate::color::Color;
 use crate::framebuffer::Framebuffer;
 use crate::text::{shape_text, measure_advance, Font, TextMetrics};
 
+// ---------------------------------------------------------------------------
+// Layer stack entry
+// ---------------------------------------------------------------------------
+
+/// One entry on the `GfxCtx` layer stack, created by `push_layer`.
+struct LayerEntry {
+    /// The offscreen framebuffer for this layer.
+    fb:             Framebuffer,
+    /// GfxState snapshot at the moment `push_layer` was called.
+    /// Restored verbatim on `pop_layer`.
+    saved_state:    GfxState,
+    /// State-stack snapshot at the moment `push_layer` was called.
+    saved_stack:    Vec<GfxState>,
+    /// Screen-space X origin of this layer (= CTM tx at push time, Y-up).
+    origin_x:       f64,
+    /// Screen-space Y origin of this layer (= CTM ty at push time, Y-up).
+    origin_y:       f64,
+}
+
 // Re-export so callers don't need to import agg_rust directly.
 pub use agg_rust::comp_op::CompOp as BlendMode;
 
@@ -80,22 +99,75 @@ impl Default for GfxState {
 /// All widget painting goes through `GfxCtx`. Create one per frame from a
 /// [`Framebuffer`], draw into it, then let it drop — the framebuffer retains
 /// the rendered pixels.
+///
+/// # Layer compositing
+///
+/// Call `push_layer(w, h)` to redirect all subsequent drawing into an offscreen
+/// framebuffer.  Call `pop_layer()` to SrcOver-composite that buffer back into
+/// the previous target (which may itself be a layer or the base framebuffer).
+/// Layers nest; each `push` must be matched by exactly one `pop`.
 pub struct GfxCtx<'a> {
-    fb: &'a mut Framebuffer,
-    state: GfxState,
+    base_fb:     &'a mut Framebuffer,
+    /// Offscreen layer stack.  Empty when rendering directly to `base_fb`.
+    layer_stack: Vec<LayerEntry>,
+    state:       GfxState,
     state_stack: Vec<GfxState>,
     /// Accumulated path, reset by `begin_path()`.
-    path: PathStorage,
+    path:        PathStorage,
 }
 
 impl<'a> GfxCtx<'a> {
     /// Create a new graphics context for the given framebuffer.
     pub fn new(fb: &'a mut Framebuffer) -> Self {
         Self {
-            fb,
+            base_fb: fb,
+            layer_stack: Vec::new(),
             state: GfxState::default(),
             state_stack: Vec::new(),
             path: PathStorage::new(),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Layer compositing
+    // -------------------------------------------------------------------------
+
+    /// Begin an offscreen compositing layer of `width × height` pixels.
+    ///
+    /// All draw calls until the matching `pop_layer` are redirected into a fresh
+    /// transparent `Framebuffer`.  The current CTM's translation records the
+    /// layer's screen-space origin; drawing inside uses a reset local transform.
+    pub fn push_layer(&mut self, width: f64, height: f64) {
+        let origin_x = self.state.transform.tx;
+        let origin_y = self.state.transform.ty;
+        let saved_state = self.state.clone();
+        let saved_stack = std::mem::take(&mut self.state_stack);
+        let layer_fb = Framebuffer::new(width.ceil() as u32, height.ceil() as u32);
+        self.layer_stack.push(LayerEntry {
+            fb: layer_fb,
+            saved_state,
+            saved_stack,
+            origin_x,
+            origin_y,
+        });
+        // Reset to local-space origin for the new layer.
+        self.state.transform = TransAffine::new();
+        self.state.clip = None;
+    }
+
+    /// SrcOver-composite the current layer into the previous render target, then
+    /// restore the graphics state that was active at the matching `push_layer`.
+    pub fn pop_layer(&mut self) {
+        let Some(layer) = self.layer_stack.pop() else { return; };
+        let ox = layer.origin_x as i32;
+        let oy = layer.origin_y as i32;
+        self.state       = layer.saved_state;
+        self.state_stack = layer.saved_stack;
+        // Composite: src = layer.fb, dst = now-active framebuffer.
+        if let Some(top) = self.layer_stack.last_mut() {
+            composite_framebuffers(&mut top.fb, &layer.fb, ox, oy);
+        } else {
+            composite_framebuffers(self.base_fb, &layer.fb, ox, oy);
         }
     }
 
@@ -221,10 +293,10 @@ impl<'a> GfxCtx<'a> {
     // Clear
     // -------------------------------------------------------------------------
 
-    /// Fill the entire framebuffer with `color`, ignoring transform and clip.
+    /// Fill the entire active framebuffer with `color`, ignoring transform and clip.
     pub fn clear(&mut self, color: Color) {
         let rgba = color.to_rgba8();
-        for chunk in self.fb.pixels_mut().chunks_exact_mut(4) {
+        for chunk in active_fb(&mut self.base_fb, &mut self.layer_stack).pixels_mut().chunks_exact_mut(4) {
             chunk[0] = rgba.r as u8;
             chunk[1] = rgba.g as u8;
             chunk[2] = rgba.b as u8;
@@ -291,7 +363,8 @@ impl<'a> GfxCtx<'a> {
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
-        rasterize_fill(self.fb, &mut self.path, &rgba, mode, clip, &transform);
+        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        rasterize_fill(fb, &mut self.path, &rgba, mode, clip, &transform);
     }
 
     /// Stroke the accumulated path.
@@ -305,7 +378,8 @@ impl<'a> GfxCtx<'a> {
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
-        rasterize_stroke(self.fb, &mut self.path, &rgba, width, join, cap, mode, clip, &transform);
+        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        rasterize_stroke(fb, &mut self.path, &rgba, width, join, cap, mode, clip, &transform);
     }
 
     /// Fill then stroke the accumulated path in one call.
@@ -342,9 +416,9 @@ impl<'a> GfxCtx<'a> {
 
         // Shape text and collect per-glyph outline paths.
         let (glyph_paths, _) = shape_text(&font, text, font_size, x, y);
-
+        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
         for mut path in glyph_paths {
-            rasterize_fill(self.fb, &mut path, &rgba, mode, clip, &transform);
+            rasterize_fill(fb, &mut path, &rgba, mode, clip, &transform);
         }
     }
 
@@ -377,11 +451,12 @@ impl<'a> GfxCtx<'a> {
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
 
-        let w = self.fb.width();
-        let h = self.fb.height();
+        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let w = fb.width();
+        let h = fb.height();
         let stride = (w * 4) as i32;
         let mut ra = RowAccessor::new();
-        unsafe { ra.attach(self.fb.pixels_mut().as_mut_ptr(), w, h, stride) };
+        unsafe { ra.attach(fb.pixels_mut().as_mut_ptr(), w, h, stride) };
         let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
         let mut rb = RendererBase::new(pf);
         apply_clip(&mut rb, clip);
@@ -399,6 +474,78 @@ impl<'a> GfxCtx<'a> {
         let mut transformed = ConvTransform::new(&mut stroke, transform);
         ras.add_path(&mut transformed, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &rgba);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Active-framebuffer helper
+// ---------------------------------------------------------------------------
+
+/// Return a `&mut Framebuffer` for the currently active render target.
+///
+/// If any layers are on the stack, returns the top layer's framebuffer.
+/// Otherwise returns the base framebuffer.  Accepts the two fields as
+/// separate `&mut` references so callers can simultaneously borrow other
+/// `GfxCtx` fields (e.g. `state`, `path`) without triggering borrow
+/// conflicts on `self`.
+#[inline]
+fn active_fb<'a>(
+    base_fb:     &'a mut Framebuffer,
+    layer_stack: &'a mut Vec<LayerEntry>,
+) -> &'a mut Framebuffer {
+    if let Some(top) = layer_stack.last_mut() {
+        &mut top.fb
+    } else {
+        base_fb
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SrcOver layer compositing
+// ---------------------------------------------------------------------------
+
+/// Composite `src` onto `dst` using SrcOver alpha blending.
+///
+/// AGG writes **premultiplied** RGBA into framebuffers.  The premultiplied
+/// SrcOver formula is:
+///
+/// ```text
+/// out_channel = src_premul + dst_premul × (1 − src_alpha_norm)
+/// ```
+///
+/// This applies identically to all four channels (R, G, B, A), which makes
+/// the implementation straightforward and avoids the division step needed for
+/// straight-alpha compositing.
+///
+/// `dest_x` / `dest_y` are the Y-up pixel coordinates in `dst` where the
+/// bottom-left corner of `src` lands.  Out-of-bounds pixels are silently clipped.
+fn composite_framebuffers(dst: &mut Framebuffer, src: &Framebuffer, dest_x: i32, dest_y: i32) {
+    let src_w = src.width() as i32;
+    let src_h = src.height() as i32;
+    let dst_w = dst.width() as i32;
+    let dst_h = dst.height() as i32;
+
+    let src_px = src.pixels();
+    let dst_px = dst.pixels_mut();
+
+    for sy in 0..src_h {
+        let dy = dest_y + sy;
+        if dy < 0 || dy >= dst_h { continue; }
+        for sx in 0..src_w {
+            let dx = dest_x + sx;
+            if dx < 0 || dx >= dst_w { continue; }
+            let si = ((sy * src_w + sx) * 4) as usize;
+            let di = ((dy * dst_w + dx) * 4) as usize;
+            let sa = src_px[si + 3] as f32 / 255.0;
+            if sa < 1e-4 { continue; } // fully transparent source — skip
+            let inv_sa = 1.0 - sa;
+            // Premultiplied SrcOver — same formula for all four channels.
+            for k in 0..4 {
+                let s = src_px[si + k] as f32;
+                let d = dst_px[di + k] as f32;
+                dst_px[di + k] = (s + d * inv_sa).round().clamp(0.0, 255.0) as u8;
+            }
+        }
     }
 }
 
@@ -512,6 +659,8 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn scale(&mut self, sx: f64, sy: f64)                    { self.scale(sx, sy) }
     fn set_transform(&mut self, m: agg_rust::trans_affine::TransAffine) { self.set_transform(m) }
     fn reset_transform(&mut self)                             { self.reset_transform() }
+    fn push_layer(&mut self, w: f64, h: f64)                 { self.push_layer(w, h) }
+    fn pop_layer(&mut self)                                   { self.pop_layer() }
 }
 
 /// Apply a Y-up scissor clip to a `RendererBase` (pixel-inclusive coordinates).

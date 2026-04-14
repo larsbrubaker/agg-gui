@@ -99,7 +99,7 @@ fn main() {
     let init_h = size.height.max(1) as f32;
     let mut gl_ctx = unsafe { GlGfxCtx::new(Rc::clone(&gl), init_w, init_h) };
 
-    let (mut app, show_inspector, inspector_nodes, hovered_bounds) =
+    let (mut app, show_inspector, inspector_nodes, hovered_bounds, cube_visible) =
         demo_ui::build_demo_ui(Arc::clone(&font), Box::new(GlCubeWidget::new()));
 
     let mut cursor_x    = 0.0f64;
@@ -116,7 +116,6 @@ fn main() {
     #[allow(deprecated)]
     event_loop
         .run(|event, elwt| {
-            elwt.set_control_flow(ControlFlow::Poll);
             match event {
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                     elwt.exit();
@@ -177,6 +176,14 @@ fn main() {
                     app.on_mouse_wheel(cursor_x, cursor_y, delta_y);
                 }
                 Event::AboutToWait => {
+                    // Animate every frame while the 3D Demo window is open;
+                    // switch to event-driven rendering once it is closed.
+                    elwt.set_control_flow(if cube_visible.get() {
+                        ControlFlow::Poll
+                    } else {
+                        ControlFlow::Wait
+                    });
+
                     let t0 = std::time::Instant::now();
 
                     // Sync inspector node snapshot before painting.

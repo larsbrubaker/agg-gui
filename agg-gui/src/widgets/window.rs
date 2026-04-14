@@ -56,6 +56,8 @@ pub struct Window {
     drag_start_bounds: Rect,
 
     close_hovered: bool,
+    /// Called once when the close button is clicked.
+    on_close: Option<Box<dyn FnMut()>>,
 }
 
 impl Window {
@@ -75,11 +77,18 @@ impl Window {
             drag_start_world: Point::ORIGIN,
             drag_start_bounds: Rect::default(),
             close_hovered: false,
+            on_close: None,
         }
     }
 
     pub fn with_bounds(mut self, b: Rect) -> Self { self.bounds = b; self }
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+
+    /// Register a callback fired once when the close button is clicked.
+    pub fn on_close(mut self, cb: impl FnMut() + 'static) -> Self {
+        self.on_close = Some(Box::new(cb));
+        self
+    }
 
     pub fn show(&mut self) { self.visible = true; }
     pub fn hide(&mut self) { self.visible = false; }
@@ -262,8 +271,9 @@ impl Widget for Window {
 
             Event::MouseDown { button: MouseButton::Left, pos, .. } => {
                 if self.in_close_button(*pos) {
-                    // Close button: hide the window.
+                    // Close button: hide the window and fire the on_close callback.
                     self.visible = false;
+                    if let Some(cb) = self.on_close.as_mut() { cb(); }
                     return EventResult::Consumed;
                 }
                 if self.in_title_bar(*pos) {

@@ -1,10 +1,25 @@
 //! `Label` — static text display widget.
+//!
+//! Labels are non-interactive by design (`hit_test` always returns `false`
+//! and `on_event` always returns `Ignored`).  This makes them safe to use as
+//! transparent overlay children inside interactive parents like `Button` — the
+//! parent retains full hit-test and focus ownership.
+//!
+//! # Backbuffer
+//!
+//! When `has_backbuffer` is `true`, the label is intended to pre-render its
+//! glyphs into an offscreen buffer (texture or software framebuffer) and then
+//! blit that buffer each frame instead of re-tessellating.  The field is
+//! present and visible in the inspector; full texture-blit rendering is a
+//! future implementation.  For the GL path, the [`GlyphCache`] already
+//! provides equivalent per-frame savings, so the visual output is identical
+//! in both modes at this time.
 
 use std::sync::Arc;
 
 use crate::color::Color;
 use crate::event::{Event, EventResult};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
 use crate::text::Font;
 use crate::widget::Widget;
@@ -19,6 +34,9 @@ pub enum LabelAlign {
 }
 
 /// A non-interactive text widget.
+///
+/// Used directly as a standalone label, and as a child of composite widgets
+/// such as [`Button`] and (in the future) `Checkbox`, `RadioGroup`, etc.
 pub struct Label {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
@@ -27,6 +45,10 @@ pub struct Label {
     font_size: f64,
     color: Color,
     align: LabelAlign,
+    /// When `true`, the text is pre-rendered to an offscreen backbuffer and
+    /// blitted each frame.  Currently display-only; full backbuffer path is
+    /// planned.
+    pub has_backbuffer: bool,
 }
 
 impl Label {
@@ -39,14 +61,22 @@ impl Label {
             font_size: 14.0,
             color: Color::rgb(0.1, 0.1, 0.1),
             align: LabelAlign::Left,
+            has_backbuffer: false,
         }
     }
+
+    // ── builder methods ───────────────────────────────────────────────────────
 
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
     pub fn with_color(mut self, color: Color) -> Self { self.color = color; self }
     pub fn with_align(mut self, align: LabelAlign) -> Self { self.align = align; self }
+    pub fn with_has_backbuffer(mut self, v: bool) -> Self { self.has_backbuffer = v; self }
+
+    // ── setter methods (for post-construction mutation) ───────────────────────
 
     pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
+    pub fn set_color(&mut self, color: Color) { self.color = color; }
+    pub fn set_align(&mut self, align: LabelAlign) { self.align = align; }
 }
 
 impl Widget for Label {
@@ -56,10 +86,18 @@ impl Widget for Label {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
+    /// Labels are never independently hittable.  This lets their interactive
+    /// parent (e.g., Button) retain full hit-test and focus ownership even
+    /// when the label fills the parent's entire bounds.
+    fn hit_test(&self, _: Point) -> bool { false }
+
     fn layout(&mut self, available: Size) -> Size {
-        // Height based on font size; full available width.
+        // Tight bounds: width matches rendered text, height is font-size based.
+        // Callers that need to centre or otherwise position the label use the
+        // returned size; they must not assume the label fills available.width.
+        let metrics = crate::text::measure_text_metrics(&self.font, &self.text, self.font_size);
         let h = self.font_size * 1.5;
-        Size::new(available.width, h)
+        Size::new(metrics.width.min(available.width), h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -81,5 +119,16 @@ impl Widget for Label {
         }
     }
 
+    fn has_backbuffer(&self) -> bool { self.has_backbuffer }
+
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("text",           self.text.clone()),
+            ("font_size",      format!("{:.1}", self.font_size)),
+            ("align",          format!("{:?}", self.align)),
+            ("has_backbuffer", if self.has_backbuffer { "true" } else { "false" }.to_string()),
+        ]
+    }
 }

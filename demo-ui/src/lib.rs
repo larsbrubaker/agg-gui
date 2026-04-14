@@ -21,14 +21,18 @@ use agg_gui::widgets::button::ButtonTheme;
 /// Build the full demo `App`.
 ///
 /// `cube_widget` is platform-specific (GL widget provided by the caller).
-/// Returns the `App` plus shared handles for the inspector toggle and node list.
+/// Returns the `App` plus shared handles for the inspector toggle, node list,
+/// hover bounds, and 3D Demo window visibility (for animation scheduling).
 pub fn build_demo_ui(
     font:        Arc<Font>,
     cube_widget: Box<dyn Widget>,
-) -> (App, Rc<Cell<bool>>, Rc<RefCell<Vec<InspectorNode>>>, Rc<RefCell<Option<Rect>>>) {
+) -> (App, Rc<Cell<bool>>, Rc<RefCell<Vec<InspectorNode>>>, Rc<RefCell<Option<Rect>>>, Rc<Cell<bool>>) {
     let show_inspector  = Rc::new(Cell::new(false));
     let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
     let hovered_bounds  = Rc::new(RefCell::new(None::<Rect>));
+    // Tracks whether the 3D Demo window is open; used by the render loop to
+    // decide between ControlFlow::Poll (animate) and ControlFlow::Wait (idle).
+    let cube_visible = Rc::new(Cell::new(true));
 
     let inspector = InspectorPanel::new(
         Arc::clone(&font),
@@ -50,13 +54,15 @@ pub fn build_demo_ui(
         })
         .with_sidebar(Box::new(inspector), Rc::clone(&show_inspector));
 
-    let window = build_demo_window(Arc::clone(&font), cube_widget);
+    let cube_vis_clone = Rc::clone(&cube_visible);
+    let window = build_demo_window(Arc::clone(&font), cube_widget)
+        .on_close(move || { cube_vis_clone.set(false); });
 
     let root = Stack::new()
         .add(Box::new(tab_view))
         .add(Box::new(window));
 
-    (App::new(Box::new(root)), show_inspector, inspector_nodes, hovered_bounds)
+    (App::new(Box::new(root)), show_inspector, inspector_nodes, hovered_bounds, cube_visible)
 }
 
 
@@ -216,7 +222,8 @@ pub fn build_tree_content(font: Arc<Font>) -> impl Widget {
         .with_row_height(26.0)
         .with_font_size(13.0)
         .with_indent_width(18.0)
-        .with_drag_enabled();
+        .with_drag_enabled()
+        .with_toggle_on_row_click();
 
     let alpha = tv.add_root("Project Alpha", NodeIcon::Package);
     tv.expand(alpha);

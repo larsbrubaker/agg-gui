@@ -67,6 +67,14 @@ pub struct TreeView {
 
     // Interaction
     pub drag_enabled: bool,
+    /// When `true`, clicking anywhere on a row that has children also toggles
+    /// its expansion state.  When `false` (the default), only the expand-toggle
+    /// arrow collapses/expands; clicks elsewhere only select.
+    ///
+    /// Set to `true` for file-explorer-style trees (the demo Tree tab).
+    /// Leave `false` for the inspector tree, where clicking selects without
+    /// accidentally collapsing an expanded branch.
+    pub toggle_on_row_click: bool,
     focused: bool,
     /// Flat-row index of the row under the cursor.
     hovered_row: Option<usize>,
@@ -102,6 +110,7 @@ impl TreeView {
             font,
             font_size: 13.0,
             drag_enabled: false,
+            toggle_on_row_click: false,
             focused: false,
             hovered_row: None,
             cursor_node: None,
@@ -118,6 +127,7 @@ impl TreeView {
     pub fn with_indent_width(mut self, w: f64) -> Self { self.indent_width = w; self }
     pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
     pub fn with_drag_enabled(mut self) -> Self { self.drag_enabled = true; self }
+    pub fn with_toggle_on_row_click(mut self) -> Self { self.toggle_on_row_click = true; self }
 
     /// Add a root-level node; returns its index.
     pub fn add_root(&mut self, label: impl Into<String>, icon: NodeIcon) -> usize {
@@ -493,13 +503,20 @@ impl TreeView {
         let meta     = &self.row_metas[flat_i];
         let node_idx = meta.node_idx;
 
-        // Click on expand toggle?
-        if let Some(tr) = meta.toggle_rect {
+        // Expand/collapse: any click on a row with children toggles it when
+        // `toggle_on_row_click` is enabled (file-explorer style).  Otherwise
+        // only the expand-toggle arrow triggers expansion so that clicking a
+        // row in the inspector tree selects it without accidentally collapsing
+        // a branch the user was browsing.
+        if self.toggle_on_row_click {
+            if meta.toggle_rect.is_some() {
+                self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
+            }
+        } else if let Some(tr) = meta.toggle_rect {
             if pos.x >= tr.x && pos.x < tr.x + tr.width
                 && pos.y >= tr.y && pos.y < tr.y + tr.height
             {
                 self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
-                return EventResult::Consumed;
             }
         }
 

@@ -86,6 +86,40 @@ pub trait Widget {
     fn is_visible(&self) -> bool {
         true
     }
+
+    /// Return type-specific properties for the inspector properties pane.
+    ///
+    /// Each entry is `(name, display_value)`.  The default returns an empty
+    /// list; widgets override this to expose their state to the inspector.
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![]
+    }
+
+    /// Whether this widget renders into its own offscreen buffer before
+    /// compositing into the parent.
+    ///
+    /// When `true`, `paint_subtree` wraps the widget (and all its descendants)
+    /// in `ctx.push_layer` / `ctx.pop_layer`.  The widget and its children draw
+    /// into a fresh transparent framebuffer; when complete, the buffer is
+    /// SrcOver-composited back into the parent render target.  This enables
+    /// per-widget alpha compositing, caching, and isolation.
+    ///
+    /// Default: `false` (pass-through rendering).
+    fn has_backbuffer(&self) -> bool {
+        false
+    }
+
+    /// Whether the inspector should recurse into this widget's children.
+    ///
+    /// Returns `false` for widgets that are part of the inspector infrastructure
+    /// (e.g. the inspector's own `TreeView`) to prevent the inspector from
+    /// showing itself recursively, which would grow the node list every frame.
+    ///
+    /// The widget itself is still included in the inspector snapshot — only
+    /// its subtree is suppressed.
+    fn contributes_children_to_inspector(&self) -> bool {
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -94,9 +128,23 @@ pub trait Widget {
 
 /// Paint `widget` and all its descendants. The caller must ensure `ctx` is
 /// already translated so that (0,0) maps to `widget`'s bottom-left corner.
+///
+/// If the widget returns `true` from [`Widget::has_backbuffer`], the entire
+/// subtree (widget + all descendants) is rendered into a fresh offscreen layer
+/// via [`DrawCtx::push_layer`] / [`DrawCtx::pop_layer`].  The layer is then
+/// SrcOver-composited back into the parent render target.
 pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
-    if !widget.is_visible() { return; }   // suppress self AND children
+    if !widget.is_visible() { return; }
+
+    // Buffered widgets: redirect self + descendants into an offscreen layer.
+    let buffered = widget.has_backbuffer();
+    if buffered {
+        let b = widget.bounds();
+        ctx.push_layer(b.width, b.height);
+    }
+
     widget.paint(ctx);
+
     // Iterate over indices to avoid holding a reference while recursing.
     let n = widget.children().len();
     for i in 0..n {
@@ -107,6 +155,10 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         let child = &mut widget.children_mut()[i];
         paint_subtree(child.as_mut(), ctx);
         ctx.restore();
+    }
+
+    if buffered {
+        ctx.pop_layer();
     }
 }
 
@@ -195,6 +247,8 @@ pub struct InspectorNode {
     /// Absolute screen bounds (Y-up), accumulated as the tree is walked.
     pub screen_bounds: Rect,
     pub depth: usize,
+    /// Type-specific display properties from [`Widget::properties`].
+    pub properties: Vec<(&'static str, String)>,
 }
 
 /// Walk the subtree rooted at `widget` and collect an `InspectorNode` per
@@ -207,6 +261,10 @@ pub fn collect_inspector_nodes(
     screen_origin: Point,
     out: &mut Vec<InspectorNode>,
 ) {
+    // Invisible widgets (and their entire subtrees) are excluded from the
+    // inspector — they are not part of the live rendered scene.
+    if !widget.is_visible() { return; }
+
     let b = widget.bounds();
     let abs = Rect::new(
         screen_origin.x + b.x,
@@ -214,7 +272,19 @@ pub fn collect_inspector_nodes(
         b.width,
         b.height,
     );
-    out.push(InspectorNode { type_name: widget.type_name(), screen_bounds: abs, depth });
+    out.push(InspectorNode {
+        type_name:  widget.type_name(),
+        screen_bounds: abs,
+        depth,
+        properties: widget.properties(),
+    });
+
+    // Widgets that are part of the inspector infrastructure opt out of child
+    // recursion to prevent the inspector from growing its own node list every
+    // frame (exponential growth).  Their sub-trees are still visible in the
+    // inspector on the next frame through the normal layout snapshot.
+    if !widget.contributes_children_to_inspector() { return; }
+
     let child_origin = Point::new(abs.x, abs.y);
     for child in widget.children() {
         collect_inspector_nodes(child.as_ref(), depth + 1, child_origin, out);
