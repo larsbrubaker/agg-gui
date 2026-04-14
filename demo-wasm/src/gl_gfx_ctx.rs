@@ -390,9 +390,12 @@ impl DrawCtx for GlGfxCtx {
         self.ctm().transform(&mut x1, &mut y1);
         let (lx, rx) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (by, ty2) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
-        // Y-up → GL Y-down: scissor y is measured from the bottom.
+        // gl.scissor y is in window coordinates: y=0 at the bottom of the
+        // framebuffer, increasing upward — identical to Y-up screen space.
+        // Use `by` (the Y-up bottom of the clip) directly; do NOT convert to
+        // Y-down (viewport_height − top), which shifts the scissor downward.
         let gl_x = lx.floor() as i32;
-        let gl_y = (self.viewport.1 as f64 - ty2).floor() as i32;
+        let gl_y = by.floor() as i32;
         let gl_w = (rx - lx).ceil() as i32;
         let gl_h = (ty2 - by).ceil() as i32;
         let scissor = [gl_x, gl_y, gl_w, gl_h];

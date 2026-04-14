@@ -372,11 +372,7 @@ impl DrawCtx for GlGfxCtx {
         self.ctm().transform(&mut x1, &mut y1);
         let (lx, rx) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (by, ty2) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
-        // Y-up → GL Y-down: scissor y is measured from the bottom.
-        let gl_x = lx.floor() as i32;
-        let gl_y = (self.viewport.1 as f64 - ty2).floor() as i32;
-        let gl_w = (rx - lx).ceil() as i32;
-        let gl_h = (ty2 - by).ceil() as i32;
+        let [gl_x, gl_y, gl_w, gl_h] = compute_gl_scissor(lx, by, rx, ty2);
         let scissor = [gl_x, gl_y, gl_w, gl_h];
         self.state_stack.last_mut().unwrap().1 = Some(scissor);
         unsafe {
@@ -727,4 +723,56 @@ unsafe fn compile_program(
         return Err(format!("program link error: {log}"));
     }
     Ok(prog)
+}
+
+// ---------------------------------------------------------------------------
+// Scissor helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a Y-up screen-space bounding box to a GL scissor rectangle.
+///
+/// `gl.scissor(x, y, w, h)` uses window coordinates where y=0 is the
+/// **bottom** of the framebuffer — identical to Y-up screen space.  So the
+/// GL scissor `y` is simply `by` (the bottom of the clip rect in Y-up).
+///
+/// A common mistake is to compute `viewport_height − top` (a Y-down
+/// conversion), which shifts the scissor downward by `top − bottom` pixels
+/// and clips the top rows of any widget painted near the top of a clipped
+/// region.
+fn compute_gl_scissor(lx: f64, by: f64, rx: f64, ty2: f64) -> [i32; 4] {
+    let gl_x = lx.floor() as i32;
+    let gl_y = by.floor() as i32;   // Y-up bottom == GL scissor y (Y from bottom)
+    let gl_w = (rx - lx).ceil() as i32;
+    let gl_h = (ty2 - by).ceil() as i32;
+    [gl_x, gl_y, gl_w, gl_h]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_gl_scissor;
+
+    /// The inspector tree area spans Y-up [184, 650] in a 720-tall viewport.
+    /// The GL scissor must cover exactly that band (y=184 from bottom, h=466).
+    /// Before the fix, `viewport_height − top = 720 − 650 = 70` was used as
+    /// gl_y, placing the scissor 114 px too low and clipping the top rows of
+    /// the tree (Stack, TabView, Container, Buttons), leaving a gray band.
+    #[test]
+    fn test_scissor_y_uses_y_up_bottom_not_y_down_top() {
+        // Clip rect [184, 650] in screen Y-up (inspector tree area, 720-px viewport).
+        let [_gl_x, gl_y, _gl_w, gl_h] = compute_gl_scissor(0.0, 184.0, 320.0, 650.0);
+        assert_eq!(gl_y, 184, "gl_y must equal the Y-up bottom of the clip, not viewport_h − top");
+        assert_eq!(gl_h, 466);
+    }
+
+    /// Row 0 of the tree (Stack widget) sits at screen Y-up [630, 650].
+    /// The scissor must include this band so the row is visible.
+    #[test]
+    fn test_scissor_covers_top_tree_rows() {
+        let [_, gl_y, _, gl_h] = compute_gl_scissor(0.0, 184.0, 320.0, 650.0);
+        let scissor_top = gl_y + gl_h; // highest Y covered (Y-up)
+        assert!(
+            scissor_top >= 650,
+            "scissor top ({scissor_top}) must reach y=650 to include top tree rows"
+        );
+    }
 }

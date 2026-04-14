@@ -18,10 +18,8 @@ Never commit a bug fix that isn't covered by a test.
 ## Testing
 
 - Tests MUST test actual production code, not copies
-- Tests must verify **exact behavioral match** with the C++ implementation — same floating-point results, same triangle counts, same vertex positions
-- To confirm numerical exactness, instrument both the Rust and C++ implementations and compare output byte-for-byte where applicable
 - All tests must pass before advancing to the next phase
-- When test failures occur, use the fix-test-failures skill — treat all failures as real bugs, resolve through instrumentation and root cause analysis, never by weakening tests
+- When test failures occur, treat all failures as real bugs, resolve through instrumentation and root cause analysis, never by weakening tests
 
 **Running tests:**
 ```bash
@@ -35,11 +33,18 @@ cargo test -- --nocapture
 
 ### File length
 - **Hard limit: 800 lines.** Files that reach this must be refactored by splitting into
-  focused modules before adding more code. Be very careful when refactoring. Use code (python) to split modules if helpful to ensure we never loose code or functionality.
+  focused modules before adding more code. Use code (python) to split modules if helpful
+  to ensure we never lose code or functionality.
 - Never reduce a file's line count by removing comments or blank lines to meet the limit —
   that is not refactoring. Split real logic into separate files/modules.
-- **Exceptions:**
 
+### Documentation
+- Every file must begin with a comment block describing its purpose and how it relates
+  to other modules in the project.
+- Add doc comments to functions when they clarify intent, non-obvious behavior, or
+  relationships to other parts of the codebase. Skip them when the function name and
+  signature already tell the full story.
+- Explain *why*, not *what*. A comment that restates the code is noise.
 
 ### General style
 - Prefer `Result`/`Option` over `unwrap` in library code; `expect` is acceptable in
@@ -48,14 +53,13 @@ cargo test -- --nocapture
 - Avoid unsafe code unless there is no alternative; document every `unsafe` block.
 
 ### Names
-Follow Rust conventions (`snake_case` for functions/variables, `PascalCase` for types, `SCREAMING_SNAKE_CASE` for constants). Mirror C++ names where they are clear; use better Rust names where they aren't.
-
-### Comments
-Explain *why*, not *what*. When porting, note where Rust differs from C++ and why.
+Follow Rust conventions (`snake_case` for functions/variables, `PascalCase` for types,
+`SCREAMING_SNAKE_CASE` for constants).
 
 ### Refactoring
 Improve code when it serves a purpose, not for aesthetics.
 
 ## Shell
 
-This project uses **PowerShell** on Windows for build scripts. Use `bash` syntax in Bash tool calls.
+This project uses **PowerShell** on Windows for build scripts. Claude Code's shell tool
+runs bash/Linux, so adapt commands accordingly.
