@@ -58,7 +58,7 @@ pub use widgets::{Button, Checkbox, ComboBox, Container, DragValue, FlexColumn, 
                   Hyperlink, InspectorPanel,
                   Label, LabelAlign, MarkdownView, NodeIcon, Padding, ProgressBar, RadioGroup,
                   ScrollView, Separator, SizedBox, Slider, Spacer, Splitter, Stack,
-                  TabView, TextField, ToggleSwitch, TreeView, Window};
+                  TabView, TextField, ToggleSwitch, Tooltip, TreeView, Window};
 
 // Re-export AGG types so callers don't need to import agg-rust directly.
 pub use agg_rust::trans_affine::TransAffine;
