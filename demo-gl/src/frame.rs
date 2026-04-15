@@ -100,6 +100,7 @@ pub fn render_app_frame(
     hovered_bounds: Option<Rect>,
 ) {
     ctx.reset(width as f32, height as f32);
+
     app.layout(Size::new(width as f64, height as f64));
     app.paint(ctx);
 

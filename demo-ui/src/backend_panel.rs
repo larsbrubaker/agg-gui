@@ -1,13 +1,16 @@
-//! Backend panel — left-side collapsible panel shown when the "💻 Backend" button
+//! Backend panel — left-side collapsible panel shown when the "Backend" button
 //! is active in the top bar.
+//!
+//! All text is rendered through `Label` children so that glyph rasterization
+//! is cached to offscreen framebuffers (backbuffer path).  For the live FPS
+//! display (which changes every frame) the label uses `buffered = false` since
+//! caching a value that changes every render cycle adds overhead with no
+//! benefit.
 //!
 //! Contents mirror egui's backend panel:
 //! - Run mode (Reactive / Continuous)
 //! - Frame rate display (last frame time)
 //! - "Reset all state" button
-//!
-//! The panel is 240 px wide and uses the panel theme background so it adapts
-//! to dark / light mode switches automatically.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -18,6 +21,7 @@ use agg_gui::{
     FlexColumn, Font, Insets, Label, Rect, Separator,
     Size, SizedBox, Widget,
 };
+use agg_gui::widget::paint_subtree;
 use agg_gui::widgets::button::Button;
 
 // ── Run mode ──────────────────────────────────────────────────────────────────
@@ -70,6 +74,8 @@ impl FrameHistory {
 
 // ── Sparkline widget ──────────────────────────────────────────────────────────
 
+/// Renders a line chart of the last N frame times.  No text is drawn here —
+/// the adjacent `FpsLabel` handles the textual display.
 struct Sparkline {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
@@ -128,6 +134,183 @@ impl Widget for Sparkline {
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }
 
+// ── FPS label ─────────────────────────────────────────────────────────────────
+
+/// Displays live frame-time statistics.  Uses `buffered = false` because
+/// the text string changes every frame, so caching it to a backbuffer would
+/// rebuild the cache every frame anyway — direct rasterization is cheaper.
+struct FpsLabel {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+    history:  Rc<RefCell<FrameHistory>>,
+    /// Inner Label — not buffered (text changes every frame).
+    label:    Label,
+}
+
+impl FpsLabel {
+    fn new(font: Arc<Font>, history: Rc<RefCell<FrameHistory>>) -> Self {
+        let mut label = Label::new("0.0 ms  (0 fps)", font)
+            .with_font_size(11.0);
+        label.buffered = false; // live counter: no benefit to caching
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            history,
+            label,
+        }
+    }
+}
+
+impl Widget for FpsLabel {
+    fn type_name(&self) -> &'static str { "FpsLabel" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn layout(&mut self, available: Size) -> Size {
+        self.bounds = Rect::new(0.0, 0.0, available.width, 18.0);
+        let s = self.label.layout(Size::new(available.width, 18.0));
+        self.label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        Size::new(available.width, 18.0)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        let hist = self.history.borrow();
+        let text = format!("{:.1} ms  ({:.0} fps)", hist.mean_ms(), hist.fps());
+        drop(hist);
+
+        // Update label text and color, then paint it.
+        self.label.set_text(text);
+        self.label.set_color(v.text_dim);
+
+        let h = self.bounds.height;
+        let lw = self.label.bounds().width;
+        let lh = self.label.bounds().height;
+        let ly = (h - lh) * 0.5;
+        self.label.set_bounds(Rect::new(0.0, ly, lw, lh));
+
+        ctx.save();
+        ctx.translate(12.0, ly);
+        paint_subtree(&mut self.label, ctx);
+        ctx.restore();
+    }
+
+    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+}
+
+// ── Run mode row ─────────────────────────────────────────────────────────────
+
+/// Reactive / Continuous toggle.  Two segmented buttons, each with a
+/// backbuffered Label child.
+struct RunModeRow {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+    run_mode: Rc<Cell<RunMode>>,
+    hovered:  Option<usize>,
+    /// One Label per button.
+    labels:   Vec<Label>,
+}
+
+impl RunModeRow {
+    const BTN_W: f64 = 96.0;
+    const BTN_H: f64 = 24.0;
+    const LABELS: &'static [&'static str] = &["Reactive", "Continuous"];
+
+    fn new(font: Arc<Font>, run_mode: Rc<Cell<RunMode>>) -> Self {
+        let labels = Self::LABELS.iter().map(|text| {
+            Label::new(*text, Arc::clone(&font))
+                .with_font_size(12.0)
+        }).collect();
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            run_mode,
+            hovered: None,
+            labels,
+        }
+    }
+
+    fn btn_rect(&self, i: usize) -> Rect {
+        let gy = (self.bounds.height - Self::BTN_H) * 0.5;
+        Rect::new(12.0 + i as f64 * (Self::BTN_W + 4.0), gy, Self::BTN_W, Self::BTN_H)
+    }
+}
+
+impl Widget for RunModeRow {
+    fn type_name(&self) -> &'static str { "RunModeRow" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn layout(&mut self, available: Size) -> Size {
+        self.bounds = Rect::new(0.0, 0.0, available.width, Self::BTN_H + 8.0);
+        for i in 0..2 {
+            let r = self.btn_rect(i);
+            let s = self.labels[i].layout(Size::new(r.width, r.height));
+            self.labels[i].set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        }
+        Size::new(available.width, Self::BTN_H + 8.0)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        let current = self.run_mode.get();
+        let modes = [RunMode::Reactive, RunMode::Continuous];
+
+        for (i, (label_text, mode)) in Self::LABELS.iter().zip(modes.iter()).enumerate() {
+            let r = self.btn_rect(i);
+            let active  = current == *mode;
+            let hovered = self.hovered == Some(i);
+
+            let bg = if active { v.accent }
+                     else if hovered { v.widget_bg_hovered }
+                     else { v.widget_bg };
+            ctx.set_fill_color(bg);
+            ctx.begin_path();
+            ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
+            ctx.fill();
+
+            // Update label text + color.
+            self.labels[i].set_text(*label_text);
+            let text_color = if active { v.window_title_text } else { v.text_color };
+            self.labels[i].set_color(text_color);
+
+            // Center label within button.
+            let lw = self.labels[i].bounds().width;
+            let lh = self.labels[i].bounds().height;
+            let lx = r.x + (r.width - lw) * 0.5;
+            let ly = r.y + (r.height - lh) * 0.5;
+            self.labels[i].set_bounds(Rect::new(lx, ly, lw, lh));
+
+            ctx.save();
+            ctx.translate(lx, ly);
+            paint_subtree(&mut self.labels[i], ctx);
+            ctx.restore();
+        }
+    }
+
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        let hit = |p: agg_gui::Point| (0..2).find(|&i| {
+            let r = self.btn_rect(i);
+            p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
+        });
+        match event {
+            Event::MouseMove { pos } => { self.hovered = hit(*pos); EventResult::Ignored }
+            Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
+                if let Some(i) = hit(*pos) {
+                    self.run_mode.set([RunMode::Reactive, RunMode::Continuous][i]);
+                    return EventResult::Consumed;
+                }
+                EventResult::Ignored
+            }
+            _ => EventResult::Ignored,
+        }
+    }
+}
+
 // ── Backend panel ─────────────────────────────────────────────────────────────
 
 /// Build the backend panel widget (240 px wide).
@@ -145,7 +328,7 @@ pub fn build_backend_panel(
     // ── Heading ──────────────────────────────────────────────────────────────
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     col.push(Box::new(
-        Label::new("💻 Backend", Arc::clone(&font))
+        Label::new("Backend", Arc::clone(&font))
             .with_font_size(14.0)
             .with_margin(Insets::from_sides(12.0, 12.0, 4.0, 4.0))
     ), 0.0);
@@ -167,9 +350,8 @@ pub fn build_backend_panel(
             }))
     ), 0.0);
 
-    // ── FPS label (updates dynamically via FpsLabel widget) ───────────────────
-    col.push(Box::new(FpsLabel { bounds: Rect::default(), children: Vec::new(),
-        font: Arc::clone(&font), history: Rc::clone(&history) }), 0.0);
+    // ── FPS label (live, non-buffered) ────────────────────────────────────────
+    col.push(Box::new(FpsLabel::new(Arc::clone(&font), Rc::clone(&history))), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
@@ -182,15 +364,7 @@ pub fn build_backend_panel(
             .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 0.0))
     ), 0.0);
 
-    let rm_reactive   = Rc::clone(&run_mode);
-    let rm_continuous = Rc::clone(&run_mode);
-
-    col.push(Box::new(RunModeRow {
-        bounds: Rect::default(), children: Vec::new(),
-        font: Arc::clone(&font),
-        run_mode: Rc::clone(&run_mode),
-        hovered: None,
-    }), 0.0);
+    col.push(Box::new(RunModeRow::new(Arc::clone(&font), run_mode)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
@@ -210,124 +384,5 @@ pub fn build_backend_panel(
 
     col.push(Box::new(SizedBox::new().with_height(12.0)), 0.0);
 
-    let _ = (rm_reactive, rm_continuous); // suppress unused warnings
-
     Box::new(col)
-}
-
-// ── FPS label (reads from history each frame) ─────────────────────────────────
-
-struct FpsLabel {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    history:  Rc<RefCell<FrameHistory>>,
-}
-
-impl Widget for FpsLabel {
-    fn type_name(&self) -> &'static str { "FpsLabel" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, 18.0);
-        Size::new(available.width, 18.0)
-    }
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let hist = self.history.borrow();
-        let text = format!("{:.1} ms  ({:.0} fps)", hist.mean_ms(), hist.fps());
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(11.0);
-        ctx.set_fill_color(v.text_dim);
-        let h = self.bounds.height;
-        if let Some(m) = ctx.measure_text(&text) {
-            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-            ctx.fill_text(&text, 12.0, ty);
-        }
-    }
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-}
-
-// ── Run mode row ─────────────────────────────────────────────────────────────
-
-struct RunModeRow {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    run_mode: Rc<Cell<RunMode>>,
-    hovered:  Option<usize>,
-}
-
-impl RunModeRow {
-    const BTN_W: f64 = 96.0;
-    const BTN_H: f64 = 24.0;
-    const LABELS: &'static [&'static str] = &["Reactive", "Continuous"];
-
-    fn btn_rect(&self, i: usize) -> Rect {
-        let gy = (self.bounds.height - Self::BTN_H) * 0.5;
-        Rect::new(12.0 + i as f64 * (Self::BTN_W + 4.0), gy, Self::BTN_W, Self::BTN_H)
-    }
-}
-
-impl Widget for RunModeRow {
-    fn type_name(&self) -> &'static str { "RunModeRow" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, Self::BTN_H + 8.0);
-        Size::new(available.width, Self::BTN_H + 8.0)
-    }
-
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(12.0);
-        let v = ctx.visuals();
-        let current = self.run_mode.get();
-        let modes = [RunMode::Reactive, RunMode::Continuous];
-
-        for (i, (label, mode)) in Self::LABELS.iter().zip(modes.iter()).enumerate() {
-            let r = self.btn_rect(i);
-            let active  = current == *mode;
-            let hovered = self.hovered == Some(i);
-
-            let bg = if active { v.accent }
-                     else if hovered { v.widget_bg_hovered }
-                     else { v.widget_bg };
-            ctx.set_fill_color(bg);
-            ctx.begin_path();
-            ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
-            ctx.fill();
-
-            let text_color = if active { v.window_title_text } else { v.text_color };
-            ctx.set_fill_color(text_color);
-            if let Some(m) = ctx.measure_text(label) {
-                let tx = r.x + (r.width - m.width) * 0.5;
-                let ty = r.y + r.height * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-                ctx.fill_text(label, tx, ty);
-            }
-        }
-    }
-
-    fn on_event(&mut self, event: &Event) -> EventResult {
-        let hit = |p: agg_gui::Point| (0..2).find(|&i| {
-            let r = self.btn_rect(i);
-            p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
-        });
-        match event {
-            Event::MouseMove { pos } => { self.hovered = hit(*pos); EventResult::Ignored }
-            Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
-                if let Some(i) = hit(*pos) {
-                    self.run_mode.set([RunMode::Reactive, RunMode::Continuous][i]);
-                    return EventResult::Consumed;
-                }
-                EventResult::Ignored
-            }
-            _ => EventResult::Ignored,
-        }
-    }
 }

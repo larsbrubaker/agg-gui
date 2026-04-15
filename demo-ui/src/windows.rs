@@ -14,6 +14,9 @@ mod basic;
 mod code_example;
 mod animation;
 mod misc;
+mod interaction;
+mod text_demos;
+mod tests;
 
 // Re-export every public demo builder so callers use `windows::foo(font)`.
 pub use gallery::widget_gallery;
@@ -22,6 +25,13 @@ pub use code_example::code_example;
 pub use animation::{bezier_curve, dancing_strings, painting};
 pub use misc::{frame_demo, extra_viewport, highlighting, interactive_container,
                font_book, misc_demos};
+pub use interaction::{drag_and_drop, scrolling_demo, panels_demo, popups_demo,
+                      scene_demo, screenshot_demo};
+pub use text_demos::{strip_demo, table_demo, text_layout, undo_redo,
+                     window_options, modals_demo, multi_touch};
+pub use tests::{clipboard_test, cursor_test, grid_test, id_test,
+                input_event_history, input_test, layout_test, manual_layout_test,
+                svg_test, tessellation_test, window_resize_test};
 
 use std::sync::Arc;
 

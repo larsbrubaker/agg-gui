@@ -242,25 +242,46 @@ pub struct ShapedGlyph {
 /// Shape `text` and return per-glyph positioning info, with **no** outline
 /// extraction or tessellation.
 ///
-/// Use this together with [`flatten_glyph_at_origin`] and a [`GlyphCache`]
-/// to avoid re-tessellating glyphs every frame.
+/// Results are cached in a thread-local `HashMap` keyed by
+/// `(font_data_ptr, text, size_bits)`.  The GL `fill_text()` path calls this
+/// on every paint; caching it eliminates the per-frame `rustybuzz::shape()`
+/// cost for static labels and sidebar items.
+///
+/// Use the result together with [`flatten_glyph_at_origin`] and a
+/// [`GlyphCache`] to avoid re-tessellating glyphs every frame.
 pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
-    let scale = size / font.units_per_em() as f64;
-    font.with_rb_face(|face| {
-        let mut buffer = rustybuzz::UnicodeBuffer::new();
-        buffer.push_str(text);
-        let output = rustybuzz::shape(face, &[], buffer);
-        output
-            .glyph_infos()
-            .iter()
-            .zip(output.glyph_positions().iter())
-            .map(|(info, pos)| ShapedGlyph {
-                glyph_id:  info.glyph_id as u16,
-                x_advance: pos.x_advance as f64 * scale,
-                x_offset:  pos.x_offset  as f64 * scale,
-                y_offset:  pos.y_offset  as f64 * scale,
-            })
-            .collect()
+    let font_key = Arc::as_ptr(&font.data) as usize;
+    let size_key = size.to_bits();
+
+    SHAPE_CACHE.with(|cache| {
+        {
+            let c = cache.borrow();
+            if let Some(cached) = c.get(&(font_key, text.to_owned(), size_key)) {
+                return cached.clone();
+            }
+        }
+
+        // Cache miss — shape the text.
+        let scale = size / font.units_per_em() as f64;
+        let glyphs = font.with_rb_face(|face| {
+            let mut buffer = rustybuzz::UnicodeBuffer::new();
+            buffer.push_str(text);
+            let output = rustybuzz::shape(face, &[], buffer);
+            output
+                .glyph_infos()
+                .iter()
+                .zip(output.glyph_positions().iter())
+                .map(|(info, pos)| ShapedGlyph {
+                    glyph_id:  info.glyph_id as u16,
+                    x_advance: pos.x_advance as f64 * scale,
+                    x_offset:  pos.x_offset  as f64 * scale,
+                    y_offset:  pos.y_offset  as f64 * scale,
+                })
+                .collect::<Vec<_>>()
+        });
+
+        cache.borrow_mut().insert((font_key, text.to_owned(), size_key), glyphs.clone());
+        glyphs
     })
 }
 
@@ -335,18 +356,64 @@ pub fn measure_text_metrics(font: &Font, text: &str, size: f64) -> TextMetrics {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Global measurement cache — survives across Label instance recreation
+// ---------------------------------------------------------------------------
+//
+// TreeView and other widgets rebuild their Label children every layout() call,
+// so a per-Label cache doesn't help: each new instance starts cold. This
+// thread-local HashMap caches rustybuzz::shape() results for the lifetime of
+// the process, keyed by (font data pointer, text, size bits). The pointer is
+// stable as long as any Arc<Vec<u8>> clone exists (which is always true while
+// the Font is alive).
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    static ADVANCE_CACHE: RefCell<HashMap<(usize, String, u64), f64>> =
+        RefCell::new(HashMap::new());
+    /// Caches the full rustybuzz shaping output (per-glyph IDs + advances).
+    /// Used by shape_glyphs() so fill_text() avoids re-shaping every frame.
+    static SHAPE_CACHE: RefCell<HashMap<(usize, String, u64), Vec<ShapedGlyph>>> =
+        RefCell::new(HashMap::new());
+}
+
 /// Measure text advance width without rasterizing.
+///
+/// Results are cached in a thread-local `HashMap` keyed by
+/// `(font_data_ptr, text, size_bits)` so that repeated calls with the same
+/// arguments — including from freshly constructed `Label` instances — skip the
+/// `rustybuzz::shape()` call entirely.
 pub fn measure_advance(font: &Font, text: &str, size: f64) -> f64 {
-    let scale = size / font.units_per_em() as f64;
-    font.with_rb_face(|face| {
-        let mut buffer = rustybuzz::UnicodeBuffer::new();
-        buffer.push_str(text);
-        let output = rustybuzz::shape(face, &[], buffer);
-        output
-            .glyph_positions()
-            .iter()
-            .map(|p| p.x_advance as f64 * scale)
-            .sum()
+    // Use the raw pointer to the Vec<u8> inside the Arc as the font key.
+    // This is stable for the lifetime of the Arc (i.e. forever in practice).
+    let font_key = Arc::as_ptr(&font.data) as usize;
+    let size_key = size.to_bits();
+
+    ADVANCE_CACHE.with(|cache| {
+        {
+            let c = cache.borrow();
+            if let Some(&cached) = c.get(&(font_key, text.to_owned(), size_key)) {
+                return cached;
+            }
+        }
+
+        // Cache miss — actually shape the text.
+        let scale = size / font.units_per_em() as f64;
+        let result = font.with_rb_face(|face| {
+            let mut buffer = rustybuzz::UnicodeBuffer::new();
+            buffer.push_str(text);
+            let output = rustybuzz::shape(face, &[], buffer);
+            output
+                .glyph_positions()
+                .iter()
+                .map(|p| p.x_advance as f64 * scale)
+                .sum::<f64>()
+        });
+
+        cache.borrow_mut().insert((font_key, text.to_owned(), size_key), result);
+        result
     })
 }
 

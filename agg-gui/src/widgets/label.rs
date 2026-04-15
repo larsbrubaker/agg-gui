@@ -7,13 +7,17 @@
 //!
 //! # Backbuffer
 //!
-//! When `has_backbuffer` is `true`, the label is intended to pre-render its
-//! glyphs into an offscreen buffer (texture or software framebuffer) and then
-//! blit that buffer each frame instead of re-tessellating.  The field is
-//! present and visible in the inspector; full texture-blit rendering is a
-//! future implementation.  For the GL path, the [`GlyphCache`] already
-//! provides equivalent per-frame savings, so the visual output is identical
-//! in both modes at this time.
+//! When `buffered` is `true` AND the active `DrawCtx` supports image blitting
+//! (`ctx.has_image_blit()` returns `true`, i.e. the software `GfxCtx` path),
+//! the label pre-renders its glyphs into an offscreen `Framebuffer` on the
+//! first `paint()` call — or whenever `text`, `font_size`, `color`, or `bounds`
+//! change — and blits the cached pixels every subsequent frame via
+//! `ctx.draw_image_rgba()`.  No font shaping or rasterisation occurs on cache
+//! hits.
+//!
+//! On the GL path (`has_image_blit()` → false) the label falls back to the
+//! direct `fill_text()` call; the GL path's `GlyphCache` provides equivalent
+//! glyph-level savings there.
 
 use std::sync::Arc;
 
@@ -21,9 +25,24 @@ use crate::color::Color;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
+use crate::framebuffer::Framebuffer;
+use crate::gfx_ctx::GfxCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
+
+/// Compare two `Color` values for equality within a small epsilon.
+///
+/// Used to detect cache invalidation when the resolved text color changes
+/// (e.g. on a theme switch).  Colors whose components differ by less than
+/// 1/255 (~0.004) are considered equal so that floating-point noise in
+/// visuals does not force unnecessary re-renders.
+fn colors_equal(a: Color, b: Color) -> bool {
+    (a.r - b.r).abs() < 0.004_f32
+        && (a.g - b.g).abs() < 0.004_f32
+        && (a.b - b.b).abs() < 0.004_f32
+        && (a.a - b.a).abs() < 0.004_f32
+}
 
 /// Horizontal alignment for `Label` text.
 #[derive(Clone, Copy, Debug, Default)]
@@ -54,10 +73,33 @@ pub struct Label {
     /// `Some(c)` → explicit override (e.g. accent-coloured or dimmed text).
     color: Option<Color>,
     align: LabelAlign,
-    /// When `true`, the text is pre-rendered to an offscreen backbuffer and
-    /// blitted each frame.  Currently display-only; full backbuffer path is
-    /// planned.
+    /// When `true` (the default), and the active DrawCtx supports blitting
+    /// (`has_image_blit()`), text is rendered once to an offscreen framebuffer
+    /// and blitted each frame.  Set to `false` only for text that changes
+    /// every frame (e.g. live counters) where caching adds overhead with no
+    /// benefit.
     pub buffered: bool,
+
+    // ── Layout measurement cache ──────────────────────────────────────────────
+    /// Cached text advance width from last `measure_advance()` call.
+    /// Avoids calling `rustybuzz::shape()` every frame — only re-measures
+    /// when `text` or `font_size` changes.
+    layout_text: String,
+    layout_font_size: f64,
+    layout_width: f64,
+
+    // ── Backbuffer cache ──────────────────────────────────────────────────────
+    /// Cached pixel data (top-row first, RGBA8).  `None` until first render.
+    cache_pixels: Option<Vec<u8>>,
+    /// Framebuffer dimensions used for the last cache render.
+    cache_w: u32,
+    cache_h: u32,
+    /// Text, font_size, and color as of last cache render — used for
+    /// invalidation detection.
+    cache_text: String,
+    cache_font_size: f64,
+    /// The resolved color (possibly from visuals) used for the last cache render.
+    cache_color: Color,
 }
 
 impl Label {
@@ -71,7 +113,16 @@ impl Label {
             font_size: 14.0,
             color: None, // resolved from ctx.visuals() at paint time
             align: LabelAlign::Left,
-            buffered: false,
+            buffered: true,
+            layout_text: String::new(),
+            layout_font_size: 0.0,
+            layout_width: 0.0,
+            cache_pixels: None,
+            cache_w: 0,
+            cache_h: 0,
+            cache_text: String::new(),
+            cache_font_size: 0.0,
+            cache_color: Color::black(),
         }
     }
 
@@ -91,11 +142,39 @@ impl Label {
     pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
     pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
+    // ── getter methods ────────────────────────────────────────────────────────
+
+    /// Return the current label text as a `&str`.
+    pub fn text_str(&self) -> &str { &self.text }
+
     // ── setter methods (for post-construction mutation) ───────────────────────
 
-    pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
-    pub fn set_color(&mut self, color: Color) { self.color = Some(color); }
-    pub fn clear_color(&mut self) { self.color = None; }
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        if text != self.text {
+            self.text = text;
+            self.cache_pixels = None; // invalidate pixel cache
+            // layout_text mismatch will trigger remeasure on next layout()
+        }
+    }
+    pub fn set_color(&mut self, color: Color) {
+        // Only invalidate if the color actually changed (avoids per-frame rebuilds
+        // for widgets that call set_color with the same value every paint).
+        let changed = match self.color {
+            None    => true,
+            Some(c) => !colors_equal(c, color),
+        };
+        if changed {
+            self.color = Some(color);
+            self.cache_pixels = None;
+        }
+    }
+    pub fn clear_color(&mut self) {
+        if self.color.is_some() {
+            self.color = None;
+            self.cache_pixels = None; // invalidate cache
+        }
+    }
     pub fn set_align(&mut self, align: LabelAlign) { self.align = align; }
 }
 
@@ -113,11 +192,19 @@ impl Widget for Label {
 
     fn layout(&mut self, available: Size) -> Size {
         // Tight bounds: width matches rendered text, height is font-size based.
-        // Callers that need to centre or otherwise position the label use the
-        // returned size; they must not assume the label fills available.width.
-        let metrics = crate::text::measure_text_metrics(&self.font, &self.text, self.font_size);
+        // Text measurement (rustybuzz::shape) is cached: only re-runs when the
+        // text string or font_size changes, not on every frame.
+        if self.layout_text != self.text
+            || (self.layout_font_size - self.font_size).abs() > 0.01
+        {
+            let metrics =
+                crate::text::measure_text_metrics(&self.font, &self.text, self.font_size);
+            self.layout_width     = metrics.width;
+            self.layout_text      = self.text.clone();
+            self.layout_font_size = self.font_size;
+        }
         let h = self.font_size * 1.5;
-        Size::new(metrics.width.min(available.width), h)
+        Size::new(self.layout_width.min(available.width), h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -128,8 +215,53 @@ impl Widget for Label {
         ctx.set_font_size(self.font_size);
         // If no explicit colour was set, follow the active theme.
         let color = self.color.unwrap_or_else(|| ctx.visuals().text_color);
-        ctx.set_fill_color(color);
 
+        // ── Backbuffer path ───────────────────────────────────────────────────
+        if self.buffered && ctx.has_image_blit() && w >= 1.0 && h >= 1.0 {
+            let bw = w.ceil() as u32;
+            let bh = h.ceil() as u32;
+
+            // Rebuild cache if anything changed.
+            let cache_valid = self.cache_pixels.is_some()
+                && self.cache_w == bw
+                && self.cache_h == bh
+                && self.cache_text == self.text
+                && (self.cache_font_size - self.font_size).abs() < 0.01
+                && colors_equal(self.cache_color, color);
+
+            if !cache_valid {
+                let mut fb = Framebuffer::new(bw, bh);
+                {
+                    let mut gfx = GfxCtx::new(&mut fb);
+                    gfx.set_font(Arc::clone(&self.font));
+                    gfx.set_font_size(self.font_size);
+                    gfx.set_fill_color(color);
+                    if let Some(m) = gfx.measure_text(&self.text) {
+                        let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
+                        let tx = match self.align {
+                            LabelAlign::Left   => 0.0,
+                            LabelAlign::Center => (w - m.width) * 0.5,
+                            LabelAlign::Right  => w - m.width,
+                        };
+                        gfx.fill_text(&self.text, tx, ty);
+                    }
+                }
+                self.cache_pixels   = Some(fb.pixels_flipped());
+                self.cache_w        = bw;
+                self.cache_h        = bh;
+                self.cache_text     = self.text.clone();
+                self.cache_font_size = self.font_size;
+                self.cache_color    = color;
+            }
+
+            if let Some(pixels) = &self.cache_pixels {
+                ctx.draw_image_rgba(pixels, self.cache_w, self.cache_h, 0.0, 0.0, w, h);
+            }
+            return;
+        }
+
+        // ── Direct path (GL or non-buffered) ──────────────────────────────────
+        ctx.set_fill_color(color);
         if let Some(m) = ctx.measure_text(&self.text) {
             let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
             let tx = match self.align {

@@ -169,6 +169,15 @@ pub trait DrawCtx {
 
     // ── Image blitting ────────────────────────────────────────────────────────
 
+    /// Returns `true` if this context implements `draw_image_rgba` with actual
+    /// pixel blitting.  `Label` (and any other widget that uses a software
+    /// backbuffer) gates its cache path on this method so it can fall back to
+    /// direct `fill_text()` on render targets that don't support blitting
+    /// (e.g. the GL path).
+    ///
+    /// Default: `false`.  Override to `true` in `GfxCtx`.
+    fn has_image_blit(&self) -> bool { false }
+
     /// Draw raw RGBA pixel data into `dst_rect` (Y-up local coordinates).
     ///
     /// `data` must be `img_w * img_h * 4` bytes of tightly-packed RGBA8 data

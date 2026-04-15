@@ -436,7 +436,20 @@ pub fn build_demo_ui(
         let open_cell  = Rc::clone(&test_entries[i].open);
         let reset_cell = Rc::clone(&reset_cells[total_i]);
         let initial    = tile_rect(total_i, default_canvas_h, spec.win_w, spec.win_h);
-        let content    = windows::coming_soon();
+        let content: Box<dyn Widget> = match spec.title {
+            "Clipboard Test"      => windows::clipboard_test(Arc::clone(&font)),
+            "Cursor Test"         => windows::cursor_test(Arc::clone(&font)),
+            "Grid Test"           => windows::grid_test(Arc::clone(&font)),
+            "Id Test"             => windows::id_test(Arc::clone(&font)),
+            "Input Event History" => windows::input_event_history(Arc::clone(&font)),
+            "Input Test"          => windows::input_test(Arc::clone(&font)),
+            "Layout Test"         => windows::layout_test(Arc::clone(&font)),
+            "Manual Layout Test"  => windows::manual_layout_test(Arc::clone(&font)),
+            "SVG Test"            => windows::svg_test(Arc::clone(&font)),
+            "Tessellation Test"   => windows::tessellation_test(Arc::clone(&font)),
+            "Window Resize Test"  => windows::window_resize_test(Arc::clone(&font)),
+            _                     => windows::coming_soon(),
+        };
         let win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(initial.x, initial.y, spec.win_w, spec.win_h))
             .with_visible_cell(open_cell)
@@ -559,6 +572,21 @@ fn build_demo_content(title: &str, font: Arc<Font>) -> Box<dyn Widget> {
         "Interactive Container" => windows::interactive_container(font),
         "Font Book"             => windows::font_book(font),
         "Misc Demos"            => windows::misc_demos(font),
+        // interaction.rs
+        "Drag and Drop"         => windows::drag_and_drop(font),
+        "Scrolling"             => windows::scrolling_demo(font),
+        "Panels"                => windows::panels_demo(font),
+        "Popups"                => windows::popups_demo(font),
+        "Scene"                 => windows::scene_demo(font),
+        "Screenshot"            => windows::screenshot_demo(font),
+        // text_demos.rs
+        "Strip"                 => windows::strip_demo(font),
+        "Table"                 => windows::table_demo(font),
+        "Text Layout"           => windows::text_layout(font),
+        "Undo Redo"             => windows::undo_redo(font),
+        "Window Options"        => windows::window_options(font),
+        "Modals"                => windows::modals_demo(font),
+        "Multi Touch"           => windows::multi_touch(font),
         _                       => windows::coming_soon(),
     }
 }

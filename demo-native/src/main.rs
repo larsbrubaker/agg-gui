@@ -108,7 +108,7 @@ fn main() {
     // Tracks the live modifier state from ModifiersChanged events.
     let mut current_mods = Modifiers::default();
 
-    // Initial frame
+    // Initial frame.
     render_frame(&mut app, &mut gl_ctx, &gl, win_w, win_h, last_frame_ms,
                  Arc::clone(&font), &hovered_bounds);
     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");

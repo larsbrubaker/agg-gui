@@ -36,7 +36,8 @@ use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::Widget;
+use crate::widget::{Widget, paint_subtree};
+use crate::widgets::label::Label;
 
 const TITLE_H:      f64 = 28.0;
 const CORNER_R:     f64 = 8.0;
@@ -72,8 +73,6 @@ pub struct Window {
     children: Vec<Box<dyn Widget>>, // always exactly 1: the content
     base: WidgetBase,
 
-    title: String,
-    font: Arc<Font>,
     font_size: f64,
 
     visible: bool,
@@ -95,6 +94,9 @@ pub struct Window {
 
     /// Time of last left-click in the title bar — for double-click collapse.
     last_title_click: Option<Instant>,
+
+    /// Backbuffered title label.  Positioned and painted manually in `paint()`.
+    title_label: Label,
 }
 
 impl Window {
@@ -103,13 +105,15 @@ impl Window {
     /// Default position: `(60, 60)` with `size = (360, 280)`. Call
     /// [`with_bounds`] to override.
     pub fn new(title: impl Into<String>, font: Arc<Font>, content: Box<dyn Widget>) -> Self {
+        let font_size = 13.0;
+        let title_str: String = title.into();
+        let title_label = Label::new(&title_str, Arc::clone(&font))
+            .with_font_size(font_size);
         Self {
             bounds: Rect::new(60.0, 60.0, 360.0, 280.0),
             children: vec![content],
             base: WidgetBase::new(),
-            title: title.into(),
-            font,
-            font_size: 13.0,
+            font_size,
             visible: true,
             visible_cell: None,
             reset_to: None,
@@ -121,6 +125,7 @@ impl Window {
             close_hovered: false,
             on_close: None,
             last_title_click: None,
+            title_label,
         }
     }
 
@@ -292,6 +297,11 @@ impl Widget for Window {
             // When collapsed the child keeps its last bounds but is not visible
             // because hit_test returns false for the content area.
         }
+
+        // Layout the title label so its intrinsic size is known before paint().
+        let s = self.title_label.layout(Size::new(self.bounds.width - 48.0, TITLE_H));
+        self.title_label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+
         Size::new(self.bounds.width, visible_h)
     }
 
@@ -358,16 +368,17 @@ impl Widget for Window {
         }
         ctx.stroke();
 
-        // Title text.
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(self.font_size);
-        ctx.set_fill_color(v.window_title_text);
-        let title_cy = tb + TITLE_H * 0.5;
-        if let Some(m) = ctx.measure_text(&self.title) {
-            let tx = 24.0; // leave room for chevron
-            let ty = title_cy - (m.ascent - m.descent) * 0.5 + m.descent;
-            ctx.fill_text(&self.title, tx, ty);
-        }
+        // Title text — rendered through backbuffered Label.
+        self.title_label.set_color(v.window_title_text);
+        let title_lw = self.title_label.bounds().width;
+        let title_lh = self.title_label.bounds().height;
+        let title_lx = 24.0; // leave room for chevron
+        let title_ly = tb + (TITLE_H - title_lh) * 0.5;
+        self.title_label.set_bounds(Rect::new(title_lx, title_ly, title_lw, title_lh));
+        ctx.save();
+        ctx.translate(title_lx, title_ly);
+        paint_subtree(&mut self.title_label, ctx);
+        ctx.restore();
 
         // Close button.
         let cc = self.close_center();

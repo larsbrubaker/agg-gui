@@ -662,6 +662,8 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn push_layer(&mut self, w: f64, h: f64)                 { self.push_layer(w, h) }
     fn pop_layer(&mut self)                                   { self.pop_layer() }
 
+    fn has_image_blit(&self) -> bool { true }
+
     fn draw_image_rgba(
         &mut self,
         data:  &[u8],

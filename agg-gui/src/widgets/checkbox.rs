@@ -1,4 +1,15 @@
 //! `Checkbox` — a boolean toggle with a label.
+//!
+//! # Composition
+//!
+//! The checkbox label is rendered through a [`Label`] child with backbuffer
+//! caching enabled (the default).  The box + checkmark are drawn directly via
+//! path commands; only the text goes through the Label path.
+//!
+//! ```text
+//! Checkbox (box + checkmark drawn via paths)
+//!   └── Label (text, backbuffered)
+//! ```
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -10,7 +21,8 @@ use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::Widget;
+use crate::widget::{Widget, paint_subtree};
+use crate::widgets::label::Label;
 
 const BOX_SIZE: f64 = 16.0;
 const GAP: f64 = 8.0;
@@ -18,12 +30,11 @@ const GAP: f64 = 8.0;
 /// A boolean toggle with a square box and a text label.
 pub struct Checkbox {
     bounds: Rect,
-    children: Vec<Box<dyn Widget>>, // always empty
+    children: Vec<Box<dyn Widget>>, // always empty — label stored separately
     base: WidgetBase,
-    label: String,
     font: Arc<Font>,
     font_size: f64,
-    /// `None` → use `ctx.visuals().text_color` at paint time.
+    /// Explicit label color override.  `None` → follow active visuals.
     label_color: Option<Color>,
     checked: bool,
     /// When set, this cell is the authoritative checked state.  `paint` reads
@@ -33,27 +44,40 @@ pub struct Checkbox {
     hovered: bool,
     focused: bool,
     on_change: Option<Box<dyn FnMut(bool)>>,
+    /// Backbuffered text label — painted manually so we can position it.
+    label_widget: Label,
 }
 
 impl Checkbox {
     pub fn new(label: impl Into<String>, font: Arc<Font>, checked: bool) -> Self {
+        let label_str: String = label.into();
+        let font_size = 14.0;
+        let label_widget = Label::new(&label_str, Arc::clone(&font))
+            .with_font_size(font_size);
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
             base: WidgetBase::new(),
-            label: label.into(),
             font,
-            font_size: 14.0,
+            font_size,
             label_color: None,
             checked,
             state_cell: None,
             hovered: false,
             focused: false,
             on_change: None,
+            label_widget,
         }
     }
 
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self.label_widget = Label::new(
+            self.label_widget.text_str(),
+            Arc::clone(&self.font),
+        ).with_font_size(size);
+        self
+    }
     pub fn with_label_color(mut self, c: Color) -> Self { self.label_color = Some(c); self }
 
     /// Bind checked state to a shared cell.
@@ -112,6 +136,11 @@ impl Widget for Checkbox {
 
     fn layout(&mut self, available: Size) -> Size {
         let h = BOX_SIZE.max(self.font_size * 1.5);
+        self.bounds = Rect::new(0.0, 0.0, available.width, h);
+        // Layout the label within the remaining width after the box + gap.
+        let label_avail_w = (available.width - BOX_SIZE - GAP).max(0.0);
+        let s = self.label_widget.layout(Size::new(label_avail_w, h));
+        self.label_widget.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         Size::new(available.width, h)
     }
 
@@ -153,29 +182,32 @@ impl Widget for Checkbox {
         ctx.stroke();
 
         // Checkmark — coordinates in Y-up space (origin = box bottom-left).
-        // Fractions are (1 - Y-down-fraction) so the tick reads correctly.
         if checked {
             ctx.set_stroke_color(Color::white());
             ctx.set_line_width(2.0);
             ctx.begin_path();
             let bx = 0.0;
             let by = box_y;
-            ctx.move_to(bx + 3.0,              by + BOX_SIZE * 0.55); // left, mid-high
-            ctx.line_to(bx + BOX_SIZE * 0.42,  by + BOX_SIZE * 0.28); // bend at bottom
-            ctx.line_to(bx + BOX_SIZE - 3.0,   by + BOX_SIZE * 0.75); // right, upper
+            ctx.move_to(bx + 3.0,              by + BOX_SIZE * 0.55);
+            ctx.line_to(bx + BOX_SIZE * 0.42,  by + BOX_SIZE * 0.28);
+            ctx.line_to(bx + BOX_SIZE - 3.0,   by + BOX_SIZE * 0.75);
             ctx.stroke();
         }
 
-        // Label text
+        // Label — rendered through backbuffered Label child.
         let label_color = self.label_color.unwrap_or(v.text_color);
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(self.font_size);
-        ctx.set_fill_color(label_color);
-        let tx = BOX_SIZE + GAP;
-        if let Some(m) = ctx.measure_text(&self.label) {
-            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-            ctx.fill_text(&self.label, tx, ty);
-        }
+        self.label_widget.set_color(label_color);
+
+        let lw = self.label_widget.bounds().width;
+        let lh = self.label_widget.bounds().height;
+        let lx = BOX_SIZE + GAP;
+        let ly = (h - lh) * 0.5;
+        self.label_widget.set_bounds(Rect::new(lx, ly, lw, lh));
+
+        ctx.save();
+        ctx.translate(lx, ly);
+        paint_subtree(&mut self.label_widget, ctx);
+        ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

@@ -56,6 +56,14 @@ cargo test -- --nocapture
 Follow Rust conventions (`snake_case` for functions/variables, `PascalCase` for types,
 `SCREAMING_SNAKE_CASE` for constants).
 
+### Performance
+- **Never guess at performance problems by reading code.** Always measure first.
+- Before optimizing, instrument the real workload and identify the actual bottleneck
+  through profiling data or timing measurements.
+- Validate that each change produces a measurable improvement. If it doesn't show up
+  in the numbers, revert it.
+- **Target: average frame rendering time must stay under 10 ms in the demo.**
+
 ### Refactoring
 Improve code when it serves a purpose, not for aesthetics.
 

@@ -1,4 +1,7 @@
 //! `RadioGroup` — a set of mutually exclusive radio buttons.
+//!
+//! Each option label is rendered through a backbuffered [`Label`] child,
+//! so glyph rasterization is cached and only repeated when text or color changes.
 
 use std::sync::Arc;
 
@@ -8,7 +11,8 @@ use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::Widget;
+use crate::widget::{Widget, paint_subtree};
+use crate::widgets::label::Label;
 
 const DOT_R: f64 = 8.0;   // outer circle radius
 const GAP: f64 = 8.0;
@@ -20,7 +24,7 @@ const ROW_H: f64 = 28.0;
 /// the currently chosen option.
 pub struct RadioGroup {
     bounds: Rect,
-    children: Vec<Box<dyn Widget>>, // always empty
+    children: Vec<Box<dyn Widget>>, // always empty — label_widgets stored separately
     base: WidgetBase,
     options: Vec<String>,
     selected: usize,
@@ -29,25 +33,42 @@ pub struct RadioGroup {
     font: Arc<Font>,
     font_size: f64,
     on_change: Option<Box<dyn FnMut(usize)>>,
+    /// One backbuffered Label per option.
+    label_widgets: Vec<Label>,
 }
 
 impl RadioGroup {
     pub fn new(options: Vec<impl Into<String>>, selected: usize, font: Arc<Font>) -> Self {
+        let font_size = 14.0;
+        let opts: Vec<String> = options.into_iter().map(|s| s.into()).collect();
+        let label_widgets = opts.iter().map(|text| {
+            Label::new(text.as_str(), Arc::clone(&font))
+                .with_font_size(font_size)
+        }).collect();
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
             base: WidgetBase::new(),
-            options: options.into_iter().map(|s| s.into()).collect(),
+            options: opts,
             selected,
             hovered: None,
             focused: false,
             font,
-            font_size: 14.0,
+            font_size,
             on_change: None,
+            label_widgets,
         }
     }
 
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        // Rebuild label widgets with new font size.
+        self.label_widgets = self.options.iter().map(|text| {
+            Label::new(text.as_str(), Arc::clone(&self.font))
+                .with_font_size(size)
+        }).collect();
+        self
+    }
 
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
@@ -110,6 +131,12 @@ impl Widget for RadioGroup {
 
     fn layout(&mut self, available: Size) -> Size {
         let h = self.options.len() as f64 * ROW_H;
+        self.bounds = Rect::new(0.0, 0.0, available.width, h);
+        let label_avail_w = (available.width - DOT_R * 2.0 - GAP).max(0.0);
+        for lw in self.label_widgets.iter_mut() {
+            let s = lw.layout(Size::new(label_avail_w, ROW_H));
+            lw.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        }
         Size::new(available.width, h)
     }
 
@@ -117,7 +144,7 @@ impl Widget for RadioGroup {
         let v = ctx.visuals();
         let h = self.bounds.height;
 
-        // Focus outline around whole widget
+        // Focus outline around whole widget.
         if self.focused {
             ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(1.5);
@@ -126,22 +153,15 @@ impl Widget for RadioGroup {
             ctx.stroke();
         }
 
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(self.font_size);
-
-        for (i, label) in self.options.iter().enumerate() {
+        for i in 0..self.options.len() {
             let cy = self.row_center_y(i, h);
             let checked = i == self.selected;
             let hovered = self.hovered == Some(i);
 
-            // Outer circle
-            let border = if checked {
-                v.accent
-            } else if hovered {
-                v.widget_bg_hovered
-            } else {
-                v.widget_stroke
-            };
+            // Outer circle.
+            let border = if checked { v.accent }
+                         else if hovered { v.widget_bg_hovered }
+                         else { v.widget_stroke };
             let bg = if checked { v.accent } else { v.widget_bg };
 
             ctx.set_fill_color(bg);
@@ -155,7 +175,7 @@ impl Widget for RadioGroup {
             ctx.circle(DOT_R, cy, DOT_R);
             ctx.stroke();
 
-            // Inner dot when checked
+            // Inner dot when checked.
             if checked {
                 ctx.set_fill_color(Color::white());
                 ctx.begin_path();
@@ -163,12 +183,19 @@ impl Widget for RadioGroup {
                 ctx.fill();
             }
 
-            // Label
-            ctx.set_fill_color(v.text_color);
-            if let Some(m) = ctx.measure_text(label) {
-                let ty = cy - (m.ascent - m.descent) * 0.5 + m.descent;
-                ctx.fill_text(label, DOT_R * 2.0 + GAP, ty);
-            }
+            // Label — rendered through backbuffered Label child.
+            self.label_widgets[i].set_color(v.text_color);
+
+            let lw = self.label_widgets[i].bounds().width;
+            let lh = self.label_widgets[i].bounds().height;
+            let lx = DOT_R * 2.0 + GAP;
+            let ly = cy - lh * 0.5;
+            self.label_widgets[i].set_bounds(Rect::new(lx, ly, lw, lh));
+
+            ctx.save();
+            ctx.translate(lx, ly);
+            paint_subtree(&mut self.label_widgets[i], ctx);
+            ctx.restore();
         }
     }
 

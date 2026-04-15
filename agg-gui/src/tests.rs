@@ -1007,7 +1007,7 @@ fn test_label_properties() {
     assert!(props.contains_key("text"), "Label must expose 'text' property");
     assert_eq!(props["text"], "Hello");
     assert!(props.contains_key("has_backbuffer"), "Label must expose 'has_backbuffer'");
-    assert_eq!(props["has_backbuffer"], "false");
+    assert_eq!(props["has_backbuffer"], "true"); // buffered = true by default
 }
 
 /// Button properties must include the label text.
@@ -1247,25 +1247,29 @@ fn test_label_backbuffer_renders_text() {
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
 
-    // Render without backbuffer.
+    // Render without backbuffer — explicit color so text is dark on white bg.
     let mut fb_direct = Framebuffer::new(200, 60);
     {
         let mut ctx = GfxCtx::new(&mut fb_direct);
         ctx.clear(Color::white());
-        let mut lbl = Label::new("Hi", Arc::clone(&font)).with_font_size(20.0);
+        let mut lbl = Label::new("Hi", Arc::clone(&font))
+            .with_font_size(20.0)
+            .with_has_backbuffer(false)
+            .with_color(Color::black());
         lbl.layout(Size::new(200.0, 60.0));
         lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
         crate::widget::paint_subtree(&mut lbl, &mut ctx);
     }
 
-    // Render with backbuffer.
+    // Render with backbuffer — explicit color so blitted pixels are dark on white bg.
     let mut fb_layer = Framebuffer::new(200, 60);
     {
         let mut ctx = GfxCtx::new(&mut fb_layer);
         ctx.clear(Color::white());
         let mut lbl = Label::new("Hi", Arc::clone(&font))
             .with_font_size(20.0)
-            .with_has_backbuffer(true);
+            .with_has_backbuffer(true)
+            .with_color(Color::black());
         lbl.layout(Size::new(200.0, 60.0));
         lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
         crate::widget::paint_subtree(&mut lbl, &mut ctx);

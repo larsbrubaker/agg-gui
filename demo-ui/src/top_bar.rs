@@ -1,5 +1,9 @@
 //! Top-bar widgets: theme toggle, app-tab bar, and backend toggle button.
 //!
+//! All text in this module is rendered through `Label` children with
+//! `buffered = true` (the default), so glyph rasterization is cached to an
+//! offscreen framebuffer and only repeated when the text or color changes.
+//!
 //! Exports:
 //! - `AppTab` — selects which body pane is shown (Demos / 3D Cube / Rendering test)
 //! - `build_top_bar_inner` — builds the FlexRow that fills the `TopMenuBar`
@@ -13,6 +17,8 @@ use agg_gui::{
     FlexRow, Font, Rect, Size, SizedBox, Widget,
     ThemePreference, Visuals, set_visuals,
 };
+use agg_gui::widgets::label::Label;
+use agg_gui::widget::paint_subtree;
 
 /// Detect OS color scheme and return the matching `ThemePreference`.
 pub fn detect_system_theme() -> ThemePreference {
@@ -38,22 +44,38 @@ pub enum AppTab { Demos, Cube3D, RenderingTest }
 
 // ── Theme toggle widget ────────────────────────────────────────────────────────
 
-/// Three-button toggle: ☀ (Light) / 🌙 (Dark) / System.
+/// Three-button toggle: Light / Dark / System.
 /// Writes the chosen `Visuals` via `set_visuals()` when clicked.
+/// Text is rendered through backbuffered Label children.
 struct ThemeToggle {
-    bounds:  Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:    Arc<Font>,
-    pref:    Rc<Cell<ThemePreference>>,
-    hovered: Option<usize>,
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>, // always empty — labels are stored separately
+    pref:     Rc<Cell<ThemePreference>>,
+    hovered:  Option<usize>,
+    /// One Label per segment. Positioned and painted manually.
+    labels:   Vec<Label>,
 }
 
 impl ThemeToggle {
     const BTN_W: f64 = 52.0;
     const BTN_H: f64 = 24.0;
+    const LABELS: &'static [&'static str] = &["Light", "Dark", "System"];
+    const PREFS: [ThemePreference; 3] = [
+        ThemePreference::Light, ThemePreference::Dark, ThemePreference::System,
+    ];
 
     fn new(font: Arc<Font>, pref: Rc<Cell<ThemePreference>>) -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), font, pref, hovered: None }
+        let labels = Self::LABELS.iter().map(|text| {
+            Label::new(*text, Arc::clone(&font))
+                .with_font_size(11.0)
+        }).collect();
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            pref,
+            hovered: None,
+            labels,
+        }
     }
 
     fn group_x(&self) -> f64 { 8.0 }
@@ -85,17 +107,20 @@ impl Widget for ThemeToggle {
     fn layout(&mut self, available: Size) -> Size {
         let natural_w = (3.0 * Self::BTN_W + 16.0).min(available.width);
         self.bounds = Rect::new(0.0, 0.0, natural_w, available.height);
+        // Layout each label to fill its button rect (for centered text).
+        for i in 0..3 {
+            let r = self.btn_rect(i);
+            let s = self.labels[i].layout(Size::new(r.width, r.height));
+            self.labels[i].set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        }
         Size::new(natural_w, available.height)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        ctx.set_font(Arc::clone(&self.font));
         let v = ctx.visuals();
         let current = self.pref.get();
-        let labels = ["Light", "Dark", "System"];
-        let prefs  = [ThemePreference::Light, ThemePreference::Dark, ThemePreference::System];
 
-        for (i, (label, pref)) in labels.iter().zip(prefs.iter()).enumerate() {
+        for (i, pref) in Self::PREFS.iter().enumerate() {
             let r = self.btn_rect(i);
             let active  = std::mem::discriminant(&current) == std::mem::discriminant(pref);
             let hovered = self.hovered == Some(i);
@@ -109,6 +134,7 @@ impl Widget for ThemeToggle {
             ctx.rounded_rect(r.x, r.y, r.width, r.height, radius);
             ctx.fill();
 
+            // Draw separator between buttons.
             if i < 2 {
                 ctx.set_fill_color(v.widget_stroke);
                 ctx.begin_path();
@@ -116,14 +142,22 @@ impl Widget for ThemeToggle {
                 ctx.fill();
             }
 
+            // Update label color based on active state.
             let text_color = if active { v.window_title_text } else { v.text_color };
-            ctx.set_fill_color(text_color);
-            ctx.set_font_size(11.0);
-            if let Some(m) = ctx.measure_text(label) {
-                let tx = r.x + (r.width - m.width) * 0.5;
-                let ty = r.y + r.height * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-                ctx.fill_text(label, tx, ty);
-            }
+            self.labels[i].set_color(text_color);
+
+            // Reposition label centered within button rect.
+            let lw = self.labels[i].bounds().width;
+            let lh = self.labels[i].bounds().height;
+            let lx = r.x + (r.width - lw) * 0.5;
+            let ly = r.y + (r.height - lh) * 0.5;
+            self.labels[i].set_bounds(Rect::new(lx, ly, lw, lh));
+
+            // Paint the label (handles backbuffer caching internally).
+            ctx.save();
+            ctx.translate(lx, ly);
+            paint_subtree(&mut self.labels[i], ctx);
+            ctx.restore();
         }
     }
 
@@ -135,7 +169,7 @@ impl Widget for ThemeToggle {
             }
             Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
                 if let Some(idx) = self.hit_idx(*pos) {
-                    let pref = [ThemePreference::Light, ThemePreference::Dark, ThemePreference::System][idx];
+                    let pref = Self::PREFS[idx];
                     self.pref.set(pref);
                     match pref {
                         ThemePreference::Light  => set_visuals(Visuals::light()),
@@ -154,12 +188,15 @@ impl Widget for ThemeToggle {
 // ── App tab bar widget ────────────────────────────────────────────────────────
 
 /// Segmented tab selector: "Demos" | "3D Cube" | "Rendering test".
+/// Text rendered through backbuffered Label children.
 struct AppTabBar {
     bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
+    children: Vec<Box<dyn Widget>>, // always empty — labels stored separately
     font:     Arc<Font>,
     tab:      Rc<Cell<AppTab>>,
     hovered:  Option<usize>,
+    /// One Label per tab segment.
+    labels:   Vec<Label>,
 }
 
 impl AppTabBar {
@@ -168,7 +205,18 @@ impl AppTabBar {
     const PAD_X:  f64 = 12.0;
 
     fn new(font: Arc<Font>, tab: Rc<Cell<AppTab>>) -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), font, tab, hovered: None }
+        let labels = Self::LABELS.iter().map(|text| {
+            Label::new(*text, Arc::clone(&font))
+                .with_font_size(12.0)
+        }).collect();
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font,
+            tab,
+            hovered: None,
+            labels,
+        }
     }
 
     fn tab_width(font: &Font, label: &str, fs: f64) -> f64 {
@@ -210,17 +258,23 @@ impl Widget for AppTabBar {
     fn layout(&mut self, available: Size) -> Size {
         let w = self.natural_width().min(available.width);
         self.bounds = Rect::new(0.0, 0.0, w, available.height);
+        // Pre-layout labels to compute their intrinsic sizes.
+        for i in 0..Self::LABELS.len() {
+            let r = self.tab_rects()[i];
+            let s = self.labels[i].layout(Size::new(r.width, r.height));
+            self.labels[i].set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        }
         Size::new(w, available.height)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(12.0);
         let v = ctx.visuals();
         let current = self.tab.get();
         let tabs = [AppTab::Demos, AppTab::Cube3D, AppTab::RenderingTest];
+        let n = tabs.len();
+        let rects = self.tab_rects();
 
-        for (i, (rect, tab)) in self.tab_rects().iter().zip(tabs.iter()).enumerate() {
+        for (i, (rect, tab)) in rects.iter().zip(tabs.iter()).enumerate() {
             let active  = current == *tab;
             let hovered = self.hovered == Some(i);
 
@@ -229,25 +283,32 @@ impl Widget for AppTabBar {
                      else { v.widget_bg };
             ctx.set_fill_color(bg);
             ctx.begin_path();
-            let r = if i == 0 || i == tabs.len() - 1 { 4.0 } else { 0.0 };
+            let r = if i == 0 || i == n - 1 { 4.0 } else { 0.0 };
             ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, r);
             ctx.fill();
 
-            if i < tabs.len() - 1 {
+            if i < n - 1 {
                 ctx.set_fill_color(v.widget_stroke);
                 ctx.begin_path();
                 ctx.rect(rect.x + rect.width - 1.0, rect.y, 1.0, rect.height);
                 ctx.fill();
             }
 
+            // Update label color based on active/hover state.
             let text_color = if active { v.window_title_text } else { v.text_color };
-            ctx.set_fill_color(text_color);
-            let label = Self::LABELS[i];
-            if let Some(m) = ctx.measure_text(label) {
-                let tx = rect.x + (rect.width - m.width) * 0.5;
-                let ty = rect.y + rect.height * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-                ctx.fill_text(label, tx, ty);
-            }
+            self.labels[i].set_color(text_color);
+
+            // Center label within button rect.
+            let lw = self.labels[i].bounds().width;
+            let lh = self.labels[i].bounds().height;
+            let lx = rect.x + (rect.width - lw) * 0.5;
+            let ly = rect.y + (rect.height - lh) * 0.5;
+            self.labels[i].set_bounds(Rect::new(lx, ly, lw, lh));
+
+            ctx.save();
+            ctx.translate(lx, ly);
+            paint_subtree(&mut self.labels[i], ctx);
+            ctx.restore();
         }
     }
 
@@ -270,12 +331,13 @@ impl Widget for AppTabBar {
 // ── Backend toggle button ─────────────────────────────────────────────────────
 
 /// "💻 Backend" button — toggles the left-side backend panel.
+/// Text rendered through a backbuffered Label child.
 struct BackendButton {
     bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
+    children: Vec<Box<dyn Widget>>, // always empty — label stored separately
     show:     Rc<Cell<bool>>,
     hovered:  bool,
+    label:    Label,
 }
 
 impl BackendButton {
@@ -283,7 +345,15 @@ impl BackendButton {
     const H: f64 = 24.0;
 
     fn new(font: Arc<Font>, show: Rc<Cell<bool>>) -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), font, show, hovered: false }
+        let label = Label::new("Backend", Arc::clone(&font))
+            .with_font_size(12.0);
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            show,
+            hovered: false,
+            label,
+        }
     }
 
     fn btn_rect(&self) -> Rect {
@@ -302,12 +372,12 @@ impl Widget for BackendButton {
     fn layout(&mut self, available: Size) -> Size {
         let w = Self::W + 8.0;
         self.bounds = Rect::new(0.0, 0.0, w, available.height);
+        let s = self.label.layout(Size::new(Self::W, Self::H));
+        self.label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         Size::new(w, available.height)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(12.0);
         let v = ctx.visuals();
         let r = self.btn_rect();
         let active = self.show.get();
@@ -320,14 +390,21 @@ impl Widget for BackendButton {
         ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
         ctx.fill();
 
+        // Update label color based on active state.
         let text_color = if active { v.window_title_text } else { v.text_color };
-        ctx.set_fill_color(text_color);
-        let label = "💻 Backend";
-        if let Some(m) = ctx.measure_text(label) {
-            let tx = r.x + (r.width - m.width) * 0.5;
-            let ty = r.y + r.height * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-            ctx.fill_text(label, tx, ty);
-        }
+        self.label.set_color(text_color);
+
+        // Center label within button rect.
+        let lw = self.label.bounds().width;
+        let lh = self.label.bounds().height;
+        let lx = r.x + (r.width - lw) * 0.5;
+        let ly = r.y + (r.height - lh) * 0.5;
+        self.label.set_bounds(Rect::new(lx, ly, lw, lh));
+
+        ctx.save();
+        ctx.translate(lx, ly);
+        paint_subtree(&mut self.label, ctx);
+        ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
