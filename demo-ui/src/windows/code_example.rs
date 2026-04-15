@@ -14,18 +14,32 @@ use agg_gui::{
     FlexColumn, FlexRow, Font, Insets, Label,
     Rect, ScrollView, Separator, Size, SizedBox, TextField, Widget,
 };
+use agg_gui::widget::paint_subtree;
 
 // ---------------------------------------------------------------------------
 // AgeDisplay — custom widget
 // ---------------------------------------------------------------------------
 
-/// A widget that reads the age from a shared `Cell` on every paint call so it
-/// always shows the current value without explicit invalidation.
+/// A widget that reads the age from a shared `Cell` on every layout call and
+/// updates a backbuffered [`Label`] child so the displayed value stays in sync
+/// without raw `fill_text` calls.
 pub struct AgeDisplay {
     pub bounds:   Rect,
     pub children: Vec<Box<dyn Widget>>,
-    pub font:     Arc<Font>,
     pub age:      Rc<Cell<u32>>,
+    label:        Label,
+}
+
+impl AgeDisplay {
+    fn new(age: Rc<Cell<u32>>, font: Arc<Font>) -> Self {
+        let text = format!("Arthur is {}", age.get());
+        Self {
+            bounds:   Rect::default(),
+            children: Vec::new(),
+            label:    Label::new(&text, font).with_font_size(13.0),
+            age,
+        }
+    }
 }
 
 impl Widget for AgeDisplay {
@@ -36,20 +50,23 @@ impl Widget for AgeDisplay {
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
     fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, 20.0);
-        Size::new(available.width, 20.0)
+        // Update label text — only re-rasterizes when the age actually changes.
+        self.label.set_text(format!("Arthur is {}", self.age.get()));
+        let s = self.label.layout(Size::new(available.width, 20.0));
+        let h = s.height.max(20.0);
+        self.bounds = Rect::new(0.0, 0.0, available.width, h);
+        self.label.set_bounds(Rect::new(0.0, (h - s.height) * 0.5, s.width, s.height));
+        Size::new(available.width, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let text = format!("Arthur is {}", self.age.get());
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(13.0);
-        ctx.set_fill_color(v.text_color);
-        if let Some(m) = ctx.measure_text(&text) {
-            let ty = self.bounds.height * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-            ctx.fill_text(&text, 0.0, ty);
-        }
+        let color = ctx.visuals().text_color;
+        self.label.set_color(color);
+        let lb = self.label.bounds();
+        ctx.save();
+        ctx.translate(lb.x, lb.y);
+        paint_subtree(&mut self.label, ctx);
+        ctx.restore();
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
@@ -180,8 +197,7 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
             code_line("    format!(", fn_, &font),
             code_line("        \"{name} is {age}\"))", str_, &font),
         ], code_bg),
-        Box::new(AgeDisplay { bounds: Rect::default(), children: Vec::new(),
-            font: Arc::clone(&font), age: Rc::clone(&age) }),
+        Box::new(AgeDisplay::new(Rc::clone(&age), Arc::clone(&font))),
     ), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);

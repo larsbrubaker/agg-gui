@@ -25,7 +25,7 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Clipboard test", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     let row = FlexRow::new().with_gap(10.0)
         .add_flex(Box::new(FlexColumn::new().with_gap(6.0)
@@ -48,7 +48,7 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
          Ctrl+V           — paste from clipboard\n\
          Ctrl+A           — select all",
         Arc::clone(&font),
-    ).with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(11.5)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -132,7 +132,7 @@ pub fn cursor_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Cursor shapes (hover to see name)",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     // 4-column grid.
     for chunk in cursor_names.chunks(4) {
@@ -150,7 +150,7 @@ pub fn cursor_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Custom cursor shape API not yet wired to the OS layer.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -223,7 +223,7 @@ pub fn grid_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("8 × 6 alignment grid", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     col.push(Box::new(GridPainter {
         bounds: Rect::default(), children: Vec::new(),
@@ -258,7 +258,7 @@ pub fn id_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Widget type → generated ID", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
@@ -277,7 +277,7 @@ pub fn id_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "IDs are hashed from the widget type name + call-site path.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -394,7 +394,7 @@ pub fn input_event_history(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Interact inside the box to record events (last 20)",
         Arc::clone(&font),
-    ).with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(11.5)), 0.0);
 
     col.push(Box::new(EventHistoryWidget::new(Arc::clone(&font))), 1.0);
     Box::new(col)
@@ -483,7 +483,7 @@ pub fn input_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Move the mouse or press keys inside the status box",
         Arc::clone(&font),
-    ).with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(11.5)), 0.0);
 
     col.push(Box::new(InputStateWidget {
         bounds: Rect::default(), children: Vec::new(),
@@ -516,7 +516,7 @@ pub fn layout_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Alignment examples", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     for (i, (&lbl, &bg)) in labels.iter().zip(colors.iter()).enumerate() {
         let box_w = match i {
@@ -548,7 +548,7 @@ pub fn layout_test(font: Arc<Font>) -> Box<dyn Widget> {
         "FlexRow / FlexColumn control alignment.\n\
          add() = fixed-size child, add_flex() = fills remaining space.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -633,7 +633,7 @@ pub fn manual_layout_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Absolutely-positioned boxes with coordinate labels",
         Arc::clone(&font),
-    ).with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(11.5)), 0.0);
 
     col.push(Box::new(ManualLayoutWidget {
         bounds: Rect::default(), children: Vec::new(), font,
@@ -663,7 +663,7 @@ pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
          support would require a full SVG parse + rasterize pipeline.\n\n\
          Placeholder shape below:",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.55))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     // A simple drawn placeholder.
     col.push(Box::new(SvgPlaceholder {
@@ -817,7 +817,7 @@ pub fn tessellation_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Circle approximations: n = 3, 6, 12, 24, 48 segments",
         Arc::clone(&font),
-    ).with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(11.5)), 0.0);
 
     col.push(Box::new(TessellationWidget {
         bounds: Rect::default(), children: Vec::new(), font,
@@ -845,7 +845,7 @@ pub fn window_resize_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Window resize test", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     col.push(Box::new(Label::new(
         "Current size:  360 \u{00d7} 290\nMin size:      200 \u{00d7} 120\nMax size:      none",
@@ -854,7 +854,7 @@ pub fn window_resize_test(font: Arc<Font>) -> Box<dyn Widget> {
 
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(Label::new("Constraints", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     {
         let v = Rc::clone(&min_size);
@@ -874,7 +874,7 @@ pub fn window_resize_test(font: Arc<Font>) -> Box<dyn Widget> {
         "Drag the window title bar edge to resize.\n\
          Min/max enforcement is not yet wired to the Window widget.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)

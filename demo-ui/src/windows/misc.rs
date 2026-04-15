@@ -25,7 +25,7 @@ pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     outer.push(Box::new(Label::new("Container styles", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     // Three boxes side by side.
     let row = FlexRow::new().with_gap(10.0)
@@ -64,7 +64,7 @@ pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
         "Containers support background color, border color/width, corner radius,\n\
          and inner padding. Children are laid out in a top-down stack.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     outer.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(outer)
@@ -160,7 +160,7 @@ pub fn highlighting(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Colored text segments", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     col.push(Box::new(HighlightWidget {
         bounds:   Rect::default(),
@@ -190,7 +190,7 @@ pub fn highlighting(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Each token is measured, a highlight rect is drawn, then the text.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -307,7 +307,7 @@ pub fn interactive_container(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Hover and click the box", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     col.push(Box::new(InteractiveBox {
         bounds:   Rect::default(),
@@ -322,7 +322,7 @@ pub fn interactive_container(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Background, border, and label change on hover / press.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -398,7 +398,7 @@ pub fn font_book(font: Arc<Font>) -> Box<dyn Widget> {
     let header = |text: &str, font: &Arc<Font>| -> Box<dyn Widget> {
         Box::new(Label::new(text, Arc::clone(font))
             .with_font_size(11.0)
-            .with_color(Color::rgba(0.0, 0.0, 0.0, 0.50)))
+            )
     };
 
     // Glyph row helper: render `chars` in a wrapping FlexRow.
@@ -488,7 +488,7 @@ pub fn misc_demos(font: Arc<Font>) -> Box<dyn Widget> {
 
     // Color swatch grid.
     col.push(Box::new(Label::new("Color swatches", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     let swatches: &[Color] = &[
         Color::rgb(0.88, 0.25, 0.18), // red
@@ -517,7 +517,7 @@ pub fn misc_demos(font: Arc<Font>) -> Box<dyn Widget> {
 
     // Lorem ipsum paragraph.
     col.push(Box::new(Label::new("Sample text", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     col.push(Box::new(Label::new(
         "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do \
          eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim \

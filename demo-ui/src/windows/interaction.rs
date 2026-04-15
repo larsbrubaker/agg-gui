@@ -179,7 +179,7 @@ pub fn drag_and_drop(font: Arc<Font>) -> Box<dyn Widget> {
     outer.push(Box::new(Label::new(
         "Click an item to move it to the next column",
         Arc::clone(&font),
-    ).with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(11.5)), 0.0);
 
     let row = FlexRow::new().with_gap(8.0)
         .add_flex(Box::new(col_a), 1.0)
@@ -204,7 +204,7 @@ pub fn scrolling_demo(font: Arc<Font>) -> Box<dyn Widget> {
     outer.push(Box::new(Label::new(
         "50 rows inside a ScrollView",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     let mut inner = FlexColumn::new().with_gap(4.0).with_padding(6.0);
     for i in 0..50_usize {
@@ -322,7 +322,7 @@ pub fn popups_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Popups demo", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     {
         let open_for_btn = Rc::clone(&open);
@@ -536,11 +536,11 @@ pub fn scene_demo(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Hover shapes to highlight them",
         Arc::clone(&font),
-    ).with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(11.5)), 0.0);
     col.push(Box::new(Label::new(
         "Pan: middle-drag, Zoom: scroll (not yet implemented)",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.35))), 0.0);
+    ).with_font_size(11.0)), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(SceneWidget::new()), 1.0);
     Box::new(col)
@@ -568,7 +568,7 @@ pub fn screenshot_demo(font: Arc<Font>) -> Box<dyn Widget> {
          the HTML Canvas `toDataURL()` API.\n\n\
          In-framework screenshot capture is not yet implemented.",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.55))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     Box::new(col)
 }

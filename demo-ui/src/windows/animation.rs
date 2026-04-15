@@ -203,7 +203,7 @@ pub fn bezier_curve(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Drag the control points",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     col.push(Box::new(BezierCanvas::new()), 1.0);
 
@@ -311,7 +311,7 @@ pub fn dancing_strings(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Three sine waves animated in real time",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     col.push(Box::new(DancingStrings::new()), 1.0);
 

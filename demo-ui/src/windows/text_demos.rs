@@ -71,7 +71,7 @@ pub fn strip_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     outer.push(Box::new(Label::new("Horizontal strips", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     let colors_h = [
         Color::rgba(0.22, 0.45, 0.88, 0.18),
@@ -93,7 +93,7 @@ pub fn strip_demo(font: Arc<Font>) -> Box<dyn Widget> {
 
     outer.push(Box::new(Separator::horizontal()), 0.0);
     outer.push(Box::new(Label::new("Vertical strips", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     let colors_v = [
         Color::rgba(0.22, 0.65, 0.88, 0.18),
@@ -128,7 +128,7 @@ pub fn table_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     outer.push(Box::new(Label::new("Simple data table", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     // Column widths.
     let col_w = [55.0_f64, 90.0, 70.0, 55.0];
@@ -205,7 +205,7 @@ pub fn text_layout(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new("Body text — size 12", Arc::clone(&font))
         .with_font_size(12.0)), 0.0);
     col.push(Box::new(Label::new("Caption — size 11", Arc::clone(&font))
-        .with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(11.0)), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
@@ -214,12 +214,12 @@ pub fn text_layout(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new("Danger / warning text", Arc::clone(&font))
         .with_font_size(13.0).with_color(Color::rgb(0.88, 0.25, 0.18))), 0.0);
     col.push(Box::new(Label::new("Dimmed secondary text", Arc::clone(&font))
-        .with_font_size(13.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+        .with_font_size(13.0)), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     col.push(Box::new(Label::new("Paragraph with line wrapping:", Arc::clone(&font))
-        .with_font_size(11.5).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+        .with_font_size(11.5)), 0.0);
     col.push(Box::new(Label::new(
         "The quick brown fox jumps over the lazy dog. Pack my box with five dozen \
          liquor jugs. How vain it is to sit down to write when you have not stood up \
@@ -244,7 +244,7 @@ pub fn undo_redo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Text field with undo/redo", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(34.0).with_child(Box::new(
         TextField::new(Arc::clone(&font))
@@ -255,7 +255,7 @@ pub fn undo_redo(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     col.push(Box::new(Label::new("Keyboard shortcuts:", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     for line in [
         "Ctrl+Z         — undo last edit",
@@ -273,7 +273,7 @@ pub fn undo_redo(font: Arc<Font>) -> Box<dyn Widget> {
         "Each character insertion/deletion is recorded in the TextField's internal \
          UndoBuffer. Undo collapses runs of single-character edits into a single step.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -296,7 +296,7 @@ pub fn window_options(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Window options", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     {
         let v = Rc::clone(&resizable);
@@ -323,7 +323,7 @@ pub fn window_options(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Current window size: 360 \u{00d7} 290",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.45))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -424,7 +424,7 @@ pub fn modals_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Modals demo", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     {
         let open_for_btn = Rc::clone(&open);
@@ -443,7 +443,7 @@ pub fn modals_demo(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Click 'Open modal' to show the dialog. Click anywhere in it to dismiss.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -472,7 +472,7 @@ pub fn multi_touch(font: Arc<Font>) -> Box<dyn Widget> {
          To test on WASM: open the demo in a browser on a touch-capable device,\n\
          or use browser DevTools touch emulation.",
         Arc::clone(&font),
-    ).with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.55))), 0.0);
+    ).with_font_size(12.0)), 0.0);
 
     Box::new(col)
 }

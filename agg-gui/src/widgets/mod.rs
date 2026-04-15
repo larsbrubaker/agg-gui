@@ -1,5 +1,6 @@
 pub mod button;
 pub mod checkbox;
+pub mod combo_box;
 pub mod container;
 pub mod drag_value;
 pub mod flex;
@@ -22,6 +23,7 @@ pub mod window;
 
 pub use button::Button;
 pub use checkbox::Checkbox;
+pub use combo_box::ComboBox;
 pub use container::Container;
 pub use drag_value::DragValue;
 pub use flex::{FlexColumn, FlexRow};

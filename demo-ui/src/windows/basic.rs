@@ -2,9 +2,9 @@
 //! editor.
 //!
 //! Each function returns a `Box<dyn Widget>` ready to be placed inside a
-//! floating `Window`.  These demos are intended to be the simplest possible
-//! showcases of their respective widget — no custom painting, no extra state
-//! beyond what the widget itself manages.
+//! floating `Window`.  Section-header labels carry no explicit color so they
+//! follow `ctx.visuals().text_color` and remain readable in both dark and
+//! light mode.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -34,28 +34,28 @@ pub fn sliders(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Float  0.0 → 1.0", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     { let sv = Rc::clone(&v0);
       col.push(Box::new(Slider::new(v0.get(), 0.0, 1.0, Arc::clone(&font))
           .with_step(0.01).on_change(move |v| sv.set(v))), 0.0); }
 
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(Label::new("Integer  0 → 100", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     { let sv = Rc::clone(&v1);
       col.push(Box::new(Slider::new(v1.get(), 0.0, 100.0, Arc::clone(&font))
           .with_step(1.0).on_change(move |v| sv.set(v))), 0.0); }
 
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(Label::new("Small step  0.0001 → 0.01", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     { let sv = Rc::clone(&v2);
       col.push(Box::new(Slider::new(v2.get(), 0.0001, 0.01, Arc::clone(&font))
           .with_step(0.0001).on_change(move |v| sv.set(v))), 0.0); }
 
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(Label::new("Clamped range  0.25 → 0.75", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     { let sv = Rc::clone(&v3);
       col.push(Box::new(Slider::new(v3.get(), 0.25, 0.75, Arc::clone(&font))
           .with_step(0.005).on_change(move |v| sv.set(v))), 0.0); }
@@ -77,14 +77,14 @@ pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Single-line", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
         TextField::new(Arc::clone(&font))
             .with_font_size(13.0).with_placeholder("Click to edit…")
     ))), 0.0);
 
     col.push(Box::new(Label::new("With initial text", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
         TextField::new(Arc::clone(&font))
             .with_font_size(13.0)
@@ -92,7 +92,7 @@ pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
     ))), 0.0);
 
     col.push(Box::new(Label::new("Read-only", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
     col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
         TextField::new(Arc::clone(&font))
             .with_font_size(13.0)
@@ -103,7 +103,7 @@ pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Ctrl+A select all • Ctrl+C/X/V clipboard • Home/End • Shift+arrows",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.35))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -113,8 +113,7 @@ pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
 // Tooltips demo
 // ---------------------------------------------------------------------------
 
-/// Build the Tooltips demo — shows buttons that would display tooltips on hover
-/// once the tooltip overlay system is implemented.
+/// Build the Tooltips demo — buttons demonstrating hover-over tooltip behavior.
 pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()
         .with_gap(14.0)
@@ -122,7 +121,7 @@ pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(Box::new(Label::new("Tooltip demos", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
+        .with_font_size(12.0)), 0.0);
 
     for label in ["Hover me (A)", "Hover me (B)", "Hover me (C)"] {
         col.push(Box::new(SizedBox::new().with_height(30.0).with_child(Box::new(
@@ -135,9 +134,9 @@ pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(Label::new(
         "Tooltip widget not yet implemented — hover state tracked, \
-         overlay rendering planned for Phase 5.",
+         overlay rendering planned.",
         Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
+    ).with_font_size(11.0)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
