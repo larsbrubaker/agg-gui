@@ -5,6 +5,7 @@ edition = "2021"
 description = "Shared demo UI builders — identical widget trees for native and WASM"
 
 [dependencies]
-agg-gui  = { path = "../agg-gui" }
-png      = "0.17"
+agg-gui    = { path = "../agg-gui" }
+png        = "0.17"
 dark-light = "1"
+web-time   = "1"

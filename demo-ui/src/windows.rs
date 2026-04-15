@@ -1,19 +1,35 @@
-//! Demo window content builders.
+//! Demo window content builders — dispatcher module.
 //!
-//! Each function returns a `Box<dyn Widget>` that becomes the content of a
-//! floating `Window`.  Real content is implemented for key demos; the rest show
-//! a "Coming Soon" placeholder until they are fleshed out in later phases.
+//! This file declares the submodules that contain the actual implementations
+//! and re-exports every public builder function so that callers can write
+//! `windows::widget_gallery(font)` etc. without knowing the submodule layout.
+//!
+//! Retained here (not delegated):
+//! - `ComingSoon` struct + `coming_soon()` — used ubiquitously by `lib.rs`.
+//! - `about()`, `load_png()`, `cube_content()` — tightly coupled to the demo
+//!   shell and unlikely to grow beyond their current size.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+mod gallery;
+mod basic;
+mod code_example;
+mod animation;
+mod misc;
+
+// Re-export every public demo builder so callers use `windows::foo(font)`.
+pub use gallery::widget_gallery;
+pub use basic::{sliders, text_edit, tooltips, code_editor};
+pub use code_example::code_example;
+pub use animation::{bezier_curve, dancing_strings, painting};
+pub use misc::{frame_demo, extra_viewport, highlighting, interactive_container,
+               font_book, misc_demos};
+
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, Checkbox, Color, DragValue, DrawCtx, Event, EventResult,
-    FlexColumn, FlexRow, Font, Hyperlink, Label, MarkdownView, ProgressBar, RadioGroup,
-    Rect, ScrollView, Separator, Size, SizedBox, Slider, TextField, ToggleSwitch, Widget,
+    Color, DrawCtx, Event, EventResult,
+    FlexColumn, Font, Label, MarkdownView,
+    Rect, ScrollView, Size, Widget,
 };
-use agg_gui::widgets::button::ButtonTheme;
 
 // ---------------------------------------------------------------------------
 // "Coming Soon" placeholder
@@ -44,492 +60,10 @@ impl Widget for ComingSoon {
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }
 
-/// Returns a minimal placeholder window content.
+/// Returns a minimal placeholder window content for unimplemented demos.
 pub fn coming_soon() -> Box<dyn Widget> {
     Box::new(ComingSoon::new())
 }
-
-// ---------------------------------------------------------------------------
-// Widget Gallery
-// ---------------------------------------------------------------------------
-
-pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
-    let slider_val = Rc::new(Cell::new(0.42_f64));
-    let cb1        = Rc::new(Cell::new(true));
-    let cb2        = Rc::new(Cell::new(false));
-    let radio_sel  = Rc::new(Cell::new(0_usize));
-
-    let mut col = FlexColumn::new()
-        .with_gap(14.0)
-        .with_padding(16.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new("Buttons", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-
-    let row = FlexRow::new().with_gap(8.0)
-        .add(Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-            Button::new("Primary", Arc::clone(&font)).with_font_size(12.0).on_click(|| {})
-        ))))
-        .add(Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-            Button::new("Secondary", Arc::clone(&font)).with_font_size(12.0)
-                .with_theme(ButtonTheme {
-                    background:         Color::rgba(0.22, 0.45, 0.88, 0.12),
-                    background_hovered: Color::rgba(0.22, 0.45, 0.88, 0.22),
-                    background_pressed: Color::rgba(0.22, 0.45, 0.88, 0.35),
-                    label_color:        Color::rgb(0.22, 0.45, 0.88),
-                    border_radius:      6.0,
-                    focus_ring_color:   Color::rgba(0.22, 0.45, 0.88, 0.55),
-                    focus_ring_width:   2.5,
-                }).on_click(|| {})
-        ))))
-        .add(Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-            Button::new("Danger", Arc::clone(&font)).with_font_size(12.0)
-                .with_theme(ButtonTheme {
-                    background:         Color::rgb(0.88, 0.25, 0.18),
-                    background_hovered: Color::rgb(0.95, 0.32, 0.24),
-                    background_pressed: Color::rgb(0.72, 0.18, 0.12),
-                    label_color:        Color::white(),
-                    border_radius:      6.0,
-                    focus_ring_color:   Color::rgba(0.88, 0.25, 0.18, 0.55),
-                    focus_ring_width:   2.5,
-                }).on_click(|| {})
-        ))));
-    col.push(Box::new(row), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Checkboxes", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    { let v = Rc::clone(&cb1);
-      col.push(Box::new(Checkbox::new("Enable feature A", Arc::clone(&font), cb1.get())
-          .with_font_size(13.0).on_change(move |v2| v.set(v2))), 0.0); }
-    { let v = Rc::clone(&cb2);
-      col.push(Box::new(Checkbox::new("Enable feature B", Arc::clone(&font), cb2.get())
-          .with_font_size(13.0).on_change(move |v2| v.set(v2))), 0.0); }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Slider", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    { let sv = Rc::clone(&slider_val);
-      col.push(Box::new(Slider::new(slider_val.get(), 0.0, 1.0, Arc::clone(&font))
-          .with_step(0.01).on_change(move |v| sv.set(v))), 0.0); }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Radio", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    { let rs = Rc::clone(&radio_sel);
-      col.push(Box::new(RadioGroup::new(
-          vec!["Option A", "Option B", "Option C"],
-          radio_sel.get(), Arc::clone(&font),
-      ).with_font_size(13.0).on_change(move |i| rs.set(i))), 0.0); }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Progress Bar", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(ProgressBar::new(slider_val.get(), Arc::clone(&font))), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Toggle Switch", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    {
-        let ts1 = Rc::new(Cell::new(true));
-        let ts2 = Rc::new(Cell::new(false));
-        let row = FlexRow::new().with_gap(16.0)
-            .add(Box::new(ToggleSwitch::new(ts1.get()).with_state_cell(Rc::clone(&ts1))))
-            .add(Box::new(Label::new("Enabled", Arc::clone(&font)).with_font_size(13.0)))
-            .add(Box::new(ToggleSwitch::new(ts2.get()).with_state_cell(Rc::clone(&ts2))))
-            .add(Box::new(Label::new("Disabled", Arc::clone(&font)).with_font_size(13.0)));
-        col.push(Box::new(row), 0.0);
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Drag Value", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    {
-        let dv1 = Rc::new(Cell::new(42.0_f64));
-        let dv2 = Rc::new(Cell::new(3.14_f64));
-        let row = FlexRow::new().with_gap(8.0)
-            .add(Box::new(SizedBox::new().with_width(120.0).with_height(28.0).with_child({
-                let v = Rc::clone(&dv1);
-                Box::new(DragValue::new(dv1.get(), 0.0, 100.0, Arc::clone(&font))
-                    .with_decimals(0).on_change(move |x| v.set(x)))
-            })))
-            .add(Box::new(SizedBox::new().with_width(120.0).with_height(28.0).with_child({
-                let v = Rc::clone(&dv2);
-                Box::new(DragValue::new(dv2.get(), 0.0, 10.0, Arc::clone(&font))
-                    .with_decimals(2).on_change(move |x| v.set(x)))
-            })));
-        col.push(Box::new(row), 0.0);
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Hyperlink", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(
-        Hyperlink::new("Visit the agg-gui repository", Arc::clone(&font))
-            .with_font_size(13.0)
-            .on_click(|| {})
-    ), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Text Input", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-        TextField::new(Arc::clone(&font))
-            .with_font_size(13.0).with_placeholder("Type something…")
-    ))), 0.0);
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-
-    Box::new(ScrollView::new(Box::new(col)))
-}
-
-// ---------------------------------------------------------------------------
-// Sliders demo
-// ---------------------------------------------------------------------------
-
-pub fn sliders(font: Arc<Font>) -> Box<dyn Widget> {
-    let v0 = Rc::new(Cell::new(0.5_f64));
-    let v1 = Rc::new(Cell::new(25.0_f64));
-    let v2 = Rc::new(Cell::new(0.001_f64));
-    let v3 = Rc::new(Cell::new(0.75_f64));
-
-    let mut col = FlexColumn::new()
-        .with_gap(18.0)
-        .with_padding(16.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new("Float  0.0 → 1.0", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    { let sv = Rc::clone(&v0);
-      col.push(Box::new(Slider::new(v0.get(), 0.0, 1.0, Arc::clone(&font))
-          .with_step(0.01).on_change(move |v| sv.set(v))), 0.0); }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Integer  0 → 100", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    { let sv = Rc::clone(&v1);
-      col.push(Box::new(Slider::new(v1.get(), 0.0, 100.0, Arc::clone(&font))
-          .with_step(1.0).on_change(move |v| sv.set(v))), 0.0); }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Small step  0.0001 → 0.01", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    { let sv = Rc::clone(&v2);
-      col.push(Box::new(Slider::new(v2.get(), 0.0001, 0.01, Arc::clone(&font))
-          .with_step(0.0001).on_change(move |v| sv.set(v))), 0.0); }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new("Clamped range  0.25 → 0.75", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    { let sv = Rc::clone(&v3);
-      col.push(Box::new(Slider::new(v3.get(), 0.25, 0.75, Arc::clone(&font))
-          .with_step(0.005).on_change(move |v| sv.set(v))), 0.0); }
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(col)
-}
-
-// ---------------------------------------------------------------------------
-// Text Edit demo
-// ---------------------------------------------------------------------------
-
-pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new()
-        .with_gap(14.0)
-        .with_padding(16.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new("Single-line", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-        TextField::new(Arc::clone(&font))
-            .with_font_size(13.0).with_placeholder("Click to edit…")
-    ))), 0.0);
-
-    col.push(Box::new(Label::new("With initial text", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-        TextField::new(Arc::clone(&font))
-            .with_font_size(13.0)
-            .with_text("Hello, world!")
-    ))), 0.0);
-
-    col.push(Box::new(Label::new("Read-only", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-        TextField::new(Arc::clone(&font))
-            .with_font_size(13.0)
-            .with_text("This field is read-only")
-            .with_read_only(true)
-    ))), 0.0);
-
-    col.push(Box::new(Label::new(
-        "Ctrl+A select all • Ctrl+C/X/V clipboard • Home/End • Shift+arrows",
-        Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.35))), 0.0);
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(col)
-}
-
-// ---------------------------------------------------------------------------
-// Code Editor demo
-// ---------------------------------------------------------------------------
-
-pub fn code_editor(font: Arc<Font>) -> Box<dyn Widget> {
-    const SAMPLE: &str = "\
-fn main() {\n\
-    let greeting = \"Hello, agg-gui!\";\n\
-    println!(\"{}\", greeting);\n\
-\n\
-    let values: Vec<f64> = (0..10)\n\
-        .map(|i| i as f64 * 0.1)\n\
-        .collect();\n\
-\n\
-    for (i, v) in values.iter().enumerate() {\n\
-        println!(\"[{i}] {v:.2}\");\n\
-    }\n\
-}";
-
-    let bg = Color::rgb(0.12, 0.13, 0.15);
-    let mut col = FlexColumn::new()
-        .with_gap(0.0)
-        .with_background(bg);
-
-    col.push(Box::new(Label::new("main.rs", Arc::clone(&font))
-        .with_font_size(11.0)
-        .with_color(Color::rgba(1.0, 1.0, 1.0, 0.45))), 0.0);
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    // Render each line as a label — simple but effective without a real editor widget.
-    for (i, line) in SAMPLE.lines().enumerate() {
-        let line_num = format!("{:>3}  ", i + 1);
-        let row = FlexRow::new().with_gap(0.0)
-            .add(Box::new(Label::new(line_num, Arc::clone(&font))
-                .with_font_size(12.5)
-                .with_color(Color::rgba(1.0, 1.0, 1.0, 0.22))))
-            .add(Box::new(Label::new(line, Arc::clone(&font))
-                .with_font_size(12.5)
-                .with_color(Color::rgba(0.85, 0.90, 0.95, 1.0))));
-        col.push(Box::new(row), 0.0);
-    }
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-
-    // Editable single-line command bar at the bottom.
-    let bar = FlexRow::new().with_gap(8.0)
-        .add(Box::new(Label::new(">", Arc::clone(&font))
-            .with_font_size(13.0)
-            .with_color(Color::rgb(0.4, 0.8, 0.4))))
-        .add_flex(Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-            TextField::new(Arc::clone(&font))
-                .with_font_size(13.0)
-                .with_placeholder("command…")
-        ))), 1.0);
-    col.push(Box::new(bar), 0.0);
-
-    Box::new(ScrollView::new(Box::new(col)))
-}
-
-// ---------------------------------------------------------------------------
-// Code Example demo
-// ---------------------------------------------------------------------------
-
-/// A widget that displays the current age from a shared cell — re-read each paint.
-struct AgeDisplay {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    age:      Rc<Cell<u32>>,
-}
-
-impl Widget for AgeDisplay {
-    fn type_name(&self) -> &'static str { "AgeDisplay" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, 20.0);
-        Size::new(available.width, 20.0)
-    }
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let text = format!("Arthur is {}", self.age.get());
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(13.0);
-        ctx.set_fill_color(v.text_color);
-        if let Some(m) = ctx.measure_text(&text) {
-            let ty = self.bounds.height * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
-            ctx.fill_text(&text, 0.0, ty);
-        }
-    }
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-}
-
-/// Code Example: mirrors the egui Code Example demo.
-/// Shows agg-gui widget calls on the left alongside their live output on the right.
-pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
-    // Shared state.
-    let age = Rc::new(Cell::new(42_u32));
-
-    // Code snippet color palette (dark-theme syntax colors).
-    let kw  = Color::rgb(0.56, 0.74, 0.95); // blue — keywords / types
-    let fn_ = Color::rgb(0.86, 0.78, 0.55); // gold — function names
-    let str_= Color::rgb(0.82, 0.60, 0.45); // orange — string literals
-    let dim = Color::rgba(1.0, 1.0, 1.0, 0.38);
-    let fg  = Color::rgba(0.88, 0.90, 0.93, 1.0);
-    let code_bg = Color::rgb(0.12, 0.13, 0.15);
-
-    /// Build a one-line syntax-colored code label.
-    fn code_line(text: &str, color: Color, font: &Arc<Font>) -> Box<dyn Widget> {
-        Box::new(Label::new(text, Arc::clone(font))
-            .with_font_size(11.5)
-            .with_color(color))
-    }
-
-    /// Wrap code lines in a dark-bg padded box.
-    fn code_box(lines: Vec<Box<dyn Widget>>, code_bg: Color) -> Box<dyn Widget> {
-        let mut col = FlexColumn::new().with_gap(0.0).with_background(code_bg);
-        for l in lines { col.push(l, 0.0); }
-        Box::new(SizedBox::new()
-            .with_margin(agg_gui::Insets::all(4.0))
-            .with_child(Box::new(col)))
-    }
-
-    /// One row: [code box (fixed 210px)] | [gap] | [output widget].
-    fn row(code: Box<dyn Widget>, output: Box<dyn Widget>) -> Box<dyn Widget> {
-        Box::new(FlexRow::new()
-            .with_gap(12.0)
-            .add(Box::new(SizedBox::new().with_width(210.0).with_child(code)))
-            .add_flex(output, 1.0))
-    }
-
-    let mut col = FlexColumn::new()
-        .with_gap(10.0)
-        .with_padding(12.0)
-        .with_panel_bg();
-
-    // ── Heading row ───────────────────────────────────────────────────────────
-    col.push(row(
-        code_box(vec![
-            code_line("Label::new(", fg, &font),
-            code_line("    \"Example\", font)", fg, &font),
-            code_line("    .with_font_size(18.0)", dim, &font),
-        ], code_bg),
-        Box::new(Label::new("Example", Arc::clone(&font)).with_font_size(18.0)),
-    ), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    // ── Name text field row ───────────────────────────────────────────────────
-    col.push(row(
-        code_box(vec![
-            code_line("FlexRow::new()", fg, &font),
-            code_line("  .add(Label::new(", fg, &font),
-            code_line("    \"Name:\", font))", dim, &font),
-            code_line("  .add(TextField::new(font))", fn_, &font),
-        ], code_bg),
-        Box::new(FlexRow::new().with_gap(8.0)
-            .add(Box::new(Label::new("Name:", Arc::clone(&font)).with_font_size(13.0)))
-            .add_flex(Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-                TextField::new(Arc::clone(&font))
-                    .with_font_size(13.0)
-                    .with_text("Arthur")
-            ))), 1.0)),
-    ), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    // ── Age drag-value row ────────────────────────────────────────────────────
-    {
-        let age2 = Rc::clone(&age);
-        col.push(row(
-            code_box(vec![
-                code_line("DragValue::new(", fn_, &font),
-                code_line("    age, 0.0, 120.0, font)", fg, &font),
-            ], code_bg),
-            Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-                DragValue::new(age.get() as f64, 0.0, 120.0, Arc::clone(&font))
-                    .with_decimals(0)
-                    .on_change(move |v| age2.set(v as u32))
-            ))),
-        ), 0.0);
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    // ── Increment button row ──────────────────────────────────────────────────
-    {
-        let age3 = Rc::clone(&age);
-        col.push(row(
-            code_box(vec![
-                code_line("if Button::new(", fn_, &font),
-                code_line("    \"Increment\", font)", str_, &font),
-                code_line("    .on_click(|| *age += 1)", dim, &font),
-            ], code_bg),
-            Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-                Button::new("Increment", Arc::clone(&font))
-                    .with_font_size(13.0)
-                    .on_click(move || { age3.set(age3.get().saturating_add(1)); })
-            ))),
-        ), 0.0);
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    // ── Dynamic age label row ─────────────────────────────────────────────────
-    col.push(row(
-        code_box(vec![
-            code_line("Label::new(", fg, &font),
-            code_line("    format!(", fn_, &font),
-            code_line("        \"{name} is {age}\"))", str_, &font),
-        ], code_bg),
-        Box::new(AgeDisplay { bounds: Rect::default(), children: Vec::new(),
-            font: Arc::clone(&font), age: Rc::clone(&age) }),
-    ), 0.0);
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-
-    Box::new(ScrollView::new(Box::new(col)))
-}
-
-// ---------------------------------------------------------------------------
-// Tooltips demo
-// ---------------------------------------------------------------------------
-
-pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new()
-        .with_gap(14.0)
-        .with_padding(16.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new("Tooltip demos", Arc::clone(&font))
-        .with_font_size(12.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.50))), 0.0);
-
-    for label in ["Hover me (A)", "Hover me (B)", "Hover me (C)"] {
-        col.push(Box::new(SizedBox::new().with_height(30.0).with_child(Box::new(
-            Button::new(label, Arc::clone(&font))
-                .with_font_size(13.0)
-                .on_click(|| {})
-        ))), 0.0);
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new(
-        "Tooltip widget not yet implemented — hover state tracked, \
-         overlay rendering planned for Phase 5.",
-        Arc::clone(&font),
-    ).with_font_size(11.0).with_color(Color::rgba(0.0, 0.0, 0.0, 0.40))), 0.0);
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(col)
-}
-
-// ---------------------------------------------------------------------------
-// 3D Cube window content (wraps a platform-provided GL widget)
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // About window
@@ -568,6 +102,10 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
 
     Box::new(ScrollView::new(Box::new(md_view)))
 }
+
+// ---------------------------------------------------------------------------
+// PNG loader (shared by about())
+// ---------------------------------------------------------------------------
 
 /// Decode a PNG file to raw RGBA8 pixel data (top-row first).
 /// Returns `None` if the file doesn't exist or can't be decoded.
@@ -614,6 +152,12 @@ fn load_png(path: &std::path::Path) -> Option<(Vec<u8>, u32, u32)> {
     Some((rgba, w, h))
 }
 
+// ---------------------------------------------------------------------------
+// 3D Cube window content
+// ---------------------------------------------------------------------------
+
+/// Wrap the platform-provided GL cube widget in a dark-themed column with a
+/// label, ready to be placed inside a floating `Window`.
 pub fn cube_content(font: Arc<Font>, cube_widget: Box<dyn Widget>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()
         .with_gap(8.0)

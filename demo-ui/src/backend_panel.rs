@@ -41,6 +41,7 @@ impl FrameHistory {
         Self { times: vec![0.0; Self::CAP], head: 0, len: 0 }
     }
 
+    #[allow(dead_code)] // called by platform render loop once wired up
     pub fn push(&mut self, frame_ms: f32) {
         self.times[self.head] = frame_ms;
         self.head = (self.head + 1) % Self::CAP;

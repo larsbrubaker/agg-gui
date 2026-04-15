@@ -107,50 +107,9 @@ impl Widget for TopMenuBar {
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }
 
-// ── Tab body switcher ─────────────────────────────────────────────────────────
-
-/// Wraps three body views and shows only the active tab's content.
-struct TabBody {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>, // [demos_view, cube_view, rendering_view]
-    tab:      Rc<Cell<AppTab>>,
-}
-
-impl Widget for TabBody {
-    fn type_name(&self) -> &'static str { "TabBody" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-
-    fn is_visible(&self) -> bool { true }
-
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
-        let active = self.tab.get() as usize;
-        for (i, child) in self.children.iter_mut().enumerate() {
-            if i == active {
-                child.layout(available);
-                child.set_bounds(Rect::new(0.0, 0.0, available.width, available.height));
-            }
-        }
-        available
-    }
-
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-
-    fn hit_test(&self, local_pos: agg_gui::Point) -> bool {
-        let b = self.bounds;
-        local_pos.x >= 0.0 && local_pos.x <= b.width && local_pos.y >= 0.0 && local_pos.y <= b.height
-    }
-}
-
-// Note: paint_subtree and event routing use children() — TabBody makes inactive
-// children invisible by not calling set_bounds on them; the widget tree system
-// routes events and painting only to children whose hit_test passes.
-// We override is_visible per-child via a wrapper.
+// ── Tab pane switcher — see TabPane below ─────────────────────────────────────
+// Tab switching is handled by individual TabPane wrappers in a Stack, each
+// returning is_visible() == false when their tab is not active.
 
 /// Wrapper that hides a widget when its tab is not active.
 struct TabPane {
@@ -580,12 +539,26 @@ pub fn build_demo_ui(
 
 fn build_demo_content(title: &str, font: Arc<Font>) -> Box<dyn Widget> {
     match title {
-        "Code Editor"    => windows::code_editor(font),
-        "Code Example"   => windows::code_example(font),
-        "Sliders"        => windows::sliders(font),
-        "TextEdit"       => windows::text_edit(font),
-        "Tooltips"       => windows::tooltips(font),
-        "Widget Gallery" => windows::widget_gallery(font),
-        _                => windows::coming_soon(),
+        // basic.rs
+        "Code Editor"           => windows::code_editor(font),
+        "Sliders"               => windows::sliders(font),
+        "TextEdit"              => windows::text_edit(font),
+        "Tooltips"              => windows::tooltips(font),
+        // code_example.rs
+        "Code Example"          => windows::code_example(font),
+        // gallery.rs
+        "Widget Gallery"        => windows::widget_gallery(font),
+        // animation.rs
+        "Bézier Curve"          => windows::bezier_curve(font),
+        "Dancing Strings"       => windows::dancing_strings(font),
+        "Painting"              => windows::painting(font),
+        // misc.rs
+        "Frame"                 => windows::frame_demo(font),
+        "Extra Viewport"        => windows::extra_viewport(font),
+        "Highlighting"          => windows::highlighting(font),
+        "Interactive Container" => windows::interactive_container(font),
+        "Font Book"             => windows::font_book(font),
+        "Misc Demos"            => windows::misc_demos(font),
+        _                       => windows::coming_soon(),
     }
 }
