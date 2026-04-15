@@ -40,7 +40,7 @@ fn apply_system_visuals() {
 // ── App tab ───────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum AppTab { Demos, Cube3D, RenderingTest }
+pub enum AppTab { Demos, RenderingTest }
 
 // ── Theme toggle widget ────────────────────────────────────────────────────────
 
@@ -187,7 +187,7 @@ impl Widget for ThemeToggle {
 
 // ── App tab bar widget ────────────────────────────────────────────────────────
 
-/// Segmented tab selector: "Demos" | "3D Cube" | "Rendering test".
+/// Segmented tab selector: "Demos" | "Rendering test".
 /// Text rendered through backbuffered Label children.
 struct AppTabBar {
     bounds:   Rect,
@@ -200,7 +200,7 @@ struct AppTabBar {
 }
 
 impl AppTabBar {
-    const LABELS: &'static [&'static str] = &["Demos", "3D Cube", "Rendering test"];
+    const LABELS: &'static [&'static str] = &["Demos", "Rendering test"];
     const BTN_H:  f64 = 24.0;
     const PAD_X:  f64 = 12.0;
 
@@ -270,7 +270,7 @@ impl Widget for AppTabBar {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
         let current = self.tab.get();
-        let tabs = [AppTab::Demos, AppTab::Cube3D, AppTab::RenderingTest];
+        let tabs = [AppTab::Demos, AppTab::RenderingTest];
         let n = tabs.len();
         let rects = self.tab_rects();
 
@@ -317,7 +317,7 @@ impl Widget for AppTabBar {
             Event::MouseMove { pos } => { self.hovered = self.hit_idx(*pos); EventResult::Ignored }
             Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
                 if let Some(i) = self.hit_idx(*pos) {
-                    let tabs = [AppTab::Demos, AppTab::Cube3D, AppTab::RenderingTest];
+                    let tabs = [AppTab::Demos, AppTab::RenderingTest];
                     self.tab.set(tabs[i]);
                     return EventResult::Consumed;
                 }

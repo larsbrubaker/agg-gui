@@ -509,14 +509,6 @@ pub fn build_demo_ui(
         my_tab:   AppTab::Demos,
     };
 
-    // ── 3D Cube tab body: fullscreen cube placeholder ──────────────────────────
-    let cube_pane = TabPane {
-        bounds:   Rect::default(),
-        children: vec![Box::new(CanvasBg::new())],
-        tab:      Rc::clone(&app_tab),
-        my_tab:   AppTab::Cube3D,
-    };
-
     // ── Rendering test tab body: placeholder ──────────────────────────────────
     let render_pane = TabPane {
         bounds:   Rect::default(),
@@ -528,7 +520,6 @@ pub fn build_demo_ui(
     // ── Body: stack of tab panes (only the active one is visible + hittable) ──
     let body = Stack::new()
         .add(Box::new(demos_pane))
-        .add(Box::new(cube_pane))
         .add(Box::new(render_pane));
 
     // ── Top bar inner row ─────────────────────────────────────────────────────

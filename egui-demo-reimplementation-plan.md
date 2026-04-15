@@ -55,15 +55,16 @@ The top bar includes a three-way theme preference switch matching egui's `global
 
 ## Top-Level App Tabs
 
-The app shell (matching egui's `WrapApp`) has selectable top-level apps beyond the demo gallery. These appear as selectable labels in the top bar:
+The app shell has two selectable tabs in the top bar:
 
 | Tab | Description |
 |-----|-------------|
 | Demos | The main demo gallery with right sidebar checklist and floating windows (primary focus) |
-| 3D Cube | Our existing 3D rotating cube demo, presented as a top-level app tab |
 | Rendering test | Rendering validation surface for color/gradient/shape correctness |
 
 Default selection is "Demos" on startup.
+
+**Note:** Unlike egui, we do not have a separate "3D Cube" top-level tab. Our GL cube is implemented as a floating demo window inside the Demos canvas (egui lacks this capability since it has no GL widget). The 3D Cube entry in the sidebar checklist opens it as a normal window.
 
 ---
 
