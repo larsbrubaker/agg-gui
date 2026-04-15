@@ -13,7 +13,7 @@ use std::sync::Arc;
 use agg_gui::{
     Button, Color,
     FlexColumn, FlexRow, Font, Label,
-    ScrollView, Separator, SizedBox, Slider, TextField, Widget,
+    ScrollView, Separator, SizedBox, Slider, TextField, Tooltip, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -114,27 +114,39 @@ pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
 // ---------------------------------------------------------------------------
 
 /// Build the Tooltips demo — buttons demonstrating hover-over tooltip behavior.
+///
+/// Each button is wrapped in a [`Tooltip`] widget that shows a small info panel
+/// after the cursor rests over it for ~0.5 s.
 pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()
         .with_gap(14.0)
         .with_padding(16.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("Tooltip demos", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(Box::new(Label::new("Tooltip demos — hover a button to see its tip",
+        Arc::clone(&font)).with_font_size(12.0)), 0.0);
 
-    for label in ["Hover me (A)", "Hover me (B)", "Hover me (C)"] {
-        col.push(Box::new(SizedBox::new().with_height(30.0).with_child(Box::new(
+    let tips = [
+        ("Hover me (A)", "This is tooltip A.\nHover delay: ~0.5 s"),
+        ("Hover me (B)", "Tooltip B: click to activate the button"),
+        ("Hover me (C)", "Tooltip C: the panel follows the cursor position"),
+    ];
+
+    for (label, tip) in tips {
+        let btn = Box::new(
             Button::new(label, Arc::clone(&font))
                 .with_font_size(13.0)
                 .on_click(|| {})
-        ))), 0.0);
+        );
+        let wrapped = Tooltip::new(btn, tip, Arc::clone(&font));
+        col.push(Box::new(SizedBox::new().with_height(30.0)
+            .with_child(Box::new(wrapped))), 0.0);
     }
 
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(Label::new(
-        "Tooltip widget not yet implemented — hover state tracked, \
-         overlay rendering planned.",
+        "Tooltips are rendered inline within the widget's local space.\n\
+         A future global overlay layer will allow true floating tooltips.",
         Arc::clone(&font),
     ).with_font_size(11.0)), 0.0);
 

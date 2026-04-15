@@ -122,6 +122,14 @@ pub trait Widget {
         true
     }
 
+    /// Paint decorations that must appear **on top of all children**.
+    ///
+    /// Called by [`paint_subtree`] after all children have been painted.
+    /// The default implementation is a no-op; override in widgets that need
+    /// to draw overlays (e.g. resize handles, drag previews) that must not
+    /// be occluded by child content.
+    fn paint_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
+
     // -------------------------------------------------------------------------
     // Layout properties (universal — every widget carries these)
     // -------------------------------------------------------------------------
@@ -193,6 +201,9 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if buffered {
         ctx.pop_layer();
     }
+
+    // Paint decorations that must appear on top of all children (e.g. resize handles).
+    widget.paint_overlay(ctx);
 }
 
 /// Walk the subtree rooted at `widget` and return the path (list of child
@@ -367,6 +378,9 @@ pub struct App {
     captured: Option<Vec<usize>>,
     /// Viewport height in pixels — used for Y-down → Y-up conversion.
     viewport_height: f64,
+    /// Optional global key handler called *before* dispatching to the focused widget.
+    /// Returns `true` if the key was handled globally (suppresses focused dispatch).
+    global_key_handler: Option<Box<dyn FnMut(Key, Modifiers) -> bool>>,
 }
 
 impl App {
@@ -378,7 +392,25 @@ impl App {
             hovered: None,
             captured: None,
             viewport_height: 1.0,
+            global_key_handler: None,
         }
+    }
+
+    /// Register a global key handler invoked before the focused widget receives
+    /// the key.  Return `true` to consume the event (suppress focused dispatch).
+    ///
+    /// # Example
+    /// ```ignore
+    /// app.set_global_key_handler(|key, mods| {
+    ///     if mods.ctrl && mods.shift && key == Key::O {
+    ///         organize_windows();
+    ///         return true;
+    ///     }
+    ///     false
+    /// });
+    /// ```
+    pub fn set_global_key_handler(&mut self, handler: impl FnMut(Key, Modifiers) -> bool + 'static) {
+        self.global_key_handler = Some(Box::new(handler));
     }
 
     /// Lay out the widget tree to fill `viewport`. Call once per frame before
@@ -445,10 +477,20 @@ impl App {
     }
 
     /// Key pressed. Delivered to the focused widget and bubbles up.
+    ///
+    /// If a global key handler was registered via [`set_global_key_handler`] and
+    /// it returns `true`, the key is consumed and the focused widget does not
+    /// receive it.
     pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
         if key == Key::Tab {
             self.advance_focus(!mods.shift);
             return;
+        }
+        // Call global handler first; bail out if it consumes the key.
+        if let Some(ref mut handler) = self.global_key_handler {
+            if handler(key.clone(), mods) {
+                return;
+            }
         }
         let event = Event::KeyDown { key, modifiers: mods };
         if let Some(path) = self.focus.clone() {

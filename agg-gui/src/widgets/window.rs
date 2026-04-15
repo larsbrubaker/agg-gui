@@ -47,7 +47,7 @@ const CLOSE_PAD:    f64 = 10.0;
 const RESIZE_EDGE:  f64 = 6.0;   // px from the edge that counts as a resize zone
 const MIN_W:        f64 = 120.0;
 const MIN_H:        f64 = 80.0;
-const DBL_CLICK_MS: u128 = 300;  // double-click detection window
+const DBL_CLICK_MS: u128 = 500;  // double-click detection window
 
 // ── Resize direction ───────────────────────────────────────────────────────────
 
@@ -407,22 +407,29 @@ impl Widget for Window {
         ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
         ctx.stroke();
 
-        // Resize handle hint — small dot grid at SE corner (only when not collapsed).
-        if !self.collapsed {
-            ctx.set_fill_color(v.window_stroke);
-            let dot_r = 1.0;
-            let dot_gap = 4.0;
-            let corner_x = w - 10.0;
-            let corner_y = RESIZE_EDGE + 2.0;
-            for row in 0..3 {
-                for col in 0..3 {
-                    if row + col <= 2 { // lower-left triangle of the 3×3 grid
-                        let bx = corner_x - col as f64 * dot_gap;
-                        let by = corner_y + row as f64 * dot_gap;
-                        ctx.begin_path();
-                        ctx.circle(bx, by, dot_r);
-                        ctx.fill();
-                    }
+    }
+
+    // paint_overlay: draws the resize handle dots on top of content.
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if !self.is_visible() || self.collapsed { return; }
+        let v = ctx.visuals();
+        let w = self.bounds.width;
+        // Dot grid in the SE corner (Y-up: SE = bottom-right = small y, large x).
+        // Drawn after children so it is never occluded by content.
+        let dot_r   = 1.5;
+        let dot_gap = 4.5;
+        // Anchor the grid 12 px in from the right and 12 px up from the bottom.
+        let origin_x = w - 12.0;
+        let origin_y = 12.0;
+        ctx.set_fill_color(v.window_stroke);
+        for row in 0..3_i32 {
+            for col in 0..3_i32 {
+                if row + col <= 2 {
+                    let bx = origin_x - col as f64 * dot_gap;
+                    let by = origin_y + row as f64 * dot_gap;
+                    ctx.begin_path();
+                    ctx.circle(bx, by, dot_r);
+                    ctx.fill();
                 }
             }
         }

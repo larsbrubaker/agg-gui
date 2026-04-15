@@ -12,6 +12,7 @@ use agg_gui::{
     Point, Rect, Separator,
     Size, SizedBox, TextField, Widget,
 };
+use agg_gui::widget::paint_subtree;
 
 // ---------------------------------------------------------------------------
 // Clipboard Test
@@ -62,9 +63,19 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
 struct CursorBox {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    label:    &'static str,
+    label_widget: Label,
     hovered:  bool,
+}
+
+impl CursorBox {
+    fn new(name: &'static str, font: Arc<Font>) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            label_widget: Label::new(name, font).with_font_size(11.0),
+            hovered: false,
+        }
+    }
 }
 
 impl Widget for CursorBox {
@@ -76,6 +87,11 @@ impl Widget for CursorBox {
 
     fn layout(&mut self, _available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, 90.0, 50.0);
+        let ls = self.label_widget.layout(Size::new(90.0, 50.0));
+        // Center label within the 90×50 box.
+        let lx = (90.0 - ls.width) * 0.5;
+        let ly = (50.0 - ls.height) * 0.5;
+        self.label_widget.set_bounds(Rect::new(lx, ly, ls.width, ls.height));
         Size::new(90.0, 50.0)
     }
 
@@ -91,12 +107,14 @@ impl Widget for CursorBox {
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, 90.0, 50.0, 5.0);
         ctx.stroke();
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(11.0);
-        ctx.set_fill_color(v.text_color);
-        if let Some(m) = ctx.measure_text(self.label) {
-            ctx.fill_text(self.label, (90.0 - m.width) * 0.5, 50.0 * 0.45 + 4.0);
-        }
+
+        // Paint label via backbuffered Label child.
+        self.label_widget.set_color(v.text_color);
+        let lb = self.label_widget.bounds();
+        ctx.save();
+        ctx.translate(lb.x, lb.y);
+        paint_subtree(&mut self.label_widget, ctx);
+        ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
@@ -138,10 +156,7 @@ pub fn cursor_test(font: Arc<Font>) -> Box<dyn Widget> {
     for chunk in cursor_names.chunks(4) {
         let mut row = FlexRow::new().with_gap(8.0);
         for &name in chunk {
-            row.push(Box::new(CursorBox {
-                bounds: Rect::default(), children: Vec::new(),
-                font: Arc::clone(&font), label: name, hovered: false,
-            }), 0.0);
+            row.push(Box::new(CursorBox::new(name, Arc::clone(&font))), 0.0);
         }
         col.push(Box::new(row), 0.0);
     }
@@ -666,17 +681,28 @@ pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
     ).with_font_size(12.0)), 0.0);
 
     // A simple drawn placeholder.
-    col.push(Box::new(SvgPlaceholder {
-        bounds: Rect::default(), children: Vec::new(), font: Arc::clone(&font),
-    }), 0.0);
+    col.push(Box::new(SvgPlaceholder::new(Arc::clone(&font))), 0.0);
 
     Box::new(col)
 }
 
+/// A visual placeholder for SVG rendering (not yet implemented).
+///
+/// The "SVG placeholder" text is a backbuffered Label child.
 struct SvgPlaceholder {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
+    label:    Label,
+}
+
+impl SvgPlaceholder {
+    fn new(font: Arc<Font>) -> Self {
+        Self {
+            bounds:   Rect::default(),
+            children: Vec::new(),
+            label:    Label::new("SVG placeholder", font).with_font_size(10.0),
+        }
+    }
 }
 
 impl Widget for SvgPlaceholder {
@@ -689,6 +715,12 @@ impl Widget for SvgPlaceholder {
     fn layout(&mut self, available: Size) -> Size {
         let h = 80.0_f64.min(available.height);
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
+
+        // Position label at 12px from left, vertically near center.
+        let ls = self.label.layout(Size::new(available.width - 16.0, 16.0));
+        let ly = (h - ls.height) * 0.5;
+        self.label.set_bounds(Rect::new(12.0, ly, ls.width, ls.height));
+
         Size::new(available.width, h)
     }
 
@@ -713,10 +745,13 @@ impl Widget for SvgPlaceholder {
         ctx.move_to(w - 8.0, 8.0);
         ctx.line_to(8.0, h - 8.0);
         ctx.stroke();
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(10.0);
-        ctx.set_fill_color(v.text_dim);
-        ctx.fill_text("SVG placeholder", 12.0, h * 0.5 + 4.0);
+
+        // Paint label via backbuffered child.
+        self.label.set_color(v.text_dim);
+        let lb = self.label.bounds();
+        ctx.save(); ctx.translate(lb.x, lb.y);
+        paint_subtree(&mut self.label, ctx);
+        ctx.restore();
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }

@@ -13,6 +13,7 @@ mod gallery;
 mod basic;
 mod code_example;
 mod animation;
+mod font_book;
 mod misc;
 mod interaction;
 mod text_demos;
@@ -23,8 +24,8 @@ pub use gallery::widget_gallery;
 pub use basic::{sliders, text_edit, tooltips, code_editor};
 pub use code_example::code_example;
 pub use animation::{bezier_curve, dancing_strings, painting};
-pub use misc::{frame_demo, extra_viewport, highlighting, interactive_container,
-               font_book, misc_demos};
+pub use font_book::font_book;
+pub use misc::{frame_demo, extra_viewport, highlighting, interactive_container, misc_demos};
 pub use interaction::{drag_and_drop, scrolling_demo, panels_demo, popups_demo,
                       scene_demo, screenshot_demo};
 pub use text_demos::{strip_demo, table_demo, text_layout, undo_redo,

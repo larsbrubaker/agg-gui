@@ -23,6 +23,7 @@ use agg_gui::{
 };
 use agg_gui::widget::paint_subtree;
 use agg_gui::widgets::button::Button;
+use agg_gui::widgets::combo_box::ComboBox;
 
 // ── Run mode ──────────────────────────────────────────────────────────────────
 
@@ -365,6 +366,31 @@ pub fn build_backend_panel(
     ), 0.0);
 
     col.push(Box::new(RunModeRow::new(Arc::clone(&font), run_mode)), 0.0);
+
+    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+    col.push(Box::new(Separator::horizontal()), 0.0);
+    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+
+    // ── Font selector ─────────────────────────────────────────────────────────
+    col.push(Box::new(
+        Label::new("Font", Arc::clone(&font))
+            .with_font_size(11.0)
+            .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 0.0))
+    ), 0.0);
+
+    let font_options = vec![
+        "Cascadia Code (default)".to_string(),
+        "System monospace".to_string(),
+        "System proportional".to_string(),
+    ];
+    col.push(Box::new(
+        SizedBox::new()
+            .with_margin(Insets::from_sides(12.0, 12.0, 4.0, 4.0))
+            .with_child(Box::new(
+                ComboBox::new(font_options, 0, Arc::clone(&font))
+                    .on_change(|_| { /* Font switching requires restart */ })
+            ))
+    ), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);

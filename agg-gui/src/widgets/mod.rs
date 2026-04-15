@@ -18,6 +18,7 @@ pub mod tab_view;
 pub mod text_field;
 pub mod text_field_core;
 pub mod toggle_switch;
+pub mod tooltip;
 pub mod tree_view;
 pub mod window;
 
@@ -40,5 +41,6 @@ pub use splitter::Splitter;
 pub use tab_view::TabView;
 pub use text_field::TextField;
 pub use toggle_switch::ToggleSwitch;
+pub use tooltip::Tooltip;
 pub use tree_view::{NodeIcon, TreeView};
 pub use window::Window;

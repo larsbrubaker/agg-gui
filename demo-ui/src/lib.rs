@@ -9,6 +9,7 @@
 //! The only platform-specific piece is the 3D cube widget, passed by the caller.
 
 mod backend_panel;
+mod rendering_test;
 mod sidebar;
 mod top_bar;
 mod windows;
@@ -18,7 +19,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    App, DrawCtx, Event, EventResult,
+    App, DrawCtx, Event, EventResult, Key, Modifiers,
     FlexColumn, FlexRow, Font, InspectorNode, InspectorPanel,
     Rect, Size, SizedBox, Stack, Widget, Window,
     ThemePreference,
@@ -362,17 +363,23 @@ pub fn build_demo_ui(
     let default_canvas_h = 720.0_f64;
 
     // ── Organize Windows callback ──────────────────────────────────────────────
-    let rc_for_cb: Vec<_> = reset_cells.iter().map(Rc::clone).collect();
+    // Two separate clones: one for the sidebar button, one for Ctrl+Shift+O shortcut.
+    let rc_for_cb: Vec<_>  = reset_cells.iter().map(Rc::clone).collect();
+    let rc_for_key: Vec<_> = reset_cells.iter().map(Rc::clone).collect();
+
+    let specs_w: Vec<f64> = DEMOS.iter().map(|s| s.win_w)
+        .chain(TESTS.iter().map(|s| s.win_w))
+        .collect();
+    let specs_h: Vec<f64> = DEMOS.iter().map(|s| s.win_h)
+        .chain(TESTS.iter().map(|s| s.win_h))
+        .collect();
+
     let on_organize = {
-        let specs_w: Vec<f64> = DEMOS.iter().map(|s| s.win_w)
-            .chain(TESTS.iter().map(|s| s.win_w))
-            .collect();
-        let specs_h: Vec<f64> = DEMOS.iter().map(|s| s.win_h)
-            .chain(TESTS.iter().map(|s| s.win_h))
-            .collect();
+        let sw = specs_w.clone();
+        let sh = specs_h.clone();
         move || {
             for (i, cell) in rc_for_cb.iter().enumerate() {
-                let r = tile_rect(i, default_canvas_h, specs_w[i], specs_h[i]);
+                let r = tile_rect(i, default_canvas_h, sw[i], sh[i]);
                 cell.set(Some(r));
             }
         }
@@ -509,10 +516,10 @@ pub fn build_demo_ui(
         my_tab:   AppTab::Demos,
     };
 
-    // ── Rendering test tab body: placeholder ──────────────────────────────────
+    // ── Rendering test tab body ────────────────────────────────────────────────
     let render_pane = TabPane {
         bounds:   Rect::default(),
-        children: vec![Box::new(CanvasBg::new())],
+        children: vec![Box::new(rendering_test::RenderingTestView::new(Arc::clone(&font)))],
         tab:      Rc::clone(&app_tab),
         my_tab:   AppTab::RenderingTest,
     };
@@ -536,7 +543,46 @@ pub fn build_demo_ui(
         .add(Box::new(TopMenuBar::new(top_bar_inner)))
         .add_flex(Box::new(body), 1.0);
 
-    (App::new(Box::new(root)), show_inspector, inspector_nodes, hovered_bounds, cube_visible)
+    let mut app = App::new(Box::new(root));
+
+    // ── Global keyboard shortcuts ─────────────────────────────────────────────
+    // Ctrl+Shift+O — Organize Windows (tile all visible windows).
+    // Ctrl+Shift+R — Reset Memory (resets all open/collapsed window states).
+    let on_organize_key = {
+        move || {
+            for (i, cell) in rc_for_key.iter().enumerate() {
+                let r = tile_rect(i, default_canvas_h, specs_w[i], specs_h[i]);
+                cell.set(Some(r));
+            }
+        }
+    };
+    let demo_open_cells: Vec<Rc<Cell<bool>>> = demo_entries.iter()
+        .map(|e| Rc::clone(&e.open))
+        .collect();
+    let test_open_cells: Vec<Rc<Cell<bool>>> = test_entries.iter()
+        .map(|e| Rc::clone(&e.open))
+        .collect();
+
+    app.set_global_key_handler({
+        let on_org = on_organize_key;
+        move |key: Key, mods: Modifiers| {
+            if mods.ctrl && mods.shift {
+                match key {
+                    Key::Char('O') | Key::Char('o') => { on_org(); return true; }
+                    Key::Char('R') | Key::Char('r') => {
+                        // Reset Memory: close all demo/test windows.
+                        for c in &demo_open_cells  { c.set(false); }
+                        for c in &test_open_cells  { c.set(false); }
+                        return true;
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+    });
+
+    (app, show_inspector, inspector_nodes, hovered_bounds, cube_visible)
 }
 
 // ── Demo content dispatcher ────────────────────────────────────────────────────

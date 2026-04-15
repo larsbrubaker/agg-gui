@@ -160,7 +160,7 @@ impl TextField {
     pub fn with_password_mode(mut self, v: bool) -> Self { self.password_mode = v; self }
 
     pub fn with_placeholder(mut self, s: impl Into<String>) -> Self { self.placeholder = s.into(); self }
-    pub fn with_text(mut self, s: impl Into<String>) -> Self {
+    pub fn with_text(self, s: impl Into<String>) -> Self {
         let t = s.into();
         let len = t.len();
         let mut st = self.edit.borrow_mut();
@@ -213,9 +213,12 @@ impl TextField {
     // ── Private state helpers ────────────────────────────────────────────────
 
     fn snap(&self) -> TextEditState { self.edit.borrow().clone() }
+    #[allow(dead_code)]
     fn apply(&self, s: TextEditState) { *self.edit.borrow_mut() = s; }
 
+    #[allow(dead_code)]
     fn sel_min(&self) -> usize { let s = self.edit.borrow(); s.cursor.min(s.anchor) }
+    #[allow(dead_code)]
     fn sel_max(&self) -> usize { let s = self.edit.borrow(); s.cursor.max(s.anchor) }
     fn has_selection(&self) -> bool { let s = self.edit.borrow(); s.cursor != s.anchor }
 
@@ -254,6 +257,7 @@ impl TextField {
             let st = self.edit.borrow();
             if self.password_mode {
                 const BULLET: char = '•';
+                #[allow(dead_code)]
                 const BULLET_LEN: usize = 3;
                 let n      = st.text[..st.cursor].chars().count();
                 let masked = BULLET.to_string().repeat(n);

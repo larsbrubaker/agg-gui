@@ -82,6 +82,7 @@ enum LayoutItem {
     /// An image row — draws cached pixel data or a placeholder box.
     Image {
         /// URL/path originally specified in the Markdown.
+        #[allow(dead_code)]
         url:    String,
         alt:    String,
         /// Index into `MarkdownView::image_cache`.

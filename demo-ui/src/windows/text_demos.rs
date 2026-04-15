@@ -14,20 +14,36 @@ use agg_gui::{
     MouseButton, Point, Rect, ScrollView, Separator,
     Size, SizedBox, TextField, Widget,
 };
+use agg_gui::widget::paint_subtree;
 
 // ---------------------------------------------------------------------------
 // Strip demo
 // ---------------------------------------------------------------------------
 
 /// A fixed-width labeled box used to visualise "strip" regions.
+///
+/// Text is rendered through a backbuffered Label child so the glyph rasterization
+/// is cached to a framebuffer rather than repeated each frame.
 struct StripCell {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    label:    String,
-    bg:       Color,
-    w:        f64,
-    h:        f64,
+    bounds:       Rect,
+    children:     Vec<Box<dyn Widget>>,
+    label_widget: Label,
+    bg:           Color,
+    w:            f64,
+    h:            f64,
+}
+
+impl StripCell {
+    fn new(label: impl Into<String>, font: Arc<Font>, bg: Color, w: f64, h: f64) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            label_widget: Label::new(label, font).with_font_size(11.0),
+            bg,
+            w,
+            h,
+        }
+    }
 }
 
 impl Widget for StripCell {
@@ -39,6 +55,10 @@ impl Widget for StripCell {
 
     fn layout(&mut self, _available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, self.w, self.h);
+        // Position the label at 4px from the left, vertically centered.
+        let ls = self.label_widget.layout(Size::new(self.w - 8.0, self.h));
+        let ly = (self.h - ls.height) * 0.5;
+        self.label_widget.set_bounds(Rect::new(4.0, ly, ls.width, ls.height));
         Size::new(self.w, self.h)
     }
 
@@ -53,10 +73,13 @@ impl Widget for StripCell {
         ctx.begin_path();
         ctx.rect(0.0, 0.0, self.w, self.h);
         ctx.stroke();
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(11.0);
-        ctx.set_fill_color(v.text_color);
-        ctx.fill_text(&self.label, 4.0, self.h * 0.4 + 4.0);
+
+        // Paint label via backbuffered child.
+        self.label_widget.set_color(v.text_color);
+        let lb = self.label_widget.bounds();
+        ctx.save(); ctx.translate(lb.x, lb.y);
+        paint_subtree(&mut self.label_widget, ctx);
+        ctx.restore();
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
@@ -82,12 +105,9 @@ pub fn strip_demo(font: Arc<Font>) -> Box<dyn Widget> {
     ];
     let mut h_row = FlexRow::new().with_gap(4.0);
     for (i, &bg) in colors_h.iter().enumerate() {
-        h_row.push(Box::new(StripCell {
-            bounds: Rect::default(), children: Vec::new(),
-            font: Arc::clone(&font),
-            label: format!("S{}", i + 1),
-            bg, w: 55.0, h: 40.0,
-        }), 0.0);
+        h_row.push(Box::new(StripCell::new(
+            format!("S{}", i + 1), Arc::clone(&font), bg, 55.0, 40.0,
+        )), 0.0);
     }
     outer.push(Box::new(h_row), 0.0);
 
@@ -103,12 +123,9 @@ pub fn strip_demo(font: Arc<Font>) -> Box<dyn Widget> {
     ];
     let mut v_col = FlexColumn::new().with_gap(4.0);
     for (i, &bg) in colors_v.iter().enumerate() {
-        v_col.push(Box::new(StripCell {
-            bounds: Rect::default(), children: Vec::new(),
-            font: Arc::clone(&font),
-            label: format!("Strip {}", i + 1),
-            bg, w: 200.0, h: 32.0,
-        }), 0.0);
+        v_col.push(Box::new(StripCell::new(
+            format!("Strip {}", i + 1), Arc::clone(&font), bg, 200.0, 32.0,
+        )), 0.0);
     }
     outer.push(Box::new(v_col), 0.0);
 
@@ -334,11 +351,29 @@ pub fn window_options(font: Arc<Font>) -> Box<dyn Widget> {
 // ---------------------------------------------------------------------------
 
 /// Inline modal overlay: shown/hidden by the `open` cell.
+///
+/// Text is rendered through backbuffered Label children so glyph rasterization
+/// is cached rather than repeated each frame.
 struct ModalOverlay {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    open:     Rc<Cell<bool>>,
+    bounds:      Rect,
+    children:    Vec<Box<dyn Widget>>,
+    open:        Rc<Cell<bool>>,
+    lbl_title:   Label,
+    lbl_body:    Label,
+    lbl_dismiss: Label,
+}
+
+impl ModalOverlay {
+    fn new(font: Arc<Font>, open: Rc<Cell<bool>>) -> Self {
+        Self {
+            bounds:      Rect::default(),
+            children:    Vec::new(),
+            open,
+            lbl_title:   Label::new("Modal dialog", Arc::clone(&font)).with_font_size(13.0),
+            lbl_body:    Label::new("This is a modal. Click anywhere to dismiss.", Arc::clone(&font)).with_font_size(11.5),
+            lbl_dismiss: Label::new("[ Dismiss ]", Arc::clone(&font)).with_font_size(11.0),
+        }
+    }
 }
 
 impl Widget for ModalOverlay {
@@ -354,8 +389,26 @@ impl Widget for ModalOverlay {
             return Size::new(0.0, 0.0);
         }
         let h = 120.0_f64;
-        self.bounds = Rect::new(0.0, 0.0, available.width, h);
-        Size::new(available.width, h)
+        let w = available.width;
+        self.bounds = Rect::new(0.0, 0.0, w, h);
+
+        // Dialog dimensions (computed same as paint).
+        let dw = w.min(280.0);
+        let dh = 90.0_f64;
+        let dx = (w - dw) * 0.5;
+        let dy = (h - dh) * 0.5;
+        let inner_w = dw - 20.0;
+
+        let ts = self.lbl_title.layout(Size::new(inner_w, 20.0));
+        self.lbl_title.set_bounds(Rect::new(dx + 10.0, dy + dh - ts.height - 10.0, ts.width, ts.height));
+
+        let bs = self.lbl_body.layout(Size::new(inner_w, 18.0));
+        self.lbl_body.set_bounds(Rect::new(dx + 10.0, dy + dh - ts.height - bs.height - 18.0, bs.width, bs.height));
+
+        let ds = self.lbl_dismiss.layout(Size::new(inner_w, 18.0));
+        self.lbl_dismiss.set_bounds(Rect::new(dx + 10.0, dy + dh - ts.height - bs.height - ds.height - 26.0, ds.width, ds.height));
+
+        Size::new(w, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -385,16 +438,24 @@ impl Widget for ModalOverlay {
         ctx.rounded_rect(dx, dy, dw, dh, 8.0);
         ctx.stroke();
 
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_fill_color(v.text_color);
-        ctx.set_font_size(13.0);
-        ctx.fill_text("Modal dialog", dx + 10.0, dy + dh - 18.0);
-        ctx.set_font_size(11.5);
-        ctx.set_fill_color(v.text_dim);
-        ctx.fill_text("This is a modal. Press Dismiss to close.", dx + 10.0, dy + dh - 38.0);
-        ctx.set_font_size(11.0);
-        ctx.set_fill_color(v.accent);
-        ctx.fill_text("[ Dismiss ]", dx + 10.0, dy + dh - 60.0);
+        // Paint labels via backbuffered children.
+        self.lbl_title.set_color(v.text_color);
+        let tb = self.lbl_title.bounds();
+        ctx.save(); ctx.translate(tb.x, tb.y);
+        paint_subtree(&mut self.lbl_title, ctx);
+        ctx.restore();
+
+        self.lbl_body.set_color(v.text_dim);
+        let bb = self.lbl_body.bounds();
+        ctx.save(); ctx.translate(bb.x, bb.y);
+        paint_subtree(&mut self.lbl_body, ctx);
+        ctx.restore();
+
+        self.lbl_dismiss.set_color(v.accent);
+        let db = self.lbl_dismiss.bounds();
+        ctx.save(); ctx.translate(db.x, db.y);
+        paint_subtree(&mut self.lbl_dismiss, ctx);
+        ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
@@ -435,10 +496,7 @@ pub fn modals_demo(font: Arc<Font>) -> Box<dyn Widget> {
         ))), 0.0);
     }
 
-    col.push(Box::new(ModalOverlay {
-        bounds: Rect::default(), children: Vec::new(),
-        font: Arc::clone(&font), open: Rc::clone(&open),
-    }), 0.0);
+    col.push(Box::new(ModalOverlay::new(Arc::clone(&font), Rc::clone(&open))), 0.0);
 
     col.push(Box::new(Label::new(
         "Click 'Open modal' to show the dialog. Click anywhere in it to dismiss.",

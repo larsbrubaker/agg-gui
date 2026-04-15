@@ -17,7 +17,7 @@
 //! flatten_glyph_at_origin      — single-glyph, origin 0,0, feeds GlyphCache
 //! ```
 
-use agg_rust::basics::{is_end_poly, is_move_to, is_stop, PATH_CMD_LINE_TO, PATH_FLAGS_NONE, VertexSource};
+use agg_rust::basics::{is_end_poly, is_move_to, is_stop, PATH_CMD_LINE_TO, VertexSource};
 use agg_rust::conv_curve::ConvCurve;
 
 use super::{Font, GlyphPathBuilder};
