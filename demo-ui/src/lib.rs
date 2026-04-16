@@ -18,6 +18,31 @@ mod windows;
 pub use state::{SavedState, StateAccessor, WindowState};
 pub use backend_panel::FrameHistory;
 
+/// Encode a top-down RGBA8 buffer (first `width*4` bytes = top row, left→right)
+/// as a PNG.  Shared by the native harness (writes to disk) and the WASM
+/// harness (creates a browser blob for download).  Returns empty on failure.
+pub fn encode_png_rgba(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(rgba.len() / 2);
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        match encoder.write_header() {
+            Ok(mut w) => {
+                if let Err(e) = w.write_image_data(rgba) {
+                    eprintln!("encode_png_rgba: write_image_data failed: {e}");
+                    return Vec::new();
+                }
+            }
+            Err(e) => {
+                eprintln!("encode_png_rgba: write_header failed: {e}");
+                return Vec::new();
+            }
+        }
+    }
+    out
+}
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -264,7 +289,7 @@ const DEMOS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F0DB} Panels",                 label: "\u{F0DB} Panels",                 group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F0C9} Strip",                  label: "\u{F0C9} Strip",                  group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F0CE} Table",                  label: "\u{F0CE} Table",                  group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "\u{F07D} Scrolling",              label: "\u{F07D} Scrolling",              group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F07D} Scrolling",              label: "\u{F07D} Scrolling",              group: "Layout",  open: false, win_w: 680.0, win_h: 540.0 },
     DemoSpec { title: "\u{F013} Window Options",         label: "\u{F013} Window Options",         group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F036} Text Layout",            label: "\u{F036} Text Layout",            group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F1B2} Interactive Container",  label: "\u{F1B2} Interactive Container",  group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
@@ -319,6 +344,14 @@ pub struct DemoHandles {
     /// Fullscreen / maximized state of the OS window.  The platform harness
     /// sets this cell whenever the window transitions.
     pub window_fullscreen: Rc<Cell<bool>>,
+    /// When set to `true`, the platform harness captures the frame buffer on
+    /// the NEXT fully-rendered frame, writes the RGBA8 data + dimensions into
+    /// `screenshot_image`, then resets this flag.  Set to `true` from any
+    /// widget (e.g. the Screenshot demo button) to request a capture.
+    pub screenshot_request: Rc<Cell<bool>>,
+    /// Latest captured frame.  `None` until at least one capture completes.
+    /// Top-down RGBA8; first `width * 4` bytes are the TOP row.
+    pub screenshot_image: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
     pub state:           StateAccessor,
 }
 
@@ -340,6 +373,9 @@ pub fn build_demo_ui(
     let window_fullscreen = Rc::new(Cell::new(
         initial_state.as_ref().map(|s| s.window_fullscreen).unwrap_or(false)
     ));
+    let screenshot_request = Rc::new(Cell::new(false));
+    let screenshot_image: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>> =
+        Rc::new(RefCell::new(None));
 
     // Theme preference — detect OS color scheme so we start in the right mode.
     let initial_theme = top_bar::detect_system_theme();
@@ -483,7 +519,12 @@ pub fn build_demo_ui(
             // Use a placeholder here; replaced immediately after the loop.
             windows::coming_soon()
         } else {
-            build_demo_content(spec.title, Arc::clone(&font))
+            build_demo_content(
+                spec.title,
+                Arc::clone(&font),
+                Rc::clone(&screenshot_request),
+                Rc::clone(&screenshot_image),
+            )
         };
 
         let win = Window::new(spec.title, Arc::clone(&font), content)
@@ -691,6 +732,8 @@ pub fn build_demo_ui(
         screen_size,
         frame_history,
         window_fullscreen,
+        screenshot_request: Rc::clone(&screenshot_request),
+        screenshot_image:   Rc::clone(&screenshot_image),
         state: state_accessor,
     };
     (app, handles)
@@ -698,7 +741,12 @@ pub fn build_demo_ui(
 
 // ── Demo content dispatcher ────────────────────────────────────────────────────
 
-fn build_demo_content(title: &str, font: Arc<Font>) -> Box<dyn Widget> {
+fn build_demo_content(
+    title: &str,
+    font: Arc<Font>,
+    screenshot_request: Rc<Cell<bool>>,
+    screenshot_image:   Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
+) -> Box<dyn Widget> {
     match title {
         // basic.rs
         "\u{F121} Code Editor"           => windows::code_editor(font),
@@ -728,7 +776,9 @@ fn build_demo_content(title: &str, font: Arc<Font>) -> Box<dyn Widget> {
         "\u{F075} Popups"                => windows::popups_demo(font),
         "\u{F0C3} Rendering Test"        => rendering_test::rendering_test_view(font),
         "\u{F002} Scene"                 => windows::scene_demo(font),
-        "\u{F030} Screenshot"            => windows::screenshot_demo(font),
+        "\u{F030} Screenshot"            => windows::screenshot_demo(
+            font, screenshot_request, screenshot_image,
+        ),
         // text_demos.rs
         "\u{F0C9} Strip"                 => windows::strip_demo(font),
         "\u{F0CE} Table"                 => windows::table_demo(font),

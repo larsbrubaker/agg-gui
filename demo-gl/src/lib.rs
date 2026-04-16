@@ -55,6 +55,21 @@ const SOLID_FRAG: &str = "#version 300 es\nprecision mediump float;\nuniform vec
 #[cfg(not(target_arch = "wasm32"))]
 const SOLID_FRAG: &str = "#version 330 core\nuniform vec4 u_color;out vec4 frag_color;void main(){frag_color=u_color;}";
 
+// ── Textured-quad pipeline (used by draw_image_rgba) ────────────────────────
+//
+// Same screen-space → NDC math as the solid pipeline, with an extra `a_uv`
+// attribute and a single texture sampler binding.
+
+#[cfg(target_arch = "wasm32")]
+const TEX_VERT: &str = "#version 300 es\nprecision mediump float;\nlayout(location=0)in vec2 a_pos;layout(location=1)in vec2 a_uv;uniform vec2 u_resolution;out vec2 v_uv;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_uv=a_uv;}";
+#[cfg(not(target_arch = "wasm32"))]
+const TEX_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;layout(location=1)in vec2 a_uv;uniform vec2 u_resolution;out vec2 v_uv;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_uv=a_uv;}";
+
+#[cfg(target_arch = "wasm32")]
+const TEX_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_tex;out vec4 frag_color;void main(){frag_color=texture(u_tex,v_uv);}";
+#[cfg(not(target_arch = "wasm32"))]
+const TEX_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;out vec4 frag_color;void main(){frag_color=texture(u_tex,v_uv);}";
+
 // ---------------------------------------------------------------------------
 // GlGfxCtx
 // ---------------------------------------------------------------------------
@@ -77,6 +92,13 @@ pub struct GlGfxCtx {
     ibo:  glow::Buffer,     // persistent index buffer — no per-draw alloc
     res_loc:   Option<glow::UniformLocation>,
     color_loc: Option<glow::UniformLocation>,
+
+    // Textured-quad pipeline (draw_image_rgba — markdown images, screenshots).
+    tex_prog: glow::Program,
+    tex_vao:  glow::VertexArray,
+    tex_vbo:  glow::Buffer,
+    tex_res_loc: Option<glow::UniformLocation>,
+    tex_sampler_loc: Option<glow::UniformLocation>,
 
     // Drawing state
     fill_color:   Color,
@@ -133,11 +155,30 @@ impl GlGfxCtx {
         gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ibo));
         gl.bind_vertex_array(None);
 
+        // ── Textured-quad pipeline ─────────────────────────────────────────
+        let tex_prog = compile_program(&gl, TEX_VERT, TEX_FRAG)
+            .expect("tex shader compile/link");
+        let tex_res_loc     = gl.get_uniform_location(tex_prog, "u_resolution");
+        let tex_sampler_loc = gl.get_uniform_location(tex_prog, "u_tex");
+
+        let tex_vao = gl.create_vertex_array().expect("create tex VAO");
+        let tex_vbo = gl.create_buffer().expect("create tex VBO");
+        gl.bind_vertex_array(Some(tex_vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(tex_vbo));
+        // Layout: vec2 pos + vec2 uv = 16 bytes per vertex.
+        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 16, 0);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 16, 8);
+        gl.enable_vertex_attrib_array(0);
+        gl.enable_vertex_attrib_array(1);
+        gl.bind_vertex_array(None);
+
         Self {
             gl,
             viewport: (width, height),
             prog, vao, vbo, ibo,
             res_loc, color_loc,
+            tex_prog, tex_vao, tex_vbo,
+            tex_res_loc, tex_sampler_loc,
             fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
@@ -150,6 +191,37 @@ impl GlGfxCtx {
             font_size:    16.0,
             glyph_cache:  GlyphCache::new(),
         }
+    }
+
+    /// Read the contents of the back buffer into a top-down RGBA8 buffer.
+    /// Returns `(pixels, width, height)` where the first `width * 4` bytes are
+    /// the TOP row (left-to-right, RGBA).  Intended for the Screenshot demo
+    /// and the WASM download-blob path — not used in the rendering hot path.
+    ///
+    /// Must be called BEFORE the window's buffer swap for the current frame,
+    /// otherwise the back buffer contents are undefined on some platforms.
+    pub fn read_screenshot(&self) -> (Vec<u8>, u32, u32) {
+        let w = self.viewport.0.round().max(1.0) as i32;
+        let h = self.viewport.1.round().max(1.0) as i32;
+        let total = (w * h * 4) as usize;
+        let mut buf = vec![0u8; total];
+        unsafe {
+            self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+            self.gl.read_pixels(
+                0, 0, w, h, glow::RGBA, glow::UNSIGNED_BYTE,
+                glow::PixelPackData::Slice(&mut buf),
+            );
+        }
+        // Flip vertically: GL origin is bottom-left, PNG top-left.
+        let stride = (w * 4) as usize;
+        let mut flipped = vec![0u8; total];
+        for y in 0..(h as usize) {
+            let src_off = y * stride;
+            let dst_off = (h as usize - 1 - y) * stride;
+            flipped[dst_off..dst_off + stride]
+                .copy_from_slice(&buf[src_off..src_off + stride]);
+        }
+        (flipped, w as u32, h as u32)
     }
 
     /// Reset drawing state for a new frame.  Does NOT recreate GL resources.
@@ -575,6 +647,86 @@ impl DrawCtx for GlGfxCtx {
     fn fill_text_gsv(&mut self, _text: &str, _x: f64, _y: f64, _size: f64) {
         // GSV (Glyph-Stroke-Vector) font is AGG-specific; not available in GL path.
         // Silently ignore — this is only used in placeholder widgets.
+    }
+
+    // ── Image blitting (textured quad) ───────────────────────────────────────
+    //
+    // NOTE: `has_image_blit()` is deliberately left at the default `false`.
+    // If it returned `true`, `Label`'s backbuffer caching path would activate
+    // and every label's text would be rasterised to a software framebuffer
+    // then uploaded as a throwaway texture each frame — a major regression
+    // for widgets that rebuild their labels every layout (e.g. inspector
+    // `TreeRow`).  Widgets that genuinely need pixel blitting (the Screenshot
+    // demo, MarkdownView images) can call `draw_image_rgba` directly.
+
+    fn draw_image_rgba(
+        &mut self,
+        data:  &[u8],
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 { return; }
+        if data.len() < (img_w as usize) * (img_h as usize) * 4 { return; }
+
+        // Transform the four corners through the CTM.  Image is stored
+        // top-row-first so map the quad's HIGH-Y corners to uv.v=0 and the
+        // LOW-Y corners to uv.v=1.
+        let bl = self.transform_pt(dst_x,          dst_y);
+        let br = self.transform_pt(dst_x + dst_w,  dst_y);
+        let tr = self.transform_pt(dst_x + dst_w,  dst_y + dst_h);
+        let tl = self.transform_pt(dst_x,          dst_y + dst_h);
+
+        let verts: [f32; 24] = [
+            bl[0], bl[1], 0.0, 1.0,
+            br[0], br[1], 1.0, 1.0,
+            tr[0], tr[1], 1.0, 0.0,
+            bl[0], bl[1], 0.0, 1.0,
+            tr[0], tr[1], 1.0, 0.0,
+            tl[0], tl[1], 0.0, 0.0,
+        ];
+
+        unsafe {
+            let gl = &self.gl;
+            let tex = gl.create_texture().expect("create texture");
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+            gl.tex_image_2d(
+                glow::TEXTURE_2D, 0, glow::RGBA as i32,
+                img_w as i32, img_h as i32, 0,
+                glow::RGBA, glow::UNSIGNED_BYTE, Some(data),
+            );
+
+            gl.use_program(Some(self.tex_prog));
+            gl.uniform_2_f32(
+                self.tex_res_loc.as_ref(),
+                self.viewport.0, self.viewport.1,
+            );
+            gl.uniform_1_i32(self.tex_sampler_loc.as_ref(), 0);
+
+            gl.bind_vertex_array(Some(self.tex_vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.tex_vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(&verts),
+                glow::DYNAMIC_DRAW,
+            );
+
+            gl.enable(glow::BLEND);
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+
+            gl.bind_vertex_array(None);
+            gl.delete_texture(tex);
+        }
     }
 
     fn measure_text(&self, text: &str) -> Option<TextMetrics> {

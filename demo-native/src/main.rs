@@ -165,14 +165,18 @@ fn main() {
         "native GL (glutin/winit)",
         initial_state,
     );
-    let show_inspector    = Rc::clone(&handles.show_inspector);
-    let inspector_nodes   = Rc::clone(&handles.inspector_nodes);
-    let hovered_bounds    = Rc::clone(&handles.hovered_bounds);
-    let cube_visible      = Rc::clone(&handles.cube_visible);
-    let screen_size       = Rc::clone(&handles.screen_size);
-    let frame_history     = Rc::clone(&handles.frame_history);
-    let window_fullscreen = Rc::clone(&handles.window_fullscreen);
-    let state_accessor    = handles.state;
+    let show_inspector     = Rc::clone(&handles.show_inspector);
+    let inspector_nodes    = Rc::clone(&handles.inspector_nodes);
+    let hovered_bounds     = Rc::clone(&handles.hovered_bounds);
+    let cube_visible       = Rc::clone(&handles.cube_visible);
+    let screen_size        = Rc::clone(&handles.screen_size);
+    let frame_history      = Rc::clone(&handles.frame_history);
+    let window_fullscreen  = Rc::clone(&handles.window_fullscreen);
+    let screenshot_request      = Rc::clone(&handles.screenshot_request);
+    let handles_screenshot_image = Rc::clone(&handles.screenshot_image);
+    let state_accessor          = handles.state;
+    #[allow(unused_assignments, unused_mut)]
+    let mut screenshot_counter: u32 = 0;
 
     let mut cursor_x    = 0.0f64;
     let mut cursor_y    = 0.0f64;
@@ -281,6 +285,34 @@ fn main() {
                             }
                             return;
                         }
+                        // F10 — dump widget tree + bounds as JSON next to the
+                        // executable.  Overwrites on each press so successive
+                        // dumps can be diffed to track layout changes.
+                        if matches!(
+                            key_event.logical_key,
+                            WinitKey::Named(NamedKey::F10)
+                        ) {
+                            let path = state_file_path()
+                                .parent()
+                                .map(|p| p.join("widget-tree.json"))
+                                .unwrap_or_else(|| std::path::PathBuf::from("widget-tree.json"));
+                            let json = app.dump_tree_json();
+                            match std::fs::write(&path, &json) {
+                                Ok(_)  => eprintln!("dumped widget tree → {}", path.display()),
+                                Err(e) => eprintln!("failed to write widget tree: {e}"),
+                            }
+                            return;
+                        }
+                        // F9 — request a screenshot of the NEXT rendered
+                        // frame.  The main loop polls this cell and captures
+                        // after rendering.
+                        if matches!(
+                            key_event.logical_key,
+                            WinitKey::Named(NamedKey::F9)
+                        ) {
+                            screenshot_request.set(true);
+                            return;
+                        }
                         if let Some(key) = map_key(&key_event.logical_key) {
                             app.on_key_down(key, current_mods);
                         }
@@ -327,6 +359,16 @@ fn main() {
                     screen_size.set((win_w, win_h));
                     render_frame(&mut app, &mut gl_ctx, &gl,
                                  win_w, win_h, last_frame_ms, &hovered_bounds);
+
+                    // Satisfy any pending screenshot request BEFORE buffer swap
+                    // while the back buffer still holds this frame's pixels.
+                    if screenshot_request.get() {
+                        let (rgba, w, h) = gl_ctx.read_screenshot();
+                        *handles_screenshot_image.borrow_mut() = Some((rgba, w, h));
+                        screenshot_request.set(false);
+                        screenshot_counter = screenshot_counter.wrapping_add(1);
+                    }
+
                     gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
 
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;

@@ -62,6 +62,10 @@ thread_local! {
     static FRAME_HISTORY: RefCell<Option<Rc<RefCell<demo_ui::FrameHistory>>>>                   = RefCell::new(None);
     /// Frame counter used to throttle localStorage saves.
     static FRAME_COUNT: Cell<u32> = Cell::new(0);
+    /// Screenshot request flag — set by the demo button, cleared by render().
+    static SCREENSHOT_REQUEST: RefCell<Option<Rc<Cell<bool>>>>                  = RefCell::new(None);
+    /// Shared latest-screenshot image (top-down RGBA8 + dims).
+    static SCREENSHOT_IMAGE:   RefCell<Option<Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>>> = RefCell::new(None);
 }
 
 /// Initialise panic hook so Rust panics appear in the browser console.
@@ -106,6 +110,8 @@ fn ensure_demo_app() {
             HOVERED_BOUNDS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.hovered_bounds)));
             SCREEN_SIZE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screen_size)));
             FRAME_HISTORY.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.frame_history)));
+            SCREENSHOT_REQUEST.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_request)));
+            SCREENSHOT_IMAGE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_image)));
             STATE_ACCESSOR.with(|c| *c.borrow_mut() = Some(handles.state));
             *cell.borrow_mut() = Some(app);
         }
@@ -217,6 +223,24 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                     render_app_frame(gl_ctx, app, width, height, frame_ms, hovered);
                 }
             });
+
+            // Satisfy any pending screenshot request — must happen BEFORE the
+            // browser presents the frame so the WebGL back buffer still holds
+            // these pixels.
+            let requested = SCREENSHOT_REQUEST.with(|c| {
+                c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false)
+            });
+            if requested {
+                let (rgba, w, h) = gl_ctx.read_screenshot();
+                SCREENSHOT_IMAGE.with(|c| {
+                    if let Some(ref rc) = *c.borrow() {
+                        *rc.borrow_mut() = Some((rgba, w, h));
+                    }
+                });
+                SCREENSHOT_REQUEST.with(|c| {
+                    if let Some(ref rc) = *c.borrow() { rc.set(false); }
+                });
+            }
         }
     });
 

@@ -129,6 +129,13 @@ pub trait Widget {
         true
     }
 
+    /// Return `false` to hide this widget (and its subtree) from the inspector
+    /// node snapshot entirely.  Intended for zero-size utility widgets such
+    /// as layout-time watchers / tickers / invisible composers — they bloat
+    /// the inspector tree without providing user-relevant information and,
+    /// at scale, can make the inspector's per-frame tree rebuild expensive.
+    fn show_in_inspector(&self) -> bool { true }
+
     /// Paint decorations that must appear **on top of all children**.
     ///
     /// Called by [`paint_subtree`] after all children have been painted.
@@ -352,6 +359,8 @@ pub fn collect_inspector_nodes(
     // Invisible widgets (and their entire subtrees) are excluded from the
     // inspector — they are not part of the live rendered scene.
     if !widget.is_visible() { return; }
+    // Utility widgets opt out of the inspector entirely.
+    if !widget.show_in_inspector() { return; }
 
     let b = widget.bounds();
     let abs = Rect::new(
@@ -578,6 +587,33 @@ impl App {
         let mut out = Vec::new();
         collect_inspector_nodes(self.root.as_ref(), 0, Point::ORIGIN, &mut out);
         out
+    }
+
+    /// Serialize the widget tree — types, bounds, depth, properties — as JSON.
+    ///
+    /// Produces a flat array of nodes in paint-order DFS.  Suitable for writing
+    /// to a file and diffing between runs to verify layout stability.  Used by
+    /// the demo harness's debug hotkey.
+    pub fn dump_tree_json(&self) -> String {
+        let nodes = self.collect_inspector_nodes();
+        let mut s = String::from("[\n");
+        for (i, n) in nodes.iter().enumerate() {
+            let props_json = n.properties.iter()
+                .map(|(k, v)| format!("{:?}: {:?}", k, v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            s.push_str(&format!(
+                "  {{\"type\":{:?},\"depth\":{},\"x\":{:.2},\"y\":{:.2},\"w\":{:.2},\"h\":{:.2},\"props\":{{{}}}}}",
+                n.type_name, n.depth,
+                n.screen_bounds.x, n.screen_bounds.y,
+                n.screen_bounds.width, n.screen_bounds.height,
+                props_json,
+            ));
+            if i + 1 < nodes.len() { s.push(','); }
+            s.push('\n');
+        }
+        s.push(']');
+        s
     }
 
     /// Returns `true` if any widget currently holds keyboard focus.

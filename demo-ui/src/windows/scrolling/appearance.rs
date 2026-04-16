@@ -404,6 +404,7 @@ impl Widget for WatchCell {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn show_in_inspector(&self) -> bool { false }
     fn layout(&mut self, _: Size) -> Size {
         let cur = self.obs.get();
         if cur != self.last.get() {

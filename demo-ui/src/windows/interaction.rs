@@ -738,25 +738,150 @@ pub fn scene_demo(font: Arc<Font>) -> Box<dyn Widget> {
 // Screenshot demo
 // ---------------------------------------------------------------------------
 
-/// Build the Screenshot demo — informational placeholder.
-pub fn screenshot_demo(font: Arc<Font>) -> Box<dyn Widget> {
+/// Build the Screenshot demo.  Matches egui's `ScreenshotDemo`:
+///
+/// 1. "Take Screenshot" button + "Capture continuously" toggle.
+/// 2. Below: a preview panel that displays the most recent capture (via
+///    `DrawCtx::draw_image_rgba`) or a "No screenshot taken yet." placeholder.
+///
+/// The platform harness watches `screenshot_request`; on the next fully-
+/// rendered frame it reads the GL back buffer, writes the top-down RGBA8 data
+/// plus dimensions into `screenshot_image`, and resets the request cell.
+pub fn screenshot_demo(
+    font: Arc<Font>,
+    screenshot_request: Rc<Cell<bool>>,
+    screenshot_image:   std::rc::Rc<std::cell::RefCell<Option<(Vec<u8>, u32, u32)>>>,
+) -> Box<dyn Widget> {
+    let continuous = Rc::new(Cell::new(false));
+
     let mut col = FlexColumn::new()
-        .with_gap(12.0)
-        .with_padding(16.0)
+        .with_gap(10.0)
+        .with_padding(12.0)
         .with_panel_bg();
 
     col.push(Box::new(Label::new(
-        "Screenshot functionality is platform-dependent.",
+        "Capture the current frame and display it below.",
         Arc::clone(&font),
-    ).with_font_size(13.0)), 0.0);
+    ).with_font_size(12.0).with_wrap(true)), 0.0);
 
-    col.push(Box::new(Label::new(
-        "On desktop targets, screenshots can be captured via the OS screenshot\n\
-         tool or a dedicated crate (e.g. `screenshots`).  WASM targets can use\n\
-         the HTML Canvas `toDataURL()` API.\n\n\
-         In-framework screenshot capture is not yet implemented.",
-        Arc::clone(&font),
-    ).with_font_size(12.0)), 0.0);
+    let req_for_btn    = Rc::clone(&screenshot_request);
+    let continuous_cb  = Rc::clone(&continuous);
+
+    let button_row = agg_gui::FlexRow::new().with_gap(10.0)
+        .add(Box::new(
+            Button::new("\u{F030}  Take Screenshot", Arc::clone(&font))
+                .with_font_size(12.0)
+                .on_click(move || req_for_btn.set(true))
+        ))
+        .add(Box::new(
+            agg_gui::Checkbox::new(
+                "Capture continuously", Arc::clone(&font), continuous_cb.get()
+            )
+                .with_font_size(12.0)
+                .with_state_cell(Rc::clone(&continuous_cb))
+        ));
+    col.push(Box::new(button_row), 0.0);
+
+    // Continuous-capture driver: while the checkbox is checked, set the
+    // request flag on every layout so the harness captures the frame.
+    col.push(Box::new(ContinuousCapture {
+        bounds:   Rect::default(), children: Vec::new(),
+        enabled:  Rc::clone(&continuous),
+        request:  Rc::clone(&screenshot_request),
+    }), 0.0);
+
+    col.push(Box::new(Separator::horizontal()), 0.0);
+
+    // Preview pane that displays the captured image, scaled to fit.
+    col.push(Box::new(ImageView {
+        bounds:   Rect::default(), children: Vec::new(),
+        font:     Arc::clone(&font),
+        source:   Rc::clone(&screenshot_image),
+    }), 1.0);
 
     Box::new(col)
+}
+
+// ── ImageView: paints an `Rc<RefCell<Option<(rgba, w, h)>>>` as an image ─────
+
+struct ImageView {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+    font:     Arc<Font>,
+    source:   std::rc::Rc<std::cell::RefCell<Option<(Vec<u8>, u32, u32)>>>,
+}
+
+impl Widget for ImageView {
+    fn type_name(&self) -> &'static str { "ImageView" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn layout(&mut self, available: Size) -> Size {
+        self.bounds = Rect::new(0.0, 0.0, available.width, available.height.max(120.0));
+        Size::new(self.bounds.width, self.bounds.height)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        let w = self.bounds.width;
+        let h = self.bounds.height;
+
+        // Frame.
+        ctx.set_fill_color(v.widget_bg);
+        ctx.begin_path();
+        ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
+        ctx.fill();
+
+        let src = self.source.borrow();
+        if let Some((pixels, iw, ih)) = src.as_ref() {
+            // Shrink-to-fit preserving aspect ratio.
+            let iwf = *iw as f64;
+            let ihf = *ih as f64;
+            let scale = (w / iwf).min(h / ihf);
+            let dw = iwf * scale;
+            let dh = ihf * scale;
+            let dx = (w - dw) * 0.5;
+            let dy = (h - dh) * 0.5;
+            ctx.draw_image_rgba(pixels, *iw, *ih, dx, dy, dw, dh);
+        } else {
+            // Placeholder text.
+            ctx.set_font(Arc::clone(&self.font));
+            ctx.set_font_size(13.0);
+            ctx.set_fill_color(v.text_dim);
+            let msg = "No screenshot taken yet.";
+            if let Some(m) = ctx.measure_text(msg) {
+                let tx = (w - m.width) * 0.5;
+                let ty = (h - (m.ascent - m.descent)) * 0.5;
+                ctx.fill_text(msg, tx, ty);
+            }
+        }
+    }
+
+    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+}
+
+// ── ContinuousCapture: drives `screenshot_request` when enabled ──────────────
+
+struct ContinuousCapture {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+    enabled:  Rc<Cell<bool>>,
+    request:  Rc<Cell<bool>>,
+}
+
+impl Widget for ContinuousCapture {
+    fn type_name(&self) -> &'static str { "ContinuousCapture" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn show_in_inspector(&self) -> bool { false }
+    fn layout(&mut self, _: Size) -> Size {
+        if self.enabled.get() { self.request.set(true); }
+        Size::ZERO
+    }
+    fn paint(&mut self, _: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }

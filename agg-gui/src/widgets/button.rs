@@ -161,9 +161,18 @@ impl Widget for Button {
 
     fn layout(&mut self, available: Size) -> Size {
         let height = (self.font_size * 2.4).max(28.0);
-        let size = Size::new(available.width, height);
-        // Label returns tight text bounds; centre it within the button area.
-        let label_size = self.children[0].layout(size);
+        // Measure the label first so we can report a "fit" width — label
+        // width plus horizontal padding — instead of stretching to the whole
+        // available width.  This makes Buttons share horizontal space
+        // politely when placed inside a `FlexRow` next to other widgets.
+        // Parents that want a full-width button should wrap in a `SizedBox`
+        // with an explicit width, or set `HAnchor::FILL` — handled by the
+        // flex layout before this method is called.
+        let pad_h = self.font_size * 1.4;
+        let label_size = self.children[0].layout(Size::new(available.width, height));
+        let natural_w = (label_size.width + pad_h).max(48.0);
+        let width = natural_w.min(available.width);
+        let size = Size::new(width, height);
         let label_x = ((size.width  - label_size.width)  * 0.5).max(0.0);
         let label_y = ((size.height - label_size.height) * 0.5).max(0.0);
         self.children[0].set_bounds(Rect::new(label_x, label_y, label_size.width, label_size.height));

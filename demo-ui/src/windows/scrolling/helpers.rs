@@ -178,13 +178,27 @@ impl<T: Clone + Copy + PartialEq + 'static> SegRow<T> {
         self
     }
 
-    const BTN_H: f64 = 24.0;
+    const BTN_H:       f64 = 24.0;
+    const BTN_PAD_X:   f64 = 14.0;   // horizontal padding around label
+    const BTN_MIN_W:   f64 = 56.0;   // never smaller than this per segment
+    const BTN_GAP:     f64 = 1.0;
+
+    /// Natural width needed to fit every option's label + padding + gaps.
+    /// Computed from the label widths stored in `self.labels` AFTER they are
+    /// laid out — so `layout` calls this only after measuring labels.
+    fn natural_width(&self) -> f64 {
+        let n = self.labels.len().max(1);
+        let per: f64 = self.labels.iter()
+            .map(|l| l.bounds().width + Self::BTN_PAD_X * 2.0)
+            .fold(Self::BTN_MIN_W, f64::max);
+        per * n as f64 + Self::BTN_GAP * (n - 1) as f64
+    }
 
     fn btn_rect(&self, i: usize, total_w: f64) -> Rect {
         let n = self.options.len().max(1);
-        let w = (total_w - (n - 1) as f64).max(20.0) / n as f64;
+        let w = ((total_w - Self::BTN_GAP * (n - 1) as f64) / n as f64).max(20.0);
         let y = (self.bounds.height - Self::BTN_H) * 0.5;
-        Rect::new(i as f64 * (w + 1.0), y, w, Self::BTN_H)
+        Rect::new(i as f64 * (w + Self::BTN_GAP), y, w, Self::BTN_H)
     }
 
     fn hit(&self, pos: Point) -> Option<usize> {
@@ -205,21 +219,22 @@ impl<T: Clone + Copy + PartialEq + 'static> Widget for SegRow<T> {
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
     fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, Self::BTN_H + 6.0);
-        let rects: Vec<Rect> = (0..self.labels.len())
-            .map(|i| self.btn_rect(i, available.width))
-            .collect();
-        for (lbl, r) in self.labels.iter_mut().zip(rects.iter()) {
-            let s = lbl.layout(Size::new(r.width, r.height));
+        // First pass: measure labels so we know how wide each segment needs
+        // to be.  Use a generous horizontal budget so text doesn't wrap.
+        for lbl in self.labels.iter_mut() {
+            let s = lbl.layout(Size::new(available.width, Self::BTN_H));
             lbl.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         }
+        // Natural "fit" width — never wider than the slot we were given.
+        let natural = self.natural_width().min(available.width);
+        self.bounds = Rect::new(0.0, 0.0, natural, Self::BTN_H + 6.0);
         // Fire on_change when state changed since last layout.
         let cur = self.state.get();
         if self.last.get() != Some(cur) {
             self.last.set(Some(cur));
             if let Some(cb) = &self.on_change { cb(); }
         }
-        Size::new(available.width, Self::BTN_H + 6.0)
+        Size::new(natural, Self::BTN_H + 6.0)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -323,6 +338,7 @@ impl Widget for MaxScrollWatcher {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn show_in_inspector(&self) -> bool { false }
     fn layout(&mut self, _: Size) -> Size {
         let cur = self.max.get();
         let last = self.last.get();
@@ -354,6 +370,7 @@ impl Widget for CounterTicker {
     fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn show_in_inspector(&self) -> bool { false }
     fn layout(&mut self, _: Size) -> Size {
         self.counter.set(self.counter.get() + 1);
         Size::ZERO
