@@ -37,7 +37,7 @@ pub use markdown::MarkdownView;
 pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
 pub use progress_bar::ProgressBar;
 pub use radio_group::RadioGroup;
-pub use scroll_view::ScrollView;
+pub use scroll_view::{ScrollBarVisibility, ScrollView};
 pub use slider::Slider;
 pub use splitter::Splitter;
 pub use tab_view::TabView;

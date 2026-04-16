@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    DrawCtx, Event, EventResult,
+    Color, DrawCtx, Event, EventResult,
     FlexRow, Font, Rect, Size, SizedBox, Widget,
     ThemePreference, Visuals, set_visuals,
 };
@@ -141,8 +141,8 @@ impl Widget for ThemeToggle {
                 ctx.fill();
             }
 
-            // Update label color based on active state.
-            let text_color = if active { v.window_title_text } else { v.text_color };
+            // Active segment = accent blue → white for max contrast.
+            let text_color = if active { Color::white() } else { v.text_color };
             self.labels[i].set_color(text_color);
 
             // Reposition label centered within button rect.
@@ -247,8 +247,8 @@ impl Widget for BackendButton {
         ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
         ctx.fill();
 
-        // Update label color based on active state.
-        let text_color = if active { v.window_title_text } else { v.text_color };
+        // Active state = accent blue → white text for contrast.
+        let text_color = if active { Color::white() } else { v.text_color };
         self.label.set_color(text_color);
 
         // Center label within button rect.

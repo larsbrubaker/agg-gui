@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, Color, Container, DrawCtx, Event, EventResult,
-    FlexColumn, Font, Label, current_visuals,
-    MouseButton, Point, Rect, ScrollView, Separator,
+    Button, Color, DrawCtx, Event, EventResult,
+    FlexColumn, Font, Label,
+    MouseButton, Point, Rect, Separator,
     Size, SizedBox, Widget,
 };
 use agg_gui::widget::paint_subtree;
@@ -384,40 +384,6 @@ pub fn drag_and_drop(font: Arc<Font>) -> Box<dyn Widget> {
     ).with_font_size(11.5)), 0.0);
 
     outer.push(Box::new(DragAndDropWidget::new(Arc::clone(&font))), 1.0);
-    Box::new(outer)
-}
-
-// ---------------------------------------------------------------------------
-// Scrolling demo
-// ---------------------------------------------------------------------------
-
-/// Build the Scrolling demo — a tall list of labelled rows inside a ScrollView.
-pub fn scrolling_demo(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut outer = FlexColumn::new()
-        .with_gap(10.0)
-        .with_padding(12.0)
-        .with_panel_bg();
-
-    outer.push(Box::new(Label::new(
-        "50 rows inside a ScrollView",
-        Arc::clone(&font),
-    ).with_font_size(12.0)), 0.0);
-
-    let mut inner = FlexColumn::new().with_gap(4.0).with_padding(6.0);
-    let v = current_visuals();
-    for i in 0..50_usize {
-        let bg = if i % 2 == 0 { v.separator } else { Color::transparent() };
-        let row = Container::new()
-            .with_background(bg)
-            .with_padding(4.0)
-            .add(Box::new(Label::new(
-                format!("Row {}", i + 1),
-                Arc::clone(&font),
-            ).with_font_size(12.5)));
-        inner.push(Box::new(row), 0.0);
-    }
-
-    outer.push(Box::new(ScrollView::new(Box::new(inner))), 1.0);
     Box::new(outer)
 }
 

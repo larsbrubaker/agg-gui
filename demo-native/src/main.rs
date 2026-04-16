@@ -28,7 +28,7 @@ use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
-use winit::window::WindowAttributes;
+use winit::window::{Fullscreen, WindowAttributes};
 
 const FONT_BYTES:  &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 const FA_BYTES:    &[u8] = include_bytes!("../../demo/assets/fa.ttf");
@@ -51,9 +51,19 @@ fn load_saved_state() -> Option<demo_ui::SavedState> {
     demo_ui::SavedState::deserialize(&s)
 }
 
-fn save_state(accessor: &demo_ui::StateAccessor) {
+fn save_state(
+    accessor: &demo_ui::StateAccessor,
+    last_windowed: (u32, u32),
+) {
     let path = state_file_path();
-    let state = accessor.current_state();
+    let mut state = accessor.current_state();
+    // When fullscreen, inner_size() is the monitor resolution, which is NOT what
+    // we want to restore on next launch.  Persist the last-known windowed size
+    // instead so toggling out of fullscreen gives a sensible rect.
+    if state.window_fullscreen {
+        state.window_w = Some(last_windowed.0);
+        state.window_h = Some(last_windowed.1);
+    }
     let _ = std::fs::write(&path, state.serialize());
 }
 
@@ -64,9 +74,28 @@ fn save_state(accessor: &demo_ui::StateAccessor) {
 fn main() {
     let event_loop = EventLoop::new().expect("EventLoop::new");
 
-    let window_attributes = WindowAttributes::default()
+    // Pull saved window size / fullscreen out of the state file BEFORE building
+    // the window so we can apply it as initial attributes.  Full UI state is
+    // reloaded later (once fonts + GL context exist).
+    let initial_state = load_saved_state();
+    let (start_w, start_h) = match initial_state.as_ref() {
+        Some(s) => (
+            s.window_w.unwrap_or(1280),
+            s.window_h.unwrap_or(720),
+        ),
+        None => (1280, 720),
+    };
+    let start_fullscreen = initial_state.as_ref()
+        .map(|s| s.window_fullscreen)
+        .unwrap_or(false);
+
+    let mut window_attributes = WindowAttributes::default()
         .with_title("agg-gui — Demo (GL)")
-        .with_inner_size(LogicalSize::new(1280u32, 720u32));
+        .with_inner_size(LogicalSize::new(start_w, start_h));
+    if start_fullscreen {
+        window_attributes = window_attributes
+            .with_fullscreen(Some(Fullscreen::Borderless(None)));
+    }
 
     let template = ConfigTemplateBuilder::new().with_alpha_size(0);
     let display_builder =
@@ -129,7 +158,6 @@ fn main() {
     let init_h = size.height.max(1) as f32;
     let mut gl_ctx = unsafe { GlGfxCtx::new(Rc::clone(&gl), init_w, init_h) };
 
-    let initial_state = load_saved_state();
     let (mut app, handles) = demo_ui::build_demo_ui(
         Arc::clone(&font),
         Box::new(GlCubeWidget::new()),
@@ -137,19 +165,24 @@ fn main() {
         "native GL (glutin/winit)",
         initial_state,
     );
-    let show_inspector  = Rc::clone(&handles.show_inspector);
-    let inspector_nodes = Rc::clone(&handles.inspector_nodes);
-    let hovered_bounds  = Rc::clone(&handles.hovered_bounds);
-    let cube_visible    = Rc::clone(&handles.cube_visible);
-    let screen_size     = Rc::clone(&handles.screen_size);
-    let frame_history   = Rc::clone(&handles.frame_history);
-    let state_accessor  = handles.state;
+    let show_inspector    = Rc::clone(&handles.show_inspector);
+    let inspector_nodes   = Rc::clone(&handles.inspector_nodes);
+    let hovered_bounds    = Rc::clone(&handles.hovered_bounds);
+    let cube_visible      = Rc::clone(&handles.cube_visible);
+    let screen_size       = Rc::clone(&handles.screen_size);
+    let frame_history     = Rc::clone(&handles.frame_history);
+    let window_fullscreen = Rc::clone(&handles.window_fullscreen);
+    let state_accessor    = handles.state;
 
     let mut cursor_x    = 0.0f64;
     let mut cursor_y    = 0.0f64;
     let mut last_frame_ms = 0.0f64;
     let mut win_w       = size.width.max(1);
     let mut win_h       = size.height.max(1);
+    // Last size seen while the window was NOT fullscreen — what we persist
+    // across restarts.  Seeded with the saved windowed size (or the default).
+    let mut last_windowed_w: u32 = start_w;
+    let mut last_windowed_h: u32 = start_h;
     // Tracks the live modifier state from ModifiersChanged events.
     let mut current_mods = Modifiers::default();
 
@@ -163,7 +196,7 @@ fn main() {
         .run(|event, elwt| {
             match event {
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                    save_state(&state_accessor);
+                    save_state(&state_accessor, (last_windowed_w, last_windowed_h));
                     elwt.exit();
                 }
                 Event::WindowEvent {
@@ -178,6 +211,14 @@ fn main() {
                         win_w = new_size.width;
                         win_h = new_size.height;
                         screen_size.set((win_w, win_h));
+                        // Resize is the reliable signal for fullscreen changes,
+                        // so refresh the tracked fullscreen state here.
+                        let is_full = window.fullscreen().is_some();
+                        window_fullscreen.set(is_full);
+                        if !is_full {
+                            last_windowed_w = win_w;
+                            last_windowed_h = win_h;
+                        }
                         // Render immediately so content tracks the drag handle.
                         sync_inspector(&app, show_inspector.get(),
                                        &inspector_nodes, &hovered_bounds);
@@ -222,6 +263,24 @@ fn main() {
                     event: WindowEvent::KeyboardInput { event: key_event, .. }, ..
                 } => {
                     if key_event.state == ElementState::Pressed {
+                        // F11 toggles borderless fullscreen at the OS level.
+                        // We also flip the tracked fullscreen cell eagerly so
+                        // the saved-state snapshot is right even if the
+                        // subsequent Resized event hasn't landed yet.
+                        if matches!(
+                            key_event.logical_key,
+                            WinitKey::Named(NamedKey::F11)
+                        ) {
+                            let now_full = window.fullscreen().is_some();
+                            if now_full {
+                                window.set_fullscreen(None);
+                                window_fullscreen.set(false);
+                            } else {
+                                window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                                window_fullscreen.set(true);
+                            }
+                            return;
+                        }
                         if let Some(key) = map_key(&key_event.logical_key) {
                             app.on_key_down(key, current_mods);
                         }

@@ -148,10 +148,11 @@ impl Widget for BackendPane {
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         if !self.show.get() { return; }
-        // 1-px vertical separator line on the right edge, matching the top-bar
-        // bottom separator style so the panel visually detaches from the canvas.
+        // 1-px vertical separator line on the right edge.  Uses `text_dim`
+        // (font color at 50% alpha) so the edge tracks the theme and stays
+        // soft instead of high-contrast.
         let v = ctx.visuals();
-        ctx.set_fill_color(v.separator);
+        ctx.set_fill_color(v.text_dim);
         ctx.begin_path();
         ctx.rect(self.bounds.width - 1.0, 0.0, 1.0, self.bounds.height);
         ctx.fill();
@@ -195,8 +196,9 @@ impl Widget for SidebarPane {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        // Uses text_dim for the same theme-aware, low-contrast edge as BackendPane.
         let v = ctx.visuals();
-        ctx.set_fill_color(v.separator);
+        ctx.set_fill_color(v.text_dim);
         ctx.begin_path();
         ctx.rect(0.0, 0.0, 1.0, self.bounds.height);
         ctx.fill();
@@ -314,6 +316,9 @@ pub struct DemoHandles {
     pub cube_visible:    Rc<Cell<bool>>,
     pub screen_size:     Rc<Cell<(u32, u32)>>,
     pub frame_history:   Rc<RefCell<FrameHistory>>,
+    /// Fullscreen / maximized state of the OS window.  The platform harness
+    /// sets this cell whenever the window transitions.
+    pub window_fullscreen: Rc<Cell<bool>>,
     pub state:           StateAccessor,
 }
 
@@ -332,6 +337,9 @@ pub fn build_demo_ui(
     let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
     let hovered_bounds  = Rc::new(RefCell::new(None::<Rect>));
     let screen_size     = Rc::new(Cell::new((0u32, 0u32)));
+    let window_fullscreen = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.window_fullscreen).unwrap_or(false)
+    ));
 
     // Theme preference — detect OS color scheme so we start in the right mode.
     let initial_theme = top_bar::detect_system_theme();
@@ -671,6 +679,8 @@ pub fn build_demo_ui(
         about_open: Rc::clone(&about_open),
         about_pos:  about_pos_cell,
         backend_open: Rc::clone(&show_backend),
+        window_size: Rc::clone(&screen_size),
+        window_fullscreen: Rc::clone(&window_fullscreen),
     };
 
     let handles = DemoHandles {
@@ -680,6 +690,7 @@ pub fn build_demo_ui(
         cube_visible,
         screen_size,
         frame_history,
+        window_fullscreen,
         state: state_accessor,
     };
     (app, handles)

@@ -342,7 +342,7 @@ impl Widget for RunModeRow {
 
             // Update label text + color.
             self.labels[i].set_text(*label_text);
-            let text_color = if active { v.window_title_text } else { v.text_color };
+            let text_color = if active { Color::white() } else { v.text_color };
             self.labels[i].set_color(text_color);
 
             // Center label within button.
@@ -393,7 +393,9 @@ struct RunModeDesc {
 
 impl RunModeDesc {
     fn new(font: Arc<Font>, run_mode: Rc<Cell<RunMode>>, history: Rc<RefCell<FrameHistory>>) -> Self {
-        let mut label = Label::new("", Arc::clone(&font)).with_font_size(10.0);
+        let mut label = Label::new("", Arc::clone(&font))
+            .with_font_size(10.0)
+            .with_wrap(true);
         label.buffered = false;
         Self { bounds: Rect::default(), children: Vec::new(), run_mode, history, label }
     }
@@ -407,10 +409,18 @@ impl Widget for RunModeDesc {
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
     fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, 30.0);
-        let s = self.label.layout(Size::new(available.width - 24.0, 30.0));
+        // Set the text first so wrapped height is measured correctly for the
+        // worst-case (reactive) string, then layout once within the available
+        // width minus the 12-px horizontal padding used at paint time.
+        self.label.set_text(
+            "Only running UI code when there are animations or input.".to_owned()
+        );
+        let inner_w = (available.width - 24.0).max(1.0);
+        let s = self.label.layout(Size::new(inner_w, f64::MAX / 2.0));
         self.label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
-        Size::new(available.width, 30.0)
+        let h = (s.height + 8.0).max(18.0);
+        self.bounds = Rect::new(0.0, 0.0, available.width, h);
+        Size::new(available.width, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -427,7 +437,7 @@ impl Widget for RunModeDesc {
         self.label.set_color(v.text_dim);
 
         let lh = self.label.bounds().height;
-        let ly = (self.bounds.height - lh) * 0.5;
+        let ly = ((self.bounds.height - lh) * 0.5).max(2.0);
 
         ctx.save();
         ctx.translate(12.0, ly);
@@ -475,18 +485,21 @@ pub fn build_backend_panel(
     col.push(Box::new(
         Label::new(running_text, Arc::clone(&font))
             .with_font_size(11.0)
+            .with_wrap(true)
             .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 2.0))
     ), 0.0);
     let renderer_text = format!("Renderer: {renderer_name}");
     col.push(Box::new(
         Label::new(renderer_text, Arc::clone(&font))
             .with_font_size(11.0)
+            .with_wrap(true)
             .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 2.0))
     ), 0.0);
     let backend_text = format!("Backend: {backend_name}");
     col.push(Box::new(
         Label::new(backend_text, Arc::clone(&font))
             .with_font_size(11.0)
+            .with_wrap(true)
             .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 2.0))
     ), 0.0);
 

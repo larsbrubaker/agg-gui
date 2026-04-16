@@ -25,7 +25,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, Checkbox, Color, CollapsingHeader, DrawCtx, Event, EventResult,
+    Button, Color, CollapsingHeader, DrawCtx, Event, EventResult,
     FlexColumn, Font, Insets, Label, MouseButton, Point, Rect, ScrollView,
     Separator, Size, SizedBox, TextField, Widget,
 };
@@ -346,12 +346,10 @@ pub fn build_sidebar(
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
 
-    // ── About checkbox ── (FA4 "info-circle" icon prefix)
+    // ── About toggle row ── (FA4 "info-circle" icon prefix).  Uses the same
+    // ToggleButton widget as every other sidebar entry so it visually matches.
     col.push(Box::new(
-        Checkbox::new("\u{F05A} About", Arc::clone(&font), about_open.get())
-            .with_font_size(13.0)
-            .with_state_cell(Rc::clone(&about_open))
-            .with_margin(Insets::from_sides(10.0, 0.0, 2.0, 2.0))
+        ToggleButton::new("\u{F05A} About", Arc::clone(&font), Rc::clone(&about_open))
     ), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(SizedBox::new().with_height(6.0)), 0.0);
