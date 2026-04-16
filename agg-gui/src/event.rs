@@ -66,10 +66,12 @@ pub enum Event {
     FocusGained,
     /// Sent by the framework when this widget loses keyboard focus.
     FocusLost,
-    /// Mouse wheel scrolled. `delta_y` is in logical pixels; positive = scroll
-    /// up (content moves up, typical "natural" scroll direction). `pos` is the
-    /// cursor location at the time of the scroll.
-    MouseWheel { pos: Point, delta_y: f64 },
+    /// Mouse wheel scrolled.  `delta_y` is in logical pixels; positive =
+    /// scroll up (content moves up, typical "natural" scroll direction).
+    /// `delta_x` is horizontal wheel / trackpad input in the same units;
+    /// positive = content moves right.  `pos` is the cursor location at the
+    /// time of the scroll.
+    MouseWheel { pos: Point, delta_y: f64, delta_x: f64 },
 }
 
 /// What a widget returns from [`crate::widget::Widget::on_event`].

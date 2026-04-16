@@ -1,45 +1,42 @@
-//! `ScrollView` — vertical scrolling container with an egui-style floating scrollbar.
+//! `ScrollView` — scrolling container with egui-style scrollbars.
 //!
-//! The content child is laid out at its natural height (unconstrained) and clipped
-//! to the visible area.  The scrollbar floats **on top of** the content (no width
-//! is reserved) so the child always gets the full widget width.
+//! Supports vertical, horizontal, or bidirectional scrolling.  The scrollbar
+//! can be styled in detail (bar width, margins, fade, solid vs floating) via
+//! [`ScrollBarStyle`] — set by value, by builder, or bound to an
+//! `Rc<Cell<ScrollBarStyle>>` for live tweaking (used by the demo Appearance
+//! tab).
 //!
-//! # Scrollbar behaviour (egui "floating" style)
+//! # Coordinate system
+//! All local coordinates are Y-up.  `scroll_offset` is "how far the user has
+//! scrolled down from the top" — `0` shows the TOP of the content,
+//! `max_scroll_y` shows the BOTTOM.  Same convention for horizontal:
+//! `h_scroll_offset = 0` shows the LEFT of the content.
 //!
-//! The bar lives at the right edge of the widget:
-//! - **Dormant** — 2 px thin strip (`BAR_THIN_W`), no track background.
-//! - **Hovered** — expands to 6 px (`BAR_FULL_W`), track background appears.
-//! - **Dragging** — stays at full width, thumb uses active colour.
-//!
-//! Hover zone: rightmost `HOVER_ZONE_W` (10 px) of the widget.
-//!
-//! # Scrollbar geometry (Y-up)
-//!
-//! The track spans `[BAR_Y_MARGIN, height − BAR_Y_MARGIN]` along Y.
-//! `thumb_y` is the **bottom** edge of the thumb in local space:
-//! - `scroll_offset = 0`   → `thumb_y = track_h`  (thumb at visual top)
-//! - `scroll_offset = max` → `thumb_y = 0`         (thumb at visual bottom)
+//! # Virtual rendering
+//! `with_viewport_cell(Rc<Cell<Rect>>)` publishes the currently-visible
+//! content-space rect each layout.  Children that want to cull off-viewport
+//! work (e.g. painting 10k row labels) read this cell and limit their paint.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::color::Color;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
-/// How the vertical scrollbar is shown.
+/// How the scrollbar is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollBarVisibility {
-    /// Scrollbar is painted whenever content overflows (even with no hover).
+    /// Paint whenever content overflows, regardless of hover.
     AlwaysVisible,
-    /// Scrollbar is painted only while the cursor is in the hover zone or a
-    /// drag is in progress.  This is the default and matches egui's "floating"
-    /// style.
+    /// Paint when content overflows (egui naming).
+    VisibleWhenNeeded,
+    /// Paint only while hovered or dragging (egui "floating" style).
     VisibleOnHover,
-    /// Scrollbar is never painted — wheel/drag still works inside the widget
-    /// but no visual indicator appears.
+    /// Never paint — wheel/drag still work, but no visual indicator.
     AlwaysHidden,
 }
 
@@ -47,62 +44,127 @@ impl Default for ScrollBarVisibility {
     fn default() -> Self { Self::VisibleOnHover }
 }
 
-// ── Egui-matching constants ────────────────────────────────────────────────────
+/// Whether the bar reserves layout space (Solid) or floats over content (Floating).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollBarKind { Solid, Floating }
 
-/// Bar width when hovered / active.  Below this threshold the bar is not
-/// rendered at all — the scrollbar is fully invisible in its dormant state.
-const BAR_FULL_W: f64 = 10.0;
-/// Top / bottom margin inside the track (shrinks effective track height).
-const BAR_Y_MARGIN: f64 = 4.0;
-/// Minimum thumb height in pixels.
-const HANDLE_MIN_H: f64 = 24.0;
-/// Pixels at the right edge that belong exclusively to the parent window's
-/// resize handle.  The scrollbar is inset by this amount from the right edge
-/// so the resize grip always remains grabbable.
-const RIGHT_EDGE_GUARD: f64 = 4.0;
-/// Extra grab margin to the left of the bar so the thumb is easy to grab
-/// even when it is rendered thin.
-const GRAB_MARGIN: f64 = 6.0;
-/// Width of the hover-detection zone:  grab margin + full bar width.
-const HOVER_ZONE_W: f64 = BAR_FULL_W + GRAB_MARGIN;
+impl Default for ScrollBarKind {
+    fn default() -> Self { Self::Floating }
+}
+
+/// Which pair of colours is used for the track vs thumb.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollBarColor {
+    /// Track = neutral background; thumb = slightly brighter.  Default.
+    Background,
+    /// Track = transparent; thumb = accent-tinted foreground.
+    Foreground,
+}
+
+impl Default for ScrollBarColor {
+    fn default() -> Self { Self::Background }
+}
+
+/// Full scrollbar appearance configuration — mirrors egui's `style.spacing.scroll`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollBarStyle {
+    /// Width of the full-size bar in pixels.
+    pub bar_width:         f64,
+    /// Minimum length of the draggable thumb.
+    pub handle_min_length: f64,
+    /// Space between the bar and the panel's outer edge.
+    pub outer_margin:      f64,
+    /// Space between the bar and the content area.
+    pub inner_margin:      f64,
+    /// Space between sibling content and the bar area (applied when `kind = Solid`
+    /// and as a decorative inset when `Floating`).
+    pub content_margin:    f64,
+    /// `true` = use one value for both axes; `false` = each axis may differ
+    /// (we keep a single value here for brevity and apply it to both).
+    pub margin_same:       bool,
+    /// Bar kind — Solid reserves space in layout, Floating overlays content.
+    pub kind:              ScrollBarKind,
+    /// Which colour role the bar uses.
+    pub color:             ScrollBarColor,
+    /// Alpha of the fade-out region along the scroll-axis edges, 0..1.
+    pub fade_strength:     f64,
+    /// Length of the fade region in pixels at each end.
+    pub fade_size:         f64,
+}
+
+impl Default for ScrollBarStyle {
+    fn default() -> Self {
+        Self {
+            bar_width:         15.0,
+            handle_min_length: 10.0,
+            outer_margin:       5.0,
+            inner_margin:       7.0,
+            content_margin:     5.0,
+            margin_same:        true,
+            kind:               ScrollBarKind::default(),
+            color:              ScrollBarColor::default(),
+            fade_strength:      1.0,
+            fade_size:         45.0,
+        }
+    }
+}
+
+// ── Runtime constants ────────────────────────────────────────────────────────
+
+/// Pixels at the right edge reserved for the parent window's resize grip.
+const RIGHT_EDGE_GUARD:  f64 = 4.0;
+/// Pixels at the bottom edge reserved for the parent window's resize grip.
+const BOTTOM_EDGE_GUARD: f64 = 4.0;
+/// Extra hit-margin around the bar so it's easy to grab even when dormant.
+const GRAB_MARGIN:       f64 = 6.0;
+
+// ── Per-axis state (vertical or horizontal) ──────────────────────────────────
+//
+// The vertical and horizontal scroll axes share the same computation — we
+// factor the state so both reuse `clamp_offset` / `thumb_metrics` logic.
+
+#[derive(Default, Clone, Copy)]
+struct AxisState {
+    enabled:     bool,
+    offset:      f64,
+    content:     f64,
+    hovered_bar: bool,
+    hovered_thumb: bool,
+    dragging:    bool,
+    drag_thumb_offset: f64,
+}
+
+impl AxisState {
+    fn max_scroll(&self, viewport: f64) -> f64 {
+        (self.content - viewport).max(0.0)
+    }
+}
 
 pub struct ScrollView {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,  // always 0 or 1
     base:     WidgetBase,
 
-    scroll_offset:  f64,
-    content_height: f64,
+    v: AxisState,
+    h: AxisState,
 
-    /// Cursor is inside the hover zone (rightmost HOVER_ZONE_W px).
-    hovered_bar: bool,
-    /// Cursor is directly over the thumb (subset of hovered_bar).
-    hovered_thumb: bool,
-    /// Scrollbar drag in progress.
-    dragging: bool,
-    /// Pixel distance from thumb bottom edge to cursor at drag start (Y-up).
-    drag_thumb_offset: f64,
-
-    /// Whether the scrollbar should remain glued to the bottom as content grows.
-    /// Tracks whether the offset was at max during the last layout so the user
-    /// can still temporarily detach by scrolling up.
+    /// Keep the scrollbar glued to the bottom as content grows (while the
+    /// user hasn't scrolled away from the end).
     stick_to_bottom: bool,
     was_at_bottom:   bool,
 
-    /// How to render the scrollbar.  Event handling (wheel, drag) still works
-    /// in every mode — only the paint changes.
+    /// How to render the scrollbar.
     bar_visibility: ScrollBarVisibility,
+    style:          ScrollBarStyle,
 
-    /// Optional external scroll-offset cell.  When set, `layout` reads the
-    /// requested offset from the cell, clamps it, and writes the clamped
-    /// value back.  Lets the surrounding UI programmatically scroll.
-    offset_cell:     Option<Rc<Cell<f64>>>,
-    /// Optional output cell — written each layout with the maximum scroll
-    /// distance (content_height − viewport_height).  Useful for demos that
-    /// display "offset / max" readouts.
-    max_scroll_cell: Option<Rc<Cell<f64>>>,
-    /// Optional input cell that drives the bar-visibility mode at runtime.
-    visibility_cell: Option<Rc<Cell<ScrollBarVisibility>>>,
+    // ── External cell bindings ──
+    offset_cell:      Option<Rc<Cell<f64>>>,
+    max_scroll_cell:  Option<Rc<Cell<f64>>>,
+    visibility_cell:  Option<Rc<Cell<ScrollBarVisibility>>>,
+    style_cell:       Option<Rc<Cell<ScrollBarStyle>>>,
+    /// Visible viewport rect in content-space Y-up coordinates, written each
+    /// layout.  Children doing virtual rendering read this cell.
+    viewport_cell:    Option<Rc<Cell<Rect>>>,
 }
 
 impl ScrollView {
@@ -111,144 +173,208 @@ impl ScrollView {
             bounds:            Rect::default(),
             children:          vec![content],
             base:              WidgetBase::new(),
-            scroll_offset:     0.0,
-            content_height:    0.0,
-            hovered_bar:       false,
-            hovered_thumb:     false,
-            dragging:          false,
-            drag_thumb_offset: 0.0,
+            v:                 AxisState { enabled: true, ..AxisState::default() },
+            h:                 AxisState::default(),
             stick_to_bottom:   false,
             was_at_bottom:     false,
             bar_visibility:    ScrollBarVisibility::default(),
+            style:             ScrollBarStyle::default(),
             offset_cell:       None,
             max_scroll_cell:   None,
             visibility_cell:   None,
+            style_cell:        None,
+            viewport_cell:     None,
         }
     }
 
-    // ── Public scroll API ─────────────────────────────────────────────────────
+    // ── Axis enable ───────────────────────────────────────────────────────────
 
-    /// Current vertical scroll offset in pixels (0 at top, `max_scroll` at bottom).
-    pub fn scroll_offset(&self) -> f64 { self.scroll_offset }
+    pub fn horizontal(mut self, enabled: bool) -> Self {
+        self.h.enabled = enabled; self
+    }
+    pub fn vertical(mut self, enabled: bool) -> Self {
+        self.v.enabled = enabled; self
+    }
 
-    /// Set the scroll offset; clamped to the valid range at the next layout.
-    /// If an external offset cell is bound, that cell is updated too.
+    // ── Scroll offset API (vertical for back-compat) ─────────────────────────
+
+    pub fn scroll_offset(&self) -> f64 { self.v.offset }
+
     pub fn set_scroll_offset(&mut self, offset: f64) {
-        self.scroll_offset = offset;
+        self.v.offset = offset;
         if let Some(c) = &self.offset_cell { c.set(offset); }
     }
 
-    /// Maximum valid scroll offset for the current content.
-    pub fn max_scroll_value(&self) -> f64 { self.max_scroll() }
+    pub fn max_scroll_value(&self) -> f64 { self.v.max_scroll(self.bounds.height) }
 
-    /// Bind an external cell that drives (and reflects) the scroll offset.
     pub fn with_offset_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
-        self.offset_cell = Some(cell);
-        self
+        self.offset_cell = Some(cell); self
     }
 
-    /// Bind an external cell that receives the computed `max_scroll` each layout.
     pub fn with_max_scroll_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
-        self.max_scroll_cell = Some(cell);
-        self
+        self.max_scroll_cell = Some(cell); self
     }
 
-    /// Keep the scrollbar glued to the bottom as content grows (while the
-    /// user hasn't scrolled away from the end).  Off by default.
     pub fn with_stick_to_bottom(mut self, stick: bool) -> Self {
-        self.stick_to_bottom = stick;
-        self
+        self.stick_to_bottom = stick; self
     }
 
-    /// Control when the scrollbar thumb/track is painted.
     pub fn with_bar_visibility(mut self, v: ScrollBarVisibility) -> Self {
-        self.bar_visibility = v;
-        self
+        self.bar_visibility = v; self
     }
 
     pub fn set_bar_visibility(&mut self, v: ScrollBarVisibility) {
         self.bar_visibility = v;
     }
 
-    /// Bind an external cell that drives the bar-visibility mode at runtime.
-    /// The cell is polled on every layout.
     pub fn with_bar_visibility_cell(mut self, cell: Rc<Cell<ScrollBarVisibility>>) -> Self {
-        self.visibility_cell = Some(cell);
-        self
+        self.visibility_cell = Some(cell); self
+    }
+
+    pub fn with_style(mut self, s: ScrollBarStyle) -> Self {
+        self.style = s; self
+    }
+
+    pub fn with_style_cell(mut self, cell: Rc<Cell<ScrollBarStyle>>) -> Self {
+        self.style_cell = Some(cell); self
+    }
+
+    /// Bind a cell that receives the visible content-space viewport rect.
+    pub fn with_viewport_cell(mut self, cell: Rc<Cell<Rect>>) -> Self {
+        self.viewport_cell = Some(cell); self
     }
 
     // ── Geometry helpers ──────────────────────────────────────────────────────
 
-    fn max_scroll(&self) -> f64 {
-        (self.content_height - self.bounds.height).max(0.0)
+    fn viewport(&self) -> (f64, f64) {
+        // Viewport inside the widget AFTER reserving space for Solid bars.
+        let (reserve_x, reserve_y) = self.bar_reserve();
+        let w = (self.bounds.width  - reserve_x).max(0.0);
+        let h = (self.bounds.height - reserve_y).max(0.0);
+        (w, h)
     }
 
-    /// Track y-range: `[BAR_Y_MARGIN, height − BAR_Y_MARGIN]`.
-    fn track_range(&self) -> (f64, f64) {
-        let lo = BAR_Y_MARGIN;
-        let hi = (self.bounds.height - BAR_Y_MARGIN).max(lo);
+    /// Horizontal/vertical space reserved for Solid scrollbars (0 for Floating).
+    fn bar_reserve(&self) -> (f64, f64) {
+        if self.style.kind != ScrollBarKind::Solid {
+            return (0.0, 0.0);
+        }
+        let span = self.style.bar_width
+            + self.style.outer_margin
+            + self.style.inner_margin;
+        let rx = if self.h.enabled && self.h.content > self.bounds.width  { 0.0 } else { 0.0 };
+        // We reserve vertical bar width on the right when vertical scrolling
+        // is potentially active (has content overflow).
+        let need_v = self.v.enabled && self.v.content > self.bounds.height - self.h_bar_thickness();
+        let need_h = self.h.enabled && self.h.content > self.bounds.width  - self.v_bar_thickness();
+        let rx = rx + if need_v { span } else { 0.0 };
+        let ry = if need_h { span } else { 0.0 };
+        (rx, ry)
+    }
+
+    /// Just the bar width + margins (not conditional on overflow).  Used for
+    /// hover-zone/paint placement when visibility says "AlwaysVisible".
+    fn v_bar_thickness(&self) -> f64 {
+        self.style.bar_width + self.style.outer_margin + self.style.inner_margin
+    }
+    fn h_bar_thickness(&self) -> f64 {
+        self.style.bar_width + self.style.outer_margin + self.style.inner_margin
+    }
+
+    /// Right-edge X (exclusive) of the vertical scroll bar in local space.
+    fn v_bar_right(&self) -> f64 {
+        self.bounds.width - RIGHT_EDGE_GUARD - self.style.outer_margin
+    }
+    /// Bottom-edge Y (exclusive, Y-up) of the horizontal bar — i.e. the lower
+    /// edge of the bar stripe, which in Y-up = `outer_margin + BOTTOM_EDGE_GUARD`.
+    fn h_bar_bottom(&self) -> f64 {
+        BOTTOM_EDGE_GUARD + self.style.outer_margin
+    }
+
+    /// Vertical track range [lo, hi] in Y-up.  Accounts for the horizontal bar
+    /// reserving a sliver at the bottom when both axes scroll.
+    fn v_track_range(&self) -> (f64, f64) {
+        let (_, reserve_y) = self.bar_reserve();
+        let lo = self.style.inner_margin + reserve_y;
+        let hi = (self.bounds.height - self.style.inner_margin).max(lo);
         (lo, hi)
     }
 
-    /// Compute `(thumb_y, thumb_h)` in local Y-up coordinates.
-    /// `thumb_y` is the bottom edge of the thumb.
-    /// Returns `None` when content fits without scrolling.
-    fn thumb_metrics(&self) -> Option<(f64, f64)> {
-        let h = self.bounds.height;
-        if self.content_height <= h { return None; }
+    fn h_track_range(&self) -> (f64, f64) {
+        let (reserve_x, _) = self.bar_reserve();
+        let lo = self.style.inner_margin;
+        let hi = (self.bounds.width - self.style.inner_margin - reserve_x).max(lo);
+        (lo, hi)
+    }
 
-        let (track_lo, track_hi) = self.track_range();
-        let track_h = track_hi - track_lo;
-
-        let ratio   = h / self.content_height;
-        let thumb_h = (track_h * ratio).max(HANDLE_MIN_H);
-        let travel  = (track_h - thumb_h).max(0.0);
-        let max_s   = self.max_scroll();
-
-        // Y-up: offset=0 → thumb at top (thumb_y = track_hi − thumb_h + thumb_h = track_hi... wait)
-        // track_lo is the bottom of the track space, track_hi is the top.
-        // offset=0 → thumb_y (bottom) = track_hi - thumb_h  (thumb sits at top of track)
-        // offset=max → thumb_y (bottom) = track_lo           (thumb sits at bottom of track)
-        let thumb_y = if max_s > 0.0 {
-            track_lo + travel * (1.0 - self.scroll_offset / max_s)
-        } else {
-            track_lo + travel
-        };
+    /// Vertical thumb `(y_bottom, height)` in local Y-up or `None` if no overflow.
+    fn v_thumb_metrics(&self) -> Option<(f64, f64)> {
+        let (_, vh) = self.viewport();
+        if self.v.content <= vh { return None; }
+        let (lo, hi) = self.v_track_range();
+        let track_h  = hi - lo;
+        let ratio    = vh / self.v.content;
+        let thumb_h  = (track_h * ratio).max(self.style.handle_min_length);
+        let travel   = (track_h - thumb_h).max(0.0);
+        let max_s    = self.v.max_scroll(vh);
+        let thumb_y  = if max_s > 0.0 {
+            lo + travel * (1.0 - self.v.offset / max_s)
+        } else { lo + travel };
         Some((thumb_y, thumb_h))
     }
 
-    /// Right edge of the bar in local X (exclusive).  Bar sits left of the
-    /// resize guard.
-    fn bar_right(&self) -> f64 {
-        self.bounds.width - RIGHT_EDGE_GUARD
+    /// Horizontal thumb `(x_left, width)` in local X.
+    fn h_thumb_metrics(&self) -> Option<(f64, f64)> {
+        let (vw, _) = self.viewport();
+        if self.h.content <= vw { return None; }
+        let (lo, hi) = self.h_track_range();
+        let track_w  = hi - lo;
+        let ratio    = vw / self.h.content;
+        let thumb_w  = (track_w * ratio).max(self.style.handle_min_length);
+        let travel   = (track_w - thumb_w).max(0.0);
+        let max_s    = self.h.max_scroll(vw);
+        let thumb_x  = if max_s > 0.0 {
+            lo + travel * (self.h.offset / max_s)
+        } else { lo };
+        Some((thumb_x, thumb_w))
     }
 
-    /// True when `pos` lands on the thumb rectangle.  Horizontal hit area
-    /// is extended leftward by `GRAB_MARGIN` so a thin dormant bar is still
-    /// easy to grab.
-    fn pos_on_thumb(&self, pos: Point) -> bool {
-        let bar_right = self.bar_right();
-        let hit_left  = bar_right - BAR_FULL_W - GRAB_MARGIN;
+    fn pos_on_v_thumb(&self, pos: Point) -> bool {
+        let bar_right = self.v_bar_right();
+        let bar_left  = bar_right - self.style.bar_width;
+        let hit_left  = bar_left - GRAB_MARGIN;
         if pos.x < hit_left || pos.x >= bar_right { return false; }
-        if let Some((thumb_y, thumb_h)) = self.thumb_metrics() {
-            pos.y >= thumb_y && pos.y <= thumb_y + thumb_h
-        } else {
-            false
-        }
+        if let Some((ty, th)) = self.v_thumb_metrics() {
+            pos.y >= ty && pos.y <= ty + th
+        } else { false }
     }
 
-    /// True when `pos` is in the scrollbar hover-detection zone.
-    ///
-    /// The rightmost `RIGHT_EDGE_GUARD` pixels are excluded so the parent
-    /// window's resize handle always remains grabbable without interference.
-    fn pos_in_hover_zone(&self, pos: Point) -> bool {
-        let bar_right = self.bar_right();
-        pos.x >= bar_right - HOVER_ZONE_W && pos.x < bar_right
+    fn pos_on_h_thumb(&self, pos: Point) -> bool {
+        let bar_bottom = self.h_bar_bottom();
+        let bar_top    = bar_bottom + self.style.bar_width;
+        let hit_top    = bar_top + GRAB_MARGIN;
+        if pos.y < bar_bottom || pos.y >= hit_top { return false; }
+        if let Some((tx, tw)) = self.h_thumb_metrics() {
+            pos.x >= tx && pos.x <= tx + tw
+        } else { false }
     }
 
-    /// Clamp and snap offset to integer pixels.
-    fn clamp_offset(&self, raw: f64) -> f64 {
-        raw.clamp(0.0, self.max_scroll()).round()
+    fn pos_in_v_hover(&self, pos: Point) -> bool {
+        let bar_right = self.v_bar_right();
+        let bar_left  = bar_right - self.style.bar_width - GRAB_MARGIN;
+        pos.x >= bar_left && pos.x < bar_right
+    }
+
+    fn pos_in_h_hover(&self, pos: Point) -> bool {
+        let bar_bottom = self.h_bar_bottom();
+        let bar_top    = bar_bottom + self.style.bar_width + GRAB_MARGIN;
+        pos.y >= bar_bottom && pos.y < bar_top
+    }
+
+    fn clamp_offsets(&mut self) {
+        let (vw, vh) = self.viewport();
+        self.v.offset = self.v.offset.clamp(0.0, self.v.max_scroll(vh)).round();
+        self.h.offset = self.h.offset.clamp(0.0, self.h.max_scroll(vw)).round();
     }
 
     // ── Layout property forwarding ────────────────────────────────────────────
@@ -258,6 +384,30 @@ impl ScrollView {
     pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
     pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
     pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+
+    // ── Visibility helper ────────────────────────────────────────────────────
+
+    fn should_paint_v(&self) -> bool {
+        let (_, vh) = self.viewport();
+        if self.v.content <= vh { return false; }
+        match self.bar_visibility {
+            ScrollBarVisibility::AlwaysHidden       => false,
+            ScrollBarVisibility::AlwaysVisible      => true,
+            ScrollBarVisibility::VisibleWhenNeeded  => true,
+            ScrollBarVisibility::VisibleOnHover     => self.v.hovered_bar || self.v.dragging,
+        }
+    }
+
+    fn should_paint_h(&self) -> bool {
+        let (vw, _) = self.viewport();
+        if self.h.content <= vw { return false; }
+        match self.bar_visibility {
+            ScrollBarVisibility::AlwaysHidden       => false,
+            ScrollBarVisibility::AlwaysVisible      => true,
+            ScrollBarVisibility::VisibleWhenNeeded  => true,
+            ScrollBarVisibility::VisibleOnHover     => self.h.hovered_bar || self.h.dragging,
+        }
+    }
 }
 
 impl Widget for ScrollView {
@@ -274,186 +424,318 @@ impl Widget for ScrollView {
     fn max_size(&self) -> Size    { self.base.max_size }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        if self.dragging { return true; }
+        if self.v.dragging || self.h.dragging { return true; }
         let b = self.bounds();
         local_pos.x >= 0.0 && local_pos.x <= b.width
             && local_pos.y >= 0.0 && local_pos.y <= b.height
     }
 
-    /// The scrollbar floats above children, so when the cursor is in the
-    /// scrollbar hover zone we must claim the event before any child (e.g.
-    /// a full-width list row) can consume it.
     fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
-        if self.dragging { return true; }
-        if self.content_height <= self.bounds.height { return false; }
-        self.pos_in_hover_zone(local_pos)
+        if self.v.dragging || self.h.dragging { return true; }
+        let (vw, vh) = self.viewport();
+        if self.v.enabled && self.v.content > vh && self.pos_in_v_hover(local_pos) { return true; }
+        if self.h.enabled && self.h.content > vw && self.pos_in_h_hover(local_pos) { return true; }
+        false
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        // Child gets the full widget width — bar floats on top.
-        let content_w = available.width;
+        // Pull live state from external cells first.
+        if let Some(c) = &self.offset_cell     { self.v.offset = c.get(); }
+        if let Some(c) = &self.visibility_cell { self.bar_visibility = c.get(); }
+        if let Some(c) = &self.style_cell      { self.style = c.get(); }
 
-        // Pull requested offset from external cell before we clamp, so the
-        // surrounding UI can drive the scroll position.
-        if let Some(c) = &self.offset_cell {
-            self.scroll_offset = c.get();
-        }
-        if let Some(c) = &self.visibility_cell {
-            self.bar_visibility = c.get();
-        }
+        self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
 
-        self.bounds = Rect::new(0.0, 0.0, content_w, available.height);
+        // For horizontal scrolling, content width is unconstrained (the child
+        // may return a width larger than our viewport).  For vertical-only, we
+        // pin child to the viewport width so wrapping widgets behave.
+        let (vw_guess, _vh_guess) = self.viewport();
+        let child_in_w = if self.h.enabled { f64::MAX / 2.0 } else { vw_guess };
+        let child_in_h = f64::MAX / 2.0;
+
         if let Some(child) = self.children.first_mut() {
-            let natural = child.layout(Size::new(content_w, f64::MAX / 2.0));
-            self.content_height = natural.height;
+            let natural = child.layout(Size::new(child_in_w, child_in_h));
+            self.v.content = natural.height;
+            self.h.content = if self.h.enabled { natural.width } else { vw_guess };
         }
 
-        // Apply stick-to-bottom AFTER we know the new content_height: if we
-        // were at the end on the previous frame, follow the end as it moves.
+        // Re-query viewport now that content dimensions are known (Solid bars
+        // may reserve different space once we know overflow).
+        let (vw, vh) = self.viewport();
+
         if self.stick_to_bottom && self.was_at_bottom {
-            self.scroll_offset = self.max_scroll();
+            self.v.offset = self.v.max_scroll(vh);
         }
-        self.scroll_offset = self.clamp_offset(self.scroll_offset);
-        self.was_at_bottom = (self.max_scroll() - self.scroll_offset).abs() < 0.5;
+        self.clamp_offsets();
+        self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
 
-        // Publish back to the external cells.
-        if let Some(c) = &self.offset_cell     { c.set(self.scroll_offset); }
-        if let Some(c) = &self.max_scroll_cell { c.set(self.max_scroll());  }
+        // Publish offsets / max / viewport.
+        if let Some(c) = &self.offset_cell     { c.set(self.v.offset); }
+        if let Some(c) = &self.max_scroll_cell { c.set(self.v.max_scroll(vh)); }
+        if let Some(c) = &self.viewport_cell {
+            // Content-space viewport rect in Y-UP content coords:
+            //   x = h_offset  (left edge of visible region)
+            //   y = (v_content_height - vh - v_offset) if inverting, but we
+            //       expose TOP-DOWN coords for easier row math: y = v_offset.
+            // We output a rect where (x, y) is the TOP-LEFT of visible content
+            // in a conventional top-down space, and (width, height) = viewport.
+            c.set(Rect::new(self.h.offset, self.v.offset, vw, vh));
+        }
 
+        // Position child inside the widget.
         if let Some(child) = self.children.first_mut() {
-            let child_y = available.height - self.content_height + self.scroll_offset;
-            child.set_bounds(Rect::new(0.0, child_y.round(), content_w, self.content_height));
+            let child_y = vh - self.v.content + self.v.offset;
+            let child_x = -self.h.offset;
+            child.set_bounds(Rect::new(
+                child_x.round(), child_y.round(),
+                if self.h.enabled { self.h.content } else { vw },
+                self.v.content,
+            ));
         }
 
         available
     }
 
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
-        // Background drawn by parent / Window. Scrollbar is in paint_overlay.
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        // Clip children to the VIEWPORT so the content never overpaints the
+        // scrollbar gutter or the edge guards.
+        let (vw, vh) = self.viewport();
+        Some((0.0, self.bounds.height - vh, vw, vh))
     }
 
-    /// Draw the floating scrollbar on top of all children.
-    ///
-    /// Because `paint_overlay` runs after `ctx.restore()` (which lifts the
-    /// children clip), the bar is never clipped by `clip_children_rect`.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        let h = self.bounds.height;
-        if self.content_height <= h { return; }
+        let v = ctx.visuals();
 
-        // Decide whether to draw based on visibility mode.
-        let is_hover = self.hovered_bar || self.dragging;
-        let paint = match self.bar_visibility {
-            ScrollBarVisibility::AlwaysHidden  => false,
-            ScrollBarVisibility::AlwaysVisible => true,
-            ScrollBarVisibility::VisibleOnHover => is_hover,
+        let paint_v = self.v.enabled && self.should_paint_v();
+        let paint_h = self.h.enabled && self.should_paint_h();
+
+        let track_color = match self.style.color {
+            ScrollBarColor::Background => v.scroll_track,
+            ScrollBarColor::Foreground => Color::rgba(
+                v.accent.r, v.accent.g, v.accent.b, 0.08),
         };
-        if !paint { return; }
-
-        let Some((thumb_y, thumb_h)) = self.thumb_metrics() else { return };
-
-        let v     = ctx.visuals();
-        let bar_w = BAR_FULL_W;
-        let bar_x = self.bar_right() - bar_w;
-        let r     = bar_w * 0.5;
-
-        // Track background — only drawn while visible.
-        let (track_lo, track_hi) = self.track_range();
-        ctx.set_fill_color(v.scroll_track);
-        ctx.begin_path();
-        ctx.rounded_rect(bar_x, track_lo, bar_w, track_hi - track_lo, r);
-        ctx.fill();
-
-        // Thumb.
-        let thumb_color = if self.dragging {
-            v.scroll_thumb_dragging
-        } else if self.hovered_thumb {
-            v.scroll_thumb_hovered
-        } else {
-            v.scroll_thumb
+        let thumb_idle = match self.style.color {
+            ScrollBarColor::Background => v.scroll_thumb,
+            ScrollBarColor::Foreground => v.accent,
         };
 
-        ctx.set_fill_color(thumb_color);
-        ctx.begin_path();
-        ctx.rounded_rect(bar_x, thumb_y, bar_w, thumb_h, r);
-        ctx.fill();
+        // ── Vertical bar ──
+        if paint_v {
+            if let Some((ty, th)) = self.v_thumb_metrics() {
+                let bar_right = self.v_bar_right();
+                let bar_w     = self.style.bar_width;
+                let bar_x     = bar_right - bar_w;
+                let r         = bar_w * 0.5;
+
+                let (lo, hi) = self.v_track_range();
+                ctx.set_fill_color(track_color);
+                ctx.begin_path();
+                ctx.rounded_rect(bar_x, lo, bar_w, hi - lo, r);
+                ctx.fill();
+
+                let tc = if self.v.dragging {
+                    v.scroll_thumb_dragging
+                } else if self.v.hovered_thumb {
+                    v.scroll_thumb_hovered
+                } else { thumb_idle };
+                ctx.set_fill_color(tc);
+                ctx.begin_path();
+                ctx.rounded_rect(bar_x, ty, bar_w, th, r);
+                ctx.fill();
+            }
+        }
+
+        // ── Horizontal bar ──
+        if paint_h {
+            if let Some((tx, tw)) = self.h_thumb_metrics() {
+                let bar_bottom = self.h_bar_bottom();
+                let bar_h      = self.style.bar_width;
+                let r          = bar_h * 0.5;
+
+                let (lo, hi) = self.h_track_range();
+                ctx.set_fill_color(track_color);
+                ctx.begin_path();
+                ctx.rounded_rect(lo, bar_bottom, hi - lo, bar_h, r);
+                ctx.fill();
+
+                let tc = if self.h.dragging {
+                    v.scroll_thumb_dragging
+                } else if self.h.hovered_thumb {
+                    v.scroll_thumb_hovered
+                } else { thumb_idle };
+                ctx.set_fill_color(tc);
+                ctx.begin_path();
+                ctx.rounded_rect(tx, bar_bottom, tw, bar_h, r);
+                ctx.fill();
+            }
+        }
+
+        // ── Fade gradient overlay at the scroll-axis edges ──
+        //
+        // Approximation of egui's fade: draw a translucent stripe of the
+        // panel_fill colour at each edge where content is clipped.  Strength
+        // * 1.0 = fully opaque at the edge.
+        if self.style.fade_strength > 0.001 && self.style.fade_size > 0.5 {
+            self.paint_fade(ctx);
+        }
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             // ── Mouse wheel ───────────────────────────────────────────────────
-            Event::MouseWheel { delta_y, .. } => {
-                self.scroll_offset = self.clamp_offset(
-                    self.scroll_offset + delta_y * 40.0,
-                );
-                // Manual scroll detaches from the sticky-bottom mode until the
-                // user returns to the end.  If they land exactly at the end
-                // again, re-enable sticking.
-                self.was_at_bottom = (self.max_scroll() - self.scroll_offset).abs() < 0.5;
-                if let Some(c) = &self.offset_cell { c.set(self.scroll_offset); }
-                EventResult::Consumed
+            Event::MouseWheel { delta_y, delta_x, .. } => {
+                let mut consumed = false;
+                if self.v.enabled {
+                    self.v.offset = self.v.offset + delta_y * 40.0;
+                    consumed = true;
+                }
+                if self.h.enabled {
+                    self.h.offset = self.h.offset + delta_x * 40.0;
+                    consumed = true;
+                }
+                self.clamp_offsets();
+                let (_, vh) = self.viewport();
+                self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+                if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
+                if consumed { EventResult::Consumed } else { EventResult::Ignored }
             }
 
             // ── Mouse move ────────────────────────────────────────────────────
             Event::MouseMove { pos } => {
-                let scrollable = self.content_height > self.bounds.height;
-                self.hovered_bar   = scrollable && self.pos_in_hover_zone(*pos);
-                self.hovered_thumb = scrollable && self.pos_on_thumb(*pos);
+                let (vw, vh) = self.viewport();
+                let v_scroll = self.v.enabled && self.v.content > vh;
+                let h_scroll = self.h.enabled && self.h.content > vw;
+                self.v.hovered_bar   = v_scroll && self.pos_in_v_hover(*pos);
+                self.v.hovered_thumb = v_scroll && self.pos_on_v_thumb(*pos);
+                self.h.hovered_bar   = h_scroll && self.pos_in_h_hover(*pos);
+                self.h.hovered_thumb = h_scroll && self.pos_on_h_thumb(*pos);
 
-                if self.dragging {
-                    if let Some((_, thumb_h)) = self.thumb_metrics() {
-                        let (track_lo, track_hi) = self.track_range();
-                        let travel = (track_hi - track_lo - thumb_h).max(1.0);
-                        // New bottom of thumb, clamped to track.
-                        let new_thumb_y = (pos.y - self.drag_thumb_offset)
-                            .clamp(track_lo, track_lo + travel);
-                        let scroll_frac = 1.0 - (new_thumb_y - track_lo) / travel;
-                        self.scroll_offset =
-                            self.clamp_offset(scroll_frac * self.max_scroll());
+                if self.v.dragging {
+                    if let Some((_, th)) = self.v_thumb_metrics() {
+                        let (lo, hi) = self.v_track_range();
+                        let travel = (hi - lo - th).max(1.0);
+                        let new_ty = (pos.y - self.v.drag_thumb_offset)
+                            .clamp(lo, lo + travel);
+                        let frac = 1.0 - (new_ty - lo) / travel;
+                        self.v.offset = (frac * self.v.max_scroll(vh)).max(0.0);
+                        self.clamp_offsets();
                         self.was_at_bottom =
-                            (self.max_scroll() - self.scroll_offset).abs() < 0.5;
-                        if let Some(c) = &self.offset_cell { c.set(self.scroll_offset); }
+                            (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+                        if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
                     }
                     return EventResult::Consumed;
                 }
-
-                // Return Ignored so the event bubbles to the parent Window, which
-                // must be able to detect its resize edge even when the scrollbar
-                // hover zone overlaps the window's right-edge resize zone.
+                if self.h.dragging {
+                    if let Some((_, tw)) = self.h_thumb_metrics() {
+                        let (lo, hi) = self.h_track_range();
+                        let travel = (hi - lo - tw).max(1.0);
+                        let new_tx = (pos.x - self.h.drag_thumb_offset)
+                            .clamp(lo, lo + travel);
+                        let frac = (new_tx - lo) / travel;
+                        self.h.offset = (frac * self.h.max_scroll(vw)).max(0.0);
+                        self.clamp_offsets();
+                    }
+                    return EventResult::Consumed;
+                }
                 EventResult::Ignored
             }
 
             // ── Mouse down ────────────────────────────────────────────────────
             Event::MouseDown { pos, button: MouseButton::Left, .. } => {
-                if !self.pos_in_hover_zone(*pos) { return EventResult::Ignored; }
+                let (vw, vh) = self.viewport();
+                let v_scroll = self.v.enabled && self.v.content > vh;
+                let h_scroll = self.h.enabled && self.h.content > vw;
 
-                if self.pos_on_thumb(*pos) {
-                    // Drag: remember offset from thumb bottom to cursor.
-                    let thumb_y = self.thumb_metrics().map(|(y, _)| y).unwrap_or(0.0);
-                    self.dragging          = true;
-                    self.drag_thumb_offset = pos.y - thumb_y;
-                } else if self.content_height > self.bounds.height {
-                    // Click on track: center thumb at click position.
-                    if let Some((_, thumb_h)) = self.thumb_metrics() {
-                        let (track_lo, track_hi) = self.track_range();
-                        let travel = (track_hi - track_lo - thumb_h).max(1.0);
-                        let new_thumb_y = (pos.y - thumb_h * 0.5)
-                            .clamp(track_lo, track_lo + travel);
-                        let scroll_frac = 1.0 - (new_thumb_y - track_lo) / travel;
-                        self.scroll_offset =
-                            self.clamp_offset(scroll_frac * self.max_scroll());
+                if v_scroll && self.pos_in_v_hover(*pos) {
+                    if self.pos_on_v_thumb(*pos) {
+                        let ty = self.v_thumb_metrics().map(|(y, _)| y).unwrap_or(0.0);
+                        self.v.dragging = true;
+                        self.v.drag_thumb_offset = pos.y - ty;
+                    } else if let Some((_, th)) = self.v_thumb_metrics() {
+                        let (lo, hi) = self.v_track_range();
+                        let travel = (hi - lo - th).max(1.0);
+                        let new_ty = (pos.y - th * 0.5).clamp(lo, lo + travel);
+                        let frac = 1.0 - (new_ty - lo) / travel;
+                        self.v.offset = frac * self.v.max_scroll(vh);
+                        self.clamp_offsets();
+                        if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
                     }
+                    return EventResult::Consumed;
                 }
-                EventResult::Consumed
+                if h_scroll && self.pos_in_h_hover(*pos) {
+                    if self.pos_on_h_thumb(*pos) {
+                        let tx = self.h_thumb_metrics().map(|(x, _)| x).unwrap_or(0.0);
+                        self.h.dragging = true;
+                        self.h.drag_thumb_offset = pos.x - tx;
+                    } else if let Some((_, tw)) = self.h_thumb_metrics() {
+                        let (lo, hi) = self.h_track_range();
+                        let travel = (hi - lo - tw).max(1.0);
+                        let new_tx = (pos.x - tw * 0.5).clamp(lo, lo + travel);
+                        let frac = (new_tx - lo) / travel;
+                        self.h.offset = frac * self.h.max_scroll(vw);
+                        self.clamp_offsets();
+                    }
+                    return EventResult::Consumed;
+                }
+                EventResult::Ignored
             }
 
             // ── Mouse up ──────────────────────────────────────────────────────
             Event::MouseUp { button: MouseButton::Left, .. } => {
-                let was = self.dragging;
-                self.dragging = false;
+                let was = self.v.dragging || self.h.dragging;
+                self.v.dragging = false;
+                self.h.dragging = false;
                 if was { EventResult::Consumed } else { EventResult::Ignored }
             }
 
             _ => EventResult::Ignored,
+        }
+    }
+}
+
+impl ScrollView {
+    /// Paint a fade stripe at the axis edges using `style.fade_strength` alpha
+    /// and `style.fade_size` length.  Solid-coloured overlay — not a gradient —
+    /// because our `DrawCtx` doesn't expose a gradient fill primitive yet.
+    fn paint_fade(&self, ctx: &mut dyn DrawCtx) {
+        let v      = ctx.visuals();
+        let c      = v.panel_fill;
+        let (vw, vh) = self.viewport();
+        let alpha  = self.style.fade_strength.clamp(0.0, 1.0) as f64;
+        let size   = self.style.fade_size.max(0.0);
+        let fade   = Color::rgba(c.r, c.g, c.b, alpha as f32 * 0.35);
+        ctx.set_fill_color(fade);
+
+        // Fade appears only near edges where content is clipped.  For vertical
+        // scrolling: top fade visible when content above top is clipped
+        // (v.offset > 0).
+        if self.v.enabled {
+            if self.v.offset > 0.5 {
+                // Top of viewport (Y-up = high Y).  Widget rect starts from bottom.
+                ctx.begin_path();
+                ctx.rect(0.0, self.bounds.height - size, vw, size);
+                ctx.fill();
+            }
+            if (self.v.max_scroll(vh) - self.v.offset) > 0.5 {
+                ctx.begin_path();
+                let y_bottom = self.bounds.height - vh;
+                ctx.rect(0.0, y_bottom, vw, size);
+                ctx.fill();
+            }
+        }
+        if self.h.enabled {
+            if self.h.offset > 0.5 {
+                ctx.begin_path();
+                ctx.rect(0.0, self.bounds.height - vh, size, vh);
+                ctx.fill();
+            }
+            if (self.h.max_scroll(vw) - self.h.offset) > 0.5 {
+                ctx.begin_path();
+                ctx.rect(vw - size, self.bounds.height - vh, size, vh);
+                ctx.fill();
+            }
         }
     }
 }

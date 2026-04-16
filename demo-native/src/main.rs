@@ -290,11 +290,19 @@ fn main() {
                     event: WindowEvent::MouseWheel { delta, .. }, ..
                 } => {
                     // Winit: LineDelta y > 0 = wheel up = scroll UP = negative delta.
-                    let delta_y = match delta {
-                        winit::event::MouseScrollDelta::LineDelta(_, y) => -(y as f64),
-                        winit::event::MouseScrollDelta::PixelDelta(d) => d.y / 40.0,
+                    // Treat shift+wheel as horizontal (common mouse-with-only-
+                    // vertical-wheel convention).
+                    let (mut dx, mut dy) = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(x, y) =>
+                            (-(x as f64), -(y as f64)),
+                        winit::event::MouseScrollDelta::PixelDelta(d) =>
+                            (d.x / 40.0, d.y / 40.0),
                     };
-                    app.on_mouse_wheel(cursor_x, cursor_y, delta_y);
+                    if current_mods.shift && dx == 0.0 {
+                        dx = dy;
+                        dy = 0.0;
+                    }
+                    app.on_mouse_wheel_xy(cursor_x, cursor_y, dx, dy);
                 }
                 Event::AboutToWait => {
                     // Poll while cube animates; WaitUntil(500ms) when a text

@@ -59,7 +59,8 @@ pub use widget::{App, InspectorNode, Widget, collect_inspector_nodes};
 pub use widgets::{Button, Checkbox, CollapsingHeader, ComboBox, Container, DragValue, FlexColumn, FlexRow,
                   Hyperlink, InspectorPanel,
                   Label, LabelAlign, MarkdownView, NodeIcon, Padding, ProgressBar, RadioGroup,
-                  ScrollBarVisibility, ScrollView, Separator, SizedBox, Slider, Spacer, Splitter, Stack,
+                  ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility,
+                  ScrollView, Separator, SizedBox, Slider, Spacer, Splitter, Stack,
                   TabView, TextField, ToggleSwitch, Tooltip, TreeView, Window};
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

@@ -99,9 +99,10 @@ fn translate_event(event: &Event, offset_y: f64) -> Event {
             button: *button,
             modifiers: *modifiers,
         },
-        Event::MouseWheel { pos, delta_y } => Event::MouseWheel {
+        Event::MouseWheel { pos, delta_y, delta_x } => Event::MouseWheel {
             pos: Point::new(pos.x, pos.y - offset_y),
             delta_y: *delta_y,
+            delta_x: *delta_x,
         },
         other => other.clone(),
     }
