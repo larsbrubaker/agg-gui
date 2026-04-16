@@ -51,6 +51,9 @@ const CORNER_R:     f64 = 8.0;
 const SHADOW_BLUR:  f64 = 6.0;
 const CLOSE_R:      f64 = 6.0;
 const CLOSE_PAD:    f64 = 10.0;
+/// Horizontal distance from the right edge to the maximize button centre.
+/// = CLOSE_PAD + CLOSE_R*2 + 4 px gap
+const MAX_PAD:      f64 = CLOSE_PAD + CLOSE_R * 2.0 + 4.0; // 26 px
 const RESIZE_EDGE:  f64 = 6.0;   // px from the edge that counts as a resize zone
 const MIN_W:        f64 = 120.0;
 const MIN_H:        f64 = 80.0;
@@ -100,6 +103,12 @@ pub struct Window {
     close_hovered: bool,
     on_close: Option<Box<dyn FnMut()>>,
 
+    /// Whether the window is currently maximized (fills the full canvas).
+    maximized: bool,
+    /// Bounds saved before maximizing so we can restore them.
+    pre_maximize_bounds: Rect,
+    maximize_hovered: bool,
+
     /// Which resize edge/corner the cursor is currently hovering over.
     /// Cleared to None when the cursor moves into the interior.
     hover_dir: Option<ResizeDir>,
@@ -142,6 +151,9 @@ impl Window {
             drag_start_bounds: Rect::default(),
             close_hovered: false,
             on_close: None,
+            maximized: false,
+            pre_maximize_bounds: Rect::new(60.0, 60.0, 360.0, 280.0),
+            maximize_hovered: false,
             hover_dir: None,
             last_title_click: None,
             title_label,
@@ -219,6 +231,35 @@ impl Window {
         let dx = local.x - c.x;
         let dy = local.y - c.y;
         dx * dx + dy * dy <= (CLOSE_R + 3.0) * (CLOSE_R + 3.0)
+    }
+
+    fn maximize_center(&self) -> Point {
+        Point::new(
+            self.bounds.width - MAX_PAD,
+            self.bounds.height - TITLE_H * 0.5,
+        )
+    }
+
+    fn in_maximize_button(&self, local: Point) -> bool {
+        let c = self.maximize_center();
+        let dx = local.x - c.x;
+        let dy = local.y - c.y;
+        dx * dx + dy * dy <= (CLOSE_R + 3.0) * (CLOSE_R + 3.0)
+    }
+
+    fn toggle_maximize(&mut self) {
+        if self.maximized {
+            self.bounds = self.pre_maximize_bounds;
+            self.maximized = false;
+        } else {
+            self.pre_maximize_bounds = self.bounds;
+            self.bounds = snap(Rect::new(
+                0.0, 0.0,
+                self.canvas_size.width,
+                self.canvas_size.height,
+            ));
+            self.maximized = true;
+        }
     }
 
     // ── Resize zone detection ──────────────────────────────────────────────────
@@ -453,6 +494,40 @@ impl Widget for Window {
         paint_subtree(&mut self.title_label, ctx);
         ctx.restore();
 
+        // Maximize / Restore button (left of close).
+        let mc = self.maximize_center();
+        let max_bg = if self.maximize_hovered { v.window_close_bg_hovered } else { v.window_close_bg };
+        ctx.set_fill_color(max_bg);
+        ctx.begin_path();
+        ctx.circle(mc.x, mc.y, CLOSE_R);
+        ctx.fill();
+
+        ctx.set_stroke_color(v.window_close_fg);
+        ctx.set_line_width(1.5);
+        let sz = 3.5_f64; // half-size of the icon (7×7 px total)
+        if self.maximized {
+            // Restore icon: two overlapping bordered squares.
+            // Back square (upper-right in screen coords = +x, +y in Y-up).
+            let off = 2.0_f64;
+            let sq  = sz * 2.0 - off;
+            ctx.begin_path();
+            ctx.rect(mc.x - sz + off, mc.y - sz + off, sq, sq);
+            ctx.stroke();
+            // Front square (lower-left — drawn on top so it occludes back).
+            ctx.set_fill_color(max_bg); // blank out back rect where front overlaps
+            ctx.begin_path();
+            ctx.rect(mc.x - sz, mc.y - sz, sq, sq);
+            ctx.fill();
+            ctx.begin_path();
+            ctx.rect(mc.x - sz, mc.y - sz, sq, sq);
+            ctx.stroke();
+        } else {
+            // Maximize icon: single bordered square.
+            ctx.begin_path();
+            ctx.rect(mc.x - sz, mc.y - sz, sz * 2.0, sz * 2.0);
+            ctx.stroke();
+        }
+
         // Close button.
         let cc = self.close_center();
         let close_bg = if self.close_hovered { v.window_close_bg_hovered } else { v.window_close_bg };
@@ -569,7 +644,8 @@ impl Widget for Window {
 
         match event {
             Event::MouseMove { pos } => {
-                self.close_hovered = self.in_close_button(*pos);
+                self.close_hovered    = self.in_close_button(*pos);
+                self.maximize_hovered = self.in_maximize_button(*pos);
 
                 match self.drag_mode {
                     DragMode::Move => {
@@ -607,6 +683,12 @@ impl Widget for Window {
                     self.visible = false;
                     if let Some(ref cell) = self.visible_cell { cell.set(false); }
                     if let Some(cb) = self.on_close.as_mut() { cb(); }
+                    return EventResult::Consumed;
+                }
+
+                // Maximize / Restore button.
+                if self.in_maximize_button(*pos) {
+                    self.toggle_maximize();
                     return EventResult::Consumed;
                 }
 
