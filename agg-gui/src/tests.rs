@@ -1683,9 +1683,9 @@ fn test_flex_row_cross_axis_anchors() {
 
     // BOTTOM (Y-up): y = 0 (pad_b = 0, margin_b = 0)
     assert_eq!(children[0].bounds().y, 0.0, "BOTTOM child y");
-    // CENTER: y = (60 - 15) / 2 = 22.5
+    // CENTER: y = (60 - 15) / 2 = 22.5, rounded to integer → 23
     let cy = children[1].bounds().y;
-    assert!((cy - 22.5).abs() < 0.5, "CENTER child y ≈ 22.5, got {cy}");
+    assert_eq!(cy, 23.0, "CENTER child y rounded to integer, got {cy}");
     // TOP: y = 60 - 15 = 45
     assert_eq!(children[2].bounds().y, 45.0, "TOP child y (Y-up)");
 }

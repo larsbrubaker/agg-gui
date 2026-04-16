@@ -321,7 +321,11 @@ impl Widget for FlexColumn {
                 h_anchor, pad_l, inner_w, m.left, m.right, natural_w, min_w, max_w,
             );
 
-            self.children[i].set_bounds(Rect::new(child_x, child_bottom, child_w, content_h));
+            // Round to integers so bitmap content (cached text, images) lands on
+            // exact pixel boundaries and isn't sub-pixel sampled into blur.
+            self.children[i].set_bounds(Rect::new(
+                child_x.round(), child_bottom.round(), child_w.round(), content_h.round(),
+            ));
 
             // Advance cursor past bottom margin and inter-child gap.
             cursor_y = child_bottom - m.bottom - gap;
@@ -518,7 +522,10 @@ impl Widget for FlexRow {
                 v_anchor, pad_b, inner_h, m.bottom, m.top, natural_h, min_h, max_h,
             );
 
-            self.children[i].set_bounds(Rect::new(cursor_x, child_y, content_w, child_h));
+            // Round to integers — same reason as FlexColumn (pixel-perfect blits).
+            self.children[i].set_bounds(Rect::new(
+                cursor_x.round(), child_y.round(), content_w.round(), child_h.round(),
+            ));
             max_slot_h = max_slot_h.max(child_h + m.vertical());
 
             // Advance past content width, right margin, and inter-child gap.

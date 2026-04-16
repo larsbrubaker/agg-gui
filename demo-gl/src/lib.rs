@@ -358,11 +358,23 @@ impl DrawCtx for GlGfxCtx {
         let (lx, rx) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (by, ty2) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
         let [gl_x, gl_y, gl_w, gl_h] = compute_gl_scissor(lx, by, rx, ty2);
-        let scissor = [gl_x, gl_y, gl_w, gl_h];
-        self.state_stack.last_mut().unwrap().1 = Some(scissor);
+
+        // Intersect with the existing scissor so parent clips constrain children.
+        // (Replacing outright lets children escape their parent's clip region.)
+        let [ix, iy, iw, ih] = if let Some([ex, ey, ew, eh]) = self.current_clip() {
+            let nx1 = gl_x.max(ex);
+            let ny1 = gl_y.max(ey);
+            let nx2 = (gl_x + gl_w).min(ex + ew);
+            let ny2 = (gl_y + gl_h).min(ey + eh);
+            [nx1, ny1, (nx2 - nx1).max(0), (ny2 - ny1).max(0)]
+        } else {
+            [gl_x, gl_y, gl_w, gl_h]
+        };
+
+        self.state_stack.last_mut().unwrap().1 = Some([ix, iy, iw, ih]);
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(gl_x, gl_y, gl_w, gl_h);
+            self.gl.scissor(ix, iy, iw, ih);
         }
     }
 
@@ -614,14 +626,22 @@ impl DrawCtx for GlGfxCtx {
     /// Passes `&*self.gl` as `&dyn Any` — the caller downcasts to
     /// `glow::Context`.  Viewport dimensions come from `self.viewport`.
     fn gl_paint(&mut self, screen_rect: agg_gui::Rect, painter: &mut dyn agg_gui::GlPaint) {
+        self.apply_scissor();
         let full_w = self.viewport.0 as i32;
         let full_h = self.viewport.1 as i32;
+        // Pass the current framework scissor so the painter can intersect its own
+        // scissor with it — this ensures parent clips (collapsed windows, etc.)
+        // correctly hide GPU-rendered content.
+        let parent_clip = self.current_clip();
         painter.gl_paint(
             self.gl.as_ref() as &dyn std::any::Any,
             screen_rect,
             full_w,
             full_h,
+            parent_clip,
         );
+        // Re-apply our scissor after — the painter may have disabled it.
+        self.apply_scissor();
     }
 }
 

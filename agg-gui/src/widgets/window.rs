@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use web_time::Instant;
 
+use crate::cursor::{CursorIcon, set_cursor_icon};
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
@@ -38,6 +39,12 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::{Widget, paint_subtree};
 use crate::widgets::label::Label;
+
+/// Round all four components of a Rect to the nearest integer so widgets
+/// are always placed on exact pixel boundaries (crisp bitmap blits, no blur).
+fn snap(r: Rect) -> Rect {
+    Rect::new(r.x.round(), r.y.round(), r.width.round(), r.height.round())
+}
 
 const TITLE_H:      f64 = 28.0;
 const CORNER_R:     f64 = 8.0;
@@ -182,11 +189,10 @@ impl Window {
         if !self.constrain { return; }
         let cw = self.canvas_size.width;
         let ch = self.canvas_size.height;
-        let visible_h = if self.collapsed { TITLE_H } else { self.bounds.height };
-        // Keep window fully inside the canvas area.
-        // If window is larger than the canvas, pin at origin.
-        self.bounds.x = self.bounds.x.clamp(0.0, (cw - self.bounds.width).max(0.0));
-        self.bounds.y = self.bounds.y.clamp(0.0, (ch - visible_h).max(0.0));
+        // bounds.height equals TITLE_H when collapsed (we adjust it on toggle),
+        // so no special-case is needed here.
+        self.bounds.x = self.bounds.x.clamp(0.0, (cw - self.bounds.width).max(0.0)).round();
+        self.bounds.y = self.bounds.y.clamp(0.0, (ch - self.bounds.height).max(0.0)).round();
     }
 
     pub fn show(&mut self) { self.visible = true; }
@@ -268,8 +274,22 @@ impl Window {
             }
         }
 
-        self.bounds = Rect::new(x, y, w, h);
+        self.bounds = snap(Rect::new(x, y, w, h));
         self.clamp_to_canvas();
+    }
+}
+
+/// Map a resize direction to the appropriate OS cursor icon.
+fn resize_cursor(dir: ResizeDir) -> CursorIcon {
+    match dir {
+        ResizeDir::N  => CursorIcon::ResizeNorth,
+        ResizeDir::S  => CursorIcon::ResizeSouth,
+        ResizeDir::E  => CursorIcon::ResizeEast,
+        ResizeDir::W  => CursorIcon::ResizeWest,
+        ResizeDir::NE => CursorIcon::ResizeNorthEast,
+        ResizeDir::NW => CursorIcon::ResizeNorthWest,
+        ResizeDir::SE => CursorIcon::ResizeSouthEast,
+        ResizeDir::SW => CursorIcon::ResizeSouthWest,
     }
 }
 
@@ -307,6 +327,17 @@ impl Widget for Window {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
+    /// Clip child painting to the content area (below the title bar).
+    /// When collapsed bounds.height == TITLE_H so the content rect has zero height,
+    /// preventing any child from drawing outside the visible title-bar strip.
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        if !self.is_visible() { return None; }
+        let w = self.bounds.width;
+        let content_h = (self.bounds.height - TITLE_H).max(0.0);
+        // Clip to content area: y=0 (bottom) up to content_h, full width.
+        Some((0.0, 0.0, w, content_h))
+    }
+
     fn hit_test(&self, local_pos: Point) -> bool {
         if !self.is_visible() { return false; }
         if self.drag_mode != DragMode::None { return true; }
@@ -319,8 +350,8 @@ impl Widget for Window {
         if !self.is_visible() {
             return Size::new(self.bounds.width, self.bounds.height);
         }
-        let visible_h = if self.collapsed { TITLE_H } else { self.bounds.height };
-        let content_h = (visible_h - TITLE_H).max(0.0);
+        // When collapsed, bounds.height == TITLE_H (set during toggle).
+        let content_h = (self.bounds.height - TITLE_H).max(0.0);
 
         if let Some(child) = self.children.first_mut() {
             if !self.collapsed {
@@ -343,7 +374,7 @@ impl Widget for Window {
             cell.set(self.bounds);
         }
 
-        Size::new(self.bounds.width, visible_h)
+        Size::new(self.bounds.width, self.bounds.height)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -351,7 +382,8 @@ impl Widget for Window {
 
         let v  = ctx.visuals();
         let w  = self.bounds.width;
-        let h  = if self.collapsed { TITLE_H } else { self.bounds.height };
+        // bounds.height == TITLE_H when collapsed (adjusted on toggle).
+        let h  = self.bounds.height;
         let tb = h - TITLE_H;
 
         // Shadow.
@@ -457,23 +489,26 @@ impl Widget for Window {
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        // ── SE corner dot grid ─────────────────────────────────────────────────
-        // Drawn after children so it is never occluded by content.
-        let dot_r   = 1.5;
-        let dot_gap = 4.5;
-        let origin_x = w - 12.0;
-        let origin_y = 12.0;
-        ctx.set_fill_color(v.window_stroke);
-        for row in 0..3_i32 {
-            for col in 0..3_i32 {
-                if row + col <= 2 {
-                    let bx = origin_x - col as f64 * dot_gap;
-                    let by = origin_y + row as f64 * dot_gap;
-                    ctx.begin_path();
-                    ctx.circle(bx, by, dot_r);
-                    ctx.fill();
-                }
-            }
+        // ── SE corner drag grip (3 diagonal lines, egui-style) ───────────────
+        // Highlight when SE is hovered or actively being dragged.
+        let is_se_active = matches!(self.drag_mode, DragMode::Resize(ResizeDir::SE));
+        let is_se_hover  = self.hover_dir == Some(ResizeDir::SE);
+        let grip_color = if is_se_active {
+            v.window_resize_active
+        } else if is_se_hover {
+            v.window_resize_hover
+        } else {
+            v.window_stroke
+        };
+        ctx.set_stroke_color(grip_color);
+        ctx.set_line_width(1.5);
+        let m = 3.0_f64; // margin from corner edge
+        for i in 1..=3_i32 {
+            let off = i as f64 * 4.0 + m;
+            ctx.begin_path();
+            ctx.move_to(w - off, m);
+            ctx.line_to(w - m, off);
+            ctx.stroke();
         }
 
         // ── Resize edge / corner highlight ────────────────────────────────────
@@ -541,21 +576,26 @@ impl Widget for Window {
                         let world = Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y);
                         let dx = world.x - self.drag_start_world.x;
                         let dy = world.y - self.drag_start_world.y;
-                        self.bounds.x = self.drag_start_bounds.x + dx;
-                        self.bounds.y = self.drag_start_bounds.y + dy;
+                        self.bounds.x = (self.drag_start_bounds.x + dx).round();
+                        self.bounds.y = (self.drag_start_bounds.y + dy).round();
                         self.clamp_to_canvas();
                         self.hover_dir = None;
+                        set_cursor_icon(CursorIcon::Grabbing);
                         return EventResult::Consumed;
                     }
-                    DragMode::Resize(_) => {
+                    DragMode::Resize(dir) => {
                         let world = Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y);
                         self.apply_resize(world);
+                        set_cursor_icon(resize_cursor(dir));
                         return EventResult::Consumed;
                     }
                     DragMode::None => {
                         // Track which edge/corner the cursor is hovering over so
                         // paint_overlay can draw the appropriate highlight.
                         self.hover_dir = self.resize_dir(*pos);
+                        if let Some(dir) = self.hover_dir {
+                            set_cursor_icon(resize_cursor(dir));
+                        }
                     }
                 }
                 EventResult::Ignored
@@ -591,13 +631,23 @@ impl Widget for Window {
 
                     if is_double {
                         // Toggle collapse.
+                        // We adjust bounds.y so the title bar (top edge) stays fixed.
+                        // In Y-up: top = bounds.y + bounds.height.
                         if self.collapsed {
+                            // Expanding: restore full height, keep top edge in place.
+                            let top = self.bounds.y + self.bounds.height;
                             self.bounds.height = self.pre_collapse_h;
+                            self.bounds.y = (top - self.pre_collapse_h).round();
                             self.collapsed = false;
                         } else {
+                            // Collapsing: shrink to title-bar only, keep top edge in place.
+                            let top = self.bounds.y + self.bounds.height;
                             self.pre_collapse_h = self.bounds.height;
+                            self.bounds.height = TITLE_H;
+                            self.bounds.y = (top - TITLE_H).round();
                             self.collapsed = true;
                         }
+                        self.clamp_to_canvas();
                         self.last_title_click = None;
                     } else {
                         self.last_title_click = Some(now);

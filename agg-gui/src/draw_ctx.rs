@@ -38,12 +38,17 @@ pub trait GlPaint {
     /// `gl` — opaque platform GL context; downcast via `std::any::Any`.
     /// `screen_rect` — Y-up screen-space rect for this widget (for viewport/scissor).
     /// `full_w`, `full_h` — full viewport dimensions (for restoring after).
+    /// `parent_clip` — current framework scissor rect `[x, y, w, h]` in GL/Y-up
+    ///   pixels, or `None` if no clip is active.  Implementations **must intersect**
+    ///   any scissor they set with this rect so that parent widget clips (e.g. a
+    ///   collapsed window) correctly hide GPU-rendered content.
     fn gl_paint(
         &mut self,
         gl:          &dyn std::any::Any,
         screen_rect: Rect,
         full_w:      i32,
         full_h:      i32,
+        parent_clip: Option<[i32; 4]>,
     );
 }
 

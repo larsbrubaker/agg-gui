@@ -162,8 +162,10 @@ impl Widget for ScrollView {
             Event::MouseWheel { delta_y, .. } => {
                 // Convention: delta_y > 0 = user scrolled DOWN (wants to see content below).
                 // Increasing scroll_offset moves content up → reveals lower items. ✓
+                // Snap to integer so bitmapped content stays on exact pixel boundaries.
                 self.scroll_offset = (self.scroll_offset + delta_y * 40.0)
-                    .clamp(0.0, self.max_scroll());
+                    .clamp(0.0, self.max_scroll())
+                    .round();
                 EventResult::Consumed
             }
             Event::MouseMove { pos } => {
@@ -178,7 +180,8 @@ impl Widget for ScrollView {
                         let delta_y = self.drag_start_y - pos.y;
                         let scroll_per_px = self.max_scroll() / track_h;
                         self.scroll_offset = (self.drag_start_offset + delta_y * scroll_per_px)
-                            .clamp(0.0, self.max_scroll());
+                            .clamp(0.0, self.max_scroll())
+                            .round();
                     }
                     EventResult::Consumed
                 } else if self.hovered_scrollbar {

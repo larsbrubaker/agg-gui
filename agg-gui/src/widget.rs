@@ -130,6 +130,19 @@ pub trait Widget {
     /// be occluded by child content.
     fn paint_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
 
+    /// Return a clip rectangle (in local coordinates) that constrains all child
+    /// painting.  `paint_subtree` applies this clip before recursing into
+    /// children, then restores the previous clip state afterward.  The clip does
+    /// **not** affect `paint_overlay`, which runs after the clip is removed.
+    ///
+    /// The default clips children to this widget's own bounds, preventing
+    /// overflow.  Override to return a narrower rect (e.g. Window clips to the
+    /// content area below the title bar, or an empty rect when collapsed).
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let b = self.bounds();
+        Some((0.0, 0.0, b.width, b.height))
+    }
+
     // -------------------------------------------------------------------------
     // Layout properties (universal — every widget carries these)
     // -------------------------------------------------------------------------
@@ -186,6 +199,14 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 
     widget.paint(ctx);
 
+    // Always clip children to this widget's clip rect (default: widget bounds).
+    // save/restore means the clip is removed before paint_overlay runs.
+    let b = widget.bounds();
+    let (cx, cy, cw, ch) = widget.clip_children_rect()
+        .unwrap_or((0.0, 0.0, b.width, b.height));
+    ctx.save();
+    ctx.clip_rect(cx, cy, cw, ch);
+
     // Iterate over indices to avoid holding a reference while recursing.
     let n = widget.children().len();
     for i in 0..n {
@@ -197,6 +218,8 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         paint_subtree(child.as_mut(), ctx);
         ctx.restore();
     }
+
+    ctx.restore(); // lifts the children clip before paint_overlay
 
     if buffered {
         ctx.pop_layer();

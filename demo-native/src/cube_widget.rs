@@ -96,12 +96,13 @@ impl GlPaint for GlCubeWidget {
         screen_rect: Rect,
         full_w:      i32,
         full_h:      i32,
+        parent_clip: Option<[i32; 4]>,
     ) {
         if let Some(gl_ctx) = gl.downcast_ref::<glow::Context>() {
             let renderer = self.renderer.get_or_insert_with(|| {
                 unsafe { CubeGlRenderer::new(gl_ctx) }
             });
-            unsafe { renderer.draw_gl(gl_ctx, screen_rect, 0.0, full_w, full_h) };
+            unsafe { renderer.draw_gl(gl_ctx, screen_rect, 0.0, full_w, full_h, parent_clip) };
         }
     }
 }
@@ -222,11 +223,12 @@ impl CubeGlRenderer {
     /// `full_w`, `full_h` — full viewport dimensions for restoring after.
     pub unsafe fn draw_gl(
         &mut self,
-        gl:         &glow::Context,
-        fb_rect:    Rect,
-        viewport_h: f64,
-        full_w:     i32,
-        full_h:     i32,
+        gl:          &glow::Context,
+        fb_rect:     Rect,
+        viewport_h:  f64,
+        full_w:      i32,
+        full_h:      i32,
+        parent_clip: Option<[i32; 4]>,
     ) {
         if fb_rect.width < 1.0 || fb_rect.height < 1.0 { return; }
 
@@ -237,9 +239,23 @@ impl CubeGlRenderer {
         let gl_h = fb_rect.height as i32;
         let _ = viewport_h; // no longer needed
 
+        // Intersect widget scissor with the parent clip so that collapsed windows
+        // (and any other parent clip) correctly hide this GL content.
+        let [sx, sy, sw, sh] = if let Some([px, py, pw, ph]) = parent_clip {
+            let x1 = gl_x.max(px);
+            let y1 = gl_y.max(py);
+            let x2 = (gl_x + gl_w).min(px + pw);
+            let y2 = (gl_y + gl_h).min(py + ph);
+            [x1, y1, (x2 - x1).max(0), (y2 - y1).max(0)]
+        } else {
+            [gl_x, gl_y, gl_w, gl_h]
+        };
+        // Nothing visible after intersection — skip rendering entirely.
+        if sw <= 0 || sh <= 0 { return; }
+
         gl.viewport(gl_x, gl_y, gl_w, gl_h);
         gl.enable(glow::SCISSOR_TEST);
-        gl.scissor(gl_x, gl_y, gl_w, gl_h);
+        gl.scissor(sx, sy, sw, sh);
 
         // Only clear depth — colour comes from the AGG texture underneath.
         gl.enable(glow::DEPTH_TEST);
@@ -283,9 +299,10 @@ impl GlPaint for CubeGlRenderer {
         screen_rect: Rect,
         full_w:      i32,
         full_h:      i32,
+        parent_clip: Option<[i32; 4]>,
     ) {
         if let Some(gl) = gl.downcast_ref::<glow::Context>() {
-            unsafe { self.draw_gl(gl, screen_rect, 0.0, full_w, full_h) };
+            unsafe { self.draw_gl(gl, screen_rect, 0.0, full_w, full_h, parent_clip) };
         }
     }
 }
