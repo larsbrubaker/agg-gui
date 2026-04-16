@@ -44,6 +44,42 @@ fn colors_equal(a: Color, b: Color) -> bool {
         && (a.a - b.a).abs() < 0.004_f32
 }
 
+/// Break `text` into lines that each fit within `max_width` pixels at the given
+/// font size.  Explicit `\n` characters always produce a new line.  Returns at
+/// least one entry (possibly an empty string for blank text).
+fn wrap_text(font: &Arc<Font>, text: &str, font_size: f64, max_width: f64) -> Vec<String> {
+    use crate::text::measure_text_metrics;
+    let mut result = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.trim().is_empty() {
+            // Preserve explicit blank lines.
+            result.push(String::new());
+            continue;
+        }
+        let mut current: String = String::new();
+        for word in paragraph.split_whitespace() {
+            if current.is_empty() {
+                current.push_str(word);
+            } else {
+                let candidate = format!("{current} {word}");
+                let w = measure_text_metrics(font, &candidate, font_size).width;
+                if w <= max_width {
+                    current = candidate;
+                } else {
+                    result.push(std::mem::replace(&mut current, word.to_string()));
+                }
+            }
+        }
+        if !current.is_empty() {
+            result.push(current);
+        }
+    }
+    if result.is_empty() {
+        result.push(String::new());
+    }
+    result
+}
+
 /// Horizontal alignment for `Label` text.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum LabelAlign {
@@ -79,6 +115,10 @@ pub struct Label {
     /// every frame (e.g. live counters) where caching adds overhead with no
     /// benefit.
     pub buffered: bool,
+    /// When `true`, long lines are broken at word boundaries to fit
+    /// `available.width`.  The label height expands to fit all lines.
+    /// Disabled by default; enable with `.with_wrap(true)`.
+    wrap: bool,
 
     // ── Layout measurement cache ──────────────────────────────────────────────
     /// Cached text advance width from last `measure_advance()` call.
@@ -87,6 +127,10 @@ pub struct Label {
     layout_text: String,
     layout_font_size: f64,
     layout_width: f64,
+    /// Width used for the last word-wrap computation.
+    wrap_at_width: f64,
+    /// Lines produced by the last word-wrap computation.
+    wrapped_lines: Vec<String>,
 
     // ── Backbuffer cache ──────────────────────────────────────────────────────
     /// Cached pixel data (top-row first, RGBA8).  `None` until first render.
@@ -114,9 +158,12 @@ impl Label {
             color: None, // resolved from ctx.visuals() at paint time
             align: LabelAlign::Left,
             buffered: true,
+            wrap: false,
             layout_text: String::new(),
             layout_font_size: 0.0,
             layout_width: 0.0,
+            wrap_at_width: -1.0,
+            wrapped_lines: Vec::new(),
             cache_pixels: None,
             cache_w: 0,
             cache_h: 0,
@@ -135,6 +182,10 @@ impl Label {
     pub fn with_color(mut self, color: Color) -> Self { self.color = Some(color); self }
     pub fn with_align(mut self, align: LabelAlign) -> Self { self.align = align; self }
     pub fn with_has_backbuffer(mut self, v: bool) -> Self { self.buffered = v; self }
+    /// Enable or disable word-wrapping.  When `true`, long lines are broken at
+    /// word boundaries to fit the available width; the label height expands to
+    /// accommodate all lines.  Newlines in the text are always honoured.
+    pub fn with_wrap(mut self, wrap: bool) -> Self { self.wrap = wrap; self }
 
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
@@ -191,20 +242,37 @@ impl Widget for Label {
     fn hit_test(&self, _: Point) -> bool { false }
 
     fn layout(&mut self, available: Size) -> Size {
-        // Tight bounds: width matches rendered text, height is font-size based.
-        // Text measurement (rustybuzz::shape) is cached: only re-runs when the
-        // text string or font_size changes, not on every frame.
-        if self.layout_text != self.text
-            || (self.layout_font_size - self.font_size).abs() > 0.01
-        {
-            let metrics =
-                crate::text::measure_text_metrics(&self.font, &self.text, self.font_size);
-            self.layout_width     = metrics.width;
-            self.layout_text      = self.text.clone();
-            self.layout_font_size = self.font_size;
+        let line_h = self.font_size * 1.5;
+
+        if self.wrap && available.width > 0.0 {
+            // Rebuild wrapped lines when text, font_size, or available width changes.
+            let text_changed = self.layout_text != self.text
+                || (self.layout_font_size - self.font_size).abs() > 0.01;
+            let width_changed = (self.wrap_at_width - available.width).abs() > 1.0;
+            if text_changed || width_changed {
+                self.wrapped_lines = wrap_text(&self.font, &self.text, self.font_size, available.width);
+                self.wrap_at_width    = available.width;
+                self.layout_text      = self.text.clone();
+                self.layout_font_size = self.font_size;
+                self.cache_pixels     = None; // invalidate backbuffer
+            }
+            let total_h = self.wrapped_lines.len() as f64 * line_h;
+            Size::new(available.width, total_h)
+        } else {
+            // Single-line path: tight bounds matching rendered text width.
+            // Text measurement (rustybuzz::shape) is cached: only re-runs when the
+            // text string or font_size changes, not on every frame.
+            if self.layout_text != self.text
+                || (self.layout_font_size - self.font_size).abs() > 0.01
+            {
+                let metrics =
+                    crate::text::measure_text_metrics(&self.font, &self.text, self.font_size);
+                self.layout_width     = metrics.width;
+                self.layout_text      = self.text.clone();
+                self.layout_font_size = self.font_size;
+            }
+            Size::new(self.layout_width.min(available.width), line_h)
         }
-        let h = self.font_size * 1.5;
-        Size::new(self.layout_width.min(available.width), h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -215,6 +283,28 @@ impl Widget for Label {
         ctx.set_font_size(self.font_size);
         // If no explicit colour was set, follow the active theme.
         let color = self.color.unwrap_or_else(|| ctx.visuals().text_color);
+
+        // ── Wrapped multi-line path (always direct; no backbuffer for wrapped text) ─
+        if self.wrap && !self.wrapped_lines.is_empty() {
+            ctx.set_fill_color(color);
+            let line_h = self.font_size * 1.5;
+            let total_h = self.wrapped_lines.len() as f64 * line_h;
+            for (i, line) in self.wrapped_lines.iter().enumerate() {
+                if line.is_empty() { continue; }
+                if let Some(m) = ctx.measure_text(line) {
+                    // Y-up: line 0 is topmost → y_center = total_h - 0.5*line_h
+                    let line_center_y = total_h - (i as f64 + 0.5) * line_h;
+                    let ty = line_center_y - (m.ascent - m.descent) * 0.5 + m.descent;
+                    let tx = match self.align {
+                        LabelAlign::Left   => 0.0,
+                        LabelAlign::Center => (w - m.width) * 0.5,
+                        LabelAlign::Right  => w - m.width,
+                    };
+                    ctx.fill_text(line, tx, ty);
+                }
+            }
+            return;
+        }
 
         // ── Backbuffer path ───────────────────────────────────────────────────
         if self.buffered && ctx.has_image_blit() && w >= 1.0 && h >= 1.0 {

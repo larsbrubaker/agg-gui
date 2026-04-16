@@ -2,7 +2,6 @@
 //!
 //! Renders via `GlGfxCtx` (tess2 → GL vertex buffers), matching the WASM path.
 //! The UI is shared with the WASM target via `demo-ui`.
-//! A rotating 3D cube widget is drawn on top each frame.
 
 mod cube_widget;
 use cube_widget::{GlCubeWidget, CUBE_SCREEN_RECT};

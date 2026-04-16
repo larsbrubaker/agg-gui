@@ -25,7 +25,7 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new().with_gap(4.0).with_padding(10.0);
 
     let lbl = |text: &str, sz: f64, f: &Arc<Font>| -> Box<dyn Widget> {
-        Box::new(Label::new(text, Arc::clone(f)).with_font_size(sz))
+        Box::new(Label::new(text, Arc::clone(f)).with_font_size(sz).with_wrap(true))
     };
     let heading = |text: &str, f: &Arc<Font>| -> Box<dyn Widget> {
         Box::new(Label::new(text, Arc::clone(f)).with_font_size(16.0))

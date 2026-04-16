@@ -1,6 +1,11 @@
 //! `GlGfxCtx` — a hardware-accelerated [`DrawCtx`] implementation for
 //! WebGL2 / OpenGL via `glow`.
 //!
+//! This crate is a **rendering harness only** — it wires up GL resources,
+//! the event loop, and frame presentation. All demo/UI code belongs in
+//! `demo-ui`; platform entry-points (`demo-native`, `demo-wasm`) and this
+//! crate should contain no widget or layout logic.
+//!
 //! # Pipeline
 //!
 //! ```text

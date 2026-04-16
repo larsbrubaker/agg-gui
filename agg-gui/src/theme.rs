@@ -72,6 +72,10 @@ pub struct Visuals {
     pub window_close_bg_hovered: Color,
     /// Close button × glyph colour.
     pub window_close_fg:        Color,
+    /// Resize edge / corner highlight colour when hovered (not yet dragging).
+    pub window_resize_hover:    Color,
+    /// Resize edge / corner highlight colour while actively dragging to resize.
+    pub window_resize_active:   Color,
 
     // ── Text ──────────────────────────────────────────────────────────────────
     /// Body text colour.
@@ -137,6 +141,8 @@ impl Visuals {
             window_close_bg:        Color::rgba(1.0,  1.0,  1.0,  0.12),
             window_close_bg_hovered:Color::rgba(1.0,  1.0,  1.0,  0.25),
             window_close_fg:        Color::rgba(1.0,  1.0,  1.0,  0.80),
+            window_resize_hover:    Color::rgba(1.0,  1.0,  1.0,  0.40),
+            window_resize_active:   Color::rgba(1.0,  1.0,  1.0,  0.80),
             // Text
             text_color:             Color::rgb(0.90, 0.90, 0.92),
             text_dim:               Color::rgba(0.90, 0.90, 0.92, 0.50),
@@ -184,6 +190,8 @@ impl Visuals {
             window_close_bg:        Color::rgba(0.0,  0.0,  0.0,  0.08),
             window_close_bg_hovered:Color::rgba(0.0,  0.0,  0.0,  0.18),
             window_close_fg:        Color::rgba(0.0,  0.0,  0.0,  0.65),
+            window_resize_hover:    Color::rgba(0.0,  0.0,  0.0,  0.30),
+            window_resize_active:   Color::rgba(0.0,  0.0,  0.0,  0.65),
             // Text
             text_color:             Color::rgb(0.08, 0.08, 0.10),
             text_dim:               Color::rgba(0.08, 0.08, 0.10, 0.50),

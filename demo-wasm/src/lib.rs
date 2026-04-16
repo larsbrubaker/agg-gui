@@ -1,10 +1,8 @@
 //! WASM demo crate for agg-gui.
 //!
-//! The widget tree is rendered via `GlGfxCtx` (tess2 tessellation → WebGL2
-//! draw calls) directly to the canvas.  A rotating 3D cube is drawn on top
-//! each frame by `GlState`.
-//!
-//! UI is shared with the native target via `demo-ui`.
+//! This crate is a **rendering harness only** — it wires up WebGL2 resources,
+//! browser event forwarding, and frame presentation. All demo/UI code belongs
+//! in `demo-ui`; this crate should contain no widget or layout logic.
 //!
 //! WASM exports:
 //! - `render(width, height)` — full-frame render (void; GL writes to canvas)

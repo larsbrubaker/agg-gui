@@ -167,7 +167,9 @@ impl Widget for ScrollView {
                 EventResult::Consumed
             }
             Event::MouseMove { pos } => {
-                self.hovered_scrollbar = pos.x >= sb_x;
+                // Only show scrollbar hover when content actually overflows.
+                let scrollbar_visible = self.content_height > self.bounds.height;
+                self.hovered_scrollbar = scrollbar_visible && pos.x >= sb_x;
                 if self.dragging_scrollbar {
                     if let Some((_, thumb_h)) = self.thumb_metrics() {
                         let h = self.bounds.height;
@@ -178,6 +180,10 @@ impl Widget for ScrollView {
                         self.scroll_offset = (self.drag_start_offset + delta_y * scroll_per_px)
                             .clamp(0.0, self.max_scroll());
                     }
+                    EventResult::Consumed
+                } else if self.hovered_scrollbar {
+                    // Consume the hover so parent windows don't show a resize
+                    // highlight for the right edge in the same region as the scrollbar.
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored

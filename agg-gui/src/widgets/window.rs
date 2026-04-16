@@ -93,6 +93,10 @@ pub struct Window {
     close_hovered: bool,
     on_close: Option<Box<dyn FnMut()>>,
 
+    /// Which resize edge/corner the cursor is currently hovering over.
+    /// Cleared to None when the cursor moves into the interior.
+    hover_dir: Option<ResizeDir>,
+
     /// Time of last left-click in the title bar — for double-click collapse.
     last_title_click: Option<Instant>,
 
@@ -131,6 +135,7 @@ impl Window {
             drag_start_bounds: Rect::default(),
             close_hovered: false,
             on_close: None,
+            hover_dir: None,
             last_title_click: None,
             title_label,
             canvas_size: Size::new(1280.0, 720.0),
@@ -445,16 +450,17 @@ impl Widget for Window {
 
     }
 
-    // paint_overlay: draws the resize handle dots on top of content.
+    // paint_overlay: draws the resize handle dots + edge highlights on top of content.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if !self.is_visible() || self.collapsed { return; }
         let v = ctx.visuals();
         let w = self.bounds.width;
-        // Dot grid in the SE corner (Y-up: SE = bottom-right = small y, large x).
+        let h = self.bounds.height;
+
+        // ── SE corner dot grid ─────────────────────────────────────────────────
         // Drawn after children so it is never occluded by content.
         let dot_r   = 1.5;
         let dot_gap = 4.5;
-        // Anchor the grid 12 px in from the right and 12 px up from the bottom.
         let origin_x = w - 12.0;
         let origin_y = 12.0;
         ctx.set_fill_color(v.window_stroke);
@@ -468,6 +474,58 @@ impl Widget for Window {
                     ctx.fill();
                 }
             }
+        }
+
+        // ── Resize edge / corner highlight ────────────────────────────────────
+        // Determine the highlighted direction and whether it is actively dragging.
+        let (highlight, is_active) = match self.drag_mode {
+            DragMode::Resize(d) => (Some(d), true),
+            DragMode::Move      => (None, false), // no edge highlight while moving
+            DragMode::None      => (self.hover_dir, false),
+        };
+        let dir = match highlight { Some(d) => d, None => return };
+
+        let color = if is_active { v.window_resize_active } else { v.window_resize_hover };
+        ctx.set_stroke_color(color);
+        ctx.set_line_width(2.0);
+
+        // Which edges to highlight (derived from direction).
+        let (top, bottom, left, right) = match dir {
+            ResizeDir::N  => (true,  false, false, false),
+            ResizeDir::S  => (false, true,  false, false),
+            ResizeDir::E  => (false, false, false, true),
+            ResizeDir::W  => (false, false, true,  false),
+            ResizeDir::NE => (true,  false, false, true),
+            ResizeDir::NW => (true,  false, true,  false),
+            ResizeDir::SE => (false, true,  false, true),
+            ResizeDir::SW => (false, true,  true,  false),
+        };
+
+        // Segments run between the rounded-corner tangent points.
+        let cr = CORNER_R;
+        if top {
+            ctx.begin_path();
+            ctx.move_to(cr, h);
+            ctx.line_to(w - cr, h);
+            ctx.stroke();
+        }
+        if bottom {
+            ctx.begin_path();
+            ctx.move_to(cr, 0.0);
+            ctx.line_to(w - cr, 0.0);
+            ctx.stroke();
+        }
+        if left {
+            ctx.begin_path();
+            ctx.move_to(0.0, cr);
+            ctx.line_to(0.0, h - cr);
+            ctx.stroke();
+        }
+        if right {
+            ctx.begin_path();
+            ctx.move_to(w, cr);
+            ctx.line_to(w, h - cr);
+            ctx.stroke();
         }
     }
 
@@ -486,6 +544,7 @@ impl Widget for Window {
                         self.bounds.x = self.drag_start_bounds.x + dx;
                         self.bounds.y = self.drag_start_bounds.y + dy;
                         self.clamp_to_canvas();
+                        self.hover_dir = None;
                         return EventResult::Consumed;
                     }
                     DragMode::Resize(_) => {
@@ -493,7 +552,11 @@ impl Widget for Window {
                         self.apply_resize(world);
                         return EventResult::Consumed;
                     }
-                    DragMode::None => {}
+                    DragMode::None => {
+                        // Track which edge/corner the cursor is hovering over so
+                        // paint_overlay can draw the appropriate highlight.
+                        self.hover_dir = self.resize_dir(*pos);
+                    }
                 }
                 EventResult::Ignored
             }

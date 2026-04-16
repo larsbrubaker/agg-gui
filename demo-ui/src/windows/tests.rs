@@ -49,7 +49,7 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
          Ctrl+V           — paste from clipboard\n\
          Ctrl+A           — select all",
         Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
+    ).with_font_size(11.5).with_wrap(true)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -339,7 +339,7 @@ pub fn id_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "IDs are hashed from the widget type name + call-site path.",
         Arc::clone(&font),
-    ).with_font_size(11.0)), 0.0);
+    ).with_font_size(11.0).with_wrap(true)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -456,7 +456,7 @@ pub fn input_event_history(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Interact inside the box to record events (last 20)",
         Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
+    ).with_font_size(11.5).with_wrap(true)), 0.0);
 
     col.push(Box::new(EventHistoryWidget::new(Arc::clone(&font))), 1.0);
     Box::new(col)
@@ -545,7 +545,7 @@ pub fn input_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Move the mouse or press keys inside the status box",
         Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
+    ).with_font_size(11.5).with_wrap(true)), 0.0);
 
     col.push(Box::new(InputStateWidget {
         bounds: Rect::default(), children: Vec::new(),
@@ -610,7 +610,7 @@ pub fn layout_test(font: Arc<Font>) -> Box<dyn Widget> {
         "FlexRow / FlexColumn control alignment.\n\
          add() = fixed-size child, add_flex() = fills remaining space.",
         Arc::clone(&font),
-    ).with_font_size(11.0)), 0.0);
+    ).with_font_size(11.0).with_wrap(true)), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -695,7 +695,7 @@ pub fn manual_layout_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Absolutely-positioned boxes with coordinate labels",
         Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
+    ).with_font_size(11.5).with_wrap(true)), 0.0);
 
     col.push(Box::new(ManualLayoutWidget {
         bounds: Rect::default(), children: Vec::new(), font,
@@ -725,7 +725,7 @@ pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
          support would require a full SVG parse + rasterize pipeline.\n\n\
          Placeholder shape below:",
         Arc::clone(&font),
-    ).with_font_size(12.0)), 0.0);
+    ).with_font_size(12.0).with_wrap(true)), 0.0);
 
     // A simple drawn placeholder.
     col.push(Box::new(SvgPlaceholder::new(Arc::clone(&font))), 0.0);
@@ -899,7 +899,7 @@ pub fn tessellation_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Label::new(
         "Circle approximations: n = 3, 6, 12, 24, 48 segments",
         Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
+    ).with_font_size(11.5).with_wrap(true)), 0.0);
 
     col.push(Box::new(TessellationWidget {
         bounds: Rect::default(), children: Vec::new(), font,
@@ -958,7 +958,8 @@ pub fn window_resize_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     col.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
-        .with_font_size(11.5)), 0.0);
+        .with_font_size(11.5)
+        .with_wrap(true)), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
@@ -997,12 +998,13 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
             "This window is resizable and has a scroll area.\n\
              You can shrink it to any size.",
             Arc::clone(&font),
-        ).with_font_size(12.0)), 0.0);
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
         root.push(Box::new(Separator::horizontal()), 0.0);
         // Scrollable region fills remaining space.
         let mut scroll_col = FlexColumn::new().with_gap(4.0).with_padding(4.0);
         scroll_col.push(Box::new(Label::new(LOREM_IPSUM_LONG, Arc::clone(&font))
-            .with_font_size(11.5)), 0.0);
+            .with_font_size(11.5)
+            .with_wrap(true)), 0.0);
         root.push(Box::new(ScrollView::new(Box::new(scroll_col))), 1.0);
         out.push(("↔ resizable + scroll".into(), Box::new(root), rects[0]));
     }
@@ -1013,7 +1015,7 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
         root.push(Box::new(Label::new(
             "This window is resizable but has no built-in scroll area.",
             Arc::clone(&font),
-        ).with_font_size(12.0)), 0.0);
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
         root.push(Box::new(Label::new(
             "However, we have a sub-region with a scroll bar:",
             Arc::clone(&font),
@@ -1022,7 +1024,8 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
         let long2 = format!("{}\n\n{}", LOREM_IPSUM_LONG, LOREM_IPSUM_LONG);
         let mut inner = FlexColumn::new().with_gap(4.0).with_padding(4.0);
         inner.push(Box::new(Label::new(&long2, Arc::clone(&font))
-            .with_font_size(11.5)), 0.0);
+            .with_font_size(11.5)
+            .with_wrap(true)), 0.0);
         root.push(Box::new(ScrollView::new(Box::new(inner))), 1.0);
         out.push(("↔ resizable + embedded scroll".into(), Box::new(root), rects[1]));
     }
@@ -1034,10 +1037,11 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
             "This window is resizable but has no scroll area. It can only be \
              resized to a size where all contents are visible.",
             Arc::clone(&font),
-        ).with_font_size(12.0)), 0.0);
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
         root.push(Box::new(Separator::horizontal()), 0.0);
         root.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
-            .with_font_size(11.5)), 0.0);
+            .with_font_size(11.5)
+            .with_wrap(true)), 0.0);
         root.push(Box::new(SizedBox::new()), 1.0);
         out.push(("↔ resizable without scroll".into(), Box::new(root), rects[2]));
     }
@@ -1048,7 +1052,7 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
         root.push(Box::new(Label::new(
             "Shows how a widget can fill the available area.",
             Arc::clone(&font),
-        ).with_font_size(12.0)), 0.0);
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
         // TextField fills the remainder of the window content area.
         // Wrapped in a flex SizedBox so it stretches with the window.
         root.push(Box::new(SizedBox::new().with_child(Box::new(
@@ -1066,7 +1070,7 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
             "This window has empty space that fills up the available area,\n\
              preventing auto-shrink.",
             Arc::clone(&font),
-        ).with_font_size(12.0)), 0.0);
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
         // Flex fill prevents the window from auto-shrinking to content.
         root.push(Box::new(SizedBox::new()), 1.0);
         out.push(("↔ freely resized".into(), Box::new(root), rects[4]));
