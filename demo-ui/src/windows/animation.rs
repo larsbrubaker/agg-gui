@@ -211,27 +211,37 @@ pub fn bezier_curve(font: Arc<Font>) -> Box<dyn Widget> {
 }
 
 // ---------------------------------------------------------------------------
-// DancingStrings
+// DancingStrings — matches egui's `DancingStrings` demo
 // ---------------------------------------------------------------------------
+//
+// egui draws three standing-wave harmonics with modes 2, 3, 5.  For each
+// point index `i` in 0..=N the coordinates are:
+//
+//     t    = i / N                     // 0..1 normalised x
+//     amp  = sin(time · speed · mode) / mode
+//     y    = amp · sin(t · π · mode)   // −1..1 normalised y
+//
+// Then `(t, y)` is mapped from x_range 0..1, y_range −1..1 onto the canvas
+// rect.  Line thickness per mode is `10 / mode` (so mode 2 is thickest,
+// mode 5 thinnest).  Color is a single high-alpha text-like tone; the
+// optional "Colored" toggle renders a center-teal → edges-pink gradient
+// along the path (trans-flag colors).
 
-/// Animated sine-wave display.
-///
-/// Three overlapping sine waves are drawn with different frequencies,
-/// amplitudes, and colors.  Since agg-gui currently runs a single-threaded
-/// immediate-mode loop, the frame time is used for animation.  We store the
-/// start instant and compute `t = elapsed_seconds` each paint call.
+/// Animated sine-wave display (egui parity).
 struct DancingStrings {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
     start:    web_time::Instant,
+    colored:  std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 impl DancingStrings {
-    fn new() -> Self {
+    fn new(colored: std::rc::Rc<std::cell::Cell<bool>>) -> Self {
         Self {
             bounds:   Rect::default(),
             children: Vec::new(),
             start:    web_time::Instant::now(),
+            colored,
         }
     }
 }
@@ -249,47 +259,90 @@ impl Widget for DancingStrings {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        use std::f64::consts::PI;
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
-        let t = self.start.elapsed().as_secs_f64();
+        let time = self.start.elapsed().as_secs_f64();
+        let colored = self.colored.get();
 
-        // Background.
+        // Canvas background (egui uses Frame::canvas which draws a subtle
+        // tinted rect + border).
         ctx.set_fill_color(v.bg_color);
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
+        ctx.set_stroke_color(v.widget_stroke);
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.rect(0.0, 0.0, w, h);
+        ctx.stroke();
 
-        let center_y = h * 0.5;
+        // Base color — dark theme: luminous white α=196/255; light: black α=240/255.
+        let base = if v.bg_color.r + v.bg_color.g + v.bg_color.b < 1.0 {
+            Color::rgba(1.0, 1.0, 1.0, 196.0 / 255.0)
+        } else {
+            Color::rgba(0.0, 0.0, 0.0, 240.0 / 255.0)
+        };
+        // Trans-flag gradient endpoints (egui hex_colors).
+        let center_color = Color::rgb(0x5B as f32 / 255.0, 0xCE as f32 / 255.0, 0xFA as f32 / 255.0);
+        let outer_color  = Color::rgb(0xF5 as f32 / 255.0, 0xA9 as f32 / 255.0, 0xB8 as f32 / 255.0);
 
-        // Wave definitions: (color, amplitude_px, freq_per_100px, speed, phase).
-        let waves: [(Color, f64, f64, f64, f64); 3] = [
-            (v.accent,                        30.0, 0.8, 1.2, 0.0),
-            (Color::rgb(0.55, 0.85, 0.45),    20.0, 1.3, 0.8, 1.0),
-            (Color::rgb(0.85, 0.45, 0.75),    40.0, 0.5, 1.6, 2.1),
-        ];
+        let speed = 1.5_f64;
+        let n     = 120_usize;
 
-        let segments = 100_usize;
-        for (color, amp, freq, speed, phase) in waves {
-            ctx.set_stroke_color(color);
-            ctx.set_line_width(1.8);
-            ctx.begin_path();
+        for &mode_i in &[2_u32, 3, 5] {
+            let mode = mode_i as f64;
+            let thickness = 10.0 / mode;
 
-            for seg in 0..=segments {
-                let x = w * seg as f64 / segments as f64;
-                // freq is cycles per 100 px.
-                let angle = x * freq * std::f64::consts::TAU / 100.0
-                    + t * speed
-                    + phase;
-                let y = center_y + amp * angle.sin();
+            // In "colored" mode, draw each segment with its own interpolated
+            // color so the full path shows the gradient.  Otherwise draw the
+            // path as one stroked polyline in the base color.
+            if colored {
+                // Iterate segments, interpolating color based on segment midpoint.
+                ctx.set_line_width(thickness);
+                let mut prev: Option<(f64, f64)> = None;
+                for i in 0..=n {
+                    let t     = i as f64 / n as f64;
+                    let amp   = (time * speed * mode).sin() / mode;
+                    let y_n   = amp * (t * PI * mode).sin();      // −1..1
+                    // Map: t → x in [0, w];  y_n → y in [0, h] with y_n=−1 at
+                    // the top and y_n=+1 at the bottom of egui's screen.
+                    // Y-up: top = high Y, so flip: y = (1 − y_n) · 0.5 · h.
+                    let x = t * w;
+                    let y = (1.0 - y_n) * 0.5 * h;
 
-                if seg == 0 {
-                    ctx.move_to(x, y);
-                } else {
-                    ctx.line_to(x, y);
+                    if let Some((px, py)) = prev {
+                        // Colour based on midpoint's x-offset from centre.
+                        let mid_x    = (px + x) * 0.5;
+                        let dist_n   = ((mid_x / w) * 2.0 - 1.0).abs() as f32; // 0..1
+                        let col = Color::rgb(
+                            lerp_f32(center_color.r, outer_color.r, dist_n),
+                            lerp_f32(center_color.g, outer_color.g, dist_n),
+                            lerp_f32(center_color.b, outer_color.b, dist_n),
+                        );
+                        ctx.set_stroke_color(col);
+                        ctx.begin_path();
+                        ctx.move_to(px, py);
+                        ctx.line_to(x, y);
+                        ctx.stroke();
+                    }
+                    prev = Some((x, y));
                 }
+            } else {
+                ctx.set_stroke_color(base);
+                ctx.set_line_width(thickness);
+                ctx.begin_path();
+                for i in 0..=n {
+                    let t     = i as f64 / n as f64;
+                    let amp   = (time * speed * mode).sin() / mode;
+                    let y_n   = amp * (t * PI * mode).sin();
+                    let x = t * w;
+                    let y = (1.0 - y_n) * 0.5 * h;
+                    if i == 0 { ctx.move_to(x, y); } else { ctx.line_to(x, y); }
+                }
+                ctx.stroke();
             }
-            ctx.stroke();
         }
     }
 
@@ -301,19 +354,29 @@ impl Widget for DancingStrings {
     }
 }
 
-/// Build the Dancing Strings demo — a note label above the animated canvas.
+#[inline]
+fn lerp_f32(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+
+/// Build the Dancing Strings demo — Colored checkbox above the animated canvas.
 pub fn dancing_strings(font: Arc<Font>) -> Box<dyn Widget> {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let colored = Rc::new(Cell::new(false));
+
     let mut col = FlexColumn::new()
         .with_gap(8.0)
         .with_padding(8.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new(
-        "Three sine waves animated in real time",
-        Arc::clone(&font),
-    ).with_font_size(12.0)), 0.0);
+    let cell = Rc::clone(&colored);
+    col.push(Box::new(
+        agg_gui::Checkbox::new("Colored", Arc::clone(&font), false)
+            .with_state_cell(Rc::clone(&colored))
+            .on_change(move |v| cell.set(v))
+    ), 0.0);
 
-    col.push(Box::new(DancingStrings::new()), 1.0);
+    col.push(Box::new(DancingStrings::new(Rc::clone(&colored))), 1.0);
 
     Box::new(col)
 }

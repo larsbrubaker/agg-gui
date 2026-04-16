@@ -68,6 +68,13 @@ pub trait Widget {
             && local_pos.y >= 0.0 && local_pos.y <= b.height
     }
 
+    /// When `true`, `hit_test_subtree` stops recursing into this widget's
+    /// children and returns this widget as the hit target.  Used for floating
+    /// overlays (e.g. a scrollbar painted above its content) that must claim
+    /// the pointer before children that happen to share the same pixels.
+    /// Default: `false`.
+    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool { false }
+
     /// Handle an event. The event's positions are already in **local** Y-up
     /// coordinates. Return [`EventResult::Consumed`] to stop bubbling.
     fn on_event(&mut self, event: &Event) -> EventResult;
@@ -240,6 +247,11 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 pub fn hit_test_subtree(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usize>> {
     if !widget.is_visible() || !widget.hit_test(local_pos) {
         return None;
+    }
+    // Let overlays (e.g. a floating scrollbar) claim the pointer before any
+    // child that happens to cover the same pixels.
+    if widget.claims_pointer_exclusively(local_pos) {
+        return Some(vec![]);
     }
     // Check children in reverse order (last drawn = topmost = highest priority).
     for (i, child) in widget.children().iter().enumerate().rev() {

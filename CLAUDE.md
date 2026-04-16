@@ -24,7 +24,7 @@ Never commit a bug fix that isn't covered by a test.
 **Running tests:**
 ```bash
 cargo test
-cargo test --lib vec_tests
+cargo test --lib vec_tests 
 cargo test test_name -- --exact
 cargo test -- --nocapture
 ```

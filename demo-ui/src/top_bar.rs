@@ -51,9 +51,14 @@ struct ThemeToggle {
 }
 
 impl ThemeToggle {
-    const BTN_W: f64 = 52.0;
+    const BTN_W: f64 = 68.0;
     const BTN_H: f64 = 24.0;
-    const LABELS: &'static [&'static str] = &["Light", "Dark", "System"];
+    // Font Awesome 4 icon prefixes: sun-o, moon-o, desktop.
+    const LABELS: &'static [&'static str] = &[
+        "\u{F185} Light",
+        "\u{F186} Dark",
+        "\u{F108} System",
+    ];
     const PREFS: [ThemePreference; 3] = [
         ThemePreference::Light, ThemePreference::Dark, ThemePreference::System,
     ];
@@ -192,11 +197,12 @@ struct BackendButton {
 }
 
 impl BackendButton {
-    const W: f64 = 96.0;
+    const W: f64 = 112.0;
     const H: f64 = 24.0;
 
     fn new(font: Arc<Font>, show: Rc<Cell<bool>>) -> Self {
-        let label = Label::new("Backend", Arc::clone(&font))
+        // FA4 "laptop" icon prefix.
+        let label = Label::new("\u{F109} Backend", Arc::clone(&font))
             .with_font_size(12.0);
         Self {
             bounds: Rect::default(),

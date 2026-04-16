@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use web_time::Instant;
 
+use crate::color::Color;
 use crate::cursor::{CursorIcon, set_cursor_icon};
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
@@ -48,7 +49,14 @@ fn snap(r: Rect) -> Rect {
 
 const TITLE_H:      f64 = 28.0;
 const CORNER_R:     f64 = 8.0;
-const SHADOW_BLUR:  f64 = 6.0;
+/// Shadow blur radius in pixels (egui default Shadow::blur is ≈16; we use 14
+/// for a slightly tighter falloff since windows live on a panel background).
+const SHADOW_BLUR:  f64 = 14.0;
+/// Shadow offset from the window (Y-down visually → −y in Y-up space).
+const SHADOW_DX:    f64 = 2.0;
+const SHADOW_DY:    f64 = 6.0;
+/// Number of stacked layers approximating a Gaussian blur falloff.
+const SHADOW_STEPS: usize = 10;
 const CLOSE_R:      f64 = 6.0;
 const CLOSE_PAD:    f64 = 10.0;
 /// Horizontal distance from the right edge to the maximize button centre.
@@ -427,11 +435,26 @@ impl Widget for Window {
         let h  = self.bounds.height;
         let tb = h - TITLE_H;
 
-        // Shadow.
-        ctx.set_fill_color(v.window_shadow);
-        ctx.begin_path();
-        ctx.rounded_rect(SHADOW_BLUR, -SHADOW_BLUR, w + SHADOW_BLUR, h + SHADOW_BLUR, CORNER_R);
-        ctx.fill();
+        // Drop shadow — stacked rounded rects approximating a Gaussian blur.
+        // Outer layers inflate outward and fade with a (1−t)² falloff; drawn
+        // outside-in so the denser core overlays the softer halo.
+        let base = v.window_shadow;
+        for i in (0..SHADOW_STEPS).rev() {
+            let t     = i as f64 / SHADOW_STEPS as f64;
+            let infl  = t * SHADOW_BLUR;
+            let falloff = (1.0 - t).powi(2) as f32;
+            let alpha = base.a * falloff / SHADOW_STEPS as f32 * 6.0;
+            ctx.set_fill_color(Color::rgba(base.r, base.g, base.b, alpha));
+            ctx.begin_path();
+            ctx.rounded_rect(
+                SHADOW_DX - infl,
+                -SHADOW_DY - infl,
+                w + 2.0 * infl,
+                h + 2.0 * infl,
+                CORNER_R + infl,
+            );
+            ctx.fill();
+        }
 
         // Window body.
         ctx.set_fill_color(v.window_fill);

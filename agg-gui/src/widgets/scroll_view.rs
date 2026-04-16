@@ -29,19 +29,22 @@ use crate::widget::Widget;
 // ── Egui-matching constants ────────────────────────────────────────────────────
 
 /// Bar width when hovered / active.
-const BAR_FULL_W: f64 = 6.0;
+const BAR_FULL_W: f64 = 10.0;
 /// Bar width when dormant (thin strip).
-const BAR_THIN_W: f64 = 2.0;
+const BAR_THIN_W: f64 = 4.0;
 /// Top / bottom margin inside the track (shrinks effective track height).
 const BAR_Y_MARGIN: f64 = 4.0;
 /// Minimum thumb height in pixels.
-const HANDLE_MIN_H: f64 = 12.0;
-/// Width of the hover-detection zone at the right edge (bar + grab margin).
-const HOVER_ZONE_W: f64 = BAR_FULL_W + BAR_Y_MARGIN; // 10 px
+const HANDLE_MIN_H: f64 = 24.0;
 /// Pixels at the right edge that belong exclusively to the parent window's
-/// resize handle.  The scrollbar does not respond inside this guard zone,
-/// mirroring egui's layout where the resize grip is always grabbable.
+/// resize handle.  The scrollbar is inset by this amount from the right edge
+/// so the resize grip always remains grabbable.
 const RIGHT_EDGE_GUARD: f64 = 4.0;
+/// Extra grab margin to the left of the bar so the thumb is easy to grab
+/// even when it is rendered thin.
+const GRAB_MARGIN: f64 = 6.0;
+/// Width of the hover-detection zone:  grab margin + full bar width.
+const HOVER_ZONE_W: f64 = BAR_FULL_W + GRAB_MARGIN;
 
 pub struct ScrollView {
     bounds:   Rect,
@@ -116,12 +119,19 @@ impl ScrollView {
         Some((thumb_y, thumb_h))
     }
 
-    /// True when `pos` lands on the thumb rectangle.
+    /// Right edge of the bar in local X (exclusive).  Bar sits left of the
+    /// resize guard.
+    fn bar_right(&self) -> f64 {
+        self.bounds.width - RIGHT_EDGE_GUARD
+    }
+
+    /// True when `pos` lands on the thumb rectangle.  Horizontal hit area
+    /// is extended leftward by `GRAB_MARGIN` so a thin dormant bar is still
+    /// easy to grab.
     fn pos_on_thumb(&self, pos: Point) -> bool {
-        let w = self.bounds.width;
-        if pos.x >= w - RIGHT_EDGE_GUARD { return false; }
-        let sb_x = w - BAR_FULL_W;
-        if pos.x < sb_x { return false; }
+        let bar_right = self.bar_right();
+        let hit_left  = bar_right - BAR_FULL_W - GRAB_MARGIN;
+        if pos.x < hit_left || pos.x >= bar_right { return false; }
         if let Some((thumb_y, thumb_h)) = self.thumb_metrics() {
             pos.y >= thumb_y && pos.y <= thumb_y + thumb_h
         } else {
@@ -134,8 +144,8 @@ impl ScrollView {
     /// The rightmost `RIGHT_EDGE_GUARD` pixels are excluded so the parent
     /// window's resize handle always remains grabbable without interference.
     fn pos_in_hover_zone(&self, pos: Point) -> bool {
-        let w = self.bounds.width;
-        pos.x >= w - HOVER_ZONE_W && pos.x < w - RIGHT_EDGE_GUARD
+        let bar_right = self.bar_right();
+        pos.x >= bar_right - HOVER_ZONE_W && pos.x < bar_right
     }
 
     /// Clamp and snap offset to integer pixels.
@@ -172,6 +182,15 @@ impl Widget for ScrollView {
             && local_pos.y >= 0.0 && local_pos.y <= b.height
     }
 
+    /// The scrollbar floats above children, so when the cursor is in the
+    /// scrollbar hover zone we must claim the event before any child (e.g.
+    /// a full-width list row) can consume it.
+    fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
+        if self.dragging { return true; }
+        if self.content_height <= self.bounds.height { return false; }
+        self.pos_in_hover_zone(local_pos)
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         // Child gets the full widget width — bar floats on top.
         let content_w = available.width;
@@ -206,10 +225,11 @@ impl Widget for ScrollView {
         let Some((thumb_y, thumb_h)) = self.thumb_metrics() else { return };
 
         let v        = ctx.visuals();
-        let is_hover = self.hovered_bar;
+        let is_hover = self.hovered_bar || self.dragging;
         let bar_w    = if is_hover { BAR_FULL_W } else { BAR_THIN_W };
-        // Bar is right-aligned to the widget edge.
-        let bar_x    = self.bounds.width - bar_w;
+        // Bar is inset from the right edge by `RIGHT_EDGE_GUARD` so the
+        // window resize grip stays grabbable, and right-aligned inside that.
+        let bar_x    = self.bar_right() - bar_w;
         let r        = bar_w * 0.5;
 
         // Track background — only visible when hovered.

@@ -9,69 +9,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Checkbox, CollapsingHeader, Color, Container, DragValue, DrawCtx, Event, EventResult,
+    Checkbox, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult,
     FlexColumn, FlexRow, Font, Label, MouseButton, Point, RadioGroup, Rect, ScrollView,
     Separator, Size, SizedBox, Slider, Widget,
 };
 use agg_gui::widget::paint_subtree;
-
-// ---------------------------------------------------------------------------
-// Frame demo
-// ---------------------------------------------------------------------------
-
-/// Build the Frame demo — three `Container` widgets with different border and
-/// background combinations placed side by side.
-pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut outer = FlexColumn::new()
-        .with_gap(12.0)
-        .with_padding(14.0)
-        .with_panel_bg();
-
-    outer.push(Box::new(Label::new("Container styles", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
-
-    // Three boxes side by side.
-    let row = FlexRow::new().with_gap(10.0)
-        .add(Box::new(
-            Container::new()
-                .with_background(Color::rgba(0.22, 0.45, 0.88, 0.12))
-                .with_border(Color::rgb(0.22, 0.45, 0.88), 1.5)
-                .with_corner_radius(6.0)
-                .with_padding(10.0)
-                .add(Box::new(Label::new("Accent fill\nblue border", Arc::clone(&font))
-                    .with_font_size(12.0)))
-        ))
-        .add(Box::new(
-            Container::new()
-                .with_background(Color::rgba(0.18, 0.72, 0.42, 0.12))
-                .with_border(Color::rgb(0.18, 0.72, 0.42), 1.5)
-                .with_corner_radius(6.0)
-                .with_padding(10.0)
-                .add(Box::new(Label::new("Green fill\ngreen border", Arc::clone(&font))
-                    .with_font_size(12.0)))
-        ))
-        .add(Box::new(
-            Container::new()
-                .with_background(Color::rgba(0.88, 0.25, 0.18, 0.10))
-                .with_border(Color::rgb(0.88, 0.25, 0.18), 1.5)
-                .with_corner_radius(6.0)
-                .with_padding(10.0)
-                .add(Box::new(Label::new("Danger fill\nred border", Arc::clone(&font))
-                    .with_font_size(12.0)))
-        ));
-
-    outer.push(Box::new(row), 0.0);
-
-    outer.push(Box::new(Separator::horizontal()), 0.0);
-    outer.push(Box::new(Label::new(
-        "Containers support background color, border color/width, corner radius,\n\
-         and inner padding. Children are laid out in a top-down stack.",
-        Arc::clone(&font),
-    ).with_font_size(11.0)), 0.0);
-
-    outer.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(outer)
-}
 
 // ---------------------------------------------------------------------------
 // Extra Viewport demo

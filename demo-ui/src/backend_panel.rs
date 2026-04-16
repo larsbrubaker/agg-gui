@@ -460,10 +460,10 @@ pub fn build_backend_panel(
         .with_padding(0.0)
         .with_panel_bg();
 
-    // ── Heading ──────────────────────────────────────────────────────────────
+    // ── Heading ────────────────────────────────────────────────────────────── (FA4 "laptop")
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     col.push(Box::new(
-        Label::new("Backend", Arc::clone(&font))
+        Label::new("\u{F109} Backend", Arc::clone(&font))
             .with_font_size(14.0)
             .with_margin(Insets::from_sides(12.0, 12.0, 4.0, 4.0))
     ), 0.0);

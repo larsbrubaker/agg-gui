@@ -34,6 +34,8 @@ pub struct SavedState {
     pub demos: Vec<WindowState>,
     pub tests: Vec<WindowState>,
     pub about: WindowState,
+    /// Whether the left-side Backend panel is open.
+    pub backend_open: bool,
 }
 
 impl SavedState {
@@ -53,6 +55,7 @@ impl SavedState {
         out.push_str(&format!("about={},{},{},{},{}\n",
             self.about.open as u8, self.about.x, self.about.y,
             self.about.w, self.about.h));
+        out.push_str(&format!("backend={}\n", self.backend_open as u8));
         out
     }
 
@@ -62,6 +65,7 @@ impl SavedState {
         let mut demos: Vec<Option<WindowState>> = Vec::new();
         let mut tests: Vec<Option<WindowState>> = Vec::new();
         let mut about = None::<WindowState>;
+        let mut backend_open = false;
 
         for line in s.lines() {
             let line = line.trim();
@@ -72,6 +76,7 @@ impl SavedState {
                 "demos"   => { let n: usize = val.parse().ok()?; demos_count = Some(n); demos = vec![None; n]; }
                 "tests"   => { let n: usize = val.parse().ok()?; tests_count = Some(n); tests = vec![None; n]; }
                 "about"   => { about = Some(parse_window_state(val)?); }
+                "backend" => { let v: u8 = val.parse().ok()?; backend_open = v != 0; }
                 k if k.starts_with('d') => {
                     let i: usize = k[1..].parse().ok()?;
                     let ws = parse_window_state(val)?;
@@ -94,6 +99,7 @@ impl SavedState {
             demos: demos.into_iter().collect::<Option<Vec<_>>>()?,
             tests: tests.into_iter().collect::<Option<Vec<_>>>()?,
             about: about?,
+            backend_open,
         })
     }
 }
@@ -121,6 +127,7 @@ pub struct StateAccessor {
     pub test_pos:  Vec<Rc<Cell<Rect>>>,
     pub about_open: Rc<Cell<bool>>,
     pub about_pos:  Rc<Cell<Rect>>,
+    pub backend_open: Rc<Cell<bool>>,
 }
 
 impl StateAccessor {
@@ -133,6 +140,6 @@ impl StateAccessor {
             .collect();
         let r = self.about_pos.get();
         let about = WindowState { open: self.about_open.get(), x: r.x, y: r.y, w: r.width, h: r.height };
-        SavedState { demos, tests, about }
+        SavedState { demos, tests, about, backend_open: self.backend_open.get() }
     }
 }

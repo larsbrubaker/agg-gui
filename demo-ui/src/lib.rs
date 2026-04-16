@@ -25,12 +25,12 @@ use std::sync::Arc;
 use agg_gui::{
     App, DrawCtx, Event, EventResult, Key, Modifiers,
     FlexColumn, FlexRow, Font, InspectorNode, InspectorPanel,
-    Rect, Size, SizedBox, Stack, Widget, Window,
+    Rect, Size, Stack, Widget, Window,
     ThemePreference,
 };
 
 use backend_panel::{RunMode, build_backend_panel};
-use sidebar::{SidebarEntry, build_sidebar};
+use sidebar::{SidebarEntry, SidebarGroup, build_sidebar};
 use top_bar::build_top_bar_inner;
 
 // ── Canvas background ──────────────────────────────────────────────────────────
@@ -112,47 +112,6 @@ impl Widget for TopMenuBar {
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }
 
-// ── Inspector overlay (right edge of canvas) ──────────────────────────────────
-
-struct InspectorOverlay {
-    bounds:         Rect,
-    show:           Rc<Cell<bool>>,
-    children:       Vec<Box<dyn Widget>>,
-}
-
-impl Widget for InspectorOverlay {
-    fn type_name(&self) -> &'static str { "InspectorOverlay" }
-    fn is_visible(&self) -> bool { self.show.get() }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
-        let panel_w = 300.0_f64.min(available.width);
-        let panel_x = available.width - panel_w;
-        if let Some(child) = self.children.first_mut() {
-            // Child positioned at the right edge in local coordinates.
-            child.set_bounds(Rect::new(panel_x, 0.0, panel_w, available.height));
-            child.layout(Size::new(panel_w, available.height));
-        }
-        available
-    }
-
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-
-    fn hit_test(&self, local_pos: agg_gui::Point) -> bool {
-        if !self.show.get() { return false; }
-        let panel_w = 300.0_f64.min(self.bounds.width);
-        let panel_x = self.bounds.width - panel_w;
-        local_pos.x >= panel_x && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
-    }
-}
-
 // ── Backend panel pane ────────────────────────────────────────────────────────
 
 /// Wraps the backend panel; returns zero width when hidden so FlexRow collapses it.
@@ -187,7 +146,62 @@ impl Widget for BackendPane {
         Size::new(w, available.height)
     }
 
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if !self.show.get() { return; }
+        // 1-px vertical separator line on the right edge, matching the top-bar
+        // bottom separator style so the panel visually detaches from the canvas.
+        let v = ctx.visuals();
+        ctx.set_fill_color(v.separator);
+        ctx.begin_path();
+        ctx.rect(self.bounds.width - 1.0, 0.0, 1.0, self.bounds.height);
+        ctx.fill();
+    }
+    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+}
+
+// ── Sidebar pane ──────────────────────────────────────────────────────────────
+
+/// Fixed-width wrapper for the right sidebar that also paints a 1-px
+/// separator line on its left edge.
+struct SidebarPane {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl SidebarPane {
+    const PANEL_W: f64 = 220.0;
+    fn new(inner: Box<dyn Widget>) -> Self {
+        Self { bounds: Rect::default(), children: vec![inner] }
+    }
+}
+
+impl Widget for SidebarPane {
+    fn type_name(&self) -> &'static str { "SidebarPane" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn layout(&mut self, available: Size) -> Size {
+        let w = Self::PANEL_W.min(available.width);
+        self.bounds = Rect::new(0.0, 0.0, w, available.height);
+        if let Some(child) = self.children.first_mut() {
+            // Inner content starts 1 px in so the separator sits at x=0.
+            let inner_w = (w - 1.0).max(0.0);
+            child.layout(Size::new(inner_w, available.height));
+            child.set_bounds(Rect::new(1.0, 0.0, inner_w, available.height));
+        }
+        Size::new(w, available.height)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        ctx.set_fill_color(v.separator);
+        ctx.begin_path();
+        ctx.rect(0.0, 0.0, 1.0, self.bounds.height);
+        ctx.fill();
+    }
+
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }
 
@@ -216,64 +230,79 @@ fn tile_rect(i: usize, canvas_height: f64, win_w: f64, win_h: f64) -> Rect {
 struct DemoSpec {
     title:  &'static str,
     label:  &'static str,
+    /// Logical grouping shown as a collapsible section in the sidebar.
+    /// Values: "Widgets", "Layout", "Graphics", "Interaction", "Tests", "Tools".
+    group:  &'static str,
     open:   bool,
     win_w:  f64,
     win_h:  f64,
 }
 
-// Exact egui demo list (alphabetical) + our 3D Cube extra at the end.
+// Exact egui demo list (alphabetical) with egui's original icon prefixes.
 // Default open matches egui: Code Example + Widget Gallery.  3D Cube is our
 // addition and is open by default as the showcase feature.
+// Font Awesome 4 codepoints used as icon prefixes.
+// All in the Unicode Private Use Area (U+F000–U+F2FF) so they never
+// conflict with regular text characters.
 const DEMOS: &[DemoSpec] = &[
-    DemoSpec { title: "Bézier Curve",          label: "Bézier Curve",          open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Code Editor",           label: "Code Editor",           open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Code Example",          label: "Code Example",          open: true,  win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Dancing Strings",       label: "Dancing Strings",       open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Drag and Drop",         label: "Drag and Drop",         open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Extra Viewport",        label: "Extra Viewport",        open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Font Book",             label: "Font Book",             open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Frame",                 label: "Frame",                 open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Highlighting",          label: "Highlighting",          open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Interactive Container", label: "Interactive Container", open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Misc Demos",            label: "Misc Demos",            open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Modals",                label: "Modals",                open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Multi Touch",           label: "Multi Touch",           open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Painting",              label: "Painting",              open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Panels",                label: "Panels",                open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Popups",                label: "Popups",                open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Rendering Test",        label: "Rendering Test",        open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Scene",                 label: "Scene",                 open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Screenshot",            label: "Screenshot",            open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Scrolling",             label: "Scrolling",             open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Sliders",               label: "Sliders",               open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Strip",                 label: "Strip",                 open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Table",                 label: "Table",                 open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "TextEdit",              label: "TextEdit",              open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Text Layout",           label: "Text Layout",           open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Tooltips",              label: "Tooltips",              open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Undo Redo",             label: "Undo Redo",             open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Widget Gallery",        label: "Widget Gallery",        open: true,  win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Window Options",        label: "Window Options",        open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "3D Cube",               label: "3D Cube",               open: false, win_w: 300.0, win_h: 260.0 },
+    // ── Widgets ──
+    DemoSpec { title: "\u{F009} Widget Gallery",         label: "\u{F009} Widget Gallery",         group: "Widgets", open: true,  win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1DE} Sliders",                label: "\u{F1DE} Sliders",                group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F040} TextEdit",               label: "\u{F040} TextEdit",               group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F086} Tooltips",               label: "\u{F086} Tooltips",               group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F075} Popups",                 label: "\u{F075} Popups",                 group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F2D0} Modals",                 label: "\u{F2D0} Modals",                 group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F03A} Misc Demos",             label: "\u{F03A} Misc Demos",             group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F121} Code Editor",            label: "\u{F121} Code Editor",            group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1C9} Code Example",           label: "\u{F1C9} Code Example",           group: "Widgets", open: true,  win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F031} Font Book",              label: "\u{F031} Font Book",              group: "Widgets", open: false, win_w: WIN_W, win_h: WIN_H },
+
+    // ── Layout ──
+    DemoSpec { title: "\u{F096} Frame",                  label: "\u{F096} Frame",                  group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0DB} Panels",                 label: "\u{F0DB} Panels",                 group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0C9} Strip",                  label: "\u{F0C9} Strip",                  group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0CE} Table",                  label: "\u{F0CE} Table",                  group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F07D} Scrolling",              label: "\u{F07D} Scrolling",              group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F013} Window Options",         label: "\u{F013} Window Options",         group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F036} Text Layout",            label: "\u{F036} Text Layout",            group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1B2} Interactive Container",  label: "\u{F1B2} Interactive Container",  group: "Layout",  open: false, win_w: WIN_W, win_h: WIN_H },
+
+    // ── Graphics ──
+    DemoSpec { title: "\u{F1FE} Bézier Curve",           label: "\u{F1FE} Bézier Curve",           group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F001} Dancing Strings",        label: "\u{F001} Dancing Strings",        group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1FC} Painting",               label: "\u{F1FC} Painting",               group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0C3} Rendering Test",         label: "\u{F0C3} Rendering Test",         group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F030} Screenshot",             label: "\u{F030} Screenshot",             group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0D0} Highlighting",           label: "\u{F0D0} Highlighting",           group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1B3} 3D Cube",               label: "\u{F1B3} 3D Cube",                group: "Graphics", open: false, win_w: 300.0, win_h: 260.0 },
+
+    // ── Interaction ──
+    DemoSpec { title: "\u{F0B2} Drag and Drop",          label: "\u{F0B2} Drag and Drop",          group: "Interaction", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0A4} Multi Touch",            label: "\u{F0A4} Multi Touch",            group: "Interaction", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0E2} Undo Redo",              label: "\u{F0E2} Undo Redo",              group: "Interaction", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F002} Scene",                  label: "\u{F002} Scene",                  group: "Interaction", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F108} Extra Viewport",         label: "\u{F108} Extra Viewport",         group: "Interaction", open: false, win_w: WIN_W, win_h: WIN_H },
 ];
 
-// All 11 egui test windows — matching egui's Tests section exactly.
+// Tests — regression/correctness windows.  Each one now has a Font Awesome
+// icon prefix so tests look like the demos in the sidebar.
 const TESTS: &[DemoSpec] = &[
-    DemoSpec { title: "Clipboard Test",      label: "Clipboard Test",      open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Cursor Test",         label: "Cursor Test",         open: false, win_w: 296.0, win_h: 560.0 },
-    DemoSpec { title: "Grid Test",           label: "Grid Test",           open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Id Test",             label: "Id Test",             open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Input Event History", label: "Input Event History", open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Input Test",          label: "Input Test",          open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Layout Test",         label: "Layout Test",         open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Manual Layout Test",  label: "Manual Layout Test",  open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "SVG Test",            label: "SVG Test",            open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "Tessellation Test",   label: "Tessellation Test",   open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "↔ auto-sized",        label: "Window Resize Test",  open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0EA} Clipboard Test",      label: "\u{F0EA} Clipboard Test",      group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F05B} Cursor Test",         label: "\u{F05B} Cursor Test",         group: "Tests", open: false, win_w: 296.0, win_h: 560.0 },
+    DemoSpec { title: "\u{F00A} Grid Test",           label: "\u{F00A} Grid Test",           group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F007} Id Test",             label: "\u{F007} Id Test",             group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1DA} Input Event History", label: "\u{F1DA} Input Event History", group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F11C} Input Test",          label: "\u{F11C} Input Test",          group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0E4} Layout Test",         label: "\u{F0E4} Layout Test",         group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F0AD} Manual Layout Test",  label: "\u{F0AD} Manual Layout Test",  group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F03E} SVG Test",            label: "\u{F03E} SVG Test",            group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1E0} Tessellation Test",   label: "\u{F1E0} Tessellation Test",   group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F065} Window Resize Test",  label: "\u{F065} Window Resize Test",  group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
 ];
 
 // ── Index of the 3D Cube in DEMOS (computed once) ─────────────────────────────
-const CUBE_IDX: usize = 29; // must match position of "3D Cube" in DEMOS (shifted by "Rendering Test")
+// Must match position of "\u{F1B3} 3D Cube" in DEMOS (last Graphics entry).
+const CUBE_IDX: usize = 24;
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -312,8 +341,11 @@ pub fn build_demo_ui(
     }
     let theme_pref = Rc::new(Cell::new(initial_theme));
 
-    // ── Backend panel visibility ───────────────────────────────────────────────
-    let show_backend = Rc::new(Cell::new(false));
+    // ── Backend panel visibility — restored from saved state when present. ───
+    let backend_initially_open = initial_state.as_ref()
+        .map(|st| st.backend_open)
+        .unwrap_or(false);
+    let show_backend = Rc::new(Cell::new(backend_initially_open));
 
     // ── Backend panel state ────────────────────────────────────────────────────
     let run_mode      = Rc::new(Cell::new(RunMode::Reactive));
@@ -390,17 +422,41 @@ pub fn build_demo_ui(
         }
     };
 
+    // ── Tools entries (Inspector) ──────────────────────────────────────────────
+    // The Inspector is not a Window — it's an overlay on the canvas.  We expose
+    // it through a sidebar entry whose open-cell IS `show_inspector` itself.
+    let tool_entries: Vec<SidebarEntry> = vec![
+        SidebarEntry::from_cell("\u{F188} Inspector", Rc::clone(&show_inspector)),
+    ];
+
+    // ── Sidebar groups ─────────────────────────────────────────────────────────
+    // Build the ordered group list by partitioning demo_entries by each spec's
+    // `group` field, then appending `Tests` and `Tools`.
+    let group_names: &[&'static str] = &[
+        "Widgets", "Layout", "Graphics", "Interaction", "Tests", "Tools",
+    ];
+    let sidebar_groups: Vec<SidebarGroup> = group_names.iter()
+        .map(|&name| {
+            let entries: Vec<&SidebarEntry> = match name {
+                "Tests" => test_entries.iter().collect(),
+                "Tools" => tool_entries.iter().collect(),
+                _       => demo_entries.iter().enumerate()
+                    .filter(|(i, _)| DEMOS[*i].group == name)
+                    .map(|(_, e)| e)
+                    .collect(),
+            };
+            SidebarGroup { name, entries }
+        })
+        .collect();
+
     // ── Sidebar ────────────────────────────────────────────────────────────────
     let sidebar_widget = build_sidebar(
         Arc::clone(&font),
         Rc::clone(&about_open),
-        &demo_entries,
-        &test_entries,
+        &sidebar_groups,
         on_organize,
     );
-    let sidebar_panel = SizedBox::new()
-        .with_width(220.0)
-        .with_child(sidebar_widget);
+    let sidebar_panel = SidebarPane::new(sidebar_widget);
 
     // ── Canvas stack (floating windows) ───────────────────────────────────────
     let mut canvas = Stack::new().add(Box::new(CanvasBg::new()));
@@ -460,18 +516,18 @@ pub fn build_demo_ui(
             .map(|ws| ws.to_rect())
             .unwrap_or_else(|| tile_rect(total_i, default_canvas_h, spec.win_w, spec.win_h));
         let content: Box<dyn Widget> = match spec.title {
-            "Clipboard Test"      => windows::clipboard_test(Arc::clone(&font)),
-            "Cursor Test"         => windows::cursor_test(Arc::clone(&font)),
-            "Grid Test"           => windows::grid_test(Arc::clone(&font)),
-            "Id Test"             => windows::id_test(Arc::clone(&font)),
-            "Input Event History" => windows::input_event_history(Arc::clone(&font)),
-            "Input Test"          => windows::input_test(Arc::clone(&font)),
-            "Layout Test"         => windows::layout_test(Arc::clone(&font)),
-            "Manual Layout Test"  => windows::manual_layout_test(Arc::clone(&font)),
-            "SVG Test"            => windows::svg_test(Arc::clone(&font)),
-            "Tessellation Test"   => windows::tessellation_test(Arc::clone(&font)),
-            "↔ auto-sized"        => windows::window_resize_test(Arc::clone(&font)),
-            _                     => windows::coming_soon(),
+            "\u{F0EA} Clipboard Test"      => windows::clipboard_test(Arc::clone(&font)),
+            "\u{F05B} Cursor Test"         => windows::cursor_test(Arc::clone(&font)),
+            "\u{F00A} Grid Test"           => windows::grid_test(Arc::clone(&font)),
+            "\u{F007} Id Test"             => windows::id_test(Arc::clone(&font)),
+            "\u{F1DA} Input Event History" => windows::input_event_history(Arc::clone(&font)),
+            "\u{F11C} Input Test"          => windows::input_test(Arc::clone(&font)),
+            "\u{F0E4} Layout Test"         => windows::layout_test(Arc::clone(&font)),
+            "\u{F0AD} Manual Layout Test"  => windows::manual_layout_test(Arc::clone(&font)),
+            "\u{F03E} SVG Test"            => windows::svg_test(Arc::clone(&font)),
+            "\u{F1E0} Tessellation Test"   => windows::tessellation_test(Arc::clone(&font)),
+            "\u{F065} Window Resize Test"  => windows::window_resize_test(Arc::clone(&font)),
+            _                              => windows::coming_soon(),
         };
         let win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(initial.x, initial.y, initial.width, initial.height))
@@ -508,22 +564,27 @@ pub fn build_demo_ui(
         canvas = canvas.add(Box::new(about_win));
     }
 
-    // ── Inspector overlay ──────────────────────────────────────────────────────
-    let inspector = InspectorPanel::new(
-        Arc::clone(&font),
-        Rc::clone(&inspector_nodes),
-        Rc::clone(&hovered_bounds),
-    );
-    let inspector_overlay = InspectorOverlay {
-        bounds:   Rect::default(),
-        show:     Rc::clone(&show_inspector),
-        children: vec![Box::new(inspector)],
-    };
+    // ── Inspector as a floating window ─────────────────────────────────────────
+    // Visible-cell is shared with the Tools sidebar entry so F12 / sidebar
+    // toggle and window close button all stay in sync.
+    {
+        let inspector = InspectorPanel::new(
+            Arc::clone(&font),
+            Rc::clone(&inspector_nodes),
+            Rc::clone(&hovered_bounds),
+        );
+        let inspector_win = Window::new(
+            "\u{F188} Inspector",
+            Arc::clone(&font),
+            Box::new(inspector),
+        )
+            .with_bounds(Rect::new(960.0, 60.0, 320.0, 520.0))
+            .with_visible_cell(Rc::clone(&show_inspector));
+        canvas = canvas.add(Box::new(inspector_win));
+    }
 
-    // ── Main area: canvas + inspector overlay ──────────────────────────────────
-    let main_area = Stack::new()
-        .add(Box::new(canvas))
-        .add(Box::new(inspector_overlay));
+    // Main area is now just the canvas — no separate overlay layer.
+    let main_area = canvas;
 
     // ── Backend panel (left side, visible only when show_backend is true) ────────
     let backend_panel_widget = build_backend_panel(
@@ -609,6 +670,7 @@ pub fn build_demo_ui(
         test_pos:  test_pos_cells,
         about_open: Rc::clone(&about_open),
         about_pos:  about_pos_cell,
+        backend_open: Rc::clone(&show_backend),
     };
 
     let handles = DemoHandles {
@@ -628,41 +690,43 @@ pub fn build_demo_ui(
 fn build_demo_content(title: &str, font: Arc<Font>) -> Box<dyn Widget> {
     match title {
         // basic.rs
-        "Code Editor"           => windows::code_editor(font),
-        "Sliders"               => windows::sliders(font),
-        "TextEdit"              => windows::text_edit(font),
-        "Tooltips"              => windows::tooltips(font),
+        "\u{F121} Code Editor"           => windows::code_editor(font),
+        "\u{F1DE} Sliders"               => windows::sliders(font),
+        "\u{F040} TextEdit"              => windows::text_edit(font),
+        "\u{F086} Tooltips"              => windows::tooltips(font),
         // code_example.rs
-        "Code Example"          => windows::code_example(font),
+        "\u{F1C9} Code Example"          => windows::code_example(font),
         // gallery.rs
-        "Widget Gallery"        => windows::widget_gallery(font),
+        "\u{F009} Widget Gallery"        => windows::widget_gallery(font),
         // animation.rs
-        "Bézier Curve"          => windows::bezier_curve(font),
-        "Dancing Strings"       => windows::dancing_strings(font),
-        "Painting"              => windows::painting(font),
+        "\u{F1FE} Bézier Curve"          => windows::bezier_curve(font),
+        "\u{F001} Dancing Strings"       => windows::dancing_strings(font),
+        "\u{F1FC} Painting"              => windows::painting(font),
+        // frame_demo.rs
+        "\u{F096} Frame"                 => windows::frame_demo(font),
         // misc.rs
-        "Frame"                 => windows::frame_demo(font),
-        "Extra Viewport"        => windows::extra_viewport(font),
-        "Highlighting"          => windows::highlighting(font),
-        "Interactive Container" => windows::interactive_container(font),
-        "Font Book"             => windows::font_book(font),
-        "Misc Demos"            => windows::misc_demos(font),
+        "\u{F108} Extra Viewport"        => windows::extra_viewport(font),
+        "\u{F0D0} Highlighting"          => windows::highlighting(font),
+        "\u{F1B2} Interactive Container" => windows::interactive_container(font),
+        "\u{F031} Font Book"             => windows::font_book(font),
+        "\u{F03A} Misc Demos"            => windows::misc_demos(font),
         // interaction.rs
-        "Drag and Drop"         => windows::drag_and_drop(font),
-        "Scrolling"             => windows::scrolling_demo(font),
-        "Panels"                => windows::panels_demo(font),
-        "Popups"                => windows::popups_demo(font),
-        "Rendering Test"        => rendering_test::rendering_test_view(font),
-        "Scene"                 => windows::scene_demo(font),
-        "Screenshot"            => windows::screenshot_demo(font),
+        "\u{F0B2} Drag and Drop"         => windows::drag_and_drop(font),
+        "\u{F07D} Scrolling"             => windows::scrolling_demo(font),
+        "\u{F0DB} Panels"                => windows::panels_demo(font),
+        "\u{F075} Popups"                => windows::popups_demo(font),
+        "\u{F0C3} Rendering Test"        => rendering_test::rendering_test_view(font),
+        "\u{F002} Scene"                 => windows::scene_demo(font),
+        "\u{F030} Screenshot"            => windows::screenshot_demo(font),
         // text_demos.rs
-        "Strip"                 => windows::strip_demo(font),
-        "Table"                 => windows::table_demo(font),
-        "Text Layout"           => windows::text_layout(font),
-        "Undo Redo"             => windows::undo_redo(font),
-        "Window Options"        => windows::window_options(font),
-        "Modals"                => windows::modals_demo(font),
-        "Multi Touch"           => windows::multi_touch(font),
-        _                       => windows::coming_soon(),
+        "\u{F0C9} Strip"                 => windows::strip_demo(font),
+        "\u{F0CE} Table"                 => windows::table_demo(font),
+        "\u{F036} Text Layout"           => windows::text_layout(font),
+        "\u{F0E2} Undo Redo"             => windows::undo_redo(font),
+        "\u{F013} Window Options"        => windows::window_options(font),
+        "\u{F2D0} Modals"                => windows::modals_demo(font),
+        "\u{F0A4} Multi Touch"           => windows::multi_touch(font),
+        // 3D Cube title is matched in the caller; fallthrough here is fine.
+        _                                => windows::coming_soon(),
     }
 }

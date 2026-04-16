@@ -30,7 +30,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::WindowAttributes;
 
-const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+const FONT_BYTES:  &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+const FA_BYTES:    &[u8] = include_bytes!("../../demo/assets/fa.ttf");
+const EMOJI_BYTES: &[u8] = include_bytes!("../../demo/assets/NotoEmoji-Regular.ttf");
 
 // ---------------------------------------------------------------------------
 // State persistence helpers
@@ -114,7 +116,14 @@ fn main() {
         glow::Context::from_loader_function_cstr(|s| gl_display.get_proc_address(s))
     });
 
-    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("parse CascadiaCode.ttf"));
+    // Fallback chain: CascadiaCode → Font Awesome 4 (PUA icons) → NotoEmoji (emoji)
+    let emoji_font = Font::from_slice(EMOJI_BYTES).expect("parse NotoEmoji-Regular.ttf");
+    let fa_font    = Font::from_slice(FA_BYTES).expect("parse fa.ttf")
+        .with_fallback(Arc::new(emoji_font));
+    let font = Arc::new(
+        Font::from_slice(FONT_BYTES).expect("parse CascadiaCode.ttf")
+            .with_fallback(Arc::new(fa_font))
+    );
 
     let init_w = size.width.max(1) as f32;
     let init_h = size.height.max(1) as f32;

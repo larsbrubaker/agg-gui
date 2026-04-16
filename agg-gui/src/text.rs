@@ -48,6 +48,10 @@ pub struct TextMetrics {
 ///
 /// Constructed from raw TTF/OTF bytes via [`Font::from_bytes`]. The data is
 /// reference-counted so fonts can be cheaply shared and saved across frames.
+///
+/// An optional fallback font can be chained via [`Font::with_fallback`]; when
+/// a glyph is missing from the primary font (glyph_id == 0 after shaping),
+/// the fallback is consulted for both the glyph outline and advance width.
 pub struct Font {
     pub(crate) data: Arc<Vec<u8>>,
     index: u32,
@@ -56,6 +60,8 @@ pub struct Font {
     ascender: i16,
     descender: i16,
     line_gap: i16,
+    /// Optional fallback used when the primary font lacks a glyph.
+    pub(crate) fallback: Option<Arc<Font>>,
 }
 
 impl Font {
@@ -71,12 +77,24 @@ impl Font {
             line_gap: face.line_gap(),
             data: Arc::new(data),
             index: 0,
+            fallback: None,
         })
     }
 
     /// Parse a font from a borrowed byte slice (data is copied).
     pub fn from_slice(data: &[u8]) -> Result<Self, &'static str> {
         Self::from_bytes(data.to_vec())
+    }
+
+    /// Chain a fallback font consulted when this font lacks a glyph.
+    ///
+    /// Returns `self` so it can be used as a builder method:
+    /// ```ignore
+    /// let font = Font::from_slice(MAIN_BYTES)?.with_fallback(Arc::new(emoji_font));
+    /// ```
+    pub fn with_fallback(mut self, fallback: Arc<Font>) -> Self {
+        self.fallback = Some(fallback);
+        self
     }
 
     pub fn units_per_em(&self) -> u16 {
@@ -108,6 +126,18 @@ impl Font {
         F: FnOnce(&rustybuzz::Face<'_>) -> R,
     {
         let face = rustybuzz::Face::from_slice(&self.data, self.index)
+            .expect("font was validated at construction");
+        f(&face)
+    }
+
+    /// Run `f` with a `ttf_parser::Face` borrowed from the internal data.
+    ///
+    /// Used for glyph index lookups (fallback resolution) without full shaping.
+    pub(crate) fn with_ttf_face<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&ttf_parser::Face<'_>) -> R,
+    {
+        let face = ttf_parser::Face::parse(&self.data, self.index)
             .expect("font was validated at construction");
         f(&face)
     }
@@ -227,9 +257,14 @@ pub(crate) fn shape_text(
 ///
 /// Returned by [`shape_glyphs`].  All distances are in **pixels** at the
 /// requested font size.
-#[derive(Debug, Clone)]
+///
+/// When `fallback_font` is `Some`, the glyph was resolved from the fallback
+/// font rather than the primary.  Callers must use that font for outline
+/// extraction and glyph cache lookups, since `glyph_id` is an index into
+/// the fallback's glyph table, not the primary's.
+#[derive(Clone)]
 pub struct ShapedGlyph {
-    /// Index into the font's glyph table.
+    /// Index into the font's glyph table (or fallback's if `fallback_font` is Some).
     pub glyph_id: u16,
     /// How far to advance the pen after this glyph.
     pub x_advance: f64,
@@ -237,6 +272,9 @@ pub struct ShapedGlyph {
     pub x_offset: f64,
     /// Vertical offset from the baseline to this glyph's origin.
     pub y_offset: f64,
+    /// Set when this glyph was resolved via the fallback font.
+    /// Use this font instead of the primary for cache lookups and rendering.
+    pub fallback_font: Option<Arc<Font>>,
 }
 
 /// Shape `text` and return per-glyph positioning info, with **no** outline
@@ -271,11 +309,45 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
                 .glyph_infos()
                 .iter()
                 .zip(output.glyph_positions().iter())
-                .map(|(info, pos)| ShapedGlyph {
-                    glyph_id:  info.glyph_id as u16,
-                    x_advance: pos.x_advance as f64 * scale,
-                    x_offset:  pos.x_offset  as f64 * scale,
-                    y_offset:  pos.y_offset  as f64 * scale,
+                .map(|(info, pos)| {
+                    let glyph_id  = info.glyph_id as u16;
+                    let x_advance = pos.x_advance as f64 * scale;
+                    let x_offset  = pos.x_offset  as f64 * scale;
+                    let y_offset  = pos.y_offset  as f64 * scale;
+
+                    // glyph_id == 0 means the primary font has no glyph for
+                    // this code point.  Walk the fallback chain until a font
+                    // with a matching glyph is found.
+                    if glyph_id == 0 {
+                        let byte_off = info.cluster as usize;
+                        if let Some(ch) = text.get(byte_off..).and_then(|s| s.chars().next()) {
+                            let mut cur_fb = font.fallback.as_ref();
+                            while let Some(fb) = cur_fb {
+                                let fb_id = fb.with_ttf_face(|f| {
+                                    f.glyph_index(ch).map(|g| g.0).unwrap_or(0)
+                                });
+                                if fb_id != 0 {
+                                    let fb_scale = size / fb.units_per_em() as f64;
+                                    let fb_adv = fb.with_ttf_face(|f| {
+                                        f.glyph_hor_advance(ttf_parser::GlyphId(fb_id))
+                                            .map(|a| a as f64 * fb_scale)
+                                            .unwrap_or(0.0)
+                                    });
+                                    return ShapedGlyph {
+                                        glyph_id: fb_id,
+                                        x_advance: fb_adv,
+                                        x_offset,
+                                        y_offset,
+                                        fallback_font: Some(Arc::clone(fb)),
+                                    };
+                                }
+                                cur_fb = fb.fallback.as_ref();
+                            }
+                        }
+                    }
+
+                    ShapedGlyph { glyph_id, x_advance, x_offset, y_offset,
+                                  fallback_font: None }
                 })
                 .collect::<Vec<_>>()
         });
@@ -357,7 +429,7 @@ pub fn measure_text_metrics(font: &Font, text: &str, size: f64) -> TextMetrics {
 }
 
 // ---------------------------------------------------------------------------
-// Global measurement cache — survives across Label instance recreation
+// Global shape/measurement cache — survives across Label instance recreation
 // ---------------------------------------------------------------------------
 //
 // TreeView and other widgets rebuild their Label children every layout() call,
@@ -371,50 +443,22 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    static ADVANCE_CACHE: RefCell<HashMap<(usize, String, u64), f64>> =
-        RefCell::new(HashMap::new());
     /// Caches the full rustybuzz shaping output (per-glyph IDs + advances).
     /// Used by shape_glyphs() so fill_text() avoids re-shaping every frame.
+    /// Also serves as the measurement cache — measure_advance() reads it too.
     static SHAPE_CACHE: RefCell<HashMap<(usize, String, u64), Vec<ShapedGlyph>>> =
         RefCell::new(HashMap::new());
 }
 
 /// Measure text advance width without rasterizing.
 ///
-/// Results are cached in a thread-local `HashMap` keyed by
-/// `(font_data_ptr, text, size_bits)` so that repeated calls with the same
-/// arguments — including from freshly constructed `Label` instances — skip the
-/// `rustybuzz::shape()` call entirely.
+/// Delegates to [`shape_glyphs`] so that fallback-font advances are included
+/// in the measurement.  Results are cached via the shared shape cache.
 pub fn measure_advance(font: &Font, text: &str, size: f64) -> f64 {
-    // Use the raw pointer to the Vec<u8> inside the Arc as the font key.
-    // This is stable for the lifetime of the Arc (i.e. forever in practice).
-    let font_key = Arc::as_ptr(&font.data) as usize;
-    let size_key = size.to_bits();
-
-    ADVANCE_CACHE.with(|cache| {
-        {
-            let c = cache.borrow();
-            if let Some(&cached) = c.get(&(font_key, text.to_owned(), size_key)) {
-                return cached;
-            }
-        }
-
-        // Cache miss — actually shape the text.
-        let scale = size / font.units_per_em() as f64;
-        let result = font.with_rb_face(|face| {
-            let mut buffer = rustybuzz::UnicodeBuffer::new();
-            buffer.push_str(text);
-            let output = rustybuzz::shape(face, &[], buffer);
-            output
-                .glyph_positions()
-                .iter()
-                .map(|p| p.x_advance as f64 * scale)
-                .sum::<f64>()
-        });
-
-        cache.borrow_mut().insert((font_key, text.to_owned(), size_key), result);
-        result
-    })
+    shape_glyphs(font, text, size)
+        .iter()
+        .map(|g| g.x_advance)
+        .sum()
 }
 
 #[cfg(test)]

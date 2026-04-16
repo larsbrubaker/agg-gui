@@ -75,21 +75,36 @@ impl Widget for CollapsingHeader {
     fn layout(&mut self, available: Size) -> Size {
         let w = available.width;
 
+        // Sync `children` with `open` state so the framework dispatches events
+        // to the content only when it is visible.  When closed the content
+        // lives in `self.content`; when open it lives in `self.children[0]`.
+        if self.open && self.children.is_empty() {
+            if let Some(c) = self.content.take() {
+                self.children.push(c);
+            }
+        } else if !self.open && !self.children.is_empty() {
+            if let Some(c) = self.children.pop() {
+                self.content = Some(c);
+            }
+        }
+
         // Layout label inside the header row.
         let label_available = Size::new(w - INDENT - TRIANGLE_SIZE * 2.0, HEADER_H);
         let ls = self.label.layout(label_available);
         let ly = (HEADER_H - ls.height) * 0.5;
         self.label.set_bounds(Rect::new(INDENT + TRIANGLE_SIZE * 2.0 + 4.0, ly, ls.width, ls.height));
 
-        // Layout content if open.
-        let content_h = if self.open {
-            if let Some(ref mut c) = self.content {
-                let cs = c.layout(Size::new(w, available.height - HEADER_H));
-                c.set_bounds(Rect::new(0.0, 0.0, cs.width, cs.height));
-                cs.height
-            } else {
-                0.0
-            }
+        // Layout content if open — as a child so the framework paints and
+        // dispatches events normally.  Content is inset from the left by
+        // INDENT * 0.5 for visual hierarchy.
+        let content_h = if self.open && !self.children.is_empty() {
+            let inset = INDENT * 0.5;
+            let avail_w = (w - inset).max(0.0);
+            let child = &mut self.children[0];
+            let cs = child.layout(Size::new(avail_w, available.height - HEADER_H));
+            // Content sits at the bottom of our bounds (Y-up: y = 0).
+            child.set_bounds(Rect::new(inset, 0.0, cs.width, cs.height));
+            cs.height
         } else {
             0.0
         };
@@ -144,19 +159,9 @@ impl Widget for CollapsingHeader {
         paint_subtree(&mut self.label, ctx);
         ctx.restore();
 
-        // Content (drawn at bottom of bounds = y=0 in Y-up).
-        if self.open {
-            if let Some(ref mut c) = self.content {
-                let cb = c.bounds();
-                // Content sits from y=0 to y=content_h.
-                // Add a small left indent for visual hierarchy.
-                ctx.save();
-                ctx.translate(INDENT * 0.5, 0.0);
-                paint_subtree(c.as_mut(), ctx);
-                ctx.restore();
-                let _ = cb;
-            }
-        }
+        // Content is painted by the framework via normal child recursion —
+        // it lives in `self.children[0]` (when open) and has its own bounds
+        // so `dispatch_event` reaches it without manual forwarding.
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
@@ -172,52 +177,18 @@ impl Widget for CollapsingHeader {
                 if self.hovered != was {
                     return EventResult::Consumed;
                 }
-                // Propagate to content if open.
-                if self.open {
-                    if let Some(ref mut c) = self.content {
-                        let local = Point { x: pos.x - INDENT * 0.5, y: pos.y };
-                        let ev = Event::MouseMove { pos: local };
-                        return c.on_event(&ev);
-                    }
-                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, pos, modifiers } => {
+            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
                 let in_header = pos.x >= 0.0 && pos.x <= self.bounds.width
                     && pos.y >= h - HEADER_H && pos.y <= h;
                 if in_header {
                     self.open = !self.open;
                     return EventResult::Consumed;
                 }
-                // Propagate to content.
-                if self.open {
-                    if let Some(ref mut c) = self.content {
-                        let local = Point { x: pos.x - INDENT * 0.5, y: pos.y };
-                        let ev = Event::MouseDown { button: MouseButton::Left, pos: local, modifiers: *modifiers };
-                        return c.on_event(&ev);
-                    }
-                }
                 EventResult::Ignored
             }
-            Event::MouseUp { button: MouseButton::Left, pos, modifiers } => {
-                if self.open {
-                    if let Some(ref mut c) = self.content {
-                        let local = Point { x: pos.x - INDENT * 0.5, y: pos.y };
-                        let ev = Event::MouseUp { button: MouseButton::Left, pos: local, modifiers: *modifiers };
-                        return c.on_event(&ev);
-                    }
-                }
-                EventResult::Ignored
-            }
-            other => {
-                // Forward to content when open.
-                if self.open {
-                    if let Some(ref mut c) = self.content {
-                        return c.on_event(other);
-                    }
-                }
-                EventResult::Ignored
-            }
+            _ => EventResult::Ignored,
         }
     }
 

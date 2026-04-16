@@ -364,9 +364,9 @@ impl DrawCtx for GlGfxCtx {
         let [ix, iy, iw, ih] = if let Some([ex, ey, ew, eh]) = self.current_clip() {
             let nx1 = gl_x.max(ex);
             let ny1 = gl_y.max(ey);
-            let nx2 = (gl_x + gl_w).min(ex + ew);
-            let ny2 = (gl_y + gl_h).min(ey + eh);
-            [nx1, ny1, (nx2 - nx1).max(0), (ny2 - ny1).max(0)]
+            let nx2 = gl_x.saturating_add(gl_w).min(ex.saturating_add(ew));
+            let ny2 = gl_y.saturating_add(gl_h).min(ey.saturating_add(eh));
+            [nx1, ny1, nx2.saturating_sub(nx1).max(0), ny2.saturating_sub(ny1).max(0)]
         } else {
             [gl_x, gl_y, gl_w, gl_h]
         };
@@ -546,7 +546,11 @@ impl DrawCtx for GlGfxCtx {
             let gx = pen_x + glyph.x_offset;
             let gy = y     + glyph.y_offset;
 
-            if let Some(cached) = self.glyph_cache.get_or_insert(&font, glyph.glyph_id, font_size) {
+            // Use the fallback font for outline lookup when the glyph was
+            // resolved from it — glyph_id is an index into that font's table.
+            let render_font = glyph.fallback_font.as_deref().unwrap_or(&font);
+
+            if let Some(cached) = self.glyph_cache.get_or_insert(render_font, glyph.glyph_id, font_size) {
                 // Offset each cached glyph-local vert by the glyph's screen
                 // position, then apply the CTM to get screen-space pixels.
                 // This is correct for any affine CTM including rotation/scale.
@@ -846,10 +850,15 @@ fn build_stroke_quads(
 /// and clips the top rows of any widget painted near the top of a clipped
 /// region.
 fn compute_gl_scissor(lx: f64, by: f64, rx: f64, ty2: f64) -> [i32; 4] {
-    let gl_x = lx.floor() as i32;
-    let gl_y = by.floor() as i32;   // Y-up bottom == GL scissor y (Y from bottom)
-    let gl_w = (rx - lx).ceil() as i32;
-    let gl_h = (ty2 - by).ceil() as i32;
+    // Clamp before casting: STRETCH-anchored children inside a ScrollView receive
+    // f64::MAX/2 as available height during the measure pass, which would overflow
+    // i32 when fed into GL scissor calls.
+    const LO: f64 = i32::MIN as f64;
+    const HI: f64 = i32::MAX as f64;
+    let gl_x = lx.floor().clamp(LO, HI) as i32;
+    let gl_y = by.floor().clamp(LO, HI) as i32;
+    let gl_w = (rx - lx).ceil().clamp(0.0, HI) as i32;
+    let gl_h = (ty2 - by).ceil().clamp(0.0, HI) as i32;
     [gl_x, gl_y, gl_w, gl_h]
 }
 

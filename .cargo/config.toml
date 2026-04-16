@@ -1,2 +1,2 @@
 [alias]
-dev = ["watch", "-x", "run -p demo-native"]
+dev = ["watch", "-s", "cmd /c taskkill /F /IM demo-native.exe >nul 2>&1 & cargo run -p demo-native"]
