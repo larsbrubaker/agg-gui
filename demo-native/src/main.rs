@@ -17,6 +17,7 @@ use winit::window::CursorIcon as WinitCursor;
 
 use demo_gl::{GlGfxCtx, begin_frame, sync_inspector, render_app_frame};
 
+use glow::HasContext;
 use glutin::config::ConfigTemplateBuilder;
 use glutin::context::{ContextApi, ContextAttributesBuilder, Version};
 use glutin::display::GetGlDisplay;
@@ -98,10 +99,16 @@ fn main() {
         .map(|s| s.window_maximized)
         .unwrap_or(false);
 
+    // Create the window HIDDEN.  We want to finish our GL setup, apply any
+    // pending maximize / fullscreen transition, and render the first real
+    // frame before the user ever sees the window — otherwise Windows
+    // briefly paints the OS-default white background plus a black margin
+    // around the not-yet-resized GL surface.
     let mut window_attributes = WindowAttributes::default()
         .with_title("agg-gui — Demo (GL)")
         .with_inner_size(LogicalSize::new(start_w, start_h))
-        .with_maximized(start_maximized);
+        .with_maximized(start_maximized)
+        .with_visible(false);
     if start_fullscreen {
         window_attributes = window_attributes
             .with_fullscreen(Some(Fullscreen::Borderless(None)));
@@ -214,10 +221,42 @@ fn main() {
     // Tracks the live modifier state from ModifiersChanged events.
     let mut current_mods = Modifiers::default();
 
-    // Initial frame.
+    // The window was created hidden.  Re-query its inner size — on most
+    // platforms winit has by now applied any `with_maximized` /
+    // `with_fullscreen` attribute AND our post-creation `set_fullscreen` /
+    // `set_maximized` call, so this is the true canvas size of the first
+    // visible frame.  Resize the GL surface to match and render one frame
+    // BEFORE showing the window so the user never sees the OS-default
+    // white-flash + black-border-around-small-GL-surface.
+    let init_size = window.inner_size();
+    if init_size.width > 0 && init_size.height > 0 {
+        gl_surface.resize(
+            &gl_context,
+            NonZeroU32::new(init_size.width.max(1)).unwrap(),
+            NonZeroU32::new(init_size.height.max(1)).unwrap(),
+        );
+        win_w = init_size.width;
+        win_h = init_size.height;
+    }
     screen_size.set((win_w, win_h));
+
+    // Clear to the theme background first so any transparent regions in
+    // the first paint (e.g. between widgets) are already theme-coloured.
+    unsafe {
+        let bg = agg_gui::current_visuals().bg_color;
+        gl.clear_color(bg.r, bg.g, bg.b, 1.0);
+        gl.clear(glow::COLOR_BUFFER_BIT);
+    }
+    // Full initial paint at the correct canvas size.  With `clamp_to_canvas`
+    // removed from `Window::layout`, this is safe even if the reported size
+    // hasn't yet caught up with the final maximize transition — saved
+    // window positions aren't mutated during layout.
+    sync_inspector(&app, show_inspector.get(), &inspector_nodes, &hovered_bounds);
     render_frame(&mut app, &mut gl_ctx, &gl, win_w, win_h, last_frame_ms, &hovered_bounds);
-    gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
+    let _ = gl_surface.swap_buffers(&gl_context);
+
+    // Finally, reveal the window — its first visible frame is our content.
+    window.set_visible(true);
 
     #[allow(deprecated)]
     event_loop

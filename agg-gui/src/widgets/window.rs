@@ -415,10 +415,15 @@ impl Widget for Window {
         let s = self.title_label.layout(Size::new(self.bounds.width - 48.0, TITLE_H));
         self.title_label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
 
-        // Store canvas size for drag clamping, apply passive constraint first,
-        // then publish the clamped position so persistence gets the real location.
+        // Record the canvas size for drag / resize hit-testing.  We deliberately
+        // do NOT passively clamp the window's position here.  On startup the
+        // first few layout passes may run at a stale (default) canvas size
+        // before the platform has maximized / fullscreened the OS window, and
+        // passive clamping would pull saved positions into that small rect
+        // then persist them — losing user-placed positions after a restart.
+        // Clamping still happens in the drag / resize handlers so the user
+        // can't fling a window off-screen.
         self.canvas_size = available;
-        self.clamp_to_canvas();
         if let Some(ref cell) = self.position_cell {
             cell.set(self.bounds);
         }
