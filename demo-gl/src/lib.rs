@@ -29,7 +29,7 @@ pub mod frame;
 pub use frame::{begin_frame, sync_inspector, render_app_frame};
 
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
@@ -74,6 +74,17 @@ const TEX_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;
 // GlGfxCtx
 // ---------------------------------------------------------------------------
 
+/// One entry in the Arc-keyed GL texture cache.  The `Weak` serves as the
+/// liveness sentinel: when all strong refs to the underlying `Vec<u8>` have
+/// been dropped (typically because the L1 pixel cache evicted its entry),
+/// `weak.upgrade()` returns `None` and the next sweep deletes the texture.
+struct ArcTextureEntry {
+    weak:    Weak<Vec<u8>>,
+    texture: glow::Texture,
+    w:       u32,
+    h:       u32,
+}
+
 /// A [`DrawCtx`] that renders via `glow` (WebGL2 or native GL).
 ///
 /// Create once per frame (or share via mutable reference) and pass to
@@ -101,12 +112,20 @@ pub struct GlGfxCtx {
     tex_res_loc: Option<glow::UniformLocation>,
     tex_sampler_loc: Option<glow::UniformLocation>,
 
-    // Texture cache keyed on (ptr, len, w, h, head/tail byte hash).  Allows
-    // repeatedly-blitted content (typ. `Label` backbuffer) to reuse a GL
-    // texture across frames instead of uploading every paint.  LRU eviction
-    // keeps memory bounded.
+    // Texture cache keyed on (ptr, len, w, h, head/tail byte hash).  Used by
+    // the generic `draw_image_rgba(&[u8], …)` path (markdown images, screenshot
+    // display, image widgets).  LRU eviction keeps memory bounded.
     texture_cache:       std::collections::HashMap<u64, (glow::Texture, u32, u32)>,
     texture_cache_order: std::collections::VecDeque<u64>,
+
+    // Arc-pointer-keyed texture cache for `draw_image_rgba_arc` — the hot path
+    // for `Label` backbuffers (which now live in the crate-level `image_cache`
+    // as `Arc<Vec<u8>>`).  Holds a `Weak<Vec<u8>>` per entry; when the Arc is
+    // dropped by its owner (the L1 pixel cache, via LRU eviction) the `Weak`
+    // fails to upgrade and the next sweep deletes the GL texture.  This is the
+    // Rust equivalent of MatterCAD's `ConditionalWeakTable<byte[], ImageTexturePlugin>`
+    // finalizer → deferred-delete pattern.
+    arc_texture_cache: std::collections::HashMap<usize, ArcTextureEntry>,
 
     // Drawing state
     fill_color:   Color,
@@ -189,6 +208,7 @@ impl GlGfxCtx {
             tex_res_loc, tex_sampler_loc,
             texture_cache:       std::collections::HashMap::new(),
             texture_cache_order: std::collections::VecDeque::new(),
+            arc_texture_cache:   std::collections::HashMap::new(),
             fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
@@ -753,6 +773,117 @@ impl DrawCtx for GlGfxCtx {
                 self.tex_res_loc.as_ref(),
                 self.viewport.0, self.viewport.1,
             );
+            gl.uniform_1_i32(self.tex_sampler_loc.as_ref(), 0);
+            gl.bind_vertex_array(Some(self.tex_vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.tex_vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(&verts),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.enable(glow::BLEND);
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+            gl.bind_vertex_array(None);
+        }
+    }
+
+    /// Arc-keyed fast path.  `Label` backbuffers flow through here — pointer
+    /// identity of the `Arc<Vec<u8>>` is stable as long as the crate-level
+    /// pixel cache retains the entry, so the same `Arc` yields cache hits
+    /// across frames AND across re-created `Label` instances that request the
+    /// same text/font/size/colour.  Dead entries (Arc dropped → `Weak`
+    /// upgrade fails) are swept and their textures batch-deleted each call.
+    fn draw_image_rgba_arc(
+        &mut self,
+        data:  &Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 { return; }
+        if data.len() < (img_w as usize) * (img_h as usize) * 4 { return; }
+
+        let bl = self.transform_pt(dst_x,          dst_y);
+        let br = self.transform_pt(dst_x + dst_w,  dst_y);
+        let tr = self.transform_pt(dst_x + dst_w,  dst_y + dst_h);
+        let tl = self.transform_pt(dst_x,          dst_y + dst_h);
+        let verts: [f32; 24] = [
+            bl[0], bl[1], 0.0, 1.0,
+            br[0], br[1], 1.0, 1.0,
+            tr[0], tr[1], 1.0, 0.0,
+            bl[0], bl[1], 0.0, 1.0,
+            tr[0], tr[1], 1.0, 0.0,
+            tl[0], tl[1], 0.0, 0.0,
+        ];
+
+        let key = Arc::as_ptr(data) as *const u8 as usize;
+
+        unsafe {
+            let gl = Rc::clone(&self.gl);
+
+            // Sweep dead entries — one entry per dead weak ref.  O(n) but the
+            // cache is bounded by the L1 LRU cap, and we only remove; no
+            // heavy work.  Batching all GL deletes in one frame keeps GL
+            // driver chatter low.
+            let dead_keys: Vec<usize> = self.arc_texture_cache.iter()
+                .filter(|(_, e)| e.weak.strong_count() == 0)
+                .map(|(k, _)| *k)
+                .collect();
+            for k in dead_keys {
+                if let Some(e) = self.arc_texture_cache.remove(&k) {
+                    gl.delete_texture(e.texture);
+                }
+            }
+
+            // Look up by pointer — also verify via Weak::upgrade to guard
+            // against pointer recycling (old entry died, new Arc happened to
+            // allocate at the same address).
+            let existing = self.arc_texture_cache.get(&key).and_then(|e| {
+                match e.weak.upgrade() {
+                    Some(a) if Arc::ptr_eq(&a, data) && e.w == img_w && e.h == img_h
+                        => Some(e.texture),
+                    _   => None,
+                }
+            });
+
+            let tex = match existing {
+                Some(t) => t,
+                None => {
+                    // Evict the stale entry (if any) so we can insert fresh.
+                    if let Some(old) = self.arc_texture_cache.remove(&key) {
+                        gl.delete_texture(old.texture);
+                    }
+                    let tex = gl.create_texture().expect("create texture");
+                    gl.active_texture(glow::TEXTURE0);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+                    gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+                    gl.tex_image_2d(
+                        glow::TEXTURE_2D, 0, glow::RGBA as i32,
+                        img_w as i32, img_h as i32, 0,
+                        glow::RGBA, glow::UNSIGNED_BYTE, Some(data.as_slice()),
+                    );
+                    self.arc_texture_cache.insert(key, ArcTextureEntry {
+                        weak:    Arc::downgrade(data),
+                        texture: tex,
+                        w:       img_w,
+                        h:       img_h,
+                    });
+                    tex
+                }
+            };
+
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            gl.use_program(Some(self.tex_prog));
+            gl.uniform_2_f32(self.tex_res_loc.as_ref(), self.viewport.0, self.viewport.1);
             gl.uniform_1_i32(self.tex_sampler_loc.as_ref(), 0);
             gl.bind_vertex_array(Some(self.tex_vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.tex_vbo));

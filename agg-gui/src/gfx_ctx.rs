@@ -664,6 +664,21 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
 
     fn has_image_blit(&self) -> bool { true }
 
+    fn draw_image_rgba_arc(
+        &mut self,
+        data:  &Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        // Software backend has no GPU texture cache; the CPU composite path
+        // is the same as the slice entry point.
+        self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
+    }
+
     fn draw_image_rgba(
         &mut self,
         data:  &[u8],

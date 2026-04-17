@@ -204,6 +204,31 @@ pub trait DrawCtx {
         let _ = (data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    /// Same as [`draw_image_rgba`] but accepts an `Arc<Vec<u8>>` so the GL
+    /// backend can key its texture cache on the `Arc`'s pointer identity and
+    /// hold a `Weak` ref for automatic cleanup when the underlying buffer is
+    /// dropped — the pattern MatterCAD implements with C# `ConditionalWeakTable`.
+    ///
+    /// Used by `Label` (and future glyph-atlas consumers) in tandem with the
+    /// crate-level [`image_cache`](crate::image_cache) so that rebuilt widget
+    /// trees with unchanged content never re-rasterize OR re-upload.
+    ///
+    /// Default implementation: forward to [`draw_image_rgba`] via slice
+    /// borrow.  Software backends don't benefit from GPU texture caching so
+    /// the default is usually fine; the GL backend overrides.
+    fn draw_image_rgba_arc(
+        &mut self,
+        data:  &std::sync::Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
+    }
+
     // ── Theme / Visuals ───────────────────────────────────────────────────────
 
     /// Return the currently-active [`Visuals`] palette.

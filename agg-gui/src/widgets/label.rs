@@ -27,22 +27,10 @@ use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
 use crate::framebuffer::{Framebuffer, unpremultiply_rgba_inplace};
 use crate::gfx_ctx::GfxCtx;
+use crate::image_cache::{get_or_raster, LabelPixelKey};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
-
-/// Compare two `Color` values for equality within a small epsilon.
-///
-/// Used to detect cache invalidation when the resolved text color changes
-/// (e.g. on a theme switch).  Colors whose components differ by less than
-/// 1/255 (~0.004) are considered equal so that floating-point noise in
-/// visuals does not force unnecessary re-renders.
-fn colors_equal(a: Color, b: Color) -> bool {
-    (a.r - b.r).abs() < 0.004_f32
-        && (a.g - b.g).abs() < 0.004_f32
-        && (a.b - b.b).abs() < 0.004_f32
-        && (a.a - b.a).abs() < 0.004_f32
-}
 
 /// Break `text` into lines that each fit within `max_width` pixels at the given
 /// font size.  Explicit `\n` characters always produce a new line.  Returns at
@@ -133,17 +121,18 @@ pub struct Label {
     wrapped_lines: Vec<String>,
 
     // ── Backbuffer cache ──────────────────────────────────────────────────────
-    /// Cached pixel data (top-row first, RGBA8).  `None` until first render.
-    cache_pixels: Option<Vec<u8>>,
-    /// Framebuffer dimensions used for the last cache render.
+    //
+    // Labels don't own their cached pixels any more — they come from the
+    // shared crate-level `image_cache`, keyed on (text, font, size, color,
+    // bounds, align).  We retain the most-recent `Arc` + its dimensions on
+    // the widget only so `cache_for_test` can inspect the last paint and so
+    // the GL backend sees a stable `Arc::as_ptr` key between frames.  The
+    // `Arc` drops naturally when the label drops; no manual invalidation
+    // is needed on set_text/set_color because a new key misses the global
+    // cache and calls the rasterizer.
+    cache_pixels: Option<Arc<Vec<u8>>>,
     cache_w: u32,
     cache_h: u32,
-    /// Text, font_size, and color as of last cache render — used for
-    /// invalidation detection.
-    cache_text: String,
-    cache_font_size: f64,
-    /// The resolved color (possibly from visuals) used for the last cache render.
-    cache_color: Color,
 }
 
 impl Label {
@@ -167,9 +156,6 @@ impl Label {
             cache_pixels: None,
             cache_w: 0,
             cache_h: 0,
-            cache_text: String::new(),
-            cache_font_size: 0.0,
-            cache_color: Color::black(),
         }
     }
 
@@ -204,8 +190,8 @@ impl Label {
     #[cfg(test)]
     pub(crate) fn cache_for_test(&self) -> Option<(&[u8], u32, u32)> {
         self.cache_pixels
-            .as_deref()
-            .map(|p| (p, self.cache_w, self.cache_h))
+            .as_ref()
+            .map(|arc| (arc.as_slice(), self.cache_w, self.cache_h))
     }
 
     // ── setter methods (for post-construction mutation) ───────────────────────
@@ -214,27 +200,17 @@ impl Label {
         let text = text.into();
         if text != self.text {
             self.text = text;
-            self.cache_pixels = None; // invalidate pixel cache
-            // layout_text mismatch will trigger remeasure on next layout()
+            // layout_text mismatch will trigger remeasure on next layout().
+            // No manual pixel-cache invalidation: the new text produces a
+            // new key in image_cache, which is either a hit (reuse) or a
+            // miss (rasterize).
         }
     }
     pub fn set_color(&mut self, color: Color) {
-        // Only invalidate if the color actually changed (avoids per-frame rebuilds
-        // for widgets that call set_color with the same value every paint).
-        let changed = match self.color {
-            None    => true,
-            Some(c) => !colors_equal(c, color),
-        };
-        if changed {
-            self.color = Some(color);
-            self.cache_pixels = None;
-        }
+        self.color = Some(color);
     }
     pub fn clear_color(&mut self) {
-        if self.color.is_some() {
-            self.color = None;
-            self.cache_pixels = None; // invalidate cache
-        }
+        self.color = None;
     }
     pub fn set_align(&mut self, align: LabelAlign) { self.align = align; }
 }
@@ -321,48 +297,53 @@ impl Widget for Label {
             let bw = w.ceil() as u32;
             let bh = h.ceil() as u32;
 
-            // Rebuild cache if anything changed.
-            let cache_valid = self.cache_pixels.is_some()
-                && self.cache_w == bw
-                && self.cache_h == bh
-                && self.cache_text == self.text
-                && (self.cache_font_size - self.font_size).abs() < 0.01
-                && colors_equal(self.cache_color, color);
+            let align_byte: u8 = match self.align {
+                LabelAlign::Left   => 0,
+                LabelAlign::Center => 1,
+                LabelAlign::Right  => 2,
+            };
+            let key = LabelPixelKey::new(
+                &self.text,
+                Arc::as_ptr(&self.font) as *const () as usize,
+                self.font_size,
+                color,
+                bw, bh, align_byte,
+            );
 
-            if !cache_valid {
+            // Rasterize-on-miss: run AGG into a fresh framebuffer, then
+            // un-premultiply to straight alpha so downstream `draw_image_rgba`
+            // callers (GL texture upload, software composite) receive the
+            // format their blend functions expect.
+            let text  = self.text.clone();
+            let font  = Arc::clone(&self.font);
+            let size  = self.font_size;
+            let align = self.align;
+            let arc = get_or_raster(key, move || {
                 let mut fb = Framebuffer::new(bw, bh);
                 {
                     let mut gfx = GfxCtx::new(&mut fb);
-                    gfx.set_font(Arc::clone(&self.font));
-                    gfx.set_font_size(self.font_size);
+                    gfx.set_font(Arc::clone(&font));
+                    gfx.set_font_size(size);
                     gfx.set_fill_color(color);
-                    if let Some(m) = gfx.measure_text(&self.text) {
+                    if let Some(m) = gfx.measure_text(&text) {
                         let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
-                        let tx = match self.align {
+                        let tx = match align {
                             LabelAlign::Left   => 0.0,
                             LabelAlign::Center => (w - m.width) * 0.5,
                             LabelAlign::Right  => w - m.width,
                         };
-                        gfx.fill_text(&self.text, tx, ty);
+                        gfx.fill_text(&text, tx, ty);
                     }
                 }
-                // AGG writes premultiplied RGBA into `fb`; `draw_image_rgba`
-                // expects **straight** alpha so both backends render AA edges
-                // with correct intensity (premul + straight-alpha blend func
-                // in GL otherwise darkens half-coverage pixels to 0.25×).
                 let mut pixels = fb.pixels_flipped();
                 unpremultiply_rgba_inplace(&mut pixels);
-                self.cache_pixels   = Some(pixels);
-                self.cache_w        = bw;
-                self.cache_h        = bh;
-                self.cache_text     = self.text.clone();
-                self.cache_font_size = self.font_size;
-                self.cache_color    = color;
-            }
+                pixels
+            });
+            self.cache_pixels = Some(Arc::clone(&arc));
+            self.cache_w      = bw;
+            self.cache_h      = bh;
 
-            if let Some(pixels) = &self.cache_pixels {
-                ctx.draw_image_rgba(pixels, self.cache_w, self.cache_h, 0.0, 0.0, w, h);
-            }
+            ctx.draw_image_rgba_arc(&arc, bw, bh, 0.0, 0.0, w, h);
             return;
         }
 
