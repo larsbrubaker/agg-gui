@@ -460,7 +460,7 @@ impl Widget for MarkdownView {
                     let tx = pad + indent;
                     let ty = y + height * 0.5;
                     let metrics = measure_text_metrics(&self.font, text.as_str(), fs);
-                    let text_y  = ty - (metrics.ascent - metrics.descent) * 0.5 + metrics.descent;
+                    let text_y  = ty - (metrics.ascent - metrics.descent) * 0.5;
 
                     match style {
                         LineStyle::Rule => {

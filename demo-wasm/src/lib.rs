@@ -62,6 +62,11 @@ thread_local! {
     static FRAME_HISTORY: RefCell<Option<Rc<RefCell<demo_ui::FrameHistory>>>>                   = RefCell::new(None);
     /// Frame counter used to throttle localStorage saves.
     static FRAME_COUNT: Cell<u32> = Cell::new(0);
+    /// Mouse-buttons-currently-held counter.  Used to defer auto-save until
+    /// the user releases the drag / resize so we don't hammer localStorage.
+    static MOUSE_BUTTONS_DOWN: Cell<u32> = Cell::new(0);
+    /// Hash of the last persisted state for diff-based auto-save.
+    static LAST_SAVED_STATE: RefCell<String> = RefCell::new(String::new());
     /// Repaint dirty flag — set by any input handler, cleared by `render()`.
     /// The JS animation loop calls `needs_repaint()` each rAF tick and skips
     /// `render()` when nothing has changed, matching the native harness's
@@ -92,6 +97,9 @@ fn load_state_wasm() -> Option<demo_ui::SavedState> {
     demo_ui::SavedState::deserialize(&s)
 }
 
+/// Unused legacy helper; retained for a brief transition while callers move
+/// to the diff-based auto-save in `render()`.
+#[allow(dead_code)]
 fn save_state_wasm(accessor: &demo_ui::StateAccessor) {
     if let Some(storage) = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
@@ -262,13 +270,24 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
         });
     }
 
-    // ── 7. Periodically save window layout to localStorage ──────────────────
-    let fc = FRAME_COUNT.get() + 1;
-    FRAME_COUNT.set(fc);
-    if fc % 120 == 0 {
+    // ── 7. Auto-save layout when state changes ─────────────────────────────
+    // Compare a freshly-serialized state with the last-persisted version and
+    // write to localStorage only when they differ AND no mouse button is
+    // currently pressed (avoids churn during drag / resize).
+    FRAME_COUNT.set(FRAME_COUNT.get() + 1);
+    if MOUSE_BUTTONS_DOWN.get() == 0 {
         STATE_ACCESSOR.with(|c| {
             if let Some(ref acc) = *c.borrow() {
-                save_state_wasm(acc);
+                let s = acc.current_state().serialize();
+                let changed = LAST_SAVED_STATE.with(|last| *last.borrow() != s);
+                if changed {
+                    if let Some(storage) = web_sys::window()
+                        .and_then(|w| w.local_storage().ok().flatten())
+                    {
+                        let _ = storage.set_item("agg-gui-demo-state", &s);
+                        LAST_SAVED_STATE.with(|last| *last.borrow_mut() = s);
+                    }
+                }
             }
         });
     }
@@ -464,6 +483,7 @@ pub fn on_mouse_move(x: f64, y: f64) {
 #[wasm_bindgen]
 pub fn on_mouse_down(x: f64, y: f64, button: u8) {
     mark_dirty();
+    MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_add(1));
     let btn = match button {
         0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
         n => MouseButton::Other(n),
@@ -478,6 +498,7 @@ pub fn on_mouse_down(x: f64, y: f64, button: u8) {
 #[wasm_bindgen]
 pub fn on_mouse_up(x: f64, y: f64, button: u8) {
     mark_dirty();
+    MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_sub(1));
     let btn = match button {
         0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
         n => MouseButton::Other(n),

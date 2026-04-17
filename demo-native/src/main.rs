@@ -51,20 +51,25 @@ fn load_saved_state() -> Option<demo_ui::SavedState> {
     demo_ui::SavedState::deserialize(&s)
 }
 
-fn save_state(
+/// Build the serialized form of the current state, substituting the
+/// last-known windowed size when the window is currently fullscreen or
+/// maximized (its inner_size is the monitor / maximized rect, which isn't
+/// what we want to restore on the next launch).
+fn serialize_state(
     accessor: &demo_ui::StateAccessor,
     last_windowed: (u32, u32),
-) {
-    let path = state_file_path();
+) -> String {
     let mut state = accessor.current_state();
-    // When fullscreen, inner_size() is the monitor resolution, which is NOT what
-    // we want to restore on next launch.  Persist the last-known windowed size
-    // instead so toggling out of fullscreen gives a sensible rect.
-    if state.window_fullscreen {
+    if state.window_fullscreen || state.window_maximized {
         state.window_w = Some(last_windowed.0);
         state.window_h = Some(last_windowed.1);
     }
-    let _ = std::fs::write(&path, state.serialize());
+    state.serialize()
+}
+
+fn save_state_to_disk(text: &str) {
+    let path = state_file_path();
+    let _ = std::fs::write(&path, text);
 }
 
 // ---------------------------------------------------------------------------
@@ -89,9 +94,14 @@ fn main() {
         .map(|s| s.window_fullscreen)
         .unwrap_or(false);
 
+    let start_maximized = initial_state.as_ref()
+        .map(|s| s.window_maximized)
+        .unwrap_or(false);
+
     let mut window_attributes = WindowAttributes::default()
         .with_title("agg-gui — Demo (GL)")
-        .with_inner_size(LogicalSize::new(start_w, start_h));
+        .with_inner_size(LogicalSize::new(start_w, start_h))
+        .with_maximized(start_maximized);
     if start_fullscreen {
         window_attributes = window_attributes
             .with_fullscreen(Some(Fullscreen::Borderless(None)));
@@ -110,6 +120,14 @@ fn main() {
         .expect("DisplayBuilder::build");
 
     let window = window.expect("window");
+    // Belt-and-suspenders — some platforms don't fully honour the initial
+    // `with_fullscreen` / `with_maximized` attribute, so re-apply both after
+    // the window is live.  Safe no-ops when they're already in that state.
+    if start_fullscreen {
+        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+    } else if start_maximized {
+        window.set_maximized(true);
+    }
     let raw_window_handle = window.window_handle().expect("window_handle").as_raw();
 
     let context_attributes = ContextAttributesBuilder::new()
@@ -172,11 +190,17 @@ fn main() {
     let screen_size        = Rc::clone(&handles.screen_size);
     let frame_history      = Rc::clone(&handles.frame_history);
     let window_fullscreen  = Rc::clone(&handles.window_fullscreen);
+    let window_maximized   = Rc::clone(&handles.window_maximized);
     let screenshot_request      = Rc::clone(&handles.screenshot_request);
     let handles_screenshot_image = Rc::clone(&handles.screenshot_image);
     let state_accessor          = handles.state;
     #[allow(unused_assignments, unused_mut)]
     let mut screenshot_counter: u32 = 0;
+    // Auto-save machinery — every AboutToWait tick, hash the current state
+    // and save when it differs AND no mouse button is held down (so we don't
+    // thrash on disk mid-drag or mid-resize).
+    let mut last_saved_state: String = String::new();
+    let mut mouse_buttons_down: u32 = 0;
 
     let mut cursor_x    = 0.0f64;
     let mut cursor_y    = 0.0f64;
@@ -200,7 +224,9 @@ fn main() {
         .run(|event, elwt| {
             match event {
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                    save_state(&state_accessor, (last_windowed_w, last_windowed_h));
+                    let s = serialize_state(&state_accessor,
+                        (last_windowed_w, last_windowed_h));
+                    save_state_to_disk(&s);
                     elwt.exit();
                 }
                 Event::WindowEvent {
@@ -215,11 +241,13 @@ fn main() {
                         win_w = new_size.width;
                         win_h = new_size.height;
                         screen_size.set((win_w, win_h));
-                        // Resize is the reliable signal for fullscreen changes,
-                        // so refresh the tracked fullscreen state here.
+                        // Resize is the reliable signal for fullscreen AND
+                        // maximize/restore transitions — update both flags.
                         let is_full = window.fullscreen().is_some();
+                        let is_max  = window.is_maximized();
                         window_fullscreen.set(is_full);
-                        if !is_full {
+                        window_maximized.set(is_max);
+                        if !is_full && !is_max {
                             last_windowed_w = win_w;
                             last_windowed_h = win_h;
                         }
@@ -259,8 +287,14 @@ fn main() {
                 } => {
                     let btn = map_mouse_button(&button);
                     match state {
-                        ElementState::Pressed  => app.on_mouse_down(cursor_x, cursor_y, btn, current_mods),
-                        ElementState::Released => app.on_mouse_up(cursor_x, cursor_y, btn, current_mods),
+                        ElementState::Pressed  => {
+                            mouse_buttons_down = mouse_buttons_down.saturating_add(1);
+                            app.on_mouse_down(cursor_x, cursor_y, btn, current_mods);
+                        }
+                        ElementState::Released => {
+                            mouse_buttons_down = mouse_buttons_down.saturating_sub(1);
+                            app.on_mouse_up(cursor_x, cursor_y, btn, current_mods);
+                        }
                     }
                 }
                 Event::WindowEvent {
@@ -373,6 +407,19 @@ fn main() {
 
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
                     frame_history.borrow_mut().push(last_frame_ms as f32);
+
+                    // Auto-save when state changed AND no mouse button is
+                    // held down.  Covers window open/close clicks, drag /
+                    // resize releases, fullscreen / maximize transitions,
+                    // and hotkey-driven toggles — but never saves mid-drag.
+                    if mouse_buttons_down == 0 {
+                        let s = serialize_state(&state_accessor,
+                            (last_windowed_w, last_windowed_h));
+                        if s != last_saved_state {
+                            save_state_to_disk(&s);
+                            last_saved_state = s;
+                        }
+                    }
                 }
                 _ => {}
             }

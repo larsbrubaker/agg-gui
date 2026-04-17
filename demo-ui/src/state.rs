@@ -40,8 +40,11 @@ pub struct SavedState {
     pub window_w: Option<u32>,
     /// OS-window logical height (in pixels).
     pub window_h: Option<u32>,
-    /// Whether the OS window was fullscreen / maximized when last saved.
+    /// Whether the OS window was borderless-fullscreen when last saved.
     pub window_fullscreen: bool,
+    /// Whether the OS window was maximized when last saved.  Independent of
+    /// fullscreen — fullscreen wins on restore when both are true.
+    pub window_maximized: bool,
 }
 
 impl SavedState {
@@ -63,8 +66,10 @@ impl SavedState {
             self.about.w, self.about.h));
         out.push_str(&format!("backend={}\n", self.backend_open as u8));
         if let (Some(w), Some(h)) = (self.window_w, self.window_h) {
-            out.push_str(&format!("window={},{},{}\n",
-                w, h, self.window_fullscreen as u8));
+            out.push_str(&format!("window={},{},{},{}\n",
+                w, h,
+                self.window_fullscreen as u8,
+                self.window_maximized  as u8));
         }
         out
     }
@@ -79,6 +84,7 @@ impl SavedState {
         let mut window_w: Option<u32> = None;
         let mut window_h: Option<u32> = None;
         let mut window_fullscreen = false;
+        let mut window_maximized  = false;
 
         for line in s.lines() {
             let line = line.trim();
@@ -91,11 +97,13 @@ impl SavedState {
                 "about"   => { about = Some(parse_window_state(val)?); }
                 "backend" => { let v: u8 = val.parse().ok()?; backend_open = v != 0; }
                 "window"  => {
-                    let mut it = val.splitn(3, ',');
+                    let mut it = val.splitn(4, ',');
                     window_w = it.next()?.parse().ok();
                     window_h = it.next()?.parse().ok();
                     let fs: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
                     window_fullscreen = fs != 0;
+                    let mx: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    window_maximized  = mx != 0;
                 }
                 k if k.starts_with('d') => {
                     let i: usize = k[1..].parse().ok()?;
@@ -123,6 +131,7 @@ impl SavedState {
             window_w,
             window_h,
             window_fullscreen,
+            window_maximized,
         })
     }
 }
@@ -153,8 +162,10 @@ pub struct StateAccessor {
     pub backend_open: Rc<Cell<bool>>,
     /// Latest OS-window size, updated by the platform harness on Resized.
     pub window_size: Rc<Cell<(u32, u32)>>,
-    /// Whether the OS window is currently fullscreen / maximized.
+    /// Whether the OS window is currently borderless-fullscreen.
     pub window_fullscreen: Rc<Cell<bool>>,
+    /// Whether the OS window is currently maximized.
+    pub window_maximized:  Rc<Cell<bool>>,
 }
 
 impl StateAccessor {
@@ -176,6 +187,7 @@ impl StateAccessor {
             window_w: if ww > 0 { Some(ww) } else { None },
             window_h: if wh > 0 { Some(wh) } else { None },
             window_fullscreen: self.window_fullscreen.get(),
+            window_maximized:  self.window_maximized.get(),
         }
     }
 }

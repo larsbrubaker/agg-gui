@@ -294,7 +294,7 @@ impl Widget for Label {
                 if let Some(m) = ctx.measure_text(line) {
                     // Y-up: line 0 is topmost → y_center = total_h - 0.5*line_h
                     let line_center_y = total_h - (i as f64 + 0.5) * line_h;
-                    let ty = line_center_y - (m.ascent - m.descent) * 0.5 + m.descent;
+                    let ty = line_center_y - (m.ascent - m.descent) * 0.5;
                     let tx = match self.align {
                         LabelAlign::Left   => 0.0,
                         LabelAlign::Center => (w - m.width) * 0.5,
@@ -327,7 +327,7 @@ impl Widget for Label {
                     gfx.set_font_size(self.font_size);
                     gfx.set_fill_color(color);
                     if let Some(m) = gfx.measure_text(&self.text) {
-                        let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
+                        let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
                         let tx = match self.align {
                             LabelAlign::Left   => 0.0,
                             LabelAlign::Center => (w - m.width) * 0.5,
@@ -353,7 +353,7 @@ impl Widget for Label {
         // ── Direct path (GL or non-buffered) ──────────────────────────────────
         ctx.set_fill_color(color);
         if let Some(m) = ctx.measure_text(&self.text) {
-            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
+            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
             let tx = match self.align {
                 LabelAlign::Left   => 0.0,
                 LabelAlign::Center => (w - m.width) * 0.5,

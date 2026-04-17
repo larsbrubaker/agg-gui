@@ -114,7 +114,7 @@ impl Widget for ProgressBar {
             ctx.set_fill_color(text_color);
             if let Some(m) = ctx.measure_text(&label) {
                 let tx = (w - m.width) * 0.5;
-                let ty = bar_y + BAR_H * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
+                let ty = bar_y + BAR_H * 0.5 - (m.ascent - m.descent) * 0.5;
                 ctx.fill_text(&label, tx, ty);
             }
         }

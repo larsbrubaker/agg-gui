@@ -341,9 +341,11 @@ pub struct DemoHandles {
     pub cube_visible:    Rc<Cell<bool>>,
     pub screen_size:     Rc<Cell<(u32, u32)>>,
     pub frame_history:   Rc<RefCell<FrameHistory>>,
-    /// Fullscreen / maximized state of the OS window.  The platform harness
-    /// sets this cell whenever the window transitions.
+    /// Fullscreen state of the OS window.  The platform harness sets this
+    /// cell whenever the window transitions.
     pub window_fullscreen: Rc<Cell<bool>>,
+    /// Maximized (not fullscreen) state of the OS window.
+    pub window_maximized:  Rc<Cell<bool>>,
     /// When set to `true`, the platform harness captures the frame buffer on
     /// the NEXT fully-rendered frame, writes the RGBA8 data + dimensions into
     /// `screenshot_image`, then resets this flag.  Set to `true` from any
@@ -372,6 +374,9 @@ pub fn build_demo_ui(
     let screen_size     = Rc::new(Cell::new((0u32, 0u32)));
     let window_fullscreen = Rc::new(Cell::new(
         initial_state.as_ref().map(|s| s.window_fullscreen).unwrap_or(false)
+    ));
+    let window_maximized = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.window_maximized).unwrap_or(false)
     ));
     let screenshot_request = Rc::new(Cell::new(false));
     let screenshot_image: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>> =
@@ -722,6 +727,7 @@ pub fn build_demo_ui(
         backend_open: Rc::clone(&show_backend),
         window_size: Rc::clone(&screen_size),
         window_fullscreen: Rc::clone(&window_fullscreen),
+        window_maximized:  Rc::clone(&window_maximized),
     };
 
     let handles = DemoHandles {
@@ -732,6 +738,7 @@ pub fn build_demo_ui(
         screen_size,
         frame_history,
         window_fullscreen,
+        window_maximized,
         screenshot_request: Rc::clone(&screenshot_request),
         screenshot_image:   Rc::clone(&screenshot_image),
         state: state_accessor,

@@ -86,7 +86,7 @@ impl Widget for Hyperlink {
 
         let h = self.bounds.height;
         let m = ctx.measure_text(&self.text).unwrap_or_default();
-        let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
+        let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
         ctx.fill_text(&self.text, 0.0, ty);
 
         // Underline — drawn at the text baseline.

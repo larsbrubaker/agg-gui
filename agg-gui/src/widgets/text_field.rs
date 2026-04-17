@@ -609,7 +609,7 @@ impl Widget for TextField {
         ctx.set_font_size(self.font_size);
 
         let m          = ctx.measure_text("Ag").unwrap_or_default();
-        let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
+        let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
         let text_x     = pad - self.scroll_x;
 
         // ── Selection highlight ───────────────────────────────────────────

@@ -208,14 +208,14 @@ impl Widget for DragValue {
 
         // Left arrow ("◀") near the left edge.
         if let Some(lm) = ctx.measure_text("◀") {
-            let ly = h * 0.5 - (lm.ascent - lm.descent) * 0.5 + lm.descent;
+            let ly = h * 0.5 - (lm.ascent - lm.descent) * 0.5;
             ctx.fill_text("◀", ARROW_MARGIN, ly);
         }
 
         // Right arrow ("▶") near the right edge.
         if let Some(rm) = ctx.measure_text("▶") {
             let rx = w - ARROW_MARGIN - rm.width;
-            let ry = h * 0.5 - (rm.ascent - rm.descent) * 0.5 + rm.descent;
+            let ry = h * 0.5 - (rm.ascent - rm.descent) * 0.5;
             ctx.fill_text("▶", rx, ry);
         }
 
@@ -224,7 +224,7 @@ impl Widget for DragValue {
         ctx.set_fill_color(v.text_color);
         if let Some(m) = ctx.measure_text(&label) {
             let tx = (w - m.width) * 0.5;
-            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5 + m.descent;
+            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
             ctx.fill_text(&label, tx, ty);
         }
     }
