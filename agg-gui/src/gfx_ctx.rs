@@ -683,6 +683,10 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         let mut scaled = crate::framebuffer::Framebuffer::new(out_w, out_h);
 
         // Nearest-neighbour scale — sufficient for README screenshots / badges.
+        // `data` is straight-alpha by the `draw_image_rgba` convention; AGG
+        // framebuffers store **premultiplied** RGBA, so we premultiply each
+        // sampled pixel on the way in so `composite_framebuffers` (which uses
+        // premultiplied SrcOver) blends with correct intensity.
         let px = scaled.pixels_mut();
         for dy in 0..out_h {
             for dx in 0..out_w {
@@ -694,10 +698,19 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
                 let si = ((sy_img * img_w + sx) * 4) as usize;
                 let di = ((dy * out_w + dx) * 4) as usize;
                 if si + 3 < data.len() && di + 3 < px.len() {
-                    px[di]     = data[si];
-                    px[di + 1] = data[si + 1];
-                    px[di + 2] = data[si + 2];
-                    px[di + 3] = data[si + 3];
+                    let a = data[si + 3] as u32;
+                    if a == 255 {
+                        px[di]     = data[si];
+                        px[di + 1] = data[si + 1];
+                        px[di + 2] = data[si + 2];
+                        px[di + 3] = 255;
+                    } else {
+                        // Premultiply: (c * a + 127) / 255 (round-half-up).
+                        px[di]     = (((data[si]     as u32) * a + 127) / 255) as u8;
+                        px[di + 1] = (((data[si + 1] as u32) * a + 127) / 255) as u8;
+                        px[di + 2] = (((data[si + 2] as u32) * a + 127) / 255) as u8;
+                        px[di + 3] = a as u8;
+                    }
                 }
             }
         }

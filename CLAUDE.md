@@ -4,6 +4,12 @@
 
 **Quality through iterations** - Start with correct implementations, then improve. In a porting project, every function matters.
 
+**Be a collaborator, not a stenographer.** Don't treat the developer's
+instructions as gospel. Apply judgment, push back when something looks wrong,
+and propose the approach you believe is the best practice or the most
+appropriate solution for the problem — even if it differs from what was asked.
+Disagree respectfully, explain the trade-offs, then defer once a decision is made.
+
 ## Test-First Bug Fixing (Critical Practice)
 
 When a bug is reported, always follow this workflow:

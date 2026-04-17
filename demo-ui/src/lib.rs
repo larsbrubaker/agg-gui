@@ -374,7 +374,11 @@ pub fn build_demo_ui(
     backend_name:   &'static str,
     initial_state:  Option<SavedState>,
 ) -> (App, DemoHandles) {
-    let show_inspector  = Rc::new(Cell::new(false));
+    let show_inspector  = Rc::new(Cell::new(
+        initial_state.as_ref()
+            .and_then(|s| s.inspector.as_ref().map(|i| i.open))
+            .unwrap_or(false)
+    ));
     let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
     let hovered_bounds  = Rc::new(RefCell::new(None::<Rect>));
     let screen_size     = Rc::new(Cell::new((0u32, 0u32)));
@@ -626,13 +630,24 @@ pub fn build_demo_ui(
 
     // ── Inspector as a floating window ─────────────────────────────────────────
     // Visible-cell is shared with the Tools sidebar entry so F12 / sidebar
-    // toggle and window close button all stay in sync.
+    // toggle and window close button all stay in sync.  Expand / select
+    // state is restored from `initial_state.inspector` and snapshotted out
+    // each frame into `inspector_snapshot_cell` for persistence.
+    let inspector_snapshot_cell: Rc<RefCell<Option<agg_gui::InspectorSavedState>>> =
+        Rc::new(RefCell::new(None));
     {
-        let inspector = InspectorPanel::new(
+        let mut inspector = InspectorPanel::new(
             Arc::clone(&font),
             Rc::clone(&inspector_nodes),
             Rc::clone(&hovered_bounds),
-        );
+        ).with_snapshot_cell(Rc::clone(&inspector_snapshot_cell));
+        if let Some(saved) = initial_state.as_ref().and_then(|s| s.inspector.clone()) {
+            inspector.apply_saved_state(agg_gui::InspectorSavedState {
+                expanded: saved.expanded,
+                selected: saved.selected,
+                props_h:  saved.props_h,
+            });
+        }
         let inspector_win = Window::new(
             "\u{F188} Inspector",
             Arc::clone(&font),
@@ -734,6 +749,16 @@ pub fn build_demo_ui(
         window_size: Rc::clone(&screen_size),
         window_fullscreen: Rc::clone(&window_fullscreen),
         window_maximized:  Rc::clone(&window_maximized),
+        inspector_snapshot: {
+            let cell = Rc::clone(&inspector_snapshot_cell);
+            let open_cell = Rc::clone(&show_inspector);
+            Rc::new(move || cell.borrow().as_ref().map(|s| crate::state::InspectorPersist {
+                expanded: s.expanded.clone(),
+                selected: s.selected,
+                props_h:  s.props_h,
+                open:     open_cell.get(),
+            }))
+        },
     };
 
     let handles = DemoHandles {

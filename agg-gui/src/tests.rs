@@ -1286,6 +1286,65 @@ fn test_label_backbuffer_renders_text() {
     assert!(dark_layer  > 0, "backbuffer render must produce dark (text) pixels");
 }
 
+/// `Label`'s backbuffer cache MUST contain **straight-alpha** RGBA so that the
+/// GL path's `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend produces correct AA edges.
+///
+/// A half-coverage white edge pixel in a premultiplied buffer is
+/// `(128, 128, 128, 128)`; in a straight-alpha buffer it's
+/// `(255, 255, 255, 128)`.  If this test ever flips back to premul, GL text
+/// on coloured buttons loses ~50 % intensity at AA edges (dark fringe).
+#[test]
+fn test_label_backbuffer_cache_is_straight_alpha() {
+    use std::sync::Arc;
+    use crate::{Label, text::Font};
+    use crate::widget::Widget;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+
+    let mut fb = Framebuffer::new(200, 60);
+    let mut lbl = Label::new("Hi", Arc::clone(&font))
+        .with_font_size(20.0)
+        .with_has_backbuffer(true)
+        .with_color(Color::white()); // white text → AA edge pixels are the critical case
+    lbl.layout(Size::new(200.0, 60.0));
+    lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::transparent());
+        crate::widget::paint_subtree(&mut lbl, &mut ctx);
+    }
+
+    let (pixels, _w, _h) = lbl.cache_for_test().expect("backbuffer cached");
+
+    // Find partial-alpha pixels (AA edges).  In straight alpha the RGB must be
+    // at full white (255) — it's the alpha that encodes coverage.  In premul
+    // the RGB would be near the alpha value (≤ alpha).
+    let mut edge_samples = 0u32;
+    let mut premul_looking = 0u32;
+    for px in pixels.chunks_exact(4) {
+        let a = px[3];
+        if a > 0 && a < 240 {
+            edge_samples += 1;
+            // Straight white at alpha<255 → r=g=b=255 (within rounding).
+            // Premul white at alpha<255 → r=g=b=a.
+            if (px[0] as i32 - a as i32).abs() < 8
+                && (px[1] as i32 - a as i32).abs() < 8
+                && (px[2] as i32 - a as i32).abs() < 8
+                && px[0] < 240 // rule out fully-saturated straight case
+            {
+                premul_looking += 1;
+            }
+        }
+    }
+    assert!(edge_samples > 0, "expected some AA edge pixels in backbuffer");
+    assert_eq!(
+        premul_looking, 0,
+        "found {premul_looking} premul-looking edge pixels out of {edge_samples}; \
+         backbuffer must be straight-alpha"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Slider mouse-capture tests
 // ---------------------------------------------------------------------------

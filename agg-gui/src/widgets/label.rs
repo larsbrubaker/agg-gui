@@ -25,7 +25,7 @@ use crate::color::Color;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
-use crate::framebuffer::Framebuffer;
+use crate::framebuffer::{Framebuffer, unpremultiply_rgba_inplace};
 use crate::gfx_ctx::GfxCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
@@ -198,6 +198,16 @@ impl Label {
     /// Return the current label text as a `&str`.
     pub fn text_str(&self) -> &str { &self.text }
 
+    /// Test-only accessor for the backbuffer cache. Returns the cached
+    /// `(pixels, width, height)` triple, where pixels are **straight-alpha**
+    /// RGBA8 in top-row-first order.
+    #[cfg(test)]
+    pub(crate) fn cache_for_test(&self) -> Option<(&[u8], u32, u32)> {
+        self.cache_pixels
+            .as_deref()
+            .map(|p| (p, self.cache_w, self.cache_h))
+    }
+
     // ── setter methods (for post-construction mutation) ───────────────────────
 
     pub fn set_text(&mut self, text: impl Into<String>) {
@@ -336,7 +346,13 @@ impl Widget for Label {
                         gfx.fill_text(&self.text, tx, ty);
                     }
                 }
-                self.cache_pixels   = Some(fb.pixels_flipped());
+                // AGG writes premultiplied RGBA into `fb`; `draw_image_rgba`
+                // expects **straight** alpha so both backends render AA edges
+                // with correct intensity (premul + straight-alpha blend func
+                // in GL otherwise darkens half-coverage pixels to 0.25×).
+                let mut pixels = fb.pixels_flipped();
+                unpremultiply_rgba_inplace(&mut pixels);
+                self.cache_pixels   = Some(pixels);
                 self.cache_w        = bw;
                 self.cache_h        = bh;
                 self.cache_text     = self.text.clone();

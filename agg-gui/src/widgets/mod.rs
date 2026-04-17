@@ -33,7 +33,7 @@ pub use drag_value::DragValue;
 pub use flex::{FlexColumn, FlexRow};
 pub use hyperlink::Hyperlink;
 pub use image_view::ImageView;
-pub use inspector::InspectorPanel;
+pub use inspector::{InspectorPanel, InspectorSavedState};
 pub use label::{Label, LabelAlign};
 pub use markdown::MarkdownView;
 pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};

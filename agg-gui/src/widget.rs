@@ -369,11 +369,19 @@ pub fn collect_inspector_nodes(
         b.width,
         b.height,
     );
+    // Build the properties vec — include the universal `backbuffer` flag
+    // first (so every widget shows it in a consistent location), then the
+    // widget-specific properties.
+    let mut props = vec![
+        ("backbuffer", if widget.has_backbuffer() { "true".to_string() }
+                       else                        { "false".to_string() }),
+    ];
+    props.extend(widget.properties());
     out.push(InspectorNode {
         type_name:  widget.type_name(),
         screen_bounds: abs,
         depth,
-        properties: widget.properties(),
+        properties: props,
     });
 
     // Widgets that are part of the inspector infrastructure opt out of child

@@ -142,6 +142,23 @@ pub struct InspectorPanel {
     pub hovered_bounds: Rc<RefCell<Option<Rect>>>,
     /// The tree widget, managed directly (not in children).
     pub(crate) tree_view: TreeView,
+    /// Set by `apply_saved_state`; consumed on the next layout rebuild so
+    /// restored expand / select flags apply even on the very first frame
+    /// (before the user has interacted with the tree).
+    pending_expanded: Option<Vec<bool>>,
+    pending_selected: Option<Option<usize>>,
+    /// When bound, each `layout()` writes the current state into this cell
+    /// so the harness can persist it without needing mutable access to the
+    /// widget tree.
+    snapshot_out: Option<Rc<RefCell<Option<InspectorSavedState>>>>,
+}
+
+/// Serializable inspector UI state — apply at startup, snapshot at shutdown.
+#[derive(Clone, Debug, Default)]
+pub struct InspectorSavedState {
+    pub expanded: Vec<bool>,
+    pub selected: Option<usize>,
+    pub props_h:  f64,
 }
 
 impl InspectorPanel {
@@ -170,7 +187,49 @@ impl InspectorPanel {
             split_dragging: false,
             hovered_bounds,
             tree_view,
+            pending_expanded: None,
+            pending_selected: None,
+            snapshot_out: None,
         }
+    }
+
+    /// Bind an output cell that the inspector updates every layout with
+    /// the current [`InspectorSavedState`] — use the cell from a harness
+    /// that persists app state.
+    pub fn with_snapshot_cell(
+        mut self,
+        cell: Rc<RefCell<Option<InspectorSavedState>>>,
+    ) -> Self {
+        self.snapshot_out = Some(cell);
+        self
+    }
+
+    // ── Persistence helpers ──────────────────────────────────────────────────
+    //
+    // The platform harness calls `saved_state` at shutdown and
+    // `apply_saved_state` on startup so the inspector's tree expand /
+    // selection / split-bar position survive restarts.  Values are stored
+    // by the position they occupy in the flat DFS tree — if the widget
+    // tree differs across runs the worst case is a few extra collapsed
+    // nodes, never a crash.
+
+    /// Snapshot the current inspector UI state for persistence.
+    pub fn saved_state(&self) -> InspectorSavedState {
+        InspectorSavedState {
+            expanded: self.tree_view.nodes.iter().map(|n| n.is_expanded).collect(),
+            selected: self.tree_view.nodes.iter().position(|n| n.is_selected),
+            props_h:  self.props_h,
+        }
+    }
+
+    /// Apply a previously-saved state.  Must be called before the first
+    /// `layout()` runs — the inspector restores the expand / select flags
+    /// from here when it first rebuilds the TreeView, via the `pending_*`
+    /// side channels.
+    pub fn apply_saved_state(&mut self, s: InspectorSavedState) {
+        self.pending_expanded = Some(s.expanded);
+        self.pending_selected = Some(s.selected);
+        self.props_h = s.props_h.clamp(MIN_PROPS_H, 1024.0);
     }
 
     // ── geometry helpers ──────────────────────────────────────────────────────
@@ -241,10 +300,22 @@ impl Widget for InspectorPanel {
         let nodes = self.nodes.borrow();
 
         // Preserve expansion/selection state by index before rebuilding.
-        let old_expanded: Vec<bool> = self.tree_view.nodes.iter()
+        // On the very first layout after startup `pending_expanded` /
+        // `pending_selected` (set by `apply_saved_state`) seed the vectors
+        // so restored state takes effect without an extra click.
+        let mut old_expanded: Vec<bool> = self.tree_view.nodes.iter()
             .map(|n| n.is_expanded).collect();
-        let old_selected: Vec<bool> = self.tree_view.nodes.iter()
+        let mut old_selected: Vec<bool> = self.tree_view.nodes.iter()
             .map(|n| n.is_selected).collect();
+        if let Some(pe) = self.pending_expanded.take() {
+            old_expanded = pe;
+        }
+        if let Some(ps) = self.pending_selected.take() {
+            old_selected = vec![false; old_expanded.len().max(ps.map(|i| i + 1).unwrap_or(0))];
+            if let Some(i) = ps {
+                if i < old_selected.len() { old_selected[i] = true; }
+            }
+        }
 
         self.tree_view.nodes.clear();
 
@@ -308,6 +379,11 @@ impl Widget for InspectorPanel {
         // Keep the presence node's bounds in sync with the real TreeView so the
         // inspector displays accurate bounds for this proxy entry.
         self._children[0].set_bounds(self.tree_view.bounds());
+
+        // Publish a snapshot for the harness to persist.
+        if let Some(cell) = &self.snapshot_out {
+            *cell.borrow_mut() = Some(self.saved_state());
+        }
 
         available
     }

@@ -45,6 +45,19 @@ pub struct SavedState {
     /// Whether the OS window was maximized when last saved.  Independent of
     /// fullscreen — fullscreen wins on restore when both are true.
     pub window_maximized: bool,
+    /// Inspector UI state — expanded tree nodes + selected node + split-bar.
+    pub inspector: Option<InspectorPersist>,
+}
+
+/// Persisted inspector UI state.  Flat bit-vector of expanded nodes in DFS
+/// order + optional selected-node index + properties-pane height.
+#[derive(Clone, Debug, Default)]
+pub struct InspectorPersist {
+    pub expanded: Vec<bool>,
+    pub selected: Option<usize>,
+    pub props_h:  f64,
+    /// Whether the Inspector window itself was visible at save time.
+    pub open:     bool,
 }
 
 impl SavedState {
@@ -71,6 +84,15 @@ impl SavedState {
                 self.window_fullscreen as u8,
                 self.window_maximized  as u8));
         }
+        if let Some(insp) = &self.inspector {
+            // `inspector=selected,props_h,open;expanded-bits`
+            let sel = insp.selected.map(|i| i as i64).unwrap_or(-1);
+            let bits: String = insp.expanded.iter()
+                .map(|b| if *b { '1' } else { '0' })
+                .collect();
+            out.push_str(&format!("inspector={},{},{};{}\n",
+                sel, insp.props_h, insp.open as u8, bits));
+        }
         out
     }
 
@@ -85,6 +107,7 @@ impl SavedState {
         let mut window_h: Option<u32> = None;
         let mut window_fullscreen = false;
         let mut window_maximized  = false;
+        let mut inspector: Option<InspectorPersist> = None;
 
         for line in s.lines() {
             let line = line.trim();
@@ -104,6 +127,19 @@ impl SavedState {
                     window_fullscreen = fs != 0;
                     let mx: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
                     window_maximized  = mx != 0;
+                }
+                "inspector" => {
+                    let mut halves = val.splitn(2, ';');
+                    let head = halves.next().unwrap_or("");
+                    let bits = halves.next().unwrap_or("");
+                    let mut hit = head.splitn(3, ',');
+                    let sel_raw: i64 = hit.next().and_then(|s| s.parse().ok()).unwrap_or(-1);
+                    let props_h: f64 = hit.next().and_then(|s| s.parse().ok()).unwrap_or(160.0);
+                    let open_u8: u8 = hit.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let expanded: Vec<bool> = bits.chars()
+                        .map(|c| c == '1').collect();
+                    let selected = if sel_raw < 0 { None } else { Some(sel_raw as usize) };
+                    inspector = Some(InspectorPersist { expanded, selected, props_h, open: open_u8 != 0 });
                 }
                 k if k.starts_with('d') => {
                     let i: usize = k[1..].parse().ok()?;
@@ -132,6 +168,7 @@ impl SavedState {
             window_h,
             window_fullscreen,
             window_maximized,
+            inspector,
         })
     }
 }
@@ -166,6 +203,10 @@ pub struct StateAccessor {
     pub window_fullscreen: Rc<Cell<bool>>,
     /// Whether the OS window is currently maximized.
     pub window_maximized:  Rc<Cell<bool>>,
+    /// Pulled each tick by `current_state` to snapshot the Inspector panel's
+    /// expand/select/split state.  Returns `None` when the inspector has
+    /// never been laid out yet.
+    pub inspector_snapshot: Rc<dyn Fn() -> Option<InspectorPersist>>,
 }
 
 impl StateAccessor {
@@ -188,6 +229,7 @@ impl StateAccessor {
             window_h: if wh > 0 { Some(wh) } else { None },
             window_fullscreen: self.window_fullscreen.get(),
             window_maximized:  self.window_maximized.get(),
+            inspector:         (self.inspector_snapshot)(),
         }
     }
 }

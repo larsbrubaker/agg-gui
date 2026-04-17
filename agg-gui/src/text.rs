@@ -206,6 +206,10 @@ impl ttf_parser::OutlineBuilder for GlyphPathBuilder {
 /// Shape `text` with `font` at `size` pixels, starting at screen position
 /// `(x, y)` (baseline-left, Y-up). Returns one `PathStorage` per glyph that
 /// has an outline (spaces and control chars yield no path).
+///
+/// Walks the fallback font chain via [`shape_glyphs`], so Font Awesome /
+/// emoji glyphs not present in the primary font are still resolved and
+/// rasterized using the font they live in.
 pub(crate) fn shape_text(
     font: &Font,
     text: &str,
@@ -213,40 +217,32 @@ pub(crate) fn shape_text(
     x: f64,
     y: f64,
 ) -> (Vec<PathStorage>, f64) {
-    let scale = size / font.units_per_em() as f64;
+    let shaped = shape_glyphs(font, text, size);
 
-    font.with_rb_face(|face| {
-        let mut buffer = rustybuzz::UnicodeBuffer::new();
-        buffer.push_str(text);
-        let output = rustybuzz::shape(face, &[], buffer);
+    let mut paths = Vec::new();
+    let mut pen_x = x;
+    let mut total_advance = 0.0;
 
-        let mut paths = Vec::new();
-        let mut pen_x = x;
-        let mut total_advance = 0.0;
+    for g in &shaped {
+        let gx = pen_x + g.x_offset;
+        let gy = y + g.y_offset;
+        // glyph_id indexes into whichever font resolved the code point.
+        let render_font = g.fallback_font.as_deref().unwrap_or(font);
+        let scale = size / render_font.units_per_em() as f64;
 
-        for (info, pos) in output
-            .glyph_infos()
-            .iter()
-            .zip(output.glyph_positions().iter())
-        {
-            let gid = ttf_parser::GlyphId(info.glyph_id as u16);
-            let gx = pen_x + pos.x_offset as f64 * scale;
-            let gy = y + pos.y_offset as f64 * scale;
-
-            let mut builder = GlyphPathBuilder::new(gx, gy, scale);
-            let has_outline = face.outline_glyph(gid, &mut builder).is_some();
-
-            if has_outline && builder.has_outline {
-                paths.push(builder.path);
-            }
-
-            let adv = pos.x_advance as f64 * scale;
-            pen_x += adv;
-            total_advance += adv;
+        let mut builder = GlyphPathBuilder::new(gx, gy, scale);
+        let has_outline = render_font.with_ttf_face(|face| {
+            face.outline_glyph(ttf_parser::GlyphId(g.glyph_id), &mut builder)
+                .is_some()
+        });
+        if has_outline && builder.has_outline {
+            paths.push(builder.path);
         }
 
-        (paths, total_advance)
-    })
+        pen_x += g.x_advance;
+        total_advance += g.x_advance;
+    }
+    (paths, total_advance)
 }
 
 // ---------------------------------------------------------------------------
@@ -467,9 +463,85 @@ mod tests {
 
     const FONT_BYTES: &[u8] =
         include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    const FA_BYTES: &[u8] =
+        include_bytes!("../../demo/assets/fa.ttf");
 
     fn test_font() -> Arc<Font> {
         Arc::new(Font::from_slice(FONT_BYTES).expect("font ok"))
+    }
+
+    /// Font-Awesome codepoint U+F109 ("fa-laptop") — used by the demo's
+    /// backend-panel button label.  The primary font (CascadiaCode) does not
+    /// cover the FA range, so the fallback chain must carry it.
+    const FA_LAPTOP: &str = "\u{F109}";
+
+    /// A `shape_text` call for a codepoint absent from the primary font must
+    /// walk the fallback chain and produce the real glyph outline — not the
+    /// primary font's `.notdef` (the tofu box the top screenshot shows).
+    #[test]
+    fn test_shape_text_renders_fa_icon_via_fallback() {
+        let fa = Font::from_slice(FA_BYTES).expect("parse fa.ttf");
+        let font = Arc::new(
+            Font::from_slice(FONT_BYTES).expect("cc")
+                .with_fallback(Arc::new(fa)),
+        );
+
+        // shape_glyphs must agree the glyph was resolved via fallback.
+        let shaped = shape_glyphs(&font, FA_LAPTOP, 16.0);
+        assert_eq!(shaped.len(), 1);
+        assert!(
+            shaped[0].fallback_font.is_some(),
+            "FA codepoint must resolve via fallback font"
+        );
+
+        // shape_text must return a non-empty path for that glyph.
+        let (paths, _adv) = shape_text(&font, FA_LAPTOP, 16.0, 0.0, 0.0);
+        assert_eq!(
+            paths.len(),
+            1,
+            "fallback outline must yield exactly one PathStorage for FA_LAPTOP"
+        );
+    }
+
+    /// The outline returned by `shape_text` for a codepoint missing from the
+    /// primary font must match the fallback font's outline — not the primary
+    /// font's `.notdef`.  Compare flattened bounding boxes.
+    #[test]
+    fn test_shape_text_fa_outline_matches_fallback_font() {
+        use agg_rust::conv_curve::ConvCurve;
+        use agg_rust::basics::{is_stop, VertexSource};
+
+        let fa_arc = Arc::new(Font::from_slice(FA_BYTES).expect("fa"));
+        let font = Arc::new(
+            Font::from_slice(FONT_BYTES).expect("cc")
+                .with_fallback(Arc::clone(&fa_arc)),
+        );
+
+        // Outline via the fallback-aware shape_text.
+        let (mut paths, _) = shape_text(&font, FA_LAPTOP, 48.0, 0.0, 0.0);
+        assert_eq!(paths.len(), 1);
+        let mut curves = ConvCurve::new(&mut paths[0]);
+        curves.rewind(0);
+
+        let (mut xmin, mut xmax) = (f64::INFINITY, f64::NEG_INFINITY);
+        loop {
+            let (mut cx, mut cy) = (0.0, 0.0);
+            let cmd = curves.vertex(&mut cx, &mut cy);
+            if is_stop(cmd) { break; }
+            if cx < xmin { xmin = cx; }
+            if cx > xmax { xmax = cx; }
+            let _ = cy;
+        }
+        let width = xmax - xmin;
+
+        // FA's "laptop" glyph is full-width at 48 px; the CascadiaCode .notdef
+        // (tofu) is closer to advance-width (~24 px).  A width over 32 px at
+        // size 48 proves we took the fallback outline, not .notdef.
+        assert!(
+            width > 32.0,
+            "FA glyph outline width at 48 px was {width:.1} — too narrow, \
+             likely still rendering CascadiaCode .notdef instead of FA fallback"
+        );
     }
 
     /// Verify that shape_and_flatten_text produces a sane number of

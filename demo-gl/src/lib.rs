@@ -93,12 +93,20 @@ pub struct GlGfxCtx {
     res_loc:   Option<glow::UniformLocation>,
     color_loc: Option<glow::UniformLocation>,
 
-    // Textured-quad pipeline (draw_image_rgba — markdown images, screenshots).
+    // Textured-quad pipeline (draw_image_rgba — markdown images, screenshots,
+    // AGG-rasterised Label backbuffers).
     tex_prog: glow::Program,
     tex_vao:  glow::VertexArray,
     tex_vbo:  glow::Buffer,
     tex_res_loc: Option<glow::UniformLocation>,
     tex_sampler_loc: Option<glow::UniformLocation>,
+
+    // Texture cache keyed on (ptr, len, w, h, head/tail byte hash).  Allows
+    // repeatedly-blitted content (typ. `Label` backbuffer) to reuse a GL
+    // texture across frames instead of uploading every paint.  LRU eviction
+    // keeps memory bounded.
+    texture_cache:       std::collections::HashMap<u64, (glow::Texture, u32, u32)>,
+    texture_cache_order: std::collections::VecDeque<u64>,
 
     // Drawing state
     fill_color:   Color,
@@ -179,6 +187,8 @@ impl GlGfxCtx {
             res_loc, color_loc,
             tex_prog, tex_vao, tex_vbo,
             tex_res_loc, tex_sampler_loc,
+            texture_cache:       std::collections::HashMap::new(),
+            texture_cache_order: std::collections::VecDeque::new(),
             fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
@@ -651,13 +661,14 @@ impl DrawCtx for GlGfxCtx {
 
     // ── Image blitting (textured quad) ───────────────────────────────────────
     //
-    // NOTE: `has_image_blit()` is deliberately left at the default `false`.
-    // If it returned `true`, `Label`'s backbuffer caching path would activate
-    // and every label's text would be rasterised to a software framebuffer
-    // then uploaded as a throwaway texture each frame — a major regression
-    // for widgets that rebuild their labels every layout (e.g. inspector
-    // `TreeRow`).  Widgets that genuinely need pixel blitting (the Screenshot
-    // demo, MarkdownView images) can call `draw_image_rgba` directly.
+    // `has_image_blit()` returns `true` now that `draw_image_rgba` has an
+    // internal texture cache keyed by (ptr, len, head/tail bytes).  `Label`'s
+    // backbuffer path activates — text is rasterised once via AGG, uploaded
+    // as a GL texture, and blitted every subsequent frame.  Cache evicts LRU
+    // at `TEX_CACHE_MAX` entries.  Widgets that rebuild their Label every
+    // layout (e.g. inspector `TreeRow`) pay one re-raster + re-upload per
+    // layout — acceptable since those labels remain small and few.
+    fn has_image_blit(&self) -> bool { true }
 
     fn draw_image_rgba(
         &mut self,
@@ -672,14 +683,10 @@ impl DrawCtx for GlGfxCtx {
         if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 { return; }
         if data.len() < (img_w as usize) * (img_h as usize) * 4 { return; }
 
-        // Transform the four corners through the CTM.  Image is stored
-        // top-row-first so map the quad's HIGH-Y corners to uv.v=0 and the
-        // LOW-Y corners to uv.v=1.
         let bl = self.transform_pt(dst_x,          dst_y);
         let br = self.transform_pt(dst_x + dst_w,  dst_y);
         let tr = self.transform_pt(dst_x + dst_w,  dst_y + dst_h);
         let tl = self.transform_pt(dst_x,          dst_y + dst_h);
-
         let verts: [f32; 24] = [
             bl[0], bl[1], 0.0, 1.0,
             br[0], br[1], 1.0, 1.0,
@@ -689,29 +696,64 @@ impl DrawCtx for GlGfxCtx {
             tl[0], tl[1], 0.0, 0.0,
         ];
 
+        // Cache key blends pointer, length, dimensions, and the first+last
+        // few bytes.  Pointer changes when `Label` rebuilds its pixel cache
+        // (drops old `Vec<u8>`, allocates new), so the key naturally
+        // invalidates.  Head/tail-byte hash guards against the (rare) case
+        // where a new allocation lands at the freed pointer address.
+        let key = texture_key(data, img_w, img_h);
+        let existing = self.texture_cache.get(&key).map(|&(t, _, _)| t);
+
         unsafe {
-            let gl = &self.gl;
-            let tex = gl.create_texture().expect("create texture");
+            let gl = Rc::clone(&self.gl);
+            let tex = match existing {
+                Some(t) => {
+                    // LRU touch — move key to back.
+                    if let Some(pos) = self.texture_cache_order.iter()
+                        .position(|&k| k == key)
+                    {
+                        self.texture_cache_order.remove(pos);
+                    }
+                    self.texture_cache_order.push_back(key);
+                    t
+                }
+                None => {
+                    let tex = gl.create_texture().expect("create texture");
+                    gl.active_texture(glow::TEXTURE0);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+                    gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+                    gl.tex_image_2d(
+                        glow::TEXTURE_2D, 0, glow::RGBA as i32,
+                        img_w as i32, img_h as i32, 0,
+                        glow::RGBA, glow::UNSIGNED_BYTE, Some(data),
+                    );
+                    self.texture_cache.insert(key, (tex, img_w, img_h));
+                    self.texture_cache_order.push_back(key);
+                    // LRU evict to cap.
+                    const TEX_CACHE_MAX: usize = 512;
+                    while self.texture_cache.len() > TEX_CACHE_MAX {
+                        if let Some(old) = self.texture_cache_order.pop_front() {
+                            if let Some((old_tex, _, _)) = self.texture_cache.remove(&old) {
+                                gl.delete_texture(old_tex);
+                            }
+                        } else { break; }
+                    }
+                    tex
+                }
+            };
+
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-            gl.tex_image_2d(
-                glow::TEXTURE_2D, 0, glow::RGBA as i32,
-                img_w as i32, img_h as i32, 0,
-                glow::RGBA, glow::UNSIGNED_BYTE, Some(data),
-            );
-
             gl.use_program(Some(self.tex_prog));
             gl.uniform_2_f32(
                 self.tex_res_loc.as_ref(),
                 self.viewport.0, self.viewport.1,
             );
             gl.uniform_1_i32(self.tex_sampler_loc.as_ref(), 0);
-
             gl.bind_vertex_array(Some(self.tex_vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.tex_vbo));
             gl.buffer_data_u8_slice(
@@ -719,13 +761,10 @@ impl DrawCtx for GlGfxCtx {
                 bytemuck::cast_slice(&verts),
                 glow::DYNAMIC_DRAW,
             );
-
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
-
             gl.bind_vertex_array(None);
-            gl.delete_texture(tex);
         }
     }
 
@@ -888,6 +927,27 @@ unsafe fn compile_program(
 // ---------------------------------------------------------------------------
 // Shared frame overlays (identical on native and WASM)
 // ---------------------------------------------------------------------------
+
+/// Compute a cache key for an RGBA image slice.  Blends pointer, length,
+/// dimensions, and first/last 8 bytes so a freed-and-reused pointer with
+/// fresh content produces a different key.  Cheap: no full-buffer hash.
+fn texture_key(data: &[u8], w: u32, h: u32) -> u64 {
+    let mut k: u64 = 0xcbf29ce484222325;
+    let mix = |acc: u64, v: u64| -> u64 {
+        acc.wrapping_mul(0x100000001b3).wrapping_add(v)
+    };
+    k = mix(k, data.as_ptr() as usize as u64);
+    k = mix(k, data.len() as u64);
+    k = mix(k, w as u64);
+    k = mix(k, h as u64);
+    if data.len() >= 16 {
+        for &b in &data[..8]                    { k = mix(k, b as u64); }
+        for &b in &data[data.len() - 8..]       { k = mix(k, b as u64); }
+    } else {
+        for &b in data                          { k = mix(k, b as u64); }
+    }
+    k
+}
 
 /// Draw the inspector hover overlay: teal fill + inset stroke + size label.
 ///
