@@ -132,6 +132,9 @@ impl Widget for PixelTestLines {
         let h = self.bounds.height;
         let n = PT_N as usize;
 
+        ctx.save();
+        ctx.snap_to_pixel();
+
         // Vertical stripes — left block (Y-up: full height).
         for i in 0..(n / 2) {
             let x = (2 * i) as f64;
@@ -160,6 +163,8 @@ impl Widget for PixelTestLines {
             ctx.rect(off_x, y + 1.0, PT_N, 1.0);
             ctx.fill();
         }
+
+        ctx.restore();
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
@@ -192,18 +197,28 @@ impl Widget for PixelTestSquares {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        ctx.save();
+        ctx.snap_to_pixel();
+
         let v = ctx.visuals();
         let color = v.text_color;
-        let mut x = 0.0_f64;
-        let y = 2.0; // small bottom margin
+        // Match egui's top-alignment: all squares share their TOP edge.  In
+        // Y-up that means high y = top; each square extends downward so a
+        // 1-px square sits flush with the top while a 10-px square reaches
+        // further down.  egui Y-down does the mirror of this.
+        let h      = self.bounds.height;
+        let top_y  = h - 2.0; // 2-px margin below the text above
+        let mut x  = 0.0_f64;
         for size in 1..=PT_SQ_N {
             let s = size as f64;
             ctx.set_fill_color(color);
             ctx.begin_path();
-            ctx.rect(x, y, s, s);
+            ctx.rect(x, top_y - s, s, s);
             ctx.fill();
             x += s + 1.0;
         }
+
+        ctx.restore();
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
@@ -238,35 +253,61 @@ impl Widget for PixelTestStrokes {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        ctx.save();
+        ctx.snap_to_pixel();
+
         let v = ctx.visuals();
         let color = v.text_color;
         let n = 10_usize;
-        let h = self.bounds.height;
 
-        // Draw rows from bottom (thickness=1) to top (thickness=3) in Y-up.
-        let mut row_y = 0.0_f64;
+        // Match egui row order: thinnest stroke at the visual TOP, thickest
+        // at the BOTTOM.  In Y-up top = high y, so start at bounds.height
+        // and move downward (subtract row_h each iteration).
+        let mut row_top = self.bounds.height;
         for thickness in 1_usize..=3 {
-            let t = thickness as f64;
+            let t     = thickness as f64;
             let row_h = n as f64 + t * 2.0 + 2.0;
-            let mut cursor_x = t; // start with left margin = thickness
 
-            ctx.set_stroke_color(color);
-            ctx.set_line_width(t);
+            // Top-align the s×s logical rect inside the row with a 1-px +
+            // t-px margin (room for the outer stroke above and a visual gap).
+            let logical_top = row_top - 1.0 - t;
+            let mut cursor_x = t; // left margin = thickness
+
+            ctx.set_fill_color(color);
 
             for size in 1..=n {
-                let s = size as f64;
-                // rect inner size = s×s, outer = s+2t × s+2t
-                let rx = cursor_x;
-                let ry = row_y + 1.0;
+                let s   = size as f64;
+                let rx  = cursor_x;
+                let ry  = logical_top - s;   // bottom of the s×s hole in Y-up
+                // Draw the outlined ring as four filled rectangles — GUARANTEES
+                // pixel-perfect corners (no miter / round-join retreat, no AA
+                // blur from a stroke sampling across corner pixels).  The
+                // geometry matches egui's `StrokeKind::Outside`: logical rect
+                // stays empty, stroke ring of thickness t surrounds it.
+                // Top bar:    (rx-t, logical_top,     s+2t, t)
+                // Bottom bar: (rx-t, ry-t,            s+2t, t)
+                // Left bar:   (rx-t, ry,              t,    s)
+                // Right bar:  (rx+s, ry,              t,    s)
                 ctx.begin_path();
-                ctx.rect(rx, ry, s, s);
-                ctx.stroke();
+                ctx.rect(rx - t,     logical_top, s + 2.0 * t, t);
+                ctx.fill();
+                ctx.begin_path();
+                ctx.rect(rx - t,     ry - t,      s + 2.0 * t, t);
+                ctx.fill();
+                ctx.begin_path();
+                ctx.rect(rx - t,     ry,          t,            s);
+                ctx.fill();
+                ctx.begin_path();
+                ctx.rect(rx + s,     ry,          t,            s);
+                ctx.fill();
+
                 cursor_x += s + t * 2.0 + 1.0;
             }
 
-            row_y += row_h;
+            row_top -= row_h;
         }
-        let _ = h;
+
+        ctx.restore();
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }

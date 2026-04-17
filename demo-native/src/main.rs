@@ -120,6 +120,13 @@ fn main() {
 
     let (window, gl_config) = display_builder
         .build(&event_loop, template, |configs| {
+            // Pick the MAX-samples config — MSAA is what provides AA for the
+            // direct-GL tessellated-glyph path (wrapped text paragraphs that
+            // bypass the Label backbuffer cache).  MSAA samples live at
+            // sub-pixel offsets within each pixel, so pixel-aligned integer
+            // triangle edges still produce 0 % / 100 % coverage (no fringe)
+            // as long as the CTM is integer — which `paint_subtree`'s
+            // enforce-integer-bounds snap guarantees on widgets that opt in.
             configs
                 .reduce(|a, b| if b.num_samples() > a.num_samples() { b } else { a })
                 .expect("no suitable GL config")

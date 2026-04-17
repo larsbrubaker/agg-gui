@@ -188,6 +188,22 @@ pub trait Widget {
     /// The parent will never assign a slot larger than this.
     /// Default: [`Size::MAX`] (no maximum).
     fn max_size(&self) -> Size { Size::MAX }
+
+    /// Whether [`paint_subtree`] should snap this widget's incoming
+    /// translation to the physical pixel grid.
+    ///
+    /// Defaults to the process-wide
+    /// [`pixel_bounds::default_enforce_integer_bounds`](crate::pixel_bounds::default_enforce_integer_bounds)
+    /// flag so the common case — crisp UI text + strokes — works without
+    /// ceremony.  Widgets with a [`WidgetBase`] should delegate to
+    /// `self.base().enforce_integer_bounds` so per-instance overrides take
+    /// effect; widgets that genuinely want sub-pixel positioning (smooth
+    /// scroll markers, zoomed canvases) override to return `false`.
+    ///
+    /// Mirrors MatterCAD's `GuiWidget.EnforceIntegerBounds` accessor.
+    fn enforce_integer_bounds(&self) -> bool {
+        crate::pixel_bounds::default_enforce_integer_bounds()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -224,9 +240,20 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     // Iterate over indices to avoid holding a reference while recursing.
     let n = widget.children().len();
     for i in 0..n {
-        let child_bounds = widget.children()[i].bounds();
+        let child_bounds  = widget.children()[i].bounds();
+        let snap_to_pixel = widget.children()[i].enforce_integer_bounds();
         ctx.save();
-        ctx.translate(child_bounds.x, child_bounds.y);
+        // Integer-snap the incoming translation when the child opts in — the
+        // MatterCAD pattern.  A parent flex layout often produces fractional
+        // child Y (`font_size × 1.5` line heights accumulate down a column);
+        // snapping here kills the fractional component at exactly one site,
+        // guaranteeing that every rect/stroke/blit drawn inside `paint`
+        // lands on the physical pixel grid.
+        if snap_to_pixel {
+            ctx.translate(child_bounds.x.round(), child_bounds.y.round());
+        } else {
+            ctx.translate(child_bounds.x, child_bounds.y);
+        }
         // We need exclusive access to the child. Use index-based access.
         let child = &mut widget.children_mut()[i];
         paint_subtree(child.as_mut(), ctx);

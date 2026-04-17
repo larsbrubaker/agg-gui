@@ -703,10 +703,14 @@ impl DrawCtx for GlGfxCtx {
         if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 { return; }
         if data.len() < (img_w as usize) * (img_h as usize) * 4 { return; }
 
-        let bl = self.transform_pt(dst_x,          dst_y);
-        let br = self.transform_pt(dst_x + dst_w,  dst_y);
-        let tr = self.transform_pt(dst_x + dst_w,  dst_y + dst_h);
-        let tl = self.transform_pt(dst_x,          dst_y + dst_h);
+        // Honour whatever CTM the caller has set — sub-pixel positions are
+        // legitimate (smooth scrolling, animation).  Callers that need
+        // pixel-perfect 1:1 blits (e.g. `Label` backbuffers, the pixel-
+        // alignment test) must explicitly call `ctx.snap_to_pixel()` first.
+        let bl = self.transform_pt(dst_x,         dst_y);
+        let br = self.transform_pt(dst_x + dst_w, dst_y);
+        let tr = self.transform_pt(dst_x + dst_w, dst_y + dst_h);
+        let tl = self.transform_pt(dst_x,         dst_y + dst_h);
         let verts: [f32; 24] = [
             bl[0], bl[1], 0.0, 1.0,
             br[0], br[1], 1.0, 1.0,
@@ -807,10 +811,12 @@ impl DrawCtx for GlGfxCtx {
         if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 { return; }
         if data.len() < (img_w as usize) * (img_h as usize) * 4 { return; }
 
-        let bl = self.transform_pt(dst_x,          dst_y);
-        let br = self.transform_pt(dst_x + dst_w,  dst_y);
-        let tr = self.transform_pt(dst_x + dst_w,  dst_y + dst_h);
-        let tl = self.transform_pt(dst_x,          dst_y + dst_h);
+        // Honour the caller's CTM — no implicit snapping.  Callers that need
+        // pixel-perfect 1:1 blits call `ctx.snap_to_pixel()` before the draw.
+        let bl = self.transform_pt(dst_x,         dst_y);
+        let br = self.transform_pt(dst_x + dst_w, dst_y);
+        let tr = self.transform_pt(dst_x + dst_w, dst_y + dst_h);
+        let tl = self.transform_pt(dst_x,         dst_y + dst_h);
         let verts: [f32; 24] = [
             bl[0], bl[1], 0.0, 1.0,
             br[0], br[1], 1.0, 1.0,

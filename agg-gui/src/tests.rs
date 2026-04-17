@@ -1345,6 +1345,141 @@ fn test_label_backbuffer_cache_is_straight_alpha() {
     );
 }
 
+/// **MatterCAD-style equivalence test** (port of `BackBuffersAreScreenAligned`).
+///
+/// The Label backbuffer must contain BYTE-IDENTICAL pixels to a direct AGG
+/// `fill_text` call with the same parameters.  If this ever diverges the
+/// cached bitmap is no longer "what AGG would render" and GL-side blits will
+/// silently display stale / wrong content.
+#[test]
+fn test_label_backbuffer_matches_direct_agg_render() {
+    use std::sync::Arc;
+    use crate::framebuffer::unpremultiply_rgba_inplace;
+    use crate::text::Font;
+    use crate::Label;
+    use crate::widget::Widget;
+    use crate::image_cache;
+    use crate::geometry::Rect;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    let font      = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+    let text      = "Pixel alignment test";
+    let font_size = 14.0_f64;
+    let color     = Color::black();
+
+    // Label layout: line_h = font_size * 1.5 (matches Label::layout).
+    let line_h = font_size * 1.5;
+    let width  = crate::text::measure_text_metrics(&font, text, font_size).width;
+    let bw     = width.ceil() as u32;
+    let bh     = line_h.ceil() as u32;
+
+    // --- PATH A ----------------------------------------------------------
+    // Direct AGG render using the same pipeline Label's closure runs.
+    let mut fb_direct = Framebuffer::new(bw, bh);
+    {
+        let mut gfx = GfxCtx::new(&mut fb_direct);
+        gfx.set_font(Arc::clone(&font));
+        gfx.set_font_size(font_size);
+        gfx.set_fill_color(color);
+        if let Some(m) = gfx.measure_text(text) {
+            let ty = line_h * 0.5 - (m.ascent - m.descent) * 0.5;
+            let tx = 0.0; // LabelAlign::Left
+            gfx.fill_text(text, tx, ty);
+        }
+    }
+    let mut expected = fb_direct.pixels_flipped();
+    unpremultiply_rgba_inplace(&mut expected);
+
+    // --- PATH B ----------------------------------------------------------
+    // Label backbuffer (via global pixel cache → AGG closure → unpremul).
+    image_cache::clear(); // ensure we take the raster path, not a stale hit
+    let mut lbl = Label::new(text, Arc::clone(&font))
+        .with_font_size(font_size)
+        .with_has_backbuffer(true)
+        .with_color(color);
+    lbl.set_bounds(Rect::new(0.0, 0.0, width, line_h));
+
+    let mut outer = Framebuffer::new(bw, bh);
+    {
+        let mut gfx = GfxCtx::new(&mut outer);
+        gfx.clear(Color::white());
+        crate::widget::paint_subtree(&mut lbl, &mut gfx);
+    }
+
+    let (actual, cw, ch) = lbl.cache_for_test().expect("Label must cache pixels");
+    assert_eq!(cw, bw);
+    assert_eq!(ch, bh);
+    assert_eq!(
+        actual.len(), expected.len(),
+        "buffer length mismatch: direct={} cache={}", expected.len(), actual.len()
+    );
+
+    // Label's closure and the direct path share the same AGG code, so bytes
+    // must match exactly — no tolerance window.  Any divergence here would
+    // mean the cache isn't actually "what AGG would produce".
+    if actual != expected.as_slice() {
+        // On failure, find the first differing pixel for a useful message.
+        for i in (0..actual.len()).step_by(4) {
+            if actual[i..i+4] != expected[i..i+4] {
+                let px = (i / 4) as u32;
+                let y = px / bw;
+                let x = px % bw;
+                panic!(
+                    "Label backbuffer pixel ({x}, {y}) diverges from direct AGG:\n\
+                     direct = {:?}\n\
+                     cache  = {:?}",
+                    &expected[i..i+4], &actual[i..i+4]
+                );
+            }
+        }
+    }
+}
+
+/// `snap_to_pixel` must zero the fractional component of the CTM translation
+/// and leave rotations / scales / integer translations alone.  Covers the
+/// `paint_subtree` round-on-translate path exercised by every widget that
+/// opts into `enforce_integer_bounds`.
+#[test]
+fn test_snap_to_pixel_zeros_fractional_translation() {
+    use crate::draw_ctx::DrawCtx;
+
+    let mut fb = Framebuffer::new(10, 10);
+    let mut ctx = GfxCtx::new(&mut fb);
+
+    // Build a pure-translation CTM with fractional tx and ty.
+    ctx.translate(100.3, 50.7);
+    let before = ctx.transform();
+    assert!((before.tx - 100.3).abs() < 1e-9);
+    assert!((before.ty - 50.7).abs() < 1e-9);
+
+    ctx.snap_to_pixel();
+    let after = ctx.transform();
+    assert_eq!(after.tx.fract(), 0.0, "tx still fractional: {}", after.tx);
+    assert_eq!(after.ty.fract(), 0.0, "ty still fractional: {}", after.ty);
+    // Snap rounds DOWN (floor) so text/strokes sit on the pixel they would
+    // have partially covered — predictable and matches MatterCAD semantics.
+    assert_eq!(after.tx, 100.0);
+    assert_eq!(after.ty, 50.0);
+
+    // Negative translations floor toward -infinity.
+    let mut fb2 = Framebuffer::new(10, 10);
+    let mut ctx2 = GfxCtx::new(&mut fb2);
+    ctx2.translate(-3.3, -4.7);
+    ctx2.snap_to_pixel();
+    let after2 = ctx2.transform();
+    assert_eq!(after2.tx, -4.0);
+    assert_eq!(after2.ty, -5.0);
+
+    // Already-integer translation is a no-op.
+    let mut fb3 = Framebuffer::new(10, 10);
+    let mut ctx3 = GfxCtx::new(&mut fb3);
+    ctx3.translate(7.0, 13.0);
+    ctx3.snap_to_pixel();
+    let after3 = ctx3.transform();
+    assert_eq!(after3.tx, 7.0);
+    assert_eq!(after3.ty, 13.0);
+}
+
 // ---------------------------------------------------------------------------
 // Slider mouse-capture tests
 // ---------------------------------------------------------------------------

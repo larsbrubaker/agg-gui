@@ -255,18 +255,32 @@ pub struct WidgetBase {
     /// Maximum size constraint (logical units).  The parent will never assign
     /// a slot larger than this in either axis.
     pub max_size: Size,
+    /// Per-widget override of the global pixel-alignment policy.  When
+    /// `true` (the common default) `paint_subtree` rounds the child
+    /// translation to the physical pixel grid before painting, so crisp text
+    /// and strokes land on whole pixels regardless of fractional Label
+    /// heights (`font_size × 1.5`) accumulating through a flex stack.
+    /// Disable for widgets that deliberately want sub-pixel positioning
+    /// (smooth-scrolling markers, zoomed canvases).
+    ///
+    /// Mirrors MatterCAD's `GuiWidget.EnforceIntegerBounds`.  Captured from
+    /// [`pixel_bounds::default_enforce_integer_bounds`] at construction;
+    /// later global changes do NOT retroactively alter existing widgets.
+    pub enforce_integer_bounds: bool,
 }
 
 impl WidgetBase {
     /// Construct a `WidgetBase` with all defaults:
     /// zero margin, `FIT` anchors, `ZERO` min size, `Size::MAX` max size.
-    pub const fn new() -> Self {
+    /// `enforce_integer_bounds` captures the current process-wide default.
+    pub fn new() -> Self {
         Self {
             margin:   Insets::ZERO,
             h_anchor: HAnchor::FIT,
             v_anchor: VAnchor::FIT,
             min_size: Size::ZERO,
             max_size: Size::MAX,
+            enforce_integer_bounds: crate::pixel_bounds::default_enforce_integer_bounds(),
         }
     }
 
