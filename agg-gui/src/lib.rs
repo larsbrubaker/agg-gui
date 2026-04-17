@@ -62,7 +62,8 @@ pub use widgets::{Button, Checkbox, CollapsingHeader, ComboBox, Container, DragV
                   ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility,
                   ScrollView, Separator, SizedBox, Slider, Spacer, Splitter, Stack,
                   TabView, TextField, ToggleSwitch, Tooltip, TreeView, Window,
-                  current_scroll_style, set_scroll_style};
+                  current_scroll_style, current_scroll_visibility,
+                  set_scroll_style, set_scroll_visibility};
 
 // Re-export AGG types so callers don't need to import agg-rust directly.
 pub use agg_rust::trans_affine::TransAffine;

@@ -19,7 +19,6 @@ use row::{EXPAND_W, icon_color};
 
 use std::sync::Arc;
 
-use crate::color::Color;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
@@ -366,27 +365,28 @@ impl Widget for TreeView {
         let h = self.bounds.height;
         let w = self.bounds.width;
         let content_w = w - SCROLLBAR_W;
+        let v = ctx.visuals().clone();
 
-        // Background
-        ctx.set_fill_color(Color::rgb(1.0, 1.0, 1.0));
+        // Background — follow the theme's window fill rather than hard-coded white.
+        ctx.set_fill_color(v.window_fill);
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
 
-        // Scrollbar
+        // Scrollbar — theme-aware track and thumb.
         let sb_x = self.scrollbar_x();
         if self.content_height > h {
-            ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.04));
+            ctx.set_fill_color(v.scroll_track);
             ctx.begin_path();
             ctx.rect(sb_x, 0.0, SCROLLBAR_W, h);
             ctx.fill();
             if let Some((thumb_y, thumb_h)) = self.thumb_metrics() {
                 let thumb_color = if self.dragging_scrollbar {
-                    Color::rgba(0.0, 0.0, 0.0, 0.45)
+                    v.scroll_thumb_dragging
                 } else if self.hovered_scrollbar {
-                    Color::rgba(0.0, 0.0, 0.0, 0.32)
+                    v.scroll_thumb_hovered
                 } else {
-                    Color::rgba(0.0, 0.0, 0.0, 0.18)
+                    v.scroll_thumb
                 };
                 ctx.set_fill_color(thumb_color);
                 ctx.begin_path();

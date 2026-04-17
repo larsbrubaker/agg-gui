@@ -63,6 +63,10 @@ const TB_HEIGHT:    f64 = 22.0;
 const TB_INDENT:    f64 = 22.0;  // left indent so items nest under group triangle
 const TB_R:         f64 = 4.0;
 const TB_FONT_SIZE: f64 = 13.0;
+/// Horizontal inset of the row background so the accent fill doesn't reach
+/// all the way to the sidebar's right separator.
+const TB_BG_INSET_L: f64 = 4.0;
+const TB_BG_INSET_R: f64 = 8.0;
 
 struct ToggleButton {
     bounds:   Rect,
@@ -122,9 +126,11 @@ impl Widget for ToggleButton {
             Color::rgba(0.0, 0.0, 0.0, 0.0)
         };
         if bg.a > 0.001 {
+            let bx = TB_BG_INSET_L;
+            let bw = (w - TB_BG_INSET_L - TB_BG_INSET_R).max(1.0);
             ctx.set_fill_color(bg);
             ctx.begin_path();
-            ctx.rounded_rect(0.0, 0.0, w, h, TB_R);
+            ctx.rounded_rect(bx, 0.0, bw, h, TB_R);
             ctx.fill();
         }
 

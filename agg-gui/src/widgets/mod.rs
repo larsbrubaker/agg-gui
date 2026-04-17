@@ -39,7 +39,8 @@ pub use progress_bar::ProgressBar;
 pub use radio_group::RadioGroup;
 pub use scroll_view::{
     ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
-    current_scroll_style, set_scroll_style,
+    current_scroll_style, current_scroll_visibility,
+    set_scroll_style, set_scroll_visibility,
 };
 pub use slider::Slider;
 pub use splitter::Splitter;

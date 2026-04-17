@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, DragValue, FlexColumn, FlexRow, Font, Rect, ScrollBarVisibility,
+    Button, DragValue, FlexColumn, FlexRow, Font, Rect,
     ScrollView, Separator, SizedBox, Slider, Widget,
 };
 
@@ -177,8 +177,7 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
 
     let scroll = ScrollView::new(Box::new(list))
         .with_offset_cell(Rc::clone(&scroll_off))
-        .with_max_scroll_cell(Rc::clone(&max_scroll))
-        .with_bar_visibility(ScrollBarVisibility::VisibleOnHover);
+        .with_max_scroll_cell(Rc::clone(&max_scroll));
     col.push(Box::new(scroll), 1.0);
 
     // Sync target offset once `max_scroll` is known (for initial Center).

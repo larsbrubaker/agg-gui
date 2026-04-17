@@ -27,21 +27,25 @@ use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
-/// How the scrollbar is shown.
+/// How the scrollbar is shown.  Matches egui's `ScrollBarVisibility`.
+///
+/// Hover-only behaviour is controlled by [`ScrollBarKind::Floating`] on the
+/// [`ScrollBarStyle`], not by this enum — a Floating bar with
+/// `VisibleWhenNeeded` only appears on hover; a Solid bar with
+/// `VisibleWhenNeeded` is always visible when content overflows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollBarVisibility {
     /// Paint whenever content overflows, regardless of hover.
     AlwaysVisible,
-    /// Paint when content overflows (egui naming).
+    /// Paint when content overflows.  If the style is `Floating` the bar
+    /// additionally hides until the cursor enters the hover zone.
     VisibleWhenNeeded,
-    /// Paint only while hovered or dragging (egui "floating" style).
-    VisibleOnHover,
     /// Never paint — wheel/drag still work, but no visual indicator.
     AlwaysHidden,
 }
 
 impl Default for ScrollBarVisibility {
-    fn default() -> Self { Self::VisibleOnHover }
+    fn default() -> Self { Self::VisibleWhenNeeded }
 }
 
 /// Whether the bar reserves layout space (Solid) or floats over content (Floating).
@@ -157,7 +161,8 @@ impl ScrollBarStyle {
 // the application" — matching egui's `all_styles_mut` behaviour.
 
 std::thread_local! {
-    static CURRENT_SCROLL_STYLE: Cell<ScrollBarStyle> = Cell::new(ScrollBarStyle::default());
+    static CURRENT_SCROLL_STYLE:      Cell<ScrollBarStyle>      = Cell::new(ScrollBarStyle::default());
+    static CURRENT_SCROLL_VISIBILITY: Cell<ScrollBarVisibility> = Cell::new(ScrollBarVisibility::VisibleWhenNeeded);
 }
 
 /// Read the current global scroll-bar style.
@@ -169,6 +174,18 @@ pub fn current_scroll_style() -> ScrollBarStyle {
 /// that don't have an explicit override pick this up.
 pub fn set_scroll_style(s: ScrollBarStyle) {
     CURRENT_SCROLL_STYLE.with(|c| c.set(s));
+}
+
+/// Read the current global scroll-bar visibility policy.
+pub fn current_scroll_visibility() -> ScrollBarVisibility {
+    CURRENT_SCROLL_VISIBILITY.with(|c| c.get())
+}
+
+/// Replace the global scroll-bar visibility policy.  Every `ScrollView` that
+/// doesn't bind its own `with_bar_visibility_cell(...)` or call
+/// `with_bar_visibility(...)` reads this value on each layout.
+pub fn set_scroll_visibility(v: ScrollBarVisibility) {
+    CURRENT_SCROLL_VISIBILITY.with(|c| c.set(v));
 }
 
 // ── Runtime constants ────────────────────────────────────────────────────────
@@ -217,6 +234,11 @@ pub struct ScrollView {
 
     /// How to render the scrollbar.
     bar_visibility: ScrollBarVisibility,
+    /// `true` when the caller supplied an explicit per-instance visibility via
+    /// [`ScrollView::with_bar_visibility`].  When `false` and
+    /// `visibility_cell` is unset, the global visibility from
+    /// [`current_scroll_visibility`] is re-read each layout.
+    visibility_explicit: bool,
     style:          ScrollBarStyle,
     /// `true` when the caller supplied an explicit per-instance style via
     /// [`ScrollView::with_style`].  When `false` and `style_cell` is unset,
@@ -243,7 +265,8 @@ impl ScrollView {
             h:                 AxisState::default(),
             stick_to_bottom:   false,
             was_at_bottom:     false,
-            bar_visibility:    ScrollBarVisibility::default(),
+            bar_visibility:    current_scroll_visibility(),
+            visibility_explicit: false,
             style:             current_scroll_style(),
             style_explicit:    false,
             offset_cell:       None,
@@ -287,11 +310,14 @@ impl ScrollView {
     }
 
     pub fn with_bar_visibility(mut self, v: ScrollBarVisibility) -> Self {
-        self.bar_visibility = v; self
+        self.bar_visibility = v;
+        self.visibility_explicit = true;
+        self
     }
 
     pub fn set_bar_visibility(&mut self, v: ScrollBarVisibility) {
         self.bar_visibility = v;
+        self.visibility_explicit = true;
     }
 
     pub fn with_bar_visibility_cell(mut self, cell: Rc<Cell<ScrollBarVisibility>>) -> Self {
@@ -459,22 +485,27 @@ impl ScrollView {
     fn should_paint_v(&self) -> bool {
         let (_, vh) = self.viewport();
         if self.v.content <= vh { return false; }
+        let floating = self.style.kind == ScrollBarKind::Floating;
         match self.bar_visibility {
-            ScrollBarVisibility::AlwaysHidden       => false,
-            ScrollBarVisibility::AlwaysVisible      => true,
-            ScrollBarVisibility::VisibleWhenNeeded  => true,
-            ScrollBarVisibility::VisibleOnHover     => self.v.hovered_bar || self.v.dragging,
+            ScrollBarVisibility::AlwaysHidden      => false,
+            ScrollBarVisibility::AlwaysVisible     => true,
+            // With Floating kind, VisibleWhenNeeded hides until hover/drag —
+            // matches egui's floating style.  Solid kind shows unconditionally
+            // when content overflows.
+            ScrollBarVisibility::VisibleWhenNeeded =>
+                !floating || self.v.hovered_bar || self.v.dragging,
         }
     }
 
     fn should_paint_h(&self) -> bool {
         let (vw, _) = self.viewport();
         if self.h.content <= vw { return false; }
+        let floating = self.style.kind == ScrollBarKind::Floating;
         match self.bar_visibility {
-            ScrollBarVisibility::AlwaysHidden       => false,
-            ScrollBarVisibility::AlwaysVisible      => true,
-            ScrollBarVisibility::VisibleWhenNeeded  => true,
-            ScrollBarVisibility::VisibleOnHover     => self.h.hovered_bar || self.h.dragging,
+            ScrollBarVisibility::AlwaysHidden      => false,
+            ScrollBarVisibility::AlwaysVisible     => true,
+            ScrollBarVisibility::VisibleWhenNeeded =>
+                !floating || self.h.hovered_bar || self.h.dragging,
         }
     }
 }
@@ -510,7 +541,11 @@ impl Widget for ScrollView {
     fn layout(&mut self, available: Size) -> Size {
         // Pull live state from external cells first.
         if let Some(c) = &self.offset_cell     { self.v.offset = c.get(); }
-        if let Some(c) = &self.visibility_cell { self.bar_visibility = c.get(); }
+        if let Some(c) = &self.visibility_cell {
+            self.bar_visibility = c.get();
+        } else if !self.visibility_explicit {
+            self.bar_visibility = current_scroll_visibility();
+        }
         if let Some(c) = &self.style_cell {
             self.style = c.get();
         } else if !self.style_explicit {
@@ -728,12 +763,17 @@ impl Widget for ScrollView {
                         let ty = self.v_thumb_metrics().map(|(y, _)| y).unwrap_or(0.0);
                         self.v.dragging = true;
                         self.v.drag_thumb_offset = pos.y - ty;
-                    } else if let Some((_, th)) = self.v_thumb_metrics() {
-                        let (lo, hi) = self.v_track_range();
-                        let travel = (hi - lo - th).max(1.0);
-                        let new_ty = (pos.y - th * 0.5).clamp(lo, lo + travel);
-                        let frac = 1.0 - (new_ty - lo) / travel;
-                        self.v.offset = frac * self.v.max_scroll(vh);
+                    } else if let Some((ty, th)) = self.v_thumb_metrics() {
+                        // Page step on track click (matches Windows / macOS).
+                        // Y-up: cursor ABOVE thumb (higher y) → scroll UP,
+                        // cursor BELOW thumb → scroll DOWN.  Step by one
+                        // viewport minus a small overlap for continuity.
+                        let page = (vh - 16.0).max(20.0);
+                        if pos.y > ty + th {
+                            self.v.offset = (self.v.offset - page).max(0.0);
+                        } else if pos.y < ty {
+                            self.v.offset = (self.v.offset + page).min(self.v.max_scroll(vh));
+                        }
                         self.clamp_offsets();
                         if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
                     }
@@ -744,12 +784,13 @@ impl Widget for ScrollView {
                         let tx = self.h_thumb_metrics().map(|(x, _)| x).unwrap_or(0.0);
                         self.h.dragging = true;
                         self.h.drag_thumb_offset = pos.x - tx;
-                    } else if let Some((_, tw)) = self.h_thumb_metrics() {
-                        let (lo, hi) = self.h_track_range();
-                        let travel = (hi - lo - tw).max(1.0);
-                        let new_tx = (pos.x - tw * 0.5).clamp(lo, lo + travel);
-                        let frac = (new_tx - lo) / travel;
-                        self.h.offset = frac * self.h.max_scroll(vw);
+                    } else if let Some((tx, tw)) = self.h_thumb_metrics() {
+                        let page = (vw - 16.0).max(20.0);
+                        if pos.x < tx {
+                            self.h.offset = (self.h.offset - page).max(0.0);
+                        } else if pos.x > tx + tw {
+                            self.h.offset = (self.h.offset + page).min(self.h.max_scroll(vw));
+                        }
                         self.clamp_offsets();
                     }
                     return EventResult::Consumed;

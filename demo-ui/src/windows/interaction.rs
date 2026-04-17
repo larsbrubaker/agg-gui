@@ -828,8 +828,9 @@ impl Widget for ImageView {
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        // Frame.
-        ctx.set_fill_color(v.widget_bg);
+        // Frame — use the app background rather than the widget fill so it
+        // reads as a neutral preview pane, not a white card, on every theme.
+        ctx.set_fill_color(v.bg_color);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
         ctx.fill();
@@ -845,6 +846,15 @@ impl Widget for ImageView {
             let dx = (w - dw) * 0.5;
             let dy = (h - dh) * 0.5;
             ctx.draw_image_rgba(pixels, *iw, *ih, dx, dy, dw, dh);
+
+            // Outline in the text color so the image boundary is always
+            // visible against the neutral pane, even when the screenshot's
+            // outer pixels happen to match the background colour.
+            ctx.set_stroke_color(v.text_color);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            ctx.rect(dx, dy, dw, dh);
+            ctx.stroke();
         } else {
             // Placeholder text.
             ctx.set_font(Arc::clone(&self.font));

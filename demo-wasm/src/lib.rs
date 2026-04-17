@@ -62,6 +62,14 @@ thread_local! {
     static FRAME_HISTORY: RefCell<Option<Rc<RefCell<demo_ui::FrameHistory>>>>                   = RefCell::new(None);
     /// Frame counter used to throttle localStorage saves.
     static FRAME_COUNT: Cell<u32> = Cell::new(0);
+    /// Repaint dirty flag — set by any input handler, cleared by `render()`.
+    /// The JS animation loop calls `needs_repaint()` each rAF tick and skips
+    /// `render()` when nothing has changed, matching the native harness's
+    /// Wait / WaitUntil behaviour.
+    static NEEDS_REPAINT: Cell<bool> = Cell::new(true);
+    /// Share the cube-visibility + focus flags so `needs_repaint()` can keep
+    /// the loop running while animation or cursor blink is in progress.
+    static CUBE_VISIBLE: RefCell<Option<Rc<Cell<bool>>>> = RefCell::new(None);
     /// Screenshot request flag — set by the demo button, cleared by render().
     static SCREENSHOT_REQUEST: RefCell<Option<Rc<Cell<bool>>>>                  = RefCell::new(None);
     /// Shared latest-screenshot image (top-down RGBA8 + dims).
@@ -112,6 +120,7 @@ fn ensure_demo_app() {
             FRAME_HISTORY.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.frame_history)));
             SCREENSHOT_REQUEST.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_request)));
             SCREENSHOT_IMAGE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_image)));
+            CUBE_VISIBLE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.cube_visible)));
             STATE_ACCESSOR.with(|c| *c.borrow_mut() = Some(handles.state));
             *cell.borrow_mut() = Some(app);
         }
@@ -263,6 +272,11 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
             }
         });
     }
+
+    // Frame successfully rendered — clear the dirty flag.  `needs_repaint()`
+    // will return `true` again only if an event fires or an animation source
+    // (cube / focus) still needs frames.
+    NEEDS_REPAINT.with(|c| c.set(false));
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +444,7 @@ pub fn wasm_clipboard_set(text: &str) {
 
 #[wasm_bindgen]
 pub fn on_mouse_move(x: f64, y: f64) {
+    mark_dirty();
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
             app.on_mouse_move(x, y);
@@ -448,6 +463,7 @@ pub fn on_mouse_move(x: f64, y: f64) {
 
 #[wasm_bindgen]
 pub fn on_mouse_down(x: f64, y: f64, button: u8) {
+    mark_dirty();
     let btn = match button {
         0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
         n => MouseButton::Other(n),
@@ -461,6 +477,7 @@ pub fn on_mouse_down(x: f64, y: f64, button: u8) {
 
 #[wasm_bindgen]
 pub fn on_mouse_up(x: f64, y: f64, button: u8) {
+    mark_dirty();
     let btn = match button {
         0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
         n => MouseButton::Other(n),
@@ -474,6 +491,7 @@ pub fn on_mouse_up(x: f64, y: f64, button: u8) {
 
 #[wasm_bindgen]
 pub fn on_mouse_wheel(x: f64, y: f64, delta_y: f64) {
+    mark_dirty();
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
             app.on_mouse_wheel(x, y, delta_y);
@@ -483,6 +501,7 @@ pub fn on_mouse_wheel(x: f64, y: f64, delta_y: f64) {
 
 #[wasm_bindgen]
 pub fn on_mouse_leave() {
+    mark_dirty();
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
             app.on_mouse_leave();
@@ -492,6 +511,7 @@ pub fn on_mouse_leave() {
 
 #[wasm_bindgen]
 pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool) {
+    mark_dirty();
     if let Some(key) = parse_js_key(key_str) {
         let mods = Modifiers { shift, ctrl, alt };
         DEMO_APP.with(|cell| {
@@ -501,6 +521,25 @@ pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool) {
         });
     }
 }
+
+/// Called by the JS animation loop each frame.  Returns `true` when the frame
+/// needs to be re-rendered: an input event landed since the last render, a
+/// continuously-animating widget (3-D cube) is visible, a text field has
+/// focus (cursor blink), or a screenshot has been requested.
+#[wasm_bindgen]
+pub fn needs_repaint() -> bool {
+    if NEEDS_REPAINT.with(|c| c.get()) { return true; }
+    // Animation-driven: cube, focus, continuous-capture screenshot.
+    let cube_on = CUBE_VISIBLE.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
+    if cube_on { return true; }
+    let ss_req = SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
+    if ss_req { return true; }
+    let has_focus = DEMO_APP.with(|c| c.borrow().as_ref().map(|a| a.has_focus()).unwrap_or(false));
+    if has_focus { return true; }
+    false
+}
+
+fn mark_dirty() { NEEDS_REPAINT.with(|c| c.set(true)); }
 
 // ---------------------------------------------------------------------------
 // Key parsing

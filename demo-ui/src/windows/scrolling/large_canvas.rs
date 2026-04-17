@@ -41,7 +41,11 @@ impl Widget for VirtualCanvas {
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
     fn layout(&mut self, available: Size) -> Size {
-        let w = CONTENT_WIDTH.max(available.width);
+        // Parent `ScrollView` with horizontal scroll passes `f64::MAX/2` for
+        // `available.width` so it can absorb whatever natural width we
+        // report — never `.max(available.width)` that value.
+        let _ = available;
+        let w = CONTENT_WIDTH;
         let h = (NUM_ROWS as f64) * ROW_HEIGHT;
         self.bounds = Rect::new(0.0, 0.0, w, h);
         Size::new(w, h)

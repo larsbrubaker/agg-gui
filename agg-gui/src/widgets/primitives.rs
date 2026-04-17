@@ -201,8 +201,16 @@ impl Widget for SizedBox {
         // explicitly set AND don't have a child to size to; otherwise use the
         // child's natural size on that axis so the SizedBox reports a sensible
         // height when only a width was supplied (e.g. narrow DragValue wrapper).
-        let w = self.width .unwrap_or(available.width);
-        let mut h = self.height.unwrap_or(available.height);
+        //
+        // When neither height nor child is present (pure horizontal spacer,
+        // e.g. `SizedBox::new().with_width(8.0)`), default the height to zero
+        // so the spacer doesn't inflate the parent row/column to the full
+        // available axis — which would otherwise push sibling widgets off
+        // screen.
+        let w = self.width.unwrap_or(available.width);
+        let mut h = self.height.unwrap_or_else(|| {
+            if self.children.is_empty() { 0.0 } else { available.height }
+        });
 
         if let Some(child) = self.children.first_mut() {
             let scale  = device_scale();

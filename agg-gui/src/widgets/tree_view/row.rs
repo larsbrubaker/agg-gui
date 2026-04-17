@@ -287,19 +287,25 @@ impl Widget for TreeRow {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
+        let v = ctx.visuals();
 
         if self.is_selected {
             let c = if self.focused {
-                Color::rgba(0.22, 0.45, 0.88, 0.15)
+                // Accent-tinted overlay — same colour in both themes so the
+                // selection reads as "selected" regardless of palette.
+                Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.25)
             } else {
-                Color::rgba(0.0, 0.0, 0.0, 0.07)
+                // Theme-neutral dim overlay: subtle tint of the text color.
+                Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.12)
             };
             ctx.set_fill_color(c);
             ctx.begin_path();
             ctx.rect(0.0, 0.0, w, h);
             ctx.fill();
         } else if self.is_hovered {
-            ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.04));
+            ctx.set_fill_color(Color::rgba(
+                v.text_color.r, v.text_color.g, v.text_color.b, 0.08,
+            ));
             ctx.begin_path();
             ctx.rect(0.0, 0.0, w, h);
             ctx.fill();

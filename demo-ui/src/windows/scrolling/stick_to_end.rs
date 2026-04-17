@@ -6,7 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{FlexColumn, Font, ScrollBarVisibility, ScrollView, Widget};
+use agg_gui::{FlexColumn, Font, ScrollView, Widget};
 
 use super::helpers::{wrapped_label, CounterTicker, RowList};
 
@@ -28,8 +28,7 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
         Rc::new(|i| format!("This is row {}", i + 1)),
     );
     let scroll = ScrollView::new(Box::new(list))
-        .with_stick_to_bottom(true)
-        .with_bar_visibility(ScrollBarVisibility::VisibleOnHover);
+        .with_stick_to_bottom(true);
     col.push(Box::new(scroll), 1.0);
 
     Box::new(col)

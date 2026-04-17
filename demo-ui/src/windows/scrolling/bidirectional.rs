@@ -12,22 +12,24 @@ use agg_gui::{
 
 use super::helpers::{wrapped_label, LOREM_IPSUM_LONG};
 
-const N_LINES:    usize = 100;
-const LINE_HEIGHT: f64  = 20.0;
-const FONT_SIZE:   f64  = 12.0;
-/// Hard-coded content width wide enough that the full lorem ipsum line
-/// requires horizontal scrolling on any reasonable window size.
-const CONTENT_WIDTH: f64 = 2400.0;
+const N_LINES:     usize = 100;
+const LINE_HEIGHT: f64   = 20.0;
+const FONT_SIZE:   f64   = 12.0;
+const PADDING_X:   f64   = 8.0;
 
 struct LoremCanvas {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
     font:     Arc<Font>,
+    /// Measured pixel width of one lorem-ipsum line at `FONT_SIZE`.  Cached
+    /// so layout doesn't re-shape 90+ chars of text every frame.
+    text_w:   f64,
 }
 
 impl LoremCanvas {
     fn new(font: Arc<Font>) -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), font }
+        let text_w = agg_gui::measure_text_metrics(&font, LOREM_IPSUM_LONG, FONT_SIZE).width;
+        Self { bounds: Rect::default(), children: Vec::new(), font, text_w }
     }
 }
 
@@ -39,7 +41,13 @@ impl Widget for LoremCanvas {
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
     fn layout(&mut self, available: Size) -> Size {
-        let w = CONTENT_WIDTH.max(available.width);
+        // Content width is the actual rendered text width plus padding.
+        // Note: `available.width` is `f64::MAX/2` when the parent `ScrollView`
+        // has horizontal scroll enabled, so we must NOT use `.max(available.width)`
+        // — that would explode content_width to infinity and let the user
+        // scroll far past the end of the text.
+        let _ = available; // intentionally unused
+        let w = self.text_w + PADDING_X * 2.0;
         let h = (N_LINES as f64) * LINE_HEIGHT;
         self.bounds = Rect::new(0.0, 0.0, w, h);
         Size::new(w, h)
@@ -55,7 +63,7 @@ impl Widget for LoremCanvas {
         for i in 0..N_LINES {
             let y_bottom = total_h - (i as f64 + 1.0) * LINE_HEIGHT;
             let y_text   = y_bottom + (LINE_HEIGHT - FONT_SIZE) * 0.5;
-            ctx.fill_text(LOREM_IPSUM_LONG, 4.0, y_text);
+            ctx.fill_text(LOREM_IPSUM_LONG, PADDING_X, y_text);
         }
     }
 

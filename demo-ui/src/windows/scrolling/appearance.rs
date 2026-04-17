@@ -6,7 +6,7 @@
 //!    wide) with a descriptive label to the right; dragging any control also
 //!    writes to the global style.
 //! 3. **ScrollBarVisibility** selector (AlwaysHidden / VisibleWhenNeeded /
-//!    VisibleOnHover / AlwaysVisible) — drives only the demo's ScrollView,
+//!    AlwaysVisible) — drives the global scroll visibility,
 //!    since visibility is per-area in egui.
 //! 4. **Content length** slider with the numeric value shown to its right.
 //! 5. The demo ScrollView with N lorem-ipsum paragraphs.
@@ -192,19 +192,24 @@ fn apply_preset(cells: &StyleCells, preset: Preset, visibility: &Rc<Cell<ScrollB
     };
     cells.load(s);
     set_scroll_style(s);
-    // Egui's presets also nudge visibility — Solid/Thin want always-visible,
-    // Floating prefers visible-on-hover.
-    visibility.set(match preset {
-        Preset::Solid | Preset::Thin => ScrollBarVisibility::AlwaysVisible,
-        Preset::Floating              => ScrollBarVisibility::VisibleOnHover,
-    });
+    // Presets also nudge visibility globally so every scrollbar in the app
+    // picks up the new preset — Solid/Thin are "always visible" by
+    // convention; Floating hides until hovered.
+    // With our consolidated `VisibleWhenNeeded`, the Floating preset's
+    // "show on hover" behaviour is automatic via `ScrollBarKind::Floating`,
+    // so every preset maps to `VisibleWhenNeeded` for normal operation.
+    // Solid/Thin users who want the bar to always show regardless of
+    // overflow can pick `AlwaysVisible` from the visibility row below.
+    let v = ScrollBarVisibility::VisibleWhenNeeded;
+    visibility.set(v);
+    agg_gui::set_scroll_visibility(v);
 }
 
 // ── Public builder ───────────────────────────────────────────────────────────
 
 pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
     let cells      = StyleCells::build_from(current_scroll_style());
-    let visibility = Rc::new(Cell::new(ScrollBarVisibility::VisibleOnHover));
+    let visibility = Rc::new(Cell::new(ScrollBarVisibility::VisibleWhenNeeded));
     let content_len = Rc::new(Cell::new(2_usize));
 
     // Closure used by every control to rebuild and publish the global style.
@@ -331,19 +336,23 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
             .with_content(Box::new(details))
     ), 0.0);
 
-    // ScrollBarVisibility — PER demo (not global).
-    col.push(Box::new(FlexRow::new().with_gap(10.0)
-        .add(label(Arc::clone(&font), "ScrollBarVisibility:", 12.0))
-        .add(Box::new(SegRow::new(
+    // ScrollBarVisibility — drives the global visibility so every scroll
+    // bar in the app (sidebar, other demos, etc) follows the same policy.
+    {
+        let vis_cell = Rc::clone(&visibility);
+        let seg = SegRow::new(
             Arc::clone(&font),
             vec![
                 ("AlwaysHidden",       ScrollBarVisibility::AlwaysHidden),
                 ("VisibleWhenNeeded",  ScrollBarVisibility::VisibleWhenNeeded),
-                ("VisibleOnHover",     ScrollBarVisibility::VisibleOnHover),
                 ("AlwaysVisible",      ScrollBarVisibility::AlwaysVisible),
             ],
-            Rc::clone(&visibility),
-        )))), 0.0);
+            Rc::clone(&vis_cell),
+        ).on_change(move || agg_gui::set_scroll_visibility(vis_cell.get()));
+        col.push(Box::new(FlexRow::new().with_gap(10.0)
+            .add(label(Arc::clone(&font), "ScrollBarVisibility:", 12.0))
+            .add(Box::new(seg))), 0.0);
+    }
 
     col.push(wrapped_label(Arc::clone(&font),
         "When to show scroll bars; resize the window to see the effect.", 11.0), 0.0);
@@ -370,10 +379,9 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
-    // Demo ScrollView — uses the global style + the visibility cell.
+    // Demo ScrollView — uses the global style AND global visibility.
     let content = LoremStack::new(Arc::clone(&font), Rc::clone(&content_len));
-    let scroll = ScrollView::new(Box::new(content))
-        .with_bar_visibility_cell(Rc::clone(&visibility));
+    let scroll = ScrollView::new(Box::new(content));
     col.push(Box::new(scroll), 1.0);
 
     Box::new(col)

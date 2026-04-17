@@ -72,13 +72,28 @@ const MIN_PROPS_H:     f64 = 60.0;
 const MIN_TREE_H:      f64 = 60.0;
 
 // ── light theme colors ────────────────────────────────────────────────────────
-fn c_panel_bg()  -> Color { Color::rgb(0.965, 0.968, 0.975) }
-fn c_header_bg() -> Color { Color::rgb(0.910, 0.915, 0.925) }
-fn c_props_bg()  -> Color { Color::rgb(0.950, 0.952, 0.960) }
-fn c_split_bg()  -> Color { Color::rgba(0.0, 0.0, 0.0, 0.08) }
-fn c_border()    -> Color { Color::rgba(0.0, 0.0, 0.0, 0.12) }
-fn c_text()      -> Color { Color::rgb(0.12, 0.12, 0.15) }
-fn c_dim_text()  -> Color { Color::rgba(0.0, 0.0, 0.0, 0.42) }
+// Theme-aware colour helpers — all derive from the active `Visuals` so the
+// inspector follows light / dark mode changes without a restart.
+fn c_panel_bg (v: &crate::theme::Visuals) -> Color { v.panel_fill }
+fn c_header_bg(v: &crate::theme::Visuals) -> Color {
+    // Slightly darker than the panel fill.
+    let f = if is_dark(v) { 0.80 } else { 0.94 };
+    Color::rgba(v.panel_fill.r * f, v.panel_fill.g * f, v.panel_fill.b * f, 1.0)
+}
+fn c_props_bg (v: &crate::theme::Visuals) -> Color { v.window_fill }
+fn c_split_bg (v: &crate::theme::Visuals) -> Color {
+    let t = if is_dark(v) { 1.0 } else { 0.0 };
+    Color::rgba(t, t, t, 0.10)
+}
+fn c_border   (v: &crate::theme::Visuals) -> Color { v.separator }
+fn c_text     (v: &crate::theme::Visuals) -> Color { v.text_color }
+fn c_dim_text (v: &crate::theme::Visuals) -> Color { v.text_dim }
+
+fn is_dark(v: &crate::theme::Visuals) -> bool {
+    // Panel fill luminance — below 0.5 means we're in a dark palette.
+    let lum = 0.299 * v.panel_fill.r + 0.587 * v.panel_fill.g + 0.114 * v.panel_fill.b;
+    lum < 0.5
+}
 
 // ── event translation helper ──────────────────────────────────────────────────
 
@@ -302,15 +317,16 @@ impl Widget for InspectorPanel {
         let h     = self.bounds.height;
         let sy    = self.split_y();
         let hdr_y = h - HEADER_H;
+        let v     = ctx.visuals().clone();
 
         // ── panel background ─────────────────────────────────────────────────
-        ctx.set_fill_color(c_panel_bg());
+        ctx.set_fill_color(c_panel_bg(&v));
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
 
         // Left border
-        ctx.set_stroke_color(c_border());
+        ctx.set_stroke_color(c_border(&v));
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.move_to(0.0, 0.0);
@@ -318,12 +334,12 @@ impl Widget for InspectorPanel {
         ctx.stroke();
 
         // ── header ──────────────────────────────────────────────────────────
-        ctx.set_fill_color(c_header_bg());
+        ctx.set_fill_color(c_header_bg(&v));
         ctx.begin_path();
         ctx.rect(0.0, hdr_y, w, HEADER_H);
         ctx.fill();
 
-        ctx.set_stroke_color(c_border());
+        ctx.set_stroke_color(c_border(&v));
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.move_to(0.0, hdr_y);
@@ -332,7 +348,7 @@ impl Widget for InspectorPanel {
 
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(13.0);
-        ctx.set_fill_color(c_text());
+        ctx.set_fill_color(c_text(&v));
         let title = "Widget Inspector";
         if let Some(m) = ctx.measure_text(title) {
             ctx.fill_text(
@@ -344,7 +360,7 @@ impl Widget for InspectorPanel {
 
         let count_txt = format!("{} widgets", self.nodes.borrow().len());
         ctx.set_font_size(11.0);
-        ctx.set_fill_color(c_dim_text());
+        ctx.set_fill_color(c_dim_text(&v));
         if let Some(m) = ctx.measure_text(&count_txt) {
             ctx.fill_text(
                 &count_txt,
@@ -354,18 +370,18 @@ impl Widget for InspectorPanel {
         }
 
         // ── properties pane ──────────────────────────────────────────────────
-        ctx.set_fill_color(c_props_bg());
+        ctx.set_fill_color(c_props_bg(&v));
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, sy - 2.0);
         ctx.fill();
         self.paint_properties(ctx, sy - 2.0);
 
         // ── split handle ─────────────────────────────────────────────────────
-        ctx.set_fill_color(c_split_bg());
+        ctx.set_fill_color(c_split_bg(&v));
         ctx.begin_path();
         ctx.rect(0.0, sy - 2.0, w, 4.0);
         ctx.fill();
-        ctx.set_stroke_color(c_border());
+        ctx.set_stroke_color(c_border(&v));
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.move_to(0.0, sy);
@@ -438,13 +454,14 @@ impl InspectorPanel {
     fn paint_properties(&self, ctx: &mut dyn DrawCtx, available_h: f64) {
         if available_h < 4.0 { return; }
         let w = self.bounds.width;
+        let v = ctx.visuals().clone();
 
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(10.0);
-        ctx.set_fill_color(c_dim_text());
+        ctx.set_fill_color(c_dim_text(&v));
         ctx.fill_text("PROPERTIES", 10.0, available_h - 14.0);
 
-        ctx.set_stroke_color(c_border());
+        ctx.set_stroke_color(c_border(&v));
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.move_to(10.0 + 70.0, available_h - 10.0);
@@ -453,7 +470,7 @@ impl InspectorPanel {
 
         let Some(sel_idx) = self.selected else {
             ctx.set_font_size(FONT_SIZE);
-            ctx.set_fill_color(c_dim_text());
+            ctx.set_fill_color(c_dim_text(&v));
             ctx.fill_text("(select a widget)", 10.0, available_h - 36.0);
             return;
         };
@@ -462,7 +479,7 @@ impl InspectorPanel {
         let Some(node) = nodes.get(sel_idx) else { return; };
 
         ctx.set_font_size(14.0);
-        ctx.set_fill_color(c_text());
+        ctx.set_fill_color(c_text(&v));
         ctx.fill_text(node.type_name, 10.0, available_h - 36.0);
 
         let b = &node.screen_bounds;
@@ -479,13 +496,13 @@ impl InspectorPanel {
         for (i, (label, value)) in rows.iter().enumerate() {
             let ry = row_start_y - i as f64 * 18.0;
             if ry < 4.0 { break; }
-            ctx.set_fill_color(c_dim_text());
+            ctx.set_fill_color(c_dim_text(&v));
             ctx.fill_text(label, 12.0, ry);
-            ctx.set_fill_color(c_text());
+            ctx.set_fill_color(c_text(&v));
             if let Some(m) = ctx.measure_text(value) {
                 ctx.fill_text(value, w - m.width - 10.0, ry);
             }
-            ctx.set_stroke_color(c_border());
+            ctx.set_stroke_color(c_border(&v));
             ctx.set_line_width(0.5);
             ctx.begin_path();
             ctx.move_to(8.0, ry - 4.0);
@@ -498,7 +515,7 @@ impl InspectorPanel {
         for (j, (prop_label, prop_value)) in node.properties.iter().enumerate() {
             let ry = prop_start_y - j as f64 * 18.0;
             if ry < 4.0 { break; }
-            ctx.set_fill_color(c_dim_text());
+            ctx.set_fill_color(c_dim_text(&v));
             ctx.fill_text(prop_label, 12.0, ry);
             // Bool properties: green=true, red=false; others use normal text color.
             let is_bool = prop_value == "true" || prop_value == "false";
@@ -510,12 +527,12 @@ impl InspectorPanel {
                 };
                 ctx.set_fill_color(bool_color);
             } else {
-                ctx.set_fill_color(c_text());
+                ctx.set_fill_color(c_text(&v));
             }
             if let Some(m) = ctx.measure_text(prop_value) {
                 ctx.fill_text(prop_value, w - m.width - 10.0, ry);
             }
-            ctx.set_stroke_color(c_border());
+            ctx.set_stroke_color(c_border(&v));
             ctx.set_line_width(0.5);
             ctx.begin_path();
             ctx.move_to(8.0, ry - 4.0);
