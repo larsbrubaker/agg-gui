@@ -204,6 +204,19 @@ pub trait Widget {
     fn enforce_integer_bounds(&self) -> bool {
         crate::pixel_bounds::default_enforce_integer_bounds()
     }
+
+    /// Container widgets (notably [`crate::widgets::Stack`]) call this on each
+    /// child at the start of `layout()`.  A widget that returns `true` is
+    /// moved to the END of its parent's child list — painted last, i.e.
+    /// raised to the top of the z-order.  `take_` semantics: the call is
+    /// also expected to **clear** the request so the child doesn't keep
+    /// getting raised every frame.
+    ///
+    /// Default: no raise ever requested.  `Window` overrides to fire on the
+    /// false→true visibility transition (see its `with_visible_cell`), so
+    /// toggling a demo checkbox on in the sidebar automatically pops that
+    /// window to the front.
+    fn take_raise_request(&mut self) -> bool { false }
 }
 
 // ---------------------------------------------------------------------------

@@ -59,6 +59,39 @@ impl Widget for Stack {
             child.layout(available);
             child.set_bounds(Rect::new(0.0, 0.0, available.width, available.height));
         }
+
+        // Bring-to-front pass — **after** children.layout on purpose.
+        //
+        // A raise can be requested from two places:
+        //   1. Widget input handlers (e.g. `Window::on_event` firing on a
+        //      MouseDown inside the window — "click to raise").  These run
+        //      BEFORE the frame's layout pass, so the flag is already set
+        //      by the time we get here.
+        //   2. Widget `layout()` itself (e.g. `Window` detects the
+        //      `visible_cell` false→true rising edge at layout time, so
+        //      toggling a demo on from the sidebar raises its window).
+        //      These set the flag DURING this very layout pass.
+        //
+        // Draining the flags AFTER children.layout catches both cases in
+        // the same frame — no one-frame visual delay.  The reactive-mode
+        // event loop only renders once per event, so a one-frame delay
+        // means the raise is invisible until the next unrelated event
+        // arrives, which is what the user reported (sidebar-opened windows
+        // appearing in the back).
+        let mut i = 0;
+        let mut raised: Vec<Box<dyn Widget>> = Vec::new();
+        while i < self.children.len() {
+            if self.children[i].take_raise_request() {
+                raised.push(self.children.remove(i));
+                // Don't advance `i` — the list just shortened.
+            } else {
+                i += 1;
+            }
+        }
+        for r in raised {
+            self.children.push(r);
+        }
+
         available
     }
 

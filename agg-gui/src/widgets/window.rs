@@ -98,6 +98,14 @@ pub struct Window {
     reset_to: Option<Rc<Cell<Option<Rect>>>>,
     position_cell: Option<Rc<Cell<Rect>>>,
 
+    /// Snapshot of `is_visible()` from the previous `layout()` call.  Used
+    /// to detect the false→true transition (demo toggled on in the
+    /// sidebar) so we can request the parent `Stack` raise us to the top.
+    last_visible: Cell<bool>,
+    /// Set to `true` on a visibility rising edge; read + cleared by
+    /// `take_raise_request` on the next parent-layout pass.
+    raise_request: Cell<bool>,
+
     collapsed: bool,
     /// Height before collapsing, so we can restore it.
     pre_collapse_h: f64,
@@ -152,6 +160,11 @@ impl Window {
             visible_cell: None,
             reset_to: None,
             position_cell: None,
+            // Seed `last_visible` to `true` (matches `visible` above) so a
+            // window that's open on first frame doesn't spuriously request
+            // a raise before the user has interacted with it.
+            last_visible: Cell::new(true),
+            raise_request: Cell::new(false),
             collapsed: false,
             pre_collapse_h: 280.0,
             drag_mode: DragMode::None,
@@ -165,7 +178,15 @@ impl Window {
             hover_dir: None,
             last_title_click: None,
             title_label,
-            canvas_size: Size::new(1280.0, 720.0),
+            // Seed as "unknown" so `layout()`'s shrink-detect guard
+            // (`had_prior = prev.w > 0 && prev.h > 0`) correctly skips the
+            // clamp on the very first layout pass.  The old default
+            // `(1280, 720)` was treated as prior, so the first-frame
+            // transition from 1280×720 → <smaller> incorrectly looked like
+            // an OS-window shrink and pulled saved Y-up positions down into
+            // the transient canvas.  Real-value `canvas_size` is populated
+            // by `layout()` before any drag/resize/collapse hit-test runs.
+            canvas_size: Size::new(0.0, 0.0),
             constrain: true,
         }
     }
@@ -234,7 +255,14 @@ impl Window {
     pub fn show(&mut self) { self.visible = true; }
     pub fn hide(&mut self) { self.visible = false; }
     pub fn toggle(&mut self) { self.visible = !self.visible; }
-    pub fn is_visible(&self) -> bool { self.visible }
+    /// Current visibility — honours an optional shared `visible_cell` when
+    /// wired (sidebar toggles, programmatic show/hide).  The inherent
+    /// `self.visible` field is a fallback for windows that aren't wired to
+    /// a cell.  Must match the Widget-trait impl below so rising-edge
+    /// detection in `layout()` observes sidebar toggles.
+    pub fn is_visible(&self) -> bool {
+        if let Some(ref cell) = self.visible_cell { cell.get() } else { self.visible }
+    }
 
     fn title_bar_bottom(&self) -> f64 { self.bounds.height - TITLE_H }
 
@@ -373,6 +401,14 @@ impl Widget for Window {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
+    /// Pop this window to the top of the parent `Stack` when the
+    /// false→true visibility edge fires (see `layout`).
+    fn take_raise_request(&mut self) -> bool {
+        let pending = self.raise_request.get();
+        self.raise_request.set(false);
+        pending
+    }
+
     fn set_bounds(&mut self, b: Rect) {
         if let Some(ref cell) = self.reset_to {
             if let Some(new_b) = cell.get() {
@@ -412,7 +448,17 @@ impl Widget for Window {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        if !self.is_visible() {
+        // Rising-edge visibility detection → request parent raise.  The
+        // sidebar toggles `visible_cell`; we observe the transition here
+        // and set `raise_request`, which the parent `Stack` drains on its
+        // next layout (one-frame delay, invisible to the user).
+        let now_visible = self.is_visible();
+        if now_visible && !self.last_visible.get() {
+            self.raise_request.set(true);
+        }
+        self.last_visible.set(now_visible);
+
+        if !now_visible {
             return Size::new(self.bounds.width, self.bounds.height);
         }
         // When collapsed, bounds.height == TITLE_H (set during toggle).
@@ -431,27 +477,20 @@ impl Widget for Window {
         let s = self.title_label.layout(Size::new(self.bounds.width - 48.0, TITLE_H));
         self.title_label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
 
-        // Record the canvas size for drag / resize hit-testing AND clamp on
-        // SHRINK.  When the OS window shrinks (user drags the edge in, or a
-        // platform changes the DPI), internal windows that were placed
-        // relative to the old canvas would end up with their title bars
-        // outside the new viewport and become unreachable.  Clamp here when
-        // the canvas has shrunk from the previous layout to pull the title
-        // bar back into view.
+        // Record the canvas size — used by drag / resize / collapse clamp
+        // paths that fire on USER ACTION.  We deliberately do NOT clamp
+        // passively at layout time: platforms fire a Resized event with a
+        // transient smaller size during fullscreen/maximize EXIT (Windows
+        // notably), and if we clamped on shrink the auto-save would persist
+        // those transient clamped bounds — the "all windows pushed down to
+        // the same Y on next startup" bug.  Clamping only on user actions
+        // (dragging a window, resize-handle, collapse toggle) keeps saved
+        // state pinned to what the user actually chose.
         //
-        // We skip clamp on the FIRST layout and on GROWTH:
-        // * First layout: `canvas_size` may be the default (0,0) before the
-        //   platform has sized the OS window — blindly clamping at that
-        //   stale size would persist a tiny ~0-px bounds to disk.
-        // * Growth: the user's saved position is still valid; no reason to
-        //   pull it toward the origin.
-        let prev = self.canvas_size;
+        // If a later OS shrink genuinely leaves a window's title bar out of
+        // reach, the user can drag it back, use "Organize windows" to
+        // retile, or a dedicated "reset positions" command.
         self.canvas_size = available;
-        let had_prior = prev.width > 0.0 && prev.height > 0.0;
-        let shrunk = available.width < prev.width || available.height < prev.height;
-        if had_prior && shrunk {
-            self.clamp_to_canvas();
-        }
         if let Some(ref cell) = self.position_cell {
             cell.set(self.bounds);
         }
@@ -734,6 +773,16 @@ impl Widget for Window {
             }
 
             Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+                // Click-to-raise — any left click that reaches this Window
+                // (hit-test routed it here in reverse paint order, so we
+                // ARE the topmost widget under the cursor in the stack
+                // sense) requests a raise.  Classic window-manager
+                // behaviour: clicking anywhere on a window pops it to the
+                // top of the z-order.  Consumed by `Stack::layout` on the
+                // next frame via `take_raise_request`; one-frame visual
+                // delay is invisible in practice.
+                self.raise_request.set(true);
+
                 // Close button — highest priority.
                 if self.in_close_button(*pos) {
                     self.visible = false;
