@@ -690,6 +690,46 @@ impl DrawCtx for GlGfxCtx {
     // layout — acceptable since those labels remain small and few.
     fn has_image_blit(&self) -> bool { true }
 
+    /// Ground-truth pixel sampler — `glReadPixels` on the back buffer.
+    /// Forces the GL pipeline to flush everything queued so far, so the
+    /// byte we read is exactly what ancestor widgets have painted
+    /// beneath this spot.  Called once per Label cache-miss (so the cost
+    /// is amortised across every subsequent frame via the Arc-keyed
+    /// backbuffer cache).
+    ///
+    /// Returns `None` when the pixel isn't opaque — LCD subpixel blending
+    /// only makes sense on solid destinations; Label falls back to
+    /// grayscale when the sample says "not opaque or off-screen".
+    fn sample_bg_pixel(&self, local_x: f64, local_y: f64) -> Option<agg_gui::Color> {
+        let ctm = *self.ctm();
+        let sx = local_x * ctm.sx + local_y * ctm.shx + ctm.tx;
+        let sy = local_x * ctm.shy + local_y * ctm.sy + ctm.ty;
+        let ix = sx.floor() as i32;
+        let iy = sy.floor() as i32;
+        let vw = self.viewport.0 as i32;
+        let vh = self.viewport.1 as i32;
+        if ix < 0 || iy < 0 || ix >= vw || iy >= vh { return None; }
+
+        // `glReadPixels` reads from the currently-bound read buffer (back
+        // buffer for default fbo), origin at lower-left (Y-up — matches our
+        // widget coord system exactly, no flip needed).
+        let mut buf = [0u8; 4];
+        unsafe {
+            self.gl.read_pixels(
+                ix, iy, 1, 1,
+                glow::RGBA, glow::UNSIGNED_BYTE,
+                glow::PixelPackData::Slice(&mut buf),
+            );
+        }
+        if buf[3] < 250 { return None; }
+        Some(agg_gui::Color::rgba(
+            buf[0] as f32 / 255.0,
+            buf[1] as f32 / 255.0,
+            buf[2] as f32 / 255.0,
+            1.0,
+        ))
+    }
+
     fn draw_image_rgba(
         &mut self,
         data:  &[u8],

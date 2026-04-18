@@ -455,6 +455,15 @@ impl Widget for Window {
         let now_visible = self.is_visible();
         if now_visible && !self.last_visible.get() {
             self.raise_request.set(true);
+            // Un-maximize on reopen.  Clicking a sidebar checkbox is "open
+            // this window for use" — the user expects the window to come
+            // up at its normal size, not still stretched to fill the canvas
+            // from the last session's maximise.  Restore `pre_maximize_bounds`
+            // which `toggle_maximize` saved when the user maximised.
+            if self.maximized {
+                self.bounds    = self.pre_maximize_bounds;
+                self.maximized = false;
+            }
         }
         self.last_visible.set(now_visible);
 
@@ -492,7 +501,17 @@ impl Widget for Window {
         // retile, or a dedicated "reset positions" command.
         self.canvas_size = available;
         if let Some(ref cell) = self.position_cell {
-            cell.set(self.bounds);
+            // When maximised, persist the UNDERLYING pre-maximise bounds,
+            // not the stretched-to-canvas ones.  Maximise is an interaction
+            // state, not a saved size: we want cold reloads to come up at
+            // the user's last chosen "real" size, then let them re-maximise
+            // if they want.  Matches native window-manager behaviour.
+            let save_bounds = if self.maximized {
+                self.pre_maximize_bounds
+            } else {
+                self.bounds
+            };
+            cell.set(save_bounds);
         }
 
         Size::new(self.bounds.width, self.bounds.height)

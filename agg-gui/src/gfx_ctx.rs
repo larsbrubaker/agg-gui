@@ -500,6 +500,20 @@ fn active_fb<'a>(
     }
 }
 
+/// Read-only variant of [`active_fb`] — used by the pixel-sampling path
+/// which only needs `&` access.
+#[inline]
+fn active_fb_ref<'a>(
+    base_fb:     &'a Framebuffer,
+    layer_stack: &'a Vec<LayerEntry>,
+) -> &'a Framebuffer {
+    if let Some(top) = layer_stack.last() {
+        &top.fb
+    } else {
+        base_fb
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SrcOver layer compositing
 // ---------------------------------------------------------------------------
@@ -663,6 +677,41 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn pop_layer(&mut self)                                   { self.pop_layer() }
 
     fn has_image_blit(&self) -> bool { true }
+
+    /// Ground-truth pixel sampler — reads the RGBA value currently painted
+    /// at `(local_x, local_y)` in the active framebuffer (after CTM
+    /// transform).  AGG stores **premultiplied** RGBA in the fb; we
+    /// un-premultiply on the way out so callers receive straight colours.
+    ///
+    /// Returns `None` for out-of-bounds positions or semi-transparent
+    /// pixels (LCD blending requires opaque dst; if the pixel isn't
+    /// opaque, Label's LCD path should fall back to grayscale).
+    fn sample_bg_pixel(&self, local_x: f64, local_y: f64) -> Option<Color> {
+        use crate::color::Color;
+        let t = &self.state.transform;
+        let sx = local_x * t.sx + local_y * t.shx + t.tx;
+        let sy = local_x * t.shy + local_y * t.sy + t.ty;
+        // Pick the active render target — top of the layer stack, or base.
+        let fb = active_fb_ref(self.base_fb, &self.layer_stack);
+        let w = fb.width()  as i32;
+        let h = fb.height() as i32;
+        let ix = sx.floor() as i32;
+        let iy = sy.floor() as i32;
+        if ix < 0 || iy < 0 || ix >= w || iy >= h { return None; }
+        let idx = ((iy * w + ix) * 4) as usize;
+        let px = fb.pixels();
+        if idx + 3 >= px.len() { return None; }
+        let a_u8 = px[idx + 3];
+        if a_u8 < 250 { return None; } // require opaque — LCD only makes sense on solid dst
+        // AGG writes premul RGBA; at alpha = 255 premul == straight, so
+        // the u8 values are already the straight colour.
+        Some(Color::rgba(
+            px[idx]     as f32 / 255.0,
+            px[idx + 1] as f32 / 255.0,
+            px[idx + 2] as f32 / 255.0,
+            1.0,
+        ))
+    }
 
     fn draw_image_rgba_arc(
         &mut self,

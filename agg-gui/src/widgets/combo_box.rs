@@ -55,6 +55,12 @@ pub struct ComboBox {
     selected_label: Label,
     /// One label per option, used when the dropdown is open.
     item_labels:    Vec<Label>,
+    /// Optional per-item font overrides, set via [`with_item_fonts`].
+    /// `None` means every entry (and the selected label) uses `self.font`
+    /// — the default.  `Some(vec)` means each entry uses `vec[i]` and
+    /// the selected label uses `vec[selected]`, ignoring the system
+    /// font override so font-preview UI stays stable.
+    item_fonts:     Option<Vec<Arc<Font>>>,
 }
 
 impl ComboBox {
@@ -89,6 +95,7 @@ impl ComboBox {
             on_change: None,
             selected_label,
             item_labels,
+            item_fonts: None,
         }
     }
 
@@ -124,6 +131,40 @@ impl ComboBox {
         self
     }
 
+    /// Override the font used for EACH dropdown entry individually — one
+    /// font per option.  Intended for font-preview UI (the System window's
+    /// font picker renders each name in its own face).  Each item label
+    /// is rebuilt with the matching `Arc<Font>` and marked to ignore the
+    /// system-wide font override (otherwise changing the global font
+    /// would overwrite all the per-entry faces).
+    ///
+    /// Lengths must match: `fonts.len()` should equal the number of
+    /// options.  Extra fonts are ignored; missing entries keep the
+    /// default `self.font`.  The SELECTED label (shown when the dropdown
+    /// is closed) is also rebuilt with the currently-selected font so
+    /// the closed combo reflects the live face.
+    pub fn with_item_fonts(mut self, fonts: Vec<Arc<Font>>) -> Self {
+        self.item_fonts = Some(fonts.clone());
+        let size = self.font_size;
+        self.item_labels = self.options.iter().enumerate().map(|(i, t)| {
+            let f = fonts.get(i).cloned()
+                .unwrap_or_else(|| Arc::clone(&self.font));
+            Label::new(t, f)
+                .with_font_size(size)
+                .with_ignore_system_font(true)
+        }).collect();
+        // Rebuild the selected label with its matching font too.
+        if let Some(sel_font) = fonts.get(self.selected).cloned() {
+            self.selected_label = Label::new(
+                self.options.get(self.selected).map(|s| s.as_str()).unwrap_or(""),
+                sel_font,
+            )
+                .with_font_size(size)
+                .with_ignore_system_font(true);
+        }
+        self
+    }
+
     // ── Accessors ────────────────────────────────────────────────────────────
 
     pub fn selected(&self) -> usize { self.selected }
@@ -131,6 +172,20 @@ impl ComboBox {
     pub fn set_selected(&mut self, idx: usize) {
         if idx < self.options.len() {
             self.selected = idx;
+            // If per-item fonts are set, rebuild the selected label with
+            // the matching face so the closed combo shows the correct
+            // preview.  Otherwise just swap the text on the existing
+            // label.
+            if let Some(ref fonts) = self.item_fonts {
+                if let Some(f) = fonts.get(idx).cloned() {
+                    self.selected_label = Label::new(
+                        self.options[idx].as_str(), f,
+                    )
+                        .with_font_size(self.font_size)
+                        .with_ignore_system_font(true);
+                    return;
+                }
+            }
             self.selected_label.set_text(self.options[idx].as_str());
         }
     }
@@ -263,6 +318,7 @@ impl Widget for ComboBox {
         // ── Selected label ────────────────────────────────────────────────────
         self.selected_label.set_color(v.text_color);
         let sl_bounds = self.selected_label.bounds();
+
         ctx.save();
         ctx.translate(sl_bounds.x, sl_bounds.y);
         paint_subtree(&mut self.selected_label, ctx);
@@ -303,6 +359,7 @@ impl Widget for ComboBox {
                 let text_color = if is_selected { Color::white() } else { v.text_color };
                 self.item_labels[i].set_color(text_color);
                 let lb = self.item_labels[i].bounds();
+
                 ctx.save();
                 ctx.translate(lb.x, lb.y);
                 paint_subtree(&mut self.item_labels[i], ctx);

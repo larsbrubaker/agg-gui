@@ -440,6 +440,42 @@ pub fn build_demo_ui(
     // cube_visible shares the same cell as the 3D Cube sidebar entry.
     let cube_visible = Rc::clone(&demo_entries[CUBE_IDX].open);
 
+    // ── System-settings persistence cells ─────────────────────────────────────
+    //
+    // Seed from `initial_state` (None → defaults); the System window binds
+    // its widgets to these cells so user edits write through to disk via
+    // the auto-save loop.  Apply the seeded values to `agg_gui::font_settings`
+    // immediately so the first frame already reflects the user's last
+    // choice.
+    let font_name_cell: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(
+        initial_state.as_ref().and_then(|s| s.font_name.clone())
+    ));
+    let font_size_scale_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.font_size_scale).unwrap_or(1.0)
+    ));
+    let lcd_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.lcd_enabled).unwrap_or(false)
+    ));
+    let hinting_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.hinting_enabled).unwrap_or(false)
+    ));
+    agg_gui::font_settings::set_font_size_scale(font_size_scale_cell.get());
+    agg_gui::font_settings::set_lcd_enabled    (lcd_enabled_cell.get());
+    agg_gui::font_settings::set_hinting_enabled(hinting_enabled_cell.get());
+    if let Some(name) = font_name_cell.borrow().as_ref() {
+        if let Some(f) = windows::load_font_by_name(name) {
+            agg_gui::font_settings::set_system_font(Some(f));
+        }
+    }
+    // Register the cells so `system_view` (called from the dispatcher
+    // below) can bind its widgets without a new function signature.
+    windows::init_system_cells(windows::SystemCells {
+        font_name:       Rc::clone(&font_name_cell),
+        font_size_scale: Rc::clone(&font_size_scale_cell),
+        lcd_enabled:     Rc::clone(&lcd_enabled_cell),
+        hinting_enabled: Rc::clone(&hinting_enabled_cell),
+    });
+
     // ── Reset cells — one per window ───────────────────────────────────────────
     let all_specs_count = DEMOS.len() + TESTS.len();
     let reset_cells: Vec<Rc<Cell<Option<Rect>>>> = (0..all_specs_count)
@@ -491,13 +527,25 @@ pub fn build_demo_ui(
 
     // ── Sidebar groups ─────────────────────────────────────────────────────────
     // Build the ordered group list by partitioning demo_entries by each spec's
-    // `group` field, then appending `Tests` and `Tools`.
+    // `group` field, then appending `Tests` and `Tools`.  Within each group,
+    // entries are sorted alphabetically by their visible name — which means
+    // stripping the leading Font Awesome icon (PUA range 0xE000–0xF8FF) +
+    // separating whitespace before comparing.
     let group_names: &[&'static str] = &[
         "Widgets", "Layout", "Graphics", "Interaction", "Tests", "Tools",
     ];
+    /// Case-insensitive sort key for an entry label like "\u{F1DE} Sliders".
+    fn sidebar_sort_key(s: &str) -> String {
+        s.trim_start_matches(|c: char| {
+            let cp = c as u32;
+            (0xE000..=0xF8FF).contains(&cp)
+        })
+        .trim_start()
+        .to_lowercase()
+    }
     let sidebar_groups: Vec<SidebarGroup> = group_names.iter()
         .map(|&name| {
-            let entries: Vec<&SidebarEntry> = match name {
+            let mut entries: Vec<&SidebarEntry> = match name {
                 "Tests" => test_entries.iter().collect(),
                 "Tools" => tool_entries.iter().collect(),
                 _       => demo_entries.iter().enumerate()
@@ -505,6 +553,8 @@ pub fn build_demo_ui(
                     .map(|(_, e)| e)
                     .collect(),
             };
+            entries.sort_by(|a, b|
+                sidebar_sort_key(a.label).cmp(&sidebar_sort_key(b.label)));
             SidebarGroup { name, entries }
         })
         .collect();
@@ -663,6 +713,51 @@ pub fn build_demo_ui(
     let main_area = canvas;
 
     // ── Backend panel (left side, visible only when show_backend is true) ────────
+    //
+    // Build the Reset-all-state closure before passing it in.  Reset must:
+    //   - Close every demo / test / about window (open cells → false).
+    //   - Retile every window to its default `tile_rect` so the next time
+    //     the user opens one, bounds are the configured defaults rather
+    //     than the last user-dragged geometry.
+    //   - Restore system font / size / LCD / hinting to defaults, both
+    //     in the `font_settings` globals (so the live render updates)
+    //     AND in the persisted cells (so the next auto-save records
+    //     the reset state).
+    let on_reset_all = {
+        let demo_open   = demo_entries.iter().map(|e| Rc::clone(&e.open)).collect::<Vec<_>>();
+        let test_open   = test_entries.iter().map(|e| Rc::clone(&e.open)).collect::<Vec<_>>();
+        let about_open  = Rc::clone(&about_open);
+        let reset_cells = reset_cells.iter().map(Rc::clone).collect::<Vec<_>>();
+        let specs_w     = specs_w.clone();
+        let specs_h     = specs_h.clone();
+        let font_name   = Rc::clone(&font_name_cell);
+        let font_scale  = Rc::clone(&font_size_scale_cell);
+        let lcd_cell    = Rc::clone(&lcd_enabled_cell);
+        let hint_cell   = Rc::clone(&hinting_enabled_cell);
+        move || {
+            // Close every window.
+            for c in &demo_open { c.set(false); }
+            for c in &test_open { c.set(false); }
+            about_open.set(false);
+            // Retile — `Window::set_bounds` picks up `Some(rect)` on its
+            // next layout and snaps back to that rect (this is how the
+            // "Organize windows" keyboard shortcut also works).
+            for (i, cell) in reset_cells.iter().enumerate() {
+                let r = tile_rect(i, default_canvas_h, specs_w[i], specs_h[i]);
+                cell.set(Some(r));
+            }
+            // System settings → defaults (both runtime globals + cells).
+            agg_gui::font_settings::set_system_font(None);
+            agg_gui::font_settings::set_font_size_scale(1.0);
+            agg_gui::font_settings::set_lcd_enabled    (false);
+            agg_gui::font_settings::set_hinting_enabled(false);
+            *font_name.borrow_mut() = None;
+            font_scale.set(1.0);
+            lcd_cell.set(false);
+            hint_cell.set(false);
+        }
+    };
+
     let backend_panel_widget = build_backend_panel(
         Arc::clone(&font),
         Rc::clone(&run_mode),
@@ -671,7 +766,7 @@ pub fn build_demo_ui(
         Rc::clone(&show_inspector),
         renderer_name,
         backend_name,
-        || {},
+        on_reset_all,
     );
     let backend_pane = BackendPane {
         bounds:   Rect::default(),
@@ -760,6 +855,10 @@ pub fn build_demo_ui(
                 open:     open_cell.get(),
             }))
         },
+        font_name:       Rc::clone(&font_name_cell),
+        font_size_scale: Rc::clone(&font_size_scale_cell),
+        lcd_enabled:     Rc::clone(&lcd_enabled_cell),
+        hinting_enabled: Rc::clone(&hinting_enabled_cell),
     };
 
     let handles = DemoHandles {

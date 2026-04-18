@@ -30,6 +30,12 @@ thread_local! {
     /// System-wide font override.  `None` means "widgets keep whatever font
     /// they were constructed with".
     static SYSTEM_FONT:     RefCell<Option<Arc<Font>>> = RefCell::new(None);
+    /// System-wide font size multiplier — applied to every widget's own
+    /// `font_size` at paint/layout time.  `1.0` = unchanged.  Acts like
+    /// egui's `pixels_per_point` for typography: shrink or enlarge ALL
+    /// text while preserving the relative hierarchy (body stays smaller
+    /// than headings, etc.).
+    static FONT_SIZE_SCALE: RefCell<f64>  = RefCell::new(1.0);
     /// System-wide LCD-subpixel toggle.  When `true`, text-rendering widgets
     /// should prefer LCD output whenever they can determine their background
     /// colour (needed for correct per-channel compositing); fall back to
@@ -57,6 +63,24 @@ pub fn current_system_font() -> Option<Arc<Font>> {
 /// to per-widget fonts.
 pub fn set_system_font(font: Option<Arc<Font>>) {
     SYSTEM_FONT.with(|c| *c.borrow_mut() = font);
+}
+
+// ---------------------------------------------------------------------------
+// Font size scale
+// ---------------------------------------------------------------------------
+
+/// Current font size multiplier.  Widgets reading a `self.font_size`
+/// should consult this (via e.g. `Label::active_font_size`) so a single
+/// slider in the System window can grow or shrink all text uniformly.
+pub fn current_font_size_scale() -> f64 {
+    FONT_SIZE_SCALE.with(|c| *c.borrow())
+}
+
+/// Set the system font-size multiplier.  Clamped to a sensible range so
+/// typos or edge-case inputs can't hide every label or fry the layout.
+pub fn set_font_size_scale(scale: f64) {
+    let clamped = scale.clamp(0.5, 3.0);
+    FONT_SIZE_SCALE.with(|c| *c.borrow_mut() = clamped);
 }
 
 // ---------------------------------------------------------------------------

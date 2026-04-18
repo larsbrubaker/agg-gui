@@ -40,6 +40,7 @@ pub mod gl_renderer;
 pub mod font_settings;
 pub mod image_cache;
 pub mod pixel_bounds;
+pub mod text_lcd;
 pub mod layout_props;
 pub mod screenshot;
 pub mod text;

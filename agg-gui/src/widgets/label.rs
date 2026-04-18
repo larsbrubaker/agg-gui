@@ -107,6 +107,13 @@ pub struct Label {
     /// `available.width`.  The label height expands to fit all lines.
     /// Disabled by default; enable with `.with_wrap(true)`.
     wrap: bool,
+    /// When `true`, this Label ignores the system-wide font override
+    /// (`font_settings::current_system_font`) and always renders with
+    /// the specific `self.font` passed to `Label::new`.  Used by font
+    /// preview widgets (ComboBox item labels in the System window's
+    /// font selector) where each entry must render in its OWN face
+    /// regardless of the current global font choice.
+    ignore_system_font: bool,
 
     // ── Layout measurement cache ──────────────────────────────────────────────
     /// Cached text advance width from last `measure_advance()` call.
@@ -154,6 +161,7 @@ impl Label {
             align: LabelAlign::Left,
             buffered: true,
             wrap: false,
+            ignore_system_font: false,
             layout_text: String::new(),
             layout_font_size: 0.0,
             layout_width: 0.0,
@@ -180,6 +188,16 @@ impl Label {
     /// accommodate all lines.  Newlines in the text are always honoured.
     pub fn with_wrap(mut self, wrap: bool) -> Self { self.wrap = wrap; self }
 
+    /// Opt OUT of the system-wide font override for this Label.  The
+    /// Label will render with `self.font` (passed to `Label::new`)
+    /// regardless of what `font_settings::set_system_font` is pointing
+    /// at.  Useful for font-preview UI — each entry in a font picker
+    /// dropdown needs its OWN face, not the currently selected one.
+    pub fn with_ignore_system_font(mut self, ignore: bool) -> Self {
+        self.ignore_system_font = ignore;
+        self
+    }
+
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
     pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
@@ -196,8 +214,25 @@ impl Label {
     /// so swapping the system font live flows through every widget; falls
     /// back to the per-instance font otherwise.  Scrollbar-style pattern.
     fn active_font(&self) -> Arc<Font> {
-        crate::font_settings::current_system_font()
-            .unwrap_or_else(|| Arc::clone(&self.font))
+        if self.ignore_system_font {
+            Arc::clone(&self.font)
+        } else {
+            crate::font_settings::current_system_font()
+                .unwrap_or_else(|| Arc::clone(&self.font))
+        }
+    }
+
+    /// Per-instance font size multiplied by the system-wide
+    /// [`font_settings::current_font_size_scale`].  Label's font-preview
+    /// UI (combo-box items flagged `ignore_system_font`) ALSO ignores
+    /// the scale — a font picker must show every entry at the same
+    /// reference size or comparing faces becomes useless.
+    fn active_font_size(&self) -> f64 {
+        if self.ignore_system_font {
+            self.font_size
+        } else {
+            self.font_size * crate::font_settings::current_font_size_scale()
+        }
     }
 
     /// Test-only accessor for the backbuffer cache. Returns the cached
@@ -244,23 +279,26 @@ impl Widget for Label {
     fn hit_test(&self, _: Point) -> bool { false }
 
     fn layout(&mut self, available: Size) -> Size {
-        let line_h = self.font_size * 1.5;
+        // Resolve the effective font + size ONCE per layout so this call
+        // and the paint that follows agree on glyph metrics even if the
+        // system scale is mid-transition.
         let font   = self.active_font();
+        let size   = self.active_font_size();
+        let line_h = size * 1.5;
 
         if self.wrap && available.width > 0.0 {
-            // Rebuild wrapped lines when text, font_size, or available width changes.
-            let text_changed = self.layout_text != self.text
-                || (self.layout_font_size - self.font_size).abs() > 0.01;
+            let text_changed  = self.layout_text != self.text
+                || (self.layout_font_size - size).abs() > 0.01;
             let width_changed = (self.wrap_at_width - available.width).abs() > 1.0;
             // ALSO rebuild when the system font has been swapped since the
             // last layout — measurement depends on glyph metrics from a
             // particular font.
             let font_changed  = Arc::as_ptr(&font) != self.layout_font_ptr;
             if text_changed || width_changed || font_changed {
-                self.wrapped_lines = wrap_text(&font, &self.text, self.font_size, available.width);
+                self.wrapped_lines = wrap_text(&font, &self.text, size, available.width);
                 self.wrap_at_width    = available.width;
                 self.layout_text      = self.text.clone();
-                self.layout_font_size = self.font_size;
+                self.layout_font_size = size;
                 self.layout_font_ptr  = Arc::as_ptr(&font);
                 self.cache_pixels     = None; // invalidate backbuffer
             }
@@ -268,18 +306,16 @@ impl Widget for Label {
             Size::new(available.width, total_h)
         } else {
             // Single-line path: tight bounds matching rendered text width.
-            // Text measurement (rustybuzz::shape) is cached: only re-runs when the
-            // text string or font_size (or system font) changes.
             let font_changed = Arc::as_ptr(&font) != self.layout_font_ptr;
             if self.layout_text != self.text
-                || (self.layout_font_size - self.font_size).abs() > 0.01
+                || (self.layout_font_size - size).abs() > 0.01
                 || font_changed
             {
                 let metrics =
-                    crate::text::measure_text_metrics(&font, &self.text, self.font_size);
+                    crate::text::measure_text_metrics(&font, &self.text, size);
                 self.layout_width     = metrics.width;
                 self.layout_text      = self.text.clone();
-                self.layout_font_size = self.font_size;
+                self.layout_font_size = size;
                 self.layout_font_ptr  = Arc::as_ptr(&font);
             }
             Size::new(self.layout_width.min(available.width), line_h)
@@ -295,19 +331,25 @@ impl Widget for Label {
         // back to the per-instance font otherwise.  The same resolution runs
         // in `layout()` so the two stages agree on metrics.
         let font = self.active_font();
+        let size = self.active_font_size();
 
         ctx.set_font(Arc::clone(&font));
-        ctx.set_font_size(self.font_size);
+        ctx.set_font_size(size);
         // If no explicit colour was set, follow the active theme.
         let color = self.color.unwrap_or_else(|| ctx.visuals().text_color);
 
         let is_wrapped = self.wrap && !self.wrapped_lines.is_empty();
 
         // ── Backbuffer path ───────────────────────────────────────────────────
-        // Handles BOTH single-line and wrapped multi-line content.  The
-        // closure just speaks `GfxCtx` — nothing about writing into an
-        // offscreen `Framebuffer` is different from writing to the live
-        // screen, so the per-line rendering loop moves across untouched.
+        // Handles BOTH single-line and wrapped multi-line content, in
+        // BOTH rendering modes (grayscale AA and LCD subpixel).  The LCD
+        // path activates when:
+        //   - `font_settings::lcd_enabled()` is `true`, AND
+        //   - a parent widget has pushed a surface bg via
+        //     `Widget::surface_bg_for_children` (needed for per-channel
+        //     blending to be correct).
+        // Otherwise the grayscale AA path (the default) is used —
+        // un-premultiplied output that composites correctly over any dst.
         if self.buffered && ctx.has_image_blit() && w >= 1.0 && h >= 1.0 {
             let bw = w.ceil() as u32;
             let bh = h.ceil() as u32;
@@ -317,21 +359,38 @@ impl Widget for Label {
                 LabelAlign::Center => 1,
                 LabelAlign::Right  => 2,
             };
-            let key = LabelPixelKey::new(
+
+            // Decide LCD vs grayscale for THIS paint.
+            //
+            // **Single source of truth: read the actual pixel painted
+            // beneath us.**  `ctx.sample_bg_pixel` returns `Some(color)`
+            // when the backend can cheap-read its framebuffer (GfxCtx =
+            // memory read; GlGfxCtx = `glReadPixels` once per cache miss)
+            // AND the sampled pixel is opaque.  If it returns `None` — no
+            // known bg — we fall back to grayscale AA.  We do NOT guess
+            // from widget-declared hints: either we know the destination
+            // colour or we don't.
+            let lcd_bg: Option<Color> =
+                if crate::font_settings::lcd_enabled() {
+                    ctx.sample_bg_pixel(0.0, 0.0)
+                } else {
+                    None
+                };
+
+            let mut key = LabelPixelKey::new(
                 &self.text,
                 Arc::as_ptr(&font) as *const () as usize,
-                self.font_size,
+                size,
                 color,
                 bw, bh, align_byte,
             );
+            if let Some(bg) = lcd_bg {
+                key = key.with_lcd_bg(bg);
+            }
 
             let text  = self.text.clone();
             let font  = Arc::clone(&font);
-            let size  = self.font_size;
             let align = self.align;
-            // `wrapped_lines` is pre-computed each layout() for wrap=true
-            // labels.  Clone only if we need it inside the closure to avoid
-            // allocating for the common single-line case.
             let wrapped_lines = if is_wrapped {
                 Some(self.wrapped_lines.clone())
             } else {
@@ -340,53 +399,107 @@ impl Widget for Label {
 
             let arc = get_or_raster(key, move || {
                 let mut fb = Framebuffer::new(bw, bh);
-                {
-                    let mut gfx = GfxCtx::new(&mut fb);
-                    gfx.set_font(Arc::clone(&font));
-                    gfx.set_font_size(size);
-                    gfx.set_fill_color(color);
+
+                if let Some(bg) = lcd_bg {
+                    // ── LCD subpixel branch ──────────────────────────
+                    // Pre-fill bg so `PixfmtRgba32Lcd`'s per-channel blend
+                    // sees the destination colour; each line's text is
+                    // then mixed in via the 5-tap distribution kernel.
+                    let bg_r = (bg.r * 255.0).clamp(0.0, 255.0) as u8;
+                    let bg_g = (bg.g * 255.0).clamp(0.0, 255.0) as u8;
+                    let bg_b = (bg.b * 255.0).clamp(0.0, 255.0) as u8;
+                    for px in fb.pixels_mut().chunks_exact_mut(4) {
+                        px[0] = bg_r; px[1] = bg_g; px[2] = bg_b; px[3] = 255;
+                    }
+
+                    // Text positions for the LCD path — identical to the
+                    // grayscale path below, but we measure via the text
+                    // module directly (we don't have a GfxCtx here).
+                    let metrics = |s: &str| {
+                        crate::text::measure_text_metrics(&font, s, size)
+                    };
+                    let xform = agg_rust::trans_affine::TransAffine::new();
 
                     if let Some(lines) = &wrapped_lines {
-                        // Wrapped multi-line: same geometry the direct path
-                        // used (Y-up, line 0 at the top), just against the
-                        // backbuffer.
                         let line_h  = size * 1.5;
                         let total_h = lines.len() as f64 * line_h;
                         for (i, line) in lines.iter().enumerate() {
                             if line.is_empty() { continue; }
-                            if let Some(m) = gfx.measure_text(line) {
-                                let line_center_y =
-                                    total_h - (i as f64 + 0.5) * line_h;
-                                let ty = line_center_y
-                                    - (m.ascent - m.descent) * 0.5;
-                                let tx = match align {
-                                    LabelAlign::Left   => 0.0,
-                                    LabelAlign::Center => (w - m.width) * 0.5,
-                                    LabelAlign::Right  => w - m.width,
-                                };
-                                gfx.fill_text(line, tx, ty);
-                            }
+                            let m = metrics(line);
+                            let line_center_y =
+                                total_h - (i as f64 + 0.5) * line_h;
+                            let ty = line_center_y - (m.ascent - m.descent) * 0.5;
+                            let tx = match align {
+                                LabelAlign::Left   => 0.0,
+                                LabelAlign::Center => (w - m.width) * 0.5,
+                                LabelAlign::Right  => w - m.width,
+                            };
+                            crate::text_lcd::blend_text_lcd(
+                                &mut fb, &font, line, size, tx, ty, color, &xform,
+                            );
                         }
-                    } else if let Some(m) = gfx.measure_text(&text) {
-                        // Single-line: vertically-centred, horizontally aligned.
+                    } else {
+                        let m = metrics(&text);
                         let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
                         let tx = match align {
                             LabelAlign::Left   => 0.0,
                             LabelAlign::Center => (w - m.width) * 0.5,
                             LabelAlign::Right  => w - m.width,
                         };
-                        gfx.fill_text(&text, tx, ty);
+                        crate::text_lcd::blend_text_lcd(
+                            &mut fb, &font, &text, size, tx, ty, color, &xform,
+                        );
                     }
+
+                    // Already opaque (alpha=255 everywhere from both the
+                    // pre-fill and the LCD pixfmt).  Flip to top-row-first
+                    // to match `draw_image_rgba` convention.
+                    fb.pixels_flipped()
+                } else {
+                    // ── Grayscale AA branch (default) ────────────────
+                    {
+                        let mut gfx = GfxCtx::new(&mut fb);
+                        gfx.set_font(Arc::clone(&font));
+                        gfx.set_font_size(size);
+                        gfx.set_fill_color(color);
+
+                        if let Some(lines) = &wrapped_lines {
+                            let line_h  = size * 1.5;
+                            let total_h = lines.len() as f64 * line_h;
+                            for (i, line) in lines.iter().enumerate() {
+                                if line.is_empty() { continue; }
+                                if let Some(m) = gfx.measure_text(line) {
+                                    let line_center_y =
+                                        total_h - (i as f64 + 0.5) * line_h;
+                                    let ty = line_center_y
+                                        - (m.ascent - m.descent) * 0.5;
+                                    let tx = match align {
+                                        LabelAlign::Left   => 0.0,
+                                        LabelAlign::Center => (w - m.width) * 0.5,
+                                        LabelAlign::Right  => w - m.width,
+                                    };
+                                    gfx.fill_text(line, tx, ty);
+                                }
+                            }
+                        } else if let Some(m) = gfx.measure_text(&text) {
+                            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
+                            let tx = match align {
+                                LabelAlign::Left   => 0.0,
+                                LabelAlign::Center => (w - m.width) * 0.5,
+                                LabelAlign::Right  => w - m.width,
+                            };
+                            gfx.fill_text(&text, tx, ty);
+                        }
+                    }
+                    let mut pixels = fb.pixels_flipped();
+                    unpremultiply_rgba_inplace(&mut pixels);
+                    pixels
                 }
-                let mut pixels = fb.pixels_flipped();
-                unpremultiply_rgba_inplace(&mut pixels);
-                pixels
             });
             self.cache_pixels = Some(Arc::clone(&arc));
             self.cache_w      = bw;
             self.cache_h      = bh;
 
-            // 1:1 texel→pixel blit via integer dst size (see comment below).
             ctx.draw_image_rgba_arc(&arc, bw, bh, 0.0, 0.0, bw as f64, bh as f64);
             return;
         }
@@ -394,7 +507,7 @@ impl Widget for Label {
         // ── Direct path — no backbuffer (GL tess glyphs, or `buffered = false`) ─
         ctx.set_fill_color(color);
         if is_wrapped {
-            let line_h  = self.font_size * 1.5;
+            let line_h  = size * 1.5;
             let total_h = self.wrapped_lines.len() as f64 * line_h;
             for (i, line) in self.wrapped_lines.iter().enumerate() {
                 if line.is_empty() { continue; }

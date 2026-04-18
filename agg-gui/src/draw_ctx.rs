@@ -187,6 +187,26 @@ pub trait DrawCtx {
     /// Must be called after a matching `push_layer`.  Unmatched calls are ignored.
     fn pop_layer(&mut self) {}
 
+    /// Return the RGBA colour currently painted at `(local_x, local_y)` in
+    /// the active render target, or `None` if this backend can't cheaply
+    /// read its own framebuffer.
+    ///
+    /// **This is the universal "what's under this text" query.** Label's
+    /// LCD path calls this at its top-left corner — if `Some`, it's the
+    /// ground-truth destination colour for per-channel subpixel blending
+    /// (no widget-tree walking or bg declarations needed).  If `None`
+    /// (GL path, no cheap `glReadPixels`), the caller falls back to the
+    /// widget-declared `surface_bg` stack, and finally to grayscale AA
+    /// when neither source produces an opaque colour.
+    ///
+    /// Default: `None` (the conservative answer).  `GfxCtx` (software)
+    /// overrides with a real pixel read; the GL context defers to the
+    /// stack + future dual-source-blend implementation for truly
+    /// universal GL LCD.
+    fn sample_bg_pixel(&self, _local_x: f64, _local_y: f64) -> Option<Color> {
+        None
+    }
+
     // ── GL / GPU content ──────────────────────────────────────────────────────
 
     /// Render GPU content (3-D scene, video frame, etc.) inline at the correct

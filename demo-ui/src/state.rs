@@ -9,7 +9,7 @@
 //!   t<i>=<open>,<x>,<y>,<w>,<h>
 //!   about=<open>,<x>,<y>,<w>,<h>
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use agg_gui::Rect;
@@ -47,6 +47,25 @@ pub struct SavedState {
     pub window_maximized: bool,
     /// Inspector UI state — expanded tree nodes + selected node + split-bar.
     pub inspector: Option<InspectorPersist>,
+
+    // ── System-window persistence ──────────────────────────────────────
+    //
+    // These mirror `agg_gui::font_settings` so the user's typography
+    // choices survive across runs.  `font_name` matches one of the
+    // demo-ui `FONT_OPTIONS` display names (e.g. "Cascadia Code") — we
+    // persist the name, not an `Arc<Font>`, and re-load the bytes on
+    // next startup from the bundled assets.
+
+    /// Selected font's display name.  `None` or unknown name → keep the
+    /// app default (Cascadia Code).
+    pub font_name:       Option<String>,
+    /// Font-size multiplier applied system-wide.  Default 1.0.
+    pub font_size_scale: f64,
+    /// LCD subpixel rendering toggle.
+    pub lcd_enabled:     bool,
+    /// Hinting toggle (stored — not yet applied to raster; flag survives
+    /// reloads so the UI reflects the last choice).
+    pub hinting_enabled: bool,
 }
 
 /// Persisted inspector UI state.  Flat bit-vector of expanded nodes in DFS
@@ -93,6 +112,17 @@ impl SavedState {
             out.push_str(&format!("inspector={},{},{};{}\n",
                 sel, insp.props_h, insp.open as u8, bits));
         }
+        // System settings — each on its own key so the parser can add
+        // future entries without breaking old state files.
+        if let Some(name) = &self.font_name {
+            // Font names may contain spaces (e.g. "Cascadia Code") but
+            // NEVER '=' / newline, which is the only thing we care about
+            // for this line-oriented format.
+            out.push_str(&format!("font_name={name}\n"));
+        }
+        out.push_str(&format!("font_size_scale={}\n", self.font_size_scale));
+        out.push_str(&format!("lcd={}\n",     self.lcd_enabled     as u8));
+        out.push_str(&format!("hinting={}\n", self.hinting_enabled as u8));
         out
     }
 
@@ -108,6 +138,10 @@ impl SavedState {
         let mut window_fullscreen = false;
         let mut window_maximized  = false;
         let mut inspector: Option<InspectorPersist> = None;
+        let mut font_name:       Option<String> = None;
+        let mut font_size_scale: f64  = 1.0;
+        let mut lcd_enabled:     bool = false;
+        let mut hinting_enabled: bool = false;
 
         for line in s.lines() {
             let line = line.trim();
@@ -128,6 +162,10 @@ impl SavedState {
                     let mx: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
                     window_maximized  = mx != 0;
                 }
+                "font_name"       => { font_name = Some(val.to_string()); }
+                "font_size_scale" => { font_size_scale = val.parse().unwrap_or(1.0); }
+                "lcd"             => { let v: u8 = val.parse().unwrap_or(0); lcd_enabled = v != 0; }
+                "hinting"         => { let v: u8 = val.parse().unwrap_or(0); hinting_enabled = v != 0; }
                 "inspector" => {
                     let mut halves = val.splitn(2, ';');
                     let head = halves.next().unwrap_or("");
@@ -169,6 +207,10 @@ impl SavedState {
             window_fullscreen,
             window_maximized,
             inspector,
+            font_name,
+            font_size_scale,
+            lcd_enabled,
+            hinting_enabled,
         })
     }
 }
@@ -207,6 +249,24 @@ pub struct StateAccessor {
     /// expand/select/split state.  Returns `None` when the inspector has
     /// never been laid out yet.
     pub inspector_snapshot: Rc<dyn Fn() -> Option<InspectorPersist>>,
+
+    // ── System-window persistence ─────────────────────────────────────
+    //
+    // These cells are the System window's model: the ComboBox /
+    // DragValue / ToggleSwitch write to them, `current_state` reads
+    // them for disk save.  The auto-save loop picks any change up
+    // within a frame.
+
+    /// Name of the currently-selected font (matches an entry in
+    /// `system::FONT_OPTIONS`).  `None` = default (Cascadia Code).
+    pub font_name:       Rc<RefCell<Option<String>>>,
+    /// Font-size multiplier.  Mirrors
+    /// [`agg_gui::font_settings::current_font_size_scale`].
+    pub font_size_scale: Rc<Cell<f64>>,
+    /// LCD subpixel toggle mirror.
+    pub lcd_enabled:     Rc<Cell<bool>>,
+    /// Hinting toggle mirror.
+    pub hinting_enabled: Rc<Cell<bool>>,
 }
 
 impl StateAccessor {
@@ -230,6 +290,10 @@ impl StateAccessor {
             window_fullscreen: self.window_fullscreen.get(),
             window_maximized:  self.window_maximized.get(),
             inspector:         (self.inspector_snapshot)(),
+            font_name:         self.font_name.borrow().clone(),
+            font_size_scale:   self.font_size_scale.get(),
+            lcd_enabled:       self.lcd_enabled.get(),
+            hinting_enabled:   self.hinting_enabled.get(),
         }
     }
 }

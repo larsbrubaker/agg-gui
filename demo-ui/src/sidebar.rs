@@ -144,7 +144,10 @@ impl Widget for ToggleButton {
         self.label.set_color(text_color);
 
         // Draw the label at the position computed in `layout()` — left-aligned
-        // after the group indent, vertically centred in the row.
+        // after the group indent, vertically centred in the row.  Label's
+        // LCD path samples the actual painted pixel beneath it, so no
+        // bg declaration is needed here (the accent / hover / pressed
+        // pill we just painted above IS the destination Label will read).
         let lb = self.label.bounds();
         ctx.save();
         ctx.translate(lb.x, lb.y);

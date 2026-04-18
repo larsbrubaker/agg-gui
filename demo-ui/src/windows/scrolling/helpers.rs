@@ -259,6 +259,7 @@ impl<T: Clone + Copy + PartialEq + 'static> Widget for SegRow<T> {
             let lx = r.x + (r.width - lw) * 0.5;
             let ly = r.y + (r.height - lh) * 0.5;
             self.labels[i].set_bounds(Rect::new(lx, ly, lw, lh));
+
             ctx.save();
             ctx.translate(lx, ly);
             paint_subtree(&mut self.labels[i], ctx);

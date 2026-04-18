@@ -51,6 +51,13 @@ pub struct LabelPixelKey {
     w:          u32,
     h:          u32,
     align:      u8,
+    /// `None` → grayscale AA raster into a transparent backbuffer
+    ///   (the default path, un-premultiplied before caching).
+    /// `Some(packed_rgba)` → LCD subpixel raster on a pre-filled bg of
+    ///   that colour, opaque output.  Different bg → different LCD swatch
+    ///   → different cache entry, so toggling `lcd_enabled` and/or
+    ///   changing a parent's bg naturally invalidates.
+    lcd_bg:     Option<u32>,
 }
 
 impl LabelPixelKey {
@@ -73,7 +80,20 @@ impl LabelPixelKey {
             size_bits:  font_size.to_bits(),
             color_bits: (r << 24) | (g << 16) | (b << 8) | a,
             w, h, align,
+            lcd_bg:     None,
         }
+    }
+
+    /// Builder: tag this key for the LCD path against `bg`.  Keys with
+    /// different `lcd_bg` values never collide — switching LCD on or
+    /// changing a parent's bg produces a fresh raster.
+    pub fn with_lcd_bg(mut self, bg: Color) -> Self {
+        let r = (bg.r * 255.0).clamp(0.0, 255.0) as u32;
+        let g = (bg.g * 255.0).clamp(0.0, 255.0) as u32;
+        let b = (bg.b * 255.0).clamp(0.0, 255.0) as u32;
+        let a = (bg.a * 255.0).clamp(0.0, 255.0) as u32;
+        self.lcd_bg = Some((r << 24) | (g << 16) | (b << 8) | a);
+        self
     }
 }
 
