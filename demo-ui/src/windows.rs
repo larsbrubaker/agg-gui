@@ -18,6 +18,7 @@ mod frame_demo;
 mod misc;
 mod interaction;
 mod scrolling;
+mod system;
 mod text_demos;
 mod tests;
 
@@ -32,6 +33,7 @@ pub use misc::{extra_viewport, highlighting, interactive_container, misc_demos};
 pub use interaction::{drag_and_drop, panels_demo, popups_demo,
                       scene_demo, screenshot_demo};
 pub use scrolling::scrolling_demo;
+pub use system::system_view;
 pub use text_demos::{strip_demo, table_demo, text_layout, undo_redo,
                      window_options, modals_demo, multi_touch};
 pub use tests::{clipboard_test, cursor_test, grid_test, id_test,

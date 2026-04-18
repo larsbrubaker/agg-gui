@@ -115,6 +115,12 @@ pub struct Label {
     layout_text: String,
     layout_font_size: f64,
     layout_width: f64,
+    /// Pointer identity of the [`Font`] used for the last measurement.  If
+    /// the system-wide font override (see
+    /// [`font_settings::current_system_font`](crate::font_settings::current_system_font))
+    /// is swapped, pointer identity changes and we re-measure to pick up
+    /// the new font's glyph metrics.
+    layout_font_ptr: *const Font,
     /// Width used for the last word-wrap computation.
     wrap_at_width: f64,
     /// Lines produced by the last word-wrap computation.
@@ -151,6 +157,7 @@ impl Label {
             layout_text: String::new(),
             layout_font_size: 0.0,
             layout_width: 0.0,
+            layout_font_ptr: std::ptr::null(),
             wrap_at_width: -1.0,
             wrapped_lines: Vec::new(),
             cache_pixels: None,
@@ -183,6 +190,15 @@ impl Label {
 
     /// Return the current label text as a `&str`.
     pub fn text_str(&self) -> &str { &self.text }
+
+    /// Resolve the font used for THIS layout/paint.  Prefers the system-wide
+    /// font override (set by the System window / `font_settings::set_system_font`)
+    /// so swapping the system font live flows through every widget; falls
+    /// back to the per-instance font otherwise.  Scrollbar-style pattern.
+    fn active_font(&self) -> Arc<Font> {
+        crate::font_settings::current_system_font()
+            .unwrap_or_else(|| Arc::clone(&self.font))
+    }
 
     /// Test-only accessor for the backbuffer cache. Returns the cached
     /// `(pixels, width, height)` triple, where pixels are **straight-alpha**
@@ -229,17 +245,23 @@ impl Widget for Label {
 
     fn layout(&mut self, available: Size) -> Size {
         let line_h = self.font_size * 1.5;
+        let font   = self.active_font();
 
         if self.wrap && available.width > 0.0 {
             // Rebuild wrapped lines when text, font_size, or available width changes.
             let text_changed = self.layout_text != self.text
                 || (self.layout_font_size - self.font_size).abs() > 0.01;
             let width_changed = (self.wrap_at_width - available.width).abs() > 1.0;
-            if text_changed || width_changed {
-                self.wrapped_lines = wrap_text(&self.font, &self.text, self.font_size, available.width);
+            // ALSO rebuild when the system font has been swapped since the
+            // last layout — measurement depends on glyph metrics from a
+            // particular font.
+            let font_changed  = Arc::as_ptr(&font) != self.layout_font_ptr;
+            if text_changed || width_changed || font_changed {
+                self.wrapped_lines = wrap_text(&font, &self.text, self.font_size, available.width);
                 self.wrap_at_width    = available.width;
                 self.layout_text      = self.text.clone();
                 self.layout_font_size = self.font_size;
+                self.layout_font_ptr  = Arc::as_ptr(&font);
                 self.cache_pixels     = None; // invalidate backbuffer
             }
             let total_h = self.wrapped_lines.len() as f64 * line_h;
@@ -247,15 +269,18 @@ impl Widget for Label {
         } else {
             // Single-line path: tight bounds matching rendered text width.
             // Text measurement (rustybuzz::shape) is cached: only re-runs when the
-            // text string or font_size changes, not on every frame.
+            // text string or font_size (or system font) changes.
+            let font_changed = Arc::as_ptr(&font) != self.layout_font_ptr;
             if self.layout_text != self.text
                 || (self.layout_font_size - self.font_size).abs() > 0.01
+                || font_changed
             {
                 let metrics =
-                    crate::text::measure_text_metrics(&self.font, &self.text, self.font_size);
+                    crate::text::measure_text_metrics(&font, &self.text, self.font_size);
                 self.layout_width     = metrics.width;
                 self.layout_text      = self.text.clone();
                 self.layout_font_size = self.font_size;
+                self.layout_font_ptr  = Arc::as_ptr(&font);
             }
             Size::new(self.layout_width.min(available.width), line_h)
         }
@@ -265,7 +290,13 @@ impl Widget for Label {
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        ctx.set_font(Arc::clone(&self.font));
+        // Resolve the font to use THIS PAINT: prefer the system-wide override
+        // (set by the System window) so font changes propagate live; fall
+        // back to the per-instance font otherwise.  The same resolution runs
+        // in `layout()` so the two stages agree on metrics.
+        let font = self.active_font();
+
+        ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
         // If no explicit colour was set, follow the active theme.
         let color = self.color.unwrap_or_else(|| ctx.visuals().text_color);
@@ -288,14 +319,14 @@ impl Widget for Label {
             };
             let key = LabelPixelKey::new(
                 &self.text,
-                Arc::as_ptr(&self.font) as *const () as usize,
+                Arc::as_ptr(&font) as *const () as usize,
                 self.font_size,
                 color,
                 bw, bh, align_byte,
             );
 
             let text  = self.text.clone();
-            let font  = Arc::clone(&self.font);
+            let font  = Arc::clone(&font);
             let size  = self.font_size;
             let align = self.align;
             // `wrapped_lines` is pre-computed each layout() for wrap=true

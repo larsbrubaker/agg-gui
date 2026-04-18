@@ -37,6 +37,7 @@ pub mod framebuffer;
 pub mod geometry;
 pub mod gfx_ctx;
 pub mod gl_renderer;
+pub mod font_settings;
 pub mod image_cache;
 pub mod pixel_bounds;
 pub mod layout_props;

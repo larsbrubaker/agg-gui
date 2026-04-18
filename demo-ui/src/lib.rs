@@ -308,6 +308,7 @@ const DEMOS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F030} Screenshot",             label: "\u{F030} Screenshot",             group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F0D0} Highlighting",           label: "\u{F0D0} Highlighting",           group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F1B3} 3D Cube",               label: "\u{F1B3} 3D Cube",                group: "Graphics", open: false, win_w: 300.0, win_h: 260.0 },
+    DemoSpec { title: "\u{F013} System",                 label: "\u{F013} System",                 group: "Graphics", open: false, win_w: 520.0, win_h: 640.0 },
 
     // ── Interaction ──
     DemoSpec { title: "\u{F0B2} Drag and Drop",          label: "\u{F0B2} Drag and Drop",          group: "Interaction", open: false, win_w: WIN_W, win_h: WIN_H },
@@ -813,6 +814,7 @@ fn build_demo_content(
         "\u{F0DB} Panels"                => windows::panels_demo(font),
         "\u{F075} Popups"                => windows::popups_demo(font),
         "\u{F0C3} Rendering Test"        => rendering_test::rendering_test_view(font),
+        "\u{F013} System"                => windows::system_view(font),
         "\u{F002} Scene"                 => windows::scene_demo(font),
         "\u{F030} Screenshot"            => windows::screenshot_demo(
             font, screenshot_request, screenshot_image,
