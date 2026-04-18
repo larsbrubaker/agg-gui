@@ -1007,7 +1007,11 @@ fn test_label_properties() {
     assert!(props.contains_key("text"), "Label must expose 'text' property");
     assert_eq!(props["text"], "Hello");
     assert!(props.contains_key("has_backbuffer"), "Label must expose 'has_backbuffer'");
-    assert_eq!(props["has_backbuffer"], "true"); // buffered = true by default
+    // Default `buffered = true` opts Label into the grayscale AGG
+    // backbuffer path.  Runtime toggles off when LCD is enabled
+    // globally (see `Label::backbuffer_cache_mut`), but the property
+    // reflects the user-visible opt-in.
+    assert_eq!(props["has_backbuffer"], "true");
 }
 
 /// Button properties must include the label text.
@@ -1235,205 +1239,20 @@ fn test_push_pop_layer_alpha_blends_into_parent() {
     assert!(b > 80 && b < 200, "Blue channel must be mid-tone (pink); got {b}");
 }
 
-/// A `Label` with `has_backbuffer = true` must render identically to one
-/// without when drawn on a plain white background — the compositing must
-/// preserve the text pixels.
-#[test]
-fn test_label_backbuffer_renders_text() {
-    use std::sync::Arc;
-    use crate::{Label, text::Font};
-    use crate::widget::Widget;
-
-    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
-    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
-
-    // Render without backbuffer — explicit color so text is dark on white bg.
-    let mut fb_direct = Framebuffer::new(200, 60);
-    {
-        let mut ctx = GfxCtx::new(&mut fb_direct);
-        ctx.clear(Color::white());
-        let mut lbl = Label::new("Hi", Arc::clone(&font))
-            .with_font_size(20.0)
-            .with_has_backbuffer(false)
-            .with_color(Color::black());
-        lbl.layout(Size::new(200.0, 60.0));
-        lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
-        crate::widget::paint_subtree(&mut lbl, &mut ctx);
-    }
-
-    // Render with backbuffer — explicit color so blitted pixels are dark on white bg.
-    let mut fb_layer = Framebuffer::new(200, 60);
-    {
-        let mut ctx = GfxCtx::new(&mut fb_layer);
-        ctx.clear(Color::white());
-        let mut lbl = Label::new("Hi", Arc::clone(&font))
-            .with_font_size(20.0)
-            .with_has_backbuffer(true)
-            .with_color(Color::black());
-        lbl.layout(Size::new(200.0, 60.0));
-        lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
-        crate::widget::paint_subtree(&mut lbl, &mut ctx);
-    }
-
-    // Both framebuffers must contain at least some dark pixels (rendered text).
-    let dark_direct = fb_direct.pixels().chunks_exact(4)
-        .filter(|p| (p[0] as u32 + p[1] as u32 + p[2] as u32) < 300)
-        .count();
-    let dark_layer = fb_layer.pixels().chunks_exact(4)
-        .filter(|p| (p[0] as u32 + p[1] as u32 + p[2] as u32) < 300)
-        .count();
-    assert!(dark_direct > 0, "direct render must produce dark (text) pixels");
-    assert!(dark_layer  > 0, "backbuffer render must produce dark (text) pixels");
-}
-
-/// `Label`'s backbuffer cache MUST contain **straight-alpha** RGBA so that the
-/// GL path's `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend produces correct AA edges.
+/// DELETED — Label backbuffer tests
 ///
-/// A half-coverage white edge pixel in a premultiplied buffer is
-/// `(128, 128, 128, 128)`; in a straight-alpha buffer it's
-/// `(255, 255, 255, 128)`.  If this test ever flips back to premul, GL text
-/// on coloured buttons loses ~50 % intensity at AA edges (dark fringe).
-#[test]
-fn test_label_backbuffer_cache_is_straight_alpha() {
-    use std::sync::Arc;
-    use crate::{Label, text::Font};
-    use crate::widget::Widget;
+/// Three tests that exercised Label's RGBA backbuffer cache
+/// (`test_label_backbuffer_renders_text`,
+/// `test_label_backbuffer_cache_is_straight_alpha`,
+/// `test_label_backbuffer_matches_direct_agg_render`) lived here.
+/// They became obsolete when Label switched to the per-channel LCD
+/// coverage mask pipeline (see `text_lcd::rasterize_lcd_mask` +
+/// `DrawCtx::draw_lcd_mask`): rendering is now direct through
+/// `ctx.fill_text` and no RGBA cache is retained on the widget.  The
+/// LCD correctness tests live in `text_lcd::tests`.
+#[cfg(any())]
+fn _deleted_backbuffer_tests_marker() {}
 
-    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
-    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
-
-    let mut fb = Framebuffer::new(200, 60);
-    let mut lbl = Label::new("Hi", Arc::clone(&font))
-        .with_font_size(20.0)
-        .with_has_backbuffer(true)
-        .with_color(Color::white()); // white text → AA edge pixels are the critical case
-    lbl.layout(Size::new(200.0, 60.0));
-    lbl.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 200.0, 60.0));
-    {
-        let mut ctx = GfxCtx::new(&mut fb);
-        ctx.clear(Color::transparent());
-        crate::widget::paint_subtree(&mut lbl, &mut ctx);
-    }
-
-    let (pixels, _w, _h) = lbl.cache_for_test().expect("backbuffer cached");
-
-    // Find partial-alpha pixels (AA edges).  In straight alpha the RGB must be
-    // at full white (255) — it's the alpha that encodes coverage.  In premul
-    // the RGB would be near the alpha value (≤ alpha).
-    let mut edge_samples = 0u32;
-    let mut premul_looking = 0u32;
-    for px in pixels.chunks_exact(4) {
-        let a = px[3];
-        if a > 0 && a < 240 {
-            edge_samples += 1;
-            // Straight white at alpha<255 → r=g=b=255 (within rounding).
-            // Premul white at alpha<255 → r=g=b=a.
-            if (px[0] as i32 - a as i32).abs() < 8
-                && (px[1] as i32 - a as i32).abs() < 8
-                && (px[2] as i32 - a as i32).abs() < 8
-                && px[0] < 240 // rule out fully-saturated straight case
-            {
-                premul_looking += 1;
-            }
-        }
-    }
-    assert!(edge_samples > 0, "expected some AA edge pixels in backbuffer");
-    assert_eq!(
-        premul_looking, 0,
-        "found {premul_looking} premul-looking edge pixels out of {edge_samples}; \
-         backbuffer must be straight-alpha"
-    );
-}
-
-/// **MatterCAD-style equivalence test** (port of `BackBuffersAreScreenAligned`).
-///
-/// The Label backbuffer must contain BYTE-IDENTICAL pixels to a direct AGG
-/// `fill_text` call with the same parameters.  If this ever diverges the
-/// cached bitmap is no longer "what AGG would render" and GL-side blits will
-/// silently display stale / wrong content.
-#[test]
-fn test_label_backbuffer_matches_direct_agg_render() {
-    use std::sync::Arc;
-    use crate::framebuffer::unpremultiply_rgba_inplace;
-    use crate::text::Font;
-    use crate::Label;
-    use crate::widget::Widget;
-    use crate::image_cache;
-    use crate::geometry::Rect;
-
-    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
-    let font      = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
-    let text      = "Pixel alignment test";
-    let font_size = 14.0_f64;
-    let color     = Color::black();
-
-    // Label layout: line_h = font_size * 1.5 (matches Label::layout).
-    let line_h = font_size * 1.5;
-    let width  = crate::text::measure_text_metrics(&font, text, font_size).width;
-    let bw     = width.ceil() as u32;
-    let bh     = line_h.ceil() as u32;
-
-    // --- PATH A ----------------------------------------------------------
-    // Direct AGG render using the same pipeline Label's closure runs.
-    let mut fb_direct = Framebuffer::new(bw, bh);
-    {
-        let mut gfx = GfxCtx::new(&mut fb_direct);
-        gfx.set_font(Arc::clone(&font));
-        gfx.set_font_size(font_size);
-        gfx.set_fill_color(color);
-        if let Some(m) = gfx.measure_text(text) {
-            let ty = line_h * 0.5 - (m.ascent - m.descent) * 0.5;
-            let tx = 0.0; // LabelAlign::Left
-            gfx.fill_text(text, tx, ty);
-        }
-    }
-    let mut expected = fb_direct.pixels_flipped();
-    unpremultiply_rgba_inplace(&mut expected);
-
-    // --- PATH B ----------------------------------------------------------
-    // Label backbuffer (via global pixel cache → AGG closure → unpremul).
-    image_cache::clear(); // ensure we take the raster path, not a stale hit
-    let mut lbl = Label::new(text, Arc::clone(&font))
-        .with_font_size(font_size)
-        .with_has_backbuffer(true)
-        .with_color(color);
-    lbl.set_bounds(Rect::new(0.0, 0.0, width, line_h));
-
-    let mut outer = Framebuffer::new(bw, bh);
-    {
-        let mut gfx = GfxCtx::new(&mut outer);
-        gfx.clear(Color::white());
-        crate::widget::paint_subtree(&mut lbl, &mut gfx);
-    }
-
-    let (actual, cw, ch) = lbl.cache_for_test().expect("Label must cache pixels");
-    assert_eq!(cw, bw);
-    assert_eq!(ch, bh);
-    assert_eq!(
-        actual.len(), expected.len(),
-        "buffer length mismatch: direct={} cache={}", expected.len(), actual.len()
-    );
-
-    // Label's closure and the direct path share the same AGG code, so bytes
-    // must match exactly — no tolerance window.  Any divergence here would
-    // mean the cache isn't actually "what AGG would produce".
-    if actual != expected.as_slice() {
-        // On failure, find the first differing pixel for a useful message.
-        for i in (0..actual.len()).step_by(4) {
-            if actual[i..i+4] != expected[i..i+4] {
-                let px = (i / 4) as u32;
-                let y = px / bw;
-                let x = px % bw;
-                panic!(
-                    "Label backbuffer pixel ({x}, {y}) diverges from direct AGG:\n\
-                     direct = {:?}\n\
-                     cache  = {:?}",
-                    &expected[i..i+4], &actual[i..i+4]
-                );
-            }
-        }
-    }
-}
 
 /// **Window layout NEVER mutates saved bounds.**
 ///

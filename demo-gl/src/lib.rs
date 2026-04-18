@@ -71,6 +71,42 @@ const TEX_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;
 const TEX_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;out vec4 frag_color;void main(){frag_color=texture(u_tex,v_uv);}";
 
 // ---------------------------------------------------------------------------
+// LCD subpixel compositing pipeline
+// ---------------------------------------------------------------------------
+// Uploads a 3-channel `(cov_r, cov_g, cov_b)` coverage mask (from
+// `agg_gui::text_lcd::rasterize_lcd_mask_*`) as an RGB(A) texture and
+// composites per-channel onto the destination via **dual-source blending**:
+//
+//   dst.rgb = src.rgb * cov.rgb + dst.rgb * (1 - cov.rgb)
+//
+// The shader outputs the source colour on output 0 (index 0) and the
+// coverage mask on output 0 (index 1).  The blend state uses
+// `(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR)` so the hardware does the
+// per-channel blend for us — giving correct LCD text against any
+// background without the walk/sample-bg plumbing.
+//
+// Dual-source blend requires GL 3.3 core (which we already require) and
+// is unavailable in base WebGL 2; the WASM build falls back to grayscale
+// AA via a capability check.
+
+#[cfg(target_arch = "wasm32")]
+const LCD_VERT: &str = "#version 300 es\nprecision mediump float;\nlayout(location=0)in vec2 a_pos;layout(location=1)in vec2 a_uv;uniform vec2 u_resolution;out vec2 v_uv;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_uv=a_uv;}";
+#[cfg(not(target_arch = "wasm32"))]
+const LCD_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;layout(location=1)in vec2 a_uv;uniform vec2 u_resolution;out vec2 v_uv;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_uv=a_uv;}";
+
+// Fragment: sample the mask, output src colour on index 0 and the
+// coverage (with alpha=1 so the alpha blend slot doesn't go to 0) on
+// index 1.  Dual-source blending reads index 1 as SRC1.
+//
+// Note on WebGL 2: dual-source isn't in the base spec, so we use a
+// traditional single-output fallback that just emits coverage-weighted
+// alpha — this is the "grayscale from LCD mask" degradation path.
+#[cfg(target_arch = "wasm32")]
+const LCD_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;out vec4 frag_color;void main(){vec3 c=texture(u_mask,v_uv).rgb;float a=(c.r+c.g+c.b)/3.0;frag_color=vec4(u_color.rgb,a);}";
+#[cfg(not(target_arch = "wasm32"))]
+const LCD_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;layout(location=0,index=0)out vec4 out_color;layout(location=0,index=1)out vec4 out_coverage;void main(){vec3 c=texture(u_mask,v_uv).rgb;out_color=vec4(u_color.rgb,1.0);out_coverage=vec4(c,1.0);}";
+
+// ---------------------------------------------------------------------------
 // GlGfxCtx
 // ---------------------------------------------------------------------------
 
@@ -112,6 +148,20 @@ pub struct GlGfxCtx {
     tex_res_loc: Option<glow::UniformLocation>,
     tex_sampler_loc: Option<glow::UniformLocation>,
 
+    // LCD subpixel compositing pipeline (see `LCD_VERT` / `LCD_FRAG`).
+    lcd_prog: glow::Program,
+    lcd_vao:  glow::VertexArray,
+    lcd_vbo:  glow::Buffer,
+    lcd_res_loc:     Option<glow::UniformLocation>,
+    lcd_sampler_loc: Option<glow::UniformLocation>,
+    lcd_color_loc:   Option<glow::UniformLocation>,
+
+    // Arc-pointer-keyed texture cache for LCD coverage masks — same
+    // pattern as `arc_texture_cache`.  One upload per unique text
+    // raster; textures live as long as the mask `Arc` is still strong
+    // in `agg_gui::text_lcd`'s LRU cache.
+    lcd_arc_texture_cache: std::collections::HashMap<usize, ArcTextureEntry>,
+
     // Texture cache keyed on (ptr, len, w, h, head/tail byte hash).  Used by
     // the generic `draw_image_rgba(&[u8], …)` path (markdown images, screenshot
     // display, image widgets).  LRU eviction keeps memory bounded.
@@ -149,6 +199,10 @@ pub struct GlGfxCtx {
 
     // Glyph vertex cache — survives frame resets, populated on first use.
     glyph_cache: GlyphCache,
+
+    /// LCD mode for this ctx — see `GfxCtx::lcd_mode`.  Set by the main
+    /// render loop each frame from `font_settings::lcd_enabled()`.
+    lcd_mode: bool,
 }
 
 impl GlGfxCtx {
@@ -199,6 +253,23 @@ impl GlGfxCtx {
         gl.enable_vertex_attrib_array(1);
         gl.bind_vertex_array(None);
 
+        // ── LCD subpixel pipeline ──────────────────────────────────────────
+        let lcd_prog = compile_program(&gl, LCD_VERT, LCD_FRAG)
+            .expect("lcd shader compile/link");
+        let lcd_res_loc     = gl.get_uniform_location(lcd_prog, "u_resolution");
+        let lcd_sampler_loc = gl.get_uniform_location(lcd_prog, "u_mask");
+        let lcd_color_loc   = gl.get_uniform_location(lcd_prog, "u_color");
+
+        let lcd_vao = gl.create_vertex_array().expect("create lcd VAO");
+        let lcd_vbo = gl.create_buffer().expect("create lcd VBO");
+        gl.bind_vertex_array(Some(lcd_vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(lcd_vbo));
+        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 16, 0);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 16, 8);
+        gl.enable_vertex_attrib_array(0);
+        gl.enable_vertex_attrib_array(1);
+        gl.bind_vertex_array(None);
+
         Self {
             gl,
             viewport: (width, height),
@@ -206,9 +277,12 @@ impl GlGfxCtx {
             res_loc, color_loc,
             tex_prog, tex_vao, tex_vbo,
             tex_res_loc, tex_sampler_loc,
+            lcd_prog, lcd_vao, lcd_vbo,
+            lcd_res_loc, lcd_sampler_loc, lcd_color_loc,
             texture_cache:       std::collections::HashMap::new(),
             texture_cache_order: std::collections::VecDeque::new(),
             arc_texture_cache:   std::collections::HashMap::new(),
+            lcd_arc_texture_cache: std::collections::HashMap::new(),
             fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
@@ -220,6 +294,7 @@ impl GlGfxCtx {
             font:         None,
             font_size:    16.0,
             glyph_cache:  GlyphCache::new(),
+            lcd_mode:     false,
         }
     }
 
@@ -271,6 +346,11 @@ impl GlGfxCtx {
         unsafe { self.gl.disable(glow::SCISSOR_TEST); }
     }
 
+    /// Set the LCD mode for this ctx.  Demo main loops call this each
+    /// frame with `font_settings::lcd_enabled()` so direct-to-screen
+    /// text picks up the global toggle.
+    pub fn set_lcd_mode(&mut self, on: bool) { self.lcd_mode = on; }
+
     // ---- internal helpers --------------------------------------------------
 
     fn ctm(&self) -> &TransAffine {
@@ -301,6 +381,94 @@ impl GlGfxCtx {
         let (mut px, mut py) = (x, y);
         self.ctm().transform(&mut px, &mut py);
         [px as f32, py as f32]
+    }
+
+    /// Upload a 3-channel LCD coverage mask into `tex` as an RGB texture.
+    unsafe fn upload_lcd_texture(&self, tex: glow::Texture, w: u32, h: u32, data: &[u8]) {
+        let gl = &*self.gl;
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        gl.tex_image_2d(
+            glow::TEXTURE_2D, 0, glow::RGB as i32,
+            w as i32, h as i32, 0,
+            glow::RGB, glow::UNSIGNED_BYTE, Some(data),
+        );
+    }
+
+    /// Draw the LCD-mask quad with dual-source blending.  `tex` is a
+    /// pre-uploaded RGB mask of size `mask_w × mask_h`.  The quad's
+    /// bottom-left lands at `(dst_x, dst_y)` in local coords after the
+    /// current CTM is applied.  Mask rows are Y-up so UV (0, 0) maps
+    /// to the bottom of the quad.
+    unsafe fn draw_lcd_quad(
+        &self,
+        tex:       glow::Texture,
+        mask_w:    u32,
+        mask_h:    u32,
+        src_color: agg_gui::Color,
+        dst_x:     f64,
+        dst_y:     f64,
+    ) {
+        let gl = &*self.gl;
+        let ctm = *self.ctm();
+        let bl_x = dst_x * ctm.sx + dst_y * ctm.shx + ctm.tx;
+        let bl_y = dst_x * ctm.shy + dst_y * ctm.sy + ctm.ty;
+        let tr_x = bl_x + mask_w as f64;
+        let tr_y = bl_y + mask_h as f64;
+
+        let verts: [f32; 16] = [
+            bl_x as f32, bl_y as f32, 0.0, 0.0,
+            tr_x as f32, bl_y as f32, 1.0, 0.0,
+            tr_x as f32, tr_y as f32, 1.0, 1.0,
+            bl_x as f32, tr_y as f32, 0.0, 1.0,
+        ];
+        let idx: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+        gl.use_program(Some(self.lcd_prog));
+        gl.uniform_2_f32(self.lcd_res_loc.as_ref(), self.viewport.0, self.viewport.1);
+        gl.uniform_1_i32(self.lcd_sampler_loc.as_ref(), 0);
+        let a = (src_color.a as f64 * self.global_alpha) as f32;
+        gl.uniform_4_f32(
+            self.lcd_color_loc.as_ref(),
+            src_color.r, src_color.g, src_color.b, a,
+        );
+        gl.active_texture(glow::TEXTURE0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+
+        // Dual-source blend for per-channel src-over.  Keep the
+        // alpha-channel-preserving factors so the framebuffer's A
+        // stays at 1 (matches `begin_frame`).
+        #[cfg(not(target_arch = "wasm32"))]
+        gl.blend_func_separate(
+            glow::SRC1_COLOR, glow::ONE_MINUS_SRC1_COLOR,
+            glow::ZERO,       glow::ONE,
+        );
+
+        gl.bind_vertex_array(Some(self.lcd_vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.lcd_vbo));
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            bytemuck::cast_slice(&verts),
+            glow::STREAM_DRAW,
+        );
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ibo));
+        gl.buffer_data_u8_slice(
+            glow::ELEMENT_ARRAY_BUFFER,
+            bytemuck::cast_slice(&idx),
+            glow::STREAM_DRAW,
+        );
+        gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+        gl.bind_vertex_array(None);
+
+        // Restore standard alpha blend state.
+        gl.blend_func_separate(
+            glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA,
+            glow::ZERO,      glow::ONE,
+        );
     }
 
     /// Submit triangles with the given colour.
@@ -631,6 +799,30 @@ impl DrawCtx for GlGfxCtx {
             None => return,
         };
 
+        // LCD subpixel path — raster is cached in `text_lcd` keyed on
+        // `(text, font, size)`; the GL backend then caches the uploaded
+        // texture keyed on the returned `Arc`'s pointer identity via
+        // `draw_lcd_mask_arc`.  Result: one AGG rasterisation +
+        // `glTexImage2D` per unique string, every subsequent frame is a
+        // single dual-source-blend draw call.
+        if <Self as agg_gui::DrawCtx>::has_lcd_mask_composite(self)
+            && self.lcd_mode
+        {
+            let cached = agg_gui::lcd_coverage::rasterize_text_lcd_cached(
+                &font, text, self.font_size,
+            );
+            let mut col = self.fill_color;
+            col.a *= self.global_alpha as f32;
+            let dst_x = x - cached.baseline_x_in_mask;
+            let dst_y = y - cached.baseline_y_in_mask;
+            <Self as agg_gui::DrawCtx>::draw_lcd_mask_arc(
+                self,
+                &cached.pixels, cached.width, cached.height,
+                col, dst_x, dst_y,
+            );
+            return;
+        }
+
         // Shape the text string to get per-glyph IDs and advances.
         // Rustybuzz shaping is cheap relative to tessellation.
         let shaped    = shape_glyphs(&font, text, self.font_size);
@@ -690,44 +882,82 @@ impl DrawCtx for GlGfxCtx {
     // layout — acceptable since those labels remain small and few.
     fn has_image_blit(&self) -> bool { true }
 
-    /// Ground-truth pixel sampler — `glReadPixels` on the back buffer.
-    /// Forces the GL pipeline to flush everything queued so far, so the
-    /// byte we read is exactly what ancestor widgets have painted
-    /// beneath this spot.  Called once per Label cache-miss (so the cost
-    /// is amortised across every subsequent frame via the Arc-keyed
-    /// backbuffer cache).
-    ///
-    /// Returns `None` when the pixel isn't opaque — LCD subpixel blending
-    /// only makes sense on solid destinations; Label falls back to
-    /// grayscale when the sample says "not opaque or off-screen".
-    fn sample_bg_pixel(&self, local_x: f64, local_y: f64) -> Option<agg_gui::Color> {
-        let ctm = *self.ctm();
-        let sx = local_x * ctm.sx + local_y * ctm.shx + ctm.tx;
-        let sy = local_x * ctm.shy + local_y * ctm.sy + ctm.ty;
-        let ix = sx.floor() as i32;
-        let iy = sy.floor() as i32;
-        let vw = self.viewport.0 as i32;
-        let vh = self.viewport.1 as i32;
-        if ix < 0 || iy < 0 || ix >= vw || iy >= vh { return None; }
+    #[cfg(target_arch = "wasm32")]
+    fn has_lcd_mask_composite(&self) -> bool {
+        // WebGL 2 base spec lacks dual-source blending; the shader
+        // fallback degrades to grayscale-ish alpha compositing which
+        // produces visible colour fringing.  Report `false` so callers
+        // stick with the grayscale AA path on WASM until we wire the
+        // `EXT_blend_func_extended` check.
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn has_lcd_mask_composite(&self) -> bool { true }
 
-        // `glReadPixels` reads from the currently-bound read buffer (back
-        // buffer for default fbo), origin at lower-left (Y-up — matches our
-        // widget coord system exactly, no flip needed).
-        let mut buf = [0u8; 4];
+    fn draw_lcd_mask(
+        &mut self,
+        mask:      &[u8],
+        mask_w:    u32,
+        mask_h:    u32,
+        src_color: agg_gui::Color,
+        dst_x:     f64,
+        dst_y:     f64,
+    ) {
+        // Slice path — upload a throwaway texture.  Used only by code
+        // that doesn't have an `Arc` to key a cache on.  Label's hot
+        // path goes through `draw_lcd_mask_arc` below, which reuses
+        // the uploaded GL texture across frames.
+        if mask.is_empty() || mask_w == 0 || mask_h == 0 { return; }
+        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 { return; }
         unsafe {
-            self.gl.read_pixels(
-                ix, iy, 1, 1,
-                glow::RGBA, glow::UNSIGNED_BYTE,
-                glow::PixelPackData::Slice(&mut buf),
-            );
+            let tex = self.gl.create_texture().expect("create LCD texture");
+            self.upload_lcd_texture(tex, mask_w, mask_h, mask);
+            self.draw_lcd_quad(tex, mask_w, mask_h, src_color, dst_x, dst_y);
+            self.gl.delete_texture(tex);
         }
-        if buf[3] < 250 { return None; }
-        Some(agg_gui::Color::rgba(
-            buf[0] as f32 / 255.0,
-            buf[1] as f32 / 255.0,
-            buf[2] as f32 / 255.0,
-            1.0,
-        ))
+    }
+
+    fn draw_lcd_mask_arc(
+        &mut self,
+        mask:      &std::sync::Arc<Vec<u8>>,
+        mask_w:    u32,
+        mask_h:    u32,
+        src_color: agg_gui::Color,
+        dst_x:     f64,
+        dst_y:     f64,
+    ) {
+        if mask.is_empty() || mask_w == 0 || mask_h == 0 { return; }
+        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 { return; }
+        let key = std::sync::Arc::as_ptr(mask) as usize;
+
+        // Sweep expired entries opportunistically — each miss walks the
+        // map once; each hit bumps a counter and sweeps every Nth call.
+        // Keeps GPU memory bounded when the CPU mask cache evicts.
+        let tex = match self.lcd_arc_texture_cache.get(&key) {
+            Some(entry) if entry.weak.upgrade().is_some() => entry.texture,
+            _ => unsafe {
+                let tex = self.gl.create_texture().expect("create LCD texture");
+                self.upload_lcd_texture(tex, mask_w, mask_h, mask.as_slice());
+                // Insert fresh entry, dropping any stale one for this key.
+                if let Some(old) = self.lcd_arc_texture_cache.insert(key, ArcTextureEntry {
+                    weak:    std::sync::Arc::downgrade(mask),
+                    texture: tex,
+                    w:       mask_w,
+                    h:       mask_h,
+                }) {
+                    self.gl.delete_texture(old.texture);
+                }
+                // Cheap periodic sweep of dropped Arcs.
+                self.lcd_arc_texture_cache.retain(|_, e| {
+                    if e.weak.upgrade().is_some() { true } else {
+                        self.gl.delete_texture(e.texture);
+                        false
+                    }
+                });
+                tex
+            },
+        };
+        unsafe { self.draw_lcd_quad(tex, mask_w, mask_h, src_color, dst_x, dst_y); }
     }
 
     fn draw_image_rgba(

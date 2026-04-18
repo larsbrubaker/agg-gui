@@ -187,26 +187,6 @@ pub trait DrawCtx {
     /// Must be called after a matching `push_layer`.  Unmatched calls are ignored.
     fn pop_layer(&mut self) {}
 
-    /// Return the RGBA colour currently painted at `(local_x, local_y)` in
-    /// the active render target, or `None` if this backend can't cheaply
-    /// read its own framebuffer.
-    ///
-    /// **This is the universal "what's under this text" query.** Label's
-    /// LCD path calls this at its top-left corner — if `Some`, it's the
-    /// ground-truth destination colour for per-channel subpixel blending
-    /// (no widget-tree walking or bg declarations needed).  If `None`
-    /// (GL path, no cheap `glReadPixels`), the caller falls back to the
-    /// widget-declared `surface_bg` stack, and finally to grayscale AA
-    /// when neither source produces an opaque colour.
-    ///
-    /// Default: `None` (the conservative answer).  `GfxCtx` (software)
-    /// overrides with a real pixel read; the GL context defers to the
-    /// stack + future dual-source-blend implementation for truly
-    /// universal GL LCD.
-    fn sample_bg_pixel(&self, _local_x: f64, _local_y: f64) -> Option<Color> {
-        None
-    }
-
     // ── GL / GPU content ──────────────────────────────────────────────────────
 
     /// Render GPU content (3-D scene, video frame, etc.) inline at the correct
@@ -223,6 +203,63 @@ pub trait DrawCtx {
     /// placeholder before calling this method so the software render has
     /// something visible.
     fn gl_paint(&mut self, _screen_rect: Rect, _painter: &mut dyn GlPaint) {}
+
+    // ── LCD mask compositing ──────────────────────────────────────────────────
+
+    /// Composite a pre-rasterized LCD subpixel mask onto the current
+    /// render target, mixing `src_color` into the destination through
+    /// per-channel coverage.
+    ///
+    /// `mask` is three bytes per pixel (`cov_r`, `cov_g`, `cov_b`) as
+    /// produced by [`crate::text_lcd::rasterize_lcd_mask`].  The caller
+    /// specifies `(dst_x, dst_y)` in local coordinates (Y-up in our
+    /// convention) and `mask_w × mask_h` to tell the backend the mask's
+    /// dimensions.
+    ///
+    /// Per-channel source-over blend:
+    /// ```text
+    /// dst.r = src.r * mask.r + dst.r * (1 - mask.r)
+    /// dst.g = src.g * mask.g + dst.g * (1 - mask.g)
+    /// dst.b = src.b * mask.b + dst.b * (1 - mask.b)
+    /// ```
+    ///
+    /// **This is the universal "composite LCD text onto arbitrary bg"
+    /// primitive** — it replaces the prior walk / sample / pre-fill
+    /// approach.  Software ctx implements it as an inner-loop blend; the
+    /// GL ctx implements it via a dual-source-blend fragment shader.
+    /// Backends that haven't wired it yet use the default no-op, which
+    /// makes callers fall back to grayscale AA.
+    fn draw_lcd_mask(
+        &mut self,
+        _mask:      &[u8],
+        _mask_w:    u32,
+        _mask_h:    u32,
+        _src_color: Color,
+        _dst_x:     f64,
+        _dst_y:     f64,
+    ) {}
+
+    /// Arc-keyed variant so GL backends can cache the uploaded texture
+    /// on the `Arc`'s pointer identity — one `glTexImage2D` per unique
+    /// raster, lifetime tied to the mask's strong-ref count.  Software
+    /// backends fall through to the slice path.
+    fn draw_lcd_mask_arc(
+        &mut self,
+        mask:      &std::sync::Arc<Vec<u8>>,
+        mask_w:    u32,
+        mask_h:    u32,
+        src_color: Color,
+        dst_x:     f64,
+        dst_y:     f64,
+    ) {
+        self.draw_lcd_mask(mask.as_slice(), mask_w, mask_h, src_color, dst_x, dst_y);
+    }
+
+    /// Returns `true` if this backend supports [`draw_lcd_mask`] — i.e.
+    /// it can composite per-channel LCD coverage onto the active target.
+    /// Label queries this to decide between the LCD and grayscale AA
+    /// paths; a backend that returns `false` will never see LCD text.
+    fn has_lcd_mask_composite(&self) -> bool { false }
 
     // ── Image blitting ────────────────────────────────────────────────────────
 

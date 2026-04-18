@@ -25,9 +25,6 @@ use crate::color::Color;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::draw_ctx::DrawCtx;
-use crate::framebuffer::{Framebuffer, unpremultiply_rgba_inplace};
-use crate::gfx_ctx::GfxCtx;
-use crate::image_cache::{get_or_raster, LabelPixelKey};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -69,7 +66,7 @@ fn wrap_text(font: &Arc<Font>, text: &str, font_size: f64, max_width: f64) -> Ve
 }
 
 /// Horizontal alignment for `Label` text.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LabelAlign {
     #[default]
     Left,
@@ -97,12 +94,16 @@ pub struct Label {
     /// `Some(c)` → explicit override (e.g. accent-coloured or dimmed text).
     color: Option<Color>,
     align: LabelAlign,
-    /// When `true` (the default), and the active DrawCtx supports blitting
-    /// (`has_image_blit()`), text is rendered once to an offscreen framebuffer
-    /// and blitted each frame.  Set to `false` only for text that changes
-    /// every frame (e.g. live counters) where caching adds overhead with no
-    /// benefit.
+    /// When `true` (the default), this Label owns a CPU backbuffer
+    /// that's re-rasterised on dirty and blitted every frame.  Set to
+    /// `false` only for text that changes every frame (e.g. live
+    /// counters) where caching adds overhead with no benefit — those
+    /// go through `ctx.fill_text` direct every paint.
     pub buffered: bool,
+    /// Per-widget CPU bitmap cache.  Populated by `paint_subtree` when
+    /// `buffered = true`; invalidated by Label's setters (text, color,
+    /// align, etc.) so the next paint re-rasterises.
+    cache: crate::widget::BackbufferCache,
     /// When `true`, long lines are broken at word boundaries to fit
     /// `available.width`.  The label height expands to fit all lines.
     /// Disabled by default; enable with `.with_wrap(true)`.
@@ -114,6 +115,12 @@ pub struct Label {
     /// font selector) where each entry must render in its OWN face
     /// regardless of the current global font choice.
     ignore_system_font: bool,
+    /// Per-instance LCD preference: `Some(true)` always LCD, `Some(false)`
+    /// always grayscale, `None` defers to the global
+    /// `font_settings::lcd_enabled()`.  Exposed on every widget via
+    /// `Widget::lcd_preference`; Label is the only widget that reads it
+    /// today.
+    lcd_pref: Option<bool>,
 
     // ── Layout measurement cache ──────────────────────────────────────────────
     /// Cached text advance width from last `measure_advance()` call.
@@ -133,19 +140,6 @@ pub struct Label {
     /// Lines produced by the last word-wrap computation.
     wrapped_lines: Vec<String>,
 
-    // ── Backbuffer cache ──────────────────────────────────────────────────────
-    //
-    // Labels don't own their cached pixels any more — they come from the
-    // shared crate-level `image_cache`, keyed on (text, font, size, color,
-    // bounds, align).  We retain the most-recent `Arc` + its dimensions on
-    // the widget only so `cache_for_test` can inspect the last paint and so
-    // the GL backend sees a stable `Arc::as_ptr` key between frames.  The
-    // `Arc` drops naturally when the label drops; no manual invalidation
-    // is needed on set_text/set_color because a new key misses the global
-    // cache and calls the rasterizer.
-    cache_pixels: Option<Arc<Vec<u8>>>,
-    cache_w: u32,
-    cache_h: u32,
 }
 
 impl Label {
@@ -159,18 +153,31 @@ impl Label {
             font_size: 14.0,
             color: None, // resolved from ctx.visuals() at paint time
             align: LabelAlign::Left,
+            // Default: backbuffer only when grayscale.  Rationale:
+            //   - Grayscale on GL direct-to-surface goes through
+            //     tessellated glyph outlines, which are visibly thinner
+            //     than AGG's subpixel-accurate scanline coverage.
+            //     Routing grayscale through a software backbuffer gives
+            //     AGG-quality rasterisation blitted as a texture.
+            //   - LCD on GL direct-to-surface uses dual-source blend on
+            //     the cached LCD mask — identical quality to AGG.
+            //     Adding a backbuffer here would force the sub-ctx into
+            //     `Rgba` mode (Label has no opaque bg for `LcdCoverage`)
+            //     and lose the subpixel result.
+            // `buffered` stores the user's opt-out; the actual decision
+            // happens in `backbuffer_cache_mut` based on the global
+            // LCD flag.
             buffered: true,
+            cache: crate::widget::BackbufferCache::new(),
             wrap: false,
             ignore_system_font: false,
+            lcd_pref: None,
             layout_text: String::new(),
             layout_font_size: 0.0,
             layout_width: 0.0,
             layout_font_ptr: std::ptr::null(),
             wrap_at_width: -1.0,
             wrapped_lines: Vec::new(),
-            cache_pixels: None,
-            cache_w: 0,
-            cache_h: 0,
         }
     }
 
@@ -193,6 +200,12 @@ impl Label {
     /// regardless of what `font_settings::set_system_font` is pointing
     /// at.  Useful for font-preview UI — each entry in a font picker
     /// dropdown needs its OWN face, not the currently selected one.
+    /// Pin this label's LCD setting: `Some(true)` always LCD, `Some(false)`
+    /// always grayscale, `None` (default) defers to the global toggle.
+    pub fn with_lcd(mut self, pref: Option<bool>) -> Self {
+        self.lcd_pref = pref; self
+    }
+
     pub fn with_ignore_system_font(mut self, ignore: bool) -> Self {
         self.ignore_system_font = ignore;
         self
@@ -235,43 +248,63 @@ impl Label {
         }
     }
 
-    /// Test-only accessor for the backbuffer cache. Returns the cached
-    /// `(pixels, width, height)` triple, where pixels are **straight-alpha**
-    /// RGBA8 in top-row-first order.
-    #[cfg(test)]
-    pub(crate) fn cache_for_test(&self) -> Option<(&[u8], u32, u32)> {
-        self.cache_pixels
-            .as_ref()
-            .map(|arc| (arc.as_slice(), self.cache_w, self.cache_h))
-    }
-
     // ── setter methods (for post-construction mutation) ───────────────────────
 
     pub fn set_text(&mut self, text: impl Into<String>) {
         let text = text.into();
         if text != self.text {
             self.text = text;
-            // layout_text mismatch will trigger remeasure on next layout().
-            // No manual pixel-cache invalidation: the new text produces a
-            // new key in image_cache, which is either a hit (reuse) or a
-            // miss (rasterize).
+            self.cache.invalidate();
         }
     }
     pub fn set_color(&mut self, color: Color) {
-        self.color = Some(color);
+        if self.color != Some(color) {
+            self.color = Some(color);
+            self.cache.invalidate();
+        }
     }
     pub fn clear_color(&mut self) {
-        self.color = None;
+        if self.color.is_some() {
+            self.color = None;
+            self.cache.invalidate();
+        }
     }
-    pub fn set_align(&mut self, align: LabelAlign) { self.align = align; }
+    pub fn set_align(&mut self, align: LabelAlign) {
+        if self.align != align {
+            self.align = align;
+            self.cache.invalidate();
+        }
+    }
 }
 
 impl Widget for Label {
     fn type_name(&self) -> &'static str { "Label" }
     fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn set_bounds(&mut self, b: Rect) {
+        if self.bounds != b {
+            self.bounds = b;
+            self.cache.invalidate();
+        }
+    }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn lcd_preference(&self) -> Option<bool> { self.lcd_pref }
+
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut crate::widget::BackbufferCache> {
+        // Buffer only when grayscale.  See `Label::new` for the
+        // rationale: grayscale needs AGG raster (tessellated GL glyphs
+        // are thinner), LCD needs direct-to-surface dual-source blend
+        // (a sub-ctx backbuffer can't carry per-channel coverage back
+        // out through alpha compositing).  Toggling the global LCD
+        // flag therefore flips Label between "own bitmap cache" and
+        // "paint directly" automatically.
+        if self.buffered && !crate::font_settings::lcd_enabled() {
+            Some(&mut self.cache)
+        } else {
+            None
+        }
+    }
 
     /// Labels are never independently hittable.  This lets their interactive
     /// parent (e.g., Button) retain full hit-test and focus ownership even
@@ -300,7 +333,6 @@ impl Widget for Label {
                 self.layout_text      = self.text.clone();
                 self.layout_font_size = size;
                 self.layout_font_ptr  = Arc::as_ptr(&font);
-                self.cache_pixels     = None; // invalidate backbuffer
             }
             let total_h = self.wrapped_lines.len() as f64 * line_h;
             Size::new(available.width, total_h)
@@ -340,171 +372,11 @@ impl Widget for Label {
 
         let is_wrapped = self.wrap && !self.wrapped_lines.is_empty();
 
-        // ── Backbuffer path ───────────────────────────────────────────────────
-        // Handles BOTH single-line and wrapped multi-line content, in
-        // BOTH rendering modes (grayscale AA and LCD subpixel).  The LCD
-        // path activates when:
-        //   - `font_settings::lcd_enabled()` is `true`, AND
-        //   - a parent widget has pushed a surface bg via
-        //     `Widget::surface_bg_for_children` (needed for per-channel
-        //     blending to be correct).
-        // Otherwise the grayscale AA path (the default) is used —
-        // un-premultiplied output that composites correctly over any dst.
-        if self.buffered && ctx.has_image_blit() && w >= 1.0 && h >= 1.0 {
-            let bw = w.ceil() as u32;
-            let bh = h.ceil() as u32;
-
-            let align_byte: u8 = match self.align {
-                LabelAlign::Left   => 0,
-                LabelAlign::Center => 1,
-                LabelAlign::Right  => 2,
-            };
-
-            // Decide LCD vs grayscale for THIS paint.
-            //
-            // **Single source of truth: read the actual pixel painted
-            // beneath us.**  `ctx.sample_bg_pixel` returns `Some(color)`
-            // when the backend can cheap-read its framebuffer (GfxCtx =
-            // memory read; GlGfxCtx = `glReadPixels` once per cache miss)
-            // AND the sampled pixel is opaque.  If it returns `None` — no
-            // known bg — we fall back to grayscale AA.  We do NOT guess
-            // from widget-declared hints: either we know the destination
-            // colour or we don't.
-            let lcd_bg: Option<Color> =
-                if crate::font_settings::lcd_enabled() {
-                    ctx.sample_bg_pixel(0.0, 0.0)
-                } else {
-                    None
-                };
-
-            let mut key = LabelPixelKey::new(
-                &self.text,
-                Arc::as_ptr(&font) as *const () as usize,
-                size,
-                color,
-                bw, bh, align_byte,
-            );
-            if let Some(bg) = lcd_bg {
-                key = key.with_lcd_bg(bg);
-            }
-
-            let text  = self.text.clone();
-            let font  = Arc::clone(&font);
-            let align = self.align;
-            let wrapped_lines = if is_wrapped {
-                Some(self.wrapped_lines.clone())
-            } else {
-                None
-            };
-
-            let arc = get_or_raster(key, move || {
-                let mut fb = Framebuffer::new(bw, bh);
-
-                if let Some(bg) = lcd_bg {
-                    // ── LCD subpixel branch ──────────────────────────
-                    // Pre-fill bg so `PixfmtRgba32Lcd`'s per-channel blend
-                    // sees the destination colour; each line's text is
-                    // then mixed in via the 5-tap distribution kernel.
-                    let bg_r = (bg.r * 255.0).clamp(0.0, 255.0) as u8;
-                    let bg_g = (bg.g * 255.0).clamp(0.0, 255.0) as u8;
-                    let bg_b = (bg.b * 255.0).clamp(0.0, 255.0) as u8;
-                    for px in fb.pixels_mut().chunks_exact_mut(4) {
-                        px[0] = bg_r; px[1] = bg_g; px[2] = bg_b; px[3] = 255;
-                    }
-
-                    // Text positions for the LCD path — identical to the
-                    // grayscale path below, but we measure via the text
-                    // module directly (we don't have a GfxCtx here).
-                    let metrics = |s: &str| {
-                        crate::text::measure_text_metrics(&font, s, size)
-                    };
-                    let xform = agg_rust::trans_affine::TransAffine::new();
-
-                    if let Some(lines) = &wrapped_lines {
-                        let line_h  = size * 1.5;
-                        let total_h = lines.len() as f64 * line_h;
-                        for (i, line) in lines.iter().enumerate() {
-                            if line.is_empty() { continue; }
-                            let m = metrics(line);
-                            let line_center_y =
-                                total_h - (i as f64 + 0.5) * line_h;
-                            let ty = line_center_y - (m.ascent - m.descent) * 0.5;
-                            let tx = match align {
-                                LabelAlign::Left   => 0.0,
-                                LabelAlign::Center => (w - m.width) * 0.5,
-                                LabelAlign::Right  => w - m.width,
-                            };
-                            crate::text_lcd::blend_text_lcd(
-                                &mut fb, &font, line, size, tx, ty, color, &xform,
-                            );
-                        }
-                    } else {
-                        let m = metrics(&text);
-                        let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
-                        let tx = match align {
-                            LabelAlign::Left   => 0.0,
-                            LabelAlign::Center => (w - m.width) * 0.5,
-                            LabelAlign::Right  => w - m.width,
-                        };
-                        crate::text_lcd::blend_text_lcd(
-                            &mut fb, &font, &text, size, tx, ty, color, &xform,
-                        );
-                    }
-
-                    // Already opaque (alpha=255 everywhere from both the
-                    // pre-fill and the LCD pixfmt).  Flip to top-row-first
-                    // to match `draw_image_rgba` convention.
-                    fb.pixels_flipped()
-                } else {
-                    // ── Grayscale AA branch (default) ────────────────
-                    {
-                        let mut gfx = GfxCtx::new(&mut fb);
-                        gfx.set_font(Arc::clone(&font));
-                        gfx.set_font_size(size);
-                        gfx.set_fill_color(color);
-
-                        if let Some(lines) = &wrapped_lines {
-                            let line_h  = size * 1.5;
-                            let total_h = lines.len() as f64 * line_h;
-                            for (i, line) in lines.iter().enumerate() {
-                                if line.is_empty() { continue; }
-                                if let Some(m) = gfx.measure_text(line) {
-                                    let line_center_y =
-                                        total_h - (i as f64 + 0.5) * line_h;
-                                    let ty = line_center_y
-                                        - (m.ascent - m.descent) * 0.5;
-                                    let tx = match align {
-                                        LabelAlign::Left   => 0.0,
-                                        LabelAlign::Center => (w - m.width) * 0.5,
-                                        LabelAlign::Right  => w - m.width,
-                                    };
-                                    gfx.fill_text(line, tx, ty);
-                                }
-                            }
-                        } else if let Some(m) = gfx.measure_text(&text) {
-                            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
-                            let tx = match align {
-                                LabelAlign::Left   => 0.0,
-                                LabelAlign::Center => (w - m.width) * 0.5,
-                                LabelAlign::Right  => w - m.width,
-                            };
-                            gfx.fill_text(&text, tx, ty);
-                        }
-                    }
-                    let mut pixels = fb.pixels_flipped();
-                    unpremultiply_rgba_inplace(&mut pixels);
-                    pixels
-                }
-            });
-            self.cache_pixels = Some(Arc::clone(&arc));
-            self.cache_w      = bw;
-            self.cache_h      = bh;
-
-            ctx.draw_image_rgba_arc(&arc, bw, bh, 0.0, 0.0, bw as f64, bh as f64);
-            return;
-        }
-
-        // ── Direct path — no backbuffer (GL tess glyphs, or `buffered = false`) ─
+        // Labels always paint through `ctx.fill_text` — the backend
+        // decides LCD vs grayscale AA internally based on
+        // `font_settings::lcd_enabled()` and whether it can composite
+        // per-channel coverage.  No backbuffer, no LCD-specific logic
+        // lives here.  Label is just a widget that draws text.
         ctx.set_fill_color(color);
         if is_wrapped {
             let line_h  = size * 1.5;
@@ -532,8 +404,6 @@ impl Widget for Label {
             ctx.fill_text(&self.text, tx, ty);
         }
     }
-
-    fn has_backbuffer(&self) -> bool { self.buffered }
 
     fn margin(&self)   -> Insets  { self.base.margin }
     fn h_anchor(&self) -> HAnchor { self.base.h_anchor }

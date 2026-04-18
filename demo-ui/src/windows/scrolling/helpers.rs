@@ -264,6 +264,7 @@ impl<T: Clone + Copy + PartialEq + 'static> Widget for SegRow<T> {
             ctx.translate(lx, ly);
             paint_subtree(&mut self.labels[i], ctx);
             ctx.restore();
+            let _ = bg;
         }
     }
 

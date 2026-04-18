@@ -23,6 +23,7 @@ pub mod toggle_switch;
 pub mod tooltip;
 pub mod tree_view;
 pub mod window;
+pub mod window_title_bar;
 
 pub use button::Button;
 pub use checkbox::Checkbox;

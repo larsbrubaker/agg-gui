@@ -50,6 +50,13 @@ impl Framebuffer {
         &mut self.pixels
     }
 
+    /// Consume the framebuffer and return ownership of the underlying
+    /// `Vec<u8>`.  Used by widget backbuffer caching to hand the bitmap
+    /// off to an `Arc` without copying.
+    pub fn into_pixels(self) -> Vec<u8> {
+        self.pixels
+    }
+
     /// Resize the framebuffer (pixels are zeroed on resize).
     pub fn resize(&mut self, width: u32, height: u32) {
         if self.width != width || self.height != height {

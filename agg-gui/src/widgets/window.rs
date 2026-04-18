@@ -25,7 +25,7 @@
 //! The title bar is at the **top** of the window, i.e. local Y ∈
 //! `[height − TITLE_H .. height]`. The content area fills local Y ∈ `[0 .. height − TITLE_H]`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::{Widget, paint_subtree};
-use crate::widgets::label::Label;
+use crate::widgets::window_title_bar::{TitleBarView, WindowTitleBar};
 
 /// Round all four components of a Rect to the nearest integer so widgets
 /// are always placed on exact pixel boundaries (crisp bitmap blits, no blur).
@@ -132,8 +132,13 @@ pub struct Window {
     /// Time of last left-click in the title bar — for double-click collapse.
     last_title_click: Option<Instant>,
 
-    /// Backbuffered title label.  Positioned and painted manually in `paint()`.
-    title_label: Label,
+    /// Title-bar sub-widget — owns the bar fill, separator, chevron,
+    /// title label, maximize/close buttons.  Painted manually from
+    /// `paint()` so `clip_children_rect` can keep content clipped to the
+    /// body area.  Display state is written into `title_state` every
+    /// layout pass; the sub-widget reads it at paint time.
+    title_bar:   WindowTitleBar,
+    title_state: Rc<RefCell<TitleBarView>>,
 
     /// Canvas size supplied by the last `layout()` call; used for clamping.
     canvas_size: Size,
@@ -149,8 +154,8 @@ impl Window {
     pub fn new(title: impl Into<String>, font: Arc<Font>, content: Box<dyn Widget>) -> Self {
         let font_size = 13.0;
         let title_str: String = title.into();
-        let title_label = Label::new(&title_str, Arc::clone(&font))
-            .with_font_size(font_size);
+        let title_state = Rc::new(RefCell::new(TitleBarView::default_visuals()));
+        let title_bar = WindowTitleBar::new(&title_str, Arc::clone(&font), Rc::clone(&title_state));
         Self {
             bounds: Rect::new(60.0, 60.0, 360.0, 280.0),
             children: vec![content],
@@ -177,7 +182,8 @@ impl Window {
             maximize_hovered: false,
             hover_dir: None,
             last_title_click: None,
-            title_label,
+            title_bar,
+            title_state,
             // Seed as "unknown" so `layout()`'s shrink-detect guard
             // (`had_prior = prev.w > 0 && prev.h > 0`) correctly skips the
             // clamp on the very first layout pass.  The old default
@@ -482,9 +488,11 @@ impl Widget for Window {
             // because hit_test returns false for the content area.
         }
 
-        // Layout the title label so its intrinsic size is known before paint().
-        let s = self.title_label.layout(Size::new(self.bounds.width - 48.0, TITLE_H));
-        self.title_label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        // Position the title-bar strip at the top of the window and
+        // give it a layout pass so the title label knows its size.
+        let tb_y = self.bounds.height - TITLE_H;
+        self.title_bar.set_bounds(Rect::new(0.0, tb_y, self.bounds.width, TITLE_H));
+        self.title_bar.layout(Size::new(self.bounds.width, TITLE_H));
 
         // Record the canvas size — used by drag / resize / collapse clamp
         // paths that fire on USER ACTION.  We deliberately do NOT clamp
@@ -524,7 +532,6 @@ impl Widget for Window {
         let w  = self.bounds.width;
         // bounds.height == TITLE_H when collapsed (adjusted on toggle).
         let h  = self.bounds.height;
-        let tb = h - TITLE_H;
 
         // Drop shadow — stacked rounded rects approximating a Gaussian blur.
         // Outer layers inflate outward and fade with a (1−t)² falloff; drawn
@@ -553,116 +560,33 @@ impl Widget for Window {
         ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
         ctx.fill();
 
-        // Title bar background.
-        let dragging = self.drag_mode == DragMode::Move;
-        let bar_color = if dragging { v.window_title_fill_drag } else { v.window_title_fill };
-        ctx.set_fill_color(bar_color);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, tb, w, TITLE_H, CORNER_R);
-        ctx.fill();
-        // Square off the bottom corners of the title bar (only when not collapsed).
-        if !self.collapsed {
-            ctx.set_fill_color(bar_color);
-            ctx.begin_path();
-            ctx.rect(0.0, tb, w, CORNER_R);
-            ctx.fill();
+        // Sync the title-bar sub-widget's display state for this frame
+        // and paint it.  Positioning was done in `layout`; we just need
+        // to hand it the per-frame interaction snapshot and dispatch
+        // through `paint_subtree` so the ancestor-chain stack gets the
+        // WindowTitleBar entry (background_color = window_title_fill).
+        {
+            let mut st = self.title_state.borrow_mut();
+            st.bar_color = if self.drag_mode == DragMode::Move {
+                v.window_title_fill_drag
+            } else {
+                v.window_title_fill
+            };
+            st.title_color      = v.window_title_text;
+            st.collapsed        = self.collapsed;
+            st.maximized        = self.maximized;
+            st.close_hovered    = self.close_hovered;
+            st.maximize_hovered = self.maximize_hovered;
         }
-
-        // Separator between title bar and content.
-        if !self.collapsed {
-            ctx.set_fill_color(v.window_stroke);
-            ctx.begin_path();
-            ctx.rect(0.0, tb - 1.0, w, 1.0);
-            ctx.fill();
-        }
-
-        // Collapse indicator — small chevron on the left of the title bar.
-        let chev_x = 12.0;
-        let chev_cy = tb + TITLE_H * 0.5;
-        let chev_sz = 4.0;
-        ctx.set_stroke_color(v.window_title_text);
-        ctx.set_line_width(1.5);
-        ctx.begin_path();
-        if self.collapsed {
-            // ▶ pointing right (collapsed state).
-            ctx.move_to(chev_x,            chev_cy - chev_sz);
-            ctx.line_to(chev_x + chev_sz,  chev_cy);
-            ctx.line_to(chev_x,            chev_cy + chev_sz);
-        } else {
-            // ▼ pointing down (expanded state).
-            ctx.move_to(chev_x - chev_sz,  chev_cy - chev_sz * 0.5);
-            ctx.line_to(chev_x,            chev_cy + chev_sz * 0.5);
-            ctx.line_to(chev_x + chev_sz,  chev_cy - chev_sz * 0.5);
-        }
-        ctx.stroke();
-
-        // Title text — rendered through backbuffered Label.
-        self.title_label.set_color(v.window_title_text);
-        let title_lw = self.title_label.bounds().width;
-        let title_lh = self.title_label.bounds().height;
-        let title_lx = 24.0; // leave room for chevron
-        let title_ly = tb + (TITLE_H - title_lh) * 0.5;
-        self.title_label.set_bounds(Rect::new(title_lx, title_ly, title_lw, title_lh));
+        let tb_bounds = self.title_bar.bounds();
         ctx.save();
-        ctx.translate(title_lx, title_ly);
-        paint_subtree(&mut self.title_label, ctx);
+        ctx.translate(tb_bounds.x, tb_bounds.y);
+        paint_subtree(&mut self.title_bar, ctx);
         ctx.restore();
 
-        // Maximize / Restore button (left of close).
-        let mc = self.maximize_center();
-        let max_bg = if self.maximize_hovered { v.window_close_bg_hovered } else { v.window_close_bg };
-        ctx.set_fill_color(max_bg);
-        ctx.begin_path();
-        ctx.circle(mc.x, mc.y, CLOSE_R);
-        ctx.fill();
-
-        ctx.set_stroke_color(v.window_close_fg);
-        ctx.set_line_width(1.5);
-        let sz = 3.5_f64; // half-size of the icon (7×7 px total)
-        if self.maximized {
-            // Restore icon: two overlapping bordered squares.
-            // Back square (upper-right in screen coords = +x, +y in Y-up).
-            let off = 2.0_f64;
-            let sq  = sz * 2.0 - off;
-            ctx.begin_path();
-            ctx.rect(mc.x - sz + off, mc.y - sz + off, sq, sq);
-            ctx.stroke();
-            // Front square (lower-left — drawn on top so it occludes back).
-            ctx.set_fill_color(max_bg); // blank out back rect where front overlaps
-            ctx.begin_path();
-            ctx.rect(mc.x - sz, mc.y - sz, sq, sq);
-            ctx.fill();
-            ctx.begin_path();
-            ctx.rect(mc.x - sz, mc.y - sz, sq, sq);
-            ctx.stroke();
-        } else {
-            // Maximize icon: single bordered square.
-            ctx.begin_path();
-            ctx.rect(mc.x - sz, mc.y - sz, sz * 2.0, sz * 2.0);
-            ctx.stroke();
-        }
-
-        // Close button.
-        let cc = self.close_center();
-        let close_bg = if self.close_hovered { v.window_close_bg_hovered } else { v.window_close_bg };
-        ctx.set_fill_color(close_bg);
-        ctx.begin_path();
-        ctx.circle(cc.x, cc.y, CLOSE_R);
-        ctx.fill();
-
-        let arm = CLOSE_R * 0.5;
-        ctx.set_stroke_color(v.window_close_fg);
-        ctx.set_line_width(1.5);
-        ctx.begin_path();
-        ctx.move_to(cc.x - arm, cc.y - arm);
-        ctx.line_to(cc.x + arm, cc.y + arm);
-        ctx.stroke();
-        ctx.begin_path();
-        ctx.move_to(cc.x + arm, cc.y - arm);
-        ctx.line_to(cc.x - arm, cc.y + arm);
-        ctx.stroke();
-
-        // Outer border.
+        // Outer border — on top of the title bar so the rounded corners
+        // cleanly frame both body and title region.
+        ctx.set_fill_color(v.window_fill); // restore default fill — stroke follows
         ctx.set_stroke_color(v.window_stroke);
         ctx.set_line_width(1.0);
         ctx.begin_path();

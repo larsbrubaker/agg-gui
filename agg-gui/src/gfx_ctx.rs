@@ -114,6 +114,13 @@ pub struct GfxCtx<'a> {
     state_stack: Vec<GfxState>,
     /// Accumulated path, reset by `begin_path()`.
     path:        PathStorage,
+    /// When true, `fill_text` routes through the 3× horizontal LCD
+    /// subpixel pipeline (see `lcd_coverage.rs`) and composites per-channel
+    /// onto the active framebuffer.  Controlled by the backbuffer mode —
+    /// set to true when this ctx is writing into an `LcdCoverage` widget
+    /// backbuffer, false for `Rgba`.  Main render loops set it at frame
+    /// start from `font_settings::lcd_enabled()`.
+    lcd_mode: bool,
 }
 
 impl<'a> GfxCtx<'a> {
@@ -125,6 +132,7 @@ impl<'a> GfxCtx<'a> {
             state: GfxState::default(),
             state_stack: Vec::new(),
             path: PathStorage::new(),
+            lcd_mode: false,
         }
     }
 
@@ -242,6 +250,16 @@ impl<'a> GfxCtx<'a> {
     pub fn set_font_size(&mut self, size: f64) {
         self.state.font_size = size.max(1.0);
     }
+
+    /// Enable/disable LCD subpixel rendering on this ctx.  When true,
+    /// `fill_text` uses the per-channel coverage pipeline; when false
+    /// grayscale AA.  Set by `paint_subtree_backbuffered` for
+    /// `LcdCoverage` widget buffers, and by the main render loop for
+    /// direct-to-screen text.
+    pub fn set_lcd_mode(&mut self, on: bool) { self.lcd_mode = on; }
+
+    /// Read the ctx's current LCD mode.
+    pub fn lcd_mode(&self) -> bool { self.lcd_mode }
 
     // -------------------------------------------------------------------------
     // Clipping
@@ -409,6 +427,27 @@ impl<'a> GfxCtx<'a> {
 
         let mut color = self.state.fill_color;
         color.a *= self.state.global_alpha as f32;
+
+        // LCD subpixel path — gated on this ctx's `lcd_mode` flag,
+        // which is set by `paint_subtree_backbuffered` when the widget
+        // chose `BackbufferMode::LcdCoverage` and by the main render
+        // loop for direct-to-screen text when the global font setting
+        // says so.  Mask raster is cached keyed on `(text, font, size)`
+        // and colour is applied at composite time.
+        if self.lcd_mode {
+            let cached = crate::lcd_coverage::rasterize_text_lcd_cached(
+                &font, text, font_size,
+            );
+            let dst_x = x - cached.baseline_x_in_mask;
+            let dst_y = y - cached.baseline_y_in_mask;
+            <Self as crate::DrawCtx>::draw_lcd_mask_arc(
+                self,
+                &cached.pixels, cached.width, cached.height,
+                color, dst_x, dst_y,
+            );
+            return;
+        }
+
         let rgba = color.to_rgba8();
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
@@ -495,20 +534,6 @@ fn active_fb<'a>(
 ) -> &'a mut Framebuffer {
     if let Some(top) = layer_stack.last_mut() {
         &mut top.fb
-    } else {
-        base_fb
-    }
-}
-
-/// Read-only variant of [`active_fb`] — used by the pixel-sampling path
-/// which only needs `&` access.
-#[inline]
-fn active_fb_ref<'a>(
-    base_fb:     &'a Framebuffer,
-    layer_stack: &'a Vec<LayerEntry>,
-) -> &'a Framebuffer {
-    if let Some(top) = layer_stack.last() {
-        &top.fb
     } else {
         base_fb
     }
@@ -678,41 +703,6 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
 
     fn has_image_blit(&self) -> bool { true }
 
-    /// Ground-truth pixel sampler — reads the RGBA value currently painted
-    /// at `(local_x, local_y)` in the active framebuffer (after CTM
-    /// transform).  AGG stores **premultiplied** RGBA in the fb; we
-    /// un-premultiply on the way out so callers receive straight colours.
-    ///
-    /// Returns `None` for out-of-bounds positions or semi-transparent
-    /// pixels (LCD blending requires opaque dst; if the pixel isn't
-    /// opaque, Label's LCD path should fall back to grayscale).
-    fn sample_bg_pixel(&self, local_x: f64, local_y: f64) -> Option<Color> {
-        use crate::color::Color;
-        let t = &self.state.transform;
-        let sx = local_x * t.sx + local_y * t.shx + t.tx;
-        let sy = local_x * t.shy + local_y * t.sy + t.ty;
-        // Pick the active render target — top of the layer stack, or base.
-        let fb = active_fb_ref(self.base_fb, &self.layer_stack);
-        let w = fb.width()  as i32;
-        let h = fb.height() as i32;
-        let ix = sx.floor() as i32;
-        let iy = sy.floor() as i32;
-        if ix < 0 || iy < 0 || ix >= w || iy >= h { return None; }
-        let idx = ((iy * w + ix) * 4) as usize;
-        let px = fb.pixels();
-        if idx + 3 >= px.len() { return None; }
-        let a_u8 = px[idx + 3];
-        if a_u8 < 250 { return None; } // require opaque — LCD only makes sense on solid dst
-        // AGG writes premul RGBA; at alpha = 255 premul == straight, so
-        // the u8 values are already the straight colour.
-        Some(Color::rgba(
-            px[idx]     as f32 / 255.0,
-            px[idx + 1] as f32 / 255.0,
-            px[idx + 2] as f32 / 255.0,
-            1.0,
-        ))
-    }
-
     fn draw_image_rgba_arc(
         &mut self,
         data:  &Arc<Vec<u8>>,
@@ -726,6 +716,70 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // Software backend has no GPU texture cache; the CPU composite path
         // is the same as the slice entry point.
         self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
+    }
+
+    fn has_lcd_mask_composite(&self) -> bool { true }
+
+    fn draw_lcd_mask(
+        &mut self,
+        mask:      &[u8],
+        mask_w:    u32,
+        mask_h:    u32,
+        src_color: Color,
+        dst_x:     f64,
+        dst_y:     f64,
+    ) {
+        // Resolve to the active target (base fb or topmost layer) with
+        // the current CTM applied to the placement origin.  Both the
+        // mask and the Framebuffer are Y-up (row 0 = bottom), so mask
+        // row `my` maps directly to dst row `sy + my`.
+        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 { return; }
+        let t = &self.state.transform;
+        let sx = dst_x * t.sx + dst_y * t.shx + t.tx;
+        let sy = dst_x * t.shy + dst_y * t.sy + t.ty;
+        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let fw = fb.width();
+        let fh = fb.height();
+        let origin_x = sx.round() as i32;
+        let origin_y = sy.round() as i32;
+
+        let sr = src_color.r.clamp(0.0, 1.0);
+        let sg = src_color.g.clamp(0.0, 1.0);
+        let sb = src_color.b.clamp(0.0, 1.0);
+        let fw_i = fw as i32;
+        let fh_i = fh as i32;
+        let mw_i = mask_w as i32;
+        let mh_i = mask_h as i32;
+        let pixels = fb.pixels_mut();
+
+        for my in 0..mh_i {
+            // Mask row `my` (Y-up: 0 = bottom) → dst row `origin_y + my`
+            // in the Y-up framebuffer.  No flip.
+            let dy = origin_y + my;
+            if dy < 0 || dy >= fh_i { continue; }
+            for mx in 0..mw_i {
+                let dx = origin_x + mx;
+                if dx < 0 || dx >= fw_i { continue; }
+                let mi = ((my * mw_i + mx) * 3) as usize;
+                let cr = mask[mi]     as f32 / 255.0;
+                let cg = mask[mi + 1] as f32 / 255.0;
+                let cb = mask[mi + 2] as f32 / 255.0;
+                if cr == 0.0 && cg == 0.0 && cb == 0.0 { continue; }
+                let di = ((dy * fw_i + dx) * 4) as usize;
+                let dr = pixels[di]     as f32 / 255.0;
+                let dg = pixels[di + 1] as f32 / 255.0;
+                let db = pixels[di + 2] as f32 / 255.0;
+                let rr  = sr * cr + dr * (1.0 - cr);
+                let rg  = sg * cg + dg * (1.0 - cg);
+                let rbb = sb * cb + db * (1.0 - cb);
+                pixels[di]     = (rr  * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di + 1] = (rg  * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di + 2] = (rbb * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                // Alpha unchanged — we're writing onto an existing opaque
+                // (or semi-transparent) surface without introducing new
+                // transparency.
+            }
+        }
     }
 
     fn draw_image_rgba(
