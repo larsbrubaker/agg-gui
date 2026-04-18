@@ -1435,6 +1435,197 @@ fn test_label_backbuffer_matches_direct_agg_render() {
     }
 }
 
+/// **Paint-entry CTM snap invariant.**
+///
+/// The contract for a widget whose `enforce_integer_bounds()` returns `true`
+/// is: "my `paint()` is called with an integer-translation CTM".  That
+/// contract MUST hold regardless of how the widget is reached — via the
+/// normal parent-walks-children loop inside `paint_subtree`, OR via a manual
+/// `ctx.translate(fractional, fractional); paint_subtree(child, ctx)`
+/// sequence in a widget that does its own layout (SegRow, drag overlays,
+/// popups, anything with custom centering math).
+///
+/// Before the fix the snap happened only in the child-iteration loop, so
+/// manual-translate callers silently handed off a fractional CTM — invisibly
+/// breaking the guarantee and producing blurry `Label` backbuffer blits.
+///
+/// This test wraps a probe widget in a fractional manual translate and
+/// asserts the probe sees an integer CTM at `paint()` entry.  If anyone ever
+/// removes the `paint_subtree` entry snap again, this regresses.
+#[test]
+fn test_paint_subtree_snaps_ctm_for_manual_translate_entry() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use crate::draw_ctx::DrawCtx;
+    use crate::geometry::Rect;
+    use crate::widget::{paint_subtree, Widget};
+    use crate::event::{Event, EventResult};
+    use agg_rust::trans_affine::TransAffine;
+
+    /// Widget that captures the CTM present at its `paint()` entry.
+    struct CtmProbe {
+        bounds:   Rect,
+        children: Vec<Box<dyn Widget>>,
+        captured: Rc<Cell<Option<TransAffine>>>,
+    }
+
+    impl Widget for CtmProbe {
+        fn type_name(&self) -> &'static str { "CtmProbe" }
+        fn bounds(&self) -> Rect { self.bounds }
+        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+        fn layout(&mut self, available: Size) -> Size {
+            Size::new(self.bounds.width.min(available.width),
+                      self.bounds.height.min(available.height))
+        }
+        fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+            self.captured.set(Some(ctx.transform()));
+        }
+        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    }
+
+    let captured = Rc::new(Cell::new(None));
+    let mut probe = CtmProbe {
+        bounds:   Rect::new(0.0, 0.0, 10.0, 10.0),
+        children: Vec::new(),
+        captured: Rc::clone(&captured),
+    };
+
+    let mut fb = Framebuffer::new(100, 100);
+    let mut ctx = GfxCtx::new(&mut fb);
+
+    // Manual caller: applies a FRACTIONAL translate, then drives paint_subtree.
+    // This is the pattern `SegRow` uses when centring labels in unevenly
+    // divided columns.  The snap has to happen inside paint_subtree — manual
+    // callers shouldn't need to remember `snap_to_pixel`.
+    ctx.translate(100.3, 50.7);
+    paint_subtree(&mut probe, &mut ctx);
+
+    let ctm = captured.get().expect("probe must have been painted");
+    assert_eq!(
+        ctm.tx.fract(), 0.0,
+        "tx still fractional at paint() entry: {} — paint_subtree snap regressed",
+        ctm.tx,
+    );
+    assert_eq!(
+        ctm.ty.fract(), 0.0,
+        "ty still fractional at paint() entry: {} — paint_subtree snap regressed",
+        ctm.ty,
+    );
+    // Specific floor values so this also guards against a silent change to
+    // round-nearest (which would subtly shift widgets by up to 0.5 px).
+    assert_eq!(ctm.tx, 100.0);
+    assert_eq!(ctm.ty, 50.0);
+}
+
+/// A widget that opts OUT of enforce_integer_bounds must NOT have its CTM
+/// snapped — preserves sub-pixel positioning for smooth-scroll markers /
+/// zoomed canvases.
+#[test]
+fn test_paint_subtree_preserves_fractional_ctm_when_opted_out() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use crate::draw_ctx::DrawCtx;
+    use crate::geometry::Rect;
+    use crate::widget::{paint_subtree, Widget};
+    use crate::event::{Event, EventResult};
+    use agg_rust::trans_affine::TransAffine;
+
+    struct SubpixelProbe {
+        bounds:   Rect,
+        children: Vec<Box<dyn Widget>>,
+        captured: Rc<Cell<Option<TransAffine>>>,
+    }
+    impl Widget for SubpixelProbe {
+        fn type_name(&self) -> &'static str { "SubpixelProbe" }
+        fn bounds(&self) -> Rect { self.bounds }
+        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+        fn layout(&mut self, available: Size) -> Size {
+            Size::new(self.bounds.width.min(available.width),
+                      self.bounds.height.min(available.height))
+        }
+        fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+            self.captured.set(Some(ctx.transform()));
+        }
+        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+        fn enforce_integer_bounds(&self) -> bool { false } // opt out
+    }
+
+    let captured = Rc::new(Cell::new(None));
+    let mut probe = SubpixelProbe {
+        bounds:   Rect::new(0.0, 0.0, 10.0, 10.0),
+        children: Vec::new(),
+        captured: Rc::clone(&captured),
+    };
+
+    let mut fb = Framebuffer::new(100, 100);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.translate(100.3, 50.7);
+    paint_subtree(&mut probe, &mut ctx);
+
+    let ctm = captured.get().expect("probe must have been painted");
+    // Opt-out honoured: CTM passes through untouched.
+    assert!((ctm.tx - 100.3).abs() < 1e-9, "opt-out widget had tx snapped: {}", ctm.tx);
+    assert!((ctm.ty - 50.7).abs() < 1e-9, "opt-out widget had ty snapped: {}", ctm.ty);
+}
+
+/// AGG's software rasterizer, given **integer-aligned** 1-px-wide fills at
+/// integer positions, must produce pixels that are **exactly** the fill
+/// colour or the original buffer — never a half-covered mid-tone.  If this
+/// ever regresses, every "bitmap then blit" path in the app loses its
+/// pixel-perfect guarantee, including Label backbuffers.
+///
+/// This is the agg-side half of the "why did the bitmap grid look fuzzy on
+/// native GL" investigation — if AGG is correct here, the fault lies in the
+/// texture-upload / texture-sample stage; if AGG is wrong here, the source
+/// image is already gray before the GL blit.
+#[test]
+fn test_agg_rasters_1px_stripes_with_zero_gray() {
+    use crate::framebuffer::unpremultiply_rgba_inplace;
+
+    let w = 96_u32;
+    let h = 96_u32;
+    let mut fb = Framebuffer::new(w, h);
+    {
+        let mut gfx = GfxCtx::new(&mut fb);
+        // Alternating 1-px white / 1-px black vertical columns — exactly what
+        // `PixelTestLinesBitmap` draws.
+        for i in 0..(w as usize / 2) {
+            let x = (2 * i) as f64;
+            gfx.set_fill_color(Color::white());
+            gfx.begin_path();
+            gfx.rect(x, 0.0, 1.0, h as f64);
+            gfx.fill();
+            gfx.set_fill_color(Color::black());
+            gfx.begin_path();
+            gfx.rect(x + 1.0, 0.0, 1.0, h as f64);
+            gfx.fill();
+        }
+    }
+    let mut pixels = fb.pixels_flipped();
+    unpremultiply_rgba_inplace(&mut pixels);
+
+    let row_bytes = (w * 4) as usize;
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            let off = y * row_bytes + x * 4;
+            let px = &pixels[off..off + 4];
+            let expected_white = x % 2 == 0;
+            let (er, eg, eb) = if expected_white { (255, 255, 255) } else { (0, 0, 0) };
+            assert_eq!(
+                (px[0], px[1], px[2], px[3]),
+                (er, eg, eb, 255),
+                "pixel ({x}, {y}) should be {} but is {:?}",
+                if expected_white { "white" } else { "black" },
+                px,
+            );
+        }
+    }
+}
+
 /// `snap_to_pixel` must zero the fractional component of the CTM translation
 /// and leave rotations / scales / integer translations alone.  Covers the
 /// `paint_subtree` round-on-translate path exercised by every widget that

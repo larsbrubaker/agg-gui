@@ -220,6 +220,22 @@ pub trait Widget {
 pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if !widget.is_visible() { return; }
 
+    // Snap CTM at paint_subtree ENTRY — not just at the child-translate step
+    // below.  This catches manual callers that apply a fractional translate
+    // before calling us (e.g. `SegRow` centring labels via
+    // `ctx.translate(r.x + (r.w - lw) * 0.5, ...)`, which is fractional when
+    // the button column width is not cleanly divisible).  Without this snap
+    // the Label's NEAREST-filtered backbuffer texture blits at a fractional
+    // quad position and every row shifts by one texel at a sub-pixel point
+    // along the width — visibly blurry text.  For the normal recursive case
+    // the parent's child-translate loop already rounded, so `snap_to_pixel`
+    // is a no-op here.
+    let snap_this = widget.enforce_integer_bounds();
+    if snap_this {
+        ctx.save();
+        ctx.snap_to_pixel();
+    }
+
     // Buffered widgets: redirect self + descendants into an offscreen layer.
     let buffered = widget.has_backbuffer();
     if buffered {
@@ -268,6 +284,10 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 
     // Paint decorations that must appear on top of all children (e.g. resize handles).
     widget.paint_overlay(ctx);
+
+    if snap_this {
+        ctx.restore();
+    }
 }
 
 /// Walk the subtree rooted at `widget` and return the path (list of child

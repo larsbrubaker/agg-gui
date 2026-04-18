@@ -866,8 +866,20 @@ impl DrawCtx for GlGfxCtx {
                     let tex = gl.create_texture().expect("create texture");
                     gl.active_texture(glow::TEXTURE0);
                     gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+                    // NEAREST filter — the Arc-keyed path is the "pre-
+                    // rasterized bitmap, blit 1:1" lane (Label backbuffers,
+                    // pixel-test bitmaps).  LINEAR at integer-aligned quads
+                    // *should* return exact texel values everywhere, but the
+                    // native desktop GL driver implements sub-texel rounding
+                    // differently from WebGL — enough to visibly fuzz 1-px
+                    // alternating stripes.  NEAREST skips the filter entirely
+                    // and is guaranteed exact: each screen pixel's fragment
+                    // fetches one texel, no interpolation, no driver-specific
+                    // rounding.  Callers who genuinely want smooth interp
+                    // (scaled markdown images, screenshot zoom) should go
+                    // through the `&[u8]` path which stays LINEAR.
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
                     gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
                     gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
                     gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);

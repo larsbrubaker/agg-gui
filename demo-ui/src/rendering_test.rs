@@ -44,6 +44,19 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
 
     col.push(Box::new(PixelTestLines { bounds: Rect::default(), children: Vec::new() }), 0.0);
 
+    // Same patterns drawn via AGG software raster into a bitmap, then blit
+    // through the Arc-keyed GL texture cache — the identical path used by
+    // `Label` backbuffers.  Should be VISUALLY IDENTICAL to the direct-GL
+    // grid above; any divergence exposes a bug in the bitmap→texture path.
+    col.push(lbl("The same two grids, drawn to a bitmap first then blit — \
+                  must match pixel-for-pixel.", 13.0, &font), 0.0);
+    col.push(Box::new(PixelTestLinesBitmap {
+        bounds: Rect::default(),
+        children: Vec::new(),
+        bitmap_vertical: None,
+        bitmap_horizontal: None,
+    }), 0.0);
+
     col.push(lbl("The first square should be exactly one physical pixel big.", 13.0, &font), 0.0);
     col.push(lbl("They should be exactly one physical pixel apart.", 13.0, &font), 0.0);
     col.push(lbl("Each subsequent square should be one physical pixel larger than the previous.", 13.0, &font), 0.0);
@@ -164,6 +177,120 @@ impl Widget for PixelTestLines {
             ctx.fill();
         }
 
+        ctx.restore();
+    }
+
+    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+}
+
+// ---------------------------------------------------------------------------
+// Pixel test: 1-px stripes via SOFTWARE BITMAP → GL texture blit
+// ---------------------------------------------------------------------------
+
+/// Same two grids as [`PixelTestLines`] but rasterized into an off-screen
+/// `Framebuffer` by AGG first, then blit to the screen through the
+/// Arc-keyed GL texture cache — the **exact** path that `Label` backbuffers
+/// use.  Sits next to the direct polygon-drawn version so the user can
+/// visually confirm both paths produce identical pixels.
+///
+/// Bitmaps are cached on the widget (not in the global image_cache) because
+/// their content is static for the lifetime of the widget and we don't want
+/// to share with labels that happen to collide on key.
+struct PixelTestLinesBitmap {
+    bounds:            Rect,
+    children:          Vec<Box<dyn Widget>>,
+    /// Arc so the GL L2 cache can key on pointer identity and hold a Weak
+    /// ref; re-use across frames with zero CPU work after the first paint.
+    bitmap_vertical:   Option<Arc<Vec<u8>>>,
+    bitmap_horizontal: Option<Arc<Vec<u8>>>,
+}
+
+impl PixelTestLinesBitmap {
+    /// Rasterize a PT_N × PT_N bitmap via AGG software, un-premultiply, wrap
+    /// in an Arc.  `fill_stripes` draws the widget-specific content into a
+    /// fresh `GfxCtx`.
+    fn raster_to_bitmap<F>(fill_stripes: F) -> Arc<Vec<u8>>
+    where F: FnOnce(&mut agg_gui::GfxCtx)
+    {
+        use agg_gui::{Framebuffer, GfxCtx};
+        use agg_gui::framebuffer::unpremultiply_rgba_inplace;
+        let bw = PT_N as u32;
+        let bh = PT_N as u32;
+        let mut fb = Framebuffer::new(bw, bh);
+        {
+            let mut gfx = GfxCtx::new(&mut fb);
+            fill_stripes(&mut gfx);
+        }
+        let mut pixels = fb.pixels_flipped();
+        unpremultiply_rgba_inplace(&mut pixels);
+        Arc::new(pixels)
+    }
+}
+
+impl Widget for PixelTestLinesBitmap {
+    fn type_name(&self) -> &'static str { "PixelTestLinesBitmap" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn layout(&mut self, available: Size) -> Size {
+        let w = PT_N + PT_GAP + PT_N;
+        let h = PT_N;
+        self.bounds = Rect::new(0.0, 0.0, w.min(available.width), h);
+        Size::new(w.min(available.width), h)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let n = PT_N as usize;
+
+        // Build the vertical-stripes bitmap once — identical to
+        // `PixelTestLines`'s left block, just rendered into a Framebuffer
+        // instead of the live DrawCtx.
+        if self.bitmap_vertical.is_none() {
+            self.bitmap_vertical = Some(Self::raster_to_bitmap(|gfx| {
+                for i in 0..(n / 2) {
+                    let x = (2 * i) as f64;
+                    gfx.set_fill_color(Color::white());
+                    gfx.begin_path();
+                    gfx.rect(x, 0.0, 1.0, PT_N);
+                    gfx.fill();
+                    gfx.set_fill_color(Color::black());
+                    gfx.begin_path();
+                    gfx.rect(x + 1.0, 0.0, 1.0, PT_N);
+                    gfx.fill();
+                }
+            }));
+        }
+
+        // Horizontal-stripes bitmap — identical to the right block.
+        if self.bitmap_horizontal.is_none() {
+            self.bitmap_horizontal = Some(Self::raster_to_bitmap(|gfx| {
+                for i in 0..(n / 2) {
+                    let y = (2 * i) as f64;
+                    gfx.set_fill_color(Color::white());
+                    gfx.begin_path();
+                    gfx.rect(0.0, y, PT_N, 1.0);
+                    gfx.fill();
+                    gfx.set_fill_color(Color::black());
+                    gfx.begin_path();
+                    gfx.rect(0.0, y + 1.0, PT_N, 1.0);
+                    gfx.fill();
+                }
+            }));
+        }
+
+        ctx.save();
+        ctx.snap_to_pixel();
+        let bw = PT_N as u32;
+        let bh = PT_N as u32;
+        if let Some(arc) = self.bitmap_vertical.as_ref() {
+            ctx.draw_image_rgba_arc(arc, bw, bh, 0.0, 0.0, PT_N, PT_N);
+        }
+        if let Some(arc) = self.bitmap_horizontal.as_ref() {
+            let off_x = PT_N + PT_GAP;
+            ctx.draw_image_rgba_arc(arc, bw, bh, off_x, 0.0, PT_N, PT_N);
+        }
         ctx.restore();
     }
 

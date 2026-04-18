@@ -270,29 +270,13 @@ impl Widget for Label {
         // If no explicit colour was set, follow the active theme.
         let color = self.color.unwrap_or_else(|| ctx.visuals().text_color);
 
-        // ── Wrapped multi-line path (always direct; no backbuffer for wrapped text) ─
-        if self.wrap && !self.wrapped_lines.is_empty() {
-            ctx.set_fill_color(color);
-            let line_h = self.font_size * 1.5;
-            let total_h = self.wrapped_lines.len() as f64 * line_h;
-            for (i, line) in self.wrapped_lines.iter().enumerate() {
-                if line.is_empty() { continue; }
-                if let Some(m) = ctx.measure_text(line) {
-                    // Y-up: line 0 is topmost → y_center = total_h - 0.5*line_h
-                    let line_center_y = total_h - (i as f64 + 0.5) * line_h;
-                    let ty = line_center_y - (m.ascent - m.descent) * 0.5;
-                    let tx = match self.align {
-                        LabelAlign::Left   => 0.0,
-                        LabelAlign::Center => (w - m.width) * 0.5,
-                        LabelAlign::Right  => w - m.width,
-                    };
-                    ctx.fill_text(line, tx, ty);
-                }
-            }
-            return;
-        }
+        let is_wrapped = self.wrap && !self.wrapped_lines.is_empty();
 
         // ── Backbuffer path ───────────────────────────────────────────────────
+        // Handles BOTH single-line and wrapped multi-line content.  The
+        // closure just speaks `GfxCtx` — nothing about writing into an
+        // offscreen `Framebuffer` is different from writing to the live
+        // screen, so the per-line rendering loop moves across untouched.
         if self.buffered && ctx.has_image_blit() && w >= 1.0 && h >= 1.0 {
             let bw = w.ceil() as u32;
             let bh = h.ceil() as u32;
@@ -310,14 +294,19 @@ impl Widget for Label {
                 bw, bh, align_byte,
             );
 
-            // Rasterize-on-miss: run AGG into a fresh framebuffer, then
-            // un-premultiply to straight alpha so downstream `draw_image_rgba`
-            // callers (GL texture upload, software composite) receive the
-            // format their blend functions expect.
             let text  = self.text.clone();
             let font  = Arc::clone(&self.font);
             let size  = self.font_size;
             let align = self.align;
+            // `wrapped_lines` is pre-computed each layout() for wrap=true
+            // labels.  Clone only if we need it inside the closure to avoid
+            // allocating for the common single-line case.
+            let wrapped_lines = if is_wrapped {
+                Some(self.wrapped_lines.clone())
+            } else {
+                None
+            };
+
             let arc = get_or_raster(key, move || {
                 let mut fb = Framebuffer::new(bw, bh);
                 {
@@ -325,7 +314,30 @@ impl Widget for Label {
                     gfx.set_font(Arc::clone(&font));
                     gfx.set_font_size(size);
                     gfx.set_fill_color(color);
-                    if let Some(m) = gfx.measure_text(&text) {
+
+                    if let Some(lines) = &wrapped_lines {
+                        // Wrapped multi-line: same geometry the direct path
+                        // used (Y-up, line 0 at the top), just against the
+                        // backbuffer.
+                        let line_h  = size * 1.5;
+                        let total_h = lines.len() as f64 * line_h;
+                        for (i, line) in lines.iter().enumerate() {
+                            if line.is_empty() { continue; }
+                            if let Some(m) = gfx.measure_text(line) {
+                                let line_center_y =
+                                    total_h - (i as f64 + 0.5) * line_h;
+                                let ty = line_center_y
+                                    - (m.ascent - m.descent) * 0.5;
+                                let tx = match align {
+                                    LabelAlign::Left   => 0.0,
+                                    LabelAlign::Center => (w - m.width) * 0.5,
+                                    LabelAlign::Right  => w - m.width,
+                                };
+                                gfx.fill_text(line, tx, ty);
+                            }
+                        }
+                    } else if let Some(m) = gfx.measure_text(&text) {
+                        // Single-line: vertically-centred, horizontally aligned.
                         let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
                         let tx = match align {
                             LabelAlign::Left   => 0.0,
@@ -343,13 +355,30 @@ impl Widget for Label {
             self.cache_w      = bw;
             self.cache_h      = bh;
 
-            ctx.draw_image_rgba_arc(&arc, bw, bh, 0.0, 0.0, w, h);
+            // 1:1 texel→pixel blit via integer dst size (see comment below).
+            ctx.draw_image_rgba_arc(&arc, bw, bh, 0.0, 0.0, bw as f64, bh as f64);
             return;
         }
 
-        // ── Direct path (GL or non-buffered) ──────────────────────────────────
+        // ── Direct path — no backbuffer (GL tess glyphs, or `buffered = false`) ─
         ctx.set_fill_color(color);
-        if let Some(m) = ctx.measure_text(&self.text) {
+        if is_wrapped {
+            let line_h  = self.font_size * 1.5;
+            let total_h = self.wrapped_lines.len() as f64 * line_h;
+            for (i, line) in self.wrapped_lines.iter().enumerate() {
+                if line.is_empty() { continue; }
+                if let Some(m) = ctx.measure_text(line) {
+                    let line_center_y = total_h - (i as f64 + 0.5) * line_h;
+                    let ty = line_center_y - (m.ascent - m.descent) * 0.5;
+                    let tx = match self.align {
+                        LabelAlign::Left   => 0.0,
+                        LabelAlign::Center => (w - m.width) * 0.5,
+                        LabelAlign::Right  => w - m.width,
+                    };
+                    ctx.fill_text(line, tx, ty);
+                }
+            }
+        } else if let Some(m) = ctx.measure_text(&self.text) {
             let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
             let tx = match self.align {
                 LabelAlign::Left   => 0.0,

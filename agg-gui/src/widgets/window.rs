@@ -209,10 +209,26 @@ impl Window {
         if !self.constrain { return; }
         let cw = self.canvas_size.width;
         let ch = self.canvas_size.height;
-        // bounds.height equals TITLE_H when collapsed (we adjust it on toggle),
-        // so no special-case is needed here.
-        self.bounds.x = self.bounds.x.clamp(0.0, (cw - self.bounds.width).max(0.0)).round();
-        self.bounds.y = self.bounds.y.clamp(0.0, (ch - self.bounds.height).max(0.0)).round();
+        // **Policy: keep the TITLE BAR grabbable**, not the whole window.
+        // Horizontally we keep at least `MIN_H_VISIBLE` pixels of the title
+        // bar inside the canvas so the user can always drag the window back
+        // on-screen.  Vertically (Y-up) we keep the FULL title bar inside
+        // the canvas — the body may extend above/below, but the drag handle
+        // is always fully reachable.  This matches how native OS window
+        // managers constrain child windows against their host monitor.
+        const MIN_H_VISIBLE: f64 = 40.0;
+
+        let min_x = MIN_H_VISIBLE - self.bounds.width;
+        let max_x = (cw - MIN_H_VISIBLE).max(min_x);
+        self.bounds.x = self.bounds.x.clamp(min_x, max_x).round();
+
+        // Title bar Y range in parent coords: [bounds.y + h - TITLE_H, bounds.y + h].
+        // Full title bar visible → `bounds.y >= TITLE_H - h` AND `bounds.y <= ch - h`.
+        // `bounds.height` collapses to `TITLE_H` when the user folds the
+        // window, so the collapsed case naturally falls out of the same math.
+        let min_y = TITLE_H - self.bounds.height;
+        let max_y = (ch - self.bounds.height).max(min_y);
+        self.bounds.y = self.bounds.y.clamp(min_y, max_y).round();
     }
 
     pub fn show(&mut self) { self.visible = true; }
@@ -415,15 +431,27 @@ impl Widget for Window {
         let s = self.title_label.layout(Size::new(self.bounds.width - 48.0, TITLE_H));
         self.title_label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
 
-        // Record the canvas size for drag / resize hit-testing.  We deliberately
-        // do NOT passively clamp the window's position here.  On startup the
-        // first few layout passes may run at a stale (default) canvas size
-        // before the platform has maximized / fullscreened the OS window, and
-        // passive clamping would pull saved positions into that small rect
-        // then persist them — losing user-placed positions after a restart.
-        // Clamping still happens in the drag / resize handlers so the user
-        // can't fling a window off-screen.
+        // Record the canvas size for drag / resize hit-testing AND clamp on
+        // SHRINK.  When the OS window shrinks (user drags the edge in, or a
+        // platform changes the DPI), internal windows that were placed
+        // relative to the old canvas would end up with their title bars
+        // outside the new viewport and become unreachable.  Clamp here when
+        // the canvas has shrunk from the previous layout to pull the title
+        // bar back into view.
+        //
+        // We skip clamp on the FIRST layout and on GROWTH:
+        // * First layout: `canvas_size` may be the default (0,0) before the
+        //   platform has sized the OS window — blindly clamping at that
+        //   stale size would persist a tiny ~0-px bounds to disk.
+        // * Growth: the user's saved position is still valid; no reason to
+        //   pull it toward the origin.
+        let prev = self.canvas_size;
         self.canvas_size = available;
+        let had_prior = prev.width > 0.0 && prev.height > 0.0;
+        let shrunk = available.width < prev.width || available.height < prev.height;
+        if had_prior && shrunk {
+            self.clamp_to_canvas();
+        }
         if let Some(ref cell) = self.position_cell {
             cell.set(self.bounds);
         }
