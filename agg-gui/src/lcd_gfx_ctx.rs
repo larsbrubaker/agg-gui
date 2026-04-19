@@ -309,14 +309,22 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         let mut color = self.state.fill_color;
         color.a *= self.state.global_alpha as f32;
 
-        let cached = rasterize_text_lcd_cached(&font, text, self.state.font_size);
+        // HiDPI: rasterise at the **physical** font size (logical × CTM
+        // scale).  See `gfx_ctx::fill_text` for the long version; short
+        // version: the mask composites 1:1 at its rasterised pixel count,
+        // so caching at logical size would shrink text on 2×/3× displays.
+        let t = &self.state.transform;
+        let ctm_scale = (t.sx * t.sx + t.shy * t.shy).sqrt().max(1e-6);
+        let phys_size = self.state.font_size * ctm_scale;
+        let cached = rasterize_text_lcd_cached(&font, text, phys_size);
         // Match the legacy CPU LCD compositor: apply CTM to the destination
         // origin, then snap to integer pixels.  Sub-pixel placement of an
         // LCD mask smears the per-channel phase pattern across pixel
         // boundaries (see `gfx_ctx::draw_lcd_mask` for the long story).
-        let dst_x = x - cached.baseline_x_in_mask;
-        let dst_y = y - cached.baseline_y_in_mask;
-        let t = &self.state.transform;
+        // Divide `baseline_*_in_mask` by `ctm_scale` so offsets stay in
+        // logical units that the CTM multiplies back to physical.
+        let dst_x = x - cached.baseline_x_in_mask / ctm_scale;
+        let dst_y = y - cached.baseline_y_in_mask / ctm_scale;
         let sx = (dst_x * t.sx + dst_y * t.shx + t.tx).round() as i32;
         let sy = (dst_x * t.shy + dst_y * t.sy + t.ty).round() as i32;
 

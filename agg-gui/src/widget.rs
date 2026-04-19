@@ -429,6 +429,17 @@ fn paint_subtree_direct(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 
 /// Backbuffered paint: re-raster through AGG if dirty, blit the cached
 /// bitmap via `draw_image_rgba_arc` regardless.
+///
+/// # HiDPI
+///
+/// The backing bitmap is allocated at **physical pixel** dimensions
+/// (`bounds × device_scale`) and the sub-ctx running the widget's paint has
+/// a matching `scale(dps, dps)` applied.  This means glyph outlines are
+/// rasterised at the physical grid — "true" HiDPI rendering, not pixel
+/// doubling — and the outer blit then draws the physical-sized image at the
+/// widget's logical rect, which the outer CTM (also scaled by dps) maps 1:1
+/// back to physical pixels.  Net: logical layout, physical rasterisation,
+/// zero upscale blur.
 fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     // Snap the outer CTM to the pixel grid BEFORE blitting the cached
     // bitmap.  `draw_image_rgba_arc` uses a NEAREST filter for Arc-keyed
@@ -440,9 +451,17 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     ctx.save();
     ctx.snap_to_pixel();
 
-    let b = widget.bounds();
-    let w = b.width.ceil().max(1.0) as u32;
-    let h = b.height.ceil().max(1.0) as u32;
+    let b   = widget.bounds();
+    let dps = crate::device_scale::device_scale().max(1e-6);
+    // Physical pixel dimensions of the offscreen render target.
+    let w_phys = (b.width  * dps).ceil().max(1.0) as u32;
+    let h_phys = (b.height * dps).ceil().max(1.0) as u32;
+    // Logical dimensions used as the blit destination rect — the outer CTM
+    // already has the `scale(dps, dps)` transform active from `App::paint`,
+    // so `dst_w = w_logical` maps exactly to `w_phys` physical pixels, 1:1
+    // with the backing texture.
+    let w_logical = b.width .max(1.0 / dps);
+    let h_logical = b.height.max(1.0 / dps);
 
     // Decide whether to re-raster.  Size change invalidates; so does a
     // mode swap — if the cache holds `Rgba` bytes but the widget now
@@ -457,8 +476,8 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         let cache_is_lcd = cache.lcd_alpha.is_some();
         let needs = cache.dirty
             || cache.pixels.is_none()
-            || cache.width != w
-            || cache.height != h
+            || cache.width != w_phys
+            || cache.height != h_phys
             || cache_is_lcd != mode_is_lcd;
         (needs, cache.pixels.is_some())
     };
@@ -483,10 +502,15 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         //     step below picks a compositor based on which is present.
         let (pixels_bytes, lcd_alpha_bytes): (Vec<u8>, Option<Vec<u8>>) = match mode {
             BackbufferMode::Rgba => {
-                let mut fb = Framebuffer::new(w, h);
+                let mut fb = Framebuffer::new(w_phys, h_phys);
                 {
                     let mut sub = GfxCtx::new(&mut fb);
                     sub.set_lcd_mode(false);   // RGBA mode never uses LCD text
+                    if (dps - 1.0).abs() > 1e-6 {
+                        // Widgets paint in logical coords — scale the sub ctx
+                        // so their drawing lands on the physical pixel grid.
+                        sub.scale(dps, dps);
+                    }
                     paint_subtree_direct(widget, &mut sub);
                 }
                 // Two conversions to make the bitmap directly blittable:
@@ -517,9 +541,15 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                 // Widgets that can't paint their own opaque bg should
                 // use `Rgba` mode or paint through the parent's ctx
                 // directly instead.
-                let mut buf = LcdBuffer::new(w, h);
+                let mut buf = LcdBuffer::new(w_phys, h_phys);
                 {
                     let mut sub = crate::lcd_gfx_ctx::LcdGfxCtx::new(&mut buf);
+                    if (dps - 1.0).abs() > 1e-6 {
+                        // Match the RGBA branch: widgets paint in logical
+                        // coords; the sub ctx's scale transforms them into
+                        // the physical-pixel LCD buffer.
+                        sub.scale(dps, dps);
+                    }
                     paint_subtree_direct(widget, &mut sub);
                 }
                 (buf.color_plane_flipped(), Some(buf.alpha_plane_flipped()))
@@ -531,8 +561,8 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         let cache = widget.backbuffer_cache_mut().unwrap();
         cache.pixels    = Some(Arc::clone(&pixels));
         cache.lcd_alpha = lcd_alpha.as_ref().map(Arc::clone);
-        cache.width     = w;
-        cache.height    = h;
+        cache.width     = w_phys;
+        cache.height    = h_phys;
         cache.dirty     = false;
     }
 
@@ -549,17 +579,20 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     //     cache round-trip (grayscale AA on backends that fall back
     //     to the default trait impl).
     let cache = widget.backbuffer_cache_mut().unwrap();
-    let w = cache.width;
-    let h = cache.height;
+    // Image is physical-sized; dst is logical.  The outer CTM already has
+    // `scale(dps, dps)` active, so logical dst × dps == physical dst ==
+    // bitmap size, giving a 1:1 texel-to-pixel blit (no up/downscale blur).
+    let img_w = cache.width;
+    let img_h = cache.height;
     match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
         (Some(color), Some(alpha)) => {
             ctx.draw_lcd_backbuffer_arc(
-                color, alpha, w, h,
-                0.0, 0.0, w as f64, h as f64,
+                color, alpha, img_w, img_h,
+                0.0, 0.0, w_logical, h_logical,
             );
         }
         (Some(bmp), None) => {
-            ctx.draw_image_rgba_arc(bmp, w, h, 0.0, 0.0, w as f64, h as f64);
+            ctx.draw_image_rgba_arc(bmp, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
         }
         _ => {}
     }

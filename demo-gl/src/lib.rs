@@ -1043,22 +1043,35 @@ impl DrawCtx for GlGfxCtx {
             None => return,
         };
 
+        // Extract uniform scale from the CTM — used below to render text at
+        // **physical** font size rather than logical.  Pure scale transforms
+        // (what we use for DPI) give `sqrt(sx² + shy²) == scale`.
+        let ctm = *self.ctm();
+        let ctm_scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt().max(1e-6);
+
         // LCD subpixel path — raster is cached in `text_lcd` keyed on
         // `(text, font, size)`; the GL backend then caches the uploaded
         // texture keyed on the returned `Arc`'s pointer identity via
         // `draw_lcd_mask_arc`.  Result: one AGG rasterisation +
         // `glTexImage2D` per unique string, every subsequent frame is a
         // single dual-source-blend draw call.
+        //
+        // HiDPI: rasterise at physical size so the mask composites 1:1 at
+        // the right pixel count instead of being half-sized on 2×/3× screens.
         if <Self as agg_gui::DrawCtx>::has_lcd_mask_composite(self)
             && self.lcd_mode
         {
+            let phys_size = self.font_size * ctm_scale;
             let cached = agg_gui::lcd_coverage::rasterize_text_lcd_cached(
-                &font, text, self.font_size,
+                &font, text, phys_size,
             );
             let mut col = self.fill_color;
             col.a *= self.global_alpha as f32;
-            let dst_x = x - cached.baseline_x_in_mask;
-            let dst_y = y - cached.baseline_y_in_mask;
+            // `baseline_*_in_mask` is in physical mask pixels; divide by
+            // `ctm_scale` so offsets stay in logical units that the CTM
+            // inside `draw_lcd_mask_arc` multiplies back to physical.
+            let dst_x = x - cached.baseline_x_in_mask / ctm_scale;
+            let dst_y = y - cached.baseline_y_in_mask / ctm_scale;
             <Self as agg_gui::DrawCtx>::draw_lcd_mask_arc(
                 self,
                 &cached.pixels, cached.width, cached.height,
@@ -1071,9 +1084,15 @@ impl DrawCtx for GlGfxCtx {
         // Rustybuzz shaping is cheap relative to tessellation.
         let shaped    = shape_glyphs(&font, text, self.font_size);
         let font_size = self.font_size;
-        // Snapshot the CTM so we can apply it inside the loop without holding
-        // an immutable borrow of `self` while `glyph_cache` is mutably borrowed.
-        let ctm = *self.ctm();
+        // HiDPI: cache glyph tessellations at the **physical** size so the
+        // Bezier flattening resolves more segments on 2×/3× displays.  We
+        // then divide each vertex by `ctm_scale` before adding the glyph
+        // origin, so positions stay in logical units — the outer CTM
+        // transforms them back to physical pixels for the GPU.  Net: same
+        // on-screen size as before, but curves are tessellated at the
+        // higher resolution.
+        let tess_size = font_size * ctm_scale;
+        let inv_scale = 1.0 / ctm_scale;
 
         let mut all_verts: Vec<[f32; 2]> = Vec::new();
         let mut all_idx:   Vec<u32>      = Vec::new();
@@ -1088,13 +1107,16 @@ impl DrawCtx for GlGfxCtx {
             // resolved from it — glyph_id is an index into that font's table.
             let render_font = glyph.fallback_font.as_deref().unwrap_or(&font);
 
-            if let Some(cached) = self.glyph_cache.get_or_insert(render_font, glyph.glyph_id, font_size) {
-                // Offset each cached glyph-local vert by the glyph's screen
-                // position, then apply the CTM to get screen-space pixels.
-                // This is correct for any affine CTM including rotation/scale.
+            if let Some(cached) = self.glyph_cache.get_or_insert(render_font, glyph.glyph_id, tess_size) {
+                // Vertices are in physical pixel space at `tess_size`.  Scale
+                // to logical via `inv_scale`, offset by the glyph's logical
+                // pen position, then apply the CTM to reach physical pixels.
                 let base = all_verts.len() as u32;
                 for &[vx, vy] in &cached.verts {
-                    let (mut px, mut py) = (gx + vx as f64, gy + vy as f64);
+                    let (mut px, mut py) = (
+                        gx + vx as f64 * inv_scale,
+                        gy + vy as f64 * inv_scale,
+                    );
                     ctm.transform(&mut px, &mut py);
                     all_verts.push([px as f32, py as f32]);
                 }

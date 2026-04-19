@@ -434,12 +434,24 @@ impl<'a> GfxCtx<'a> {
         // loop for direct-to-screen text when the global font setting
         // says so.  Mask raster is cached keyed on `(text, font, size)`
         // and colour is applied at composite time.
+        //
+        // HiDPI: rasterise the mask at the **physical** font size (logical
+        // × CTM scale) so the 1:1 texel-to-pixel composite fills the
+        // expected number of physical pixels.  Without this the mask
+        // renders at logical size and ends up half-size (or stretched by a
+        // separate scale call) on 2×/3× displays.
         if self.lcd_mode {
+            let t = &self.state.transform;
+            let ctm_scale = (t.sx * t.sx + t.shy * t.shy).sqrt().max(1e-6);
+            let phys_size = font_size * ctm_scale;
             let cached = crate::lcd_coverage::rasterize_text_lcd_cached(
-                &font, text, font_size,
+                &font, text, phys_size,
             );
-            let dst_x = x - cached.baseline_x_in_mask;
-            let dst_y = y - cached.baseline_y_in_mask;
+            // `baseline_*_in_mask` is in physical mask pixels; divide by
+            // `ctm_scale` so the offset stays in logical units that the
+            // CTM then multiplies back to physical at blit time.
+            let dst_x = x - cached.baseline_x_in_mask / ctm_scale;
+            let dst_y = y - cached.baseline_y_in_mask / ctm_scale;
             <Self as crate::DrawCtx>::draw_lcd_mask_arc(
                 self,
                 &cached.pixels, cached.width, cached.height,
