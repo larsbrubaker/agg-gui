@@ -1939,17 +1939,15 @@ fn test_widget_base_clamp_size() {
 }
 
 // --- DeviceScale scaled_margin ----------------------------------------------
-
-#[test]
-fn test_widget_base_scaled_margin_at_2x() {
-    set_device_scale(2.0);
-    let mut base = WidgetBase::new();
-    base.margin = Insets::all(10.0);
-    let scaled = base.scaled_margin();
-    set_device_scale(1.0); // restore
-    assert_eq!(scaled.left,   20.0);
-    assert_eq!(scaled.bottom, 20.0);
-}
+//
+// DPI scaling is now applied once at the `App` boundary (via a paint-ctx
+// transform plus logical/physical conversion of viewport + input coords) —
+// widgets work in logical units end-to-end.  `scaled_margin()` is therefore
+// a pass-through and no longer multiplies by `device_scale`.  The old 2×
+// expectation was invariant under the previous broken-by-design approach
+// where only margins scaled and fonts didn't; it's been removed rather than
+// updated, since a pass-through-returns-logical test is redundant with
+// `scaled_margin`'s trivial definition.
 
 #[test]
 fn test_device_scale_default_is_one() {

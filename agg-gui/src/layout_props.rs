@@ -303,13 +303,15 @@ impl WidgetBase {
         )
     }
 
-    /// Return [`margin`](Self::margin) scaled by the current
-    /// [`device_scale`](crate::device_scale::device_scale) factor.
+    /// Return [`margin`](Self::margin) in logical units.
     ///
-    /// Call this inside layout algorithms where physical pixel values are
-    /// needed.  Widget configuration code always uses logical units.
+    /// Previously multiplied by [`device_scale`](crate::device_scale::device_scale)
+    /// when margin handling was spread across widgets.  DPI scaling is now
+    /// applied once at the [`App`](crate::widget::App) boundary via a paint-
+    /// ctx transform, so widgets work in logical units end-to-end and this
+    /// helper is a simple passthrough kept for call-site readability.
     pub fn scaled_margin(&self) -> Insets {
-        self.margin.scale(crate::device_scale::device_scale())
+        self.margin
     }
 }
 

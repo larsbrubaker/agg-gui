@@ -24,6 +24,11 @@ const loadingEl = document.getElementById("loading")!;
 
 // --- Canvas size helper ---
 
+// Track the last DPR we published into WASM so we only re-set on change.
+// `window.devicePixelRatio` can shift when the browser zooms, the OS scale
+// changes, or the tab moves to a different-DPI monitor.
+let lastDpr = 0;
+
 function updateCanvasSize(): boolean {
   const wrap = canvas.parentElement!;
   const dpr  = window.devicePixelRatio || 1;
@@ -33,6 +38,11 @@ function updateCanvasSize(): boolean {
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width  = w;
     canvas.height = h;
+  }
+  if (wasmModule && dpr !== lastDpr) {
+    lastDpr = dpr;
+    const setDpr = wasmModule["set_device_pixel_ratio"] as ((d: number) => void) | undefined;
+    if (setDpr) setDpr(dpr);
   }
   return w > 0 && h > 0;
 }

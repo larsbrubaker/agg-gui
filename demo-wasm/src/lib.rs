@@ -461,6 +461,17 @@ pub fn wasm_clipboard_set(text: &str) {
 // WASM event exports
 // ---------------------------------------------------------------------------
 
+/// Publish the browser's `window.devicePixelRatio`.  JS calls this once at
+/// init and again whenever the DPR changes (zoom, window moves to a
+/// different-DPI screen on desktops).  The widget tree then paints at
+/// physical pixel density instead of logical pixels — the difference
+/// between "comfortable" text on a high-DPR phone and "miniature" text.
+#[wasm_bindgen]
+pub fn set_device_pixel_ratio(dpr: f64) {
+    agg_gui::set_device_scale(dpr.max(0.5));
+    mark_dirty();
+}
+
 #[wasm_bindgen]
 pub fn on_mouse_move(x: f64, y: f64) {
     mark_dirty();

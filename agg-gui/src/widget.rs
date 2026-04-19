@@ -811,22 +811,39 @@ impl App {
         self.global_key_handler = Some(Box::new(handler));
     }
 
-    /// Lay out the widget tree to fill `viewport`. Call once per frame before
-    /// [`paint`][Self::paint].
+    /// Lay out the widget tree to fill `viewport`.  `viewport` is in **physical
+    /// pixels** (e.g. `window.inner_size()` on native, `canvas.width/height` on
+    /// wasm); this method divides by the current device scale factor so the
+    /// widget tree lays out in logical (device-independent) units.  Call once
+    /// per frame before [`paint`][Self::paint].
     pub fn layout(&mut self, viewport: Size) {
-        self.viewport_height = viewport.height;
-        self.root.set_bounds(Rect::new(0.0, 0.0, viewport.width, viewport.height));
-        self.root.layout(viewport);
+        let scale = crate::device_scale::device_scale().max(1e-6);
+        let logical = Size::new(viewport.width / scale, viewport.height / scale);
+        self.viewport_height = logical.height;
+        self.root.set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
+        self.root.layout(logical);
     }
 
     /// Paint the entire widget tree into `ctx`. Call after [`layout`][Self::layout].
     ///
-    /// Clears the animation tick flag up-front so widgets can re-request it during
+    /// Applies a `ctx.scale(dps, dps)` transform up-front so the whole tree —
+    /// widget dimensions, font sizes, margins — is rendered at physical pixel
+    /// density on HiDPI screens without any widget having to know about DPI.
+    ///
+    /// Also clears the animation tick flag so widgets can re-request it during
     /// this paint if they need another frame; hosts read [`wants_animation_tick`]
     /// after `paint` returns to decide whether to schedule continuous redraws.
     pub fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         crate::animation::clear_tick();
-        paint_subtree(self.root.as_mut(), ctx);
+        let scale = crate::device_scale::device_scale();
+        if (scale - 1.0).abs() > 1e-6 {
+            ctx.save();
+            ctx.scale(scale, scale);
+            paint_subtree(self.root.as_mut(), ctx);
+            ctx.restore();
+        } else {
+            paint_subtree(self.root.as_mut(), ctx);
+        }
     }
 
     /// After a paint pass, returns `true` if any widget requested another frame
@@ -836,9 +853,14 @@ impl App {
         crate::animation::wants_tick()
     }
 
-    // --- Platform event ingestion (Y-down → Y-up conversion happens here) ---
+    // --- Platform event ingestion ---
+    //
+    // Hosts pass raw physical-pixel coordinates (e.g. `e.clientX * devicePixelRatio`
+    // in wasm, or `WindowEvent::CursorMoved.position` on native).  These methods
+    // divide by the current device scale factor and flip Y so widget code sees
+    // logical Y-up coordinates matching the layout pass.
 
-    /// Mouse cursor moved. `screen_y` is Y-down (OS / browser convention).
+    /// Mouse cursor moved. `screen_y` is Y-down physical pixels.
     pub fn on_mouse_move(&mut self, screen_x: f64, screen_y: f64) {
         // Reset cursor so the hovered widget can set it; Default if nothing sets it.
         crate::cursor::reset_cursor_icon();
@@ -846,7 +868,7 @@ impl App {
         self.dispatch_mouse_move(pos);
     }
 
-    /// Mouse button pressed. `screen_y` is Y-down.
+    /// Mouse button pressed. `screen_y` is Y-down physical pixels.
     pub fn on_mouse_down(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
         let pos = self.flip_y(screen_x, screen_y);
         let hit = self.compute_hit(pos);
@@ -1043,8 +1065,15 @@ impl App {
     }
 
     #[inline]
+    /// Convert a platform-supplied physical Y-down coordinate into the
+    /// logical Y-up space the widget tree works in.  Divides by the current
+    /// device scale factor (so mouse coords line up with the scaled paint
+    /// transform) and flips Y against the cached logical viewport height.
     fn flip_y(&self, x: f64, y_down: f64) -> Point {
-        Point::new(x, self.viewport_height - y_down)
+        let scale = crate::device_scale::device_scale().max(1e-6);
+        let lx = x / scale;
+        let ly_down = y_down / scale;
+        Point::new(lx, self.viewport_height - ly_down)
     }
 
     fn compute_hit(&self, pos: Point) -> Option<Vec<usize>> {

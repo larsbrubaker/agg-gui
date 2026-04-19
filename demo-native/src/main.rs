@@ -247,6 +247,12 @@ fn main() {
     }
     screen_size.set((win_w, win_h));
 
+    // Publish the OS-reported device scale factor so the widget tree paints
+    // at physical pixel density — tiny text on 2×/3× HiDPI monitors and
+    // phone-browser emulation otherwise.  winit emits ScaleFactorChanged
+    // when the window moves to a different monitor; we update it there too.
+    agg_gui::set_device_scale(window.scale_factor());
+
     // Clear to the theme background first so any transparent regions in
     // the first paint (e.g. between widgets) are already theme-coloured.
     unsafe {
@@ -274,6 +280,14 @@ fn main() {
                         (last_windowed_w, last_windowed_h));
                     save_state_to_disk(&s);
                     elwt.exit();
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::ScaleFactorChanged { scale_factor, .. }, ..
+                } => {
+                    // Window moved to a different-DPI monitor.  Update our
+                    // scale factor so the next layout/paint/input pass uses
+                    // the new value.
+                    agg_gui::set_device_scale(scale_factor);
                 }
                 Event::WindowEvent {
                     event: WindowEvent::Resized(new_size), ..
