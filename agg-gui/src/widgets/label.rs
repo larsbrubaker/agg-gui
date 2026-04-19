@@ -340,30 +340,39 @@ impl Widget for Label {
         let size   = self.active_font_size();
         let line_h = size * 1.5;
 
+        // Drop the pre-rasterized bitmap the moment we notice a font or size
+        // swap — unconditionally, before any other branching.  Without this
+        // a buffered Label (the default) keeps blitting glyphs drawn with
+        // the previous typeface / point size until a bounds change or a
+        // text edit happens to invalidate the cache.  DragValue hits this
+        // hardest: its `value_label` often measures the same width for two
+        // different fonts ("14.0" in Arial vs the default is identical
+        // within a pixel), so the size-based invalidation in `set_bounds`
+        // never fires and the stale bitmap lingers until the user hovers
+        // (which triggers some other layout-affecting update).
+        let font_changed = Arc::as_ptr(&font) != self.layout_font_ptr;
+        let size_changed = (self.layout_font_size - size).abs() > 0.01;
+        if font_changed || size_changed {
+            self.cache.invalidate();
+        }
+
         if self.wrap && available.width > 0.0 {
-            let text_changed  = self.layout_text != self.text
-                || (self.layout_font_size - size).abs() > 0.01;
+            let text_changed  = self.layout_text != self.text || size_changed;
             let width_changed = (self.wrap_at_width - available.width).abs() > 1.0;
-            // ALSO rebuild when the system font has been swapped since the
-            // last layout — measurement depends on glyph metrics from a
-            // particular font.
-            let font_changed  = Arc::as_ptr(&font) != self.layout_font_ptr;
             if text_changed || width_changed || font_changed {
                 self.wrapped_lines = wrap_text(&font, &self.text, size, available.width);
                 self.wrap_at_width    = available.width;
                 self.layout_text      = self.text.clone();
                 self.layout_font_size = size;
                 self.layout_font_ptr  = Arc::as_ptr(&font);
+                // Text changes also need a bitmap rebuild.
+                if text_changed { self.cache.invalidate(); }
             }
             let total_h = self.wrapped_lines.len() as f64 * line_h;
             Size::new(available.width, total_h)
         } else {
             // Single-line path: tight bounds matching rendered text width.
-            let font_changed = Arc::as_ptr(&font) != self.layout_font_ptr;
-            if self.layout_text != self.text
-                || (self.layout_font_size - size).abs() > 0.01
-                || font_changed
-            {
+            if self.layout_text != self.text || size_changed || font_changed {
                 let metrics =
                     crate::text::measure_text_metrics(&font, &self.text, size);
                 self.layout_width     = metrics.width;

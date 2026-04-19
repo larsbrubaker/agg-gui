@@ -140,6 +140,14 @@ struct TextFieldSig {
     scroll_x_bits: u64,
     w_bits:        u64,
     h_bits:        u64,
+    // Font identity + size: the cached bitmap was rasterised with a specific
+    // typeface at a specific point size, so any live swap in the System
+    // window (which runs through `font_settings::set_system_font` /
+    // `set_font_size_scale`) must invalidate — otherwise the stale bitmap
+    // keeps blitting until some other field in the sig happens to change
+    // (e.g. the user hovers the control, which flips `hovered`).
+    font_ptr:      usize,
+    font_size_bits: u64,
 }
 
 impl TextField {
@@ -628,16 +636,19 @@ impl Widget for TextField {
         // Sig excludes cursor-blink phase.  Cursor paints in
         // `paint_overlay` after cache blit — no blink-driven
         // invalidation.
-        let st  = self.edit.borrow();
+        let st   = self.edit.borrow();
+        let font = self.active_font();
         let sig = TextFieldSig {
-            text:          st.text.clone(),
-            cursor:        st.cursor,
-            anchor:        st.anchor,
-            focused:       self.focused,
-            hovered:       self.hovered,
-            scroll_x_bits: self.scroll_x.to_bits(),
-            w_bits:        self.bounds.width .to_bits(),
-            h_bits:        self.bounds.height.to_bits(),
+            text:           st.text.clone(),
+            cursor:         st.cursor,
+            anchor:         st.anchor,
+            focused:        self.focused,
+            hovered:        self.hovered,
+            scroll_x_bits:  self.scroll_x.to_bits(),
+            w_bits:         self.bounds.width .to_bits(),
+            h_bits:         self.bounds.height.to_bits(),
+            font_ptr:       Arc::as_ptr(&font) as usize,
+            font_size_bits: self.font_size.to_bits(),
         };
         drop(st);
         if self.last_sig.as_ref() != Some(&sig) {
