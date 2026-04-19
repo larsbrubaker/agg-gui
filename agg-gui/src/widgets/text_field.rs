@@ -30,7 +30,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{Font, measure_advance};
 use crate::undo::UndoBuffer;
-use crate::widget::{BackbufferCache, BackbufferMode, Widget};
+use crate::widget::Widget;
 use super::text_field_core::{
     TextEditCommand, TextEditState,
     byte_at_x, next_char_boundary, next_word_boundary,
@@ -119,41 +119,6 @@ pub struct TextField {
     on_change:        Option<Box<dyn FnMut(&str)>>,
     on_enter:         Option<Box<dyn FnMut(&str)>>,
     on_edit_complete: Option<Box<dyn FnMut(&str)>>,
-
-    // ── Backbuffer cache ─────────────────────────────────────────────────
-    //
-    // Routes paint through the framework's backbuffer lane — when the
-    // global LCD toggle is on the cache holds two planes (per-channel
-    // colour + per-channel alpha), blitted via `draw_lcd_backbuffer_arc`
-    // which preserves subpixel chroma through the cache round-trip.
-    // Dispatching on `font_settings::lcd_enabled()` inside
-    // `backbuffer_mode` means toggling the setting automatically
-    // rebuilds the cache in the right format (the framework detects
-    // the mode flip and forces a re-raster).
-    cache:          BackbufferCache,
-    /// Snapshot of everything the paint output depends on, captured at
-    /// the end of each successful layout.  When any of these change the
-    /// cache is invalidated — handles blinking cursor (a re-layout every
-    /// frame detects the phase flip) as well as text, focus, selection,
-    /// and scroll changes without needing an invalidate() call at every
-    /// mutation site.
-    last_paint_sig: Option<TextFieldPaintSig>,
-}
-
-/// State signature that changes whenever the painted output should
-/// change.  Compared at layout time to decide whether to invalidate the
-/// backbuffer cache.
-#[derive(Clone, PartialEq)]
-struct TextFieldPaintSig {
-    text:          String,
-    cursor:        usize,
-    anchor:        usize,
-    focused:       bool,
-    hovered:       bool,
-    scroll_x_bits: u64,
-    blink_visible: bool,
-    w_bits:        u64,
-    h_bits:        u64,
 }
 
 impl TextField {
@@ -182,8 +147,6 @@ impl TextField {
             on_change:        None,
             on_enter:         None,
             on_edit_complete: None,
-            cache:            BackbufferCache::default(),
-            last_paint_sig:   None,
         }
     }
 
