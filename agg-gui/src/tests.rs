@@ -2394,12 +2394,17 @@ fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
     assert_eq!(alpha.len(), 60 * 24 * 3, "alpha plane is 3 bytes/pixel");
 
     // Defining property of LCD output: at least one pixel along glyph
-    // edges has noticeably different per-channel alphas (R_alpha, G_alpha,
-    // B_alpha vary due to the 5-tap filter's phase shift between channels).
-    // A grayscale AA path would have R_alpha == G_alpha == B_alpha at every
-    // pixel — if THIS check fails, the wiring fell back to the Rgba branch.
+    // edges has noticeably different per-channel values due to the
+    // 5-tap filter's phase shift between channels.  A grayscale AA
+    // path would emit identical R/G/B everywhere.  For
+    // black-text-on-white-bg content the chroma lives in the COLOUR
+    // plane (composite saturates alpha to 255 over the opaque white
+    // background, but `dst.color := src.c·eff_a + buf.color·(1-eff_a)`
+    // carries the per-channel variation of `eff_a` through `(1-eff_a)`
+    // into the colour plane).  Alpha-plane chroma would only appear
+    // over a transparent / partially-covered destination.
     let mut saw_chroma = false;
-    for px in alpha.chunks_exact(3) {
+    for px in color.chunks_exact(3) {
         let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
         let mx = r.max(g).max(b);
         let mn = r.min(g).min(b);
@@ -2409,7 +2414,7 @@ fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
         }
     }
     assert!(saw_chroma,
-        "cached alpha plane must show per-channel variation — proves LcdGfxCtx, not GfxCtx, painted");
+        "cached colour plane must show per-channel variation — proves LcdGfxCtx, not GfxCtx, painted");
 
     // The widget paints an opaque white bg covering its full bounds (the
     // `LcdCoverage` contract), so every subpixel's alpha should be 255.

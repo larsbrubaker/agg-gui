@@ -890,18 +890,32 @@ fn apply_5_tap_filter(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec
                 let pos = base + off;
                 if pos < 0 || pos >= gw { 0.0 } else { row[pos as usize] as f64 }
             };
+            let mi = ((py as usize) * (mask_w as usize) + (px as usize)) * 3;
+
+            // Pixel-aligned bypass — see the matching block in
+            // `apply_5_tap_filter_legacy` for the rationale.
+            let s0 = sample(0);
+            let s1 = sample(1);
+            let s2 = sample(2);
+            if s0 == s1 && s1 == s2 {
+                let v = apply_gamma(s0).round().clamp(0.0, 255.0) as u8;
+                data[mi]     = v;
+                data[mi + 1] = v;
+                data[mi + 2] = v;
+                continue;
+            }
+
             // R samples [-2..=2], G shifts +1, B shifts +2 (phase offsets
             // between the three physical subpixels of the output pixel).
             let cov_r = w[0] * sample(-2) + w[1] * sample(-1)
-                      + w[2] * sample( 0) + w[3] * sample( 1)
-                      + w[4] * sample( 2);
-            let cov_g = w[0] * sample(-1) + w[1] * sample( 0)
-                      + w[2] * sample( 1) + w[3] * sample( 2)
+                      + w[2] * s0        + w[3] * s1
+                      + w[4] * s2;
+            let cov_g = w[0] * sample(-1) + w[1] * s0
+                      + w[2] * s1         + w[3] * s2
                       + w[4] * sample( 3);
-            let cov_b = w[0] * sample( 0) + w[1] * sample( 1)
-                      + w[2] * sample( 2) + w[3] * sample( 3)
+            let cov_b = w[0] * s0         + w[1] * s1
+                      + w[2] * s2         + w[3] * sample( 3)
                       + w[4] * sample( 4);
-            let mi = ((py as usize) * (mask_w as usize) + (px as usize)) * 3;
             // `.round()` here matches the classic integer filter's
             // rounding semantics more closely than bare `as u8` (which
             // truncates) — minor but measurable difference near mid-gray.
@@ -916,6 +930,17 @@ fn apply_5_tap_filter(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec
 /// Byte-exact legacy 5-tap filter — preserved for the
 /// primary-weight = 1/3, gamma = 1 default path so cached text
 /// rasterised before phase 3 matches what we produce now.
+///
+/// # Pixel-aligned fast path
+///
+/// When a dest pixel's three gray-buffer subpixels are uniform (all
+/// three equal), the pixel has no subpixel-accurate feature for the
+/// LCD filter to correct — the 5-tap low-pass would only introduce
+/// cross-pixel smearing that shows up as colour fringing on
+/// pixel-aligned content (e.g. 1-px alternating black/white bars).
+/// Detect this case and output the uniform value directly, bypassing
+/// the filter entirely.  Antialiased glyph edges — the filter's real
+/// purpose — always have subpixel variation and take the filter path.
 fn apply_5_tap_filter_legacy(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec<u8> {
     let mut data = vec![0u8; (mask_w as usize) * (mask_h as usize) * 3];
     let gw = gray_w as i32;
@@ -928,22 +953,37 @@ fn apply_5_tap_filter_legacy(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32)
                 let pos = base + off;
                 if pos < 0 || pos >= gw { 0 } else { row[pos as usize] as u32 }
             };
+            let mi = ((py as usize) * (mask_w as usize) + (px as usize)) * 3;
+
+            // Pixel-aligned bypass: if this pixel's three gray
+            // subpixels are uniform, the filter has nothing to do — use
+            // the uniform value directly for all three channels.
+            let s0 = sample(0);
+            let s1 = sample(1);
+            let s2 = sample(2);
+            if s0 == s1 && s1 == s2 {
+                let v = s0.min(255) as u8;
+                data[mi]     = v;
+                data[mi + 1] = v;
+                data[mi + 2] = v;
+                continue;
+            }
+
             let cov_r = (FILTER_WEIGHTS[0] * sample(-2)
                        + FILTER_WEIGHTS[1] * sample(-1)
-                       + FILTER_WEIGHTS[2] * sample(0)
-                       + FILTER_WEIGHTS[3] * sample(1)
-                       + FILTER_WEIGHTS[4] * sample(2)) / FILTER_SUM;
+                       + FILTER_WEIGHTS[2] * s0
+                       + FILTER_WEIGHTS[3] * s1
+                       + FILTER_WEIGHTS[4] * s2) / FILTER_SUM;
             let cov_g = (FILTER_WEIGHTS[0] * sample(-1)
-                       + FILTER_WEIGHTS[1] * sample(0)
-                       + FILTER_WEIGHTS[2] * sample(1)
-                       + FILTER_WEIGHTS[3] * sample(2)
+                       + FILTER_WEIGHTS[1] * s0
+                       + FILTER_WEIGHTS[2] * s1
+                       + FILTER_WEIGHTS[3] * s2
                        + FILTER_WEIGHTS[4] * sample(3)) / FILTER_SUM;
-            let cov_b = (FILTER_WEIGHTS[0] * sample(0)
-                       + FILTER_WEIGHTS[1] * sample(1)
-                       + FILTER_WEIGHTS[2] * sample(2)
+            let cov_b = (FILTER_WEIGHTS[0] * s0
+                       + FILTER_WEIGHTS[1] * s1
+                       + FILTER_WEIGHTS[2] * s2
                        + FILTER_WEIGHTS[3] * sample(3)
                        + FILTER_WEIGHTS[4] * sample(4)) / FILTER_SUM;
-            let mi = ((py as usize) * (mask_w as usize) + (px as usize)) * 3;
             data[mi]     = cov_r.min(255) as u8;
             data[mi + 1] = cov_g.min(255) as u8;
             data[mi + 2] = cov_b.min(255) as u8;
@@ -1455,6 +1495,132 @@ mod tests {
                 assert_eq!(a_rgb, b_rgb,
                     "RGB mismatch at ({x},{y}): RGBA-path={a_rgb:?} LcdBuffer-path={b_rgb:?}");
             }
+        }
+    }
+
+    // ── LCD pipeline round-trip for pixel-aligned content ──────────────────
+    //
+    // The motivating scenario: render 1-pixel-wide alternating black bars
+    // through the LCD pipeline (LcdGfxCtx → LcdBuffer → 5-tap filter →
+    // composite) and verify the round-trip produces pure black/white on
+    // the output RGB bitmap.  Because every dest pixel's three subpixels
+    // start *uniform* (either all 255 or all 0 in the gray buffer), the
+    // 5-tap filter's per-channel phase shift has nothing subpixel-shaped
+    // to correct — it should pass pixel-aligned content through as pure
+    // black/white.
+
+    /// Helper: render 1-px wide alternating black bars into a fresh
+    /// `LcdBuffer`, with `width` bars and a `height`-pixel tall canvas.
+    /// Returns the painted buffer ready for plane inspection + composite.
+    ///
+    /// Layout: even columns (0, 2, 4, …) get a black bar; odd columns
+    /// (1, 3, 5, …) stay transparent.  The test widget in
+    /// `demo-ui/src/rendering_test.rs::PixelTestLinesBitmap` draws the
+    /// same pattern via the same code path.
+    fn paint_alternating_black_bars(width: u32, height: u32) -> LcdBuffer {
+        use crate::lcd_gfx_ctx::LcdGfxCtx;
+        use crate::color::Color;
+        use crate::draw_ctx::DrawCtx;
+        let mut buf = LcdBuffer::new(width, height);
+        {
+            let mut gfx = LcdGfxCtx::new(&mut buf);
+            gfx.set_fill_color(Color::black());
+            let n_pairs = (width as usize) / 2;
+            for i in 0..n_pairs {
+                let x = (2 * i) as f64;
+                gfx.begin_path();
+                gfx.rect(x, 0.0, 1.0, height as f64);
+                gfx.fill();
+            }
+        }
+        buf
+    }
+
+    /// Stage 1 of the round-trip: after rendering 1-px black bars, the
+    /// LcdBuffer's color plane must be zero everywhere (black × alpha
+    /// = 0), and its alpha plane must have coverage at bar columns.
+    ///
+    /// The user's design intent is that each bar pixel's three alpha
+    /// channels (R, G, B) all come out fully opaque (255) because the
+    /// gray buffer for this pattern has uniform values across each
+    /// pixel's three subpixels — the 5-tap filter has no subpixel
+    /// divergence to correct.  The assertion captures that intent.
+    /// If the filter IS smearing across pixel boundaries (the current
+    /// behaviour), this test flags it so the regression is visible
+    /// rather than silent.
+    #[test]
+    fn test_lcd_pipeline_bars_buffer_has_pixel_aligned_coverage() {
+        let width  = 8;
+        let height = 1;
+        let buf = paint_alternating_black_bars(width, height);
+
+        // Color plane: black-on-transparent leaves premult colour at
+        // zero everywhere.  This is the invariant we DO expect to hold.
+        assert!(
+            buf.color_plane().iter().all(|&b| b == 0),
+            "black bars on transparent bg: color plane must stay zero (premult black × α = 0), got {:?}",
+            buf.color_plane()
+        );
+
+        // Alpha plane: expected pattern per pixel is
+        //   bar pixel (even col): (255, 255, 255)
+        //   gap pixel (odd col):  (  0,   0,   0)
+        // This encodes the user's intent: "alpha for all rendered bars
+        // is 1 and the coverage is 1 where the bars are".
+        let alpha = buf.alpha_plane();
+        for px in 0..width as usize {
+            let bi = px * 3;
+            let got = (alpha[bi], alpha[bi + 1], alpha[bi + 2]);
+            let expected = if px % 2 == 0 {
+                (255u8, 255u8, 255u8)   // bar
+            } else {
+                (  0u8,   0u8,   0u8)   // gap
+            };
+            assert_eq!(
+                got, expected,
+                "pixel {px} alpha: expected {expected:?} (bar={} ), got {got:?}",
+                px % 2 == 0
+            );
+        }
+    }
+
+    /// Stage 2: composite the LCD buffer onto a white RGB background.
+    /// Over-white composite of "black bars, zero gaps" should produce
+    /// exactly alternating black/white pixels with no colour fringing.
+    #[test]
+    fn test_lcd_pipeline_bars_composite_to_rgb_is_black_white() {
+        let width  = 8;
+        let height = 1;
+        let buf = paint_alternating_black_bars(width, height);
+
+        // Collapse the two-plane LcdBuffer into RGBA via the same path
+        // widget backbuffers use when blitted to a regular RGBA surface,
+        // then composite over a white background to produce the final
+        // visible pixels.
+        //
+        // For each subpixel: dst = color + bg * (1 - alpha/255).
+        // Color plane is zero (black) everywhere, so the formula
+        // simplifies to dst = bg * (1 - alpha/255).  Bar columns with
+        // alpha=255 collapse to dst=0; gap columns with alpha=0 leave
+        // dst=255.  Result is pure alternating black/white.
+        let color = buf.color_plane();
+        let alpha = buf.alpha_plane();
+        let bg = 255u8;
+        for px in 0..width as usize {
+            let bi = px * 3;
+            let r_out = (color[bi]     as u32 + bg as u32 * (255 - alpha[bi]     as u32) / 255) as u8;
+            let g_out = (color[bi + 1] as u32 + bg as u32 * (255 - alpha[bi + 1] as u32) / 255) as u8;
+            let b_out = (color[bi + 2] as u32 + bg as u32 * (255 - alpha[bi + 2] as u32) / 255) as u8;
+            let expected_rgb = if px % 2 == 0 {
+                (  0u8,   0u8,   0u8)   // bar → black
+            } else {
+                (255u8, 255u8, 255u8)   // gap → white (unchanged bg)
+            };
+            assert_eq!(
+                (r_out, g_out, b_out), expected_rgb,
+                "pixel {px} composite: expected {expected_rgb:?} (bar={}), got ({r_out}, {g_out}, {b_out})",
+                px % 2 == 0
+            );
         }
     }
 }
