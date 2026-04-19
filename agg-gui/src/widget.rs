@@ -474,12 +474,17 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     // Physical pixel dimensions of the offscreen render target.
     let w_phys = (b.width  * dps).ceil().max(1.0) as u32;
     let h_phys = (b.height * dps).ceil().max(1.0) as u32;
-    // Logical dimensions used as the blit destination rect — the outer CTM
-    // already has the `scale(dps, dps)` transform active from `App::paint`,
-    // so `dst_w = w_logical` maps exactly to `w_phys` physical pixels, 1:1
-    // with the backing texture.
-    let w_logical = b.width .max(1.0 / dps);
-    let h_logical = b.height.max(1.0 / dps);
+    // Logical dimensions used as the blit destination rect.  **Must** be
+    // derived from `w_phys / dps` rather than `b.width` so the quad the
+    // bitmap is drawn into matches the bitmap's actual pixel extent.  If
+    // `b.width` is non-integer (e.g. 19.5 for a sidebar Label), using
+    // it as `dst_w` stretches a 20-pixel bitmap into a 19.5-pixel quad —
+    // sub-pixel shrink that drops partial-coverage rows at the edges,
+    // which reads as a faint fade along the top / bottom of the glyph.
+    // Pre-HiDPI the blit used the bitmap's integer pixel size directly;
+    // this restores that contract for the logical-units pipeline.
+    let w_logical = w_phys as f64 / dps;
+    let h_logical = h_phys as f64 / dps;
 
     // Decide whether to re-raster.  Size change invalidates; so does a
     // mode swap — if the cache holds `Rgba` bytes but the widget now
