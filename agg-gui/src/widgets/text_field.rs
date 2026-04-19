@@ -578,54 +578,7 @@ impl Widget for TextField {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
-    fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
-        Some(&mut self.cache)
-    }
-
-    fn backbuffer_mode(&self) -> BackbufferMode {
-        // When LCD is on, route through the per-channel `LcdCoverage`
-        // cache so text composites correctly over the white bg through
-        // the same pipeline `PixelTestLines`'s stripes take.  The
-        // framework auto-invalidates on mode flip (see
-        // `paint_subtree_backbuffered`).
-        if crate::font_settings::lcd_enabled() {
-            BackbufferMode::LcdCoverage
-        } else {
-            BackbufferMode::Rgba
-        }
-    }
-
     fn layout(&mut self, available: Size) -> Size {
-        // Capture every aspect of the widget's state that affects the
-        // painted output.  When any of these shift, invalidate the
-        // backbuffer cache so the framework re-rasterises on the next
-        // frame.  `layout` runs every frame regardless of cache
-        // freshness, so this is the right hook for detecting the
-        // cursor-blink phase flip (which otherwise has no mutation
-        // site to hang an invalidate() on).
-        let st = self.edit.borrow();
-        let blink_visible = self.focused
-            && st.cursor == st.anchor
-            && match self.focus_time {
-                Some(t) => (t.elapsed().as_millis() / 500) % 2 == 0,
-                None    => false,
-            };
-        let sig = TextFieldPaintSig {
-            text:          st.text.clone(),
-            cursor:        st.cursor,
-            anchor:        st.anchor,
-            focused:       self.focused,
-            hovered:       self.hovered,
-            scroll_x_bits: self.scroll_x.to_bits(),
-            blink_visible,
-            w_bits:        self.bounds.width .to_bits(),
-            h_bits:        self.bounds.height.to_bits(),
-        };
-        drop(st);
-        if self.last_paint_sig.as_ref() != Some(&sig) {
-            self.last_paint_sig = Some(sig);
-            self.cache.invalidate();
-        }
         Size::new(available.width, (self.font_size * 2.4).max(28.0))
     }
 
