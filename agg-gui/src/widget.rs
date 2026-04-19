@@ -565,6 +565,18 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     }
     let _ = has_bitmap;
 
+    // Overlay paint runs AFTER the cache blit and paints directly onto
+    // the outer ctx.  Widgets use this for content that changes too
+    // often to be worth caching — the canonical case is `TextField`'s
+    // blinking cursor, which flips twice per second and would otherwise
+    // invalidate the cache 2×/s.  With overlay, cursor is drawn fresh
+    // each frame onto the already-blitted bg+text; the cache only
+    // invalidates when the text/focus/selection actually changes.
+    //
+    // `paint_subtree_direct` has the same overlay call after children
+    // (see its own body); this keeps the two paint paths consistent.
+    widget.paint_overlay(ctx);
+
     ctx.restore(); // pops the snap_to_pixel save above.
 }
 

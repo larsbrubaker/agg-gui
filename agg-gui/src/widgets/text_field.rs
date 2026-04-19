@@ -30,7 +30,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{Font, measure_advance};
 use crate::undo::UndoBuffer;
-use crate::widget::Widget;
+use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 use super::text_field_core::{
     TextEditCommand, TextEditState,
     byte_at_x, next_char_boundary, next_word_boundary,
@@ -119,6 +119,27 @@ pub struct TextField {
     on_change:        Option<Box<dyn FnMut(&str)>>,
     on_enter:         Option<Box<dyn FnMut(&str)>>,
     on_edit_complete: Option<Box<dyn FnMut(&str)>>,
+
+    // ── Backbuffer cache ─────────────────────────────────────────────
+    //
+    // Cache holds bg + text + selection + border.  Cursor draws in
+    // `paint_overlay` directly on the outer ctx AFTER the cache blit
+    // so cursor-blink state flips (twice per second) don't invalidate
+    // the cache.  Sig deliberately excludes `blink_visible`.
+    cache:    BackbufferCache,
+    last_sig: Option<TextFieldSig>,
+}
+
+#[derive(Clone, PartialEq)]
+struct TextFieldSig {
+    text:          String,
+    cursor:        usize,
+    anchor:        usize,
+    focused:       bool,
+    hovered:       bool,
+    scroll_x_bits: u64,
+    w_bits:        u64,
+    h_bits:        u64,
 }
 
 impl TextField {
@@ -147,6 +168,8 @@ impl TextField {
             on_change:        None,
             on_enter:         None,
             on_edit_complete: None,
+            cache:            BackbufferCache::default(),
+            last_sig:         None,
         }
     }
 
@@ -578,7 +601,38 @@ impl Widget for TextField {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
+        Some(&mut self.cache)
+    }
+
+    fn backbuffer_mode(&self) -> BackbufferMode {
+        if crate::font_settings::lcd_enabled() {
+            BackbufferMode::LcdCoverage
+        } else {
+            BackbufferMode::Rgba
+        }
+    }
+
     fn layout(&mut self, available: Size) -> Size {
+        // Sig excludes cursor-blink phase.  Cursor paints in
+        // `paint_overlay` after cache blit — no blink-driven
+        // invalidation.
+        let st  = self.edit.borrow();
+        let sig = TextFieldSig {
+            text:          st.text.clone(),
+            cursor:        st.cursor,
+            anchor:        st.anchor,
+            focused:       self.focused,
+            hovered:       self.hovered,
+            scroll_x_bits: self.scroll_x.to_bits(),
+            w_bits:        self.bounds.width .to_bits(),
+            h_bits:        self.bounds.height.to_bits(),
+        };
+        drop(st);
+        if self.last_sig.as_ref() != Some(&sig) {
+            self.last_sig = Some(sig);
+            self.cache.invalidate();
+        }
         Size::new(available.width, (self.font_size * 2.4).max(28.0))
     }
 
@@ -650,24 +704,8 @@ impl Widget for TextField {
             ctx.fill_text(&text, text_x, baseline_y);
         }
 
-        // ── Blinking cursor (500 ms half-period) ──────────────────────────
-        let cursor_visible = self.focused && cursor == anchor && {
-            match self.focus_time {
-                Some(t) => (t.elapsed().as_millis() / 500) % 2 == 0,
-                None    => false,
-            }
-        };
-        if cursor_visible {
-            let cx  = text_x + measure_advance(&self.font, &text[..cursor], self.font_size);
-            let top = baseline_y + m.ascent;
-            let bot = baseline_y - m.descent;
-            ctx.set_stroke_color(v.accent);
-            ctx.set_line_width(1.5);
-            ctx.begin_path();
-            ctx.move_to(cx, bot);
-            ctx.line_to(cx, top);
-            ctx.stroke();
-        }
+        // Cursor draws in `paint_overlay` — skipped here so blink
+        // state doesn't force the cache to re-raster twice per second.
 
         ctx.reset_clip();
 
@@ -680,6 +718,64 @@ impl Widget for TextField {
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.stroke();
+    }
+
+    /// Cursor overlay — runs AFTER the cache blit on every frame, so
+    /// blink-phase flips don't invalidate the backbuffer.  Reads the
+    /// same edit state `paint()` does so cursor lands on the glyph the
+    /// cached text shows.
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        let cursor_visible = self.focused && {
+            let st = self.edit.borrow();
+            st.cursor == st.anchor
+        } && match self.focus_time {
+            Some(t) => (t.elapsed().as_millis() / 500) % 2 == 0,
+            None    => false,
+        };
+        if !cursor_visible { return; }
+
+        let (text, cursor) = {
+            let st = self.edit.borrow();
+            let text = if self.password_mode {
+                const BULLET: char = '•';
+                let n = st.text.chars().count();
+                BULLET.to_string().repeat(n)
+            } else {
+                st.text.clone()
+            };
+            let cursor = if self.password_mode {
+                const BULLET_LEN: usize = 3;
+                st.text[..st.cursor].chars().count() * BULLET_LEN
+            } else {
+                st.cursor
+            };
+            (text, cursor)
+        };
+
+        let h   = self.bounds.height;
+        let pad = self.padding;
+        let v   = ctx.visuals();
+
+        ctx.set_font(Arc::clone(&self.font));
+        ctx.set_font_size(self.font_size);
+        let m = ctx.measure_text("Ag").unwrap_or_default();
+        let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
+        let text_x     = pad - self.scroll_x;
+        let cx  = text_x + measure_advance(&self.font, &text[..cursor], self.font_size);
+        let top = baseline_y + m.ascent;
+        let bot = baseline_y - m.descent;
+
+        // Clip to the text area so the cursor can't spill past the
+        // padding or the border.
+        ctx.save();
+        ctx.clip_rect(pad, 0.0, (self.bounds.width - pad * 2.0).max(0.0), h);
+        ctx.set_stroke_color(v.accent);
+        ctx.set_line_width(1.5);
+        ctx.begin_path();
+        ctx.move_to(cx, bot);
+        ctx.line_to(cx, top);
+        ctx.stroke();
+        ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

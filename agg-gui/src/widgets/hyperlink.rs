@@ -29,6 +29,9 @@ pub struct Hyperlink {
 
     hovered:  bool,
     on_click: Option<Box<dyn FnMut()>>,
+
+    cache:    crate::widget::BackbufferCache,
+    last_sig: Option<(bool, u64, u64)>,  // (hovered, w_bits, h_bits)
 }
 
 impl Hyperlink {
@@ -42,6 +45,8 @@ impl Hyperlink {
             font_size: 14.0,
             hovered:  false,
             on_click: None,
+            cache:    crate::widget::BackbufferCache::default(),
+            last_sig: None,
         }
     }
 
@@ -72,7 +77,24 @@ impl Widget for Hyperlink {
 
     fn is_focusable(&self) -> bool { true }
 
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut crate::widget::BackbufferCache> {
+        Some(&mut self.cache)
+    }
+
+    fn backbuffer_mode(&self) -> crate::widget::BackbufferMode {
+        if crate::font_settings::lcd_enabled() {
+            crate::widget::BackbufferMode::LcdCoverage
+        } else {
+            crate::widget::BackbufferMode::Rgba
+        }
+    }
+
     fn layout(&mut self, available: Size) -> Size {
+        let sig = (self.hovered, self.bounds.width.to_bits(), self.bounds.height.to_bits());
+        if self.last_sig != Some(sig) {
+            self.last_sig = Some(sig);
+            self.cache.invalidate();
+        }
         let h = self.font_size * 1.5;
         Size::new(available.width, h)
     }

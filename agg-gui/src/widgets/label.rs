@@ -281,10 +281,15 @@ impl Widget for Label {
     fn type_name(&self) -> &'static str { "Label" }
     fn bounds(&self) -> Rect { self.bounds }
     fn set_bounds(&mut self, b: Rect) {
-        if self.bounds != b {
-            self.bounds = b;
+        // Only invalidate on SIZE change — position doesn't affect
+        // cached bitmap (painted at local origin, blitted at parent's
+        // choice of translation).  Framework also invalidates via
+        // `cache.width != w || cache.height != h` in
+        // `paint_subtree_backbuffered`, so this is defence in depth.
+        if self.bounds.width != b.width || self.bounds.height != b.height {
             self.cache.invalidate();
         }
+        self.bounds = b;
     }
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }

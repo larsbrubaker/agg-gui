@@ -99,12 +99,14 @@ const LCD_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;layou
 // on index 1.  Dual-source blending reads index 1 as SRC1, giving
 // per-channel src-over: `dst = src * (cov * src.a) + dst * (1 - cov * src.a)`.
 //
-// Note on WebGL 2: dual-source isn't in the base spec, so we use a
-// traditional single-output fallback that emits coverage-weighted
-// (and alpha-weighted) alpha — this is the "grayscale from LCD mask"
-// degradation path.
+// Note on WebGL 2: dual-source isn't in the base spec, so we do a
+// 3-pass color-masked fallback instead — same shader run three times
+// with `u_channel` ∈ {0, 1, 2} selecting which subpixel alpha to use,
+// and `glColorMask` restricting writes to one R/G/B channel per pass.
+// Each pass uses standard `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend; the
+// net effect is per-channel src-over at the cost of 3× draw calls.
 #[cfg(target_arch = "wasm32")]
-const LCD_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;out vec4 frag_color;void main(){vec3 c=texture(u_mask,v_uv).rgb;float a=((c.r+c.g+c.b)/3.0)*u_color.a;frag_color=vec4(u_color.rgb,a);}";
+const LCD_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;uniform int u_channel;out vec4 frag_color;void main(){vec3 c=texture(u_mask,v_uv).rgb;float ch=(u_channel==0)?c.r:((u_channel==1)?c.g:c.b);frag_color=vec4(u_color.rgb,ch*u_color.a);}";
 #[cfg(not(target_arch = "wasm32"))]
 const LCD_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;layout(location=0,index=0)out vec4 out_color;layout(location=0,index=1)out vec4 out_coverage;void main(){vec3 c=texture(u_mask,v_uv).rgb;out_color=vec4(u_color.rgb,1.0);out_coverage=vec4(c*u_color.a,1.0);}";
 
@@ -123,11 +125,21 @@ const LCD_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_mask
 // subpixel has its own `out_coverage` entry, LCD chroma survives the
 // cache round-trip to the screen.
 //
-// WebGL 2 path (no dual-source): collapse per-channel alphas to the
-// max and degrade to standard SrcOver.  Same quality as the existing
-// LCD text fallback on web.
+// WebGL 2 path: 3-pass color-masked fallback (see LCD_FRAG note).
+// Per-pass output picks ONE channel's premultiplied colour + alpha
+// and writes to ONE destination channel via `glColorMask`.  3× draw
+// calls, but preserves full per-channel LCD chroma without needing
+// `WEBGL_blend_func_extended`.
+//
+//   pass 0: u_channel=0 → out = (color.r, 0, 0, alpha.r); mask R
+//   pass 1: u_channel=1 → out = (0, color.g, 0, alpha.g); mask G
+//   pass 2: u_channel=2 → out = (0, 0, color.b, alpha.b); mask B
+//
+// Blend: `ONE, ONE_MINUS_SRC_ALPHA` — matches the premultiplied
+// per-channel src-over the desktop dual-source path does.  Alpha-zero
+// regions are written-but-no-op (out.ch = 0, blend factor = 1).
 #[cfg(target_arch = "wasm32")]
-const LCB_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_color;uniform sampler2D u_alpha;out vec4 frag_color;void main(){vec3 c=texture(u_color,v_uv).rgb;vec3 a=texture(u_alpha,v_uv).rgb;float ma=max(max(a.r,a.g),a.b);if(ma<=0.0)discard;frag_color=vec4(c/ma,ma);}";
+const LCB_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_color;uniform sampler2D u_alpha;uniform int u_channel;out vec4 frag_color;void main(){vec3 c=texture(u_color,v_uv).rgb;vec3 a=texture(u_alpha,v_uv).rgb;float cc=(u_channel==0)?c.r:((u_channel==1)?c.g:c.b);float aa=(u_channel==0)?a.r:((u_channel==1)?a.g:a.b);vec3 col=(u_channel==0)?vec3(cc,0.0,0.0):((u_channel==1)?vec3(0.0,cc,0.0):vec3(0.0,0.0,cc));frag_color=vec4(col,aa);}";
 #[cfg(not(target_arch = "wasm32"))]
 const LCB_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_color;uniform sampler2D u_alpha;layout(location=0,index=0)out vec4 out_color;layout(location=0,index=1)out vec4 out_coverage;void main(){vec3 c=texture(u_color,v_uv).rgb;vec3 a=texture(u_alpha,v_uv).rgb;float ma=max(max(a.r,a.g),a.b);out_color=vec4(c,ma);out_coverage=vec4(a,ma);}";
 
@@ -180,6 +192,11 @@ pub struct GlGfxCtx {
     lcd_res_loc:     Option<glow::UniformLocation>,
     lcd_sampler_loc: Option<glow::UniformLocation>,
     lcd_color_loc:   Option<glow::UniformLocation>,
+    /// WASM-only: per-channel selector uniform for the 3-pass
+    /// color-masked fallback.  Ignored on desktop (its shader uses
+    /// dual-source blend instead).
+    #[allow(dead_code)]
+    lcd_channel_loc: Option<glow::UniformLocation>,
 
     // Arc-pointer-keyed texture cache for LCD coverage masks — same
     // pattern as `arc_texture_cache`.  One upload per unique text
@@ -194,6 +211,9 @@ pub struct GlGfxCtx {
     lcb_res_loc:         Option<glow::UniformLocation>,
     lcb_color_sampler:   Option<glow::UniformLocation>,
     lcb_alpha_sampler:   Option<glow::UniformLocation>,
+    /// WASM-only (mirrors `lcd_channel_loc`).
+    #[allow(dead_code)]
+    lcb_channel_loc:     Option<glow::UniformLocation>,
 
     // Texture cache keyed on (ptr, len, w, h, head/tail byte hash).  Used by
     // the generic `draw_image_rgba(&[u8], …)` path (markdown images, screenshot
@@ -292,6 +312,10 @@ impl GlGfxCtx {
         let lcd_res_loc     = gl.get_uniform_location(lcd_prog, "u_resolution");
         let lcd_sampler_loc = gl.get_uniform_location(lcd_prog, "u_mask");
         let lcd_color_loc   = gl.get_uniform_location(lcd_prog, "u_color");
+        // WASM-only uniform; desktop shader doesn't declare it.  On a
+        // desktop build this returns `None` which is harmless — the
+        // desktop draw path doesn't call `uniform_1_i32` on it.
+        let lcd_channel_loc = gl.get_uniform_location(lcd_prog, "u_channel");
 
         let lcd_vao = gl.create_vertex_array().expect("create lcd VAO");
         let lcd_vbo = gl.create_buffer().expect("create lcd VBO");
@@ -312,6 +336,7 @@ impl GlGfxCtx {
         let lcb_res_loc       = gl.get_uniform_location(lcb_prog, "u_resolution");
         let lcb_color_sampler = gl.get_uniform_location(lcb_prog, "u_color");
         let lcb_alpha_sampler = gl.get_uniform_location(lcb_prog, "u_alpha");
+        let lcb_channel_loc   = gl.get_uniform_location(lcb_prog, "u_channel");
 
         Self {
             gl,
@@ -321,7 +346,7 @@ impl GlGfxCtx {
             tex_prog, tex_vao, tex_vbo,
             tex_res_loc, tex_sampler_loc,
             lcd_prog, lcd_vao, lcd_vbo,
-            lcd_res_loc, lcd_sampler_loc, lcd_color_loc,
+            lcd_res_loc, lcd_sampler_loc, lcd_color_loc, lcd_channel_loc,
             texture_cache:       std::collections::HashMap::new(),
             texture_cache_order: std::collections::VecDeque::new(),
             arc_texture_cache:   std::collections::HashMap::new(),
@@ -330,6 +355,7 @@ impl GlGfxCtx {
             lcb_res_loc,
             lcb_color_sampler,
             lcb_alpha_sampler,
+            lcb_channel_loc,
             fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
@@ -516,7 +542,26 @@ impl GlGfxCtx {
             bytemuck::cast_slice(&idx),
             glow::STREAM_DRAW,
         );
-        gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+
+        // Desktop: single draw — dual-source blend does per-channel work.
+        // WASM: 3 draws — each pass writes ONE channel via `glColorMask`
+        // and selects that channel's coverage via `u_channel`.  Standard
+        // `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend computes per-channel
+        // src-over.  Alpha channel write disabled on all 3 passes so
+        // framebuffer alpha stays at 1.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            for ch in 0..3i32 {
+                gl.uniform_1_i32(self.lcd_channel_loc.as_ref(), ch);
+                gl.color_mask(ch == 0, ch == 1, ch == 2, false);
+                gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+            }
+            gl.color_mask(true, true, true, true);
+        }
         gl.bind_vertex_array(None);
 
         // Restore standard alpha blend state.
@@ -620,9 +665,15 @@ impl GlGfxCtx {
             glow::ONE, glow::ONE_MINUS_SRC1_COLOR,
             glow::ONE, glow::ONE_MINUS_SRC1_ALPHA,
         );
-        // WebGL 2 path collapses in the shader via `discard`-plus-SrcOver;
-        // no dual-source setup needed — falls back to the existing
-        // `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend state.
+        // WebGL 2 path: no dual-source → 3-pass color-masked.  Each
+        // pass uses standard `ONE, ONE_MINUS_SRC_ALPHA` blend (premult
+        // src-over with src alpha = that channel's alpha).  `u_channel`
+        // tells the shader which channel to emit.
+        #[cfg(target_arch = "wasm32")]
+        gl.blend_func_separate(
+            glow::ONE, glow::ONE_MINUS_SRC_ALPHA,
+            glow::ONE, glow::ONE_MINUS_SRC_ALPHA,
+        );
 
         gl.bind_vertex_array(Some(self.lcd_vao));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.lcd_vbo));
@@ -637,7 +688,20 @@ impl GlGfxCtx {
             bytemuck::cast_slice(&idx),
             glow::STREAM_DRAW,
         );
-        gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            for ch in 0..3i32 {
+                gl.uniform_1_i32(self.lcb_channel_loc.as_ref(), ch);
+                gl.color_mask(ch == 0, ch == 1, ch == 2, false);
+                gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+            }
+            gl.color_mask(true, true, true, true);
+        }
         gl.bind_vertex_array(None);
 
         // Rebind the default texture unit so later draws don't leak
