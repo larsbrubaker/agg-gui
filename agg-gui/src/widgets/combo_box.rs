@@ -10,6 +10,8 @@
 //! `item_labels`.  Colors are updated from `ctx.visuals()` in `paint()` so the
 //! widget responds correctly to dark / light mode switches.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -49,6 +51,11 @@ pub struct ComboBox {
     font_size: f64,
 
     on_change: Option<Box<dyn FnMut(usize)>>,
+    /// Optional external mirror of `selected` — same bidirectional-cell
+    /// pattern as `Slider::with_value_cell` / `RadioGroup::with_selected_cell`.
+    /// `layout()` re-reads the cell every frame so a sibling ComboBox bound
+    /// to the same cell stays in lock-step; selection changes here write back.
+    selected_cell: Option<Rc<Cell<usize>>>,
 
     // ── Backbuffered labels ──────────────────────────────────────────────────
     /// Label for the currently selected option (shown in the closed button area).
@@ -93,10 +100,29 @@ impl ComboBox {
             font,
             font_size,
             on_change: None,
+            selected_cell: None,
             selected_label,
             item_labels,
             item_fonts: None,
         }
+    }
+
+    /// Bind this combo's selection to an external `Rc<Cell<usize>>`.
+    /// `layout()` reads the cell each frame so a sibling combo (e.g. the
+    /// matching font picker in another window) sharing the same cell
+    /// stays in lock-step; user selections here write back.  Mirrors the
+    /// `Slider::with_value_cell` / `RadioGroup::with_selected_cell` pattern.
+    pub fn with_selected_cell(mut self, cell: Rc<Cell<usize>>) -> Self {
+        let n = self.options.len();
+        let v = cell.get();
+        if n > 0 {
+            let clamped = v.min(n - 1);
+            // Initialise self.selected from the cell so the closed combo
+            // shows the right label on first paint.
+            self.set_selected(clamped);
+        }
+        self.selected_cell = Some(cell);
+        self
     }
 
     fn make_label(text: &str, font_size: f64, font: Arc<Font>) -> Label {
@@ -194,6 +220,7 @@ impl ComboBox {
 
     fn fire(&mut self) {
         let idx = self.selected;
+        if let Some(cell) = &self.selected_cell { cell.set(idx); }
         if let Some(cb) = self.on_change.as_mut() { cb(idx); }
     }
 
@@ -262,6 +289,24 @@ impl Widget for ComboBox {
     fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Pick up external-cell writes — e.g. a sibling combo bound to
+        // the same selected_cell wrote a new index since our last paint.
+        // Skip while open so an in-progress dropdown interaction doesn't
+        // get yanked back.
+        if !self.open {
+            if let Some(cell) = &self.selected_cell {
+                let n = self.options.len();
+                if n > 0 {
+                    let v = cell.get().min(n - 1);
+                    if v != self.selected {
+                        // Use set_selected so the visible label (and the
+                        // per-item-font preview, if any) refreshes too.
+                        self.set_selected(v);
+                    }
+                }
+            }
+        }
+
         let h = self.total_h();
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
         let inner_w = (available.width - PAD_X * 2.0 - ARROW_W).max(0.0);
@@ -378,8 +423,16 @@ impl Widget for ComboBox {
                 }
                 if self.open {
                     if let Some(i) = self.item_for_pos(*pos) {
-                        self.selected = i;
-                        self.selected_label.set_text(self.options[i].as_str());
+                        // Route through `set_selected` so the closed
+                        // combo's preview label is rebuilt with the
+                        // newly-selected per-item font (when item_fonts
+                        // is set).  Direct `self.selected = i` would
+                        // change the index without swapping the face,
+                        // leaving the closed combo showing the new
+                        // name in the OLD typeface — the bug visible
+                        // when the LCD Subpixel demo's font picker
+                        // showed e.g. "Bangers" in Cascadia Code.
+                        self.set_selected(i);
                         self.open = false;
                         self.hovered_item = None;
                         self.fire();

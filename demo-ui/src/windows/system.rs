@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    font_settings, ComboBox, FlexColumn, FlexRow, Font, Label,
+    font_settings, FlexColumn, FlexRow, Font, Label,
     ScrollView, Separator, SizedBox, Slider, TextField, ToggleSwitch, Widget,
 };
 
@@ -32,6 +32,12 @@ use agg_gui::{
 #[derive(Clone)]
 pub struct SystemCells {
     pub font_name:       Rc<RefCell<Option<String>>>,
+    /// Index into `FONT_OPTIONS` matching `font_name`.  Shared between
+    /// every font-picker `ComboBox` (System window + LCD Subpixel demo)
+    /// via `with_selected_cell`, so picking a font in either window
+    /// updates the other live.  Kept in lock-step with `font_name` by
+    /// `apply_font_by_index` and the System window's combo callback.
+    pub font_index:      Rc<Cell<usize>>,
     pub font_size_scale: Rc<Cell<f64>>,
     pub lcd_enabled:     Rc<Cell<bool>>,
     pub hinting_enabled: Rc<Cell<bool>>,
@@ -146,6 +152,18 @@ pub fn font_option_names() -> Vec<&'static str> {
     FONT_OPTIONS.iter().map(|o| o.name).collect()
 }
 
+/// Load every bundled primary font (each chained with the icons + emoji
+/// fallback) and return them in `FONT_OPTIONS` order.  The shared
+/// `FontPicker` widget calls this so its dropdown can render each entry
+/// in its own face — the canonical "preview each font in the font" UI.
+///
+/// Cost: ~10 MB total at ~30 fonts.  Paid once when the first picker
+/// is built; subsequent pickers can re-use the returned `Arc<Font>`s
+/// (clone is cheap, the bytes are reference-counted).
+pub fn load_all_fonts() -> Vec<Arc<Font>> {
+    FONT_OPTIONS.iter().map(load_font).collect()
+}
+
 /// Index of `name` in `FONT_OPTIONS`, if present — lets other windows
 /// pre-seed a selection cell from a persisted font-name string.
 pub fn font_option_index(name: &str) -> Option<usize> {
@@ -153,13 +171,16 @@ pub fn font_option_index(name: &str) -> Option<usize> {
 }
 
 /// Load the font at `FONT_OPTIONS[idx]` (chained with icons + emoji
-/// fallback) and write it through to `font_settings::set_system_font`
-/// plus the persistent `font_name` cell — used by sibling windows that
-/// want "pick this typeface" to behave identically to the System combo.
+/// fallback) and write it through to `font_settings::set_system_font`,
+/// the persistent `font_name` cell, AND the shared `font_index` cell.
+/// Updating both cells here means every font-picker `ComboBox` bound
+/// to `font_index` snaps to the new selection on the next layout —
+/// the cross-window sync the user asked for.
 pub fn apply_font_by_index(cells: &SystemCells, idx: usize) {
     if let Some(opt) = FONT_OPTIONS.get(idx) {
         font_settings::set_system_font(Some(load_font(opt)));
         *cells.font_name.borrow_mut() = Some(opt.name.to_string());
+        cells.font_index.set(idx);
     }
 }
 
@@ -174,10 +195,17 @@ fn load_font(opt: &NamedFont) -> Arc<Font> {
     Arc::new(font)
 }
 
-/// Index of "Cascadia Code" in `FONT_OPTIONS` — the default the app ships
-/// with.  Used as the combo's initial selection.
-fn default_font_index() -> usize {
-    FONT_OPTIONS.iter().position(|o| o.name == "Cascadia Code").unwrap_or(0)
+/// Library default font.  Picked centrally so the first-run system
+/// font, the font picker's initial selection, and the Reset-all-state
+/// button all converge on the same value without duplicating the
+/// magic string.
+pub const DEFAULT_FONT_NAME: &str = "Nunito";
+
+/// Index of [`DEFAULT_FONT_NAME`] in `FONT_OPTIONS` — used everywhere
+/// the app needs "what font do we ship with" (combo seed, reset
+/// closure, first-run system-font override).
+pub fn default_font_index() -> usize {
+    FONT_OPTIONS.iter().position(|o| o.name == DEFAULT_FONT_NAME).unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -214,31 +242,11 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
          appear here; picking one swaps the system-wide override and every \
          `Label` re-measures on the next layout.",
     ), 0.0);
-    {
-        let names:    Vec<&'static str> = FONT_OPTIONS.iter().map(|o| o.name).collect();
-        // Load ALL bundled fonts up front so each dropdown entry renders
-        // its own display name in its own face.  ~10 MB total at 33
-        // fonts; cost paid once when the System window is first opened.
-        let per_item: Vec<Arc<Font>> = FONT_OPTIONS.iter().map(load_font).collect();
-
-        // Seed initial selection from the persisted cell if the saved
-        // name matches a known entry; otherwise default to Cascadia Code.
-        let initial_idx = cells.font_name.borrow().as_deref()
-            .and_then(|n| FONT_OPTIONS.iter().position(|o| o.name == n))
-            .unwrap_or_else(default_font_index);
-
-        let cells_for_combo = cells.clone();
-        let combo = ComboBox::new(names, initial_idx, Arc::clone(&font))
-            .with_font_size(14.0)
-            .with_item_fonts(per_item)
-            .on_change(move |idx| {
-                if let Some(opt) = FONT_OPTIONS.get(idx) {
-                    font_settings::set_system_font(Some(load_font(opt)));
-                    *cells_for_combo.font_name.borrow_mut() = Some(opt.name.to_string());
-                }
-            });
-        col.push(Box::new(combo), 0.0);
-    }
+    // Shared font picker — same widget used in the LCD Subpixel demo.
+    // Owns its cell binding, per-item font loading, and on-change
+    // apply-font wiring; picking a font here updates every other
+    // FontPicker in the app on the next layout.
+    col.push(crate::font_picker::font_picker_with_size(Arc::clone(&font), 14.0), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     // ── Point size ──────────────────────────────────────────────────────

@@ -9,6 +9,7 @@
 //! The only platform-specific piece is the 3D cube widget, passed by the caller.
 
 mod backend_panel;
+mod font_picker;
 mod rendering_test;
 mod sidebar;
 mod state;
@@ -454,11 +455,16 @@ pub fn build_demo_ui(
     let font_size_scale_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
         initial_state.as_ref().map(|s| s.font_size_scale).unwrap_or(1.0)
     ));
+    // Library defaults — LCD subpixel and Y-axis baseline hinting
+    // both ON.  These match the rendering quality the library ships
+    // with and produce the best-looking text on typical desktop LCDs.
+    // Saved state (from a prior run) overrides if present, so users
+    // who have explicitly disabled them keep their preference.
     let lcd_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.lcd_enabled).unwrap_or(false)
+        initial_state.as_ref().map(|s| s.lcd_enabled).unwrap_or(true)
     ));
     let hinting_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.hinting_enabled).unwrap_or(false)
+        initial_state.as_ref().map(|s| s.hinting_enabled).unwrap_or(true)
     ));
     // Typography-style cells.  Defaults match the agg-rust `truetype_test`
     // reference so first-run users see the neutral / no-effect state.
@@ -480,6 +486,17 @@ pub fn build_demo_ui(
     let primary_weight_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
         initial_state.as_ref().map(|s| s.primary_weight).unwrap_or(1.0 / 3.0)
     ));
+    // Shared font-index cell — both the System window's combo and the
+    // LCD Subpixel demo's combo bind to this cell, so a font picked in
+    // either window updates the other live.  Seeded from the persisted
+    // font_name when present; otherwise falls back to the library
+    // default (Nunito).
+    let font_index_cell: Rc<Cell<usize>> = Rc::new(Cell::new({
+        let name_lock = font_name_cell.borrow();
+        name_lock.as_deref()
+            .and_then(windows::font_option_index)
+            .unwrap_or_else(windows::default_font_index)
+    }));
     agg_gui::font_settings::set_font_size_scale(font_size_scale_cell.get());
     agg_gui::font_settings::set_lcd_enabled    (lcd_enabled_cell.get());
     agg_gui::font_settings::set_hinting_enabled(hinting_enabled_cell.get());
@@ -489,7 +506,15 @@ pub fn build_demo_ui(
     agg_gui::font_settings::set_faux_weight   (faux_weight_cell.get());
     agg_gui::font_settings::set_faux_italic   (faux_italic_cell.get());
     agg_gui::font_settings::set_primary_weight(primary_weight_cell.get());
-    if let Some(name) = font_name_cell.borrow().as_ref() {
+    // Always seed the system-font override so the library default
+    // (Nunito) appears uniformly from the first frame, not just after
+    // the user touches the picker.  Persisted name takes precedence;
+    // otherwise we fall back to whatever `font_index_cell` resolved
+    // to above, which itself defaults to `default_font_index()`.
+    let resolved_idx = font_name_cell.borrow().as_deref()
+        .and_then(windows::font_option_index)
+        .unwrap_or_else(|| font_index_cell.get());
+    if let Some(name) = windows::font_option_names().get(resolved_idx).copied() {
         if let Some(f) = windows::load_font_by_name(name) {
             agg_gui::font_settings::set_system_font(Some(f));
         }
@@ -498,6 +523,7 @@ pub fn build_demo_ui(
     // below) can bind its widgets without a new function signature.
     windows::init_system_cells(windows::SystemCells {
         font_name:       Rc::clone(&font_name_cell),
+        font_index:      Rc::clone(&font_index_cell),
         font_size_scale: Rc::clone(&font_size_scale_cell),
         lcd_enabled:     Rc::clone(&lcd_enabled_cell),
         hinting_enabled: Rc::clone(&hinting_enabled_cell),
@@ -774,6 +800,7 @@ pub fn build_demo_ui(
         let specs_w     = specs_w.clone();
         let specs_h     = specs_h.clone();
         let font_name   = Rc::clone(&font_name_cell);
+        let font_index  = Rc::clone(&font_index_cell);
         let font_scale  = Rc::clone(&font_size_scale_cell);
         let lcd_cell    = Rc::clone(&lcd_enabled_cell);
         let hint_cell   = Rc::clone(&hinting_enabled_cell);
@@ -795,24 +822,32 @@ pub fn build_demo_ui(
                 let r = tile_rect(i, default_canvas_h, specs_w[i], specs_h[i]);
                 cell.set(Some(r));
             }
-            // System settings → defaults (both runtime globals + cells).
-            // Every typography-style parameter goes back to its
-            // pass-through value so the Reset button gives the app the
-            // exact render it had before phase 2/3 landed.
-            agg_gui::font_settings::set_system_font(None);
+            // System settings → library defaults (both runtime globals
+            // + cells).  Style parameters reset to their pass-through
+            // values; rendering toggles + font reset to the library's
+            // ship-with defaults (Nunito + LCD + Hinting), so Reset
+            // matches first-run experience rather than "everything off".
+            let default_idx  = windows::default_font_index();
+            let default_name = windows::font_option_names()
+                .get(default_idx).copied();
+            agg_gui::font_settings::set_system_font(
+                default_name.and_then(windows::load_font_by_name)
+            );
             agg_gui::font_settings::set_font_size_scale(1.0);
-            agg_gui::font_settings::set_lcd_enabled    (false);
-            agg_gui::font_settings::set_hinting_enabled(false);
+            agg_gui::font_settings::set_lcd_enabled    (true);
+            agg_gui::font_settings::set_hinting_enabled(true);
             agg_gui::font_settings::set_gamma         (1.0);
             agg_gui::font_settings::set_width         (1.0);
             agg_gui::font_settings::set_interval      (0.0);
             agg_gui::font_settings::set_faux_weight   (0.0);
             agg_gui::font_settings::set_faux_italic   (0.0);
             agg_gui::font_settings::set_primary_weight(1.0 / 3.0);
-            *font_name.borrow_mut() = None;
+            *font_name.borrow_mut() = default_name.map(|s| s.to_string());
+            // Snap both font-picker ComboBoxes to the library default.
+            font_index.set(default_idx);
             font_scale.set(1.0);
-            lcd_cell.set(false);
-            hint_cell.set(false);
+            lcd_cell.set(true);
+            hint_cell.set(true);
             gamma.set(1.0);
             width_scl.set(1.0);
             interval.set(0.0);

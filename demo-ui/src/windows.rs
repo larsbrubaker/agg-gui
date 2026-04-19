@@ -34,7 +34,10 @@ pub use misc::{extra_viewport, highlighting, interactive_container, misc_demos};
 pub use interaction::{drag_and_drop, panels_demo, popups_demo,
                       scene_demo, screenshot_demo};
 pub use scrolling::scrolling_demo;
-pub use system::{system_view, load_font_by_name, init_cells as init_system_cells, SystemCells};
+pub use system::{system_view, load_font_by_name, font_option_index,
+                 font_option_names, load_all_fonts, apply_font_by_index,
+                 default_font_index, DEFAULT_FONT_NAME,
+                 cells as system_cells, init_cells as init_system_cells, SystemCells};
 pub use truetype_lcd::truetype_lcd_view;
 pub use text_demos::{strip_demo, table_demo, text_layout, undo_redo,
                      window_options, modals_demo, multi_touch};

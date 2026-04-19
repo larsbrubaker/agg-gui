@@ -27,12 +27,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    font_settings, ComboBox, FlexColumn, FlexRow, Font, Label,
+    font_settings, FlexColumn, FlexRow, Font, Label,
     ScrollView, Separator, SizedBox, Slider,
     ToggleSwitch, Widget,
 };
 
-use super::system::{self, apply_font_by_index, font_option_index, font_option_names};
+use super::system;
 
 // ---------------------------------------------------------------------------
 // C++ reference sample paragraphs
@@ -86,19 +86,11 @@ pub fn truetype_lcd_view(font: Arc<Font>) -> Box<dyn Widget> {
 
     // ── Font picker ─────────────────────────────────────────────────────
     col.push(heading("Font:"), 0.0);
-    {
-        let names: Vec<&'static str> = font_option_names();
-        let initial_idx = cells.font_name.borrow().as_deref()
-            .and_then(font_option_index)
-            .unwrap_or(0);
-        let cells_for_combo = cells.clone();
-        let combo = ComboBox::new(names, initial_idx, Arc::clone(&font))
-            .with_font_size(13.0)
-            .on_change(move |idx| {
-                apply_font_by_index(&cells_for_combo, idx);
-            });
-        col.push(Box::new(combo), 0.0);
-    }
+    // Shared font picker — same widget used in the System window.
+    // Picking a font here updates the System window's picker too on
+    // the next layout, and vice-versa, via the shared `font_index`
+    // cell on `SystemCells`.
+    col.push(crate::font_picker::font_picker(Arc::clone(&font)), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     // ── Typography-style sliders ────────────────────────────────────────
