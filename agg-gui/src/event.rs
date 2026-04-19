@@ -16,11 +16,18 @@ pub enum MouseButton {
 }
 
 /// Modifier keys held at the time of an event.
+///
+/// `meta` is the platform-specific "command" key: **Cmd** on macOS, **Super /
+/// Windows key** on Linux, **Windows key** on Windows.  Widgets that want
+/// portable clipboard / select-all / undo shortcuts should treat
+/// `ctrl || meta` as the "command" modifier so both Windows-style
+/// `Ctrl+C` and Mac-style `Cmd+C` work without branching on the host OS.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Modifiers {
     pub shift: bool,
     pub ctrl: bool,
     pub alt: bool,
+    pub meta: bool,
 }
 
 /// A logical keyboard key.
@@ -30,6 +37,9 @@ pub enum Key {
     Char(char),
     Backspace,
     Delete,
+    /// The `Insert` key.  Paired with `Shift`/`Ctrl` for classic Windows
+    /// clipboard shortcuts (`Shift+Ins` paste, `Ctrl+Ins` copy).
+    Insert,
     ArrowLeft,
     ArrowRight,
     ArrowUp,

@@ -8,7 +8,7 @@ type RenderFn      = (width: number, height: number, frame_ms: number) => void;
 type MouseXYFn     = (x: number, y: number) => void;
 type MouseXYBFn    = (x: number, y: number, button: number) => void;
 type WheelFn       = (x: number, y: number, delta_y: number) => void;
-type KeyFn         = (key: string, shift: boolean, ctrl: boolean, alt: boolean) => void;
+type KeyFn         = (key: string, shift: boolean, ctrl: boolean, alt: boolean, meta: boolean) => void;
 type VoidFn        = () => void;
 type ClipGetFn     = () => string | null;
 type ClipSetFn     = (text: string) => void;
@@ -131,7 +131,7 @@ canvas.addEventListener("keydown", (e) => {
   // DOM event so we get the system clipboard text synchronously.
   if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) return;
   if (e.key !== "Tab") e.preventDefault();
-  (wasmModule["on_key_down"] as KeyFn)(e.key, e.shiftKey, e.ctrlKey, e.altKey);
+  (wasmModule["on_key_down"] as KeyFn)(e.key, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
 });
 
 // --- Clipboard event bridge ---
@@ -167,7 +167,7 @@ canvas.addEventListener("paste", (e: Event) => {
   if (text.length > 0) {
     ce.preventDefault();
     (wasmModule["wasm_clipboard_set"] as ClipSetFn)(text);
-    (wasmModule["on_key_down"] as KeyFn)("v", false, true, false);
+    (wasmModule["on_key_down"] as KeyFn)("v", false, true, false, false);
   }
 });
 

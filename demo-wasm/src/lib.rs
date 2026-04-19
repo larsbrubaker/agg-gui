@@ -542,10 +542,10 @@ pub fn on_mouse_leave() {
 }
 
 #[wasm_bindgen]
-pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool) {
+pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool, meta: bool) {
     mark_dirty();
     if let Some(key) = parse_js_key(key_str) {
-        let mods = Modifiers { shift, ctrl, alt };
+        let mods = Modifiers { shift, ctrl, alt, meta };
         DEMO_APP.with(|cell| {
             if let Some(app) = cell.borrow_mut().as_mut() {
                 app.on_key_down(key, mods);
@@ -585,6 +585,7 @@ fn parse_js_key(key: &str) -> Option<Key> {
     Some(match key {
         "Backspace"  => Key::Backspace,
         "Delete"     => Key::Delete,
+        "Insert"     => Key::Insert,
         "ArrowLeft"  => Key::ArrowLeft,
         "ArrowRight" => Key::ArrowRight,
         "ArrowUp"    => Key::ArrowUp,

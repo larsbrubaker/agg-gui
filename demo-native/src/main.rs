@@ -340,6 +340,9 @@ fn main() {
                         shift: s.shift_key(),
                         ctrl:  s.control_key(),
                         alt:   s.alt_key(),
+                        // Winit's `super_key` is the platform "command" key —
+                        // Cmd on macOS, Windows key on Windows, Super on X11.
+                        meta:  s.super_key(),
                     };
                 }
                 Event::WindowEvent {
@@ -578,6 +581,7 @@ fn map_key(key: &WinitKey) -> Option<AggKey> {
         WinitKey::Named(NamedKey::Home)       => AggKey::Home,
         WinitKey::Named(NamedKey::End)        => AggKey::End,
         WinitKey::Named(NamedKey::Delete)     => AggKey::Delete,
+        WinitKey::Named(NamedKey::Insert)     => AggKey::Insert,
         WinitKey::Named(NamedKey::PageUp)     => AggKey::Other("PageUp".into()),
         WinitKey::Named(NamedKey::PageDown)   => AggKey::Other("PageDown".into()),
         WinitKey::Character(s) => AggKey::Char(s.chars().next()?),

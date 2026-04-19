@@ -450,10 +450,19 @@ impl TextField {
         // Snapshot cursor/anchor before movement so we can keep anchor on Shift.
         let anchor_before = self.edit.borrow().anchor;
 
+        // Command modifier (clipboard / select-all / undo): `Ctrl` on Windows
+        // and Linux, `Cmd` (meta) on macOS.  Treating the two as equivalent
+        // means the same handler serves both OSes without branching.
+        let cmd = mods.ctrl || mods.meta;
+        // Word-navigation modifier: `Ctrl` on Windows/Linux, `Option`
+        // (alt) on macOS.  Used for Ctrl/Alt+Arrow, Ctrl/Alt+Backspace,
+        // Ctrl/Alt+Delete.
+        let word = mods.ctrl || mods.alt;
+
         match key {
-            // ── Printable characters (and Ctrl shortcuts on Char) ──────────
-            Key::Char(c) if !self.read_only || mods.ctrl => {
-                if mods.ctrl {
+            // ── Printable characters (and Ctrl/Cmd shortcuts on Char) ──────
+            Key::Char(c) if !self.read_only || cmd => {
+                if cmd {
                     return match c {
                         'a' | 'A' => {
                             let len = self.edit.borrow().text.len();
@@ -488,9 +497,27 @@ impl TextField {
                 EventResult::Consumed
             }
 
+            // ── Insert clipboard shortcuts ────────────────────────────────
+            // Classic Windows bindings (still common on Linux):
+            //   Shift+Insert = Paste
+            //   Ctrl+Insert  = Copy
+            // Plain `Insert` toggles overwrite mode in many editors — we
+            // don't model overwrite, so plain Insert is a no-op here.
+            Key::Insert => {
+                if mods.shift && !self.read_only {
+                    if let Some(clip) = clipboard_get() { self.do_insert(&clip, false); }
+                    return EventResult::Consumed;
+                }
+                if cmd {
+                    if self.has_selection() { clipboard_set(&self.selection()); }
+                    return EventResult::Consumed;
+                }
+                EventResult::Ignored
+            }
+
             // ── Backspace ─────────────────────────────────────────────────
             Key::Backspace if !self.read_only => {
-                self.do_delete(false, mods.ctrl);
+                self.do_delete(false, word);
                 EventResult::Consumed
             }
 
@@ -500,21 +527,26 @@ impl TextField {
                     // Shift+Delete = Cut
                     if self.has_selection() { clipboard_set(&self.selection()); self.do_delete(false, false); }
                 } else {
-                    self.do_delete(true, mods.ctrl);
+                    self.do_delete(true, word);
                 }
                 EventResult::Consumed
             }
 
             // ── Arrow Left ────────────────────────────────────────────────
+            // Mac: `Cmd+Left` = start of line (Home behaviour).
+            // Win/Mac: `Ctrl+Left` / `Option+Left` = previous word.
+            // Plain: one character back (or collapse selection to left).
             Key::ArrowLeft => {
                 self.flush_pending();
                 let (cur, anchor) = {
                     let st = self.edit.borrow();
                     (st.cursor, st.anchor)
                 };
-                let new_cur = if !mods.shift && cur != anchor {
-                    cur.min(anchor)  // collapse to left
-                } else if mods.ctrl {
+                let new_cur = if mods.meta {
+                    0                                        // Mac: Cmd+Left = line start
+                } else if !mods.shift && cur != anchor {
+                    cur.min(anchor)                          // collapse to left
+                } else if word {
                     prev_word_boundary(&self.edit.borrow().text, cur)
                 } else {
                     prev_char_boundary(&self.edit.borrow().text, cur)
@@ -523,11 +555,13 @@ impl TextField {
                 let mut st = self.edit.borrow_mut();
                 st.cursor = new_cur; st.anchor = new_anchor;
                 drop(st);
+                if new_cur == 0 { self.scroll_x = 0.0; }
                 self.ensure_cursor_visible();
                 EventResult::Consumed
             }
 
             // ── Arrow Right ───────────────────────────────────────────────
+            // Symmetric with ArrowLeft.  Mac: `Cmd+Right` = end of line.
             Key::ArrowRight => {
                 self.flush_pending();
                 let text_len = self.edit.borrow().text.len();
@@ -535,9 +569,11 @@ impl TextField {
                     let st = self.edit.borrow();
                     (st.cursor, st.anchor)
                 };
-                let new_cur = if !mods.shift && cur != anchor {
-                    cur.max(anchor)  // collapse to right
-                } else if mods.ctrl {
+                let new_cur = if mods.meta {
+                    text_len                                 // Mac: Cmd+Right = line end
+                } else if !mods.shift && cur != anchor {
+                    cur.max(anchor)                          // collapse to right
+                } else if word {
                     next_word_boundary(&self.edit.borrow().text, cur)
                 } else if cur < text_len {
                     next_char_boundary(&self.edit.borrow().text, cur)
@@ -552,7 +588,38 @@ impl TextField {
                 EventResult::Consumed
             }
 
+            // ── Arrow Up / Down ──────────────────────────────────────────
+            // Single-line field, so vertical arrows only matter for the Mac
+            // `Cmd+Up` / `Cmd+Down` (start / end of document) convention —
+            // treat as Home / End.  Plain arrows fall through so callers
+            // can spin numeric-input-style steppers, etc.
+            Key::ArrowUp if mods.meta => {
+                self.flush_pending();
+                let (_, anchor) = { let st = self.edit.borrow(); (st.cursor, st.anchor) };
+                let new_cur = 0;
+                let new_anchor = if mods.shift { anchor } else { new_cur };
+                let mut st = self.edit.borrow_mut();
+                st.cursor = new_cur; st.anchor = new_anchor;
+                drop(st);
+                self.scroll_x = 0.0;
+                EventResult::Consumed
+            }
+            Key::ArrowDown if mods.meta => {
+                self.flush_pending();
+                let len = self.edit.borrow().text.len();
+                let (_, anchor) = { let st = self.edit.borrow(); (st.cursor, st.anchor) };
+                let new_cur = len;
+                let new_anchor = if mods.shift { anchor } else { new_cur };
+                let mut st = self.edit.borrow_mut();
+                st.cursor = new_cur; st.anchor = new_anchor;
+                drop(st);
+                self.ensure_cursor_visible();
+                EventResult::Consumed
+            }
+
             // ── Home ──────────────────────────────────────────────────────
+            // Ctrl+Home is "start of document" on Windows — for a single-
+            // line field that's the same as plain Home; accept both.
             Key::Home => {
                 self.flush_pending();
                 let mut st = self.edit.borrow_mut();
@@ -564,6 +631,7 @@ impl TextField {
             }
 
             // ── End ───────────────────────────────────────────────────────
+            // Ctrl+End analogous to Ctrl+Home — treated as plain End here.
             Key::End => {
                 self.flush_pending();
                 let len = self.edit.borrow().text.len();
