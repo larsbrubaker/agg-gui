@@ -550,11 +550,15 @@ pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool) {
 #[wasm_bindgen]
 pub fn needs_repaint() -> bool {
     if NEEDS_REPAINT.with(|c| c.get()) { return true; }
-    // Animation-driven: cube, focus, continuous-capture screenshot.
+    // Animation-driven: cube, focus, continuous-capture screenshot, widget anims.
     let cube_on = CUBE_VISIBLE.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
     if cube_on { return true; }
     let ss_req = SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
     if ss_req { return true; }
+    // Widget-driven animation: e.g. scroll bar hover expansion.  Set during the
+    // last paint via `animation::request_tick`; cleared at the start of the
+    // next paint.
+    if agg_gui::animation::wants_tick() { return true; }
     let has_focus = DEMO_APP.with(|c| c.borrow().as_ref().map(|a| a.has_focus()).unwrap_or(false));
     if has_focus { return true; }
     false

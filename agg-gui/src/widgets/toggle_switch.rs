@@ -16,15 +16,20 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 // ── Geometry constants ─────────────────────────────────────────────────────
+//
+// Sized to fit within a typical 16-18 px text line (13-14 px font) so the
+// switch sits flush beside a label without inflating the row height.
 
-const PILL_W: f64 = 48.0;
-const PILL_H: f64 = 26.0;
+const PILL_W: f64 = 32.0;
+const PILL_H: f64 = 18.0;
 /// Corner radius of the pill — a full semicircle on each end.
 const PILL_R: f64 = PILL_H / 2.0;
 /// Gap between the pill edge and the circle edge.
-const CIRCLE_MARGIN: f64 = 3.0;
+const CIRCLE_MARGIN: f64 = 2.5;
 /// Circle radius derived from pill height and the margin.
 const CIRCLE_R: f64 = PILL_H / 2.0 - CIRCLE_MARGIN;
+/// Duration of the on/off slide animation in seconds.
+const ANIM_SECS: f64 = 0.14;
 
 // Colors are resolved from ctx.visuals() at paint time.
 
@@ -44,7 +49,9 @@ pub struct ToggleSwitch {
     /// and `toggle` writes to it so external changes are reflected immediately.
     state_cell: Option<Rc<Cell<bool>>>,
     hovered: bool,
-    focused: bool,
+    /// Interpolates between 0.0 (off) and 1.0 (on) for smooth colour/circle
+    /// position transitions; driven by `animation::Tween`.
+    anim:      crate::animation::Tween,
     on_change: Option<Box<dyn FnMut(bool)>>,
 }
 
@@ -53,6 +60,7 @@ pub struct ToggleSwitch {
 impl ToggleSwitch {
     /// Create a new toggle switch with an initial on/off state.
     pub fn new(on: bool) -> Self {
+        let initial = if on { 1.0 } else { 0.0 };
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -60,7 +68,7 @@ impl ToggleSwitch {
             on,
             state_cell: None,
             hovered: false,
-            focused: false,
+            anim: crate::animation::Tween::new(initial, ANIM_SECS),
             on_change: None,
         }
     }
@@ -104,14 +112,24 @@ impl ToggleSwitch {
         if let Some(cb) = self.on_change.as_mut() { cb(new_val); }
     }
 
-    /// X-center of the sliding circle in local pill coordinates.
-    fn circle_cx(&self) -> f64 {
-        if self.is_on() {
-            PILL_W - CIRCLE_MARGIN - CIRCLE_R
-        } else {
-            CIRCLE_MARGIN + CIRCLE_R
-        }
+    /// X-center of the sliding circle given an interpolated position `t`
+    /// in `[0, 1]` (0 = off, 1 = on).
+    fn circle_cx_at(t: f64) -> f64 {
+        let x_off = CIRCLE_MARGIN + CIRCLE_R;
+        let x_on  = PILL_W - CIRCLE_MARGIN - CIRCLE_R;
+        x_off + (x_on - x_off) * t.clamp(0.0, 1.0)
     }
+}
+
+/// Linear interpolation between two colours, component-wise.
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    Color::rgba(
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+        a.a + (b.a - a.a) * t,
+    )
 }
 
 // ── Widget impl ────────────────────────────────────────────────────────────
@@ -139,43 +157,35 @@ impl Widget for ToggleSwitch {
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let on = self.is_on();
 
-        // The pill is drawn at (0, 0) in local coordinates; the framework has
-        // already translated the context to this widget's bottom-left corner.
+        // Retarget the tween each paint so external state-cell writes are
+        // picked up (e.g. a checkbox-style binding toggled from outside), then
+        // advance it to get this frame's interpolated position.
+        self.anim.set_target(if self.is_on() { 1.0 } else { 0.0 });
+        let t = self.anim.tick();
+
+        // Origin (0,0) is the widget's bottom-left; framework has translated.
         let pill_x = 0.0_f64;
         let pill_y = 0.0_f64;
 
-        // ── Focus ring (drawn first, behind the pill) ──────────────────────
-        if self.focused {
-            ctx.set_stroke_color(v.accent_focus);
-            ctx.set_line_width(2.5);
-            ctx.begin_path();
-            ctx.rounded_rect(
-                pill_x - 2.5,
-                pill_y - 2.5,
-                PILL_W + 5.0,
-                PILL_H + 5.0,
-                PILL_R + 2.5,
-            );
-            ctx.stroke();
-        }
-
         // ── Pill background ────────────────────────────────────────────────
-        // Off state uses the widget_bg / widget_bg_hovered colors.
-        let bg = match (on, self.hovered) {
-            (true,  true)  => v.accent_hovered,
-            (true,  false) => v.accent,
-            (false, true)  => v.widget_bg_hovered,
-            (false, false) => v.widget_stroke, // mid-gray pill when off
-        };
+        // Interpolate between the off colour (gray) and the on colour (accent);
+        // a separate hover tint is applied as a multiplicative brighten.
+        let off_color = v.widget_stroke;
+        let on_color  = v.accent;
+        let mut bg = lerp_color(off_color, on_color, t as f32);
+        if self.hovered {
+            let hover_off = v.widget_bg_hovered;
+            let hover_on  = v.accent_hovered;
+            bg = lerp_color(hover_off, hover_on, t as f32);
+        }
         ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(pill_x, pill_y, PILL_W, PILL_H, PILL_R);
         ctx.fill();
 
         // ── Sliding white circle ───────────────────────────────────────────
-        let cx = self.circle_cx();
+        let cx = Self::circle_cx_at(t);
         let cy = PILL_H * 0.5;
         ctx.set_fill_color(Color::white());
         ctx.begin_path();
@@ -202,8 +212,6 @@ impl Widget for ToggleSwitch {
                 self.toggle();
                 EventResult::Consumed
             }
-            Event::FocusGained => { self.focused = true;  EventResult::Ignored }
-            Event::FocusLost   => { self.focused = false; EventResult::Ignored }
             _ => EventResult::Ignored,
         }
     }

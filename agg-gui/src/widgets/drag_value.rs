@@ -5,13 +5,17 @@
 //! a configurable speed; the value is clamped to `[min, max]` and optionally
 //! snapped to a step interval.
 //!
+//! A plain click (no significant drag) enters an inline edit mode: the widget
+//! shows a cursor and accepts keyboard input.  Pressing Enter or losing focus
+//! commits the edit; Escape cancels it.
+//!
 //! Typical use-case: property panels, inspector rows, compact parameter editors.
 
 use std::sync::Arc;
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, MouseButton};
+use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
@@ -29,17 +33,18 @@ fn format_value(value: f64, decimals: usize) -> String {
 const WIDGET_H: f64 = 28.0;
 /// Half-width of the left/right arrow indicator text.
 const ARROW_MARGIN: f64 = 8.0;
-
-// Colors are now resolved from ctx.visuals() at paint time.
+/// Horizontal drag distance (logical px) before a press is treated as a drag.
+const DRAG_THRESHOLD: f64 = 3.0;
 
 // ── Struct ─────────────────────────────────────────────────────────────────
 
 /// A horizontal drag-to-scrub numeric value widget.
 ///
 /// The user clicks and drags left or right to decrease or increase the value.
+/// A plain click (no drag) enters inline edit mode for direct keyboard entry.
 /// The current value is displayed as formatted text in the center of the widget.
-/// Left ("◀") and right ("▶") arrow indicators are drawn at the edges as a
-/// visual affordance for the drag direction.
+/// Left ("◀") and right ("▶") arrow triangles are drawn at the edges as an
+/// affordance for the drag direction.
 pub struct DragValue {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
@@ -49,8 +54,7 @@ pub struct DragValue {
     min: f64,
     max: f64,
 
-    /// Number of logical pixels the user must drag to change `value` by one
-    /// unit (with `step == 0`).  Default: `1.0`.
+    /// How many value units change per logical pixel of horizontal drag.
     speed: f64,
     /// Snap interval; values are rounded to the nearest multiple of `step`
     /// after each drag update.  `0.0` means no snapping.
@@ -58,16 +62,27 @@ pub struct DragValue {
     /// Number of decimal places used when formatting the displayed value.
     decimals: usize,
 
-    /// Font-size kept only so `with_font_size` can forward into the
-    /// child label.  All actual glyph work happens in `value_label`.
+    font: Arc<Font>,
     font_size: f64,
 
-    /// Whether the user is currently dragging.
+    // ── Drag state ────────────────────────────────────────────────────────
+    /// True once the drag-threshold has been exceeded after a mouse-down.
     dragging: bool,
-    /// X position (in local widget coordinates) where the drag began.
+    /// True from mouse-down until mouse-up (covers both pre-threshold and drag phases).
+    mouse_pressed: bool,
+    /// X position where the mouse was pressed.
+    press_x: f64,
+    /// X position used as drag origin once the threshold is crossed.
     drag_start_x: f64,
-    /// Value captured at the moment the drag began.
+    /// Value captured at the start of the confirmed drag.
     drag_start_value: f64,
+
+    // ── Inline edit state ─────────────────────────────────────────────────
+    focused: bool,
+    editing: bool,
+    edit_text: String,
+    /// Cursor position as a char index into `edit_text`.
+    edit_cursor: usize,
 
     hovered: bool,
     on_change: Option<Box<dyn FnMut(f64)>>,
@@ -87,7 +102,7 @@ impl DragValue {
     pub fn new(value: f64, min: f64, max: f64, font: Arc<Font>) -> Self {
         let clamped = value.clamp(min, max);
         let initial_text = format_value(clamped, 2);
-        let value_label = Label::new(initial_text, font)
+        let value_label = Label::new(initial_text, Arc::clone(&font))
             .with_font_size(13.0)
             .with_align(LabelAlign::Center);
         Self {
@@ -100,10 +115,17 @@ impl DragValue {
             speed: 1.0,
             step: 0.0,
             decimals: 2,
+            font,
             font_size: 13.0,
             dragging: false,
+            mouse_pressed: false,
+            press_x: 0.0,
             drag_start_x: 0.0,
             drag_start_value: 0.0,
+            focused: false,
+            editing: false,
+            edit_text: String::new(),
+            edit_cursor: 0,
             hovered: false,
             on_change: None,
             value_label,
@@ -111,7 +133,11 @@ impl DragValue {
     }
 
     /// Set the display font size in logical pixels.
-    pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
+    pub fn with_font_size(mut self, s: f64) -> Self {
+        self.font_size = s;
+        self.value_label.set_font_size(s);
+        self
+    }
 
     /// Set a snap step.  Values are rounded to the nearest multiple of `step`
     /// during dragging.  Pass `0.0` to disable snapping (the default).
@@ -147,18 +173,14 @@ impl DragValue {
 
     // ── Internal helpers ───────────────────────────────────────────────────
 
-    /// Format the value for display.
     fn format_value(&self) -> String {
         format_value(self.value, self.decimals)
     }
 
-    /// Push the currently-formatted value into the child label.  Called
-    /// whenever `value` or `decimals` changes.
     fn sync_label(&mut self) {
         self.value_label.set_text(self.format_value());
     }
 
-    /// Apply step snapping to a raw value, then clamp to `[min, max]`.
     fn apply_step_and_clamp(&self, raw: f64) -> f64 {
         let snapped = if self.step > 0.0 {
             (raw / self.step).round() * self.step
@@ -168,7 +190,6 @@ impl DragValue {
         snapped.clamp(self.min, self.max)
     }
 
-    /// Compute the new value from a drag position and fire the callback.
     fn update_from_drag(&mut self, current_x: f64) {
         let delta = (current_x - self.drag_start_x) * self.speed;
         let raw   = self.drag_start_value + delta;
@@ -176,6 +197,37 @@ impl DragValue {
         self.sync_label();
         let v = self.value;
         if let Some(cb) = self.on_change.as_mut() { cb(v); }
+    }
+
+    fn enter_edit_mode(&mut self) {
+        self.editing = true;
+        self.edit_text = self.format_value();
+        self.edit_cursor = self.edit_text.chars().count();
+    }
+
+    fn commit_edit(&mut self) {
+        self.editing = false;
+        if let Ok(raw) = self.edit_text.trim().parse::<f64>() {
+            self.value = self.apply_step_and_clamp(raw);
+        }
+        // Always sync label back to actual value (parse success or failure).
+        self.sync_label();
+        let v = self.value;
+        if let Some(cb) = self.on_change.as_mut() { cb(v); }
+    }
+
+    fn cancel_edit(&mut self) {
+        self.editing = false;
+        self.sync_label();
+    }
+
+    /// Convert a char-index cursor position to a byte offset in `edit_text`.
+    fn cursor_byte_offset(&self, char_idx: usize) -> usize {
+        self.edit_text
+            .char_indices()
+            .nth(char_idx)
+            .map(|(b, _)| b)
+            .unwrap_or(self.edit_text.len())
     }
 }
 
@@ -189,7 +241,7 @@ impl Widget for DragValue {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
-    fn is_focusable(&self) -> bool { false }
+    fn is_focusable(&self) -> bool { true }
 
     fn margin(&self)   -> Insets  { self.base.margin }
     fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
@@ -197,7 +249,6 @@ impl Widget for DragValue {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
-    /// Fixed height of 28 px; width fills the available space offered by the parent.
     fn layout(&mut self, available: Size) -> Size {
         Size::new(available.width, WIDGET_H)
     }
@@ -206,91 +257,193 @@ impl Widget for DragValue {
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
-
-        // Derive drag-value background from accent with varying opacity.
         let a = v.accent;
-        let bg = if self.dragging {
-            Color::rgba(a.r, a.g, a.b, 0.22)
-        } else if self.hovered {
-            Color::rgba(a.r, a.g, a.b, 0.14)
+
+        if self.editing {
+            // ── Edit-mode appearance ──────────────────────────────────────
+            let bg = Color::rgba(a.r, a.g, a.b, 0.10);
+            ctx.set_fill_color(bg);
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
+            ctx.fill();
+
+            // Bright accent border signals active editing.
+            ctx.set_stroke_color(Color::rgba(a.r, a.g, a.b, 0.80));
+            ctx.set_line_width(1.5);
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
+            ctx.stroke();
+
+            // Render current edit_text via the value label.
+            self.value_label.set_text(self.edit_text.clone());
+            let avail_w = (w - 8.0).max(1.0);
+            let lsz = self.value_label.layout(Size::new(avail_w, h));
+            let lx  = (w - lsz.width)  * 0.5;
+            let ly  = (h - lsz.height) * 0.5;
+            self.value_label.set_bounds(Rect::new(0.0, 0.0, lsz.width, lsz.height));
+            ctx.save();
+            ctx.translate(lx, ly);
+            paint_subtree(&mut self.value_label, ctx);
+            ctx.restore();
+
+            // Draw cursor: measure text up to edit_cursor to find x position.
+            let prefix: String = self.edit_text.chars().take(self.edit_cursor).collect();
+            ctx.set_font(Arc::clone(&self.font));
+            ctx.set_font_size(self.font_size);
+            let prefix_w  = ctx.measure_text(&prefix).map(|m| m.width).unwrap_or(0.0);
+            // Cursor sits at the right edge of the prefix inside the label's x offset.
+            let text_x    = lx + (lsz.width - ctx.measure_text(&self.edit_text).map(|m| m.width).unwrap_or(lsz.width)) * 0.5;
+            let cursor_x  = text_x + prefix_w;
+            ctx.set_fill_color(Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.85));
+            ctx.begin_path();
+            ctx.rect(cursor_x, ly + 2.0, 1.5, lsz.height - 4.0);
+            ctx.fill();
         } else {
-            Color::rgba(a.r, a.g, a.b, 0.08)
-        };
-        let border = Color::rgba(a.r, a.g, a.b, 0.35);
-        let arrow  = Color::rgba(a.r, a.g, a.b, 0.45);
+            // ── Normal drag-value appearance ──────────────────────────────
+            let bg = if self.dragging {
+                Color::rgba(a.r, a.g, a.b, 0.22)
+            } else if self.hovered {
+                Color::rgba(a.r, a.g, a.b, 0.14)
+            } else {
+                Color::rgba(a.r, a.g, a.b, 0.08)
+            };
+            let border = Color::rgba(a.r, a.g, a.b, 0.35);
+            let arrow  = Color::rgba(a.r, a.g, a.b, 0.45);
 
-        // ── Background ─────────────────────────────────────────────────────
-        ctx.set_fill_color(bg);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
-        ctx.fill();
+            ctx.set_fill_color(bg);
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
+            ctx.fill();
 
-        // ── Border ─────────────────────────────────────────────────────────
-        ctx.set_stroke_color(border);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
-        ctx.stroke();
+            ctx.set_stroke_color(border);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
+            ctx.stroke();
 
-        // ── Arrow triangles (shape fills, not text) ────────────────────────
-        // Text glyphs for "◀" / "▶" would force a path that either uses
-        // direct fill_text (skipping the LCD backbuffer architecture) or
-        // needs its own Label cache per arrow.  Triangles are cheaper
-        // and semantically correct — they're affordance marks, not text.
-        let mid = h * 0.5;
-        let tri_half = 4.0;
-        let tri_w    = 6.0;
-        ctx.set_fill_color(arrow);
-        // Left: point at ARROW_MARGIN, base at ARROW_MARGIN + tri_w.
-        ctx.begin_path();
-        ctx.move_to(ARROW_MARGIN, mid);
-        ctx.line_to(ARROW_MARGIN + tri_w, mid - tri_half);
-        ctx.line_to(ARROW_MARGIN + tri_w, mid + tri_half);
-        ctx.close_path();
-        ctx.fill();
-        // Right: point at w - ARROW_MARGIN, base at w - ARROW_MARGIN - tri_w.
-        ctx.begin_path();
-        ctx.move_to(w - ARROW_MARGIN, mid);
-        ctx.line_to(w - ARROW_MARGIN - tri_w, mid - tri_half);
-        ctx.line_to(w - ARROW_MARGIN - tri_w, mid + tri_half);
-        ctx.close_path();
-        ctx.fill();
+            // Arrow triangles as drag affordances.
+            let mid      = h * 0.5;
+            let tri_half = 4.0;
+            let tri_w    = 6.0;
+            ctx.set_fill_color(arrow);
+            ctx.begin_path();
+            ctx.move_to(ARROW_MARGIN, mid);
+            ctx.line_to(ARROW_MARGIN + tri_w, mid - tri_half);
+            ctx.line_to(ARROW_MARGIN + tri_w, mid + tri_half);
+            ctx.close_path();
+            ctx.fill();
+            ctx.begin_path();
+            ctx.move_to(w - ARROW_MARGIN, mid);
+            ctx.line_to(w - ARROW_MARGIN - tri_w, mid - tri_half);
+            ctx.line_to(w - ARROW_MARGIN - tri_w, mid + tri_half);
+            ctx.close_path();
+            ctx.fill();
 
-        // ── Centred value text — painted via the Label child ───────────────
-        // Layout the label to get its natural size, centre it inside the
-        // widget, then recurse paint.  Label handles its own LCD cache /
-        // per-channel blit.
-        let avail_w = (w - (ARROW_MARGIN + tri_w + 4.0) * 2.0).max(1.0);
-        let lsz = self.value_label.layout(Size::new(avail_w, h));
-        let lx = (w - lsz.width)  * 0.5;
-        let ly = (h - lsz.height) * 0.5;
-        self.value_label.set_bounds(Rect::new(0.0, 0.0, lsz.width, lsz.height));
-        ctx.save();
-        ctx.translate(lx, ly);
-        paint_subtree(&mut self.value_label, ctx);
-        ctx.restore();
+            let avail_w = (w - (ARROW_MARGIN + tri_w + 4.0) * 2.0).max(1.0);
+            let lsz = self.value_label.layout(Size::new(avail_w, h));
+            let lx = (w - lsz.width)  * 0.5;
+            let ly = (h - lsz.height) * 0.5;
+            self.value_label.set_bounds(Rect::new(0.0, 0.0, lsz.width, lsz.height));
+            ctx.save();
+            ctx.translate(lx, ly);
+            paint_subtree(&mut self.value_label, ctx);
+            ctx.restore();
+        }
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
+            // ── Keyboard (edit mode) ──────────────────────────────────────
+            Event::KeyDown { key, .. } if self.editing => {
+                match key {
+                    Key::Char(c) => {
+                        // Only allow numeric input: digits, '.', '-'.
+                        if c.is_ascii_digit() || *c == '.' || (*c == '-' && self.edit_cursor == 0) {
+                            let byte = self.cursor_byte_offset(self.edit_cursor);
+                            self.edit_text.insert(byte, *c);
+                            self.edit_cursor += 1;
+                        }
+                    }
+                    Key::Backspace => {
+                        if self.edit_cursor > 0 {
+                            self.edit_cursor -= 1;
+                            let byte = self.cursor_byte_offset(self.edit_cursor);
+                            self.edit_text.remove(byte);
+                        }
+                    }
+                    Key::Delete => {
+                        let n = self.edit_text.chars().count();
+                        if self.edit_cursor < n {
+                            let byte = self.cursor_byte_offset(self.edit_cursor);
+                            self.edit_text.remove(byte);
+                        }
+                    }
+                    Key::ArrowLeft => {
+                        if self.edit_cursor > 0 { self.edit_cursor -= 1; }
+                    }
+                    Key::ArrowRight => {
+                        let n = self.edit_text.chars().count();
+                        if self.edit_cursor < n { self.edit_cursor += 1; }
+                    }
+                    Key::Enter => { self.commit_edit(); }
+                    Key::Escape => { self.cancel_edit(); }
+                    _ => {}
+                }
+                EventResult::Consumed
+            }
+
+            // ── Mouse events ──────────────────────────────────────────────
             Event::MouseMove { pos } => {
                 self.hovered = self.hit_test(*pos);
-                if self.dragging {
-                    self.update_from_drag(pos.x);
-                    return EventResult::Consumed;
+                if self.mouse_pressed && !self.editing {
+                    let dx = (pos.x - self.press_x).abs();
+                    if !self.dragging && dx >= DRAG_THRESHOLD {
+                        // Confirm drag: anchor at original press so no dead-zone jump.
+                        self.dragging         = true;
+                        self.drag_start_x     = self.press_x;
+                        self.drag_start_value = self.value;
+                    }
+                    if self.dragging {
+                        self.update_from_drag(pos.x);
+                        return EventResult::Consumed;
+                    }
                 }
                 EventResult::Ignored
             }
             Event::MouseDown { button: MouseButton::Left, pos, .. } => {
-                self.dragging         = true;
-                self.drag_start_x     = pos.x;
-                self.drag_start_value = self.value;
+                if self.editing {
+                    // Already in edit mode — consume to keep focus, don't start drag.
+                    return EventResult::Consumed;
+                }
+                self.mouse_pressed = true;
+                self.dragging      = false;
+                self.press_x       = pos.x;
                 EventResult::Consumed
             }
             Event::MouseUp { button: MouseButton::Left, .. } => {
-                self.dragging = false;
+                let was_drag    = self.dragging;
+                let was_pressed = self.mouse_pressed;
+                self.dragging      = false;
+                self.mouse_pressed = false;
+                if was_pressed && !was_drag && !self.editing {
+                    self.enter_edit_mode();
+                }
                 EventResult::Consumed
             }
+
+            // ── Focus ─────────────────────────────────────────────────────
+            Event::FocusGained => {
+                self.focused = true;
+                EventResult::Ignored
+            }
+            Event::FocusLost => {
+                self.focused = false;
+                if self.editing { self.commit_edit(); }
+                self.dragging      = false;
+                self.mouse_pressed = false;
+                EventResult::Ignored
+            }
+
             _ => EventResult::Ignored,
         }
     }

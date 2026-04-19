@@ -250,6 +250,13 @@ impl Label {
 
     // ── setter methods (for post-construction mutation) ───────────────────────
 
+    pub fn set_font_size(&mut self, size: f64) {
+        if (self.font_size - size).abs() > 1e-9 {
+            self.font_size = size;
+            self.cache.invalidate();
+        }
+    }
+
     pub fn set_text(&mut self, text: impl Into<String>) {
         let text = text.into();
         if text != self.text {

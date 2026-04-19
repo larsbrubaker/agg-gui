@@ -417,19 +417,6 @@ fn main() {
                     app.on_mouse_wheel_xy(cursor_x, cursor_y, dx, dy);
                 }
                 Event::AboutToWait => {
-                    // Poll while cube animates; WaitUntil(500ms) when a text
-                    // field has focus so the cursor blink fires; Wait otherwise.
-                    elwt.set_control_flow(if cube_visible.get() {
-                        ControlFlow::Poll
-                    } else if app.has_focus() {
-                        ControlFlow::WaitUntil(
-                            std::time::Instant::now()
-                                + std::time::Duration::from_millis(500),
-                        )
-                    } else {
-                        ControlFlow::Wait
-                    });
-
                     let t0 = std::time::Instant::now();
 
                     // Sync inspector node snapshot before painting.
@@ -439,6 +426,20 @@ fn main() {
                     screen_size.set((win_w, win_h));
                     render_frame(&mut app, &mut gl_ctx, &gl,
                                  win_w, win_h, last_frame_ms, &hovered_bounds);
+
+                    // Poll while the cube animates OR any widget is running a
+                    // hover/transition animation; WaitUntil(500ms) when a text
+                    // field has focus so the cursor blink fires; Wait otherwise.
+                    elwt.set_control_flow(if cube_visible.get() || app.wants_animation_tick() {
+                        ControlFlow::Poll
+                    } else if app.has_focus() {
+                        ControlFlow::WaitUntil(
+                            std::time::Instant::now()
+                                + std::time::Duration::from_millis(500),
+                        )
+                    } else {
+                        ControlFlow::Wait
+                    });
 
                     // Satisfy any pending screenshot request BEFORE buffer swap
                     // while the back buffer still holds this frame's pixels.

@@ -820,8 +820,20 @@ impl App {
     }
 
     /// Paint the entire widget tree into `ctx`. Call after [`layout`][Self::layout].
+    ///
+    /// Clears the animation tick flag up-front so widgets can re-request it during
+    /// this paint if they need another frame; hosts read [`wants_animation_tick`]
+    /// after `paint` returns to decide whether to schedule continuous redraws.
     pub fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        crate::animation::clear_tick();
         paint_subtree(self.root.as_mut(), ctx);
+    }
+
+    /// After a paint pass, returns `true` if any widget requested another frame
+    /// (e.g. an in-progress hover animation).  Hosts should use this to set
+    /// their event-loop control flow to continuous polling while it's `true`.
+    pub fn wants_animation_tick(&self) -> bool {
+        crate::animation::wants_tick()
     }
 
     // --- Platform event ingestion (Y-down → Y-up conversion happens here) ---

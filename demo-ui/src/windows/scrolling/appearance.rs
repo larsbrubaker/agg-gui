@@ -106,6 +106,7 @@ struct StyleCells {
     kind:            Rc<Cell<ScrollBarKind>>,
     color:           Rc<Cell<ScrollBarColor>>,
     bar_width:       Rc<Cell<f64>>,
+    floating_width:  Rc<Cell<f64>>,
     handle_min:      Rc<Cell<f64>>,
     outer_margin:    Rc<Cell<f64>>,
     inner_margin:    Rc<Cell<f64>>,
@@ -121,6 +122,7 @@ impl StyleCells {
             kind:           Rc::new(Cell::new(s.kind)),
             color:          Rc::new(Cell::new(s.color)),
             bar_width:      Rc::new(Cell::new(s.bar_width)),
+            floating_width: Rc::new(Cell::new(s.floating_width)),
             handle_min:     Rc::new(Cell::new(s.handle_min_length)),
             outer_margin:   Rc::new(Cell::new(s.outer_margin)),
             inner_margin:   Rc::new(Cell::new(s.inner_margin)),
@@ -134,6 +136,7 @@ impl StyleCells {
     fn compose(&self) -> ScrollBarStyle {
         ScrollBarStyle {
             bar_width:         self.bar_width.get(),
+            floating_width:    self.floating_width.get(),
             handle_min_length: self.handle_min.get(),
             outer_margin:      self.outer_margin.get(),
             inner_margin:      self.inner_margin.get(),
@@ -150,6 +153,7 @@ impl StyleCells {
         self.kind.set(s.kind);
         self.color.set(s.color);
         self.bar_width.set(s.bar_width);
+        self.floating_width.set(s.floating_width);
         self.handle_min.set(s.handle_min_length);
         self.outer_margin.set(s.outer_margin);
         self.inner_margin.set(s.inner_margin);
@@ -177,6 +181,7 @@ fn drag_row(
         .with_font_size(12.0)
         .with_decimals(decimals)
         .with_step(step)
+        .with_speed(step.max(0.001))
         .on_change(move |v| { cb_cell.set(v); apply(); });
 
     Box::new(FlexRow::new().with_gap(10.0)
@@ -192,15 +197,15 @@ fn apply_preset(cells: &StyleCells, preset: Preset, visibility: &Rc<Cell<ScrollB
     };
     cells.load(s);
     set_scroll_style(s);
-    // Presets also nudge visibility globally so every scrollbar in the app
-    // picks up the new preset — Solid/Thin are "always visible" by
-    // convention; Floating hides until hovered.
-    // With our consolidated `VisibleWhenNeeded`, the Floating preset's
-    // "show on hover" behaviour is automatic via `ScrollBarKind::Floating`,
-    // so every preset maps to `VisibleWhenNeeded` for normal operation.
-    // Solid/Thin users who want the bar to always show regardless of
-    // overflow can pick `AlwaysVisible` from the visibility row below.
-    let v = ScrollBarVisibility::VisibleWhenNeeded;
+    // Each preset picks a sensible default visibility:
+    //   - Solid:    visible when content overflows (track reserves space).
+    //   - Thin:     always visible — the thin bar is the whole point.
+    //   - Floating: visible when needed (hides until hover, matching egui).
+    // Users can still override via the visibility SegRow below the Details.
+    let v = match preset {
+        Preset::Thin => ScrollBarVisibility::AlwaysVisible,
+        _            => ScrollBarVisibility::VisibleWhenNeeded,
+    };
     visibility.set(v);
     agg_gui::set_scroll_visibility(v);
 }
@@ -286,9 +291,17 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
         ), 0.0);
     }
 
-    // Rows 3..5: Full bar width / Min handle length / Outer margin
+    // Rows 3..6: Full bar width / Thin bar width (Floating only) / Min handle length / Outer margin
     details.push(drag_row(Arc::clone(&font), Rc::clone(&cells_rc.bar_width),
         0.0, 50.0, 1.0, 0, "Full bar width", Rc::clone(&apply)), 0.0);
+    {
+        let kind_cell = Rc::clone(&cells_rc.kind);
+        let visible: Rc<dyn Fn() -> bool> =
+            Rc::new(move || kind_cell.get() == agg_gui::ScrollBarKind::Floating);
+        let row = drag_row(Arc::clone(&font), Rc::clone(&cells_rc.floating_width),
+            0.0, 50.0, 1.0, 0, "Thin bar width (on hover expands to full)", Rc::clone(&apply));
+        details.push(Box::new(ConditionalRow::new(row, visible)), 0.0);
+    }
     details.push(drag_row(Arc::clone(&font), Rc::clone(&cells_rc.handle_min),
         0.0, 80.0, 1.0, 0, "Minimum handle length", Rc::clone(&apply)), 0.0);
     details.push(drag_row(Arc::clone(&font), Rc::clone(&cells_rc.outer_margin),
@@ -315,9 +328,16 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
             .add(Box::new(seg))), 0.0);
     }
 
-    // Row 7: Inner margin
-    details.push(drag_row(Arc::clone(&font), Rc::clone(&cells_rc.inner_margin),
-        0.0, 40.0, 1.0, 0, "Inner margin", Rc::clone(&apply)), 0.0);
+    // Row 7: Inner margin (Solid only — matches egui, which only shows the
+    // inner-margin control when the bar allocates space).
+    {
+        let kind_cell = Rc::clone(&cells_rc.kind);
+        let visible: Rc<dyn Fn() -> bool> =
+            Rc::new(move || kind_cell.get() == agg_gui::ScrollBarKind::Solid);
+        let row = drag_row(Arc::clone(&font), Rc::clone(&cells_rc.inner_margin),
+            0.0, 40.0, 1.0, 0, "Inner margin", Rc::clone(&apply));
+        details.push(Box::new(ConditionalRow::new(row, visible)), 0.0);
+    }
 
     details.push(Box::new(Separator::horizontal()), 0.0);
 
@@ -385,6 +405,51 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(scroll), 1.0);
 
     Box::new(col)
+}
+
+// ── ConditionalRow ─ wraps a child widget and shows/hides it each layout
+//                     based on a predicate closure.  When hidden, it reports
+//                     zero size and `is_visible = false`, so the framework
+//                     skips painting and hit-testing the subtree. ─────────────
+
+struct ConditionalRow {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,   // exactly one child
+    visible:  Rc<dyn Fn() -> bool>,
+}
+impl ConditionalRow {
+    fn new(child: Box<dyn Widget>, visible: Rc<dyn Fn() -> bool>) -> Self {
+        Self { bounds: Rect::default(), children: vec![child], visible }
+    }
+}
+impl Widget for ConditionalRow {
+    fn type_name(&self) -> &'static str { "ConditionalRow" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn show_in_inspector(&self) -> bool { false }
+    fn is_visible(&self) -> bool { (self.visible)() }
+    fn layout(&mut self, available: Size) -> Size {
+        if !(self.visible)() {
+            self.bounds = Rect::new(0.0, 0.0, 0.0, 0.0);
+            if let Some(c) = self.children.first_mut() {
+                c.set_bounds(Rect::new(0.0, 0.0, 0.0, 0.0));
+            }
+            return Size::ZERO;
+        }
+        if let Some(c) = self.children.first_mut() {
+            let s = c.layout(available);
+            c.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+            self.bounds = Rect::new(0.0, 0.0, s.width, s.height);
+            return s;
+        }
+        Size::ZERO
+    }
+    fn paint(&mut self, _: &mut dyn agg_gui::DrawCtx) {}
+    fn on_event(&mut self, _: &agg_gui::Event) -> agg_gui::EventResult {
+        agg_gui::EventResult::Ignored
+    }
 }
 
 // ── WatchCell ─ a zero-size widget that fires a callback when an observed

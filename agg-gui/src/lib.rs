@@ -24,6 +24,7 @@
 //! This is a non-negotiable architectural invariant — see the dev plan for
 //! the rationale.
 
+pub mod animation;
 pub mod app_state;
 pub mod color;
 pub mod cursor;

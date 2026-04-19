@@ -72,8 +72,14 @@ impl Default for ScrollBarColor {
 /// Full scrollbar appearance configuration — mirrors egui's `style.spacing.scroll`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollBarStyle {
-    /// Width of the full-size bar in pixels.
+    /// Width of the full-size bar in pixels.  This is the bar width when the
+    /// user is hovering or interacting with it.
     pub bar_width:         f64,
+    /// Thin width shown when the bar is dormant (not hovered, not dragging).
+    /// Matches egui's `floating_width`.  On hover the bar grows from this to
+    /// [`Self::bar_width`].  Set equal to `bar_width` to disable the expand
+    /// effect.  Only takes effect when smaller than `bar_width`.
+    pub floating_width:    f64,
     /// Minimum length of the draggable thumb.
     pub handle_min_length: f64,
     /// Space between the bar and the panel's outer edge.
@@ -96,10 +102,30 @@ pub struct ScrollBarStyle {
     pub fade_size:         f64,
 }
 
+impl ScrollBarStyle {
+    /// Interpolated bar width for a hover-animation parameter `t` in `[0, 1]`.
+    /// `t = 0` returns [`Self::floating_width`] (dormant); `t = 1` returns
+    /// [`Self::bar_width`] (fully expanded).  Clamps `floating_width` so it
+    /// never exceeds `bar_width`, regardless of what the caller set.
+    ///
+    /// [`ScrollBarKind::Solid`] bars do not animate width — they always
+    /// render at `bar_width` so the "Full bar width" setting takes immediate
+    /// visible effect.  Only [`ScrollBarKind::Floating`] bars expand on hover.
+    pub fn bar_width_at(&self, t: f64) -> f64 {
+        if self.kind == ScrollBarKind::Solid {
+            return self.bar_width;
+        }
+        let from = self.floating_width.min(self.bar_width);
+        let t    = t.clamp(0.0, 1.0);
+        from + (self.bar_width - from) * t
+    }
+}
+
 impl Default for ScrollBarStyle {
     fn default() -> Self {
         Self {
             bar_width:         15.0,
+            floating_width:    15.0,
             handle_min_length: 10.0,
             outer_margin:       5.0,
             inner_margin:       7.0,
@@ -115,10 +141,12 @@ impl Default for ScrollBarStyle {
 
 impl ScrollBarStyle {
     /// Preset matching egui's `ScrollStyle::solid` — always-visible bar, solid
-    /// layout, fills reserved space.
+    /// layout, fills reserved space.  Solid bars don't expand on hover so
+    /// `floating_width` equals `bar_width`.
     pub fn solid() -> Self {
         Self {
             bar_width:         8.0,
+            floating_width:    8.0,
             handle_min_length: 12.0,
             outer_margin:      0.0,
             inner_margin:      4.0,
@@ -130,17 +158,22 @@ impl ScrollBarStyle {
             fade_size:         0.0,
         }
     }
-    /// Preset matching egui's `ScrollStyle::thin` — ultra-thin always-visible
-    /// bar that doesn't steal much horizontal space from content.
+    /// Preset matching egui's `ScrollStyle::thin` — a narrow floating bar
+    /// that's always visible at its thin width and expands to full width when
+    /// hovered.  Callers should pair this with
+    /// [`ScrollBarVisibility::AlwaysVisible`] so the dormant thin bar is
+    /// rendered even when the cursor isn't over it (the appearance panel's
+    /// preset button does this).
     pub fn thin() -> Self {
         Self {
-            bar_width:         4.0,
+            bar_width:         10.0,
+            floating_width:    4.0,
             handle_min_length: 12.0,
             outer_margin:      2.0,
             inner_margin:      2.0,
             content_margin:    0.0,
             margin_same:       true,
-            kind:              ScrollBarKind::Solid,
+            kind:              ScrollBarKind::Floating,
             color:             ScrollBarColor::Background,
             fade_strength:     0.0,
             fade_size:         0.0,
@@ -202,7 +235,7 @@ const GRAB_MARGIN:       f64 = 6.0;
 // The vertical and horizontal scroll axes share the same computation — we
 // factor the state so both reuse `clamp_offset` / `thumb_metrics` logic.
 
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct AxisState {
     enabled:     bool,
     offset:      f64,
@@ -211,11 +244,28 @@ struct AxisState {
     hovered_thumb: bool,
     dragging:    bool,
     drag_thumb_offset: f64,
+    hover_anim:  crate::animation::Tween,
+}
+
+impl Default for AxisState {
+    fn default() -> Self {
+        Self {
+            enabled: false, offset: 0.0, content: 0.0,
+            hovered_bar: false, hovered_thumb: false, dragging: false,
+            drag_thumb_offset: 0.0,
+            hover_anim: crate::animation::Tween::new(0.0, 0.12),
+        }
+    }
 }
 
 impl AxisState {
     fn max_scroll(&self, viewport: f64) -> f64 {
         (self.content - viewport).max(0.0)
+    }
+
+    /// Returns `true` when the bar is in the "expanded" interaction state.
+    fn interact(&self) -> bool {
+        self.hovered_bar || self.hovered_thumb || self.dragging
     }
 }
 
@@ -635,7 +685,9 @@ impl Widget for ScrollView {
         if paint_v {
             if let Some((ty, th)) = self.v_thumb_metrics() {
                 let bar_right = self.v_bar_right();
-                let bar_w     = self.style.bar_width;
+                self.v.hover_anim.set_target(if self.v.interact() { 1.0 } else { 0.0 });
+                let t         = self.v.hover_anim.tick();
+                let bar_w     = self.style.bar_width_at(t);
                 let bar_x     = bar_right - bar_w;
                 let r         = bar_w * 0.5;
 
@@ -661,7 +713,9 @@ impl Widget for ScrollView {
         if paint_h {
             if let Some((tx, tw)) = self.h_thumb_metrics() {
                 let bar_bottom = self.h_bar_bottom();
-                let bar_h      = self.style.bar_width;
+                self.h.hover_anim.set_target(if self.h.interact() { 1.0 } else { 0.0 });
+                let t          = self.h.hover_anim.tick();
+                let bar_h      = self.style.bar_width_at(t);
                 let r          = bar_h * 0.5;
 
                 let (lo, hi) = self.h_track_range();
@@ -812,46 +866,94 @@ impl Widget for ScrollView {
 }
 
 impl ScrollView {
-    /// Paint a fade stripe at the axis edges using `style.fade_strength` alpha
-    /// and `style.fade_size` length.  Solid-coloured overlay — not a gradient —
-    /// because our `DrawCtx` doesn't expose a gradient fill primitive yet.
+    /// Paint a gradient fade at the scroll-axis edges using thin horizontal or
+    /// vertical strips with linearly interpolated alpha.  The strip closest to
+    /// the clip edge is fully opaque; the strip furthest inside the viewport is
+    /// fully transparent — giving a smooth dissolve into the background colour.
     fn paint_fade(&self, ctx: &mut dyn DrawCtx) {
-        let v      = ctx.visuals();
-        let c      = v.panel_fill;
+        let v        = ctx.visuals();
+        let c        = v.panel_fill;
         let (vw, vh) = self.viewport();
-        let alpha  = self.style.fade_strength.clamp(0.0, 1.0) as f64;
-        let size   = self.style.fade_size.max(0.0);
-        let fade   = Color::rgba(c.r, c.g, c.b, alpha as f32 * 0.35);
-        ctx.set_fill_color(fade);
+        let strength = self.style.fade_strength.clamp(0.0, 1.0) as f32;
+        let size     = self.style.fade_size.max(0.0);
+        let max_a    = strength;
 
-        // Fade appears only near edges where content is clipped.  For vertical
-        // scrolling: top fade visible when content above top is clipped
-        // (v.offset > 0).
+        // Fade appears only near edges where content is clipped.
         if self.v.enabled {
             if self.v.offset > 0.5 {
-                // Top of viewport (Y-up = high Y).  Widget rect starts from bottom.
-                ctx.begin_path();
-                ctx.rect(0.0, self.bounds.height - size, vw, size);
-                ctx.fill();
+                // Top edge (Y-up: high Y).  Gradient transparent→opaque going up.
+                Self::fill_v_gradient(ctx, c, max_a, 0.0, self.bounds.height - size, vw, size, false);
             }
             if (self.v.max_scroll(vh) - self.v.offset) > 0.5 {
-                ctx.begin_path();
+                // Bottom edge.  Gradient transparent→opaque going down.
                 let y_bottom = self.bounds.height - vh;
-                ctx.rect(0.0, y_bottom, vw, size);
-                ctx.fill();
+                Self::fill_v_gradient(ctx, c, max_a, 0.0, y_bottom, vw, size, true);
             }
         }
         if self.h.enabled {
             if self.h.offset > 0.5 {
-                ctx.begin_path();
-                ctx.rect(0.0, self.bounds.height - vh, size, vh);
-                ctx.fill();
+                // Left edge.  Gradient transparent→opaque going left.
+                Self::fill_h_gradient(ctx, c, max_a, 0.0, self.bounds.height - vh, size, vh, true);
             }
             if (self.h.max_scroll(vw) - self.h.offset) > 0.5 {
-                ctx.begin_path();
-                ctx.rect(vw - size, self.bounds.height - vh, size, vh);
-                ctx.fill();
+                // Right edge.  Gradient transparent→opaque going right.
+                Self::fill_h_gradient(ctx, c, max_a, vw - size, self.bounds.height - vh, size, vh, false);
             }
+        }
+    }
+
+    /// Draw a vertical gradient rect using `STEPS` thin strips.
+    ///
+    /// When `opaque_at_bottom` is `true` the gradient runs opaque→transparent
+    /// bottom-to-top (bottom edge fade); when `false` it runs
+    /// transparent→opaque bottom-to-top (top edge fade).
+    fn fill_v_gradient(
+        ctx:             &mut dyn DrawCtx,
+        c:               Color,
+        max_alpha:       f32,
+        x:               f64,
+        y:               f64,
+        w:               f64,
+        h:               f64,
+        opaque_at_bottom: bool,
+    ) {
+        const STEPS: usize = 64;
+        let strip_h = h / STEPS as f64;
+        for i in 0..STEPS {
+            // t = 0 at the transparent end, 1 at the opaque end.
+            let t = (i as f32 + 0.5) / STEPS as f32;
+            let a = if opaque_at_bottom { 1.0 - t } else { t };
+            ctx.set_fill_color(Color::rgba(c.r, c.g, c.b, a * max_alpha));
+            ctx.begin_path();
+            ctx.rect(x, y + i as f64 * strip_h, w, strip_h + 0.5);
+            ctx.fill();
+        }
+    }
+
+    /// Draw a horizontal gradient rect using `STEPS` thin strips.
+    ///
+    /// When `opaque_at_left` is `true` the gradient runs opaque→transparent
+    /// left-to-right (left edge fade); when `false` it runs
+    /// transparent→opaque left-to-right (right edge fade).
+    fn fill_h_gradient(
+        ctx:           &mut dyn DrawCtx,
+        c:             Color,
+        max_alpha:     f32,
+        x:             f64,
+        y:             f64,
+        w:             f64,
+        h:             f64,
+        opaque_at_left: bool,
+    ) {
+        const STEPS: usize = 64;
+        let strip_w = w / STEPS as f64;
+        for i in 0..STEPS {
+            let t = (i as f32 + 0.5) / STEPS as f32;
+            let a = if opaque_at_left { 1.0 - t } else { t };
+            ctx.set_fill_color(Color::rgba(c.r, c.g, c.b, a * max_alpha));
+            ctx.begin_path();
+            ctx.rect(x + i as f64 * strip_w, y, strip_w + 0.5, h);
+            ctx.fill();
         }
     }
 }
