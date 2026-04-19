@@ -63,10 +63,21 @@ const TB_HEIGHT:    f64 = 22.0;
 const TB_INDENT:    f64 = 22.0;  // left indent so items nest under group triangle
 const TB_R:         f64 = 4.0;
 const TB_FONT_SIZE: f64 = 13.0;
-/// Horizontal inset of the row background so the accent fill doesn't reach
-/// all the way to the sidebar's right separator.
-const TB_BG_INSET_L: f64 = 4.0;
-const TB_BG_INSET_R: f64 = 8.0;
+/// Vertical inset of the row background — leaves a 1 px sliver of the panel
+/// colour above and below so consecutive selected rows don't fuse into one
+/// solid block.
+const TB_BG_INSET_V: f64 = 1.0;
+/// Padding inside the fill, between the bg-left edge and the start of the
+/// label (icon + text).  Matches the vertical breathing room so the fill
+/// forms a consistent pill around the label.
+const TB_BG_PAD_L: f64 = 5.0;
+/// Left edge of the row background relative to the row's left edge.  Sits
+/// just before the label so the pill hugs the text rather than extending
+/// out into empty space on the left.
+const TB_BG_INSET_L: f64 = TB_INDENT - TB_BG_PAD_L;
+/// Right inset of the row background.  Matches the 1 px outer vertical
+/// margin so the pill's right end has the same breathing room as top/bottom.
+const TB_BG_INSET_R: f64 = 5.0;
 
 struct ToggleButton {
     bounds:   Rect,
@@ -128,9 +139,11 @@ impl Widget for ToggleButton {
         if bg.a > 0.001 {
             let bx = TB_BG_INSET_L;
             let bw = (w - TB_BG_INSET_L - TB_BG_INSET_R).max(1.0);
+            let by = TB_BG_INSET_V;
+            let bh = (h - TB_BG_INSET_V * 2.0).max(1.0);
             ctx.set_fill_color(bg);
             ctx.begin_path();
-            ctx.rounded_rect(bx, 0.0, bw, h, TB_R);
+            ctx.rounded_rect(bx, by, bw, bh, TB_R);
             ctx.fill();
         }
 

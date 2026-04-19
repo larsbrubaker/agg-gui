@@ -119,15 +119,25 @@ impl Widget for CollapsingHeader {
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        // Header row background on hover.
-        if self.hovered {
-            ctx.set_fill_color(Color::rgba(
-                v.text_color.r, v.text_color.g, v.text_color.b, 0.06,
-            ));
-            ctx.begin_path();
-            ctx.rounded_rect(0.0, h - HEADER_H, w, HEADER_H, 3.0);
-            ctx.fill();
-        }
+        // Header row background — always shown at a subtle tint so the header
+        // reads as a distinct section boundary even when not hovered.  Hover
+        // deepens the tint slightly as click affordance.  Sits just below the
+        // top divider line so the line remains crisp.
+        let alpha = if self.hovered { 0.10 } else { 0.06 };
+        ctx.set_fill_color(Color::rgba(
+            v.text_color.r, v.text_color.g, v.text_color.b, alpha,
+        ));
+        ctx.begin_path();
+        ctx.rect(0.0, h - HEADER_H, w, HEADER_H - 1.0);
+        ctx.fill();
+
+        // Top divider line — 1px, full-width, in the shared separator colour
+        // so a vertical stack of headers forms consistent section boundaries
+        // matching any `Separator` widgets elsewhere in the UI.
+        ctx.set_fill_color(v.separator);
+        ctx.begin_path();
+        ctx.rect(0.0, h - 1.0, w, 1.0);
+        ctx.fill();
 
         // Triangle indicator (▶ collapsed, ▼ expanded).
         // In Y-up: the header row occupies y = h - HEADER_H .. h.

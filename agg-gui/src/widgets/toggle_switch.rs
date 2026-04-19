@@ -31,6 +31,20 @@ const CIRCLE_R: f64 = PILL_H / 2.0 - CIRCLE_MARGIN;
 /// Duration of the on/off slide animation in seconds.
 const ANIM_SECS: f64 = 0.14;
 
+// ── Press-ring overlay ───────────────────────────────────────────────────
+//
+// Matches MatterCAD's `RoundedToggleSwitch`: on mouse-down a translucent
+// disc centred on the toggle circle expands outward; on mouse-up it fades
+// back.  The MatterCAD version used a radius ratio of ~2.44× the circle
+// radius (22 vs 9 px) and ~50/255 alpha with quadratic ease-out.
+
+/// Maximum radius of the press-ring overlay (~2.4× the circle radius).
+const RING_MAX_R: f64 = CIRCLE_R * 2.4;
+/// Peak alpha of the press-ring at full expansion.
+const RING_PEAK_ALPHA: f32 = 0.20;
+/// Duration of the press-ring expand / retract animation in seconds.
+const RING_ANIM_SECS:  f64 = 0.22;
+
 // Colors are resolved from ctx.visuals() at paint time.
 
 // ── Struct ─────────────────────────────────────────────────────────────────
@@ -52,6 +66,10 @@ pub struct ToggleSwitch {
     /// Interpolates between 0.0 (off) and 1.0 (on) for smooth colour/circle
     /// position transitions; driven by `animation::Tween`.
     anim:      crate::animation::Tween,
+    /// Interpolates 0.0 → 1.0 while the mouse is pressed (ring expand) and
+    /// back to 0.0 on release (ring fade).  Mirrors MatterCAD's
+    /// `RoundedToggleSwitch` ripple overlay.
+    press_anim: crate::animation::Tween,
     on_change: Option<Box<dyn FnMut(bool)>>,
 }
 
@@ -69,6 +87,7 @@ impl ToggleSwitch {
             state_cell: None,
             hovered: false,
             anim: crate::animation::Tween::new(initial, ANIM_SECS),
+            press_anim: crate::animation::Tween::new(0.0, RING_ANIM_SECS),
             on_change: None,
         }
     }
@@ -191,6 +210,22 @@ impl Widget for ToggleSwitch {
         ctx.begin_path();
         ctx.circle(cx, cy, CIRCLE_R);
         ctx.fill();
+
+        // ── Press-ring overlay ─────────────────────────────────────────────
+        // Translucent disc centred on the toggle circle.  Radius grows with
+        // the press animation and colour follows the toggle state (accent
+        // when on, neutral stroke grey when off).  Alpha also scales with the
+        // tween so the ring fades in on press and fades out on release.
+        let ring_t = self.press_anim.tick();
+        if ring_t > 0.001 {
+            let toggle_color = if self.is_on() { v.accent } else { v.widget_stroke };
+            let alpha = RING_PEAK_ALPHA * (ring_t as f32);
+            ctx.set_fill_color(Color::rgba(
+                toggle_color.r, toggle_color.g, toggle_color.b, alpha));
+            ctx.begin_path();
+            ctx.circle(cx, cy, RING_MAX_R * ring_t);
+            ctx.fill();
+        }
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
@@ -200,11 +235,15 @@ impl Widget for ToggleSwitch {
                 EventResult::Ignored
             }
             Event::MouseDown { button: MouseButton::Left, .. } => {
-                // Consume on down so the widget "captures" the gesture.
+                // Consume on down so the widget "captures" the gesture, and
+                // start the press-ring expand animation.
+                self.press_anim.set_target(1.0);
                 EventResult::Consumed
             }
             Event::MouseUp { button: MouseButton::Left, pos, .. } => {
                 if self.hit_test(*pos) { self.toggle(); }
+                // Ring fades back out whether or not the release landed on us.
+                self.press_anim.set_target(0.0);
                 EventResult::Consumed
             }
             Event::KeyDown { key: Key::Char(' '), .. }
