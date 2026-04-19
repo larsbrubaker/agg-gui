@@ -157,6 +157,14 @@ impl MarkdownView {
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
     pub fn with_padding(mut self, p: f64) -> Self { self.padding = p; self }
 
+    /// Currently-active font — honours the thread-local system-font override
+    /// (`font_settings::current_system_font`) so system-font changes propagate
+    /// live without rebuilding the markdown view.
+    fn active_font(&self) -> Arc<Font> {
+        crate::font_settings::current_system_font()
+            .unwrap_or_else(|| Arc::clone(&self.font))
+    }
+
     /// Supply an image provider closure.
     ///
     /// The closure receives a URL/path string from the Markdown source and must
@@ -303,12 +311,13 @@ impl MarkdownView {
         let avail     = (max_w - indent).max(1.0);
         if text.is_empty() { return vec![("".to_string(), indent)]; }
 
+        let font = self.active_font();
         let mut lines: Vec<(String, f64)> = Vec::new();
         let mut current = String::new();
 
         for word in text.split_whitespace() {
             let candidate = if current.is_empty() { word.to_string() } else { format!("{} {}", current, word) };
-            let w = measure_text_metrics(&self.font, &candidate, font_size).width;
+            let w = measure_text_metrics(&font, &candidate, font_size).width;
             if w <= avail || current.is_empty() {
                 current = candidate;
             } else {
@@ -379,7 +388,7 @@ impl Widget for MarkdownView {
                         continue;
                     }
                     let font_size = style.font_size(self.font_size);
-                    let metrics   = measure_text_metrics(&self.font, "", font_size);
+                    let metrics   = measure_text_metrics(&self.active_font(), "", font_size);
                     let line_h    = metrics.line_height * 1.3;
 
                     if text.is_empty() {
@@ -449,7 +458,8 @@ impl Widget for MarkdownView {
         let v   = ctx.visuals();
         let pad = self.padding;
         let w   = self.bounds.width;
-        ctx.set_font(Arc::clone(&self.font));
+        let font = self.active_font();
+        ctx.set_font(Arc::clone(&font));
 
         for item in &self.items {
             match item {
@@ -459,7 +469,7 @@ impl Widget for MarkdownView {
 
                     let tx = pad + indent;
                     let ty = y + height * 0.5;
-                    let metrics = measure_text_metrics(&self.font, text.as_str(), fs);
+                    let metrics = measure_text_metrics(&font, text.as_str(), fs);
                     let text_y  = ty - (metrics.ascent - metrics.descent) * 0.5;
 
                     match style {

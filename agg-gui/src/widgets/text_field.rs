@@ -173,6 +173,15 @@ impl TextField {
         }
     }
 
+    /// Currently-active font — honours the thread-local system-font override
+    /// (`font_settings::current_system_font`) so changes in the System window
+    /// propagate live without a widget-tree rebuild.  Falls back to the font
+    /// passed at construction when no override is set.
+    fn active_font(&self) -> Arc<Font> {
+        crate::font_settings::current_system_font()
+            .unwrap_or_else(|| Arc::clone(&self.font))
+    }
+
     // ── Builder / setter methods ─────────────────────────────────────────────
 
     pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
@@ -254,12 +263,13 @@ impl TextField {
     /// Convert a pixel x position (in text-local space) to a byte offset in
     /// `real_text`.  In password mode, measures the masked string and maps back.
     fn click_to_cursor(&self, real_text: &str, tx: f64) -> usize {
+        let font = self.active_font();
         if self.password_mode {
             const BULLET: char = '•';
             const BULLET_LEN: usize = 3;
             let n      = real_text.chars().count();
             let masked = BULLET.to_string().repeat(n);
-            let disp   = byte_at_x(&self.font, &masked, self.font_size, tx);
+            let disp   = byte_at_x(&font, &masked, self.font_size, tx);
             // Map masked byte offset → char index → real byte offset.
             let char_idx = disp / BULLET_LEN;
             real_text.char_indices()
@@ -267,7 +277,7 @@ impl TextField {
                 .map(|(i, _)| i)
                 .unwrap_or(real_text.len())
         } else {
-            byte_at_x(&self.font, real_text, self.font_size, tx)
+            byte_at_x(&font, real_text, self.font_size, tx)
         }
     }
 
@@ -275,6 +285,7 @@ impl TextField {
     fn ensure_cursor_visible(&mut self) {
         if self.bounds.width < 1.0 { return; }
         let inner_w = (self.bounds.width - self.padding * 2.0).max(0.0);
+        let font = self.active_font();
         let cx = {
             let st = self.edit.borrow();
             if self.password_mode {
@@ -283,9 +294,9 @@ impl TextField {
                 const BULLET_LEN: usize = 3;
                 let n      = st.text[..st.cursor].chars().count();
                 let masked = BULLET.to_string().repeat(n);
-                measure_advance(&self.font, &masked, self.font_size)
+                measure_advance(&font, &masked, self.font_size)
             } else {
-                measure_advance(&self.font, &st.text[..st.cursor], self.font_size)
+                measure_advance(&font, &st.text[..st.cursor], self.font_size)
             }
         };
         if cx < self.scroll_x { self.scroll_x = cx; }
@@ -670,7 +681,8 @@ impl Widget for TextField {
         // ── Text area clip ────────────────────────────────────────────────
         ctx.clip_rect(pad, 0.0, (w - pad * 2.0).max(0.0), h);
 
-        ctx.set_font(Arc::clone(&self.font));
+        let font = self.active_font();
+        ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
 
         let m          = ctx.measure_text("Ag").unwrap_or_default();
@@ -681,8 +693,8 @@ impl Widget for TextField {
         if cursor != anchor {
             let lo = cursor.min(anchor);
             let hi = cursor.max(anchor);
-            let lo_x = measure_advance(&self.font, &text[..lo], self.font_size);
-            let hi_x = measure_advance(&self.font, &text[..hi], self.font_size);
+            let lo_x = measure_advance(&font, &text[..lo], self.font_size);
+            let hi_x = measure_advance(&font, &text[..hi], self.font_size);
             let sx   = (text_x + lo_x).max(pad);
             let sw   = (text_x + hi_x).min(w - pad) - sx;
             if sw > 0.0 {
@@ -756,12 +768,13 @@ impl Widget for TextField {
         let pad = self.padding;
         let v   = ctx.visuals();
 
-        ctx.set_font(Arc::clone(&self.font));
+        let font = self.active_font();
+        ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
         let m = ctx.measure_text("Ag").unwrap_or_default();
         let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
         let text_x     = pad - self.scroll_x;
-        let cx  = text_x + measure_advance(&self.font, &text[..cursor], self.font_size);
+        let cx  = text_x + measure_advance(&font, &text[..cursor], self.font_size);
         let top = baseline_y + m.ascent;
         let bot = baseline_y - m.descent;
 

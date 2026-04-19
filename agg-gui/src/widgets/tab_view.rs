@@ -247,7 +247,11 @@ impl Widget for TabView {
         ctx.line_to(w, bar_y);
         ctx.stroke();
 
-        ctx.set_font(Arc::clone(&self.font));
+        // Honour the thread-local system-font override so changes in the
+        // System window re-style tab titles live.
+        let font = crate::font_settings::current_system_font()
+            .unwrap_or_else(|| Arc::clone(&self.font));
+        ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
 
         // Tab labels
