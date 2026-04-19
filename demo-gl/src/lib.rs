@@ -95,16 +95,18 @@ const LCD_VERT: &str = "#version 300 es\nprecision mediump float;\nlayout(locati
 const LCD_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;layout(location=1)in vec2 a_uv;uniform vec2 u_resolution;out vec2 v_uv;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_uv=a_uv;}";
 
 // Fragment: sample the mask, output src colour on index 0 and the
-// coverage (with alpha=1 so the alpha blend slot doesn't go to 0) on
-// index 1.  Dual-source blending reads index 1 as SRC1.
+// coverage (scaled by src alpha so partial-alpha text fades correctly)
+// on index 1.  Dual-source blending reads index 1 as SRC1, giving
+// per-channel src-over: `dst = src * (cov * src.a) + dst * (1 - cov * src.a)`.
 //
 // Note on WebGL 2: dual-source isn't in the base spec, so we use a
-// traditional single-output fallback that just emits coverage-weighted
-// alpha — this is the "grayscale from LCD mask" degradation path.
+// traditional single-output fallback that emits coverage-weighted
+// (and alpha-weighted) alpha — this is the "grayscale from LCD mask"
+// degradation path.
 #[cfg(target_arch = "wasm32")]
-const LCD_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;out vec4 frag_color;void main(){vec3 c=texture(u_mask,v_uv).rgb;float a=(c.r+c.g+c.b)/3.0;frag_color=vec4(u_color.rgb,a);}";
+const LCD_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;out vec4 frag_color;void main(){vec3 c=texture(u_mask,v_uv).rgb;float a=((c.r+c.g+c.b)/3.0)*u_color.a;frag_color=vec4(u_color.rgb,a);}";
 #[cfg(not(target_arch = "wasm32"))]
-const LCD_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;layout(location=0,index=0)out vec4 out_color;layout(location=0,index=1)out vec4 out_coverage;void main(){vec3 c=texture(u_mask,v_uv).rgb;out_color=vec4(u_color.rgb,1.0);out_coverage=vec4(c,1.0);}";
+const LCD_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;layout(location=0,index=0)out vec4 out_color;layout(location=0,index=1)out vec4 out_coverage;void main(){vec3 c=texture(u_mask,v_uv).rgb;out_color=vec4(u_color.rgb,1.0);out_coverage=vec4(c*u_color.a,1.0);}";
 
 // LCD BACKBUFFER shader.  Composites an `LcdCoverage`-mode cached
 // backbuffer (two RGB8 textures: premultiplied colour plane + per-channel
@@ -1062,12 +1064,25 @@ impl DrawCtx for GlGfxCtx {
 
     #[cfg(target_arch = "wasm32")]
     fn has_lcd_mask_composite(&self) -> bool {
-        // WebGL 2 base spec lacks dual-source blending; the shader
-        // fallback degrades to grayscale-ish alpha compositing which
-        // produces visible colour fringing.  Report `false` so callers
-        // stick with the grayscale AA path on WASM until we wire the
-        // `EXT_blend_func_extended` check.
-        false
+        // WebGL 2 base spec lacks dual-source blending, so we can't do
+        // per-channel src-over on the GPU — the `LCD_FRAG`/`LCB_FRAG`
+        // WASM-path fallback shaders collapse the three coverage
+        // channels to a single average/max and composite via the
+        // standard `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend.  That's
+        // grayscale-equivalent output (no subpixel chroma) but it
+        // still routes text through **AGG-rasterised masks** instead
+        // of the tessellated-glyph path — net visibly sharper text
+        // on WebGL, which is what enabling the LCD pipeline at all
+        // gets us here.
+        //
+        // True subpixel chroma on WebGL 2 requires the
+        // `WEBGL_blend_func_extended` extension for dual-source
+        // blending — future work: query the extension at ctx init,
+        // store a flag, report it here, and branch shader selection +
+        // blend-func setup on that flag.  Every modern browser
+        // (Chrome, Firefox, Safari) ships the extension, so it's just
+        // plumbing.
+        true
     }
     #[cfg(not(target_arch = "wasm32"))]
     fn has_lcd_mask_composite(&self) -> bool { true }

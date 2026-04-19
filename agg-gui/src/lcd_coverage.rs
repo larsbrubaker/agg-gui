@@ -842,6 +842,7 @@ pub fn composite_lcd_mask(
     dst_y:    i32,
 ) {
     if mask.width == 0 || mask.height == 0 { return; }
+    let sa = src.a.clamp(0.0, 1.0);
     let sr = src.r.clamp(0.0, 1.0);
     let sg = src.g.clamp(0.0, 1.0);
     let sb = src.b.clamp(0.0, 1.0);
@@ -858,9 +859,14 @@ pub fn composite_lcd_mask(
             let dx = dst_x + mx;
             if dx < 0 || dx >= dst_w_i { continue; }
             let mi = ((my * mw + mx) * 3) as usize;
-            let cr = mask.data[mi]     as f32 / 255.0;
-            let cg = mask.data[mi + 1] as f32 / 255.0;
-            let cb = mask.data[mi + 2] as f32 / 255.0;
+            // Effective per-channel src-over weight is `mask_cov × src.a`.
+            // Callers using a Color with alpha < 1 (e.g. placeholder text
+            // painted in a half-opacity "dim" colour) depend on this to
+            // get a partially-faded blit; without the alpha modulation
+            // the blit is full-opacity regardless of src.a.
+            let cr = (mask.data[mi]     as f32 / 255.0) * sa;
+            let cg = (mask.data[mi + 1] as f32 / 255.0) * sa;
+            let cb = (mask.data[mi + 2] as f32 / 255.0) * sa;
             if cr == 0.0 && cg == 0.0 && cb == 0.0 { continue; }
 
             let di = ((dy * dst_w_i + dx) * 4) as usize;
@@ -963,6 +969,36 @@ mod tests {
             .sum();
         assert!(sum_black > 0,
                 "light-on-black composite left every pixel black");
+    }
+
+    /// `composite_lcd_mask` must honour `src.a` — multiply each channel's
+    /// coverage by the source alpha.  Without this, partial-alpha text
+    /// (e.g. a placeholder drawn in a half-opacity "dim" colour) blits
+    /// at full opacity, looking solid instead of faded.
+    ///
+    /// Regression test for the bug visible in the search-box placeholder
+    /// where "Search..." rendered at full intensity in LCD mode.
+    #[test]
+    fn test_composite_lcd_mask_honours_src_alpha() {
+        // Single pixel, full coverage on all three channels.
+        let mask = LcdMask { data: vec![255, 255, 255], width: 1, height: 1 };
+
+        // Opaque black on white → full black.
+        let mut fb_full = vec![255u8, 255, 255, 255];
+        composite_lcd_mask(&mut fb_full, 1, 1, &mask, Color::rgba(0.0, 0.0, 0.0, 1.0), 0, 0);
+        assert_eq!(fb_full[0], 0, "alpha=1 black-on-white should fully cover → R=0");
+
+        // Half-alpha black on white → ~50% grey.
+        let mut fb_half = vec![255u8, 255, 255, 255];
+        composite_lcd_mask(&mut fb_half, 1, 1, &mask, Color::rgba(0.0, 0.0, 0.0, 0.5), 0, 0);
+        // Expected: cov = 1.0 × 0.5 = 0.5; dst = 0×0.5 + 255×0.5 ≈ 128.
+        assert!(fb_half[0] >= 120 && fb_half[0] <= 135,
+            "alpha=0.5 black-on-white should land near R=128, got {}", fb_half[0]);
+
+        // Zero-alpha: dst unchanged.
+        let mut fb_zero = vec![255u8, 255, 255, 255];
+        composite_lcd_mask(&mut fb_zero, 1, 1, &mask, Color::rgba(0.0, 0.0, 0.0, 0.0), 0, 0);
+        assert_eq!(fb_zero[0], 255, "alpha=0 must leave destination untouched");
     }
 
     // ── LcdBuffer paint primitives ──────────────────────────────────────────

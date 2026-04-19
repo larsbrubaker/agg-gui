@@ -292,24 +292,26 @@ impl Widget for Label {
     fn lcd_preference(&self) -> Option<bool> { self.lcd_pref }
 
     fn backbuffer_cache_mut(&mut self) -> Option<&mut crate::widget::BackbufferCache> {
-        // Cache only when LCD is off.  Label is a transparent overlay —
-        // it paints text only, no bg — so it doesn't satisfy the
-        // `LcdCoverage` contract ("paint opaque fills covering full
-        // bounds") and can't safely use an LCD backbuffer.  A
-        // parent-seeded LCD cache would work once but go stale the
-        // moment the widget scrolls, reparents, or its parent bg
-        // changes (the seed bakes in the parent's pixels at cache
-        // time).  When LCD is on, Label instead paints directly
-        // through the parent ctx — the parent's `GfxCtx` has
-        // `lcd_mode=true` globally, or a future LcdCoverage-mode
-        // parent widget provides an `LcdGfxCtx` that Label's
-        // `fill_text` flows into correctly.  Either way LCD quality
-        // is preserved without caching a screen-position-sensitive
-        // bitmap.
-        if self.buffered && !crate::font_settings::lcd_enabled() {
-            Some(&mut self.cache)
+        // Cache always when `buffered`.  Mode is chosen by
+        // `backbuffer_mode` below — LCD on → per-channel LcdCoverage
+        // buffer, LCD off → Rgba buffer.  Per-channel alpha means
+        // unpainted pixels stay `alpha = 0` and blit leaves parent
+        // unchanged there, so no scroll-stale cache problem (that
+        // was a dead end from the seed-from-parent approach we ripped
+        // out).
+        if self.buffered { Some(&mut self.cache) } else { None }
+    }
+
+    fn backbuffer_mode(&self) -> crate::widget::BackbufferMode {
+        // Dispatching on the global LCD flag means toggling the
+        // setting automatically rebuilds every cached label in the
+        // right format — `paint_subtree_backbuffered` detects the
+        // mode flip via `cache.lcd_alpha.is_some()` vs the requested
+        // mode and forces a re-raster.
+        if crate::font_settings::lcd_enabled() {
+            crate::widget::BackbufferMode::LcdCoverage
         } else {
-            None
+            crate::widget::BackbufferMode::Rgba
         }
     }
 
@@ -379,6 +381,17 @@ impl Widget for Label {
 
         let is_wrapped = self.wrap && !self.wrapped_lines.is_empty();
 
+        // Clip text rendering to the label's bounds.  `Label::layout`
+        // clamps its returned width to `available.width`, so a long
+        // label inside a narrow parent gets bounds narrower than the
+        // text's natural width.  The backbuffered path (grayscale cache)
+        // implicitly clips at the bitmap's edges; the direct-paint path
+        // (LCD mode) would otherwise draw glyphs past the bounds.  An
+        // explicit clip makes both modes behave identically — text
+        // never escapes the label's rect.
+        ctx.save();
+        ctx.clip_rect(0.0, 0.0, w, h);
+
         // Labels always paint through `ctx.fill_text` — the backend
         // decides LCD vs grayscale AA internally based on
         // `font_settings::lcd_enabled()` and whether it can composite
@@ -410,6 +423,8 @@ impl Widget for Label {
             };
             ctx.fill_text(&self.text, tx, ty);
         }
+
+        ctx.restore();
     }
 
     fn margin(&self)   -> Insets  { self.base.margin }

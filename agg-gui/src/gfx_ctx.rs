@@ -823,6 +823,7 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         let origin_x = sx.round() as i32;
         let origin_y = sy.round() as i32;
 
+        let sa = src_color.a.clamp(0.0, 1.0);
         let sr = src_color.r.clamp(0.0, 1.0);
         let sg = src_color.g.clamp(0.0, 1.0);
         let sb = src_color.b.clamp(0.0, 1.0);
@@ -841,9 +842,11 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
                 let dx = origin_x + mx;
                 if dx < 0 || dx >= fw_i { continue; }
                 let mi = ((my * mw_i + mx) * 3) as usize;
-                let cr = mask[mi]     as f32 / 255.0;
-                let cg = mask[mi + 1] as f32 / 255.0;
-                let cb = mask[mi + 2] as f32 / 255.0;
+                // Per-channel coverage × src alpha — partial-alpha src
+                // (e.g. `text_dim` placeholder colour) fades proportionally.
+                let cr = (mask[mi]     as f32 / 255.0) * sa;
+                let cg = (mask[mi + 1] as f32 / 255.0) * sa;
+                let cb = (mask[mi + 2] as f32 / 255.0) * sa;
                 if cr == 0.0 && cg == 0.0 && cb == 0.0 { continue; }
                 let di = ((dy * fw_i + dx) * 4) as usize;
                 let dr = pixels[di]     as f32 / 255.0;
