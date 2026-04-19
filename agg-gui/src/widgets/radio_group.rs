@@ -3,6 +3,8 @@
 //! Each option label is rendered through a backbuffered [`Label`] child,
 //! so glyph rasterization is cached and only repeated when text or color changes.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::event::{Event, EventResult, Key, MouseButton};
@@ -34,6 +36,9 @@ pub struct RadioGroup {
     on_change: Option<Box<dyn FnMut(usize)>>,
     /// One backbuffered Label per option.
     label_widgets: Vec<Label>,
+    /// Optional external mirror of `selected` — same bidirectional-binding
+    /// pattern as `Slider::with_value_cell` / `ToggleSwitch::with_state_cell`.
+    selected_cell: Option<Rc<Cell<usize>>>,
 }
 
 impl RadioGroup {
@@ -56,7 +61,19 @@ impl RadioGroup {
             font_size,
             on_change: None,
             label_widgets,
+            selected_cell: None,
         }
+    }
+
+    /// Bind this group's selection to an external `Rc<Cell<usize>>`.  The
+    /// cell is read each layout and written on every selection change, so
+    /// two RadioGroups sharing one cell stay in lock-step.
+    pub fn with_selected_cell(mut self, cell: Rc<Cell<usize>>) -> Self {
+        let n = self.options.len();
+        let v = cell.get();
+        if n > 0 { self.selected = v.min(n - 1); }
+        self.selected_cell = Some(cell);
+        self
     }
 
     pub fn with_font_size(mut self, size: f64) -> Self {
@@ -83,11 +100,15 @@ impl RadioGroup {
     pub fn selected(&self) -> usize { self.selected }
 
     pub fn set_selected(&mut self, idx: usize) {
-        if idx < self.options.len() { self.selected = idx; }
+        if idx < self.options.len() {
+            self.selected = idx;
+            if let Some(cell) = &self.selected_cell { cell.set(idx); }
+        }
     }
 
     fn fire(&mut self) {
         let idx = self.selected;
+        if let Some(cell) = &self.selected_cell { cell.set(idx); }
         if let Some(cb) = self.on_change.as_mut() { cb(idx); }
     }
 
@@ -129,6 +150,15 @@ impl Widget for RadioGroup {
     fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Pick up external-cell writes every frame (e.g. the System
+        // window's typeface radio driving this demo's radio).
+        if let Some(cell) = &self.selected_cell {
+            let n = self.options.len();
+            if n > 0 {
+                let v = cell.get().min(n - 1);
+                self.selected = v;
+            }
+        }
         let h = self.options.len() as f64 * ROW_H;
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
         let label_avail_w = (available.width - DOT_R * 2.0 - GAP).max(0.0);

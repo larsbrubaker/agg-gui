@@ -471,6 +471,17 @@ struct LcdMaskKey {
     text:      String,
     font_ptr:  usize,
     size_bits: u64,
+    /// Typography-style fingerprint — every parameter that `shape_text`
+    /// now applies must be part of the cache key, or a slider drag would
+    /// keep serving stale masks rendered in the previous style.  Bits
+    /// are read off the f64s so we inherit `Eq` / `Hash`.
+    width_bits:          u64,
+    italic_bits:         u64,
+    interval_bits:       u64,
+    hint_y:              bool,
+    faux_weight_bits:    u64,
+    primary_weight_bits: u64,
+    gamma_bits:          u64,
 }
 
 struct LcdMaskEntry {
@@ -498,10 +509,27 @@ pub fn rasterize_text_lcd_cached(
     text: &str,
     size: f64,
 ) -> CachedLcdText {
+    // Snapshot the current typography style once so the same values
+    // used for the cache key are also used to size the mask below.
+    let width_now    = crate::font_settings::current_width();
+    let italic_now   = crate::font_settings::current_faux_italic();
+    let interval_now = crate::font_settings::current_interval();
+    let hint_y_now   = crate::font_settings::hinting_enabled();
+    let fweight_now  = crate::font_settings::current_faux_weight();
+    let pweight_now  = crate::font_settings::current_primary_weight();
+    let gamma_now    = crate::font_settings::current_gamma();
+
     let key = LcdMaskKey {
         text:      text.to_string(),
         font_ptr:  Arc::as_ptr(font) as *const () as usize,
         size_bits: size.to_bits(),
+        width_bits:          width_now.to_bits(),
+        italic_bits:         italic_now.to_bits(),
+        interval_bits:       interval_now.to_bits(),
+        hint_y:              hint_y_now,
+        faux_weight_bits:    fweight_now.to_bits(),
+        primary_weight_bits: pweight_now.to_bits(),
+        gamma_bits:          gamma_now.to_bits(),
     };
     // Cache hit path — bump LRU, return shared Arc.
     let hit = MASK_CACHE.with(|m| {
@@ -527,9 +555,18 @@ pub fn rasterize_text_lcd_cached(
 
     // Cache miss — run the rasteriser.
     let m   = measure_text_metrics(font, text, size);
-    let bw  = (m.width  + MASK_PAD * 2.0).ceil().max(1.0) as u32;
+    // Extra horizontal slack when Width != 1.0 (last glyph outline is
+    // scaled beyond its advance) or Faux Italic != 0 (shear lifts the
+    // top-right of each glyph past the advance column).  Without this
+    // a slider drag past 1.0/0 would crop glyph stems at the mask
+    // edges.
+    let width_slack  = (width_now - 1.0).abs() * size;
+    let italic_slack = (italic_now.abs() / 3.0) * (m.ascent + m.descent);
+    let extra_pad    = (width_slack + italic_slack).ceil();
+    let pad_x        = MASK_PAD + extra_pad;
+    let bw  = (m.width  + pad_x   * 2.0).ceil().max(1.0) as u32;
     let bh  = (m.ascent + m.descent + MASK_PAD * 2.0).ceil().max(1.0) as u32;
-    let bx  = MASK_PAD;
+    let bx  = pad_x;
     let by  = MASK_PAD + m.descent;
     let mask = rasterize_lcd_mask(
         font, text, size, bx, by, bw, bh, &TransAffine::new(),
@@ -579,9 +616,36 @@ pub struct LcdMask {
 
 /// FreeType-default 5-tap weights; sum = 9.  Heavier filter weights reduce
 /// colour fringing at the cost of sharpness; tuning against this table is
-/// the standard knob for "darker / lighter" LCD text.
+/// the standard knob for "darker / lighter" LCD text.  These are the
+/// legacy baked-in weights — still used as the fallback when the
+/// Primary Weight global sits at its default `1/3` (at which point
+/// `lcd_filter_weights()` below reproduces `[1, 2, 3, 2, 1] / 9`).
 const FILTER_WEIGHTS: [u32; 5] = [1, 2, 3, 2, 1];
 const FILTER_SUM:     u32       = 9;
+
+/// Per-frame tap weights for the 5-tap LCD filter, as f64 pre-normalised
+/// so the five samples always sum to 1.0.  Parameterised on the Primary
+/// Weight global (`font_settings::current_primary_weight`): the middle
+/// tap carries `p * 9` units, the two shoulder taps 2 each, the two
+/// outer taps 1 each — a direct analogue of the agg-rust
+/// `LcdDistributionLut::new(primary, 2/9, 1/9)` construction.
+///
+/// Called once per mask rasterisation; the inner loop multiplies each
+/// sample by the corresponding weight.  At the default `primary = 1/3`
+/// the output is identical (up to rounding) to the legacy integer
+/// `[1, 2, 3, 2, 1] / 9` filter.
+fn lcd_filter_weights() -> [f64; 5] {
+    let p_units = crate::font_settings::current_primary_weight() * 9.0;
+    let weights = [1.0, 2.0, p_units, 2.0, 1.0];
+    let sum = weights.iter().sum::<f64>().max(1e-9);
+    [
+        weights[0] / sum,
+        weights[1] / sum,
+        weights[2] / sum,
+        weights[3] / sum,
+        weights[4] / sum,
+    ]
+}
 
 /// Rasterize `text` at baseline `(x, y)` into a 3-channel coverage mask
 /// of size `mask_w × mask_h`.  `transform` is applied before the 3× X
@@ -786,6 +850,73 @@ where F: FnOnce(&mut dyn FnMut(&mut PathStorage)),
 /// packed `(R,G,B)` mask.  See module docs for the per-channel formula
 /// and phase shift.
 fn apply_5_tap_filter(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec<u8> {
+    // Decide once whether the current parameters reproduce the legacy
+    // integer filter exactly.  When they do (primary = 1/3, gamma = 1),
+    // run the original byte-for-byte path so every label cached before
+    // any slider-driven raster produces the EXACT same bytes it did
+    // pre-phase-3.  This is a correctness fast path, not just a
+    // performance one — f64 arithmetic on e.g. (128+256+384+256+128)/9
+    // rounds to 127.999… which truncates to 127, where the integer
+    // version gives a clean 128.  Sub-u8 drift on cached masks is
+    // invisible in isolation but accumulates into a faint "fade"
+    // across a paragraph of text, so we keep the old path exact.
+    let primary  = crate::font_settings::current_primary_weight();
+    let gamma    = crate::font_settings::current_gamma();
+    let is_default_primary = ((primary - 1.0 / 3.0).abs()) < 1e-6;
+    let is_default_gamma   = ((gamma - 1.0).abs()) < 1e-6;
+    if is_default_primary && is_default_gamma {
+        return apply_5_tap_filter_legacy(gray, gray_w, mask_w, mask_h);
+    }
+
+    let mut data = vec![0u8; (mask_w as usize) * (mask_h as usize) * 3];
+    let gw = gray_w as i32;
+    // Parameterised path — f64 weights driven by Primary Weight, plus
+    // a gamma curve applied to the per-channel coverage AFTER the
+    // filter sum so light AA edges strengthen or weaken uniformly.
+    let w = lcd_filter_weights();
+    let inv_g = 1.0 / gamma.max(1e-3);
+    let need_gamma = !is_default_gamma;
+    let apply_gamma = |c: f64| -> f64 {
+        if !need_gamma { return c; }
+        let t = (c / 255.0).clamp(0.0, 1.0);
+        t.powf(inv_g) * 255.0
+    };
+    for py in 0..mask_h {
+        let row_start = (py as usize) * (gray_w as usize);
+        let row = &gray[row_start .. row_start + gray_w as usize];
+        for px in 0..mask_w {
+            let base = (px as i32) * 3;
+            let sample = |off: i32| -> f64 {
+                let pos = base + off;
+                if pos < 0 || pos >= gw { 0.0 } else { row[pos as usize] as f64 }
+            };
+            // R samples [-2..=2], G shifts +1, B shifts +2 (phase offsets
+            // between the three physical subpixels of the output pixel).
+            let cov_r = w[0] * sample(-2) + w[1] * sample(-1)
+                      + w[2] * sample( 0) + w[3] * sample( 1)
+                      + w[4] * sample( 2);
+            let cov_g = w[0] * sample(-1) + w[1] * sample( 0)
+                      + w[2] * sample( 1) + w[3] * sample( 2)
+                      + w[4] * sample( 3);
+            let cov_b = w[0] * sample( 0) + w[1] * sample( 1)
+                      + w[2] * sample( 2) + w[3] * sample( 3)
+                      + w[4] * sample( 4);
+            let mi = ((py as usize) * (mask_w as usize) + (px as usize)) * 3;
+            // `.round()` here matches the classic integer filter's
+            // rounding semantics more closely than bare `as u8` (which
+            // truncates) — minor but measurable difference near mid-gray.
+            data[mi]     = apply_gamma(cov_r).round().clamp(0.0, 255.0) as u8;
+            data[mi + 1] = apply_gamma(cov_g).round().clamp(0.0, 255.0) as u8;
+            data[mi + 2] = apply_gamma(cov_b).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    data
+}
+
+/// Byte-exact legacy 5-tap filter — preserved for the
+/// primary-weight = 1/3, gamma = 1 default path so cached text
+/// rasterised before phase 3 matches what we produce now.
+fn apply_5_tap_filter_legacy(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec<u8> {
     let mut data = vec![0u8; (mask_w as usize) * (mask_h as usize) * 3];
     let gw = gray_w as i32;
     for py in 0..mask_h {
@@ -797,8 +928,6 @@ fn apply_5_tap_filter(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec
                 let pos = base + off;
                 if pos < 0 || pos >= gw { 0 } else { row[pos as usize] as u32 }
             };
-            // R samples [-2..=2], G shifts +1, B shifts +2 (phase offsets
-            // between the three physical subpixels of the output pixel).
             let cov_r = (FILTER_WEIGHTS[0] * sample(-2)
                        + FILTER_WEIGHTS[1] * sample(-1)
                        + FILTER_WEIGHTS[2] * sample(0)

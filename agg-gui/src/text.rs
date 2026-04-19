@@ -28,8 +28,11 @@ pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
 use std::sync::Arc;
 
 use agg_rust::basics::{is_end_poly, is_move_to, is_stop, PATH_CMD_LINE_TO, PATH_FLAGS_NONE, VertexSource};
+use agg_rust::conv_contour::ConvContour;
 use agg_rust::conv_curve::ConvCurve;
+use agg_rust::conv_transform::ConvTransform;
 use agg_rust::path_storage::PathStorage;
+use agg_rust::trans_affine::TransAffine;
 
 /// Metrics describing a single line of shaped text.
 #[derive(Debug, Clone, Copy, Default)]
@@ -151,11 +154,24 @@ impl Font {
 ///
 /// TTF fonts are Y-up; GfxCtx is Y-up — no axis flip is needed. Each glyph
 /// is translated to its screen position `(ox, oy)` and scaled by `scale`.
+///
+/// The builder can optionally apply two of the `font_settings` typography
+/// transforms directly at outline-construction time:
+/// - `width_scale` — horizontal scale applied to every glyph vertex,
+///   leaving advances untouched (matches AGG `truetype_lcd.cpp` "Width").
+/// - `italic_shear` — horizontal shear as a fraction of Y: `x += y *
+///   italic_shear`.  Matches the C++ "Faux Italic" which applies
+///   `TransAffine::new_skewing(faux_italic/3, 0)`; the `/3` convention
+///   keeps the slider range comparable.
 pub(crate) struct GlyphPathBuilder {
     pub path: PathStorage,
     ox: f64,
     oy: f64,
     scale: f64,
+    /// Horizontal-only outline scale.  Default `1.0`.
+    width_scale: f64,
+    /// Italic shear factor (x += y * italic_shear).  Default `0.0`.
+    italic_shear: f64,
     pub has_outline: bool,
 }
 
@@ -166,32 +182,55 @@ impl GlyphPathBuilder {
             ox,
             oy,
             scale,
+            width_scale: 1.0,
+            italic_shear: 0.0,
             has_outline: false,
         }
     }
 
+    /// Enable Width + Faux-Italic transforms for this glyph.  `width`
+    /// multiplies every outline X after font-scaling; `italic` shears
+    /// horizontally proportional to the vertex's Y above the baseline
+    /// (positive italic slants top-right, matching the AGG reference).
+    #[allow(dead_code)]
+    pub fn with_style(mut self, width: f64, italic: f64) -> Self {
+        self.width_scale  = width;
+        self.italic_shear = italic;
+        self
+    }
+
+    /// Pixel-space X of a font-unit input vertex.
+    ///
+    /// `italic_shear` uses the **unsheared** Y (distance above baseline)
+    /// so the shear stays consistent whether or not hinting has snapped
+    /// the glyph origin — the shear depends on glyph geometry, not on
+    /// where the baseline landed on screen.
     #[inline]
-    fn x(&self, v: f32) -> f64 { self.ox + v as f64 * self.scale }
+    fn x(&self, v: f32, y_raw: f32) -> f64 {
+        let base_x = self.ox + v as f64 * self.scale * self.width_scale;
+        let shear  = y_raw as f64 * self.scale * self.italic_shear;
+        base_x + shear
+    }
     #[inline]
     fn y(&self, v: f32) -> f64 { self.oy + v as f64 * self.scale }
 }
 
 impl ttf_parser::OutlineBuilder for GlyphPathBuilder {
     fn move_to(&mut self, x: f32, y: f32) {
-        self.path.move_to(self.x(x), self.y(y));
+        self.path.move_to(self.x(x, y), self.y(y));
         self.has_outline = true;
     }
     fn line_to(&mut self, x: f32, y: f32) {
-        self.path.line_to(self.x(x), self.y(y));
+        self.path.line_to(self.x(x, y), self.y(y));
     }
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.path.curve3(self.x(x1), self.y(y1), self.x(x), self.y(y));
+        self.path.curve3(self.x(x1, y1), self.y(y1), self.x(x, y), self.y(y));
     }
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         self.path.curve4(
-            self.x(x1), self.y(y1),
-            self.x(x2), self.y(y2),
-            self.x(x),  self.y(y),
+            self.x(x1, y1), self.y(y1),
+            self.x(x2, y2), self.y(y2),
+            self.x(x,  y),  self.y(y),
         );
     }
     fn close(&mut self) {
@@ -210,6 +249,54 @@ impl ttf_parser::OutlineBuilder for GlyphPathBuilder {
 /// Walks the fallback font chain via [`shape_glyphs`], so Font Awesome /
 /// emoji glyphs not present in the primary font are still resolved and
 /// rasterized using the font they live in.
+/// Apply the "faux weight" outline offset to a glyph path.
+///
+/// Port of the AGG C++ `truetype_lcd.cpp` technique:
+/// ```text
+///   curves -> scale(1, 100) -> ConvContour(width=w) -> scale(1, 1/100)
+/// ```
+/// The Y-zoom makes the contour offset act primarily horizontally —
+/// vertical stems pick up the full `w` of extra thickness while
+/// horizontal strokes stay thin, which is what you want for bold-like
+/// weight.  Returns a fresh `PathStorage` containing the offset outline
+/// flattened to straight segments (ConvCurve has already subdivided the
+/// Béziers by the time ConvContour sees them).
+///
+/// `weight_px` is the raw contour width — matches the agg-rust
+/// `contour.set_width(-faux_weight * height / 15.0)` convention; pass
+/// the already-sign-flipped, already-scaled value.
+fn apply_faux_weight(path: PathStorage, weight_px: f64) -> PathStorage {
+    if weight_px.abs() < 1e-4 { return path; }
+    let mut src = path;
+    let mut curves    = ConvCurve::new(&mut src);
+    let zoom_in       = TransAffine::new_scaling(1.0, 100.0);
+    let mut zoomed_in = ConvTransform::new(&mut curves, zoom_in);
+    let mut contour   = ConvContour::new(&mut zoomed_in);
+    contour.set_auto_detect_orientation(false);
+    contour.set_width(weight_px);
+    let zoom_out      = TransAffine::new_scaling(1.0, 1.0 / 100.0);
+    let mut out       = ConvTransform::new(&mut contour, zoom_out);
+
+    // Flatten the VertexSource chain into a fresh PathStorage.  ConvCurve
+    // has converted all Béziers to line-segments by the time we get here,
+    // so the output is only `move_to` / `line_to` / `end_poly` commands.
+    let mut result = PathStorage::new();
+    out.rewind(0);
+    loop {
+        let (mut vx, mut vy) = (0.0_f64, 0.0_f64);
+        let cmd = out.vertex(&mut vx, &mut vy);
+        if is_stop(cmd) { break; }
+        if is_move_to(cmd) {
+            result.move_to(vx, vy);
+        } else if cmd == PATH_CMD_LINE_TO {
+            result.line_to(vx, vy);
+        } else if is_end_poly(cmd) {
+            result.close_polygon(PATH_FLAGS_NONE);
+        }
+    }
+    result
+}
+
 pub(crate) fn shape_text(
     font: &Font,
     text: &str,
@@ -219,28 +306,73 @@ pub(crate) fn shape_text(
 ) -> (Vec<PathStorage>, f64) {
     let shaped = shape_glyphs(font, text, size);
 
+    // Pull the current typography-style globals ONCE per call.  The
+    // text render path consults them here so any widget (including the
+    // LCD Subpixel demo's sliders) that writes through `font_settings`
+    // affects the next paint.
+    //
+    // - `width_scale`  → horizontal outline scale per glyph
+    // - `italic_shear` → faux-italic (0..1 range maps to /3 in the
+    //   outline shear, matching the agg-rust reference)
+    // - `hint_y`       → snap the glyph-origin Y to whole pixels
+    //                    (Y-axis-only hinting, matches `(y+0.5).floor()`)
+    // - `interval_px`  → extra pen advance in pixels per glyph,
+    //                    proportional to em size
+    let width_scale  = crate::font_settings::current_width();
+    let italic_shear = crate::font_settings::current_faux_italic() / 3.0;
+    let hint_y       = crate::font_settings::hinting_enabled();
+    let interval_em  = crate::font_settings::current_interval();
+    let interval_px  = interval_em * size;
+    // Faux weight — negative sign matches agg-rust: +faux_weight
+    // thickens (contour width negative expands outward for a CCW
+    // outline), -faux_weight thins.  The `/15.0` denominator reproduces
+    // the reference demo's slider-to-pixels conversion.
+    let faux_weight  = crate::font_settings::current_faux_weight();
+    let weight_px    = if faux_weight.abs() < 0.05 {
+        0.0  // dead zone near 0, matches reference — avoids zero-width noise
+    } else {
+        -faux_weight * size / 15.0
+    };
+
     let mut paths = Vec::new();
     let mut pen_x = x;
     let mut total_advance = 0.0;
 
     for g in &shaped {
         let gx = pen_x + g.x_offset;
-        let gy = y + g.y_offset;
+        let gy_unsnapped = y + g.y_offset;
+        // Hinting: snap the glyph origin's Y to the integer pixel
+        // nearest the logical baseline.  Matches the AGG C++
+        // `(y + 0.5).floor()` convention — simple, cheap, preserves
+        // horizontal subpixel positioning.
+        let gy = if hint_y {
+            (gy_unsnapped + 0.5).floor()
+        } else {
+            gy_unsnapped
+        };
         // glyph_id indexes into whichever font resolved the code point.
         let render_font = g.fallback_font.as_deref().unwrap_or(font);
         let scale = size / render_font.units_per_em() as f64;
 
-        let mut builder = GlyphPathBuilder::new(gx, gy, scale);
+        let mut builder = GlyphPathBuilder::new(gx, gy, scale)
+            .with_style(width_scale, italic_shear);
         let has_outline = render_font.with_ttf_face(|face| {
             face.outline_glyph(ttf_parser::GlyphId(g.glyph_id), &mut builder)
                 .is_some()
         });
         if has_outline && builder.has_outline {
-            paths.push(builder.path);
+            // Apply faux weight (zero-cost pass-through at weight_px == 0).
+            let path = apply_faux_weight(builder.path, weight_px);
+            paths.push(path);
         }
 
-        pen_x += g.x_advance;
-        total_advance += g.x_advance;
+        // Interval adds a fixed pen-advance delta per glyph, in pixels.
+        // Applied after the font-native advance so kerning (already
+        // baked into x_advance by rustybuzz) is preserved — the extra
+        // spacing just piles on top.
+        let advance = g.x_advance + interval_px;
+        pen_x += advance;
+        total_advance += advance;
     }
     (paths, total_advance)
 }
@@ -450,11 +582,16 @@ thread_local! {
 ///
 /// Delegates to [`shape_glyphs`] so that fallback-font advances are included
 /// in the measurement.  Results are cached via the shared shape cache.
+///
+/// The measurement matches what `shape_text` will actually pen at paint
+/// time — so `interval` (extra letter-spacing) is added here too.  Width
+/// and italic are ignored: width only affects per-glyph outline scale,
+/// not advances, and italic shears the outline which doesn't change the
+/// horizontal extent of the pen walk.
 pub fn measure_advance(font: &Font, text: &str, size: f64) -> f64 {
-    shape_glyphs(font, text, size)
-        .iter()
-        .map(|g| g.x_advance)
-        .sum()
+    let shaped = shape_glyphs(font, text, size);
+    let interval_px = crate::font_settings::current_interval() * size;
+    shaped.iter().map(|g| g.x_advance + interval_px).sum()
 }
 
 #[cfg(test)]

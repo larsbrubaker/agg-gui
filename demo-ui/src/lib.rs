@@ -309,6 +309,7 @@ const DEMOS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F0D0} Highlighting",           label: "\u{F0D0} Highlighting",           group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F1B3} 3D Cube",               label: "\u{F1B3} 3D Cube",                group: "Graphics", open: false, win_w: 300.0, win_h: 260.0 },
     DemoSpec { title: "\u{F013} System",                 label: "\u{F013} System",                 group: "Graphics", open: false, win_w: 520.0, win_h: 640.0 },
+    DemoSpec { title: "\u{F031} LCD Subpixel",           label: "\u{F031} LCD Subpixel",           group: "Graphics", open: false, win_w: 640.0, win_h: 720.0 },
 
     // ── Interaction ──
     DemoSpec { title: "\u{F0B2} Drag and Drop",          label: "\u{F0B2} Drag and Drop",          group: "Interaction", open: false, win_w: WIN_W, win_h: WIN_H },
@@ -459,9 +460,35 @@ pub fn build_demo_ui(
     let hinting_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
         initial_state.as_ref().map(|s| s.hinting_enabled).unwrap_or(false)
     ));
+    // Typography-style cells.  Defaults match the agg-rust `truetype_test`
+    // reference so first-run users see the neutral / no-effect state.
+    let gamma_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.gamma).unwrap_or(1.0)
+    ));
+    let width_scale_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.width_scale).unwrap_or(1.0)
+    ));
+    let interval_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.interval).unwrap_or(0.0)
+    ));
+    let faux_weight_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.faux_weight).unwrap_or(0.0)
+    ));
+    let faux_italic_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.faux_italic).unwrap_or(0.0)
+    ));
+    let primary_weight_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.primary_weight).unwrap_or(1.0 / 3.0)
+    ));
     agg_gui::font_settings::set_font_size_scale(font_size_scale_cell.get());
     agg_gui::font_settings::set_lcd_enabled    (lcd_enabled_cell.get());
     agg_gui::font_settings::set_hinting_enabled(hinting_enabled_cell.get());
+    agg_gui::font_settings::set_gamma         (gamma_cell.get());
+    agg_gui::font_settings::set_width         (width_scale_cell.get());
+    agg_gui::font_settings::set_interval      (interval_cell.get());
+    agg_gui::font_settings::set_faux_weight   (faux_weight_cell.get());
+    agg_gui::font_settings::set_faux_italic   (faux_italic_cell.get());
+    agg_gui::font_settings::set_primary_weight(primary_weight_cell.get());
     if let Some(name) = font_name_cell.borrow().as_ref() {
         if let Some(f) = windows::load_font_by_name(name) {
             agg_gui::font_settings::set_system_font(Some(f));
@@ -474,6 +501,12 @@ pub fn build_demo_ui(
         font_size_scale: Rc::clone(&font_size_scale_cell),
         lcd_enabled:     Rc::clone(&lcd_enabled_cell),
         hinting_enabled: Rc::clone(&hinting_enabled_cell),
+        gamma:           Rc::clone(&gamma_cell),
+        width_scale:     Rc::clone(&width_scale_cell),
+        interval:        Rc::clone(&interval_cell),
+        faux_weight:     Rc::clone(&faux_weight_cell),
+        faux_italic:     Rc::clone(&faux_italic_cell),
+        primary_weight:  Rc::clone(&primary_weight_cell),
     });
 
     // ── Reset cells — one per window ───────────────────────────────────────────
@@ -744,6 +777,12 @@ pub fn build_demo_ui(
         let font_scale  = Rc::clone(&font_size_scale_cell);
         let lcd_cell    = Rc::clone(&lcd_enabled_cell);
         let hint_cell   = Rc::clone(&hinting_enabled_cell);
+        let gamma       = Rc::clone(&gamma_cell);
+        let width_scl   = Rc::clone(&width_scale_cell);
+        let interval    = Rc::clone(&interval_cell);
+        let fweight     = Rc::clone(&faux_weight_cell);
+        let fitalic     = Rc::clone(&faux_italic_cell);
+        let pweight     = Rc::clone(&primary_weight_cell);
         move || {
             // Close every window.
             for c in &demo_open { c.set(false); }
@@ -757,14 +796,29 @@ pub fn build_demo_ui(
                 cell.set(Some(r));
             }
             // System settings → defaults (both runtime globals + cells).
+            // Every typography-style parameter goes back to its
+            // pass-through value so the Reset button gives the app the
+            // exact render it had before phase 2/3 landed.
             agg_gui::font_settings::set_system_font(None);
             agg_gui::font_settings::set_font_size_scale(1.0);
             agg_gui::font_settings::set_lcd_enabled    (false);
             agg_gui::font_settings::set_hinting_enabled(false);
+            agg_gui::font_settings::set_gamma         (1.0);
+            agg_gui::font_settings::set_width         (1.0);
+            agg_gui::font_settings::set_interval      (0.0);
+            agg_gui::font_settings::set_faux_weight   (0.0);
+            agg_gui::font_settings::set_faux_italic   (0.0);
+            agg_gui::font_settings::set_primary_weight(1.0 / 3.0);
             *font_name.borrow_mut() = None;
             font_scale.set(1.0);
             lcd_cell.set(false);
             hint_cell.set(false);
+            gamma.set(1.0);
+            width_scl.set(1.0);
+            interval.set(0.0);
+            fweight.set(0.0);
+            fitalic.set(0.0);
+            pweight.set(1.0 / 3.0);
         }
     };
 
@@ -869,6 +923,12 @@ pub fn build_demo_ui(
         font_size_scale: Rc::clone(&font_size_scale_cell),
         lcd_enabled:     Rc::clone(&lcd_enabled_cell),
         hinting_enabled: Rc::clone(&hinting_enabled_cell),
+        gamma:           Rc::clone(&gamma_cell),
+        width_scale:     Rc::clone(&width_scale_cell),
+        interval:        Rc::clone(&interval_cell),
+        faux_weight:     Rc::clone(&faux_weight_cell),
+        faux_italic:     Rc::clone(&faux_italic_cell),
+        primary_weight:  Rc::clone(&primary_weight_cell),
     };
 
     let handles = DemoHandles {
@@ -924,6 +984,7 @@ fn build_demo_content(
         "\u{F075} Popups"                => windows::popups_demo(font),
         "\u{F0C3} Rendering Test"        => rendering_test::rendering_test_view(font),
         "\u{F013} System"                => windows::system_view(font),
+        "\u{F031} LCD Subpixel"          => windows::truetype_lcd_view(font),
         "\u{F002} Scene"                 => windows::scene_demo(font),
         "\u{F030} Screenshot"            => windows::screenshot_demo(
             font, screenshot_request, screenshot_image,

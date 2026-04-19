@@ -1084,6 +1084,16 @@ impl DrawCtx for GlGfxCtx {
         // Rustybuzz shaping is cheap relative to tessellation.
         let shaped    = shape_glyphs(&font, text, self.font_size);
         let font_size = self.font_size;
+
+        // Typography-style globals consulted per-frame (scrollbar-style
+        // pattern).  These piggy-back onto the existing GL glyph cache
+        // — the cache stores native-shape outlines at origin; width /
+        // italic are applied vertex-by-vertex below, hinting snaps the
+        // Y origin, and interval pads the pen advance.
+        let width_scale  = agg_gui::font_settings::current_width();
+        let italic_shear = agg_gui::font_settings::current_faux_italic() / 3.0;
+        let hint_y       = agg_gui::font_settings::hinting_enabled();
+        let interval_px  = agg_gui::font_settings::current_interval() * font_size;
         // HiDPI: cache glyph tessellations at the **physical** size so the
         // Bezier flattening resolves more segments on 2×/3× displays.  We
         // then divide each vertex by `ctm_scale` before adding the glyph
@@ -1101,7 +1111,11 @@ impl DrawCtx for GlGfxCtx {
         for glyph in &shaped {
             // Glyph origin in widget-local pixel space (before CTM).
             let gx = pen_x + glyph.x_offset;
-            let gy = y     + glyph.y_offset;
+            let gy_raw = y + glyph.y_offset;
+            // Y-axis hinting: snap baseline to the pixel grid.  The X
+            // coordinate keeps its subpixel precision, which matters
+            // for LCD positioning and smooth scrolling.
+            let gy = if hint_y { (gy_raw + 0.5).floor() } else { gy_raw };
 
             // Use the fallback font for outline lookup when the glyph was
             // resolved from it — glyph_id is an index into that font's table.
@@ -1111,11 +1125,20 @@ impl DrawCtx for GlGfxCtx {
                 // Vertices are in physical pixel space at `tess_size`.  Scale
                 // to logical via `inv_scale`, offset by the glyph's logical
                 // pen position, then apply the CTM to reach physical pixels.
+                //
+                // Width scale multiplies the X contribution; faux italic
+                // adds `y * italic_shear` to X (matching the agg-rust
+                // `TransAffine::new_skewing(faux_italic/3, 0)` convention
+                // — the `/3` already happened in `italic_shear` above).
+                // The cached Y stays native, so the cache doesn't need to
+                // track the new style parameters.
                 let base = all_verts.len() as u32;
                 for &[vx, vy] in &cached.verts {
+                    let vx_f64 = vx as f64 * inv_scale;
+                    let vy_f64 = vy as f64 * inv_scale;
                     let (mut px, mut py) = (
-                        gx + vx as f64 * inv_scale,
-                        gy + vy as f64 * inv_scale,
+                        gx + vx_f64 * width_scale + vy_f64 * italic_shear,
+                        gy + vy_f64,
                     );
                     ctm.transform(&mut px, &mut py);
                     all_verts.push([px as f32, py as f32]);
@@ -1123,7 +1146,7 @@ impl DrawCtx for GlGfxCtx {
                 all_idx.extend(cached.indices.iter().map(|&i| i + base));
             }
 
-            pen_x += glyph.x_advance;
+            pen_x += glyph.x_advance + interval_px;
         }
 
         if !all_verts.is_empty() {

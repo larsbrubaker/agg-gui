@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use agg_gui::{
     font_settings, ComboBox, FlexColumn, FlexRow, Font, Label,
-    ScrollView, Separator, SizedBox, TextField, ToggleSwitch, Widget,
+    ScrollView, Separator, SizedBox, Slider, TextField, ToggleSwitch, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,15 @@ pub struct SystemCells {
     pub font_size_scale: Rc<Cell<f64>>,
     pub lcd_enabled:     Rc<Cell<bool>>,
     pub hinting_enabled: Rc<Cell<bool>>,
+    // Typography-style mirrors — shared between this window's controls,
+    // the TrueType LCD Subpixel demo's controls, and the font_settings
+    // globals that (phase 2) the text render path will read.
+    pub gamma:           Rc<Cell<f64>>,
+    pub width_scale:     Rc<Cell<f64>>,
+    pub interval:        Rc<Cell<f64>>,
+    pub faux_weight:     Rc<Cell<f64>>,
+    pub faux_italic:     Rc<Cell<f64>>,
+    pub primary_weight:  Rc<Cell<f64>>,
 }
 
 thread_local! {
@@ -49,7 +58,11 @@ pub fn init_cells(cells: SystemCells) {
 
 /// Retrieve the registered cells.  Panics if `init_cells` wasn't called —
 /// the demo shell always calls it, so this is a bug if it ever fires.
-fn cells() -> SystemCells {
+///
+/// Exposed to sibling windows (e.g. the TrueType LCD Subpixel demo) that
+/// want to bind their own widgets to the same live cells — the whole
+/// point of this module's init-once pattern.
+pub fn cells() -> SystemCells {
     CELLS.with(|c| c.borrow().clone().expect("system::init_cells not called"))
 }
 
@@ -124,6 +137,30 @@ static FONT_OPTIONS: &[NamedFont] = font_table![
 /// on startup to rehydrate the persisted font choice.
 pub fn load_font_by_name(name: &str) -> Option<Arc<Font>> {
     FONT_OPTIONS.iter().find(|o| o.name == name).map(load_font)
+}
+
+/// List every bundled primary-font display name in table order.  Used by
+/// the TrueType LCD Subpixel demo's font picker so both windows share the
+/// exact same font table.
+pub fn font_option_names() -> Vec<&'static str> {
+    FONT_OPTIONS.iter().map(|o| o.name).collect()
+}
+
+/// Index of `name` in `FONT_OPTIONS`, if present — lets other windows
+/// pre-seed a selection cell from a persisted font-name string.
+pub fn font_option_index(name: &str) -> Option<usize> {
+    FONT_OPTIONS.iter().position(|o| o.name == name)
+}
+
+/// Load the font at `FONT_OPTIONS[idx]` (chained with icons + emoji
+/// fallback) and write it through to `font_settings::set_system_font`
+/// plus the persistent `font_name` cell — used by sibling windows that
+/// want "pick this typeface" to behave identically to the System combo.
+pub fn apply_font_by_index(cells: &SystemCells, idx: usize) {
+    if let Some(opt) = FONT_OPTIONS.get(idx) {
+        font_settings::set_system_font(Some(load_font(opt)));
+        *cells.font_name.borrow_mut() = Some(opt.name.to_string());
+    }
 }
 
 /// Load `opt` as the primary font, chained to the standard icons + emoji
@@ -300,11 +337,78 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
                     })
             ))
             .add(Box::new(
-                Label::new("Enable glyph hinting (pending engine support)",
+                Label::new("Enable glyph hinting (Y-axis baseline snap)",
                     Arc::clone(&font)).with_font_size(13.0),
             ));
         col.push(Box::new(row), 0.0);
     }
+
+    col.push(Box::new(Separator::horizontal()), 0.0);
+
+    // ── Typography style parameters ─────────────────────────────────────
+    //
+    // Six `Slider` widgets, each bound to one of the `SystemCells` f64
+    // cells via `with_value_cell`.  The on_change side mirrors the cell
+    // write through to `agg_gui::font_settings::*` — the global that
+    // (phase 2) the text render path will consume.  Cells + globals
+    // stay in lock-step so the TrueType LCD Subpixel demo's widgets,
+    // which bind to the same cells, move whenever anything here does
+    // and vice-versa.
+    col.push(heading("Typography style"), 0.0);
+    col.push(body(
+        "Gamma, width, spacing, faux weight/italic, and LCD primary-weight \
+         parameters mirroring the AGG `truetype_test_02_win` reference. \
+         Changes here drive the same globals the TrueType LCD Subpixel \
+         demo reads from, so the two windows are interchangeable control \
+         surfaces.",
+    ), 0.0);
+
+    // A closure captures `font` by reference so every slider row shares
+    // one Arc<Font> clone.  Applies the value both to the persistent
+    // cell (already handled by `with_value_cell`) and — via on_change
+    // — to the matching `font_settings` global.
+    let style_row = |label_text: &'static str,
+                     min: f64, max: f64, step: f64,
+                     cell: Rc<Cell<f64>>,
+                     apply: Box<dyn Fn(f64)>|
+                     -> Box<dyn Widget> {
+        let label_w = Box::new(
+            SizedBox::new().with_width(140.0).with_height(22.0)
+                .with_child(Box::new(
+                    Label::new(label_text, Arc::clone(&font))
+                        .with_font_size(13.0)
+                ))
+        );
+        let slider = Slider::new(cell.get(), min, max, Arc::clone(&font))
+            .with_step(step)
+            .with_value_cell(Rc::clone(&cell))
+            .on_change(move |v| apply(v));
+        // Slider is a flex child so the FlexRow shrinks it to the
+        // space left after the fixed-width label column.
+        let row = FlexRow::new().with_gap(10.0)
+            .add(label_w)
+            .add_flex(Box::new(slider), 1.0);
+        Box::new(row)
+    };
+
+    col.push(style_row("Gamma", 0.5, 2.5, 0.01,
+        Rc::clone(&cells.gamma),
+        Box::new(font_settings::set_gamma)), 0.0);
+    col.push(style_row("Width", 0.75, 1.25, 0.01,
+        Rc::clone(&cells.width_scale),
+        Box::new(font_settings::set_width)), 0.0);
+    col.push(style_row("Interval", -0.2, 0.2, 0.001,
+        Rc::clone(&cells.interval),
+        Box::new(font_settings::set_interval)), 0.0);
+    col.push(style_row("Faux Weight", -1.0, 1.0, 0.01,
+        Rc::clone(&cells.faux_weight),
+        Box::new(font_settings::set_faux_weight)), 0.0);
+    col.push(style_row("Faux Italic", -1.0, 1.0, 0.01,
+        Rc::clone(&cells.faux_italic),
+        Box::new(font_settings::set_faux_italic)), 0.0);
+    col.push(style_row("Primary Weight", 0.0, 1.0, 0.01,
+        Rc::clone(&cells.primary_weight),
+        Box::new(font_settings::set_primary_weight)), 0.0);
 
     Box::new(ScrollView::new(Box::new(col)))
 }

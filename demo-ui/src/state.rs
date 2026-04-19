@@ -72,9 +72,20 @@ pub struct SavedState {
     pub font_size_scale: f64,
     /// LCD subpixel rendering toggle.
     pub lcd_enabled:     bool,
-    /// Hinting toggle (stored — not yet applied to raster; flag survives
-    /// reloads so the UI reflects the last choice).
+    /// Hinting toggle (Y-axis baseline snap).
     pub hinting_enabled: bool,
+    /// Output gamma curve.  1.0 = off.
+    pub gamma:           f64,
+    /// Horizontal glyph width scale.
+    pub width_scale:     f64,
+    /// Extra letter-spacing as fraction of em.
+    pub interval:        f64,
+    /// Faux-weight offset (synthetic bold).
+    pub faux_weight:     f64,
+    /// Faux-italic shear factor.
+    pub faux_italic:     f64,
+    /// LCD primary-weight tap ratio.
+    pub primary_weight:  f64,
 }
 
 /// Persisted inspector UI state.  Flat bit-vector of expanded nodes in DFS
@@ -132,6 +143,12 @@ impl SavedState {
         out.push_str(&format!("font_size_scale={}\n", self.font_size_scale));
         out.push_str(&format!("lcd={}\n",     self.lcd_enabled     as u8));
         out.push_str(&format!("hinting={}\n", self.hinting_enabled as u8));
+        out.push_str(&format!("gamma={}\n",          self.gamma));
+        out.push_str(&format!("width_scale={}\n",    self.width_scale));
+        out.push_str(&format!("interval={}\n",       self.interval));
+        out.push_str(&format!("faux_weight={}\n",    self.faux_weight));
+        out.push_str(&format!("faux_italic={}\n",    self.faux_italic));
+        out.push_str(&format!("primary_weight={}\n", self.primary_weight));
         out
     }
 
@@ -151,6 +168,12 @@ impl SavedState {
         let mut font_size_scale: f64  = 1.0;
         let mut lcd_enabled:     bool = false;
         let mut hinting_enabled: bool = false;
+        let mut gamma:           f64 = 1.0;
+        let mut width_scale:     f64 = 1.0;
+        let mut interval:        f64 = 0.0;
+        let mut faux_weight:     f64 = 0.0;
+        let mut faux_italic:     f64 = 0.0;
+        let mut primary_weight:  f64 = 1.0 / 3.0;
 
         for line in s.lines() {
             let line = line.trim();
@@ -175,6 +198,12 @@ impl SavedState {
                 "font_size_scale" => { font_size_scale = val.parse().unwrap_or(1.0); }
                 "lcd"             => { let v: u8 = val.parse().unwrap_or(0); lcd_enabled = v != 0; }
                 "hinting"         => { let v: u8 = val.parse().unwrap_or(0); hinting_enabled = v != 0; }
+                "gamma"           => { gamma          = val.parse().unwrap_or(1.0); }
+                "width_scale"     => { width_scale    = val.parse().unwrap_or(1.0); }
+                "interval"        => { interval       = val.parse().unwrap_or(0.0); }
+                "faux_weight"     => { faux_weight    = val.parse().unwrap_or(0.0); }
+                "faux_italic"     => { faux_italic    = val.parse().unwrap_or(0.0); }
+                "primary_weight"  => { primary_weight = val.parse().unwrap_or(1.0 / 3.0); }
                 "inspector" => {
                     let mut halves = val.splitn(2, ';');
                     let head = halves.next().unwrap_or("");
@@ -220,6 +249,12 @@ impl SavedState {
             font_size_scale,
             lcd_enabled,
             hinting_enabled,
+            gamma,
+            width_scale,
+            interval,
+            faux_weight,
+            faux_italic,
+            primary_weight,
         })
     }
 }
@@ -276,6 +311,15 @@ pub struct StateAccessor {
     pub lcd_enabled:     Rc<Cell<bool>>,
     /// Hinting toggle mirror.
     pub hinting_enabled: Rc<Cell<bool>>,
+    /// Typography-style parameter mirrors — shared with the System window
+    /// and the TrueType LCD Subpixel demo so changes in either route
+    /// write through to disk via the auto-save loop.
+    pub gamma:           Rc<Cell<f64>>,
+    pub width_scale:     Rc<Cell<f64>>,
+    pub interval:        Rc<Cell<f64>>,
+    pub faux_weight:     Rc<Cell<f64>>,
+    pub faux_italic:     Rc<Cell<f64>>,
+    pub primary_weight:  Rc<Cell<f64>>,
 }
 
 impl StateAccessor {
@@ -303,6 +347,12 @@ impl StateAccessor {
             font_size_scale:   self.font_size_scale.get(),
             lcd_enabled:       self.lcd_enabled.get(),
             hinting_enabled:   self.hinting_enabled.get(),
+            gamma:             self.gamma.get(),
+            width_scale:       self.width_scale.get(),
+            interval:          self.interval.get(),
+            faux_weight:       self.faux_weight.get(),
+            faux_italic:       self.faux_italic.get(),
+            primary_weight:    self.primary_weight.get(),
         }
     }
 }
@@ -361,6 +411,12 @@ mod tests {
             font_size_scale: 1.0,
             lcd_enabled: false,
             hinting_enabled: false,
+            gamma: 1.0,
+            width_scale: 1.0,
+            interval: 0.0,
+            faux_weight: 0.0,
+            faux_italic: 0.0,
+            primary_weight: 1.0 / 3.0,
         };
 
         let text = saved.serialize();
