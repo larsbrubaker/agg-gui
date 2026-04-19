@@ -525,7 +525,7 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         };
         if cx1 >= cx2 || cy1 >= cy2 { return; }
 
-        let pixels = buf.pixels_mut();
+        let (color_plane, alpha_plane) = buf.planes_mut();
         for ly in 0..scaled_h {
             let dy = oy + ly;
             if dy < cy1 || dy >= cy2 { continue; }
@@ -543,25 +543,45 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
                 let frac_x = (lx as f64 + 0.5) / (scaled_w as f64);
                 let sx_storage = ((frac_x * img_w as f64) as u32).min(img_w - 1) as usize;
 
+                // Source image is straight-alpha RGBA; effective src alpha =
+                // image alpha × ctx global_alpha.  Regular images have one
+                // alpha per pixel — we apply it identically across all three
+                // subpixel channels (no per-subpixel variation for source).
+                // That's the one case where the per-channel-alpha buffer
+                // takes redundant data; true per-subpixel image edges would
+                // come from a rasteriser-based image path, not NEAREST blit.
                 let si = (sy_storage * img_w_u + sx_storage) * 4;
                 let sa = (data[si + 3] as f32 / 255.0) * global_alpha;
                 if sa <= 0.0 { continue; }
-                let sr = data[si]     as f32 / 255.0;
-                let sg = data[si + 1] as f32 / 255.0;
-                let sb = data[si + 2] as f32 / 255.0;
+                let sr = (data[si]     as f32 / 255.0) * sa;   // premultiply
+                let sg = (data[si + 1] as f32 / 255.0) * sa;
+                let sb = (data[si + 2] as f32 / 255.0) * sa;
 
                 let di = ((dy as usize) * buf_w_u + (dx as usize)) * 3;
-                let dr = pixels[di]     as f32 / 255.0;
-                let dg = pixels[di + 1] as f32 / 255.0;
-                let db = pixels[di + 2] as f32 / 255.0;
 
-                let rr = sr * sa + dr * (1.0 - sa);
-                let rg = sg * sa + dg * (1.0 - sa);
-                let rb = sb * sa + db * (1.0 - sa);
+                // Read current premult colour + per-channel alpha.
+                let bc_r = color_plane[di]     as f32 / 255.0;
+                let bc_g = color_plane[di + 1] as f32 / 255.0;
+                let bc_b = color_plane[di + 2] as f32 / 255.0;
+                let ba_r = alpha_plane[di]     as f32 / 255.0;
+                let ba_g = alpha_plane[di + 1] as f32 / 255.0;
+                let ba_b = alpha_plane[di + 2] as f32 / 255.0;
 
-                pixels[di]     = (rr * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                pixels[di + 1] = (rg * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                pixels[di + 2] = (rb * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                // Premult src-over per channel (all three share `sa` since
+                // the source image had a single per-pixel alpha).
+                let rc_r = sr + bc_r * (1.0 - sa);
+                let rc_g = sg + bc_g * (1.0 - sa);
+                let rc_b = sb + bc_b * (1.0 - sa);
+                let ra_r = sa + ba_r * (1.0 - sa);
+                let ra_g = sa + ba_g * (1.0 - sa);
+                let ra_b = sa + ba_b * (1.0 - sa);
+
+                color_plane[di]     = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                color_plane[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                color_plane[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                alpha_plane[di]     = (ra_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                alpha_plane[di + 1] = (ra_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                alpha_plane[di + 2] = (ra_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             }
         }
     }
@@ -597,7 +617,7 @@ mod tests {
             ctx.fill_text("ABC", 4.0, 14.0);
         }
         // Some pixels should be darker than white (where text was painted).
-        let any_dark = buf.pixels().chunks_exact(3)
+        let any_dark = buf.color_plane().chunks_exact(3)
             .any(|p| p[0] < 250 || p[1] < 250 || p[2] < 250);
         assert!(any_dark, "fill_text via LcdGfxCtx left buffer fully white");
     }
@@ -654,7 +674,7 @@ mod tests {
                 let ai = (y * w as usize + x) * 4;
                 let bi = (y * w as usize + x) * 3;
                 let a_rgb = (fb.pixels()[ai], fb.pixels()[ai + 1], fb.pixels()[ai + 2]);
-                let b_rgb = (buf.pixels()[bi], buf.pixels()[bi + 1], buf.pixels()[bi + 2]);
+                let b_rgb = (buf.color_plane()[bi], buf.color_plane()[bi + 1], buf.color_plane()[bi + 2]);
                 assert_eq!(a_rgb, b_rgb,
                     "pixel mismatch at ({x},{y}): legacy={a_rgb:?} LcdGfxCtx={b_rgb:?}");
             }
@@ -682,7 +702,7 @@ mod tests {
         let row_brightness = |y: usize| -> u32 {
             (4..16).map(|x| {
                 let i = (y * 20 + x) * 3;
-                buf.pixels()[i] as u32 + buf.pixels()[i + 1] as u32 + buf.pixels()[i + 2] as u32
+                buf.color_plane()[i] as u32 + buf.color_plane()[i + 1] as u32 + buf.color_plane()[i + 2] as u32
             }).sum()
         };
         let line  = row_brightness(5);  // line row in Y-up
@@ -708,7 +728,7 @@ mod tests {
         }
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         let (cr, cg, cb) = pixel(10, 10);
         assert!(cr < 60 && cg < 60 && cb < 60,
@@ -742,7 +762,7 @@ mod tests {
         }
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         // Centre fully inside the rounded rect → dark.
         let (cr, cg, cb) = pixel(10, 10);
@@ -783,7 +803,7 @@ mod tests {
         }
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 8 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         // Y-up: y=1 is bottom row of dst rect, y=2 is top.  Source's top
         // row (row 0 in storage) is the visually-top row, which lands at
@@ -810,7 +830,7 @@ mod tests {
             ctx.draw_image_rgba(&img, 1, 1, 1.0, 1.0, 1.0, 1.0);
         }
         let i = (1 * 4 + 1) * 3;
-        let (r, g, b) = (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2]);
+        let (r, g, b) = (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2]);
         // Expected: src(255,0,0) * 0.502 + dst(255,255,255) * 0.498
         //         = (255, ~127, ~127)  (slightly biased by quantization)
         assert!(r > 250,           "R should be near 255 (bg + src red); got {r}");
@@ -838,7 +858,7 @@ mod tests {
         }
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         // Inside clip + inside rect → dark.
         let (lr, lg, lb) = pixel(5, 5);
@@ -871,7 +891,7 @@ mod tests {
         for x in 0..40 {
             for y in 0..24 {
                 let i = (y * 120 + x) * 3;
-                if buf.pixels()[i] < 100 { saw_dark_inside = true; break; }
+                if buf.color_plane()[i] < 100 { saw_dark_inside = true; break; }
             }
             if saw_dark_inside { break; }
         }
@@ -883,7 +903,7 @@ mod tests {
         for x in 42..120 {
             for y in 0..24 {
                 let i = (y * 120 + x) * 3;
-                let (r, g, b) = (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2]);
+                let (r, g, b) = (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2]);
                 assert!(r > 240 && g > 240 && b > 240,
                     "pixel at ({x},{y}) outside clip should stay white; got ({r}, {g}, {b})");
             }
@@ -906,7 +926,7 @@ mod tests {
         }
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         // Inside clip → red.
         assert_eq!(pixel(2, 5), (255, 0, 0), "inside clip should show source red");
@@ -931,7 +951,7 @@ mod tests {
         }
         // Pixel at x=15 should now be dark (no clip blocking it).
         let i = (5 * 20 + 15) * 3;
-        let (r, g, b) = (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2]);
+        let (r, g, b) = (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2]);
         assert!(r < 50 && g < 50 && b < 50,
             "after reset_clip, fill at x=15 should be dark; got ({r}, {g}, {b})");
     }
@@ -956,7 +976,7 @@ mod tests {
         }
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         // Top-left (inside intersection) — dark.
         let (tlr, tlg, tlb) = pixel(2, 17);
@@ -996,7 +1016,7 @@ mod tests {
         }
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         // Inside the layer's destination region in the parent → dark.
         assert_eq!(pixel(8, 8), (0, 0, 0), "interior of flushed layer should be dark");
@@ -1045,7 +1065,7 @@ mod tests {
         // The post-pop fill happens at translate(3,4), filling rect (3..7, 4..8).
         // Fill colour is white (restored) → those pixels must be white.
         let i = (5 * 20 + 5) * 3;
-        let (r, g, b) = (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2]);
+        let (r, g, b) = (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2]);
         assert_eq!((r, g, b), (255, 255, 255), "post-pop fill must use restored white colour");
     }
 
@@ -1065,13 +1085,13 @@ mod tests {
             ctx.fill();
             // Mid-layer: parent buffer's pixels must still be all white.
             let base = ctx.buffer();
-            assert!(base.pixels().chunks_exact(3).all(|p| p[0] == 255 && p[1] == 255 && p[2] == 255),
+            assert!(base.color_plane().chunks_exact(3).all(|p| p[0] == 255 && p[1] == 255 && p[2] == 255),
                 "base buffer must not see layer paint until pop_layer");
             ctx.pop_layer();
         }
         // After pop: pixels (0..10, 0..10) should be dark.
         let i = (5 * 20 + 5) * 3;
-        let (r, g, b) = (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2]);
+        let (r, g, b) = (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2]);
         assert_eq!((r, g, b), (0, 0, 0), "after pop_layer, painted pixels should appear in base");
     }
 
@@ -1104,7 +1124,7 @@ mod tests {
         // black region.
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 30 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
         assert_eq!(pixel(10, 10), (0, 0, 0), "centre of nested layer region should be dark");
         assert_eq!(pixel(2, 2),   (255, 255, 255), "well outside nested region should stay white");
@@ -1130,7 +1150,7 @@ mod tests {
         // buffer edges (subpixel samples beyond the buffer read as 0)
         // which is a known + correct property of the pipeline.
         let i = (4 * 8 + 4) * 3;
-        let (r, g, b) = (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2]);
+        let (r, g, b) = (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2]);
         assert_eq!((r, g, b), (0, 0, 0), "subsequent paint after unmatched pop should still work");
     }
 
@@ -1166,7 +1186,7 @@ mod tests {
             ctx.fill_text("Hi", 10.0, 16.0);
         }
 
-        assert_eq!(buf_a.pixels(), buf_b.pixels(),
+        assert_eq!(buf_a.color_plane(), buf_b.color_plane(),
             "translate(10,4) + fill_text(0,12) must equal fill_text(10,16)");
     }
 }

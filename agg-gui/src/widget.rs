@@ -82,10 +82,22 @@ pub enum BackbufferMode {
 /// visual output could change (text, colour, bounds, hover/press state, …).
 /// The framework re-rasterises on the next paint and clears the flag.
 pub struct BackbufferCache {
-    /// RGBA8 pixels, Y-up (row 0 = bottom) — same convention as
-    /// [`Framebuffer`] so the bitmap is directly blittable via
-    /// [`DrawCtx::draw_image_rgba_arc`].
+    /// In **Rgba** mode: top-row-first RGBA8 pixels, straight alpha.
+    /// Blitted via [`DrawCtx::draw_image_rgba_arc`].
+    ///
+    /// In **LcdCoverage** mode: top-row-first **colour plane** — 3
+    /// bytes/pixel (R_premult, G_premult, B_premult) matching the
+    /// convention of [`crate::lcd_coverage::LcdBuffer::color_plane`]
+    /// flipped to top-down.  The companion alpha plane lives in
+    /// [`Self::lcd_alpha`].
     pub pixels: Option<Arc<Vec<u8>>>,
+    /// `LcdCoverage`-mode companion to `pixels`: top-row-first per-channel
+    /// **alpha plane** (3 bytes/pixel, `(R_alpha, G_alpha, B_alpha)`).
+    /// `None` means this is a plain Rgba cache.  When `Some`, the blit
+    /// step uses [`DrawCtx::draw_lcd_backbuffer_arc`] to preserve the
+    /// per-channel subpixel information through to the destination —
+    /// required for LCD chroma to survive the cache round-trip.
+    pub lcd_alpha: Option<Arc<Vec<u8>>>,
     pub width:  u32,
     pub height: u32,
     /// When true, the next paint will re-rasterise rather than reusing
@@ -97,7 +109,7 @@ pub struct BackbufferCache {
 
 impl BackbufferCache {
     pub fn new() -> Self {
-        Self { pixels: None, width: 0, height: 0, dirty: true }
+        Self { pixels: None, lcd_alpha: None, width: 0, height: 0, dirty: true }
     }
 
     /// Mark the cache dirty so the next paint re-rasterises.
@@ -432,14 +444,22 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     let w = b.width.ceil().max(1.0) as u32;
     let h = b.height.ceil().max(1.0) as u32;
 
-    // Decide whether to re-raster.  Size change also invalidates.
+    // Decide whether to re-raster.  Size change invalidates; so does a
+    // mode swap — if the cache holds `Rgba` bytes but the widget now
+    // wants `LcdCoverage` (or vice versa) we must re-raster through the
+    // correct pipeline.  Mode membership is recorded implicitly by
+    // `cache.lcd_alpha`: `Some` means LCD cache, `None` means Rgba.
+    let mode = widget.backbuffer_mode();
+    let mode_is_lcd = matches!(mode, BackbufferMode::LcdCoverage);
     let (needs_raster, has_bitmap) = {
         let cache = widget.backbuffer_cache_mut()
             .expect("backbuffered widget must return Some from backbuffer_cache_mut");
+        let cache_is_lcd = cache.lcd_alpha.is_some();
         let needs = cache.dirty
             || cache.pixels.is_none()
             || cache.width != w
-            || cache.height != h;
+            || cache.height != h
+            || cache_is_lcd != mode_is_lcd;
         (needs, cache.pixels.is_some())
     };
 
@@ -456,8 +476,12 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         // LCD-treated text instead of breaking the per-channel
         // coverage at the first non-text fill (the alpha bug the
         // search-box screenshot showed before this change).
-        let mode = widget.backbuffer_mode();
-        let pixels = match mode {
+        // Each branch produces `(pixels, lcd_alpha)` top-down:
+        //   - `Rgba`: `pixels` = straight-alpha RGBA8; `lcd_alpha` = None.
+        //   - `LcdCoverage`: `pixels` = premultiplied colour plane (3 B/px);
+        //     `lcd_alpha` = per-channel alpha plane (3 B/px).  The blit
+        //     step below picks a compositor based on which is present.
+        let (pixels_bytes, lcd_alpha_bytes): (Vec<u8>, Option<Vec<u8>>) = match mode {
             BackbufferMode::Rgba => {
                 let mut fb = Framebuffer::new(w, h);
                 {
@@ -472,16 +496,17 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                 //      AA edges composite without the dark-fringe artifact.
                 let mut pixels = fb.pixels_flipped();
                 crate::framebuffer::unpremultiply_rgba_inplace(&mut pixels);
-                pixels
+                (pixels, None)
             }
             BackbufferMode::LcdCoverage => {
                 // The LCD pipeline is strictly WRITE-only.  The buffer
                 // starts at zero coverage everywhere; the widget paints
                 // opaque content covering its full bounds (the contract
-                // for this mode) into it via an `LcdGfxCtx`; then it's
-                // blitted to the destination as an opaque RGB texture,
-                // where per-channel src-over mixes the buffer's RGB
-                // into whatever colour was at the destination.
+                // for this mode) into it via an `LcdGfxCtx`; then the
+                // two planes (premultiplied colour + per-channel alpha)
+                // are cached and composited onto the destination at
+                // blit time via `draw_lcd_backbuffer_arc` — which
+                // preserves LCD per-channel chroma through the cache.
                 //
                 // We deliberately do NOT read from any destination —
                 // seeding the buffer from the parent's pixels would
@@ -497,39 +522,46 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                     let mut sub = crate::lcd_gfx_ctx::LcdGfxCtx::new(&mut buf);
                     paint_subtree_direct(widget, &mut sub);
                 }
-                // LcdBuffer is opaque RGB.  Convert to top-down RGBA
-                // with alpha=255 so the existing blit path can carry
-                // it as a regular texture.  No premultiply step
-                // because the LCD pipeline already composited every
-                // paint into the buffer's R/G/B values directly.
-                let rgb_top_down = buf.pixels_flipped();
-                let mut rgba = vec![0u8; (w as usize) * (h as usize) * 4];
-                for (rgb, rgba_chunk) in rgb_top_down.chunks_exact(3).zip(rgba.chunks_exact_mut(4)) {
-                    rgba_chunk[0] = rgb[0];
-                    rgba_chunk[1] = rgb[1];
-                    rgba_chunk[2] = rgb[2];
-                    rgba_chunk[3] = 255;
-                }
-                rgba
+                (buf.color_plane_flipped(), Some(buf.alpha_plane_flipped()))
             }
         };
-        let pixels = Arc::new(pixels);
+        let pixels     = Arc::new(pixels_bytes);
+        let lcd_alpha  = lcd_alpha_bytes.map(Arc::new);
 
         let cache = widget.backbuffer_cache_mut().unwrap();
-        cache.pixels = Some(Arc::clone(&pixels));
-        cache.width  = w;
-        cache.height = h;
-        cache.dirty  = false;
+        cache.pixels    = Some(Arc::clone(&pixels));
+        cache.lcd_alpha = lcd_alpha.as_ref().map(Arc::clone);
+        cache.width     = w;
+        cache.height    = h;
+        cache.dirty     = false;
     }
 
-    // Blit the cached bitmap onto the outer ctx.  On GL the Arc's
-    // pointer identity keys the GPU texture cache so this becomes one
-    // `glBindTexture` + one `glDrawElements` per frame.
+    // Blit the cached bitmap onto the outer ctx.  Two paths:
+    //
+    //   - `Rgba` cache (no `lcd_alpha`): a single RGBA8 texture via the
+    //     standard image-blit lane.  Alpha-aware SrcOver at the blend
+    //     stage handles transparency.
+    //
+    //   - `LcdCoverage` cache (`lcd_alpha` is `Some`): two 3-byte/pixel
+    //     planes — premultiplied colour + per-channel alpha.  The
+    //     backend's `draw_lcd_backbuffer_arc` composites them with
+    //     per-channel src-over, preserving LCD chroma through the
+    //     cache round-trip (grayscale AA on backends that fall back
+    //     to the default trait impl).
     let cache = widget.backbuffer_cache_mut().unwrap();
-    if let Some(ref bmp) = cache.pixels {
-        let w = cache.width;
-        let h = cache.height;
-        ctx.draw_image_rgba_arc(bmp, w, h, 0.0, 0.0, w as f64, h as f64);
+    let w = cache.width;
+    let h = cache.height;
+    match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
+        (Some(color), Some(alpha)) => {
+            ctx.draw_lcd_backbuffer_arc(
+                color, alpha, w, h,
+                0.0, 0.0, w as f64, h as f64,
+            );
+        }
+        (Some(bmp), None) => {
+            ctx.draw_image_rgba_arc(bmp, w, h, 0.0, 0.0, w as f64, h as f64);
+        }
+        _ => {}
     }
     let _ = has_bitmap;
 

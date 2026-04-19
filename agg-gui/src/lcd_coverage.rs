@@ -60,44 +60,116 @@ use agg_rust::conv_transform::ConvTransform;
 // buffer has no alpha channel — it's intended to be fully covered by
 // opaque fills and blitted as an opaque RGB texture.
 
-/// RGB framebuffer, row 0 = bottom (matches `Framebuffer` convention).
-/// 3 bytes per pixel: `(R, G, B)` composited result of every fill so far.
+/// LCD coverage buffer, row 0 = bottom (matches `Framebuffer` convention).
+///
+/// **Two planes, 3 bytes per pixel each:**
+///
+/// - `color`: per-channel **premultiplied** RGB colour accumulated from
+///   every paint so far.  `(R_color, G_color, B_color)` where each byte
+///   is `channel_color * channel_alpha`.
+/// - `alpha`: per-channel alpha/coverage accumulated from every paint so
+///   far.  `(R_alpha, G_alpha, B_alpha)` where each byte is the combined
+///   opacity of that subpixel column (0 = untouched, 255 = fully opaque).
+///
+/// **Why per-channel alpha?**  LCD subpixel rendering produces a distinct
+/// coverage value per R/G/B channel, so a single per-pixel alpha can't
+/// represent the output correctly at glyph edges and fractional image
+/// boundaries.  Splitting alpha per-channel gives each subpixel its own
+/// Porter-Duff state: paints accumulate independently through the same
+/// premultiplied src-over math you'd use for a normal RGBA surface, just
+/// three streams instead of one.  A cached `LcdBuffer` with partial
+/// coverage can be composited onto any destination without the "black
+/// rect where unpainted" failure mode that killed the first-cut design.
 pub struct LcdBuffer {
-    pixels: Vec<u8>,
+    color:  Vec<u8>,
+    alpha:  Vec<u8>,
     width:  u32,
     height: u32,
 }
 
 impl LcdBuffer {
-    /// Allocate a zeroed buffer (all pixels black = `(0, 0, 0)`).
+    /// Allocate a fully-transparent buffer (color zero, alpha zero
+    /// everywhere).  "Transparent" here means the per-channel alpha is
+    /// 0, so composite-onto-destination leaves the destination
+    /// unchanged wherever no paint has landed yet.
     pub fn new(width: u32, height: u32) -> Self {
+        let bytes = (width as usize) * (height as usize) * 3;
         Self {
-            pixels: vec![0u8; (width as usize) * (height as usize) * 3],
+            color: vec![0u8; bytes],
+            alpha: vec![0u8; bytes],
             width,
             height,
         }
     }
 
-    #[inline] pub fn width(&self)  -> u32     { self.width }
-    #[inline] pub fn height(&self) -> u32     { self.height }
-    #[inline] pub fn pixels(&self) -> &[u8]   { &self.pixels }
-    #[inline] pub fn pixels_mut(&mut self) -> &mut [u8] { &mut self.pixels }
+    #[inline] pub fn width(&self)  -> u32 { self.width }
+    #[inline] pub fn height(&self) -> u32 { self.height }
 
-    /// Consume the buffer and hand ownership of the underlying
-    /// `Vec<u8>` — used when moving the rendered pixels into an
-    /// `Arc` for the widget's backbuffer cache.
-    pub fn into_pixels(self) -> Vec<u8> { self.pixels }
+    #[inline] pub fn color_plane(&self)     -> &[u8]     { &self.color }
+    #[inline] pub fn alpha_plane(&self)     -> &[u8]     { &self.alpha }
+    #[inline] pub fn color_plane_mut(&mut self) -> &mut [u8] { &mut self.color }
+    #[inline] pub fn alpha_plane_mut(&mut self) -> &mut [u8] { &mut self.alpha }
 
-    /// Top-row-first copy of the pixels — matches the convention used
-    /// by `draw_image_rgba_arc` (images uploaded as textures expect
-    /// row 0 at top).  One-time flip on cache build.
-    pub fn pixels_flipped(&self) -> Vec<u8> {
-        let row_bytes = (self.width * 3) as usize;
-        let mut out = vec![0u8; self.pixels.len()];
-        for y in 0..self.height as usize {
-            let src = &self.pixels[y * row_bytes .. (y + 1) * row_bytes];
-            let dst_y = self.height as usize - 1 - y;
-            out[dst_y * row_bytes .. (dst_y + 1) * row_bytes].copy_from_slice(src);
+    /// Both planes mutably in one borrow — for inner loops that update
+    /// a pixel's colour and alpha together (image blit, manual composite).
+    #[inline]
+    pub fn planes_mut(&mut self) -> (&mut [u8], &mut [u8]) {
+        (&mut self.color, &mut self.alpha)
+    }
+
+    /// Consume the buffer, returning the owned `(color, alpha)` planes
+    /// as a pair — used when moving the painted pixels into `Arc`s for
+    /// a widget's backbuffer cache or for GPU texture upload.
+    pub fn into_planes(self) -> (Vec<u8>, Vec<u8>) { (self.color, self.alpha) }
+
+    /// Top-row-first copy of the colour plane, suitable for a plain
+    /// RGB8 upload or CPU blit.  Row 0 of the output is the VISUAL
+    /// top of the buffer (Y-up → Y-down flip).
+    pub fn color_plane_flipped(&self) -> Vec<u8> {
+        flip_plane(&self.color, self.width, self.height)
+    }
+
+    /// Top-row-first copy of the alpha plane.
+    pub fn alpha_plane_flipped(&self) -> Vec<u8> {
+        flip_plane(&self.alpha, self.width, self.height)
+    }
+
+    /// Collapse both planes into a single top-row-first straight-alpha
+    /// RGBA8 image suitable for the existing blit pipeline (one texture,
+    /// standard `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend).
+    ///
+    /// The per-channel alphas get collapsed to a single per-pixel alpha
+    /// via `max(R_alpha, G_alpha, B_alpha)`; RGB is recovered by dividing
+    /// the premult colour by that max alpha (straight-alpha form).  This
+    /// conversion is **lossy** when the three subpixel alphas diverge
+    /// (the whole point of the per-channel representation is lost under
+    /// collapse).  It's correct for typical monochrome-text cases where
+    /// all three alphas agree, and degrades gracefully otherwise —
+    /// Phase 5.2's two-plane blit path preserves the full per-channel
+    /// information through upload and shader.
+    pub fn to_rgba8_top_down_collapsed(&self) -> Vec<u8> {
+        let w = self.width  as usize;
+        let h = self.height as usize;
+        let mut out = vec![0u8; w * h * 4];
+        for y in 0..h {
+            let src_y = h - 1 - y;
+            for x in 0..w {
+                let si = (src_y * w + x) * 3;
+                let di = (y * w + x) * 4;
+                let ra = self.alpha[si];
+                let ga = self.alpha[si + 1];
+                let ba = self.alpha[si + 2];
+                let a  = ra.max(ga).max(ba);
+                if a == 0 { continue; } // fully transparent → keep RGBA zero
+                let af = a as f32 / 255.0;
+                let rc = self.color[si]     as f32 / 255.0;
+                let gc = self.color[si + 1] as f32 / 255.0;
+                let bc = self.color[si + 2] as f32 / 255.0;
+                out[di]     = ((rc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                out[di + 1] = ((gc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                out[di + 2] = ((bc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                out[di + 3] = a;
+            }
         }
         out
     }
@@ -109,22 +181,26 @@ impl LcdBuffer {
     // directly into the 3-byte-per-pixel coverage store with no intermediate
     // allocation.
 
-    /// Fill the entire buffer with a solid colour.  Treats `color` as
-    /// fully covering every subpixel of every pixel — the natural
-    /// interpretation for a bg fill on an opaque LCD surface.  Alpha is
-    /// applied to all three channels equally; partial alpha produces a
-    /// uniformly attenuated colour, not a translucent pixel (LcdBuffer
-    /// has no alpha channel — partial alpha against a black initial
-    /// buffer simply darkens the result).
+    /// Fill the entire buffer with a solid colour.  Every subpixel gets
+    /// the same premultiplied colour contribution and the same alpha —
+    /// a flat clear has no per-subpixel differentiation, so the three
+    /// alpha channels are all set to `color.a` and the three colour
+    /// channels to `color.rgb * color.a`.
     pub fn clear(&mut self, color: Color) {
         let a  = color.a.clamp(0.0, 1.0);
-        let r8 = ((color.r.clamp(0.0, 1.0) * a) * 255.0 + 0.5) as u8;
-        let g8 = ((color.g.clamp(0.0, 1.0) * a) * 255.0 + 0.5) as u8;
-        let b8 = ((color.b.clamp(0.0, 1.0) * a) * 255.0 + 0.5) as u8;
-        for px in self.pixels.chunks_exact_mut(3) {
-            px[0] = r8;
-            px[1] = g8;
-            px[2] = b8;
+        let r_c = ((color.r.clamp(0.0, 1.0) * a) * 255.0 + 0.5) as u8;
+        let g_c = ((color.g.clamp(0.0, 1.0) * a) * 255.0 + 0.5) as u8;
+        let b_c = ((color.b.clamp(0.0, 1.0) * a) * 255.0 + 0.5) as u8;
+        let a_byte = (a * 255.0 + 0.5) as u8;
+        for px in self.color.chunks_exact_mut(3) {
+            px[0] = r_c;
+            px[1] = g_c;
+            px[2] = b_c;
+        }
+        for px in self.alpha.chunks_exact_mut(3) {
+            px[0] = a_byte;
+            px[1] = a_byte;
+            px[2] = a_byte;
         }
     }
 
@@ -166,13 +242,14 @@ impl LcdBuffer {
     }
 
     /// Composite an [`LcdMask`] into this buffer using per-channel
-    /// Porter-Duff src-over.  Each subpixel mixes `src` colour into the
-    /// stored value by its own coverage:
+    /// **premultiplied** Porter-Duff src-over.  Each subpixel column's
+    /// effective alpha is `src.a × mask.channel_coverage`, and colour +
+    /// alpha both accumulate under the standard premult src-over:
     ///
     /// ```text
-    /// dst.r = src.r * cov.r + dst.r * (1 - cov.r)
-    /// dst.g = src.g * cov.g + dst.g * (1 - cov.g)
-    /// dst.b = src.b * cov.b + dst.b * (1 - cov.b)
+    /// eff_a_c        = src.a * mask.c
+    /// buf.color_c   := src.c * eff_a_c + buf.color_c * (1 - eff_a_c)
+    /// buf.alpha_c   := eff_a_c         + buf.alpha_c * (1 - eff_a_c)
     /// ```
     ///
     /// `(dst_x, dst_y)` is the mask's bottom-left in this buffer's Y-up
@@ -180,8 +257,6 @@ impl LcdBuffer {
     /// Optional `clip` (in this buffer's integer pixel coords:
     /// `(x1, y1, x2, y2)`, half-open) suppresses writes outside its
     /// bounds — used by widgets that paint inside a clipping parent.
-    /// Mirrors [`composite_lcd_mask`] but writes into the 3-byte/pixel
-    /// LcdBuffer instead of a 4-byte/pixel RGBA destination.
     pub fn composite_mask(
         &mut self,
         mask:  &LcdMask,
@@ -200,8 +275,6 @@ impl LcdBuffer {
         let dst_w_u = self.width as usize;
         let mw = mask.width  as i32;
         let mh = mask.height as i32;
-        // Intersect clip with the buffer's bounds up-front so the inner
-        // loop can do a single range check per pixel.
         let (cx1, cy1, cx2, cy2) = match clip {
             Some((cx1, cy1, cx2, cy2)) =>
                 (cx1.max(0), cy1.max(0), cx2.min(dst_w_i), cy2.min(dst_h_i)),
@@ -217,41 +290,56 @@ impl LcdBuffer {
                 let dx = dst_x + mx;
                 if dx < cx1 || dx >= cx2 { continue; }
                 let mi = ((my * mw + mx) * 3) as usize;
-                // Source colour modulates coverage by its own alpha, then
-                // composites per channel.  Alpha-zero src → no-op; alpha-one
-                // src reproduces the original mask formula exactly.
-                let cr = (mask.data[mi]     as f32 / 255.0) * sa;
-                let cg = (mask.data[mi + 1] as f32 / 255.0) * sa;
-                let cb = (mask.data[mi + 2] as f32 / 255.0) * sa;
-                if cr == 0.0 && cg == 0.0 && cb == 0.0 { continue; }
+                // Per-channel effective alpha = src colour alpha × mask coverage.
+                let ea_r = sa * (mask.data[mi]     as f32 / 255.0);
+                let ea_g = sa * (mask.data[mi + 1] as f32 / 255.0);
+                let ea_b = sa * (mask.data[mi + 2] as f32 / 255.0);
+                if ea_r == 0.0 && ea_g == 0.0 && ea_b == 0.0 { continue; }
+
                 let di = (dy_u * dst_w_u + (dx as usize)) * 3;
-                let dr = self.pixels[di]     as f32 / 255.0;
-                let dg = self.pixels[di + 1] as f32 / 255.0;
-                let db = self.pixels[di + 2] as f32 / 255.0;
-                let rr = sr * cr + dr * (1.0 - cr);
-                let rg = sg * cg + dg * (1.0 - cg);
-                let rb = sb * cb + db * (1.0 - cb);
-                self.pixels[di]     = (rr * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                self.pixels[di + 1] = (rg * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                self.pixels[di + 2] = (rb * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                // Read existing premult colour + per-channel alpha.
+                let bc_r = self.color[di]     as f32 / 255.0;
+                let bc_g = self.color[di + 1] as f32 / 255.0;
+                let bc_b = self.color[di + 2] as f32 / 255.0;
+                let ba_r = self.alpha[di]     as f32 / 255.0;
+                let ba_g = self.alpha[di + 1] as f32 / 255.0;
+                let ba_b = self.alpha[di + 2] as f32 / 255.0;
+                // Premult src-over per channel.  `src.c × eff_a` is the
+                // premultiplied source colour contribution; it adds to
+                // the buffer's existing premult colour, weighted by
+                // (1 - eff_a).  Alpha stream does the same Porter-Duff
+                // composite independently per channel.
+                let rc_r = sr * ea_r + bc_r * (1.0 - ea_r);
+                let rc_g = sg * ea_g + bc_g * (1.0 - ea_g);
+                let rc_b = sb * ea_b + bc_b * (1.0 - ea_b);
+                let ra_r = ea_r + ba_r * (1.0 - ea_r);
+                let ra_g = ea_g + ba_g * (1.0 - ea_g);
+                let ra_b = ea_b + ba_b * (1.0 - ea_b);
+
+                self.color[di]     = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.color[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.color[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di]     = (ra_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di + 1] = (ra_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di + 2] = (ra_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             }
         }
     }
 
-    /// Copy `src` onto this buffer at offset `(dst_x, dst_y)`, replacing
-    /// every destination pixel with the corresponding source pixel.
-    /// Optional `clip` (in this buffer's integer pixel coords, half-open)
-    /// suppresses writes outside it.
+    /// Composite `src` onto this buffer at offset `(dst_x, dst_y)` via
+    /// **per-channel premultiplied src-over** — the buffer-level
+    /// analogue of [`Self::composite_mask`].  Each of the three
+    /// subpixel columns applies `src.ch_alpha` as its own
+    /// Porter-Duff weight:
     ///
-    /// Used by [`crate::lcd_gfx_ctx::LcdGfxCtx::pop_layer`] to flatten a
-    /// pushed sub-layer back into its parent.  Semantics differ from
-    /// RGBA layer compositing (which uses SrcOver alpha): an `LcdBuffer`
-    /// has no alpha channel, so we can't distinguish "untouched" from
-    /// "intentionally black".  Layers in LCD coverage mode therefore
-    /// **fully replace** the destination region — matching the
-    /// `LcdCoverage` widget contract that mandates opaque coverage of
-    /// the full bounds.  Widgets that need translucent overlays should
-    /// not opt into LCD coverage mode in the first place.
+    /// ```text
+    /// buf.color_c := src.color_c + buf.color_c * (1 - src.alpha_c)
+    /// buf.alpha_c := src.alpha_c + buf.alpha_c * (1 - src.alpha_c)
+    /// ```
+    ///
+    /// Untouched source pixels (alpha zero on every channel) don't
+    /// change the buffer at all — exactly the semantic that makes a
+    /// popped layer leave unpainted areas alone, no seed trick needed.
     pub fn composite_buffer(
         &mut self,
         src:   &LcdBuffer,
@@ -283,12 +371,55 @@ impl LcdBuffer {
                 if dx < cx1 || dx >= cx2 { continue; }
                 let si = (sy_u * src_w_u + sx as usize) * 3;
                 let di = (dy_u * dst_w_u + dx as usize) * 3;
-                self.pixels[di]     = src.pixels[si];
-                self.pixels[di + 1] = src.pixels[si + 1];
-                self.pixels[di + 2] = src.pixels[si + 2];
+
+                let sa_r = src.alpha[si]     as f32 / 255.0;
+                let sa_g = src.alpha[si + 1] as f32 / 255.0;
+                let sa_b = src.alpha[si + 2] as f32 / 255.0;
+                if sa_r == 0.0 && sa_g == 0.0 && sa_b == 0.0 { continue; }
+
+                let sc_r = src.color[si]     as f32 / 255.0;
+                let sc_g = src.color[si + 1] as f32 / 255.0;
+                let sc_b = src.color[si + 2] as f32 / 255.0;
+
+                let bc_r = self.color[di]     as f32 / 255.0;
+                let bc_g = self.color[di + 1] as f32 / 255.0;
+                let bc_b = self.color[di + 2] as f32 / 255.0;
+                let ba_r = self.alpha[di]     as f32 / 255.0;
+                let ba_g = self.alpha[di + 1] as f32 / 255.0;
+                let ba_b = self.alpha[di + 2] as f32 / 255.0;
+
+                // src is already premultiplied, so `sc + bc*(1-sa)` is the
+                // plain Porter-Duff expression — no additional modulation.
+                let rc_r = sc_r + bc_r * (1.0 - sa_r);
+                let rc_g = sc_g + bc_g * (1.0 - sa_g);
+                let rc_b = sc_b + bc_b * (1.0 - sa_b);
+                let ra_r = sa_r + ba_r * (1.0 - sa_r);
+                let ra_g = sa_g + ba_g * (1.0 - sa_g);
+                let ra_b = sa_b + ba_b * (1.0 - sa_b);
+
+                self.color[di]     = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.color[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.color[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di]     = (ra_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di + 1] = (ra_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di + 2] = (ra_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             }
         }
     }
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────
+
+/// Y-flip a 3-byte/pixel plane (Y-up row 0 = bottom → top-row-first).
+fn flip_plane(src: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let row_bytes = (width * 3) as usize;
+    let mut out = vec![0u8; src.len()];
+    for y in 0..height as usize {
+        let dst_y = height as usize - 1 - y;
+        out[dst_y * row_bytes .. (dst_y + 1) * row_bytes]
+            .copy_from_slice(&src[y * row_bytes .. (y + 1) * row_bytes]);
+    }
+    out
 }
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_gray::PixfmtGray8;
@@ -844,7 +975,7 @@ mod tests {
     fn test_lcd_buffer_clear_writes_solid_color() {
         let mut buf = LcdBuffer::new(4, 3);
         buf.clear(Color::rgba(1.0, 0.5, 0.25, 1.0));
-        for px in buf.pixels().chunks_exact(3) {
+        for px in buf.color_plane().chunks_exact(3) {
             assert_eq!(px[0], 255);
             assert_eq!(px[1], 128);
             assert_eq!(px[2], 64);
@@ -853,12 +984,148 @@ mod tests {
         // Half-alpha → premultiplied colour at half intensity.
         let mut buf2 = LcdBuffer::new(2, 2);
         buf2.clear(Color::rgba(1.0, 1.0, 1.0, 0.5));
-        for px in buf2.pixels().chunks_exact(3) {
+        for px in buf2.color_plane().chunks_exact(3) {
             assert_eq!(px[0], 128);
             assert_eq!(px[1], 128);
             assert_eq!(px[2], 128);
         }
     }
+
+    // ── Per-channel alpha: the new capability ────────────────────────────────
+
+    /// Fresh buffer is fully transparent (both planes zero).  This is
+    /// the defining change from the old 3-byte LcdBuffer: unpainted
+    /// regions no longer read as "intentional black" on composite.
+    #[test]
+    fn test_lcd_buffer_fresh_is_fully_transparent() {
+        let buf = LcdBuffer::new(8, 4);
+        assert!(buf.color_plane().iter().all(|&b| b == 0),
+            "fresh buffer's color plane must be zero");
+        assert!(buf.alpha_plane().iter().all(|&b| b == 0),
+            "fresh buffer's alpha plane must be zero (= fully transparent)");
+    }
+
+    /// Paint black text onto a transparent buffer.  The premultiplied
+    /// colour is black × alpha = 0, so `color_plane` stays all zeros —
+    /// but `alpha_plane` picks up coverage at text pixels and stays
+    /// zero elsewhere.  That zero-alpha outside-text region is exactly
+    /// the property that lets a cached LcdBuffer blit onto any parent
+    /// without the "black rect where unpainted" failure mode.
+    #[test]
+    fn test_lcd_buffer_transparent_plus_black_text_leaves_alpha_only() {
+        let f = font();
+        let mask = rasterize_lcd_mask(&f, "Hi", 20.0, 2.0, 14.0, 80, 24, &TransAffine::new());
+        let mut buf = LcdBuffer::new(80, 24);
+        buf.composite_mask(&mask, Color::black(), 0, 0, None);
+
+        assert!(buf.color_plane().iter().all(|&b| b == 0),
+            "black-text-on-transparent: premult colour is 0, so color_plane stays zero");
+        let alpha_nonzero = buf.alpha_plane().iter().filter(|&&b| b > 0).count();
+        assert!(alpha_nonzero > 0,
+            "alpha_plane must show coverage where text was rasterized");
+
+        // Corners of the buffer (far from text) must stay fully transparent.
+        let bottom_left_i  = 0;
+        let bottom_right_i = (80 - 1) * 3;
+        let top_left_i     = (23 * 80) * 3;
+        let top_right_i    = (23 * 80 + 79) * 3;
+        for i in [bottom_left_i, bottom_right_i, top_left_i, top_right_i] {
+            assert_eq!(&buf.alpha_plane()[i .. i + 3], &[0u8, 0, 0],
+                "corner at byte offset {i} should be transparent");
+        }
+    }
+
+    /// Opaque red text deposits premultiplied red into the colour plane
+    /// AND full alpha into the alpha plane at fully-covered subpixels.
+    /// This is the crisp case where per-channel alpha == per-channel
+    /// coverage, no divergence.
+    #[test]
+    fn test_lcd_buffer_red_text_writes_premultiplied_color() {
+        let f = font();
+        let w = 80u32; let h = 24u32;
+        let mask = rasterize_lcd_mask(&f, "I", 24.0, 4.0, 18.0, w, h, &TransAffine::new());
+        let mut buf = LcdBuffer::new(w, h);
+        buf.composite_mask(&mask, Color::rgba(1.0, 0.0, 0.0, 1.0), 0, 0, None);
+
+        // Look for at least one pixel where the R channel is fully
+        // covered: R_alpha = 255, R_color = 255 (premult red × 1),
+        // and G/B colour stay zero (red source has no G or B).
+        let mut saw_full_red = false;
+        for i in (0..(w * h) as usize).map(|p| p * 3) {
+            if buf.alpha_plane()[i]     == 255
+            && buf.color_plane()[i]     == 255
+            && buf.color_plane()[i + 1] == 0
+            && buf.color_plane()[i + 2] == 0
+            {
+                saw_full_red = true;
+                break;
+            }
+        }
+        assert!(saw_full_red, "expected at least one fully-covered pure-red pixel");
+    }
+
+    /// `composite_buffer` leaves dst untouched wherever src has alpha=0.
+    /// The defining behavioural property of the two-plane design: a
+    /// sub-layer with painted content plus unpainted margins flushes
+    /// back onto its parent without clobbering the margins.
+    #[test]
+    fn test_lcd_buffer_composite_buffer_leaves_dst_untouched_where_src_is_transparent() {
+        // src: all transparent (no paint).
+        let src = LcdBuffer::new(4, 4);
+
+        // dst: solid white.
+        let mut dst = LcdBuffer::new(4, 4);
+        dst.clear(Color::white());
+
+        // Snapshot expected values: white everywhere, full alpha.
+        for px in dst.color_plane().chunks_exact(3) { assert_eq!(px, [255, 255, 255]); }
+        for px in dst.alpha_plane().chunks_exact(3) { assert_eq!(px, [255, 255, 255]); }
+
+        // Composite transparent src onto white dst.  Must leave dst unchanged.
+        dst.composite_buffer(&src, 0, 0, None);
+        for px in dst.color_plane().chunks_exact(3) {
+            assert_eq!(px, [255, 255, 255], "dst colour must survive transparent src composite");
+        }
+        for px in dst.alpha_plane().chunks_exact(3) {
+            assert_eq!(px, [255, 255, 255], "dst alpha must survive transparent src composite");
+        }
+    }
+
+    /// `composite_buffer`: a fully-opaque src pixel fully replaces the
+    /// corresponding dst pixel; a fully-transparent src pixel leaves
+    /// dst alone.  This is exactly the Porter-Duff src-over you'd want
+    /// for any layer-flush operation, just expressed per-channel.
+    #[test]
+    fn test_lcd_buffer_composite_buffer_opaque_pixel_replaces_dst() {
+        // src: pixel (1,1) painted opaque red, rest transparent.
+        let mut src = LcdBuffer::new(3, 3);
+        // Manually set pixel (1,1) premultiplied red + full alpha on all three channels.
+        let i = (1 * 3 + 1) * 3;
+        src.color_plane_mut()[i]     = 255;  // R premult = 1.0 * 1.0 = 1.0 → 255
+        src.color_plane_mut()[i + 1] = 0;
+        src.color_plane_mut()[i + 2] = 0;
+        src.alpha_plane_mut()[i]     = 255;
+        src.alpha_plane_mut()[i + 1] = 255;
+        src.alpha_plane_mut()[i + 2] = 255;
+
+        // dst: solid white.
+        let mut dst = LcdBuffer::new(3, 3);
+        dst.clear(Color::white());
+
+        dst.composite_buffer(&src, 0, 0, None);
+
+        // Pixel (1,1) should now be red (fully replaced).
+        assert_eq!(&dst.color_plane()[i .. i + 3], &[255, 0, 0],
+            "opaque src pixel must fully replace dst pixel's colour");
+        assert_eq!(&dst.alpha_plane()[i .. i + 3], &[255, 255, 255],
+            "alpha stays full opacity after opaque-src overwrite");
+
+        // Corner (0,0) — src transparent → dst white unchanged.
+        assert_eq!(&dst.color_plane()[0 .. 3], &[255, 255, 255],
+            "corner should retain dst white (src was transparent there)");
+    }
+
+    // ── Legacy tests (opaque content — still valid under new semantics) ──────
 
     /// Compositing a non-empty mask onto a cleared buffer must leave at
     /// least some pixels modified — proves the path connects.
@@ -870,9 +1137,9 @@ mod tests {
         );
         let mut buf = LcdBuffer::new(80, 24);
         buf.clear(Color::white());                       // white bg
-        let before: u64 = buf.pixels().iter().map(|&b| b as u64).sum();
+        let before: u64 = buf.color_plane().iter().map(|&b| b as u64).sum();
         buf.composite_mask(&mask, Color::black(), 0, 0, None); // black text
-        let after: u64 = buf.pixels().iter().map(|&b| b as u64).sum();
+        let after: u64 = buf.color_plane().iter().map(|&b| b as u64).sum();
         assert!(after < before,
             "compositing dark text onto white bg should reduce summed brightness");
     }
@@ -932,7 +1199,7 @@ mod tests {
 
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;
-            (buf.pixels()[i], buf.pixels()[i + 1], buf.pixels()[i + 2])
+            (buf.color_plane()[i], buf.color_plane()[i + 1], buf.color_plane()[i + 2])
         };
 
         // Centre of rect — fully covered, must be black on every channel.
@@ -982,7 +1249,7 @@ mod tests {
         let mask_b = builder.finalize();
         buf_b.composite_mask(&mask_b, Color::black(), 0, 0, None);
 
-        assert_eq!(buf_a.pixels(), buf_b.pixels(),
+        assert_eq!(buf_a.color_plane(), buf_b.color_plane(),
             "fill_path-via-builder must match legacy text mask pipeline byte-for-byte");
     }
 
@@ -1019,7 +1286,7 @@ mod tests {
                 let ai = (y * w as usize + x) * 4;
                 let bi = (y * w as usize + x) * 3;
                 let a_rgb = (rgba[ai], rgba[ai + 1], rgba[ai + 2]);
-                let b_rgb = (buf.pixels()[bi], buf.pixels()[bi + 1], buf.pixels()[bi + 2]);
+                let b_rgb = (buf.color_plane()[bi], buf.color_plane()[bi + 1], buf.color_plane()[bi + 2]);
                 assert_eq!(a_rgb, b_rgb,
                     "RGB mismatch at ({x},{y}): RGBA-path={a_rgb:?} LcdBuffer-path={b_rgb:?}");
             }

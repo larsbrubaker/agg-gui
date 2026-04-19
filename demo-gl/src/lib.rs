@@ -106,6 +106,29 @@ const LCD_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;
 #[cfg(not(target_arch = "wasm32"))]
 const LCD_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_mask;uniform vec4 u_color;layout(location=0,index=0)out vec4 out_color;layout(location=0,index=1)out vec4 out_coverage;void main(){vec3 c=texture(u_mask,v_uv).rgb;out_color=vec4(u_color.rgb,1.0);out_coverage=vec4(c,1.0);}";
 
+// LCD BACKBUFFER shader.  Composites an `LcdCoverage`-mode cached
+// backbuffer (two RGB8 textures: premultiplied colour plane + per-channel
+// alpha plane) onto the destination with per-channel src-over.
+//
+// Desktop GL 3.3 path: dual-source blend.  The shader emits two outputs,
+// bound to blend indices 0 and 1:
+//   - out_color    = (premult_color.rgb, max_alpha)     → index 0
+//   - out_coverage = (per_channel_alpha.rgb, max_alpha) → index 1
+// With `glBlendFuncSeparate(ONE, ONE_MINUS_SRC1_COLOR, ONE,
+// ONE_MINUS_SRC1_ALPHA)` the hardware computes, per-channel:
+//   dst.R_new = out_color.R + dst.R * (1 - out_coverage.R)
+// which is premultiplied Porter-Duff src-over — and because each
+// subpixel has its own `out_coverage` entry, LCD chroma survives the
+// cache round-trip to the screen.
+//
+// WebGL 2 path (no dual-source): collapse per-channel alphas to the
+// max and degrade to standard SrcOver.  Same quality as the existing
+// LCD text fallback on web.
+#[cfg(target_arch = "wasm32")]
+const LCB_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_color;uniform sampler2D u_alpha;out vec4 frag_color;void main(){vec3 c=texture(u_color,v_uv).rgb;vec3 a=texture(u_alpha,v_uv).rgb;float ma=max(max(a.r,a.g),a.b);if(ma<=0.0)discard;frag_color=vec4(c/ma,ma);}";
+#[cfg(not(target_arch = "wasm32"))]
+const LCB_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_color;uniform sampler2D u_alpha;layout(location=0,index=0)out vec4 out_color;layout(location=0,index=1)out vec4 out_coverage;void main(){vec3 c=texture(u_color,v_uv).rgb;vec3 a=texture(u_alpha,v_uv).rgb;float ma=max(max(a.r,a.g),a.b);out_color=vec4(c,ma);out_coverage=vec4(a,ma);}";
+
 // ---------------------------------------------------------------------------
 // GlGfxCtx
 // ---------------------------------------------------------------------------
@@ -161,6 +184,14 @@ pub struct GlGfxCtx {
     // raster; textures live as long as the mask `Arc` is still strong
     // in `agg_gui::text_lcd`'s LRU cache.
     lcd_arc_texture_cache: std::collections::HashMap<usize, ArcTextureEntry>,
+
+    // LCD BACKBUFFER pipeline (see `LCB_FRAG`) — dual-source per-channel
+    // blit of a two-plane `LcdCoverage` cache onto the destination.
+    // Reuses `LCD_VERT` because the vertex work is identical.
+    lcb_prog: glow::Program,
+    lcb_res_loc:         Option<glow::UniformLocation>,
+    lcb_color_sampler:   Option<glow::UniformLocation>,
+    lcb_alpha_sampler:   Option<glow::UniformLocation>,
 
     // Texture cache keyed on (ptr, len, w, h, head/tail byte hash).  Used by
     // the generic `draw_image_rgba(&[u8], …)` path (markdown images, screenshot
@@ -270,6 +301,16 @@ impl GlGfxCtx {
         gl.enable_vertex_attrib_array(1);
         gl.bind_vertex_array(None);
 
+        // ── LCD backbuffer pipeline ────────────────────────────────────────
+        // Reuses `lcd_vao` / `lcd_vbo` for vertex data (same layout: vec2
+        // pos + vec2 uv) — the only difference from the text LCD shader is
+        // the fragment stage and the second sampler uniform.
+        let lcb_prog = compile_program(&gl, LCD_VERT, LCB_FRAG)
+            .expect("lcd backbuffer shader compile/link");
+        let lcb_res_loc       = gl.get_uniform_location(lcb_prog, "u_resolution");
+        let lcb_color_sampler = gl.get_uniform_location(lcb_prog, "u_color");
+        let lcb_alpha_sampler = gl.get_uniform_location(lcb_prog, "u_alpha");
+
         Self {
             gl,
             viewport: (width, height),
@@ -283,6 +324,10 @@ impl GlGfxCtx {
             texture_cache_order: std::collections::VecDeque::new(),
             arc_texture_cache:   std::collections::HashMap::new(),
             lcd_arc_texture_cache: std::collections::HashMap::new(),
+            lcb_prog,
+            lcb_res_loc,
+            lcb_color_sampler,
+            lcb_alpha_sampler,
             fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
@@ -471,6 +516,131 @@ impl GlGfxCtx {
         );
         gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
         gl.bind_vertex_array(None);
+
+        // Restore standard alpha blend state.
+        gl.blend_func_separate(
+            glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA,
+            glow::ZERO,      glow::ONE,
+        );
+    }
+
+    /// Get-or-upload a single 3-byte/pixel plane (colour or alpha) of an
+    /// LCD backbuffer, cached on its `Arc` pointer.  Matches the pattern
+    /// of `draw_lcd_mask_arc` so GPU memory stays bounded automatically
+    /// as widget backbuffer caches turn over.
+    unsafe fn lcd_plane_get_or_upload(
+        &mut self,
+        data: &std::sync::Arc<Vec<u8>>,
+        w:    u32,
+        h:    u32,
+    ) -> glow::Texture {
+        let key = std::sync::Arc::as_ptr(data) as usize;
+        if let Some(entry) = self.lcd_arc_texture_cache.get(&key) {
+            if entry.weak.upgrade().is_some() && entry.w == w && entry.h == h {
+                return entry.texture;
+            }
+        }
+        let tex = self.gl.create_texture().expect("create lcd backbuffer texture");
+        self.upload_lcd_texture(tex, w, h, data.as_slice());
+        if let Some(old) = self.lcd_arc_texture_cache.insert(key, ArcTextureEntry {
+            weak:    std::sync::Arc::downgrade(data),
+            texture: tex,
+            w, h,
+        }) {
+            self.gl.delete_texture(old.texture);
+        }
+        self.lcd_arc_texture_cache.retain(|_, e| {
+            if e.weak.upgrade().is_some() { true } else {
+                self.gl.delete_texture(e.texture);
+                false
+            }
+        });
+        tex
+    }
+
+    /// Composite a two-plane LCD backbuffer (colour + alpha textures,
+    /// both top-row-first RGB8) onto the destination with per-channel
+    /// src-over via dual-source blend.  Preserves LCD chroma through
+    /// the cache round-trip — see `LCB_FRAG` for the math.
+    unsafe fn draw_lcd_backbuffer_quad(
+        &self,
+        color_tex: glow::Texture,
+        alpha_tex: glow::Texture,
+        w:         u32,
+        h:         u32,
+        dst_x:     f64,
+        dst_y:     f64,
+        dst_w:     f64,
+        dst_h:     f64,
+    ) {
+        let gl = &*self.gl;
+        let ctm = *self.ctm();
+        // Snap origin to the integer pixel grid — subpixel phase pattern
+        // is only valid at 1:1 texel-to-pixel mapping.  Same rationale
+        // as `draw_lcd_quad` for text masks.
+        let bl_x = (dst_x * ctm.sx + dst_y * ctm.shx + ctm.tx).round();
+        let bl_y = (dst_x * ctm.shy + dst_y * ctm.sy + ctm.ty).round();
+        let tr_x = bl_x + dst_w;
+        let tr_y = bl_y + dst_h;
+        let _ = w; let _ = h;
+
+        // Cached planes are TOP-ROW-FIRST (the cache layout), so UV v=0
+        // corresponds to the visually-top row of the image.  Our Y-up
+        // quad has bl at low Y; sample `v=1` (bottom row of image data,
+        // which the UV v=1 maps to in GL texture space) at bl and `v=0`
+        // at tr.  Matches `draw_image_rgba_arc`'s convention.
+        let verts: [f32; 16] = [
+            bl_x as f32, bl_y as f32, 0.0, 1.0,
+            tr_x as f32, bl_y as f32, 1.0, 1.0,
+            tr_x as f32, tr_y as f32, 1.0, 0.0,
+            bl_x as f32, tr_y as f32, 0.0, 0.0,
+        ];
+        let idx: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+        gl.use_program(Some(self.lcb_prog));
+        gl.uniform_2_f32(self.lcb_res_loc.as_ref(), self.viewport.0, self.viewport.1);
+        gl.uniform_1_i32(self.lcb_color_sampler.as_ref(), 0);
+        gl.uniform_1_i32(self.lcb_alpha_sampler.as_ref(), 1);
+
+        gl.active_texture(glow::TEXTURE0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(color_tex));
+        gl.active_texture(glow::TEXTURE1);
+        gl.bind_texture(glow::TEXTURE_2D, Some(alpha_tex));
+
+        // Dual-source blend: fragment's `out_color` is the "source" and
+        // `out_coverage` supplies the per-channel blend factors.  With
+        // `sfactor=ONE, dfactor=ONE_MINUS_SRC1_COLOR` each destination
+        // channel computes `dst = out_color + dst * (1 - out_coverage)`.
+        // Alpha channel gets the max-alpha (passed as out_color.a and
+        // out_coverage.a) so the fb's alpha accumulates correctly.
+        #[cfg(not(target_arch = "wasm32"))]
+        gl.blend_func_separate(
+            glow::ONE, glow::ONE_MINUS_SRC1_COLOR,
+            glow::ONE, glow::ONE_MINUS_SRC1_ALPHA,
+        );
+        // WebGL 2 path collapses in the shader via `discard`-plus-SrcOver;
+        // no dual-source setup needed — falls back to the existing
+        // `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend state.
+
+        gl.bind_vertex_array(Some(self.lcd_vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.lcd_vbo));
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            bytemuck::cast_slice(&verts),
+            glow::STREAM_DRAW,
+        );
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ibo));
+        gl.buffer_data_u8_slice(
+            glow::ELEMENT_ARRAY_BUFFER,
+            bytemuck::cast_slice(&idx),
+            glow::STREAM_DRAW,
+        );
+        gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+        gl.bind_vertex_array(None);
+
+        // Rebind the default texture unit so later draws don't leak
+        // bindings off unit 1.
+        gl.active_texture(glow::TEXTURE0);
 
         // Restore standard alpha blend state.
         gl.blend_func_separate(
@@ -966,6 +1136,36 @@ impl DrawCtx for GlGfxCtx {
             },
         };
         unsafe { self.draw_lcd_quad(tex, mask_w, mask_h, src_color, dst_x, dst_y); }
+    }
+
+    fn draw_lcd_backbuffer_arc(
+        &mut self,
+        color: &std::sync::Arc<Vec<u8>>,
+        alpha: &std::sync::Arc<Vec<u8>>,
+        w: u32,
+        h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        if w == 0 || h == 0 || color.is_empty() || alpha.is_empty() { return; }
+        let needed = (w as usize) * (h as usize) * 3;
+        if color.len() < needed || alpha.len() < needed { return; }
+
+        // Get-or-upload each plane independently; both share the
+        // lcd_arc_texture_cache so GPU memory is released as soon as the
+        // owning widget's `Arc` is dropped.  Colour and alpha planes have
+        // distinct pointer identities → distinct cache entries, no
+        // collisions.
+        let color_tex = unsafe { self.lcd_plane_get_or_upload(color, w, h) };
+        let alpha_tex = unsafe { self.lcd_plane_get_or_upload(alpha, w, h) };
+
+        unsafe {
+            self.draw_lcd_backbuffer_quad(
+                color_tex, alpha_tex, w, h, dst_x, dst_y, dst_w, dst_h,
+            );
+        }
     }
 
     fn draw_image_rgba(

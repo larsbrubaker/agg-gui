@@ -42,7 +42,10 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(lbl("The lines should be exactly one physical pixel wide, one physical pixel apart.", 13.0, &font), 0.0);
     col.push(lbl("They should be perfectly white and black.", 13.0, &font), 0.0);
 
-    col.push(Box::new(PixelTestLines { bounds: Rect::default(), children: Vec::new() }), 0.0);
+    col.push(Box::new(PixelTestLines {
+        bounds: Rect::default(),
+        children: Vec::new(),
+    }), 0.0);
 
     // Same patterns drawn via AGG software raster into a bitmap, then blit
     // through the Arc-keyed GL texture cache — the identical path used by
@@ -55,6 +58,9 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
         children: Vec::new(),
         bitmap_vertical: None,
         bitmap_horizontal: None,
+        lcd_vertical: None,
+        lcd_horizontal: None,
+        last_lcd_enabled: false,
     }), 0.0);
 
     col.push(lbl("The first square should be exactly one physical pixel big.", 13.0, &font), 0.0);
@@ -117,6 +123,11 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
 /// Draws two blocks side by side:
 /// - Left: alternating 1-px white/black vertical columns (n/2 pairs)
 /// - Right: alternating 1-px white/black horizontal rows (n/2 pairs)
+///
+/// Direct paint — no backbuffer, no cache.  The companion
+/// `PixelTestLinesBitmap` below renders the same content through a
+/// cached bitmap path, and the test is that the two produce visually
+/// identical output.
 struct PixelTestLines {
     bounds:   Rect,
     children: Vec<Box<dyn Widget>>,
@@ -203,14 +214,25 @@ struct PixelTestLinesBitmap {
     /// ref; re-use across frames with zero CPU work after the first paint.
     bitmap_vertical:   Option<Arc<Vec<u8>>>,
     bitmap_horizontal: Option<Arc<Vec<u8>>>,
+    /// LCD-mode caches: `(color_plane, alpha_plane)` pair for each
+    /// stripe block.  Both 3-byte/pixel top-row-first Arcs, cached
+    /// lazily + blitted via `draw_lcd_backbuffer_arc`.
+    lcd_vertical:      Option<(Arc<Vec<u8>>, Arc<Vec<u8>>)>,
+    lcd_horizontal:    Option<(Arc<Vec<u8>>, Arc<Vec<u8>>)>,
+    /// Previous LCD-enabled state.  When the user toggles the LCD
+    /// setting we must discard whichever cache we built for the old
+    /// mode — otherwise stale stripes would persist until layout
+    /// happens to invalidate (which may never, for a static widget).
+    last_lcd_enabled:  bool,
 }
 
 impl PixelTestLinesBitmap {
-    /// Rasterize a PT_N × PT_N bitmap via AGG software, un-premultiply, wrap
-    /// in an Arc.  `fill_stripes` draws the widget-specific content into a
-    /// fresh `GfxCtx`.
+    /// Rasterize a PT_N × PT_N bitmap via AGG software (`Rgba` path),
+    /// un-premultiply, wrap in an Arc.  `fill_stripes` gets a plain
+    /// `DrawCtx` — same surface the `LcdGfxCtx` variant receives, so
+    /// the two paths share stripe-drawing code.
     fn raster_to_bitmap<F>(fill_stripes: F) -> Arc<Vec<u8>>
-    where F: FnOnce(&mut agg_gui::GfxCtx)
+    where F: FnOnce(&mut dyn agg_gui::DrawCtx)
     {
         use agg_gui::{Framebuffer, GfxCtx};
         use agg_gui::framebuffer::unpremultiply_rgba_inplace;
@@ -224,6 +246,29 @@ impl PixelTestLinesBitmap {
         let mut pixels = fb.pixels_flipped();
         unpremultiply_rgba_inplace(&mut pixels);
         Arc::new(pixels)
+    }
+
+    /// Rasterize a PT_N × PT_N bitmap through the `LcdGfxCtx` pipeline —
+    /// per-channel coverage, per-channel premultiplied src-over — and
+    /// return the two Y-flipped (top-row-first) planes as `Arc`s.  Used
+    /// when the global LCD setting is on so this widget's stripes go
+    /// through the same 3× supersample + 5-tap filter as `PixelTestLines`'s
+    /// `LcdCoverage` backbuffer.
+    fn raster_to_lcd_planes<F>(fill_stripes: F) -> (Arc<Vec<u8>>, Arc<Vec<u8>>)
+    where F: FnOnce(&mut dyn agg_gui::DrawCtx)
+    {
+        use agg_gui::lcd_coverage::LcdBuffer;
+        use agg_gui::lcd_gfx_ctx::LcdGfxCtx;
+        let bw = PT_N as u32;
+        let bh = PT_N as u32;
+        let mut buf = LcdBuffer::new(bw, bh);
+        {
+            let mut gfx = LcdGfxCtx::new(&mut buf);
+            fill_stripes(&mut gfx);
+        }
+        let color = Arc::new(buf.color_plane_flipped());
+        let alpha = Arc::new(buf.alpha_plane_flipped());
+        (color, alpha)
     }
 }
 
@@ -244,52 +289,87 @@ impl Widget for PixelTestLinesBitmap {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let n = PT_N as usize;
 
-        // Build the vertical-stripes bitmap once — identical to
-        // `PixelTestLines`'s left block, just rendered into a Framebuffer
-        // instead of the live DrawCtx.
-        if self.bitmap_vertical.is_none() {
-            self.bitmap_vertical = Some(Self::raster_to_bitmap(|gfx| {
-                for i in 0..(n / 2) {
-                    let x = (2 * i) as f64;
-                    gfx.set_fill_color(Color::white());
-                    gfx.begin_path();
-                    gfx.rect(x, 0.0, 1.0, PT_N);
-                    gfx.fill();
-                    gfx.set_fill_color(Color::black());
-                    gfx.begin_path();
-                    gfx.rect(x + 1.0, 0.0, 1.0, PT_N);
-                    gfx.fill();
-                }
-            }));
-        }
+        // Stripe-fill closures — shared by Rgba and Lcd raster helpers
+        // so the patterns are byte-identical modulo the chosen pipeline.
+        let vertical_stripes = |gfx: &mut dyn DrawCtx| {
+            for i in 0..(n / 2) {
+                let x = (2 * i) as f64;
+                gfx.set_fill_color(Color::white());
+                gfx.begin_path();
+                gfx.rect(x, 0.0, 1.0, PT_N);
+                gfx.fill();
+                gfx.set_fill_color(Color::black());
+                gfx.begin_path();
+                gfx.rect(x + 1.0, 0.0, 1.0, PT_N);
+                gfx.fill();
+            }
+        };
+        let horizontal_stripes = |gfx: &mut dyn DrawCtx| {
+            for i in 0..(n / 2) {
+                let y = (2 * i) as f64;
+                gfx.set_fill_color(Color::white());
+                gfx.begin_path();
+                gfx.rect(0.0, y, PT_N, 1.0);
+                gfx.fill();
+                gfx.set_fill_color(Color::black());
+                gfx.begin_path();
+                gfx.rect(0.0, y + 1.0, PT_N, 1.0);
+                gfx.fill();
+            }
+        };
 
-        // Horizontal-stripes bitmap — identical to the right block.
-        if self.bitmap_horizontal.is_none() {
-            self.bitmap_horizontal = Some(Self::raster_to_bitmap(|gfx| {
-                for i in 0..(n / 2) {
-                    let y = (2 * i) as f64;
-                    gfx.set_fill_color(Color::white());
-                    gfx.begin_path();
-                    gfx.rect(0.0, y, PT_N, 1.0);
-                    gfx.fill();
-                    gfx.set_fill_color(Color::black());
-                    gfx.begin_path();
-                    gfx.rect(0.0, y + 1.0, PT_N, 1.0);
-                    gfx.fill();
-                }
-            }));
+        // Detect LCD toggle and drop the cache for the OPPOSITE mode so
+        // we don't keep a stale Rgba bitmap after the user turns LCD on
+        // (or vice versa).  The framework does this automatically for
+        // widgets that use `BackbufferCache`; PixelTestLinesBitmap
+        // rolls its own cache so it has to do the bookkeeping.
+        let lcd = agg_gui::font_settings::lcd_enabled();
+        if lcd != self.last_lcd_enabled {
+            self.bitmap_vertical   = None;
+            self.bitmap_horizontal = None;
+            self.lcd_vertical      = None;
+            self.lcd_horizontal    = None;
+            self.last_lcd_enabled  = lcd;
         }
 
         ctx.save();
         ctx.snap_to_pixel();
         let bw = PT_N as u32;
         let bh = PT_N as u32;
-        if let Some(arc) = self.bitmap_vertical.as_ref() {
-            ctx.draw_image_rgba_arc(arc, bw, bh, 0.0, 0.0, PT_N, PT_N);
-        }
-        if let Some(arc) = self.bitmap_horizontal.as_ref() {
-            let off_x = PT_N + PT_GAP;
-            ctx.draw_image_rgba_arc(arc, bw, bh, off_x, 0.0, PT_N, PT_N);
+        let off_x = PT_N + PT_GAP;
+
+        if lcd {
+            // LCD path: build and blit two-plane backbuffers.  Pixel-for-pixel
+            // identical to `PixelTestLines`'s LcdCoverage-cached output because
+            // both go through the same `LcdGfxCtx` → `LcdBuffer` → per-channel
+            // composite pipeline.
+            if self.lcd_vertical.is_none() {
+                self.lcd_vertical = Some(Self::raster_to_lcd_planes(vertical_stripes));
+            }
+            if self.lcd_horizontal.is_none() {
+                self.lcd_horizontal = Some(Self::raster_to_lcd_planes(horizontal_stripes));
+            }
+            if let Some((color, alpha)) = self.lcd_vertical.as_ref() {
+                ctx.draw_lcd_backbuffer_arc(color, alpha, bw, bh, 0.0, 0.0, PT_N, PT_N);
+            }
+            if let Some((color, alpha)) = self.lcd_horizontal.as_ref() {
+                ctx.draw_lcd_backbuffer_arc(color, alpha, bw, bh, off_x, 0.0, PT_N, PT_N);
+            }
+        } else {
+            // Rgba path: classic software-AGG raster + RGBA blit.  Matches
+            // `PixelTestLines`'s Rgba cache output.
+            if self.bitmap_vertical.is_none() {
+                self.bitmap_vertical = Some(Self::raster_to_bitmap(vertical_stripes));
+            }
+            if self.bitmap_horizontal.is_none() {
+                self.bitmap_horizontal = Some(Self::raster_to_bitmap(horizontal_stripes));
+            }
+            if let Some(arc) = self.bitmap_vertical.as_ref() {
+                ctx.draw_image_rgba_arc(arc, bw, bh, 0.0, 0.0, PT_N, PT_N);
+            }
+            if let Some(arc) = self.bitmap_horizontal.as_ref() {
+                ctx.draw_image_rgba_arc(arc, bw, bh, off_x, 0.0, PT_N, PT_N);
+            }
         }
         ctx.restore();
     }

@@ -719,6 +719,85 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    fn draw_lcd_backbuffer_arc(
+        &mut self,
+        color: &Arc<Vec<u8>>,
+        alpha: &Arc<Vec<u8>>,
+        w: u32,
+        h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        _dst_w: f64,
+        _dst_h: f64,
+    ) {
+        // Per-channel premultiplied src-over directly onto the active
+        // framebuffer.  Preserves LCD chroma: each subpixel's alpha
+        // drives the src-over of that subpixel's colour into the
+        // destination independently of the other two.
+        //
+        // Inputs are **top-row-first** (matches the cache layout); the
+        // destination `Framebuffer` is Y-up with row 0 at the bottom, so
+        // src row `sy` maps to dst row `origin_y + (h-1-sy)`.
+        if w == 0 || h == 0 { return; }
+        let w_u = w as usize;
+        let h_u = h as usize;
+        if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 { return; }
+
+        let t = &self.state.transform;
+        let sx = (dst_x * t.sx + dst_y * t.shx + t.tx).round() as i32;
+        let sy = (dst_x * t.shy + dst_y * t.sy + t.ty).round() as i32;
+        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let fw = fb.width()  as i32;
+        let fh = fb.height() as i32;
+        let fw_u = fw as usize;
+        let pixels = fb.pixels_mut();
+
+        for src_y in 0..h_u {
+            // Top-row-first src → Y-up dst: src row 0 (visually top)
+            // lands at dst_y + h - 1 (the visually-top dst row).
+            let dy = sy + (h_u - 1 - src_y) as i32;
+            if dy < 0 || dy >= fh { continue; }
+            let dy_u = dy as usize;
+            for src_x in 0..w_u {
+                let dx = sx + src_x as i32;
+                if dx < 0 || dx >= fw { continue; }
+                let ci = (src_y * w_u + src_x) * 3;
+
+                let sa_r = alpha[ci]     as f32 / 255.0;
+                let sa_g = alpha[ci + 1] as f32 / 255.0;
+                let sa_b = alpha[ci + 2] as f32 / 255.0;
+                if sa_r == 0.0 && sa_g == 0.0 && sa_b == 0.0 { continue; }
+
+                let sc_r = color[ci]     as f32 / 255.0;
+                let sc_g = color[ci + 1] as f32 / 255.0;
+                let sc_b = color[ci + 2] as f32 / 255.0;
+
+                let di = (dy_u * fw_u + dx as usize) * 4;
+                // Framebuffer holds premultiplied RGBA.  Per-channel
+                // src-over is `dst = src + dst * (1 - src_a)` since src
+                // is already premultiplied.  Alpha composites via
+                // max-channel-alpha so the destination picks up full
+                // opacity wherever any subpixel was painted — matches
+                // "this pixel was drawn on" for subsequent SrcOver blits.
+                let dc_r = pixels[di]     as f32 / 255.0;
+                let dc_g = pixels[di + 1] as f32 / 255.0;
+                let dc_b = pixels[di + 2] as f32 / 255.0;
+                let da   = pixels[di + 3] as f32 / 255.0;
+
+                let rc_r = sc_r + dc_r * (1.0 - sa_r);
+                let rc_g = sc_g + dc_g * (1.0 - sa_g);
+                let rc_b = sc_b + dc_b * (1.0 - sa_b);
+                let src_a_max = sa_r.max(sa_g).max(sa_b);
+                let ra = src_a_max + da * (1.0 - src_a_max);
+
+                pixels[di]     = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di + 3] = (ra   * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+
     fn has_lcd_mask_composite(&self) -> bool { true }
 
     fn draw_lcd_mask(

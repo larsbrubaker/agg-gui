@@ -318,6 +318,71 @@ pub trait DrawCtx {
         self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    // ── LCD backbuffer blit ───────────────────────────────────────────────────
+
+    /// Composite a two-plane `LcdCoverage`-mode backbuffer onto the active
+    /// render target at `(dst_x, dst_y)` with size `(dst_w, dst_h)` (in
+    /// local coords).  Inputs are two `Arc<Vec<u8>>`, each 3 bytes per
+    /// pixel, **top-row-first**:
+    ///
+    /// - `color`: premultiplied per-channel RGB.
+    /// - `alpha`: per-channel alpha (coverage).
+    ///
+    /// The compositor applies per-channel premultiplied src-over:
+    ///
+    /// ```text
+    /// dst.ch := src.color_ch + dst.ch * (1 - src.alpha_ch)
+    /// ```
+    ///
+    /// which preserves LCD subpixel chroma through the cache round-trip.
+    /// Used by [`crate::widget::paint_subtree_backbuffered`] when a widget's
+    /// [`crate::widget::BackbufferMode::LcdCoverage`] cache is ready to
+    /// composite onto its parent.
+    ///
+    /// **Default:** collapses the two planes into a single straight-alpha
+    /// RGBA8 image (max of channel alphas, divided back to straight colour)
+    /// and forwards to [`draw_image_rgba`].  Correct for any content where
+    /// the three channel alphas agree; lossy of LCD chroma where they
+    /// diverge.  Backends that want full subpixel quality through the
+    /// cache override this with a two-texture shader path.
+    fn draw_lcd_backbuffer_arc(
+        &mut self,
+        color: &std::sync::Arc<Vec<u8>>,
+        alpha: &std::sync::Arc<Vec<u8>>,
+        w: u32,
+        h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        // Collapse to straight-alpha RGBA8 on the fly.  Matches the same
+        // math `LcdBuffer::to_rgba8_top_down_collapsed` uses internally,
+        // except applied to a top-down pair rather than a Y-up pair.
+        let w_u = w as usize;
+        let h_u = h as usize;
+        if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 { return; }
+        let mut rgba = vec![0u8; w_u * h_u * 4];
+        for i in 0..(w_u * h_u) {
+            let ci = i * 3;
+            let ra = alpha[ci];
+            let ga = alpha[ci + 1];
+            let ba = alpha[ci + 2];
+            let a  = ra.max(ga).max(ba);
+            if a == 0 { continue; }
+            let af = a as f32 / 255.0;
+            let rc = color[ci]     as f32 / 255.0;
+            let gc = color[ci + 1] as f32 / 255.0;
+            let bc = color[ci + 2] as f32 / 255.0;
+            let di = i * 4;
+            rgba[di]     = ((rc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            rgba[di + 1] = ((gc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            rgba[di + 2] = ((bc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            rgba[di + 3] = a;
+        }
+        self.draw_image_rgba(&rgba, w, h, dst_x, dst_y, dst_w, dst_h);
+    }
+
     // ── Theme / Visuals ───────────────────────────────────────────────────────
 
     /// Return the currently-active [`Visuals`] palette.

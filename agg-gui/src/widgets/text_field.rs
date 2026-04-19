@@ -30,7 +30,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{Font, measure_advance};
 use crate::undo::UndoBuffer;
-use crate::widget::Widget;
+use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 use super::text_field_core::{
     TextEditCommand, TextEditState,
     byte_at_x, next_char_boundary, next_word_boundary,
@@ -119,6 +119,41 @@ pub struct TextField {
     on_change:        Option<Box<dyn FnMut(&str)>>,
     on_enter:         Option<Box<dyn FnMut(&str)>>,
     on_edit_complete: Option<Box<dyn FnMut(&str)>>,
+
+    // ── Backbuffer cache ─────────────────────────────────────────────────
+    //
+    // Routes paint through the framework's backbuffer lane — when the
+    // global LCD toggle is on the cache holds two planes (per-channel
+    // colour + per-channel alpha), blitted via `draw_lcd_backbuffer_arc`
+    // which preserves subpixel chroma through the cache round-trip.
+    // Dispatching on `font_settings::lcd_enabled()` inside
+    // `backbuffer_mode` means toggling the setting automatically
+    // rebuilds the cache in the right format (the framework detects
+    // the mode flip and forces a re-raster).
+    cache:          BackbufferCache,
+    /// Snapshot of everything the paint output depends on, captured at
+    /// the end of each successful layout.  When any of these change the
+    /// cache is invalidated — handles blinking cursor (a re-layout every
+    /// frame detects the phase flip) as well as text, focus, selection,
+    /// and scroll changes without needing an invalidate() call at every
+    /// mutation site.
+    last_paint_sig: Option<TextFieldPaintSig>,
+}
+
+/// State signature that changes whenever the painted output should
+/// change.  Compared at layout time to decide whether to invalidate the
+/// backbuffer cache.
+#[derive(Clone, PartialEq)]
+struct TextFieldPaintSig {
+    text:          String,
+    cursor:        usize,
+    anchor:        usize,
+    focused:       bool,
+    hovered:       bool,
+    scroll_x_bits: u64,
+    blink_visible: bool,
+    w_bits:        u64,
+    h_bits:        u64,
 }
 
 impl TextField {
@@ -147,6 +182,8 @@ impl TextField {
             on_change:        None,
             on_enter:         None,
             on_edit_complete: None,
+            cache:            BackbufferCache::default(),
+            last_paint_sig:   None,
         }
     }
 
@@ -578,7 +615,54 @@ impl Widget for TextField {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
+        Some(&mut self.cache)
+    }
+
+    fn backbuffer_mode(&self) -> BackbufferMode {
+        // When LCD is on, route through the per-channel `LcdCoverage`
+        // cache so text composites correctly over the white bg through
+        // the same pipeline `PixelTestLines`'s stripes take.  The
+        // framework auto-invalidates on mode flip (see
+        // `paint_subtree_backbuffered`).
+        if crate::font_settings::lcd_enabled() {
+            BackbufferMode::LcdCoverage
+        } else {
+            BackbufferMode::Rgba
+        }
+    }
+
     fn layout(&mut self, available: Size) -> Size {
+        // Capture every aspect of the widget's state that affects the
+        // painted output.  When any of these shift, invalidate the
+        // backbuffer cache so the framework re-rasterises on the next
+        // frame.  `layout` runs every frame regardless of cache
+        // freshness, so this is the right hook for detecting the
+        // cursor-blink phase flip (which otherwise has no mutation
+        // site to hang an invalidate() on).
+        let st = self.edit.borrow();
+        let blink_visible = self.focused
+            && st.cursor == st.anchor
+            && match self.focus_time {
+                Some(t) => (t.elapsed().as_millis() / 500) % 2 == 0,
+                None    => false,
+            };
+        let sig = TextFieldPaintSig {
+            text:          st.text.clone(),
+            cursor:        st.cursor,
+            anchor:        st.anchor,
+            focused:       self.focused,
+            hovered:       self.hovered,
+            scroll_x_bits: self.scroll_x.to_bits(),
+            blink_visible,
+            w_bits:        self.bounds.width .to_bits(),
+            h_bits:        self.bounds.height.to_bits(),
+        };
+        drop(st);
+        if self.last_paint_sig.as_ref() != Some(&sig) {
+            self.last_paint_sig = Some(sig);
+            self.cache.invalidate();
+        }
         Size::new(available.width, (self.font_size * 2.4).max(28.0))
     }
 
