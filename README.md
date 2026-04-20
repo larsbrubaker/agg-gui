@@ -4,6 +4,8 @@ A Rust GUI framework built on [Anti-Grain Geometry (AGG)](https://github.com/lar
 Widgets rasterize directly to the GL surface using AGG paths — no retained scene graph, no DOM, no CSS.
 The rendering model is immediate-mode: full redraw every frame, deterministic layout, Y-up coordinates throughout.
 
+> Part of the [rust-apps](https://github.com/larsbrubaker/rust-apps) suite — a collection of Rust graphics and geometry libraries by Lars Brubaker.
+
 [![CI](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml)
 [![Demo](https://github.com/larsbrubaker/agg-gui/actions/workflows/deploy-demo.yml/badge.svg?branch=main&event=push)](https://larsbrubaker.github.io/agg-gui/)
 
