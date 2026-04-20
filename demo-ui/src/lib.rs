@@ -455,16 +455,20 @@ pub fn build_demo_ui(
     let font_size_scale_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
         initial_state.as_ref().map(|s| s.font_size_scale).unwrap_or(1.0)
     ));
-    // Library defaults — LCD subpixel and Y-axis baseline hinting
-    // both ON.  These match the rendering quality the library ships
-    // with and produce the best-looking text on typical desktop LCDs.
-    // Saved state (from a prior run) overrides if present, so users
-    // who have explicitly disabled them keep their preference.
+    // Library defaults — LCD subpixel and baseline snapping both ON
+    // for standard-DPI displays where they noticeably improve crisp-
+    // ness, OFF for HiDPI displays where the physical pixel pitch is
+    // small enough that subpixel rendering adds chromatic noise and
+    // baseline snapping costs sub-pixel positioning that HiDPI can
+    // otherwise express cleanly.  Saved state (from a prior run)
+    // overrides if present, so users who have explicitly chosen a
+    // value keep their preference.
+    let standard_dpi = agg_gui::device_scale() <= 1.25;
     let lcd_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.lcd_enabled).unwrap_or(true)
+        initial_state.as_ref().map(|s| s.lcd_enabled).unwrap_or(standard_dpi)
     ));
     let hinting_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.hinting_enabled).unwrap_or(true)
+        initial_state.as_ref().map(|s| s.hinting_enabled).unwrap_or(standard_dpi)
     ));
     // Typography-style cells.  Defaults match the agg-rust `truetype_test`
     // reference so first-run users see the neutral / no-effect state.
@@ -823,19 +827,20 @@ pub fn build_demo_ui(
                 cell.set(Some(r));
             }
             // System settings → library defaults (both runtime globals
-            // + cells).  Style parameters reset to their pass-through
-            // values; rendering toggles + font reset to the library's
-            // ship-with defaults (Nunito + LCD + Hinting), so Reset
-            // matches first-run experience rather than "everything off".
+            // + cells).  Style parameters reset to pass-through; font
+            // resets to Nunito; LCD + baseline snapping reset to the
+            // first-run value for the **current** device scale (ON for
+            // standard-DPI, OFF for HiDPI).
             let default_idx  = windows::default_font_index();
             let default_name = windows::font_option_names()
                 .get(default_idx).copied();
+            let standard_dpi = agg_gui::device_scale() <= 1.25;
             agg_gui::font_settings::set_system_font(
                 default_name.and_then(windows::load_font_by_name)
             );
             agg_gui::font_settings::set_font_size_scale(1.0);
-            agg_gui::font_settings::set_lcd_enabled    (true);
-            agg_gui::font_settings::set_hinting_enabled(true);
+            agg_gui::font_settings::set_lcd_enabled    (standard_dpi);
+            agg_gui::font_settings::set_hinting_enabled(standard_dpi);
             agg_gui::font_settings::set_gamma         (1.0);
             agg_gui::font_settings::set_width         (1.0);
             agg_gui::font_settings::set_interval      (0.0);
@@ -846,8 +851,8 @@ pub fn build_demo_ui(
             // Snap both font-picker ComboBoxes to the library default.
             font_index.set(default_idx);
             font_scale.set(1.0);
-            lcd_cell.set(true);
-            hint_cell.set(true);
+            lcd_cell.set(standard_dpi);
+            hint_cell.set(standard_dpi);
             gamma.set(1.0);
             width_scl.set(1.0);
             interval.set(0.0);

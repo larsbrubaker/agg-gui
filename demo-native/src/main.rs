@@ -190,6 +190,14 @@ fn main() {
     let init_h = size.height.max(1) as f32;
     let mut gl_ctx = unsafe { GlGfxCtx::new(Rc::clone(&gl), init_w, init_h) };
 
+    // Publish the OS device scale BEFORE `build_demo_ui` so first-run
+    // defaults (LCD subpixel + baseline snapping) can consult it — both
+    // are only useful on standard-DPI screens.  HiDPI displays already
+    // have pixels small enough that LCD subpixel adds chromatic noise
+    // for no real sharpness gain, and baseline snapping costs subpixel
+    // positioning that HiDPI can otherwise express cleanly.
+    agg_gui::set_device_scale(window.scale_factor());
+
     let (mut app, handles) = demo_ui::build_demo_ui(
         Arc::clone(&font),
         Box::new(GlCubeWidget::new()),
@@ -247,11 +255,10 @@ fn main() {
     }
     screen_size.set((win_w, win_h));
 
-    // Publish the OS-reported device scale factor so the widget tree paints
-    // at physical pixel density — tiny text on 2×/3× HiDPI monitors and
-    // phone-browser emulation otherwise.  winit emits ScaleFactorChanged
-    // when the window moves to a different monitor; we update it there too.
-    agg_gui::set_device_scale(window.scale_factor());
+    // (Device scale was already published above, before `build_demo_ui`,
+    // so first-run defaults could consult it.  winit emits
+    // ScaleFactorChanged when the window moves between monitors; we
+    // update the global at that event below.)
 
     // Clear to the theme background first so any transparent regions in
     // the first paint (e.g. between widgets) are already theme-coloured.

@@ -229,18 +229,14 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
 
     col.push(heading("System"), 0.0);
     col.push(body(
-        "Process-wide rendering toggles.  Change a setting here and every \
-         widget that doesn't override it updates live on the next frame — \
-         the same pattern scrollbars use with `current_scroll_style`.",
+        "Process-wide text rendering settings.  Changes apply on the next frame.",
     ), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     // ── Font selector ───────────────────────────────────────────────────
     col.push(heading("Font"), 0.0);
     col.push(body(
-        "Enumerated from `demo/assets/` at build time.  All bundled TTFs \
-         appear here; picking one swaps the system-wide override and every \
-         `Label` re-measures on the next layout.",
+        "Sets the system font for every widget that doesn't override it.",
     ), 0.0);
     // Shared font picker — same widget used in the LCD Subpixel demo.
     // Owns its cell binding, per-item font loading, and on-change
@@ -257,9 +253,7 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
     const BASE_POINT_SIZE: f64 = 14.0;
     col.push(heading("Point size"), 0.0);
     col.push(body(
-        "Body-text point size.  Scales every Label proportionally — \
-         headings stay bigger than body, but the whole UI grows or \
-         shrinks.  Range 7–42 pt (0.5×–3.0× of 14 pt base).",
+        "Body-text size in points.  Scales every label proportionally.  Range 7–42 pt.",
     ), 0.0);
     {
         // Typable numeric input — a `TextField` that parses on edit-complete
@@ -294,12 +288,7 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
     // ── LCD subpixel ────────────────────────────────────────────────────
     col.push(heading("LCD subpixel text"), 0.0);
     col.push(body(
-        "When enabled, Label backbuffers (solid-bg text: buttons, panels, \
-         sidebar) pre-fill with their parent's bg colour and raster through \
-         `PixfmtRgba32Lcd`, producing opaque RGBA where each glyph edge \
-         carries per-channel coverage — the LCD look.  Text rendered \
-         direct-to-screen (wrapped paragraphs, text fields) stays grayscale \
-         AA because LCD only makes sense against a known opaque bg.",
+        "Renders text using per-channel R/G/B coverage for sharper edges on LCD displays.",
     ), 0.0);
     {
         // Reuse the persisted cell directly so toggling writes through
@@ -326,11 +315,9 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
     // ── Hinting ─────────────────────────────────────────────────────────
     col.push(heading("Hinting"), 0.0);
     col.push(body(
-        "Grid-fits glyph outlines to whole pixels before rasterisation — \
-         sharper small text on low-DPI monitors.  Flag is stored today; \
-         actual hinting needs a TrueType interpreter beyond what `ttf-parser` \
-         or the agg-rust `FontEngine` currently implement (both store the \
-         flag without applying it).",
+        "Snaps glyph baselines to whole pixels for crisper text at small sizes.  \
+         Required if you want LCD and grayscale renderers to land on the same \
+         vertical position.",
     ), 0.0);
     {
         let cell  = Rc::clone(&cells.hinting_enabled);
@@ -345,7 +332,7 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
                     })
             ))
             .add(Box::new(
-                Label::new("Enable glyph hinting (Y-axis baseline snap)",
+                Label::new("Snap baselines to whole pixels",
                     Arc::clone(&font)).with_font_size(13.0),
             ));
         col.push(Box::new(row), 0.0);
@@ -364,11 +351,8 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
     // and vice-versa.
     col.push(heading("Typography style"), 0.0);
     col.push(body(
-        "Gamma, width, spacing, faux weight/italic, and LCD primary-weight \
-         parameters mirroring the AGG `truetype_test_02_win` reference. \
-         Changes here drive the same globals the TrueType LCD Subpixel \
-         demo reads from, so the two windows are interchangeable control \
-         surfaces.",
+        "Process-wide style overrides applied to every glyph at paint time.  \
+         Defaults are pass-through.",
     ), 0.0);
 
     // A closure captures `font` by reference so every slider row shares
