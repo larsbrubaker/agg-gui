@@ -1049,6 +1049,15 @@ impl DrawCtx for GlGfxCtx {
         let ctm = *self.ctm();
         let ctm_scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt().max(1e-6);
 
+        // Y-baseline alignment between LCD and grayscale paths is
+        // controlled by the hinting toggle.  When hinting is on, both
+        // paths snap to the same integer physical pixel row (RGBA via
+        // `shape_text`'s `gy` snap, LCD via the in-mask `by` snap in
+        // `rasterize_text_lcd_cached`).  When off, the RGBA path
+        // accepts exact fractional `y` while the LCD composite's
+        // intrinsic row-alignment leaves a tiny residual offset —
+        // see the comment in `gfx_ctx::fill_text` for the full story.
+
         // LCD subpixel path — raster is cached in `text_lcd` keyed on
         // `(text, font, size)`; the GL backend then caches the uploaded
         // texture keyed on the returned `Arc`'s pointer identity via

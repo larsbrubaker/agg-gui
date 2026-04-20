@@ -567,7 +567,17 @@ pub fn rasterize_text_lcd_cached(
     let bw  = (m.width  + pad_x   * 2.0).ceil().max(1.0) as u32;
     let bh  = (m.ascent + m.descent + MASK_PAD * 2.0).ceil().max(1.0) as u32;
     let bx  = pad_x;
-    let by  = MASK_PAD + m.descent;
+    // Snap the mask's internal baseline Y to a whole pixel **only when
+    // the user has hinting enabled** — the same checkbox that drives
+    // the per-glyph `gy` snap inside `shape_text`.  This keeps the
+    // two renderers aligned at integer pixels when the user opted in
+    // to hinting, and leaves both at their natural sub-pixel positions
+    // when they opted out (the small residual LCD/RGBA Y mismatch when
+    // hinting is OFF is intrinsic to LCD's composite-row-alignment
+    // requirement, not something we can paper over without forcing a
+    // permanent snap that the user explicitly rejected).
+    let by_unhinted = MASK_PAD + m.descent;
+    let by = if hint_y_now { by_unhinted.round() } else { by_unhinted };
     let mask = rasterize_lcd_mask(
         font, text, size, bx, by, bw, bh, &TransAffine::new(),
     );

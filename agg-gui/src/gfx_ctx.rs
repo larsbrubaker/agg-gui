@@ -440,6 +440,19 @@ impl<'a> GfxCtx<'a> {
         // expected number of physical pixels.  Without this the mask
         // renders at logical size and ends up half-size (or stretched by a
         // separate scale call) on 2×/3× displays.
+        //
+        // **Y-axis baseline alignment**: when the global hinting toggle
+        // is ON, both renderers place the baseline on the same integer
+        // physical pixel row — see the in-mask `by` snap inside
+        // `rasterize_text_lcd_cached` paired with `shape_text`'s own
+        // hint-driven `gy` snap.  When hinting is OFF, the RGBA path
+        // produces baseline at the exact fractional `y`, while the LCD
+        // path's intrinsic composite-rounding (`sy.round()` in
+        // `draw_lcd_mask`, required for X-subpixel coherence) lands the
+        // baseline at the nearest integer plus the fractional descender
+        // — a subpixel residual that's impossible to remove without
+        // breaking LCD chroma.  This is a deliberate trade-off matching
+        // the user's "snap should be a checkbox, not always on".
         if self.lcd_mode {
             let t = &self.state.transform;
             let ctm_scale = (t.sx * t.sx + t.shy * t.shy).sqrt().max(1e-6);
