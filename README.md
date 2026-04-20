@@ -1,11 +1,11 @@
 # agg-gui
 
-A Rust GUI framework built on [Anti-Grain Geometry (AGG)](https://crates.io/crates/agg-rust).
+A Rust GUI framework built on [Anti-Grain Geometry (AGG)](https://github.com/larsbrubaker/agg-rust).
 Widgets rasterize directly to the GL surface using AGG paths — no retained scene graph, no DOM, no CSS.
 The rendering model is immediate-mode: full redraw every frame, deterministic layout, Y-up coordinates throughout.
 
-[![CI](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml)
-[![Demo](https://github.com/larsbrubaker/agg-gui/actions/workflows/deploy-demo.yml/badge.svg)](https://larsbrubaker.github.io/agg-gui/)
+[![CI](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml)
+[![Demo](https://github.com/larsbrubaker/agg-gui/actions/workflows/deploy-demo.yml/badge.svg?branch=main&event=push)](https://larsbrubaker.github.io/agg-gui/)
 
 ## Live Demo
 
