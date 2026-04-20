@@ -1,10 +1,33 @@
 //! Native GL demo for agg-gui.
 //!
 //! Renders via `GlGfxCtx` (tess2 → GL vertex buffers), matching the WASM path.
-//! The UI is shared with the WASM target via `demo-ui`.
+//!
+//! # Platform-split policy (kept identical across `demo-native`, `demo-wasm`, `demo-gl`)
+//!
+//! This crate is a **platform shell only** — it wires up the OS window
+//! (winit/glutin), the event loop, the device-scale source, and disk
+//! I/O for state persistence.  It contains **no demo content**: every
+//! widget tree, layout, and GL renderer the user sees is shared.
+//!
+//! - **Widget / layout code** → `demo-ui`
+//! - **GL renderers (shaders, geometry, draw calls)** → `demo-gl`
+//!   (e.g. `demo_gl::GlCubeWidget`, the 3D Animation widget below)
+//! - **Platform shell (OS window, event loop, persistence backend)** →
+//!   here (`demo-native`) and `demo-wasm`
+//!
+//! If you find yourself adding a widget, shader, or piece of demo
+//! content in this file — stop and put it in `demo-ui` or `demo-gl`
+//! instead.  Local native testing is only meaningful as a proxy for
+//! the deployed WASM build when both targets share the same compiled
+//! demo content; duplicating into a platform crate breaks that
+//! contract.
 
-mod cube_widget;
-use cube_widget::{GlCubeWidget, CUBE_SCREEN_RECT};
+// 3-D Animation widget lives in `demo-gl` (shared with `demo-wasm`)
+// — this keeps demo content identical between native and browser
+// builds and ensures local testing exercises the same compiled code
+// the deployed WASM bundle runs.  No platform-specific GL renderer
+// here; the platform shell only wires up the OS window + event loop.
+use demo_gl::{GlCubeWidget, CUBE_SCREEN_RECT};
 
 use std::cell::RefCell;
 use std::num::NonZeroU32;

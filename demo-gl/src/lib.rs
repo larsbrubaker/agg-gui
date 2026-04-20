@@ -1,10 +1,30 @@
 //! `GlGfxCtx` — a hardware-accelerated [`DrawCtx`] implementation for
 //! WebGL2 / OpenGL via `glow`.
 //!
-//! This crate is a **rendering harness only** — it wires up GL resources,
-//! the event loop, and frame presentation. All demo/UI code belongs in
-//! `demo-ui`; platform entry-points (`demo-native`, `demo-wasm`) and this
-//! crate should contain no widget or layout logic.
+//! # Platform-split policy (kept identical across `demo-native`, `demo-wasm`, `demo-gl`)
+//!
+//! This crate is the **shared GL backend + GL-using demo widgets**.
+//! It exists so the platform shells (`demo-native`, `demo-wasm`) can
+//! be pure OS shims while everything that touches `glow` — the
+//! `DrawCtx` impl, the per-frame helpers, AND any demo widget that
+//! needs raw GL (e.g. the 3D Animation `GlCubeWidget` in
+//! [`bar_grid`]) — has exactly one compiled implementation.
+//!
+//! - **Generic widget / layout code** (no `glow` dependency) →
+//!   `demo-ui`
+//! - **GL-using demo widgets** (custom shaders, instanced draws,
+//!   etc.) → here, in dedicated modules like [`bar_grid`]
+//! - **Platform shell (OS window / canvas, event loop, persistence
+//!   backend)** → `demo-native` and `demo-wasm`
+//!
+//! What does **not** belong here: anything that's specific to one
+//! platform (winit code, wasm-bindgen exports, file I/O), and any
+//! widget that doesn't need direct GL access (those go in `demo-ui`).
+//!
+//! If a demo widget that uses GL ever ends up living in a platform
+//! crate again, native local testing diverges from the deployed WASM
+//! build — the exact failure mode that motivated this split.  Keep
+//! both shells pointing at the same compiled bytes from this crate.
 //!
 //! # Pipeline
 //!
@@ -27,6 +47,14 @@
 
 pub mod frame;
 pub use frame::{begin_frame, sync_inspector, render_app_frame};
+
+/// 3-D Animation widget — single source of truth shared between
+/// `demo-native` and `demo-wasm`.  See `bar_grid` module docs for the
+/// full design rationale.  Both platform crates re-export
+/// `GlCubeWidget` and `CUBE_SCREEN_RECT` from here so there is exactly
+/// one compiled implementation of the demo's GL widget.
+pub mod bar_grid;
+pub use bar_grid::{GlCubeWidget, BarGridGlRenderer, CUBE_SCREEN_RECT};
 
 use std::rc::Rc;
 use std::sync::{Arc, Weak};

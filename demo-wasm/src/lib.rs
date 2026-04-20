@@ -1,8 +1,25 @@
 //! WASM demo crate for agg-gui.
 //!
-//! This crate is a **rendering harness only** — it wires up WebGL2 resources,
-//! browser event forwarding, and frame presentation. All demo/UI code belongs
-//! in `demo-ui`; this crate should contain no widget or layout logic.
+//! # Platform-split policy (kept identical across `demo-native`, `demo-wasm`, `demo-gl`)
+//!
+//! This crate is a **platform shell only** — it wires up WebGL2
+//! resources, browser event forwarding, frame presentation, and
+//! `localStorage` for state persistence.  It contains **no demo
+//! content**: every widget tree, layout, and GL renderer the user
+//! sees is shared.
+//!
+//! - **Widget / layout code** → `demo-ui`
+//! - **GL renderers (shaders, geometry, draw calls)** → `demo-gl`
+//!   (e.g. `demo_gl::GlCubeWidget`, the 3D Animation widget)
+//! - **Platform shell (canvas + event forwarding + persistence
+//!   backend)** → here (`demo-wasm`) and `demo-native`
+//!
+//! If you find yourself adding a widget, shader, or piece of demo
+//! content in this file or `gl_resources.rs` — stop and put it in
+//! `demo-ui` or `demo-gl` instead.  Native local testing is only
+//! meaningful as a proxy for this deployed WASM build when both
+//! targets share the same compiled demo content; duplicating into a
+//! platform crate breaks that contract.
 //!
 //! WASM exports:
 //! - `render(width, height)` — full-frame render (void; GL writes to canvas)
