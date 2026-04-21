@@ -163,7 +163,11 @@ impl Widget for ThemeToggle {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                let was = self.hovered;
                 self.hovered = self.hit_idx(*pos);
+                if was != self.hovered {
+                    agg_gui::animation::request_tick();
+                }
                 EventResult::Ignored
             }
             Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
@@ -175,6 +179,8 @@ impl Widget for ThemeToggle {
                         ThemePreference::Dark   => set_visuals(Visuals::dark()),
                         ThemePreference::System => apply_system_visuals(),
                     }
+                    // Theme change is global — every widget needs to re-paint.
+                    agg_gui::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -270,10 +276,20 @@ impl Widget for BackendButton {
             p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
         };
         match event {
-            Event::MouseMove { pos } => { self.hovered = in_btn(*pos); EventResult::Ignored }
+            Event::MouseMove { pos } => {
+                let was = self.hovered;
+                self.hovered = in_btn(*pos);
+                if was != self.hovered {
+                    agg_gui::animation::request_tick();
+                }
+                EventResult::Ignored
+            }
             Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
                 if in_btn(*pos) {
+                    // Toggles backend-panel visibility — consumers read
+                    // `show` at layout/paint time, so request a frame.
                     self.show.set(!self.show.get());
+                    agg_gui::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored

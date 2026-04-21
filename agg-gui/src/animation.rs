@@ -1,23 +1,36 @@
-//! Thread-local signal: "please paint another frame soon".
+//! Thread-local repaint-request signals.
 //!
-//! Widgets that are mid-animation (e.g. a scroll bar expanding on hover) call
-//! [`request_tick`] during their `paint`.  After the widget tree has painted,
-//! the host main loop reads [`wants_tick`] to decide whether to request
-//! continuous redraws (Poll) or revert to event-driven waiting.  The flag is
-//! cleared once per frame at the start of [`crate::widget::App::paint`] so
-//! each paint starts from a clean slate and the flag accurately reflects
-//! "some widget still wants more frames after this paint finished".
+//! Two independent channels feed the host's event loop:
+//!
+//! 1. **Immediate** — [`request_tick`] / [`wants_tick`].  Any widget whose
+//!    state just changed calls `request_tick()`; the next iteration of the
+//!    host loop paints a frame and clears the flag.  This is the "mark
+//!    dirty" path: input handlers, hover transitions, tweens mid-animation,
+//!    drag movement, continuous capture widgets.
+//!
+//! 2. **Scheduled** — [`request_repaint_after`] / [`next_repaint_at`].  A
+//!    widget that needs a redraw *at a future time* (text-cursor blink,
+//!    tooltip delay) calls `request_repaint_after(Duration)`; the host's
+//!    loop goes to sleep with `ControlFlow::WaitUntil(that_instant)` and
+//!    paints when the deadline fires.  Successive calls keep the EARLIEST
+//!    deadline.
+//!
+//! The host loop paints iff `wants_tick() || now >= next_repaint_at()`.
+//! Between paints it idles; no frames are drawn while nothing has changed.
 
 use std::cell::Cell;
+use std::time::Duration;
 use web_time::Instant;
 
 std::thread_local! {
-    static NEEDS_TICK: Cell<bool> = Cell::new(false);
+    static NEEDS_TICK:      Cell<bool>            = Cell::new(false);
+    static NEXT_REPAINT_AT: Cell<Option<Instant>> = Cell::new(None);
 }
 
 /// Request that the host schedule another paint as soon as possible.  Safe to
 /// call any number of times in a frame.  Typically called from `Widget::paint`
-/// while a time-based animation is in progress.
+/// while a time-based animation is in progress, from input handlers whose
+/// widget state changed, or from anywhere that mutates visual state.
 pub fn request_tick() {
     NEEDS_TICK.with(|c| c.set(true));
 }
@@ -28,10 +41,35 @@ pub fn wants_tick() -> bool {
     NEEDS_TICK.with(|c| c.get())
 }
 
-/// Reset the flag.  The `App::paint` entry point calls this before delegating
-/// to the root widget so each frame starts fresh.
+/// Reset the per-frame repaint flags.  The `App::paint` entry point calls
+/// this before delegating to the root widget so each frame starts fresh —
+/// widgets that still need a redraw (animation in flight, focus blink, etc.)
+/// must re-arm during their paint, otherwise the loop goes idle.
 pub fn clear_tick() {
     NEEDS_TICK.with(|c| c.set(false));
+    NEXT_REPAINT_AT.with(|c| c.set(None));
+}
+
+/// Schedule a future paint.  Keeps the EARLIEST pending deadline, so multiple
+/// widgets asking for different delays will all be served by the soonest one
+/// (each widget re-arms its own deadline on the next paint anyway).
+pub fn request_repaint_after(delay: Duration) {
+    let when = Instant::now() + delay;
+    NEXT_REPAINT_AT.with(|c| {
+        match c.get() {
+            Some(existing) if existing <= when => {}
+            _                                  => c.set(Some(when)),
+        }
+    });
+}
+
+/// Read-and-clear the scheduled repaint deadline.  The host reads this after
+/// painting so the next frame's scheduled wake is determined entirely by what
+/// the fresh paint registered (e.g. a text field re-arms the 500 ms blink
+/// each frame while it remains focused; losing focus means no re-arm and the
+/// loop goes idle).
+pub fn take_next_repaint() -> Option<Instant> {
+    NEXT_REPAINT_AT.with(|c| c.replace(None))
 }
 
 // ── Tween ────────────────────────────────────────────────────────────────────

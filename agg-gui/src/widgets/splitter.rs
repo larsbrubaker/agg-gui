@@ -139,20 +139,26 @@ impl Widget for Splitter {
         match event {
             Event::MouseMove { pos } => {
                 let over_div = pos.x >= div_x - 2.0 && pos.x <= div_end + 2.0;
+                let was = self.hovered;
                 self.hovered = over_div;
                 if self.dragging {
                     let total = self.bounds.width;
                     if total > self.divider_width {
                         self.ratio = (pos.x / total).clamp(0.05, 0.95);
                     }
+                    crate::animation::request_tick();
                     EventResult::Consumed
                 } else {
+                    if was != self.hovered { crate::animation::request_tick(); }
                     EventResult::Ignored
                 }
             }
             Event::MouseDown { pos, button: MouseButton::Left, .. } => {
                 if pos.x >= div_x - 2.0 && pos.x <= div_end + 2.0 {
                     self.dragging = true;
+                    // No tick: `dragging = true` produces no immediate
+                    // visible change.  Subsequent MouseMove deltas will
+                    // tick as the split ratio actually shifts.
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -161,7 +167,12 @@ impl Widget for Splitter {
             Event::MouseUp { button: MouseButton::Left, .. } => {
                 let was_dragging = self.dragging;
                 self.dragging = false;
-                if was_dragging { EventResult::Consumed } else { EventResult::Ignored }
+                if was_dragging {
+                    crate::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             _ => EventResult::Ignored,
         }

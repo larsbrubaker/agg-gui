@@ -246,24 +246,29 @@ impl Widget for ToggleSwitch {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
+                if was != self.hovered { crate::animation::request_tick(); }
                 EventResult::Ignored
             }
             Event::MouseDown { button: MouseButton::Left, .. } => {
                 // Consume on down so the widget "captures" the gesture, and
                 // start the press-ring expand animation.
                 self.press_anim.set_target(1.0);
+                crate::animation::request_tick();
                 EventResult::Consumed
             }
             Event::MouseUp { button: MouseButton::Left, pos, .. } => {
                 if self.hit_test(*pos) { self.toggle(); }
                 // Ring fades back out whether or not the release landed on us.
                 self.press_anim.set_target(0.0);
+                crate::animation::request_tick();
                 EventResult::Consumed
             }
             Event::KeyDown { key: Key::Char(' '), .. }
             | Event::KeyDown { key: Key::Enter, .. } => {
                 self.toggle();
+                crate::animation::request_tick();
                 EventResult::Consumed
             }
             _ => EventResult::Ignored,

@@ -792,7 +792,12 @@ impl Widget for ScrollView {
                 let (_, vh) = self.viewport();
                 self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
                 if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
-                if consumed { EventResult::Consumed } else { EventResult::Ignored }
+                if consumed {
+                    crate::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
 
             // ── Mouse move ────────────────────────────────────────────────────
@@ -800,10 +805,19 @@ impl Widget for ScrollView {
                 let (vw, vh) = self.viewport();
                 let v_scroll = self.v.enabled && self.v.content > vh;
                 let h_scroll = self.h.enabled && self.h.content > vw;
+                let was_vb = self.v.hovered_bar;
+                let was_vt = self.v.hovered_thumb;
+                let was_hb = self.h.hovered_bar;
+                let was_ht = self.h.hovered_thumb;
                 self.v.hovered_bar   = v_scroll && self.pos_in_v_hover(*pos);
                 self.v.hovered_thumb = v_scroll && self.pos_on_v_thumb(*pos);
                 self.h.hovered_bar   = h_scroll && self.pos_in_h_hover(*pos);
                 self.h.hovered_thumb = h_scroll && self.pos_on_h_thumb(*pos);
+                if was_vb != self.v.hovered_bar || was_vt != self.v.hovered_thumb
+                    || was_hb != self.h.hovered_bar || was_ht != self.h.hovered_thumb
+                {
+                    crate::animation::request_tick();
+                }
 
                 if self.v.dragging {
                     if let Some((_, th)) = self.v_thumb_metrics() {
@@ -818,6 +832,7 @@ impl Widget for ScrollView {
                             (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
                         if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
                     }
+                    crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 if self.h.dragging {
@@ -830,6 +845,7 @@ impl Widget for ScrollView {
                         self.h.offset = (frac * self.h.max_scroll(vw)).max(0.0);
                         self.clamp_offsets();
                     }
+                    crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -846,6 +862,8 @@ impl Widget for ScrollView {
                         let ty = self.v_thumb_metrics().map(|(y, _)| y).unwrap_or(0.0);
                         self.v.dragging = true;
                         self.v.drag_thumb_offset = pos.y - ty;
+                        // No tick: thumb grab has no visible effect until
+                        // the cursor actually moves.
                     } else if let Some((ty, th)) = self.v_thumb_metrics() {
                         // Page step on track click (matches Windows / macOS).
                         // Y-up: cursor ABOVE thumb (higher y) → scroll UP,
@@ -859,6 +877,8 @@ impl Widget for ScrollView {
                         }
                         self.clamp_offsets();
                         if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
+                        // Offset changed — visible scroll.
+                        crate::animation::request_tick();
                     }
                     return EventResult::Consumed;
                 }
@@ -867,6 +887,7 @@ impl Widget for ScrollView {
                         let tx = self.h_thumb_metrics().map(|(x, _)| x).unwrap_or(0.0);
                         self.h.dragging = true;
                         self.h.drag_thumb_offset = pos.x - tx;
+                        // No tick — see v-axis thumb grab comment above.
                     } else if let Some((tx, tw)) = self.h_thumb_metrics() {
                         let page = (vw - 16.0).max(20.0);
                         if pos.x < tx {
@@ -875,6 +896,7 @@ impl Widget for ScrollView {
                             self.h.offset = (self.h.offset + page).min(self.h.max_scroll(vw));
                         }
                         self.clamp_offsets();
+                        crate::animation::request_tick();
                     }
                     return EventResult::Consumed;
                 }
@@ -886,7 +908,12 @@ impl Widget for ScrollView {
                 let was = self.v.dragging || self.h.dragging;
                 self.v.dragging = false;
                 self.h.dragging = false;
-                if was { EventResult::Consumed } else { EventResult::Ignored }
+                if was {
+                    crate::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
 
             _ => EventResult::Ignored,

@@ -754,9 +754,14 @@ pub fn screenshot_demo(
     font: Arc<Font>,
     screenshot_request: Rc<Cell<bool>>,
     screenshot_image:   std::rc::Rc<std::cell::RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
-    screenshot_continuous: Rc<Cell<bool>>,
     screenshot_capturing:  Rc<Cell<bool>>,
 ) -> Box<dyn Widget> {
+    // "Capture continuously" is window-local: a sub-widget re-arms the
+    // screenshot request every layout while the checkbox is on, and
+    // independently issues a repaint request so the host loop keeps running.
+    // Nothing about continuous capture leaks to DemoHandles / the harness.
+    let continuous = Rc::new(Cell::new(false));
+
     let mut col = FlexColumn::new()
         .with_gap(10.0)
         .with_padding(12.0)
@@ -768,7 +773,7 @@ pub fn screenshot_demo(
     ).with_font_size(12.0).with_wrap(true)), 0.0);
 
     let req_for_btn   = Rc::clone(&screenshot_request);
-    let continuous_cb = Rc::clone(&screenshot_continuous);
+    let continuous_cb = Rc::clone(&continuous);
 
     // VAnchor::CENTER on each child — without it FlexRow FIT-anchors to the
     // bottom (Y-up convention), so the shorter Checkbox sits flush with the
@@ -778,7 +783,10 @@ pub fn screenshot_demo(
             Button::new("\u{F030}  Take Screenshot", Arc::clone(&font))
                 .with_font_size(12.0)
                 .with_v_anchor(VAnchor::CENTER)
-                .on_click(move || req_for_btn.set(true))
+                .on_click(move || {
+                    req_for_btn.set(true);
+                    agg_gui::animation::request_tick();
+                })
         ))
         .add(Box::new(
             agg_gui::Checkbox::new(
@@ -789,6 +797,17 @@ pub fn screenshot_demo(
                 .with_state_cell(Rc::clone(&continuous_cb))
         ));
     col.push(Box::new(button_row), 0.0);
+
+    // Drives continuous-capture cadence: while enabled AND this widget is
+    // being painted (i.e. the Screenshot window is visible), arm the
+    // screenshot_request and request another frame.  When the window is
+    // collapsed/hidden, this widget's paint isn't called → no re-arm → loop
+    // goes idle naturally.  When the checkbox is off, no request is armed.
+    col.push(Box::new(ContinuousCapture {
+        bounds:   Rect::default(), children: Vec::new(),
+        enabled:  Rc::clone(&continuous),
+        request:  Rc::clone(&screenshot_request),
+    }), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
@@ -803,6 +822,38 @@ pub fn screenshot_demo(
     }), 1.0);
 
     Box::new(col)
+}
+
+// ── ContinuousCapture: while enabled + painted, drive capture cadence ──
+//
+// Zero-height widget whose only job is to be in the widget tree so that its
+// `paint` runs exactly when the enclosing Screenshot window is visible.  The
+// parent Window's `paint` is skipped when collapsed / closed / hidden, which
+// transitively skips this widget, which ends the capture loop — exactly
+// what the user wants (no global `screenshot_continuous` flag that fires
+// even while the window is out of view).
+struct ContinuousCapture {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+    enabled:  Rc<Cell<bool>>,
+    request:  Rc<Cell<bool>>,
+}
+
+impl Widget for ContinuousCapture {
+    fn type_name(&self) -> &'static str { "ContinuousCapture" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn show_in_inspector(&self) -> bool { false }
+    fn layout(&mut self, _: Size) -> Size { Size::ZERO }
+    fn paint(&mut self, _: &mut dyn DrawCtx) {
+        if self.enabled.get() {
+            self.request.set(true);
+            agg_gui::animation::request_tick();
+        }
+    }
+    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }
 
 // ── ImageView: paints an `Rc<RefCell<Option<(rgba, w, h)>>>` as an image ─────

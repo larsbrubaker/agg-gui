@@ -125,13 +125,17 @@ impl Widget for Hyperlink {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
+                if was != self.hovered { crate::animation::request_tick(); }
                 EventResult::Ignored
             }
             Event::MouseDown { button: MouseButton::Left, .. } => EventResult::Consumed,
             Event::MouseUp   { button: MouseButton::Left, pos, .. } => {
                 if self.hit_test(*pos) {
                     if let Some(cb) = self.on_click.as_mut() { cb(); }
+                    // Click handler typically mutates app state.
+                    crate::animation::request_tick();
                 }
                 EventResult::Consumed
             }

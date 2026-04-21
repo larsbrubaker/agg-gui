@@ -253,6 +253,14 @@ impl Widget for DancingStrings {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
+    /// Continuous sine-wave animation — every frame samples
+    /// `self.start.elapsed()` so the paint output changes every tick.
+    /// Returning `true` from the tree walk keeps the host rendering.  The
+    /// visibility gate short-circuits at the enclosing Window when the
+    /// Dancing Strings demo is closed, so this doesn't keep the loop
+    /// running when the widget isn't on screen.
+    fn needs_paint(&self) -> bool { true }
+
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
         available

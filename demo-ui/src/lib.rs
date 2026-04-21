@@ -374,10 +374,6 @@ pub struct DemoHandles {
     /// (first/last 8 bytes) collided on screenshots whose corners were
     /// stable, causing stale frames to be bound.
     pub screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
-    /// Checkbox state for "Capture continuously".  Exposed to the harness so
-    /// the event loop can keep running (ControlFlow::Poll) while continuous
-    /// capture is on — otherwise Wait mode would stall the capture cadence.
-    pub screenshot_continuous: Rc<Cell<bool>>,
     /// Transient flag set by the harness during the FIRST render pass of a
     /// capture frame.  Read by the screenshot demo's preview pane so it
     /// paints an empty frame (not the stale previous capture) — this keeps
@@ -414,7 +410,6 @@ pub fn build_demo_ui(
     let screenshot_request = Rc::new(Cell::new(false));
     let screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>> =
         Rc::new(RefCell::new(None));
-    let screenshot_continuous = Rc::new(Cell::new(false));
     let screenshot_capturing  = Rc::new(Cell::new(false));
 
     // Theme preference — detect OS color scheme so we start in the right mode.
@@ -699,7 +694,6 @@ pub fn build_demo_ui(
                 Arc::clone(&font),
                 Rc::clone(&screenshot_request),
                 Rc::clone(&screenshot_image),
-                Rc::clone(&screenshot_continuous),
                 Rc::clone(&screenshot_capturing),
             )
         };
@@ -1058,7 +1052,6 @@ pub fn build_demo_ui(
         window_maximized,
         screenshot_request: Rc::clone(&screenshot_request),
         screenshot_image:   Rc::clone(&screenshot_image),
-        screenshot_continuous: Rc::clone(&screenshot_continuous),
         screenshot_capturing:  Rc::clone(&screenshot_capturing),
         state: state_accessor,
     };
@@ -1072,7 +1065,6 @@ fn build_demo_content(
     font: Arc<Font>,
     screenshot_request: Rc<Cell<bool>>,
     screenshot_image:   Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
-    screenshot_continuous: Rc<Cell<bool>>,
     screenshot_capturing:  Rc<Cell<bool>>,
 ) -> Box<dyn Widget> {
     match title {
@@ -1108,7 +1100,7 @@ fn build_demo_content(
         "\u{F002} Scene"                 => windows::scene_demo(font),
         "\u{F030} Screenshot"            => windows::screenshot_demo(
             font, screenshot_request, screenshot_image,
-            screenshot_continuous, screenshot_capturing,
+            screenshot_capturing,
         ),
         // text_demos.rs
         "\u{F0C9} Strip"                 => windows::strip_demo(font),

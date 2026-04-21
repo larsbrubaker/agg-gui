@@ -214,21 +214,32 @@ impl Widget for Button {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                let was_hovered = self.hovered;
+                let was_pressed = self.pressed;
                 self.hovered = self.hit_test(*pos);
                 if !self.hovered {
                     self.pressed = false;
                 }
+                if was_hovered != self.hovered || was_pressed != self.pressed {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
             Event::MouseDown { button: MouseButton::Left, .. } => {
+                if !self.pressed { crate::animation::request_tick(); }
                 self.pressed = true;
                 EventResult::Consumed
             }
             Event::MouseUp { button: MouseButton::Left, .. } => {
                 let was_pressed = self.pressed;
                 self.pressed = false;
+                if was_pressed { crate::animation::request_tick(); }
                 if was_pressed && self.hovered {
                     self.fire_click();
+                    // Click handler almost always mutates app state that
+                    // affects the next paint; request one so the handler's
+                    // side-effects are visible.
+                    crate::animation::request_tick();
                 }
                 EventResult::Consumed
             }
@@ -237,6 +248,7 @@ impl Widget for Button {
                 match key {
                     Key::Enter | Key::Char(' ') => {
                         self.fire_click();
+                        crate::animation::request_tick();
                         EventResult::Consumed
                     }
                     _ => EventResult::Ignored,
@@ -244,11 +256,13 @@ impl Widget for Button {
             }
             Event::FocusGained => {
                 self.focused = true;
+                crate::animation::request_tick();
                 EventResult::Ignored
             }
             Event::FocusLost => {
                 self.focused = false;
                 self.pressed = false;
+                crate::animation::request_tick();
                 EventResult::Ignored
             }
             _ => EventResult::Ignored,

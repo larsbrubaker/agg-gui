@@ -96,8 +96,6 @@ thread_local! {
     static SCREENSHOT_REQUEST: RefCell<Option<Rc<Cell<bool>>>>                  = RefCell::new(None);
     /// Shared latest-screenshot image (top-down RGBA8 + dims).
     static SCREENSHOT_IMAGE:   RefCell<Option<Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>>> = RefCell::new(None);
-    /// "Capture continuously" checkbox state — keeps the rAF loop alive when on.
-    static SCREENSHOT_CONTINUOUS: RefCell<Option<Rc<Cell<bool>>>>               = RefCell::new(None);
     /// Transient flag set by `render()` around the first pass of a capture
     /// frame so the preview pane hides itself (prevents recursive nesting).
     static SCREENSHOT_CAPTURING:  RefCell<Option<Rc<Cell<bool>>>>               = RefCell::new(None);
@@ -150,7 +148,6 @@ fn ensure_demo_app() {
             FRAME_HISTORY.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.frame_history)));
             SCREENSHOT_REQUEST.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_request)));
             SCREENSHOT_IMAGE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_image)));
-            SCREENSHOT_CONTINUOUS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_continuous)));
             SCREENSHOT_CAPTURING.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_capturing)));
             CUBE_VISIBLE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.cube_visible)));
             STATE_ACCESSOR.with(|c| *c.borrow_mut() = Some(handles.state));
@@ -269,8 +266,6 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
             });
 
             let want_capture = SCREENSHOT_REQUEST.with(|c| {
-                c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false)
-            }) || SCREENSHOT_CONTINUOUS.with(|c| {
                 c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false)
             });
 
@@ -623,19 +618,19 @@ pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool, meta: bool
 #[wasm_bindgen]
 pub fn needs_repaint() -> bool {
     if NEEDS_REPAINT.with(|c| c.get()) { return true; }
-    // Animation-driven: cube, focus, continuous-capture screenshot, widget anims.
-    let cube_on = CUBE_VISIBLE.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
-    if cube_on { return true; }
+    // Pending capture (button click) — harness will consume on render.
     let ss_req = SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
     if ss_req { return true; }
-    let ss_cont = SCREENSHOT_CONTINUOUS.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
-    if ss_cont { return true; }
-    // Widget-driven animation: e.g. scroll bar hover expansion.  Set during the
-    // last paint via `animation::request_tick`; cleared at the start of the
-    // next paint.
-    if agg_gui::animation::wants_tick() { return true; }
-    let has_focus = DEMO_APP.with(|c| c.borrow().as_ref().map(|a| a.has_focus()).unwrap_or(false));
-    if has_focus { return true; }
+    // Visibility-gated tree walk — a widget with in-flight animation,
+    // pending hover transition, or scheduled cursor blink reports true
+    // ONLY when it's actually visible on screen (hidden windows, closed
+    // collapsing headers, non-selected tabs don't contribute).
+    //
+    // Includes the legacy thread-local `wants_tick` as a transitional
+    // fallback for widgets that still call `crate::animation::request_tick`
+    // instead of overriding `Widget::needs_paint`.
+    let want = DEMO_APP.with(|c| c.borrow().as_ref().map(|a| a.wants_animation_tick()).unwrap_or(false));
+    if want { return true; }
     false
 }
 

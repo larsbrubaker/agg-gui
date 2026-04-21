@@ -419,6 +419,7 @@ impl Widget for ComboBox {
                 if self.in_button(*pos) {
                     self.open = !self.open;
                     self.hovered_item = None;
+                    crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 if self.open {
@@ -436,11 +437,13 @@ impl Widget for ComboBox {
                         self.open = false;
                         self.hovered_item = None;
                         self.fire();
+                        crate::animation::request_tick();
                         return EventResult::Consumed;
                     }
                     // Click outside the dropdown — close it.
                     self.open = false;
                     self.hovered_item = None;
+                    crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -454,11 +457,13 @@ impl Widget for ComboBox {
                 match key {
                     Key::Enter | Key::Char(' ') => {
                         self.open = !self.open;
+                        crate::animation::request_tick();
                         EventResult::Consumed
                     }
                     Key::Escape => {
                         if self.open {
                             self.open = false;
+                            crate::animation::request_tick();
                             EventResult::Consumed
                         } else {
                             EventResult::Ignored
@@ -469,6 +474,7 @@ impl Widget for ComboBox {
                             self.selected += 1;
                             self.selected_label.set_text(self.options[self.selected].as_str());
                             self.fire();
+                            crate::animation::request_tick();
                         }
                         EventResult::Consumed
                     }
@@ -477,6 +483,7 @@ impl Widget for ComboBox {
                             self.selected -= 1;
                             self.selected_label.set_text(self.options[self.selected].as_str());
                             self.fire();
+                            crate::animation::request_tick();
                         }
                         EventResult::Consumed
                     }
@@ -484,8 +491,10 @@ impl Widget for ComboBox {
                 }
             }
             Event::FocusLost => {
+                let was_open = self.open;
                 self.open = false;
                 self.hovered_item = None;
+                if was_open { crate::animation::request_tick(); }
                 EventResult::Ignored
             }
             _ => EventResult::Ignored,

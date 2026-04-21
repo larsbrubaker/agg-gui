@@ -184,8 +184,11 @@ impl Widget for Tooltip {
                 } else {
                     EventResult::Ignored
                 };
-                // If hover state changed, consume to trigger a repaint.
-                if self.hovered != was { EventResult::Consumed } else { result }
+                // If hover state changed, request a repaint and consume.
+                if self.hovered != was {
+                    crate::animation::request_tick();
+                    EventResult::Consumed
+                } else { result }
             }
             _ => {
                 if let Some(child) = self.children.first_mut() {

@@ -213,22 +213,36 @@ impl Widget for Checkbox {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
+                if was != self.hovered { crate::animation::request_tick(); }
                 EventResult::Ignored
             }
             Event::MouseDown { button: MouseButton::Left, .. } => {
                 EventResult::Consumed
             }
             Event::MouseUp { button: MouseButton::Left, pos, .. } => {
-                if self.hit_test(*pos) { self.toggle(); }
+                if self.hit_test(*pos) {
+                    self.toggle();
+                    crate::animation::request_tick();
+                }
                 EventResult::Consumed
             }
             Event::KeyDown { key: Key::Char(' '), .. } => {
                 self.toggle();
+                crate::animation::request_tick();
                 EventResult::Consumed
             }
-            Event::FocusGained => { self.focused = true;  EventResult::Ignored }
-            Event::FocusLost   => { self.focused = false; EventResult::Ignored }
+            Event::FocusGained => {
+                self.focused = true;
+                crate::animation::request_tick();
+                EventResult::Ignored
+            }
+            Event::FocusLost   => {
+                self.focused = false;
+                crate::animation::request_tick();
+                EventResult::Ignored
+            }
             _ => EventResult::Ignored,
         }
     }

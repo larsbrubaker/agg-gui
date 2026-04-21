@@ -95,6 +95,13 @@ impl Widget for GlCubeWidget {
 
     fn layout(&mut self, available: Size) -> Size { available }
 
+    /// 3-D cube is a continuous animation — every frame advances the sine
+    /// field.  When the cube is visible (enclosing Window / tab /
+    /// CollapsingHeader paints it) this keeps the host loop rendering;
+    /// when it's hidden, the tree-walk visibility gate short-circuits
+    /// before reaching here, so the loop goes idle.
+    fn needs_paint(&self) -> bool { true }
+
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let t = ctx.transform();
         let screen_rect = Rect::new(t.tx, t.ty, self.bounds.width, self.bounds.height);

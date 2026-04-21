@@ -185,6 +185,7 @@ impl Widget for CollapsingHeader {
                 let was = self.hovered;
                 self.hovered = in_header;
                 if self.hovered != was {
+                    crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -194,6 +195,7 @@ impl Widget for CollapsingHeader {
                     && pos.y >= h - HEADER_H && pos.y <= h;
                 if in_header {
                     self.open = !self.open;
+                    crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored

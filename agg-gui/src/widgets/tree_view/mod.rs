@@ -434,7 +434,12 @@ impl Widget for TreeView {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        match event {
+        // Every consumed event in a tree view mutates some visible state —
+        // selection, expansion, scroll offset, hover row, focus ring.  Wrap
+        // the dispatch so a `Consumed` result translates to a repaint
+        // request.  Events that bubble away as `Ignored` do NOT tick,
+        // honouring the "only repaint on real change" contract.
+        let result = match event {
             Event::FocusGained => { self.focused = true;  EventResult::Consumed }
             Event::FocusLost   => { self.focused = false; EventResult::Consumed }
 
@@ -456,7 +461,11 @@ impl Widget for TreeView {
             }
             Event::KeyDown { key, modifiers } => self.handle_key_down(key, *modifiers),
             _ => EventResult::Ignored,
+        };
+        if result == EventResult::Consumed {
+            crate::animation::request_tick();
         }
+        result
     }
 }
 

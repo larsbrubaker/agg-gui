@@ -173,16 +173,27 @@ impl Widget for ToggleButton {
             Event::MouseMove { pos } => {
                 let inside = pos.x >= 0.0 && pos.x <= self.bounds.width
                     && pos.y >= 0.0 && pos.y <= self.bounds.height;
-                let was = self.hovered;
+                let was_hover   = self.hovered;
+                let was_pressed = self.pressed;
                 self.hovered = inside;
                 if !inside { self.pressed = false; }
-                if was != self.hovered { EventResult::Consumed } else { EventResult::Ignored }
+                if was_hover != self.hovered || was_pressed != self.pressed {
+                    agg_gui::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             Event::MouseDown { button: MouseButton::Left, pos, .. } => {
                 let inside = pos.x >= 0.0 && pos.x <= self.bounds.width
                     && pos.y >= 0.0 && pos.y <= self.bounds.height;
-                if inside { self.pressed = true; EventResult::Consumed }
-                else { EventResult::Ignored }
+                if inside {
+                    self.pressed = true;
+                    agg_gui::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             Event::MouseUp { button: MouseButton::Left, pos, .. } => {
                 let inside = pos.x >= 0.0 && pos.x <= self.bounds.width
@@ -190,8 +201,18 @@ impl Widget for ToggleButton {
                 let was_pressed = self.pressed;
                 self.pressed = false;
                 if was_pressed && inside {
+                    // Toggle the shared open-state cell: this is what opens /
+                    // closes the associated demo Window.  The Window reads
+                    // its `visible_cell` next layout, so we MUST request a
+                    // repaint — otherwise the show/hide only takes effect
+                    // the next time something else triggers a frame.
                     self.state.set(!self.state.get());
+                    agg_gui::animation::request_tick();
                     return EventResult::Consumed;
+                }
+                if was_pressed {
+                    // Lost the press (released outside) — visible state change.
+                    agg_gui::animation::request_tick();
                 }
                 EventResult::Ignored
             }

@@ -231,14 +231,16 @@ fn main() {
     let show_inspector     = Rc::clone(&handles.show_inspector);
     let inspector_nodes    = Rc::clone(&handles.inspector_nodes);
     let hovered_bounds     = Rc::clone(&handles.hovered_bounds);
-    let cube_visible       = Rc::clone(&handles.cube_visible);
+    // `cube_visible` used to drive the ControlFlow decision; now the 3-D
+    // cube's `Widget::needs_paint` returns true whenever it's visited by
+    // the tree walk, which automatically skips when its Window is closed.
+    let _cube_visible      = Rc::clone(&handles.cube_visible);
     let screen_size        = Rc::clone(&handles.screen_size);
     let frame_history      = Rc::clone(&handles.frame_history);
     let window_fullscreen  = Rc::clone(&handles.window_fullscreen);
     let window_maximized   = Rc::clone(&handles.window_maximized);
     let screenshot_request      = Rc::clone(&handles.screenshot_request);
     let handles_screenshot_image = Rc::clone(&handles.screenshot_image);
-    let screenshot_continuous   = Rc::clone(&handles.screenshot_continuous);
     let screenshot_capturing    = Rc::clone(&handles.screenshot_capturing);
     let state_accessor          = handles.state;
     #[allow(unused_assignments, unused_mut)]
@@ -466,64 +468,84 @@ fn main() {
                     app.on_mouse_wheel_xy(cursor_x, cursor_y, dx, dy);
                 }
                 Event::AboutToWait => {
-                    let t0 = std::time::Instant::now();
+                    // Decide whether anything has actually changed since the
+                    // last paint.  A plain mouse-move that didn't flip any
+                    // widget's hover state, a key that no focused widget
+                    // consumed, etc., leave all the signals clear — in that
+                    // case we do NOT render.  Only paint when:
+                    //   - A widget set the thread-local tick flag from its
+                    //     event handler (hover change, press, drag, etc.).
+                    //   - The visible widget tree reports pending work via
+                    //     `needs_paint` — widgets like TextField (cursor
+                    //     blink) compare their current phase to the one
+                    //     last painted and report dirty when they diverge.
+                    //   - A screenshot was requested (button / F9).
+                    //
+                    // Scheduled wakes (ControlFlow::WaitUntil below) just
+                    // bring the loop back so `needs_paint` can be queried
+                    // again; there is no host-side deadline bookkeeping.
+                    let want_render = app.wants_animation_tick()
+                        || screenshot_request.get();
 
-                    // Sync inspector node snapshot before painting.
-                    sync_inspector(&app, show_inspector.get(),
-                                   &inspector_nodes, &hovered_bounds);
+                    if want_render {
+                        let t0 = std::time::Instant::now();
 
-                    screen_size.set((win_w, win_h));
+                        // Sync inspector node snapshot before painting.
+                        sync_inspector(&app, show_inspector.get(),
+                                       &inspector_nodes, &hovered_bounds);
 
-                    // Capture frame?  Either a single-shot request (button /
-                    // F9) or continuous-mode checkbox.  A capture frame does
-                    // a double render: pass 1 paints the Screenshot demo's
-                    // preview pane as an empty frame so the captured pixels
-                    // don't nest the previous capture (hall-of-mirrors bug);
-                    // then we read the GL back buffer and store the image;
-                    // pass 2 re-renders with the fresh image visible.
-                    let want_capture = screenshot_request.get()
-                                    || screenshot_continuous.get();
-                    if want_capture {
-                        screenshot_capturing.set(true);
-                        render_frame(&mut app, &mut gl_ctx, &gl,
-                                     win_w, win_h, last_frame_ms, &hovered_bounds);
-                        let (rgba, w, h) = gl_ctx.read_screenshot();
-                        *handles_screenshot_image.borrow_mut()
-                            = Some((Arc::new(rgba), w, h));
-                        screenshot_capturing.set(false);
-                        screenshot_request.set(false);
-                        screenshot_counter = screenshot_counter.wrapping_add(1);
-                        render_frame(&mut app, &mut gl_ctx, &gl,
-                                     win_w, win_h, last_frame_ms, &hovered_bounds);
-                    } else {
-                        render_frame(&mut app, &mut gl_ctx, &gl,
-                                     win_w, win_h, last_frame_ms, &hovered_bounds);
+                        screen_size.set((win_w, win_h));
+
+                        // Capture frame?  Single-shot request (button / F9)
+                        // OR a continuous-mode widget has armed the request
+                        // during the previous paint.  A capture frame does a
+                        // double render: pass 1 paints the Screenshot demo's
+                        // preview pane as an empty frame so the captured
+                        // pixels don't nest the previous capture
+                        // (hall-of-mirrors bug); we glReadPixels the back
+                        // buffer and store the image; pass 2 re-renders with
+                        // the fresh image visible.
+                        let want_capture = screenshot_request.get();
+                        if want_capture {
+                            screenshot_capturing.set(true);
+                            render_frame(&mut app, &mut gl_ctx, &gl,
+                                         win_w, win_h, last_frame_ms, &hovered_bounds);
+                            let (rgba, w, h) = gl_ctx.read_screenshot();
+                            *handles_screenshot_image.borrow_mut()
+                                = Some((Arc::new(rgba), w, h));
+                            screenshot_capturing.set(false);
+                            screenshot_request.set(false);
+                            screenshot_counter = screenshot_counter.wrapping_add(1);
+                            render_frame(&mut app, &mut gl_ctx, &gl,
+                                         win_w, win_h, last_frame_ms, &hovered_bounds);
+                        } else {
+                            render_frame(&mut app, &mut gl_ctx, &gl,
+                                         win_w, win_h, last_frame_ms, &hovered_bounds);
+                        }
+
+                        gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
+
+                        last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
+                        frame_history.borrow_mut().push(last_frame_ms as f32);
                     }
 
-                    // Poll while the cube animates OR any widget is running a
-                    // hover/transition animation OR continuous screenshot is on
-                    // OR a single-shot screenshot is queued; WaitUntil(500ms)
-                    // when a text field has focus so the cursor blink fires;
-                    // Wait otherwise.
-                    elwt.set_control_flow(if cube_visible.get()
-                        || app.wants_animation_tick()
-                        || screenshot_continuous.get()
-                        || screenshot_request.get()
-                    {
+                    // Visibility-gated ControlFlow for the NEXT wake-up.
+                    // `wants_animation_tick` folds the tree walk (visible
+                    // widgets only) with the legacy thread-local flag.
+                    // Scheduled wakes come from the tree walk — a text
+                    // field's cursor blink contributes a deadline ONLY when
+                    // its enclosing window/tab/header is actually showing
+                    // it.  With nothing dirty and no deadline, `Wait` means
+                    // the loop idles until the next OS input event.
+                    let want_next = app.wants_animation_tick()
+                        || screenshot_request.get();
+                    elwt.set_control_flow(if want_next {
                         ControlFlow::Poll
-                    } else if app.has_focus() {
-                        ControlFlow::WaitUntil(
-                            std::time::Instant::now()
-                                + std::time::Duration::from_millis(500),
-                        )
+                    } else if let Some(t) = app.next_paint_deadline() {
+                        ControlFlow::WaitUntil(t)
                     } else {
                         ControlFlow::Wait
                     });
-
-                    gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
-
-                    last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
-                    frame_history.borrow_mut().push(last_frame_ms as f32);
 
                     // Auto-save when state changed AND no mouse button is
                     // held down.  Covers window open/close clicks, drag /

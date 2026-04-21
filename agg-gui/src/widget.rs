@@ -386,6 +386,50 @@ pub trait Widget {
     /// toggling a demo checkbox on in the sidebar automatically pops that
     /// window to the front.
     fn take_raise_request(&mut self) -> bool { false }
+
+    // -------------------------------------------------------------------------
+    // Visibility-gated repaint propagation
+    // -------------------------------------------------------------------------
+    //
+    // The host render loop walks the widget tree from the root to decide
+    // whether a new frame is needed.  A widget with in-flight animation,
+    // pending hover transition, or scheduled cursor-blink reports `true` via
+    // [`needs_paint`] or a deadline via [`next_paint_deadline`].  Parents
+    // aggregate these over their **visible** children — invisible subtrees
+    // (collapsed Window, non-selected TabView tab, off-viewport content)
+    // must NOT contribute, so an animation inside a hidden part of the UI
+    // cannot cause the screen to redraw.  This is the tree-walk equivalent
+    // of a global "dirty" flag; going through the tree lets the framework
+    // honour the visibility contract without trusting every widget author
+    // to check it manually.
+
+    /// Return `true` if this widget, or any visible descendant, has state
+    /// that requires a repaint (hover change, tween in flight, etc.).
+    ///
+    /// The default walks visible children.  Widgets with their own pending
+    /// state OR that state with the default walk — see `WidgetBase` helpers.
+    fn needs_paint(&self) -> bool {
+        if !self.is_visible() { return false; }
+        self.children().iter().any(|c| c.needs_paint())
+    }
+
+    /// Return the earliest wall-clock instant at which this widget (or any
+    /// visible descendant) wants the next paint.  `None` = no scheduled wake.
+    /// The host loop turns a `Some(t)` into `ControlFlow::WaitUntil(t)` so
+    /// e.g. a cursor blink fires without continuous polling.
+    ///
+    /// Same visibility contract as [`needs_paint`]: hidden subtrees return
+    /// `None` regardless of what the widget *would* ask for if shown.
+    fn next_paint_deadline(&self) -> Option<web_time::Instant> {
+        if !self.is_visible() { return None; }
+        let mut best: Option<web_time::Instant> = None;
+        for c in self.children() {
+            if let Some(t) = c.next_paint_deadline() {
+                best = Some(match best { Some(b) if b <= t => b, _ => t });
+            }
+        }
+        best
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +464,25 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 /// at the current CTM.  This is the default path for widgets that don't
 /// opt into backbuffer caching via `Widget::backbuffer_cache_mut`.
 fn paint_subtree_direct(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
+    paint_subtree_direct_inner(widget, ctx, true);
+}
+
+/// Cache-building variant: paints body + children into the given ctx
+/// WITHOUT calling `paint_overlay`.  The overlay is what `TextField` uses
+/// for its blinking cursor — if we baked the overlay into the cache bitmap,
+/// the drawn cursor would stay visible forever on blit while a second
+/// (blinking) overlay was being drawn on top of it every frame, producing
+/// two cursors.  Overlay runs only on the outer ctx in
+/// `paint_subtree_backbuffered` after the cache blit.
+fn paint_subtree_direct_no_overlay(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
+    paint_subtree_direct_inner(widget, ctx, false);
+}
+
+fn paint_subtree_direct_inner(
+    widget:          &mut dyn Widget,
+    ctx:             &mut dyn DrawCtx,
+    include_overlay: bool,
+) {
     let snap_this = widget.enforce_integer_bounds();
     if snap_this {
         ctx.save();
@@ -450,7 +513,9 @@ fn paint_subtree_direct(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     }
 
     ctx.restore(); // lifts the children clip before paint_overlay
-    widget.paint_overlay(ctx);
+    if include_overlay {
+        widget.paint_overlay(ctx);
+    }
 
     if snap_this {
         ctx.restore();
@@ -550,7 +615,7 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                         // so their drawing lands on the physical pixel grid.
                         sub.scale(dps, dps);
                     }
-                    paint_subtree_direct(widget, &mut sub);
+                    paint_subtree_direct_no_overlay(widget, &mut sub);
                 }
                 // Two conversions to make the bitmap directly blittable:
                 //   1. Row order — Framebuffer is Y-up, blit lane is top-down.
@@ -589,7 +654,7 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                         // the physical-pixel LCD buffer.
                         sub.scale(dps, dps);
                     }
-                    paint_subtree_direct(widget, &mut sub);
+                    paint_subtree_direct_no_overlay(widget, &mut sub);
                 }
                 (buf.color_plane_flipped(), Some(buf.alpha_plane_flipped()))
             }
@@ -923,8 +988,24 @@ impl App {
     /// After a paint pass, returns `true` if any widget requested another frame
     /// (e.g. an in-progress hover animation).  Hosts should use this to set
     /// their event-loop control flow to continuous polling while it's `true`.
+    ///
+    /// Combines the **tree-walk** signal — [`Widget::needs_paint`], which is
+    /// visibility-gated: hidden subtrees cannot contribute — with the legacy
+    /// thread-local [`crate::animation::wants_tick`] flag, which is retained
+    /// as a transitional fallback for widgets that haven't yet moved their
+    /// pending-repaint state into their own struct.  Widgets should prefer
+    /// overriding `needs_paint` (visibility-safe) over calling the
+    /// thread-local `request_tick` (fires even from hidden subtrees).
     pub fn wants_animation_tick(&self) -> bool {
-        crate::animation::wants_tick()
+        self.root.needs_paint() || crate::animation::wants_tick()
+    }
+
+    /// Earliest scheduled repaint deadline across the visible widget tree.
+    /// Hosts translate `Some(t)` into `ControlFlow::WaitUntil(t)` so that
+    /// e.g. a text field's cursor blink wakes the loop exactly at the flip
+    /// boundary.  Invisible subtrees contribute nothing.
+    pub fn next_paint_deadline(&self) -> Option<web_time::Instant> {
+        self.root.next_paint_deadline()
     }
 
     // --- Platform event ingestion ---
@@ -967,6 +1048,11 @@ impl App {
                 self.captured = Some(path);
             }
         }
+        // NO blanket request_tick.  Mouse-down on an inert area must not
+        // cause a repaint.  Each widget that changes visual state in
+        // response to a MouseDown (button press, window raise, focus
+        // indicator on the focus-gained widget, etc.) is responsible for
+        // calling `crate::animation::request_tick` itself.
     }
 
     /// Mouse button released. `screen_y` is Y-down.

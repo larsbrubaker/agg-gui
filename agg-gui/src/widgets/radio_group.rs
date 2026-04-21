@@ -231,13 +231,17 @@ impl Widget for RadioGroup {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                let was = self.hovered;
                 self.hovered = self.row_for_y(pos.y);
+                if was != self.hovered { crate::animation::request_tick(); }
                 EventResult::Ignored
             }
             Event::MouseDown { button: MouseButton::Left, pos, .. } => {
                 if let Some(i) = self.row_for_y(pos.y) {
+                    let was = self.selected;
                     self.selected = i;
                     self.fire();
+                    if was != i { crate::animation::request_tick(); }
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -253,10 +257,24 @@ impl Widget for RadioGroup {
                     }
                     _ => false,
                 };
-                if changed { self.fire(); EventResult::Consumed } else { EventResult::Ignored }
+                if changed {
+                    self.fire();
+                    crate::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
-            Event::FocusGained => { self.focused = true;  EventResult::Ignored }
-            Event::FocusLost   => { self.focused = false; EventResult::Ignored }
+            Event::FocusGained => {
+                self.focused = true;
+                crate::animation::request_tick();
+                EventResult::Ignored
+            }
+            Event::FocusLost   => {
+                self.focused = false;
+                crate::animation::request_tick();
+                EventResult::Ignored
+            }
             _ => EventResult::Ignored,
         }
     }

@@ -105,6 +105,13 @@ pub struct TextField {
 
     // Cursor blink: set to Some(Instant::now()) on FocusGained.
     focus_time: Option<Instant>,
+    // Blink phase (floor(elapsed_ms / 500)) last drawn by `paint_overlay`.
+    // `needs_paint` compares the current phase against this and reports
+    // dirty when they diverge — i.e. the host-observed time has crossed a
+    // flip boundary since the last paint.  `Cell` so the check can happen
+    // from a `&self` method.  Initialised far out of range so the first
+    // paint after focus always writes the real phase.
+    blink_last_phase: std::cell::Cell<u64>,
 
     // Double-click detection.
     last_click_time: Option<Instant>,
@@ -169,8 +176,9 @@ impl TextField {
             hovered:    false,
             mouse_down: false,
             scroll_x:   0.0,
-            focus_time:      None,
-            last_click_time: None,
+            focus_time:       None,
+            blink_last_phase: std::cell::Cell::new(u64::MAX),
+            last_click_time:  None,
             placeholder: String::new(),
             padding: 8.0,
             on_change:        None,
@@ -682,6 +690,31 @@ impl Widget for TextField {
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
     fn is_focusable(&self) -> bool { true }
 
+    /// While focused, the cursor blinks at 500 ms half-period.  The field
+    /// itself drives its own repaint cadence: [`needs_paint`] reports dirty
+    /// whenever wall-clock time has crossed a flip boundary since the last
+    /// paint, and [`next_paint_deadline`] returns the exact wall-clock
+    /// instant of the next boundary so the host can `WaitUntil` it.
+    ///
+    /// Losing focus makes both return `None` / `false`, and the tree walk's
+    /// visibility check drops the field entirely when its enclosing window
+    /// is closed / collapsed / tab not selected — so an invisible focused
+    /// field does NOT keep the loop awake.
+    fn needs_paint(&self) -> bool {
+        if !self.focused { return false; }
+        let Some(t) = self.focus_time else { return false; };
+        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        current_phase != self.blink_last_phase.get()
+    }
+
+    fn next_paint_deadline(&self) -> Option<web_time::Instant> {
+        if !self.focused { return None; }
+        let t = self.focus_time?;
+        let ms = t.elapsed().as_millis() as u64;
+        let next_phase = (ms / 500) + 1;
+        Some(t + std::time::Duration::from_millis(next_phase * 500))
+    }
+
     fn margin(&self)   -> Insets  { self.base.margin }
     fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
     fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
@@ -820,6 +853,17 @@ impl Widget for TextField {
     /// same edit state `paint()` does so cursor lands on the glyph the
     /// cached text shows.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        // Record the blink phase being drawn this frame.  The next tree
+        // walk's `needs_paint` will compare against this and report dirty
+        // once wall-clock time crosses the next 500 ms boundary — no
+        // host-side deadline bookkeeping, the widget drives itself.
+        if self.focused {
+            if let Some(t) = self.focus_time {
+                let phase = (t.elapsed().as_millis() / 500) as u64;
+                self.blink_last_phase.set(phase);
+            }
+        }
+
         let cursor_visible = self.focused && {
             let st = self.edit.borrow();
             st.cursor == st.anchor
@@ -877,13 +921,16 @@ impl Widget for TextField {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
                 if self.mouse_down && self.focused {
                     let tx = pos.x - self.padding + self.scroll_x;
                     let text = self.edit.borrow().text.clone();
                     let new_cur = self.click_to_cursor(&text, tx);
                     self.edit.borrow_mut().cursor = new_cur;
+                    crate::animation::request_tick();
                 }
+                if was != self.hovered { crate::animation::request_tick(); }
                 EventResult::Ignored
             }
 
@@ -911,6 +958,7 @@ impl Widget for TextField {
                 }
                 // Reset blink phase on click so cursor is immediately visible.
                 self.focus_time = Some(Instant::now());
+                crate::animation::request_tick();
                 EventResult::Consumed
             }
 
@@ -928,22 +976,31 @@ impl Widget for TextField {
                     self.edit.borrow_mut().anchor = 0;
                     self.edit.borrow_mut().cursor = len;
                 }
+                crate::animation::request_tick();
                 EventResult::Ignored
             }
 
             Event::FocusLost => {
+                let was_focused = self.focused;
                 self.focused    = false;
                 self.focus_time = None;
                 self.mouse_down = false;
                 self.flush_pending();
                 if self.text() != self.text_on_focus { self.notify_edit_complete(); }
+                if was_focused { crate::animation::request_tick(); }
                 EventResult::Ignored
             }
 
             Event::KeyDown { key, modifiers } if self.focused => {
                 // Reset blink on any keypress so cursor is visible immediately.
                 self.focus_time = Some(Instant::now());
-                self.handle_key(key, *modifiers)
+                let result = self.handle_key(key, *modifiers);
+                // Any text-editing keystroke that reached the focused field
+                // visibly mutates the text / cursor / selection; repaint.
+                if result == EventResult::Consumed {
+                    crate::animation::request_tick();
+                }
+                result
             }
 
             _ => EventResult::Ignored,
