@@ -203,8 +203,8 @@ void main() {
     // 5% of max is small enough to read as "the bar bottomed out"
     // while keeping enough depth separation that the GPU's depth
     // test resolves cleanly.
-    const float MAX_H = 1.10;
-    const float MIN_H = MAX_H * 0.2;
+    const float MAX_H = 2.10;
+    const float MIN_H = MAX_H * 0.4;
 
     float wave_unit = sin(a_grid.x * freq + a_grid.y * freq + u_time * speed)
                       * 0.5 + 0.5;            // sin in [-1, 1]  →  [0, 1]
