@@ -94,3 +94,62 @@ impl ScreenshotHandle {
 impl Default for ScreenshotHandle {
     fn default() -> Self { Self::new() }
 }
+
+// ─── Capture-aware render orchestration ─────────────────────────────────
+//
+// Both the native (winit/glutin) and wasm (rAF/WebGL2) harnesses need the
+// same "screenshot capture" flow around their per-frame render:
+//
+//   1. If a capture was requested:
+//        a. Flip `capturing` to true so the Screenshot preview pane
+//           paints empty (so captured pixels don't include last frame's
+//           preview — the hall-of-mirrors bug).
+//        b. Render the frame (platform-specific: clear + paint widgets).
+//        c. `glReadPixels` the back buffer (platform-specific).
+//        d. Publish the bytes into `image` and clear both flags.
+//        e. Render again — this time the preview pane reveals the
+//           freshly-captured image.
+//   2. Otherwise: render once.
+//
+// The orchestration (flag flipping, double-render, Arc wrap) is
+// platform-agnostic and belongs here; each host supplies two closures:
+//  - `render_fn()`          : clear the framebuffer and paint the widget
+//                             tree once (the host's existing frame path).
+//  - `read_back_buffer()`   : glReadPixels the current framebuffer and
+//                             return `(rgba, width, height)`.
+
+/// Run one frame through the screenshot capture flow.
+///
+/// Call this instead of invoking the per-frame render directly.  It runs
+/// the single-render path in the common case and the double-render
+/// capture path when `request` is set.
+///
+/// `ctx` is the host's rendering context (e.g. the GL `GlGfxCtx`) —
+/// passed in once and handed through to each closure so the two
+/// closures don't both borrow it from their capture environment (which
+/// the borrow checker can't reconcile statically even though the
+/// closures are invoked sequentially).
+///
+/// The `image` field uses the `Arc<Vec<u8>>` form so the GL back-end's
+/// texture cache can key on the Arc's pointer identity — see
+/// `gfx_ctx::draw_image_rgba_arc`.
+pub fn run_frame_with_capture<C>(
+    request:            &Rc<Cell<bool>>,
+    capturing:          &Rc<Cell<bool>>,
+    image:              &Rc<RefCell<Option<(std::sync::Arc<Vec<u8>>, u32, u32)>>>,
+    ctx:                &mut C,
+    mut render_fn:      impl FnMut(&mut C),
+    read_back_buffer:   impl FnOnce(&mut C) -> (Vec<u8>, u32, u32),
+) {
+    if !request.get() {
+        render_fn(ctx);
+        return;
+    }
+    capturing.set(true);
+    render_fn(ctx);
+    let (rgba, w, h) = read_back_buffer(ctx);
+    *image.borrow_mut() = Some((std::sync::Arc::new(rgba), w, h));
+    capturing.set(false);
+    request.set(false);
+    render_fn(ctx);
+}

@@ -10,10 +10,8 @@
 //!
 //! ```text
 //! begin_frame(gl, w, h)
-//! sync_inspector(app, show, nodes, hovered_bounds)
-//! render_app_frame(gl_ctx, app, w, h, frame_ms, hovered)
-//! // ── platform-specific ──
-//! cube.draw_gl(...)
+//! render_app_frame(gl_ctx, app, w, h, frame_ms,
+//!                  show_inspector, inspector_nodes, hovered_bounds)
 //! ```
 
 use std::cell::RefCell;
@@ -61,52 +59,46 @@ pub fn begin_frame(gl: &glow::Context, width: u32, height: u32) {
     }
 }
 
-/// Synchronise the inspector node snapshot and hover-bounds state.
+/// Reset `ctx`, sync the inspector snapshot, lay out and paint `app`, then
+/// draw the inspector hover overlay.
 ///
-/// When `show_inspector` is `true`, the app's current widget tree is collected
-/// into `inspector_nodes` so the inspector panel can render an up-to-date list.
-///
-/// When `show_inspector` is `false`, `hovered_bounds` is cleared immediately
-/// so the teal hover overlay disappears without waiting for the next mouse event.
-///
-/// Call before [`render_app_frame`] so the snapshot is ready when the inspector
-/// panel paints itself.
-pub fn sync_inspector(
-    app:             &App,
-    show_inspector:  bool,
-    inspector_nodes: &Rc<RefCell<Vec<InspectorNode>>>,
-    hovered_bounds:  &Rc<RefCell<Option<Rect>>>,
-) {
-    if show_inspector {
-        *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
-    } else {
-        *hovered_bounds.borrow_mut() = None;
-    }
-}
-
-/// Reset `ctx`, lay out and paint `app`, then draw the inspector hover overlay.
+/// The inspector-snapshot sync was previously a separate helper each shell
+/// called before render; folding it in keeps both platforms from drifting
+/// on *when* the snapshot is refreshed relative to paint, and removes
+/// demo-specific coordination from the shells.
 ///
 /// The caller must draw any platform-specific content (e.g. the rotating 3D
 /// cube) *after* this function returns so it appears on top.
 ///
 /// `frame_ms` is the render time of the **previous** frame, available to the
-/// backend panel display.  Pass `hovered_bounds = None` when the inspector is
-/// hidden.
+/// backend panel display.
 pub fn render_app_frame(
-    ctx:            &mut GlGfxCtx,
-    app:            &mut App,
-    width:          u32,
-    height:         u32,
-    _frame_ms:      f64,
-    hovered_bounds: Option<Rect>,
+    ctx:             &mut GlGfxCtx,
+    app:             &mut App,
+    width:           u32,
+    height:          u32,
+    _frame_ms:       f64,
+    show_inspector:  bool,
+    inspector_nodes: &Rc<RefCell<Vec<InspectorNode>>>,
+    hovered_bounds:  &Rc<RefCell<Option<Rect>>>,
 ) {
+    // Inspector snapshot sync: refresh the tree snapshot when the
+    // inspector is shown, or clear the hover highlight when it's hidden
+    // so the overlay vanishes without waiting for the next mouse event.
+    if show_inspector {
+        *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
+    } else {
+        *hovered_bounds.borrow_mut() = None;
+    }
+
     ctx.reset(width as f32, height as f32);
     ctx.set_lcd_mode(agg_gui::font_settings::lcd_enabled());
 
     app.layout(Size::new(width as f64, height as f64));
     app.paint(ctx);
 
-    if let Some(rect) = hovered_bounds {
+    let hovered = *hovered_bounds.borrow();
+    if let Some(rect) = hovered {
         draw_hover_overlay(ctx, rect);
     }
 }

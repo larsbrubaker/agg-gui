@@ -8,7 +8,7 @@ name = "demo-native"
 path = "src/main.rs"
 
 [dependencies]
-agg-gui      = { path = "../agg-gui", features = ["clipboard"] }
+agg-gui      = { path = "../agg-gui", features = ["clipboard", "winit-adapter"] }
 demo-gl      = { path = "../demo-gl" }
 demo-ui      = { path = "../demo-ui" }
 bytemuck     = "1"

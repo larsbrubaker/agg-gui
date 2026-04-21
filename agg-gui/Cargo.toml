@@ -14,9 +14,15 @@ ttf-parser = "0.25"
 rustybuzz = "0.20"
 tess2-rust = "1.0.3"
 arboard  = { version = "3", optional = true }
+winit    = { version = "0.30", optional = true }
 web-time = "1"
 pulldown-cmark = "0.11"
 png = "0.17"
 
 [features]
-clipboard = ["dep:arboard"]
+clipboard      = ["dep:arboard"]
+# winit-adapter: exposes `agg_gui::winit_adapter` with helpers mapping
+# `winit` types (`MouseButton`, `Modifiers`, `Key`, `CursorIcon`) to the
+# crate's input/cursor types.  Off by default so consumers that don't use
+# winit (wasm, bring-your-own event loop) don't pull the dep.
+winit-adapter  = ["dep:winit"]

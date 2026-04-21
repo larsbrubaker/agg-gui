@@ -34,11 +34,10 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{App, CursorIcon, Font, Key as AggKey, Modifiers,
-              MouseButton as AggMouseButton, Rect};
-use winit::window::CursorIcon as WinitCursor;
+use agg_gui::{App, Font, Modifiers, Rect};
+use agg_gui::winit_adapter;
 
-use demo_gl::{GlGfxCtx, begin_frame, sync_inspector, render_app_frame};
+use demo_gl::{GlGfxCtx, begin_frame, render_app_frame};
 
 use glow::HasContext;
 use glutin::config::ConfigTemplateBuilder;
@@ -248,7 +247,7 @@ fn main() {
     // Auto-save machinery — every AboutToWait tick, hash the current state
     // and save when it differs AND no mouse button is held down (so we don't
     // thrash on disk mid-drag or mid-resize).
-    let mut last_saved_state: String = String::new();
+    let mut auto_save = agg_gui::persistence::AutoSave::new();
     let mut mouse_buttons_down: u32 = 0;
 
     let mut cursor_x    = 0.0f64;
@@ -298,8 +297,8 @@ fn main() {
     // removed from `Window::layout`, this is safe even if the reported size
     // hasn't yet caught up with the final maximize transition — saved
     // window positions aren't mutated during layout.
-    sync_inspector(&app, show_inspector.get(), &inspector_nodes, &hovered_bounds);
-    render_frame(&mut app, &mut gl_ctx, &gl, win_w, win_h, last_frame_ms, &hovered_bounds);
+    render_frame(&mut app, &mut gl_ctx, &gl, win_w, win_h, last_frame_ms,
+                 show_inspector.get(), &inspector_nodes, &hovered_bounds);
     let _ = gl_surface.swap_buffers(&gl_context);
 
     // Finally, reveal the window — its first visible frame is our content.
@@ -346,10 +345,10 @@ fn main() {
                             last_windowed_h = win_h;
                         }
                         // Render immediately so content tracks the drag handle.
-                        sync_inspector(&app, show_inspector.get(),
-                                       &inspector_nodes, &hovered_bounds);
                         render_frame(&mut app, &mut gl_ctx, &gl,
-                                     win_w, win_h, last_frame_ms, &hovered_bounds);
+                                     win_w, win_h, last_frame_ms,
+                                     show_inspector.get(),
+                                     &inspector_nodes, &hovered_bounds);
                         gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
                     }
                 }
@@ -359,7 +358,7 @@ fn main() {
                     cursor_x = position.x;
                     cursor_y = position.y;
                     app.on_mouse_move(cursor_x, cursor_y);
-                    apply_cursor(&window, agg_gui::current_cursor_icon());
+                    winit_adapter::apply_cursor(&window, agg_gui::current_cursor_icon());
                 }
                 Event::WindowEvent {
                     event: WindowEvent::CursorLeft { .. }, ..
@@ -369,20 +368,12 @@ fn main() {
                 Event::WindowEvent {
                     event: WindowEvent::ModifiersChanged(mods_state), ..
                 } => {
-                    let s = mods_state.state();
-                    current_mods = Modifiers {
-                        shift: s.shift_key(),
-                        ctrl:  s.control_key(),
-                        alt:   s.alt_key(),
-                        // Winit's `super_key` is the platform "command" key —
-                        // Cmd on macOS, Windows key on Windows, Super on X11.
-                        meta:  s.super_key(),
-                    };
+                    current_mods = winit_adapter::modifiers(mods_state.state());
                 }
                 Event::WindowEvent {
                     event: WindowEvent::MouseInput { state, button, .. }, ..
                 } => {
-                    let btn = map_mouse_button(&button);
+                    let btn = winit_adapter::mouse_button(button);
                     match state {
                         ElementState::Pressed  => {
                             mouse_buttons_down = mouse_buttons_down.saturating_add(1);
@@ -416,24 +407,6 @@ fn main() {
                             }
                             return;
                         }
-                        // F10 — dump widget tree + bounds as JSON next to the
-                        // executable.  Overwrites on each press so successive
-                        // dumps can be diffed to track layout changes.
-                        if matches!(
-                            key_event.logical_key,
-                            WinitKey::Named(NamedKey::F10)
-                        ) {
-                            let path = state_file_path()
-                                .parent()
-                                .map(|p| p.join("widget-tree.json"))
-                                .unwrap_or_else(|| std::path::PathBuf::from("widget-tree.json"));
-                            let json = app.dump_tree_json();
-                            match std::fs::write(&path, &json) {
-                                Ok(_)  => eprintln!("dumped widget tree → {}", path.display()),
-                                Err(e) => eprintln!("failed to write widget tree: {e}"),
-                            }
-                            return;
-                        }
                         // F9 — request a screenshot of the NEXT rendered
                         // frame.  The main loop polls this cell and captures
                         // after rendering.
@@ -444,7 +417,7 @@ fn main() {
                             screenshot_request.set(true);
                             return;
                         }
-                        if let Some(key) = map_key(&key_event.logical_key) {
+                        if let Some(key) = winit_adapter::key(&key_event.logical_key) {
                             app.on_key_down(key, current_mods);
                         }
                     }
@@ -490,37 +463,31 @@ fn main() {
                     if want_render {
                         let t0 = std::time::Instant::now();
 
-                        // Sync inspector node snapshot before painting.
-                        sync_inspector(&app, show_inspector.get(),
-                                       &inspector_nodes, &hovered_bounds);
-
                         screen_size.set((win_w, win_h));
 
-                        // Capture frame?  Single-shot request (button / F9)
-                        // OR a continuous-mode widget has armed the request
-                        // during the previous paint.  A capture frame does a
-                        // double render: pass 1 paints the Screenshot demo's
-                        // preview pane as an empty frame so the captured
-                        // pixels don't nest the previous capture
-                        // (hall-of-mirrors bug); we glReadPixels the back
-                        // buffer and store the image; pass 2 re-renders with
-                        // the fresh image visible.
-                        let want_capture = screenshot_request.get();
-                        if want_capture {
-                            screenshot_capturing.set(true);
-                            render_frame(&mut app, &mut gl_ctx, &gl,
-                                         win_w, win_h, last_frame_ms, &hovered_bounds);
-                            let (rgba, w, h) = gl_ctx.read_screenshot();
-                            *handles_screenshot_image.borrow_mut()
-                                = Some((Arc::new(rgba), w, h));
-                            screenshot_capturing.set(false);
-                            screenshot_request.set(false);
+                        // Shared screenshot orchestration: on a capture
+                        // frame it double-renders (pass 1 hides the preview
+                        // so captured pixels don't nest, pass 2 reveals the
+                        // fresh image) via the two closures we supply.
+                        let show_insp = show_inspector.get();
+                        agg_gui::screenshot::run_frame_with_capture(
+                            &screenshot_request,
+                            &screenshot_capturing,
+                            &handles_screenshot_image,
+                            &mut gl_ctx,
+                            |gc| render_frame(&mut app, gc, &gl,
+                                              win_w, win_h, last_frame_ms,
+                                              show_insp, &inspector_nodes,
+                                              &hovered_bounds),
+                            |gc| gc.read_screenshot(),
+                        );
+                        if screenshot_request.get() == false
+                            && handles_screenshot_image.borrow().is_some()
+                        {
+                            // Counter is bumped on every frame that actually
+                            // consumed a request — tracked for parity with
+                            // pre-refactor behaviour.
                             screenshot_counter = screenshot_counter.wrapping_add(1);
-                            render_frame(&mut app, &mut gl_ctx, &gl,
-                                         win_w, win_h, last_frame_ms, &hovered_bounds);
-                        } else {
-                            render_frame(&mut app, &mut gl_ctx, &gl,
-                                         win_w, win_h, last_frame_ms, &hovered_bounds);
                         }
 
                         gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
@@ -547,18 +514,17 @@ fn main() {
                         ControlFlow::Wait
                     });
 
-                    // Auto-save when state changed AND no mouse button is
-                    // held down.  Covers window open/close clicks, drag /
-                    // resize releases, fullscreen / maximize transitions,
-                    // and hotkey-driven toggles — but never saves mid-drag.
-                    if mouse_buttons_down == 0 {
-                        let s = serialize_state(&state_accessor,
-                            (last_windowed_w, last_windowed_h));
-                        if s != last_saved_state {
-                            save_state_to_disk(&s);
-                            last_saved_state = s;
-                        }
-                    }
+                    // Auto-save via the shared `AutoSave` helper — same
+                    // policy drives both native and wasm: diff current
+                    // serialized state against last-saved, write only
+                    // when they differ, and only while no mouse button
+                    // is held (so drag / resize don't thrash disk).
+                    auto_save.tick(
+                        mouse_buttons_down == 0,
+                        || serialize_state(&state_accessor,
+                                           (last_windowed_w, last_windowed_h)),
+                        |s| save_state_to_disk(s),
+                    );
                 }
                 _ => {}
             }
@@ -571,105 +537,22 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 fn render_frame(
-    app:            &mut App,
-    gl_ctx:         &mut GlGfxCtx,
-    gl:             &glow::Context,
-    w:              u32,
-    h:              u32,
-    frame_ms:       f64,
-    hovered_bounds: &Rc<RefCell<Option<Rect>>>,
+    app:             &mut App,
+    gl_ctx:          &mut GlGfxCtx,
+    gl:              &glow::Context,
+    w:               u32,
+    h:               u32,
+    frame_ms:        f64,
+    show_inspector:  bool,
+    inspector_nodes: &Rc<RefCell<Vec<agg_gui::InspectorNode>>>,
+    hovered_bounds:  &Rc<RefCell<Option<Rect>>>,
 ) {
     begin_frame(gl, w, h);
     CUBE_SCREEN_RECT.with(|r| r.set(Rect::default()));
-    let hovered = *hovered_bounds.borrow();
-    render_app_frame(gl_ctx, app, w, h, frame_ms, hovered);
+    render_app_frame(gl_ctx, app, w, h, frame_ms,
+                     show_inspector, inspector_nodes, hovered_bounds);
 }
 
-// ---------------------------------------------------------------------------
-// Input mapping helpers
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Cursor helpers
-// ---------------------------------------------------------------------------
-
-fn apply_cursor(window: &winit::window::Window, icon: CursorIcon) {
-    if icon == CursorIcon::None {
-        window.set_cursor_visible(false);
-    } else {
-        window.set_cursor_visible(true);
-        window.set_cursor(agg_cursor_to_winit(icon));
-    }
-}
-
-fn agg_cursor_to_winit(icon: CursorIcon) -> WinitCursor {
-    match icon {
-        CursorIcon::Default          => WinitCursor::Default,
-        CursorIcon::None             => WinitCursor::Default, // handled above
-        CursorIcon::ContextMenu      => WinitCursor::ContextMenu,
-        CursorIcon::Help             => WinitCursor::Help,
-        CursorIcon::PointingHand     => WinitCursor::Pointer,
-        CursorIcon::Progress         => WinitCursor::Progress,
-        CursorIcon::Wait             => WinitCursor::Wait,
-        CursorIcon::Cell             => WinitCursor::Cell,
-        CursorIcon::Crosshair        => WinitCursor::Crosshair,
-        CursorIcon::Text             => WinitCursor::Text,
-        CursorIcon::VerticalText     => WinitCursor::VerticalText,
-        CursorIcon::Alias            => WinitCursor::Alias,
-        CursorIcon::Copy             => WinitCursor::Copy,
-        CursorIcon::Move             => WinitCursor::Move,
-        CursorIcon::NoDrop           => WinitCursor::NoDrop,
-        CursorIcon::NotAllowed       => WinitCursor::NotAllowed,
-        CursorIcon::Grab             => WinitCursor::Grab,
-        CursorIcon::Grabbing         => WinitCursor::Grabbing,
-        CursorIcon::AllScroll        => WinitCursor::AllScroll,
-        CursorIcon::ResizeHorizontal => WinitCursor::EwResize,
-        CursorIcon::ResizeNeSw       => WinitCursor::NeswResize,
-        CursorIcon::ResizeNwSe       => WinitCursor::NwseResize,
-        CursorIcon::ResizeVertical   => WinitCursor::NsResize,
-        CursorIcon::ResizeEast       => WinitCursor::EResize,
-        CursorIcon::ResizeSouthEast  => WinitCursor::SeResize,
-        CursorIcon::ResizeSouth      => WinitCursor::SResize,
-        CursorIcon::ResizeSouthWest  => WinitCursor::SwResize,
-        CursorIcon::ResizeWest       => WinitCursor::WResize,
-        CursorIcon::ResizeNorthWest  => WinitCursor::NwResize,
-        CursorIcon::ResizeNorth      => WinitCursor::NResize,
-        CursorIcon::ResizeNorthEast  => WinitCursor::NeResize,
-        CursorIcon::ResizeColumn     => WinitCursor::ColResize,
-        CursorIcon::ResizeRow        => WinitCursor::RowResize,
-        CursorIcon::ZoomIn           => WinitCursor::ZoomIn,
-        CursorIcon::ZoomOut          => WinitCursor::ZoomOut,
-    }
-}
-
-fn map_key(key: &WinitKey) -> Option<AggKey> {
-    Some(match key {
-        WinitKey::Named(NamedKey::ArrowUp)    => AggKey::ArrowUp,
-        WinitKey::Named(NamedKey::ArrowDown)  => AggKey::ArrowDown,
-        WinitKey::Named(NamedKey::ArrowLeft)  => AggKey::ArrowLeft,
-        WinitKey::Named(NamedKey::ArrowRight) => AggKey::ArrowRight,
-        WinitKey::Named(NamedKey::Enter)      => AggKey::Enter,
-        WinitKey::Named(NamedKey::Space)      => AggKey::Char(' '),
-        WinitKey::Named(NamedKey::Tab)        => AggKey::Tab,
-        WinitKey::Named(NamedKey::Escape)     => AggKey::Escape,
-        WinitKey::Named(NamedKey::Backspace)  => AggKey::Backspace,
-        WinitKey::Named(NamedKey::Home)       => AggKey::Home,
-        WinitKey::Named(NamedKey::End)        => AggKey::End,
-        WinitKey::Named(NamedKey::Delete)     => AggKey::Delete,
-        WinitKey::Named(NamedKey::Insert)     => AggKey::Insert,
-        WinitKey::Named(NamedKey::PageUp)     => AggKey::Other("PageUp".into()),
-        WinitKey::Named(NamedKey::PageDown)   => AggKey::Other("PageDown".into()),
-        WinitKey::Character(s) => AggKey::Char(s.chars().next()?),
-        _ => return None,
-    })
-}
-
-fn map_mouse_button(b: &winit::event::MouseButton) -> AggMouseButton {
-    match b {
-        winit::event::MouseButton::Left   => AggMouseButton::Left,
-        winit::event::MouseButton::Right  => AggMouseButton::Right,
-        winit::event::MouseButton::Middle => AggMouseButton::Middle,
-        winit::event::MouseButton::Other(n) => AggMouseButton::Other(*n as u8),
-        _ => AggMouseButton::Other(255),
-    }
-}
+// All input (key/mouse-button/modifier) and cursor-icon mapping now
+// lives in `agg_gui::winit_adapter` — imported above via
+// `use agg_gui::winit_adapter`.

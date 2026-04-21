@@ -28,7 +28,7 @@
 
 mod gl_resources;
 
-use demo_gl::{GlGfxCtx, begin_frame, sync_inspector, render_app_frame};
+use demo_gl::{GlGfxCtx, begin_frame, render_app_frame};
 use gl_resources::{GlCubeWidget, GlState, CUBE_SCREEN_RECT};
 
 use std::cell::{Cell, RefCell};
@@ -82,8 +82,11 @@ thread_local! {
     /// Mouse-buttons-currently-held counter.  Used to defer auto-save until
     /// the user releases the drag / resize so we don't hammer localStorage.
     static MOUSE_BUTTONS_DOWN: Cell<u32> = Cell::new(0);
-    /// Hash of the last persisted state for diff-based auto-save.
-    static LAST_SAVED_STATE: RefCell<String> = RefCell::new(String::new());
+    /// Shared auto-save tracker — compares fresh serialized state to the
+    /// previously-persisted blob so we only touch localStorage when state
+    /// has actually changed.  See `agg_gui::persistence::AutoSave`.
+    static AUTO_SAVE: RefCell<agg_gui::persistence::AutoSave> =
+        RefCell::new(agg_gui::persistence::AutoSave::new());
     /// Repaint dirty flag — set by any input handler, cleared by `render()`.
     /// The JS animation loop calls `needs_repaint()` each rAF tick and skips
     /// `render()` when nothing has changed, matching the native harness's
@@ -217,106 +220,55 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
     ensure_gl_state();
     ensure_gl_ctx(width as f32, height as f32);
 
-    // ── 1. GL clear ─────────────────────────────────────────────────────────
-    GL_STATE.with(|gl_cell| {
-        if let Some(state) = gl_cell.borrow().as_ref() {
-            begin_frame(&state.gl_rc(), width, height);
-        }
-    });
-
-    // ── 2. Sync inspector nodes snapshot (before paint) ─────────────────────
-    let show_inspector = SHOW_INSPECTOR.with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
-    DEMO_APP.with(|app_cell| {
-        if let Some(app) = app_cell.borrow().as_ref() {
-            INSPECTOR_NODES.with(|nodes_cell| {
-                if let Some(ref nodes_rc) = *nodes_cell.borrow() {
-                    HOVERED_BOUNDS.with(|hb_cell| {
-                        if let Some(ref hb_rc) = *hb_cell.borrow() {
-                            sync_inspector(app, show_inspector, nodes_rc, hb_rc);
-                        }
-                    });
-                }
-            });
-        }
-    });
-
-    // ── 3. Update screen size for the backend panel ─────────────────────────
+    // ── 1. Update screen size for the backend panel ─────────────────────────
     SCREEN_SIZE.with(|c| {
         if let Some(ref rc) = *c.borrow() {
             rc.set((width, height));
         }
     });
 
-    // ── 4. Paint widget tree (cube draws inline via DrawCtx::gl_paint) ──────
+    // ── 2. Paint widget tree through the shared capture orchestration ──────
     //
-    // Capture frames render TWICE:
-    //  - Pass 1 paints the Screenshot demo's preview pane as an empty frame
-    //    (via the `screenshot_capturing` flag) so the read_pixels output does
-    //    not contain the previous capture — prevents the hall-of-mirrors
-    //    recursion in continuous mode.
-    //  - We then glReadPixels the back buffer into the shared screenshot
-    //    image and clear the request / capturing flags.
-    //  - Pass 2 re-renders with the fresh image visible so the user sees it.
+    // `run_frame_with_capture` does the single-render path in the common
+    // case and the double-render capture path when `screenshot_request`
+    // is set.  Each render pass begins by clearing the GL back buffer and
+    // then paints the widget tree via `render_app_frame` (which also
+    // syncs the inspector snapshot internally).
     CUBE_SCREEN_RECT.with(|r| r.set(agg_gui::Rect::default()));
-    GL_CTX.with(|ctx_cell| {
-        let mut ctx_borrow = ctx_cell.borrow_mut();
-        if let Some(gl_ctx) = ctx_borrow.as_mut() {
-            let hovered = HOVERED_BOUNDS.with(|c| {
-                c.borrow().as_ref().and_then(|rc| *rc.borrow())
-            });
-
-            let want_capture = SCREENSHOT_REQUEST.with(|c| {
-                c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false)
-            });
-
-            if want_capture {
-                SCREENSHOT_CAPTURING.with(|c| {
-                    if let Some(ref rc) = *c.borrow() { rc.set(true); }
-                });
-                DEMO_APP.with(|app_cell| {
-                    let mut app_borrow = app_cell.borrow_mut();
-                    if let Some(app) = app_borrow.as_mut() {
-                        render_app_frame(gl_ctx, app, width, height, frame_ms, hovered);
-                    }
-                });
-                let (rgba, w, h) = gl_ctx.read_screenshot();
-                let rgba = Arc::new(rgba);
-                SCREENSHOT_IMAGE.with(|c| {
-                    if let Some(ref rc) = *c.borrow() {
-                        *rc.borrow_mut() = Some((rgba, w, h));
-                    }
-                });
-                SCREENSHOT_CAPTURING.with(|c| {
-                    if let Some(ref rc) = *c.borrow() { rc.set(false); }
-                });
-                SCREENSHOT_REQUEST.with(|c| {
-                    if let Some(ref rc) = *c.borrow() { rc.set(false); }
-                });
-                // Pass 2 — re-clear + re-render so the preview pane shows
-                // the new image.  begin_frame clears the back buffer so
-                // pass 1's pixels don't bleed through where pass 2's paint
-                // is transparent.
-                GL_STATE.with(|gl_cell| {
-                    if let Some(state) = gl_cell.borrow().as_ref() {
-                        begin_frame(&state.gl_rc(), width, height);
-                    }
-                });
-                DEMO_APP.with(|app_cell| {
-                    let mut app_borrow = app_cell.borrow_mut();
-                    if let Some(app) = app_borrow.as_mut() {
-                        render_app_frame(gl_ctx, app, width, height, frame_ms, hovered);
-                    }
-                });
-            } else {
-                DEMO_APP.with(|app_cell| {
-                    let mut app_borrow = app_cell.borrow_mut();
-                    if let Some(app) = app_borrow.as_mut() {
-                        render_app_frame(gl_ctx, app, width, height, frame_ms, hovered);
-                    }
-                });
+    let show_inspector = SHOW_INSPECTOR.with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
+    let screenshot_request_rc   = SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let screenshot_capturing_rc = SCREENSHOT_CAPTURING.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let screenshot_image_rc     = SCREENSHOT_IMAGE.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let inspector_nodes_rc      = INSPECTOR_NODES.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let hovered_bounds_rc       = HOVERED_BOUNDS.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let gl_rc_for_clear         = GL_STATE.with(|gl_cell| gl_cell.borrow().as_ref().map(|s| s.gl_rc()));
+    if let (Some(req), Some(cap), Some(img),
+            Some(nodes), Some(hb), Some(gl_rc)) = (
+        screenshot_request_rc, screenshot_capturing_rc, screenshot_image_rc,
+        inspector_nodes_rc, hovered_bounds_rc, gl_rc_for_clear,
+    ) {
+        GL_CTX.with(|ctx_cell| {
+            let mut ctx_borrow = ctx_cell.borrow_mut();
+            if let Some(gl_ctx) = ctx_borrow.as_mut() {
+                agg_gui::screenshot::run_frame_with_capture(
+                    &req, &cap, &img,
+                    gl_ctx,
+                    |gc| {
+                        // Each pass clears the back buffer and then paints.
+                        begin_frame(&gl_rc, width, height);
+                        DEMO_APP.with(|app_cell| {
+                            let mut app_borrow = app_cell.borrow_mut();
+                            if let Some(app) = app_borrow.as_mut() {
+                                render_app_frame(gc, app, width, height, frame_ms,
+                                                 show_inspector, &nodes, &hb);
+                            }
+                        });
+                    },
+                    |gc| gc.read_screenshot(),
+                );
             }
-        }
-    });
+        });
+    }
 
     // ── 5. Push frame time to history so backend panel shows live CPU usage ───
     if frame_ms > 0.0 {
@@ -328,26 +280,30 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
     }
 
     // ── 7. Auto-save layout when state changes ─────────────────────────────
-    // Compare a freshly-serialized state with the last-persisted version and
-    // write to localStorage only when they differ AND no mouse button is
-    // currently pressed (avoids churn during drag / resize).
+    // Same policy as native: diff the serialized state against the last
+    // persisted blob, write only on change and only while no mouse button
+    // is held.  The `AutoSave` helper in `agg_gui::persistence` owns the
+    // diff-and-write logic; this shell only supplies the serializer and
+    // the localStorage backend.
     FRAME_COUNT.set(FRAME_COUNT.get() + 1);
-    if MOUSE_BUTTONS_DOWN.get() == 0 {
-        STATE_ACCESSOR.with(|c| {
-            if let Some(ref acc) = *c.borrow() {
-                let s = acc.current_state().serialize();
-                let changed = LAST_SAVED_STATE.with(|last| *last.borrow() != s);
-                if changed {
-                    if let Some(storage) = web_sys::window()
-                        .and_then(|w| w.local_storage().ok().flatten())
-                    {
-                        let _ = storage.set_item("agg-gui-demo-state", &s);
-                        LAST_SAVED_STATE.with(|last| *last.borrow_mut() = s);
-                    }
-                }
-            }
-        });
-    }
+    let idle = MOUSE_BUTTONS_DOWN.get() == 0;
+    STATE_ACCESSOR.with(|c| {
+        if let Some(ref acc) = *c.borrow() {
+            AUTO_SAVE.with_borrow_mut(|auto| {
+                auto.tick(
+                    idle,
+                    || acc.current_state().serialize(),
+                    |s| {
+                        if let Some(storage) = web_sys::window()
+                            .and_then(|w| w.local_storage().ok().flatten())
+                        {
+                            let _ = storage.set_item("agg-gui-demo-state", s);
+                        }
+                    },
+                );
+            });
+        }
+    });
 
     // Frame successfully rendered — clear the dirty flag.  `needs_repaint()`
     // will return `true` again only if an event fires or an animation source
@@ -529,20 +485,28 @@ pub fn set_device_pixel_ratio(dpr: f64) {
     mark_dirty();
 }
 
+// NO blanket `mark_dirty()` at the app-event boundary.  A mouse-move over
+// inert canvas, a key that no focused widget consumes, a mouse-up that
+// released over empty space — none of these should force a repaint on
+// their own.  Widgets that change visible state in response to these
+// events call `crate::animation::request_tick()` themselves; the tree-walk
+// `needs_paint` path in `needs_repaint()` picks it up.
 #[wasm_bindgen]
 pub fn on_mouse_move(x: f64, y: f64) {
-    mark_dirty();
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
             app.on_mouse_move(x, y);
         }
     });
-    // Apply CSS cursor to the canvas element.
+    // Apply CSS cursor to the canvas element.  `agg_gui::web_adapter`
+    // owns the `CursorIcon` → CSS style-string conversion so future
+    // consumers drop into the same helper instead of rebuilding it.
     if let Some(window) = web_sys::window() {
         if let Some(doc) = window.document() {
             if let Some(el) = doc.get_element_by_id("canvas") {
-                let css = agg_gui::current_cursor_icon().to_css();
-                let _ = el.set_attribute("style", &format!("cursor:{css}"));
+                let style = agg_gui::web_adapter::cursor_style(
+                    agg_gui::current_cursor_icon());
+                let _ = el.set_attribute("style", &style);
             }
         }
     }
@@ -550,7 +514,6 @@ pub fn on_mouse_move(x: f64, y: f64) {
 
 #[wasm_bindgen]
 pub fn on_mouse_down(x: f64, y: f64, button: u8) {
-    mark_dirty();
     MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_add(1));
     let btn = match button {
         0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
@@ -565,7 +528,6 @@ pub fn on_mouse_down(x: f64, y: f64, button: u8) {
 
 #[wasm_bindgen]
 pub fn on_mouse_up(x: f64, y: f64, button: u8) {
-    mark_dirty();
     MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_sub(1));
     let btn = match button {
         0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
@@ -580,7 +542,6 @@ pub fn on_mouse_up(x: f64, y: f64, button: u8) {
 
 #[wasm_bindgen]
 pub fn on_mouse_wheel(x: f64, y: f64, delta_y: f64) {
-    mark_dirty();
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
             app.on_mouse_wheel(x, y, delta_y);
@@ -590,7 +551,6 @@ pub fn on_mouse_wheel(x: f64, y: f64, delta_y: f64) {
 
 #[wasm_bindgen]
 pub fn on_mouse_leave() {
-    mark_dirty();
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
             app.on_mouse_leave();
@@ -600,7 +560,6 @@ pub fn on_mouse_leave() {
 
 #[wasm_bindgen]
 pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool, meta: bool) {
-    mark_dirty();
     if let Some(key) = parse_js_key(key_str) {
         let mods = Modifiers { shift, ctrl, alt, meta };
         DEMO_APP.with(|cell| {
@@ -640,22 +599,10 @@ fn mark_dirty() { NEEDS_REPAINT.with(|c| c.set(true)); }
 // Key parsing
 // ---------------------------------------------------------------------------
 
+// DOM KeyboardEvent key-string → `Key` parser now lives in
+// `agg_gui::web_adapter::key` so web hosts don't re-implement the
+// same mapping.  Kept as a thin pass-through for clarity at call
+// sites within this file.
 fn parse_js_key(key: &str) -> Option<Key> {
-    Some(match key {
-        "Backspace"  => Key::Backspace,
-        "Delete"     => Key::Delete,
-        "Insert"     => Key::Insert,
-        "ArrowLeft"  => Key::ArrowLeft,
-        "ArrowRight" => Key::ArrowRight,
-        "ArrowUp"    => Key::ArrowUp,
-        "ArrowDown"  => Key::ArrowDown,
-        "Home"       => Key::Home,
-        "End"        => Key::End,
-        "Tab"        => Key::Tab,
-        "Enter"      => Key::Enter,
-        "Escape"     => Key::Escape,
-        " "          => Key::Char(' '),
-        s if s.chars().count() == 1 => Key::Char(s.chars().next()?),
-        s => Key::Other(s.to_string()),
-    })
+    agg_gui::web_adapter::key(key)
 }

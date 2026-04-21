@@ -45,9 +45,23 @@ pub mod lcd_gfx_ctx;
 pub mod layout_props;
 pub mod screenshot;
 pub mod text;
+pub mod persistence;
 pub mod theme;
 pub mod widget;
 pub mod widgets;
+
+/// Adapter helpers bridging `winit` types (keyboard, mouse, modifiers,
+/// cursor) to this crate's input/cursor types.  Enabled with the
+/// `winit-adapter` feature so consumers that don't use winit don't pull
+/// the dep.
+#[cfg(feature = "winit-adapter")]
+pub mod winit_adapter;
+
+/// Adapter helpers for web/JS targets — DOM KeyboardEvent key-string →
+/// [`Key`] parser and CSS cursor-name for [`CursorIcon`].  Compiled only
+/// for `wasm32` targets.
+#[cfg(target_arch = "wasm32")]
+pub mod web_adapter;
 
 // Re-export the most commonly used types at the crate root.
 pub use app_state::{OsWindowHandle, OsWindowState};

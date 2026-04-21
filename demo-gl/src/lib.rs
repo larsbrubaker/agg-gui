@@ -46,7 +46,7 @@
 //! GL NDC with `ndc = (pos / resolution) * 2 - 1`.
 
 pub mod frame;
-pub use frame::{begin_frame, sync_inspector, render_app_frame};
+pub use frame::{begin_frame, render_app_frame};
 
 /// 3-D Animation widget — single source of truth shared between
 /// `demo-native` and `demo-wasm`.  See `bar_grid` module docs for the
