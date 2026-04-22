@@ -262,6 +262,8 @@ pub struct GlGfxCtx {
     fill_color:   Color,
     stroke_color: Color,
     line_width:   f64,
+    line_join:    LineJoin,
+    line_cap:     LineCap,
     global_alpha: f64,
 
     // State stack: each entry holds a saved (transform, clip) pair.
@@ -387,6 +389,8 @@ impl GlGfxCtx {
             fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width:   1.0,
+            line_join:    LineJoin::Miter,
+            line_cap:     LineCap::Butt,
             global_alpha: 1.0,
             state_stack:  vec![(TransAffine::new(), None)],
             contours:     Vec::new(),
@@ -445,6 +449,11 @@ impl GlGfxCtx {
         self.font_size    = 16.0;
         // Disable any lingering scissor from the previous frame.
         unsafe { self.gl.disable(glow::SCISSOR_TEST); }
+        // Enable hardware multisampling — the GL config is created with 4×
+        // MSAA by the host, and this flag lets tess2 triangle edges use the
+        // sub-pixel samples for analytic edge AA (so rounded-rect strokes,
+        // Frame shadows, etc. no longer show staircase aliasing).
+        unsafe { self.gl.enable(glow::MULTISAMPLE); }
     }
 
     /// Set the LCD mode for this ctx.  Demo main loops call this each
@@ -803,16 +812,50 @@ impl GlGfxCtx {
         }
     }
 
-    /// Build stroke quads from contours and draw.
+    /// Stroke the accumulated contours.
+    ///
+    /// Single battle-tested pipeline:
+    ///   contours → AGG PathStorage → `ConvStroke` (proper miter/round/bevel
+    ///   joins + butt/round/square caps) → [`tessellate_path`] (AGG
+    ///   VertexSource → tess2 contours → GPU triangles).
+    ///
+    /// The previous `build_stroke_quads` emitted an unconnected quad per
+    /// flattened line segment, which produced "starburst" spikes at every
+    /// Bezier subdivision vertex because adjacent quads' corners didn't
+    /// share a joined miter.
     unsafe fn do_stroke(&mut self) {
+        use agg_rust::conv_stroke::ConvStroke;
+        use agg_rust::path_storage::PathStorage;
+        use agg_gui::gl_renderer::tessellate_path;
+
         let contours = std::mem::take(&mut self.contours);
         self.current_contour.clear();
         if contours.is_empty() { return; }
 
-        let hw = (self.line_width * 0.5) as f32;
-        let (verts, indices) = build_stroke_quads(&contours, hw);
-        let color = self.stroke_color;
-        self.draw_triangles(&verts, &indices, color);
+        // Rehydrate the flattened contours into a PathStorage.
+        let mut path = PathStorage::new();
+        for contour in &contours {
+            if contour.len() < 2 { continue; }
+            path.move_to(contour[0][0] as f64, contour[0][1] as f64);
+            for p in &contour[1..] {
+                path.line_to(p[0] as f64, p[1] as f64);
+            }
+        }
+
+        // Expand the path through AGG's outline renderer.
+        let mut stroke = ConvStroke::new(path);
+        stroke.set_width(self.line_width);
+        stroke.set_line_join(self.line_join);
+        stroke.set_line_cap(self.line_cap);
+
+        if let Some((verts_flat, idx)) = tessellate_path(&mut stroke) {
+            let verts: Vec<[f32; 2]> = verts_flat
+                .chunks_exact(2)
+                .map(|c| [c[0], c[1]])
+                .collect();
+            let color = self.stroke_color;
+            self.draw_triangles(&verts, &idx, color);
+        }
     }
 
     /// Flush the current contour into `contours`.
@@ -879,8 +922,8 @@ impl DrawCtx for GlGfxCtx {
     fn set_fill_color(&mut self, c: Color) { self.fill_color = c; }
     fn set_stroke_color(&mut self, c: Color) { self.stroke_color = c; }
     fn set_line_width(&mut self, w: f64) { self.line_width = w; }
-    fn set_line_join(&mut self, _: LineJoin) {}
-    fn set_line_cap(&mut self, _: LineCap) {}
+    fn set_line_join(&mut self, j: LineJoin) { self.line_join = j; }
+    fn set_line_cap(&mut self, c: LineCap) { self.line_cap = c; }
     fn set_blend_mode(&mut self, _: CompOp) {}
     fn set_global_alpha(&mut self, a: f64) { self.global_alpha = a; }
 
@@ -1794,11 +1837,10 @@ pub fn draw_status_overlay(
 /// Expand `contours` into stroke quads (two triangles per segment) with the
 /// given half-width.
 ///
-/// Contours with `first == last` are **closed**: all segments are drawn,
-/// including the wrap-around from the last interior point back to the first.
-/// Contours with `first != last` are **open**: the wrap-around segment is
-/// skipped.  Shape helpers (`rect`, `rounded_rect`, `circle`) produce closed
-/// contours so that every side is always stroked.
+/// No longer used at runtime — `do_stroke` goes through AGG's `ConvStroke` +
+/// tess2 for proper joined outlines.  Retained so the regression tests below
+/// keep documenting the behaviour this was replacing.
+#[cfg(test)]
 fn build_stroke_quads(
     contours: &[Vec<[f32; 2]>],
     hw: f32,

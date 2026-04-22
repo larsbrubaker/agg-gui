@@ -698,11 +698,16 @@ pub fn build_demo_ui(
             )
         };
 
+        // Frame demo mirrors egui's Frame inspector, which is `.resizable(false)`
+        // and sizes itself to its contents.  We opt the window in to auto-size
+        // for the same behaviour here.
+        let auto_size = spec.title == "\u{F096} Frame";
         let win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(initial.x, initial.y, initial.width, initial.height))
             .with_visible_cell(open_cell)
             .with_reset_cell(reset_cell)
             .with_position_cell(Rc::clone(&demo_pos_cells[i]))
+            .with_auto_size(auto_size)
             .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(win));
     }

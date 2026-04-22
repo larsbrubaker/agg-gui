@@ -24,6 +24,78 @@
 //! we implement non-AA fill tessellation; AA strokes are planned as Phase D ext.
 
 use tess2_rust::{ElementType, Tessellator, WindingRule};
+use agg_rust::basics::{is_end_poly, is_move_to, is_stop, VertexSource};
+
+// ---------------------------------------------------------------------------
+// Universal AGG VertexSource → tess2 contours
+// ---------------------------------------------------------------------------
+
+/// Walk any AGG `VertexSource` (a `PathStorage`, a `ConvStroke<…>`, a
+/// `ConvCurve<…>`, an `Ellipse`, etc.) and produce tess2-ready contours.
+///
+/// Protocol (mirrors MatterCAD's `VertexSourceToTesselator.SendShapeToTesselator`):
+///   - `move_to` → start a new contour.
+///   - `line_to` → append vertex to the current contour.
+///   - `end_poly` / implicit close → finalise the current contour.
+///   - `stop` → we're done.
+///
+/// Degenerate contours (< 3 vertices after de-duplication) are dropped, since
+/// tess2 can't triangulate them and frequently panics on zero-length edges.
+///
+/// This is the ONE place in the codebase that does path → contour conversion.
+/// Both fill and stroke rendering go through it so the two code paths share
+/// the same battle-tested handling of close/end-poly semantics.
+pub fn agg_path_to_contours<VS: VertexSource>(path: &mut VS) -> Vec<Vec<[f32; 2]>> {
+    let mut out: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut cur: Vec<[f32; 2]> = Vec::new();
+
+    path.rewind(0);
+    loop {
+        let (mut x, mut y) = (0.0, 0.0);
+        let cmd = path.vertex(&mut x, &mut y);
+        if is_stop(cmd) {
+            break;
+        }
+        if is_move_to(cmd) {
+            // Finish the previous contour before starting a new one.
+            if !cur.is_empty() {
+                push_contour(&mut out, std::mem::take(&mut cur));
+            }
+            cur.push([x as f32, y as f32]);
+        } else if is_end_poly(cmd) {
+            if !cur.is_empty() {
+                push_contour(&mut out, std::mem::take(&mut cur));
+            }
+        } else {
+            // line_to (drawing command): append to current contour.
+            cur.push([x as f32, y as f32]);
+        }
+    }
+    if !cur.is_empty() {
+        push_contour(&mut out, cur);
+    }
+    out
+}
+
+fn push_contour(out: &mut Vec<Vec<[f32; 2]>>, mut contour: Vec<[f32; 2]>) {
+    // De-duplicate consecutive identical vertices and strip a trailing
+    // closing duplicate (first == last) — tess2 panics on zero-length
+    // edges and on redundant closing vertices.
+    contour = deduplicate_contour_v(&contour);
+    if contour.len() < 3 { return; }
+    if signed_area_2x(&contour).abs() < 1.0 { return; }
+    out.push(contour);
+}
+
+/// Tessellate any AGG vertex source.  Convenience wrapper over
+/// [`agg_path_to_contours`] + [`tessellate_fill`] — use this for every fill /
+/// stroke rendering path so there's a single code-path from an AGG path to
+/// GPU triangles.
+pub fn tessellate_path<VS: VertexSource>(path: &mut VS) -> Option<(Vec<f32>, Vec<u32>)> {
+    let contours = agg_path_to_contours(path);
+    if contours.is_empty() { return None; }
+    tessellate_fill(&contours)
+}
 
 /// Tessellate a filled polygon described by one or more contour rings.
 ///
@@ -101,14 +173,20 @@ fn signed_area_2x(pts: &[[f32; 2]]) -> f32 {
 /// Remove consecutive duplicate vertices and strip the closing duplicate if
 /// the contour ends with a copy of its first vertex.
 fn deduplicate_contour(pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    deduplicate_contour_v(pts)
+}
+
+/// Same as `deduplicate_contour` but with a shorter name suitable for
+/// internal re-use — kept as a separate symbol to avoid churning the public
+/// one while the path converter lands.
+fn deduplicate_contour_v(pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
     let mut out: Vec<[f32; 2]> = Vec::with_capacity(pts.len());
     for &pt in pts {
         match out.last() {
-            Some(&prev) if prev == pt => {}   // skip duplicate
+            Some(&prev) if prev == pt => {}
             _ => out.push(pt),
         }
     }
-    // Strip closing vertex if it duplicates the first (open the contour for tess2).
     if out.len() >= 2 && out.first() == out.last() {
         out.pop();
     }

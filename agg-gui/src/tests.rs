@@ -396,6 +396,57 @@ fn test_y_flip_at_ingestion() {
     assert!(clicked, "button inside viewport should be clicked");
 }
 
+/// ColorPicker: clicking the swatch opens the panel; dragging the hue
+/// slider writes a new colour into the bound cell.
+#[test]
+fn test_color_picker_opens_and_updates_on_drag() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use crate::text::Font;
+    use crate::ColorPicker;
+
+    let font  = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    // Non-gray start colour so hue changes actually shift the RGB values
+    // (gray has saturation=0 → hue rotation is a no-op).
+    let start = Color::rgba(1.0, 0.0, 0.0, 1.0);
+    let cell  = Rc::new(Cell::new(start));
+    let picker = ColorPicker::new(Rc::clone(&cell), Arc::clone(&font));
+
+    let mut app = App::new(Box::new(picker));
+    const VP_H: f64 = 400.0;
+    app.layout(Size::new(300.0, VP_H));
+
+    // When closed the widget is 22 px tall in Y-up coords (y ∈ [0, 22]).
+    // Screen → Y-up: y_up = VP_H − screen_y.  A screen click at
+    // y = VP_H − 10 maps to y_up = 10 (inside the swatch).
+    let swatch_screen_y = VP_H - 10.0;
+    app.on_mouse_down(50.0, swatch_screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up  (50.0, swatch_screen_y, MouseButton::Left, Modifiers::default());
+    // Re-layout so the expanded panel dimensions take effect.
+    app.layout(Size::new(300.0, VP_H));
+
+    // With the panel open, the hue strip lives near the TOP of the widget
+    // in Y-up: its bottom edge is at
+    //   y_up = panel_h − SWATCH_H − PAD − HUE_H  ≈  panel_h − 46
+    // The panel_h when open is 22 + 258 = 280 for allow_none=false,
+    // or 22 + 284 = 306 for true.  Default allow_none=false → panel_h ≈ 280.
+    // Hue strip centre in Y-up ≈ 280 − 22 − 8 − 8 = 242.
+    // Screen y = VP_H − 242 = 158.
+    let hue_screen_y = VP_H - 242.0;
+    // Click near right end of hue strip (high hue).
+    app.on_mouse_down(220.0, hue_screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_move(210.0, hue_screen_y);
+    app.on_mouse_up  (210.0, hue_screen_y, MouseButton::Left, Modifiers::default());
+
+    let final_color = cell.get();
+    assert_ne!(
+        (start.r, start.g, start.b), (final_color.r, final_color.g, final_color.b),
+        "hue drag must have mutated the bound colour cell (got {:?})",
+        final_color,
+    );
+}
+
 /// A click outside widget bounds must not trigger the callback.
 #[test]
 fn test_click_outside_bounds_ignored() {

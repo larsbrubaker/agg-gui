@@ -19,5 +19,5 @@ pub mod glyph_cache;
 pub mod tess2_bridge;
 
 pub use glyph_cache::GlyphCache;
-pub use tess2_bridge::{tessellate_circle, tessellate_fill, tessellate_rect,
-                       tessellate_rounded_rect};
+pub use tess2_bridge::{agg_path_to_contours, tessellate_circle, tessellate_fill,
+                       tessellate_path, tessellate_rect, tessellate_rounded_rect};

@@ -148,6 +148,12 @@ pub struct Window {
     /// When true, the window is kept fully inside the canvas bounds during drag/resize.
     constrain: bool,
 
+    /// When true, the window bounds adopt the content's preferred size each
+    /// layout pass (width + height).  Keeps the title-bar top edge pinned so
+    /// the window appears to grow/shrink downward.  User resize is disabled
+    /// while auto-size is active (dragging still works).
+    auto_size: bool,
+
     /// Window title string — stored so external callers (z-order
     /// persistence, inspector display, etc.) can identify this window
     /// without going through the inner `title_bar` sub-widget.
@@ -208,6 +214,7 @@ impl Window {
             // by `layout()` before any drag/resize/collapse hit-test runs.
             canvas_size: Size::new(0.0, 0.0),
             constrain: true,
+            auto_size: false,
             title: title_str,
             on_raised: None,
         }
@@ -254,6 +261,10 @@ impl Window {
     pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 
     pub fn with_constrain(mut self, constrain: bool) -> Self { self.constrain = constrain; self }
+
+    /// Make the window size itself to the content's preferred size every frame.
+    /// Top-left pin: as content grows/shrinks, the title bar stays where it is.
+    pub fn with_auto_size(mut self, auto: bool) -> Self { self.auto_size = auto; self }
 
     pub fn on_close(mut self, cb: impl FnMut() + 'static) -> Self {
         self.on_close = Some(Box::new(cb));
@@ -384,7 +395,7 @@ impl Window {
     /// Return the resize direction for `local`, or `None` if the point is in
     /// the interior (or the window is collapsed).
     fn resize_dir(&self, local: Point) -> Option<ResizeDir> {
-        if self.collapsed { return None; }
+        if self.collapsed || self.auto_size { return None; }
         let w = self.bounds.width;
         let h = self.bounds.height;
         let x = local.x;
@@ -560,6 +571,36 @@ impl Widget for Window {
         if !now_visible {
             return Size::new(self.bounds.width, self.bounds.height);
         }
+
+        // Auto-size: measure the child's preferred size, then adopt it as the
+        // new window size (pinning the top edge — Y-up → adjust `bounds.y` so
+        // the title bar stays put when the height changes).  Skip while
+        // collapsed: the user toggled a fixed TITLE_H height.
+        //
+        // We cap the measurement request by `child.max_size()` when finite
+        // (otherwise by the canvas size): flex containers return their given
+        // `available.width` rather than an intrinsic natural width, so without
+        // a cap we'd produce an infinite/canvas-wide window.  Callers wanting
+        // a content-fitted window set `with_max_size(Size::new(w, f64::MAX))`
+        // on their root widget.
+        if self.auto_size && !self.collapsed && !self.maximized {
+            if let Some(child) = self.children.first_mut() {
+                let max_sz = child.max_size();
+                let cap_w  = if max_sz.width.is_finite()  { max_sz.width  }
+                             else                        { available.width.max(MIN_W)  };
+                let cap_h  = if max_sz.height.is_finite() { max_sz.height }
+                             else                        { available.height.max(MIN_H) };
+                let pref   = child.layout(Size::new(cap_w, cap_h));
+                let new_w  = pref.width.min(cap_w).max(MIN_W);
+                let new_h  = (pref.height + TITLE_H).min(cap_h + TITLE_H).max(MIN_H);
+                let top    = self.bounds.y + self.bounds.height;
+                self.bounds.width   = new_w;
+                self.bounds.height  = new_h;
+                self.bounds.y       = top - new_h;
+                self.pre_collapse_h = new_h;
+            }
+        }
+
         // When collapsed, bounds.height == TITLE_H (set during toggle).
         let content_h = (self.bounds.height - TITLE_H).max(0.0);
 

@@ -1,5 +1,6 @@
 pub mod button;
 pub mod checkbox;
+pub mod color_picker;
 pub mod collapsing_header;
 pub mod combo_box;
 pub mod container;
@@ -27,6 +28,7 @@ pub mod window_title_bar;
 
 pub use button::Button;
 pub use checkbox::Checkbox;
+pub use color_picker::ColorPicker;
 pub use collapsing_header::CollapsingHeader;
 pub use combo_box::ComboBox;
 pub use container::Container;

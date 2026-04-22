@@ -136,7 +136,13 @@ fn main() {
             .with_fullscreen(Some(Fullscreen::Borderless(None)));
     }
 
-    let template = ConfigTemplateBuilder::new().with_alpha_size(0);
+    // Request 4× MSAA — tess2 produces aliased triangle edges, and without
+    // multisampling the AGG-stroke outlines (rounded rects, shape strokes)
+    // show staircase artefacts.  The GL driver picks the best config from
+    // those matching this template.
+    let template = ConfigTemplateBuilder::new()
+        .with_alpha_size(0)
+        .with_multisampling(4);
     let display_builder =
         DisplayBuilder::new().with_window_attributes(Some(window_attributes));
 
