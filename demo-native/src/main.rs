@@ -136,13 +136,10 @@ fn main() {
             .with_fullscreen(Some(Fullscreen::Borderless(None)));
     }
 
-    // Request 4× MSAA — tess2 produces aliased triangle edges, and without
-    // multisampling the AGG-stroke outlines (rounded rects, shape strokes)
-    // show staircase artefacts.  The GL driver picks the best config from
-    // those matching this template.
-    let template = ConfigTemplateBuilder::new()
-        .with_alpha_size(0)
-        .with_multisampling(4);
+    // AA is handled analytically in-shader via tess2 edge-flag halo strips,
+    // so we explicitly do NOT request MSAA — hardware multisampling doubles
+    // memory bandwidth and doesn't help sub-pixel text.
+    let template = ConfigTemplateBuilder::new().with_alpha_size(0);
     let display_builder =
         DisplayBuilder::new().with_window_attributes(Some(window_attributes));
 

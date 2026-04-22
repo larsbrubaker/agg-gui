@@ -713,6 +713,40 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn fill(&mut self)                                        { self.fill() }
     fn stroke(&mut self)                                      { self.stroke() }
     fn fill_and_stroke(&mut self)                             { self.fill_and_stroke() }
+
+    fn draw_triangles_aa(
+        &mut self,
+        vertices: &[[f32; 3]],
+        indices:  &[u32],
+        color:    crate::color::Color,
+    ) {
+        // Software fallback: rasterise each triangle as a solid filled
+        // polygon.  The per-vertex `alpha` is ignored (software already has
+        // analytic AA via the scanline rasteriser), so halo quads from the
+        // GPU pipeline end up as redundant thin slivers — visually harmless
+        // but inefficient.  Callers that care should check `has_image_blit`
+        // / a similar capability flag; for now this keeps parity with the
+        // trait so the Lion demo renders correctly on the CPU path too.
+        let saved_fill = self.state.fill_color;
+        self.set_fill_color(color);
+        let n_tris = indices.len() / 3;
+        for t in 0..n_tris {
+            let i0 = indices[t * 3    ] as usize;
+            let i1 = indices[t * 3 + 1] as usize;
+            let i2 = indices[t * 3 + 2] as usize;
+            if i0 >= vertices.len() || i1 >= vertices.len() || i2 >= vertices.len() { continue; }
+            let v0 = vertices[i0];
+            let v1 = vertices[i1];
+            let v2 = vertices[i2];
+            self.begin_path();
+            self.move_to(v0[0] as f64, v0[1] as f64);
+            self.line_to(v1[0] as f64, v1[1] as f64);
+            self.line_to(v2[0] as f64, v2[1] as f64);
+            self.close_path();
+            self.fill();
+        }
+        self.set_fill_color(saved_fill);
+    }
     fn fill_text(&mut self, t: &str, x: f64, y: f64)        { self.fill_text(t, x, y) }
     fn fill_text_gsv(&mut self, t: &str, x: f64, y: f64, s: f64) { self.fill_text_gsv(t, x, y, s) }
     fn measure_text(&self, t: &str) -> Option<crate::text::TextMetrics> { self.measure_text(t) }

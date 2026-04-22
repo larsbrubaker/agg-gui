@@ -61,7 +61,7 @@ use std::sync::{Arc, Weak};
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
-use agg_gui::gl_renderer::{GlyphCache, tessellate_fill};
+use agg_gui::gl_renderer::GlyphCache;
 use agg_gui::geometry::Rect;
 use agg_gui::text::{Font, TextMetrics, shape_glyphs};
 use agg_gui::CompOp;
@@ -82,6 +82,25 @@ const SOLID_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;uni
 const SOLID_FRAG: &str = "#version 300 es\nprecision mediump float;\nuniform vec4 u_color;out vec4 frag_color;void main(){frag_color=u_color;}";
 #[cfg(not(target_arch = "wasm32"))]
 const SOLID_FRAG: &str = "#version 330 core\nuniform vec4 u_color;out vec4 frag_color;void main(){frag_color=u_color;}";
+
+// ── AA solid-colour pipeline (tess2 edge-flag halo strips) ──────────────────
+//
+// Same NDC math as `SOLID_*`, with an extra `a_alpha` attribute that gets
+// interpolated across the halo quads so the fragment shader can multiply
+// coverage into the source alpha.  Polygon interior vertices have alpha=1,
+// halo "outer" vertices have alpha=0 — linear interpolation gives analytic
+// edge coverage equivalent to 1-pixel MSAA, without requiring an MSAA
+// framebuffer config.
+
+#[cfg(target_arch = "wasm32")]
+const AA_VERT: &str = "#version 300 es\nprecision mediump float;\nlayout(location=0)in vec2 a_pos;layout(location=1)in float a_alpha;uniform vec2 u_resolution;out float v_alpha;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_alpha=a_alpha;}";
+#[cfg(not(target_arch = "wasm32"))]
+const AA_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;layout(location=1)in float a_alpha;uniform vec2 u_resolution;out float v_alpha;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_alpha=a_alpha;}";
+
+#[cfg(target_arch = "wasm32")]
+const AA_FRAG: &str = "#version 300 es\nprecision mediump float;\nin float v_alpha;uniform vec4 u_color;out vec4 frag_color;void main(){frag_color=vec4(u_color.rgb,u_color.a*v_alpha);}";
+#[cfg(not(target_arch = "wasm32"))]
+const AA_FRAG: &str = "#version 330 core\nin float v_alpha;uniform vec4 u_color;out vec4 frag_color;void main(){frag_color=vec4(u_color.rgb,u_color.a*v_alpha);}";
 
 // ── Textured-quad pipeline (used by draw_image_rgba) ────────────────────────
 //
@@ -205,6 +224,16 @@ pub struct GlGfxCtx {
     res_loc:   Option<glow::UniformLocation>,
     color_loc: Option<glow::UniformLocation>,
 
+    // AA solid-colour pipeline — identical to `prog` but with an extra
+    // per-vertex `a_alpha` attribute for analytic edge AA (tess2 edge-flag
+    // halo strips).  Fills and strokes with AA use this program.
+    aa_prog: glow::Program,
+    aa_vao:  glow::VertexArray,
+    aa_vbo:  glow::Buffer,
+    aa_ibo:  glow::Buffer,
+    aa_res_loc:   Option<glow::UniformLocation>,
+    aa_color_loc: Option<glow::UniformLocation>,
+
     // Textured-quad pipeline (draw_image_rgba — markdown images, screenshots,
     // AGG-rasterised Label backbuffers).
     tex_prog: glow::Program,
@@ -319,6 +348,24 @@ impl GlGfxCtx {
         gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ibo));
         gl.bind_vertex_array(None);
 
+        // ── AA solid pipeline (halo-strip alpha) ───────────────────────────
+        let aa_prog = compile_program(&gl, AA_VERT, AA_FRAG)
+            .expect("aa shader compile/link");
+        let aa_res_loc   = gl.get_uniform_location(aa_prog, "u_resolution");
+        let aa_color_loc = gl.get_uniform_location(aa_prog, "u_color");
+        let aa_vao = gl.create_vertex_array().expect("create AA VAO");
+        let aa_vbo = gl.create_buffer().expect("create AA VBO");
+        let aa_ibo = gl.create_buffer().expect("create AA IBO");
+        gl.bind_vertex_array(Some(aa_vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(aa_vbo));
+        // Layout: vec2 pos + f32 alpha = 12 bytes per vertex.
+        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 12, 0);
+        gl.vertex_attrib_pointer_f32(1, 1, glow::FLOAT, false, 12, 8);
+        gl.enable_vertex_attrib_array(0);
+        gl.enable_vertex_attrib_array(1);
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(aa_ibo));
+        gl.bind_vertex_array(None);
+
         // ── Textured-quad pipeline ─────────────────────────────────────────
         let tex_prog = compile_program(&gl, TEX_VERT, TEX_FRAG)
             .expect("tex shader compile/link");
@@ -373,6 +420,8 @@ impl GlGfxCtx {
             viewport: (width, height),
             prog, vao, vbo, ibo,
             res_loc, color_loc,
+            aa_prog, aa_vao, aa_vbo, aa_ibo,
+            aa_res_loc, aa_color_loc,
             tex_prog, tex_vao, tex_vbo,
             tex_res_loc, tex_sampler_loc,
             lcd_prog, lcd_vao, lcd_vbo,
@@ -449,11 +498,6 @@ impl GlGfxCtx {
         self.font_size    = 16.0;
         // Disable any lingering scissor from the previous frame.
         unsafe { self.gl.disable(glow::SCISSOR_TEST); }
-        // Enable hardware multisampling — the GL config is created with 4×
-        // MSAA by the host, and this flag lets tess2 triangle edges use the
-        // sub-pixel samples for analytic edge AA (so rounded-rect strokes,
-        // Frame shadows, etc. no longer show staircase aliasing).
-        unsafe { self.gl.enable(glow::MULTISAMPLE); }
     }
 
     /// Set the LCD mode for this ctx.  Demo main loops call this each
@@ -794,45 +838,90 @@ impl GlGfxCtx {
         self.gl.bind_vertex_array(None);
     }
 
-    /// Tessellate all accumulated `contours` and draw as a fill.
+    /// Submit AA triangles — vertices are `[x, y, alpha]` triples.
+    ///
+    /// Interior triangles and halo-strip triangles are blended uniformly via
+    /// the AA solid shader: per-vertex `a_alpha` is interpolated across the
+    /// primitive, so halo quads with inner=1.0 / outer=0.0 produce an
+    /// analytic edge-coverage ramp one pixel wide.
+    unsafe fn submit_aa_triangles(&self, verts: &[[f32; 3]], indices: &[u32], color: Color) {
+        if verts.is_empty() || indices.is_empty() { return; }
+        let a = (color.a * self.global_alpha as f32).clamp(0.0, 1.0);
+
+        self.gl.use_program(Some(self.aa_prog));
+        if let Some(ref loc) = self.aa_res_loc {
+            self.gl.uniform_2_f32(Some(loc), self.viewport.0, self.viewport.1);
+        }
+        if let Some(ref loc) = self.aa_color_loc {
+            self.gl.uniform_4_f32(Some(loc), color.r, color.g, color.b, a);
+        }
+
+        self.gl.bind_vertex_array(Some(self.aa_vao));
+
+        self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.aa_vbo));
+        self.gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            bytemuck::cast_slice(verts),
+            glow::STREAM_DRAW,
+        );
+
+        self.gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.aa_ibo));
+        self.gl.buffer_data_u8_slice(
+            glow::ELEMENT_ARRAY_BUFFER,
+            bytemuck::cast_slice(indices),
+            glow::STREAM_DRAW,
+        );
+
+        self.gl.draw_elements(glow::TRIANGLES, indices.len() as i32,
+                              glow::UNSIGNED_INT, 0);
+
+        self.gl.bind_vertex_array(None);
+    }
+
+    /// Tessellate all accumulated `contours` and draw as a fill with
+    /// analytic edge AA.
+    ///
+    /// Contours are rebuilt into an AGG `PathStorage` and fed through
+    /// `tessellate_path_aa`, which uses tess2's edge-flag output to attach
+    /// a 1-pixel halo strip along every original polygon boundary.
     unsafe fn do_fill(&mut self) {
+        use agg_rust::path_storage::PathStorage;
+        use agg_gui::gl_renderer::tessellate_path_aa;
+
         let contours = std::mem::take(&mut self.contours);
         self.current_contour.clear();
         if contours.is_empty() { return; }
 
-        if let Some((verts_flat, idx)) = tessellate_fill(&contours) {
-            // verts_flat is interleaved [x0,y0,x1,y1,...] → convert to [[f32;2]]
-            let verts: Vec<[f32; 2]> = verts_flat
-                .chunks_exact(2)
-                .map(|c| [c[0], c[1]])
-                .collect();
-            // Indices from tess2 are vertex numbers (not byte offsets)
+        let mut path = PathStorage::new();
+        for c in &contours {
+            if c.len() < 2 { continue; }
+            path.move_to(c[0][0] as f64, c[0][1] as f64);
+            for p in &c[1..] {
+                path.line_to(p[0] as f64, p[1] as f64);
+            }
+        }
+
+        if let Some((verts, idx)) = tessellate_path_aa(&mut path, 1.0) {
             let color = self.fill_color;
-            self.draw_triangles(&verts, &idx, color);
+            self.submit_aa_triangles(&verts, &idx, color);
         }
     }
 
-    /// Stroke the accumulated contours.
+    /// Stroke the accumulated contours with analytic edge AA.
     ///
     /// Single battle-tested pipeline:
-    ///   contours → AGG PathStorage → `ConvStroke` (proper miter/round/bevel
-    ///   joins + butt/round/square caps) → [`tessellate_path`] (AGG
-    ///   VertexSource → tess2 contours → GPU triangles).
-    ///
-    /// The previous `build_stroke_quads` emitted an unconnected quad per
-    /// flattened line segment, which produced "starburst" spikes at every
-    /// Bezier subdivision vertex because adjacent quads' corners didn't
-    /// share a joined miter.
+    ///   contours → AGG `PathStorage` → `ConvStroke` (proper miter/round/bevel
+    ///   joins + butt/round/square caps) → [`tessellate_path_aa`] (AGG
+    ///   VertexSource → tess2 → interior triangles + edge-flag halo strips).
     unsafe fn do_stroke(&mut self) {
         use agg_rust::conv_stroke::ConvStroke;
         use agg_rust::path_storage::PathStorage;
-        use agg_gui::gl_renderer::tessellate_path;
+        use agg_gui::gl_renderer::tessellate_path_aa;
 
         let contours = std::mem::take(&mut self.contours);
         self.current_contour.clear();
         if contours.is_empty() { return; }
 
-        // Rehydrate the flattened contours into a PathStorage.
         let mut path = PathStorage::new();
         for contour in &contours {
             if contour.len() < 2 { continue; }
@@ -842,19 +931,14 @@ impl GlGfxCtx {
             }
         }
 
-        // Expand the path through AGG's outline renderer.
         let mut stroke = ConvStroke::new(path);
         stroke.set_width(self.line_width);
         stroke.set_line_join(self.line_join);
         stroke.set_line_cap(self.line_cap);
 
-        if let Some((verts_flat, idx)) = tessellate_path(&mut stroke) {
-            let verts: Vec<[f32; 2]> = verts_flat
-                .chunks_exact(2)
-                .map(|c| [c[0], c[1]])
-                .collect();
+        if let Some((verts, idx)) = tessellate_path_aa(&mut stroke, 1.0) {
             let color = self.stroke_color;
-            self.draw_triangles(&verts, &idx, color);
+            self.submit_aa_triangles(&verts, &idx, color);
         }
     }
 
@@ -1104,6 +1188,26 @@ impl DrawCtx for GlGfxCtx {
         unsafe { self.do_fill(); }
         self.contours = saved;
         unsafe { self.do_stroke(); }
+    }
+
+    fn draw_triangles_aa(
+        &mut self,
+        vertices: &[[f32; 3]],
+        indices:  &[u32],
+        color:    Color,
+    ) {
+        // The Lion demo and other callers tessellate once at load time and
+        // submit the cached triangles + halo every frame — route straight
+        // into the existing AA-solid GL pipeline.  Apply the current CTM
+        // to each vertex's XY; alpha passes through unchanged.
+        if vertices.is_empty() || indices.is_empty() { return; }
+        let ctm = *self.ctm();
+        let transformed: Vec<[f32; 3]> = vertices.iter().map(|v| {
+            let (mut x, mut y) = (v[0] as f64, v[1] as f64);
+            ctm.transform(&mut x, &mut y);
+            [x as f32, y as f32, v[2]]
+        }).collect();
+        unsafe { self.submit_aa_triangles(&transformed, indices, color); }
     }
 
     // ── Text ─────────────────────────────────────────────────────────────────

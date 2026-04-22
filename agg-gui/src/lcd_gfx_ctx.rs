@@ -300,6 +300,36 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         self.stroke();
     }
 
+    fn draw_triangles_aa(
+        &mut self,
+        vertices: &[[f32; 3]],
+        indices:  &[u32],
+        color:    crate::color::Color,
+    ) {
+        // LCD-coverage-cache backbuffer doesn't have a dedicated halo-AA
+        // path; rasterise each triangle as a solid fill, same as the
+        // software `GfxCtx` path.
+        let saved_fill = self.state.fill_color;
+        self.state.fill_color = color;
+        let n = indices.len() / 3;
+        for t in 0..n {
+            let i0 = indices[t * 3    ] as usize;
+            let i1 = indices[t * 3 + 1] as usize;
+            let i2 = indices[t * 3 + 2] as usize;
+            if i0 >= vertices.len() || i1 >= vertices.len() || i2 >= vertices.len() { continue; }
+            let v0 = vertices[i0];
+            let v1 = vertices[i1];
+            let v2 = vertices[i2];
+            self.begin_path();
+            self.move_to(v0[0] as f64, v0[1] as f64);
+            self.line_to(v1[0] as f64, v1[1] as f64);
+            self.line_to(v2[0] as f64, v2[1] as f64);
+            self.close_path();
+            self.fill();
+        }
+        self.state.fill_color = saved_fill;
+    }
+
     // ── Text ──────────────────────────────────────────────────────────────
     fn fill_text(&mut self, text: &str, x: f64, y: f64) {
         let font = match self.state.font.clone() {

@@ -310,6 +310,7 @@ const DEMOS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F001} Dancing Strings",        label: "\u{F001} Dancing Strings",        group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F1FC} Painting",               label: "\u{F1FC} Painting",               group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F0C3} Rendering Test",         label: "\u{F0C3} Rendering Test",         group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
+    DemoSpec { title: "\u{F1B0} Lion",                   label: "\u{F1B0} Lion",                   group: "Graphics", open: true,  win_w: 520.0, win_h: 620.0 },
     DemoSpec { title: "\u{F030} Screenshot",             label: "\u{F030} Screenshot",             group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F0D0} Highlighting",           label: "\u{F0D0} Highlighting",           group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F1B3} 3D Animation",          label: "\u{F1B3} 3D Animation",           group: "Graphics", open: false, win_w: 300.0, win_h: 260.0 },
@@ -340,9 +341,17 @@ const TESTS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F065} Window Resize Test",  label: "\u{F065} Window Resize Test",  group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
 ];
 
-// ── Index of the 3D Animation in DEMOS (computed once) ─────────────────────────────
-// Must match position of "\u{F1B3} 3D Animation" in DEMOS (last Graphics entry).
-const CUBE_IDX: usize = 24;
+// ── Index of the 3D Animation in DEMOS ─────────────────────────────
+// Must match position of "\u{F1B3} 3D Animation" in DEMOS.  Computed at
+// runtime via `find_cube_idx()` (checked once in `build_demo_ui`) so
+// reordering DEMOS doesn't silently swap the GL cube widget onto some
+// other demo's slot — the classic footgun that hit us when Lion was
+// inserted in the Graphics group.
+const CUBE_TITLE: &str = "\u{F1B3} 3D Animation";
+fn find_cube_idx() -> usize {
+    DEMOS.iter().position(|d| d.title == CUBE_TITLE)
+        .expect("DEMOS must contain the 3D Animation entry (CUBE_TITLE)")
+}
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -457,7 +466,8 @@ pub fn build_demo_ui(
         .collect();
 
     // cube_visible shares the same cell as the 3D Animation sidebar entry.
-    let cube_visible = Rc::clone(&demo_entries[CUBE_IDX].open);
+    let cube_idx = find_cube_idx();
+    let cube_visible = Rc::clone(&demo_entries[cube_idx].open);
 
     // Shared z-order tracker — every `Window` reports its title here on
     // raise (click-to-front + sidebar rising-edge), maintaining a
@@ -684,7 +694,7 @@ pub fn build_demo_ui(
             .map(|ws| ws.to_rect())
             .unwrap_or_else(|| tile_rect(i, default_canvas_h, spec.win_w, spec.win_h));
 
-        let content: Box<dyn Widget> = if i == CUBE_IDX {
+        let content: Box<dyn Widget> = if i == cube_idx {
             // Cube content requires the platform-provided cube_widget.
             // Use a placeholder here; replaced immediately after the loop.
             windows::coming_soon()
@@ -715,23 +725,23 @@ pub fn build_demo_ui(
     // Replace the placeholder cube window with the real GL cube content.
     // Children layout: [0] = CanvasBg, [1..=30] = DEMOS windows in order.
     {
-        let open_cell  = Rc::clone(&demo_entries[CUBE_IDX].open);
-        let reset_cell = Rc::clone(&reset_cells[CUBE_IDX]);
-        let spec       = &DEMOS[CUBE_IDX];
+        let open_cell  = Rc::clone(&demo_entries[cube_idx].open);
+        let reset_cell = Rc::clone(&reset_cells[cube_idx]);
+        let spec       = &DEMOS[cube_idx];
         let initial = initial_state.as_ref()
-            .and_then(|st| st.demos.get(CUBE_IDX))
+            .and_then(|st| st.demos.get(cube_idx))
             .filter(|ws| ws.has_valid_bounds())
             .map(|ws| ws.to_rect())
-            .unwrap_or_else(|| tile_rect(CUBE_IDX, default_canvas_h, spec.win_w, spec.win_h));
+            .unwrap_or_else(|| tile_rect(cube_idx, default_canvas_h, spec.win_w, spec.win_h));
         let content    = windows::cube_content(Arc::clone(&font), cube_widget);
         let win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(initial.x, initial.y, initial.width, initial.height))
             .with_visible_cell(open_cell)
             .with_reset_cell(reset_cell)
-            .with_position_cell(Rc::clone(&demo_pos_cells[CUBE_IDX]))
+            .with_position_cell(Rc::clone(&demo_pos_cells[cube_idx]))
             .on_raised(make_on_raised());
-        // Replace index 1 + CUBE_IDX (offset by the CanvasBg at [0]).
-        canvas.children_mut()[1 + CUBE_IDX] = Box::new(win);
+        // Replace index 1 + cube_idx (offset by the CanvasBg at [0]).
+        canvas.children_mut()[1 + cube_idx] = Box::new(win);
     }
 
     // Add TEST windows.
@@ -1088,6 +1098,8 @@ fn build_demo_content(
         "\u{F1FC} Painting"              => windows::painting(font),
         // frame_demo.rs
         "\u{F096} Frame"                 => windows::frame_demo(font),
+        // lion.rs — halo-AA pipeline proof
+        "\u{F1B0} Lion"                  => windows::lion_demo(font),
         // misc.rs
         "\u{F108} Extra Viewport"        => windows::extra_viewport(font),
         "\u{F0D0} Highlighting"          => windows::highlighting(font),

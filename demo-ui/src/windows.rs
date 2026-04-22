@@ -15,6 +15,7 @@ mod code_example;
 mod animation;
 mod font_book;
 mod frame_demo;
+mod lion;
 mod misc;
 mod interaction;
 mod scrolling;
@@ -30,6 +31,7 @@ pub use code_example::code_example;
 pub use animation::{bezier_curve, dancing_strings, painting};
 pub use font_book::font_book;
 pub use frame_demo::frame_demo;
+pub use lion::lion_demo;
 pub use misc::{extra_viewport, highlighting, interactive_container, misc_demos};
 pub use interaction::{drag_and_drop, panels_demo, popups_demo,
                       scene_demo, screenshot_demo};
