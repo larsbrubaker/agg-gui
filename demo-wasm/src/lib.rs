@@ -137,12 +137,31 @@ fn ensure_demo_app() {
         if cell.borrow().is_none() {
             let font = make_font();
             let initial_state = load_state_wasm();
+            // Refresh button on the Render tab — WebGL2's `antialias`
+            // attribute is only honoured at canvas-context creation time,
+            // so the only way to apply a new MSAA choice is to reload the
+            // page.  Keeping the reload here means demo-ui has no need to
+            // import `web_sys`.
+            //
+            // `running_msaa` mirrors the `antialias` flag that `init_webgl2`
+            // (runs later in the same tick) will hand to the browser:
+            // `> 0` = antialias on.  Browsers don't expose the actual
+            // sample count they chose, so we report a nominal `4` when on.
+            let running_msaa_on = initial_state.as_ref()
+                .map(|s| s.msaa_samples > 0).unwrap_or(false);
+            let running_msaa: u8 = if running_msaa_on { 4 } else { 0 };
+            let platform = demo_ui::PlatformHooks::web(running_msaa, || {
+                if let Some(win) = web_sys::window() {
+                    let _ = win.location().reload();
+                }
+            });
             let (app, handles) = demo_ui::build_demo_ui(
                 Arc::clone(&font),
                 Box::new(GlCubeWidget::new()),
                 "WebGL2",
                 "Browser WebGL2",
                 initial_state,
+                platform,
             );
             SHOW_INSPECTOR.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.show_inspector)));
             INSPECTOR_NODES.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.inspector_nodes)));
@@ -194,8 +213,26 @@ fn init_webgl2() -> glow::Context {
         .expect("canvas element not found")
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .expect("element is not a canvas");
+
+    // WebGL2's `antialias` attribute is a boolean, fixed at context
+    // creation time — the browser picks the sample count (typically 4×).
+    // Read the persisted MSAA request directly so we don't require the
+    // caller to thread state through, matching how `ensure_demo_app`
+    // already independently reads from localStorage.  `msaa_samples > 0`
+    // maps to `antialias: true`.
+    let msaa_on = load_state_wasm()
+        .map(|s| s.msaa_samples > 0)
+        .unwrap_or(false);
+
+    let attrs = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &attrs,
+        &JsValue::from_str("antialias"),
+        &JsValue::from_bool(msaa_on),
+    );
+
     let webgl2 = canvas
-        .get_context("webgl2")
+        .get_context_with_context_options("webgl2", &attrs)
         .expect("get_context failed")
         .expect("webgl2 context unavailable")
         .dyn_into::<web_sys::WebGl2RenderingContext>()

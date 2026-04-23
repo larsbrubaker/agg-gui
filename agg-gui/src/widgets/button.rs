@@ -17,6 +17,7 @@
 //! the Label is invisible to the hit-test and event-routing system; the Button
 //! retains full ownership of focus and click events.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -67,6 +68,12 @@ pub struct Button {
     font_size: f64,
     pub theme: ButtonTheme,
     on_click: Option<Box<dyn FnMut()>>,
+    /// Optional gate: when `Some`, the button is enabled only while the
+    /// closure returns `true`.  Queried each paint / event so the caller
+    /// can base it on live state (e.g. "only enable Relaunch when the
+    /// selected MSAA differs from the running one") without rebuilding
+    /// the widget tree.  `None` = always enabled.
+    enabled_fn: Option<Rc<dyn Fn() -> bool>>,
 
     hovered: bool,
     pressed: bool,
@@ -89,6 +96,7 @@ impl Button {
             font_size,
             theme,
             on_click: None,
+            enabled_fn: None,
             hovered: false,
             pressed: false,
             focused: false,
@@ -110,6 +118,17 @@ impl Button {
     pub fn on_click(mut self, cb: impl FnMut() + 'static) -> Self {
         self.on_click = Some(Box::new(cb));
         self
+    }
+
+    /// Gate the button on a live predicate.  Returned-`false` frames paint
+    /// the button in its disabled style and ignore mouse / keyboard input.
+    pub fn with_enabled_fn(mut self, f: impl Fn() -> bool + 'static) -> Self {
+        self.enabled_fn = Some(Rc::new(f));
+        self
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
 
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
@@ -151,7 +170,7 @@ impl Widget for Button {
     fn children(&self) -> &[Box<dyn Widget>] { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool { self.is_enabled() }
 
     fn margin(&self)   -> Insets  { self.base.margin }
     fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
@@ -183,9 +202,11 @@ impl Widget for Button {
         let w = self.bounds.width;
         let h = self.bounds.height;
         let r = self.theme.border_radius;
+        let enabled = self.is_enabled();
 
-        // Focus ring (behind the button surface)
-        if self.focused {
+        // Focus ring (behind the button surface) — skipped when disabled
+        // because the disabled button never actually holds focus.
+        if enabled && self.focused {
             let ring = self.theme.focus_ring_width;
             ctx.set_stroke_color(self.theme.focus_ring_color);
             ctx.set_line_width(ring);
@@ -194,13 +215,26 @@ impl Widget for Button {
             ctx.stroke();
         }
 
-        // Background — color depends on interaction state.
-        let bg = if self.pressed {
+        // Background — color depends on interaction state.  Disabled state
+        // desaturates the theme colour toward mid-grey so the button still
+        // looks like a button, just clearly inactive.
+        let base_bg = if self.pressed {
             self.theme.background_pressed
         } else if self.hovered {
             self.theme.background_hovered
         } else {
             self.theme.background
+        };
+        let bg = if enabled {
+            base_bg
+        } else {
+            let k = 0.45;
+            Color::rgba(
+                base_bg.r * k + 0.5 * (1.0 - k),
+                base_bg.g * k + 0.5 * (1.0 - k),
+                base_bg.b * k + 0.5 * (1.0 - k),
+                base_bg.a,
+            )
         };
         ctx.set_fill_color(bg);
         ctx.begin_path();
@@ -212,6 +246,13 @@ impl Widget for Button {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if !self.is_enabled() {
+            // Clear any lingering hover / pressed state so the button
+            // looks idle the instant it's disabled mid-interaction.
+            self.hovered = false;
+            self.pressed = false;
+            return EventResult::Ignored;
+        }
         match event {
             Event::MouseMove { pos } => {
                 let was_hovered = self.hovered;

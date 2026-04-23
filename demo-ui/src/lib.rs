@@ -60,6 +60,47 @@ use backend_panel::{RunMode, build_backend_panel};
 use sidebar::{SidebarEntry, SidebarGroup, build_sidebar};
 use top_bar::build_top_bar_inner;
 
+// ── Platform hook ─────────────────────────────────────────────────────────────
+
+/// Which host shell is running the demo.  Consumed by the System window's
+/// Render tab so platform-specific controls (MSAA as a five-value segmented
+/// selector on native vs. a boolean on the web, "Relaunch" vs "Refresh"
+/// button label) stay inside demo-ui — demo-native and demo-wasm only
+/// declare which variant they are and hand in the hook closure that
+/// actually performs the platform-specific restart.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PlatformKind { Native, Web }
+
+/// Platform-specific hooks that demo-ui calls from the Render tab.
+#[derive(Clone)]
+pub struct PlatformHooks {
+    pub kind:      PlatformKind,
+    /// MSAA sample count actually in effect on the currently-running GL
+    /// surface.  Native hosts pass `gl_config.num_samples()`; web hosts
+    /// pass `4` when `antialias: true` was honoured at canvas creation,
+    /// `0` otherwise.  The Render tab compares this to the pending
+    /// `msaa_samples` cell so the Relaunch / Refresh button only
+    /// activates when the user has actually changed something.
+    pub running_msaa: u8,
+    /// Invoked when the user clicks the Render tab's Relaunch / Refresh
+    /// button.  Expected behaviour:
+    ///   - **Native**: flush any pending save, spawn a fresh copy of the
+    ///     process, exit the current one so the new GL surface picks up
+    ///     the saved MSAA request.
+    ///   - **Web**: call `window.location.reload()` so the browser
+    ///     re-creates the canvas with the saved `antialias` flag.
+    pub on_reload: Rc<dyn Fn()>,
+}
+
+impl PlatformHooks {
+    pub fn native(running_msaa: u8, on_reload: impl Fn() + 'static) -> Self {
+        Self { kind: PlatformKind::Native, running_msaa, on_reload: Rc::new(on_reload) }
+    }
+    pub fn web(running_msaa: u8, on_reload: impl Fn() + 'static) -> Self {
+        Self { kind: PlatformKind::Web, running_msaa, on_reload: Rc::new(on_reload) }
+    }
+}
+
 // ── Canvas background ──────────────────────────────────────────────────────────
 
 struct CanvasBg { bounds: Rect, children: Vec<Box<dyn Widget>> }
@@ -401,6 +442,7 @@ pub fn build_demo_ui(
     renderer_name:  &'static str,
     backend_name:   &'static str,
     initial_state:  Option<SavedState>,
+    platform:       PlatformHooks,
 ) -> (App, DemoHandles) {
     let show_inspector  = Rc::new(Cell::new(
         initial_state.as_ref()
@@ -542,6 +584,11 @@ pub fn build_demo_ui(
     let msaa_samples_cell: Rc<Cell<u8>> = Rc::new(Cell::new(
         initial_state.as_ref().map(|s| s.msaa_samples).unwrap_or(0)
     ));
+    // Persist the active tab inside the System window so users come
+    // back to the tab they were last on.
+    let system_tab_cell: Rc<Cell<usize>> = Rc::new(Cell::new(
+        initial_state.as_ref().map(|s| s.system_tab).unwrap_or(0)
+    ));
     // Shared font-index cell — both the System window's combo and the
     // LCD Subpixel demo's combo bind to this cell, so a font picked in
     // either window updates the other live.  Seeded from the persisted
@@ -590,6 +637,8 @@ pub fn build_demo_ui(
         faux_italic:     Rc::clone(&faux_italic_cell),
         primary_weight:  Rc::clone(&primary_weight_cell),
         msaa_samples:    Rc::clone(&msaa_samples_cell),
+        system_tab:      Rc::clone(&system_tab_cell),
+        platform:        platform.clone(),
     });
 
     // ── Reset cells — one per window ───────────────────────────────────────────
@@ -954,13 +1003,21 @@ pub fn build_demo_ui(
         }
     };
 
+    // System-window open cell — the Backend sidebar's "System" pill binds to
+    // the same cell as the sidebar's System demo entry, so the two stay in
+    // lock-step without an extra signal round-trip.
+    let system_open = {
+        let idx = DEMOS.iter().position(|d| d.title == "\u{F013} System")
+            .expect("DEMOS must contain the System window entry");
+        Rc::clone(&demo_entries[idx].open)
+    };
     let backend_panel_widget = build_backend_panel(
         Arc::clone(&font),
         Rc::clone(&run_mode),
         Rc::clone(&frame_history),
         Rc::clone(&screen_size),
         Rc::clone(&show_inspector),
-        Rc::clone(&msaa_samples_cell),
+        system_open,
         renderer_name,
         backend_name,
         on_reset_all,
@@ -1063,6 +1120,7 @@ pub fn build_demo_ui(
         faux_italic:     Rc::clone(&faux_italic_cell),
         primary_weight:  Rc::clone(&primary_weight_cell),
         msaa_samples:    Rc::clone(&msaa_samples_cell),
+        system_tab:      Rc::clone(&system_tab_cell),
         z_order:         Rc::clone(&z_order_cell),
     };
 

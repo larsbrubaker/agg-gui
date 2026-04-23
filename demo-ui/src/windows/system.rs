@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    font_settings, FlexColumn, FlexRow, Font, Label,
+    font_settings, FlexColumn, FlexRow, Font, Label, Rect,
     ScrollView, Separator, SizedBox, Slider, TabView, TextField, ToggleSwitch, Widget,
 };
 
@@ -54,6 +54,14 @@ pub struct SystemCells {
     /// `StateAccessor::msaa_samples`; surfaced in the Render tab with an
     /// "applies on next launch" caveat.
     pub msaa_samples:    Rc<Cell<u8>>,
+    /// Active tab index inside the System window.  Bound to the TabView
+    /// so clicks round-trip back into the persistence layer.
+    pub system_tab:      Rc<Cell<usize>>,
+    /// Host-shell classification + relaunch/refresh hook.  Lives on
+    /// `SystemCells` so `system_view` can render platform-appropriate
+    /// controls (native 0/2/4/8/16 vs web on/off, "Relaunch" vs "Refresh"
+    /// button label) without either platform crate carrying UI code.
+    pub platform:        crate::PlatformHooks,
 }
 
 thread_local! {
@@ -223,12 +231,14 @@ pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
     // can stay readable.
     let font_tab   = build_font_tab(Arc::clone(&font));
     let render_tab = build_render_tab(Arc::clone(&font));
+    let cells = cells();
 
     Box::new(
         TabView::new(Arc::clone(&font))
             .with_font_size(13.0)
             .add_tab("Font",   font_tab)
             .add_tab("Render", render_tab)
+            .with_active_tab_cell(Rc::clone(&cells.system_tab))
     )
 }
 
@@ -429,6 +439,9 @@ fn build_font_tab(font: Arc<Font>) -> Box<dyn Widget> {
 // ── Render tab ───────────────────────────────────────────────────────────────
 
 fn build_render_tab(font: Arc<Font>) -> Box<dyn Widget> {
+    use crate::PlatformKind;
+    use agg_gui::widgets::button::Button;
+
     let cells = cells();
     let mut col = FlexColumn::new().with_gap(10.0).with_padding(14.0);
 
@@ -443,25 +456,183 @@ fn build_render_tab(font: Arc<Font>) -> Box<dyn Widget> {
         )
     };
 
-    col.push(body(
-        "OS-level rendering settings.  Changes here require the app to restart \
-         to take effect — the GL surface is created once at startup.",
-    ), 0.0);
+    // Platform-appropriate preamble.
+    let intro = match cells.platform.kind {
+        PlatformKind::Native =>
+            "OS-level rendering settings.  The GL surface is created once at \
+             startup, so changes here take effect on the next relaunch — use \
+             the Relaunch button below after editing.",
+        PlatformKind::Web =>
+            "OS-level rendering settings.  The WebGL surface is created once \
+             by the browser at canvas creation, so changes here take effect \
+             after a page refresh — use the Refresh button below after editing.",
+    };
+    col.push(body(intro), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     // ── MSAA ─────────────────────────────────────────────────────────────
     col.push(heading("MSAA"), 0.0);
+    let msaa_body = match cells.platform.kind {
+        PlatformKind::Native =>
+            "Hardware multi-sample anti-aliasing for direct-GL content (e.g. \
+             the 3D Animation cube grid).  Widget / text rendering uses \
+             analytic halo-AA instead and is unaffected.",
+        PlatformKind::Web =>
+            "Hardware multi-sample anti-aliasing on the WebGL2 canvas.  The \
+             browser WebGL spec only exposes a single boolean `antialias` \
+             flag — the browser picks the sample count (typically 4×).  \
+             Widget / text rendering uses analytic halo-AA instead and is \
+             unaffected.",
+    };
+    col.push(body(msaa_body), 0.0);
+    col.push(match cells.platform.kind {
+        PlatformKind::Native => Box::new(
+            crate::backend_panel::MsaaRow::new(Arc::clone(&font), Rc::clone(&cells.msaa_samples))
+        ) as Box<dyn Widget>,
+        PlatformKind::Web => Box::new(
+            MsaaBoolRow::new(Arc::clone(&font), Rc::clone(&cells.msaa_samples))
+        ) as Box<dyn Widget>,
+    }, 0.0);
+
+    // ── Relaunch / Refresh button ────────────────────────────────────────
+    col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(body(
-        "Hardware multi-sample anti-aliasing for direct-GL content (e.g. the \
-         3D Animation cube grid).  Widget / text rendering uses analytic \
-         halo-AA instead and is unaffected.",
+        "Apply the setting above by restarting the app.  Any unsaved UI \
+         state — open windows, positions, z-order — is written to disk \
+         before the restart, so your layout will come back exactly as \
+         you left it.",
     ), 0.0);
+    let btn_label = match cells.platform.kind {
+        PlatformKind::Native => "Relaunch",
+        PlatformKind::Web    => "Refresh",
+    };
+    let reload = Rc::clone(&cells.platform.on_reload);
+    let msaa_cell    = Rc::clone(&cells.msaa_samples);
+    let running_msaa = cells.platform.running_msaa;
+    let kind         = cells.platform.kind;
+    // Button only enables when the persisted MSAA choice differs from
+    // whatever's actually running right now — restart is pointless when
+    // there's nothing to change.  Web host only gets a boolean MSAA, so
+    // compare on `> 0` there instead of exact sample count.
+    let reload_btn = Button::new(btn_label, Arc::clone(&font))
+        .with_font_size(13.0)
+        .with_enabled_fn(move || match kind {
+            PlatformKind::Native => msaa_cell.get() != running_msaa,
+            PlatformKind::Web    => (msaa_cell.get() > 0) != (running_msaa > 0),
+        })
+        .on_click(move || (reload)());
     col.push(Box::new(
-        crate::backend_panel::MsaaRow::new(Arc::clone(&font), Rc::clone(&cells.msaa_samples))
-    ), 0.0);
-    col.push(body(
-        "Changes apply on the next launch.",
+        SizedBox::new().with_width(140.0).with_height(30.0)
+            .with_child(Box::new(reload_btn)),
     ), 0.0);
 
     Box::new(ScrollView::new(Box::new(col)))
+}
+
+// ── On/Off MSAA row (web — WebGL2 only exposes a boolean) ────────────────
+
+/// Two-button segmented control (Off / On) bound to the same
+/// `Rc<Cell<u8>>` as the native MsaaRow — On maps to 4 (a reasonable
+/// default the browser typically honours), Off to 0.  That way the
+/// persisted state file has the same shape regardless of which shell
+/// wrote it; the WASM harness simply reads `msaa_samples > 0`.
+struct MsaaBoolRow {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>,
+    samples:  Rc<Cell<u8>>,
+    hovered:  Option<usize>,
+    labels:   Vec<agg_gui::Label>,
+}
+
+impl MsaaBoolRow {
+    const BTN_W: f64 = 60.0;
+    const BTN_H: f64 = 24.0;
+    const LABELS: &'static [&'static str] = &["Off", "On"];
+    /// Index 0 → 0 samples, index 1 → 4 samples (default WebGL MSAA level).
+    const VALS: &'static [u8] = &[0, 4];
+
+    fn new(font: Arc<Font>, samples: Rc<Cell<u8>>) -> Self {
+        let labels = Self::LABELS.iter()
+            .map(|t| agg_gui::Label::new(*t, Arc::clone(&font)).with_font_size(12.0))
+            .collect();
+        Self { bounds: agg_gui::Rect::default(), children: Vec::new(), samples, hovered: None, labels }
+    }
+
+    fn btn_rect(&self, i: usize) -> agg_gui::Rect {
+        let gy = (self.bounds.height - Self::BTN_H) * 0.5;
+        agg_gui::Rect::new(12.0 + i as f64 * (Self::BTN_W + 4.0), gy, Self::BTN_W, Self::BTN_H)
+    }
+}
+
+impl Widget for MsaaBoolRow {
+    fn type_name(&self) -> &'static str { "MsaaBoolRow" }
+    fn bounds(&self) -> agg_gui::Rect { self.bounds }
+    fn set_bounds(&mut self, b: agg_gui::Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn layout(&mut self, available: agg_gui::Size) -> agg_gui::Size {
+        self.bounds = agg_gui::Rect::new(0.0, 0.0, available.width, Self::BTN_H + 8.0);
+        for i in 0..Self::LABELS.len() {
+            let r = self.btn_rect(i);
+            let s = self.labels[i].layout(agg_gui::Size::new(r.width, r.height));
+            self.labels[i].set_bounds(agg_gui::Rect::new(0.0, 0.0, s.width, s.height));
+        }
+        agg_gui::Size::new(available.width, Self::BTN_H + 8.0)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn agg_gui::DrawCtx) {
+        let v = ctx.visuals();
+        let current = self.samples.get();
+
+        for i in 0..Self::LABELS.len() {
+            let r = self.btn_rect(i);
+            let active  = current == Self::VALS[i];
+            let hovered = self.hovered == Some(i);
+
+            let bg = if active { v.accent }
+                     else if hovered { v.widget_bg_hovered }
+                     else { v.widget_bg };
+            ctx.set_fill_color(bg);
+            ctx.begin_path();
+            ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
+            ctx.fill();
+
+            self.labels[i].set_text(Self::LABELS[i]);
+            let text_color = if active { agg_gui::Color::white() } else { v.text_color };
+            self.labels[i].set_color(text_color);
+
+            let lw = self.labels[i].bounds().width;
+            let lh = self.labels[i].bounds().height;
+            let lx = r.x + (r.width - lw) * 0.5;
+            let ly = r.y + (r.height - lh) * 0.5;
+            self.labels[i].set_bounds(agg_gui::Rect::new(lx, ly, lw, lh));
+
+            ctx.save();
+            ctx.translate(lx, ly);
+            agg_gui::widget::paint_subtree(&mut self.labels[i], ctx);
+            ctx.restore();
+        }
+    }
+
+    fn on_event(&mut self, event: &agg_gui::Event) -> agg_gui::EventResult {
+        let hit = |p: agg_gui::Point| (0..Self::LABELS.len()).find(|&i| {
+            let r = self.btn_rect(i);
+            p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
+        });
+        match event {
+            agg_gui::Event::MouseMove { pos } => {
+                self.hovered = hit(*pos);
+                agg_gui::EventResult::Ignored
+            }
+            agg_gui::Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
+                if let Some(i) = hit(*pos) {
+                    self.samples.set(Self::VALS[i]);
+                    return agg_gui::EventResult::Consumed;
+                }
+                agg_gui::EventResult::Ignored
+            }
+            _ => agg_gui::EventResult::Ignored,
+        }
+    }
 }

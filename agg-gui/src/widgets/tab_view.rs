@@ -45,6 +45,10 @@ pub struct TabView {
     show_sidebar:     Option<Rc<Cell<bool>>>,
     sidebar_w:        f64,
     sidebar_dragging: bool,
+    /// When set, writes `active_tab` on every tab switch AND is re-read
+    /// each layout so external code (state persistence) can drive the
+    /// selection too.  Pattern mirrors ScrollView / ToggleSwitch cells.
+    active_tab_cell:  Option<Rc<Cell<usize>>>,
 }
 
 impl TabView {
@@ -67,11 +71,21 @@ impl TabView {
             show_sidebar: None,
             sidebar_w: 320.0,
             sidebar_dragging: false,
+            active_tab_cell: None,
         }
     }
 
     pub fn with_tab_bar_height(mut self, h: f64) -> Self { self.tab_bar_height = h; self }
     pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+
+    /// Bind the active tab index to a shared cell.  The cell's current
+    /// value seeds the initial selection on the next layout (so a
+    /// persisted choice rehydrates); later user clicks write back
+    /// through the cell.
+    pub fn with_active_tab_cell(mut self, cell: Rc<Cell<usize>>) -> Self {
+        self.active_tab_cell = Some(cell);
+        self
+    }
 
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
@@ -171,6 +185,9 @@ impl TabView {
         self.children.push(new_child);                    // content at index 0
         if let Some(s) = old_sidebar { self.children.push(s); } // sidebar at index 1
         self.active_tab = new_idx;
+        if let Some(cell) = &self.active_tab_cell {
+            cell.set(new_idx);
+        }
     }
 }
 
@@ -188,6 +205,15 @@ impl Widget for TabView {
     fn max_size(&self) -> Size    { self.base.max_size }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Honour a persisted tab selection.  Done here (rather than in
+        // `new`) because `add_tab` runs after `new`, so the child vector
+        // isn't populated until the builder chain is complete.
+        if let Some(cell) = self.active_tab_cell.clone() {
+            let want = cell.get();
+            if want != self.active_tab && want < self.tab_labels.len() {
+                self.switch_to(want);
+            }
+        }
         let content_h = (available.height - self.tab_bar_height).max(0.0);
         let showing = self.sidebar_showing();
         let sw = if showing {

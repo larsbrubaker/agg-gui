@@ -296,6 +296,15 @@ impl Widget for SizedBox {
                 desired.height.clamp(min_h, max_h)
             };
 
+            // When a dimension is explicitly pinned, the child must fit —
+            // otherwise a child whose `layout` ignores the slot budget (e.g.
+            // `TextField` returning a font-derived natural height) paints
+            // outside the SizedBox and clips into siblings above it.  Widgets
+            // re-read `self.bounds` during paint, so shrinking here propagates
+            // cleanly.
+            let child_w = if self.width.is_some()  { child_w.min(slot_w) } else { child_w };
+            let child_h = if self.height.is_some() { child_h.min(slot_h) } else { child_h };
+
             let child_y = if v_anchor.contains(VAnchor::TOP) && !v_anchor.contains(VAnchor::BOTTOM) {
                 (h - m.top - child_h).max(0.0)
             } else if v_anchor.contains(VAnchor::CENTER) && !v_anchor.is_stretch() {

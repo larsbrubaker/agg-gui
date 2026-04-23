@@ -24,5 +24,6 @@ features = [
     "HtmlCanvasElement",
     "WebGl2RenderingContext",
     "Storage",
+    "Location",
     "console",
 ]

@@ -92,6 +92,10 @@ pub struct SavedState {
     /// Change takes effect on next launch.
     pub msaa_samples:    u8,
 
+    /// Active tab index inside the System window (`Font` = 0, `Render` = 1).
+    /// Defaults to 0 on first run so new users land on the Font settings.
+    pub system_tab:      usize,
+
     /// Window z-order — list of titles (DEMOS / TESTS / About) in
     /// **back-to-front** order.  Recorded each time a window is raised
     /// (click-to-front or sidebar rising-edge).  Empty / missing on
@@ -171,6 +175,7 @@ impl SavedState {
         out.push_str(&format!("faux_italic={}\n",    self.faux_italic));
         out.push_str(&format!("primary_weight={}\n", self.primary_weight));
         out.push_str(&format!("msaa={}\n",           self.msaa_samples));
+        out.push_str(&format!("system_tab={}\n",     self.system_tab));
         out
     }
 
@@ -197,6 +202,7 @@ impl SavedState {
         let mut faux_italic:     f64 = 0.0;
         let mut primary_weight:  f64 = 1.0 / 3.0;
         let mut msaa_samples:    u8  = 0;
+        let mut system_tab:      usize = 0;
         let mut z_order:         Vec<String> = Vec::new();
 
         for line in s.lines() {
@@ -229,6 +235,7 @@ impl SavedState {
                 "faux_italic"     => { faux_italic    = val.parse().unwrap_or(0.0); }
                 "primary_weight"  => { primary_weight = val.parse().unwrap_or(1.0 / 3.0); }
                 "msaa"            => { msaa_samples  = val.parse().unwrap_or(0); }
+                "system_tab"      => { system_tab    = val.parse().unwrap_or(0); }
                 "z_order"         => {
                     z_order = val.split('|')
                         .filter(|s| !s.is_empty())
@@ -287,6 +294,7 @@ impl SavedState {
             faux_italic,
             primary_weight,
             msaa_samples,
+            system_tab,
             z_order,
         })
     }
@@ -359,6 +367,10 @@ pub struct StateAccessor {
     /// takes effect after a restart.
     pub msaa_samples:    Rc<Cell<u8>>,
 
+    /// Active tab index inside the System window — persisted so users
+    /// stay on the Render / Font tab they were last on.
+    pub system_tab:      Rc<Cell<usize>>,
+
     /// Shared z-order tracker — back-to-front list of window titles
     /// updated whenever any `Window` fires its `on_raised` callback.
     /// Read at save time so the saved state captures the user's last
@@ -399,6 +411,7 @@ impl StateAccessor {
             faux_italic:       self.faux_italic.get(),
             primary_weight:    self.primary_weight.get(),
             msaa_samples:      self.msaa_samples.get(),
+            system_tab:        self.system_tab.get(),
             z_order:           self.z_order.borrow().clone(),
         }
     }
@@ -465,6 +478,7 @@ mod tests {
             faux_italic: 0.0,
             primary_weight: 1.0 / 3.0,
             msaa_samples: 0,
+            system_tab: 0,
             z_order: Vec::new(),
         };
 

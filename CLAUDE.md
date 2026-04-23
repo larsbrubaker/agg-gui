@@ -64,7 +64,7 @@ cargo test -- --nocapture
 
 ### Demos
 - Reproduce the egui demos as closely as possible — match layout, wording,
-  defaults, and interaction. Consult the egui source in `cpp-reference/`
+  defaults, and interaction. Consult the egui source in `egui-reference/`
   (a sync of the egui repo) whenever you touch a demo that exists there.
 - Project conventions still win on conflict (Y-up, Font Awesome, 800-line limit).
   Note any intentional deviation with a brief comment.

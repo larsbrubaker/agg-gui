@@ -20,7 +20,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Checkbox, Color, DrawCtx, Event, EventResult,
+    Color, DrawCtx, Event, EventResult,
     FlexColumn, Font, Insets, Label, Rect, Separator,
     Size, SizedBox, Widget,
 };
@@ -378,6 +378,111 @@ impl Widget for RunModeRow {
     }
 }
 
+// ── Toggle pill ──────────────────────────────────────────────────────────────
+
+/// Sidebar button that toggles a bound `Rc<Cell<bool>>` on click — visually
+/// matches the top-bar "Backend" button (solid rounded pill, accent-filled
+/// when the cell is true, white label in the active state, dim hover fill
+/// otherwise).  Used for the "System" and "Inspector" entries in the
+/// Backend sidebar's "agg-gui windows" section so the sidebar's window
+/// togglers share the same look as the rest of the app's chrome.
+struct TogglePill {
+    bounds:   Rect,
+    children: Vec<Box<dyn Widget>>, // always empty — label stored separately
+    show:     Rc<Cell<bool>>,
+    hovered:  bool,
+    label:    Label,
+}
+
+impl TogglePill {
+    const H: f64 = 26.0;
+    const LEFT_PAD:  f64 = 12.0;
+    const RIGHT_PAD: f64 = 12.0;
+
+    fn new(font: Arc<Font>, label_text: &'static str, show: Rc<Cell<bool>>) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            show,
+            hovered: false,
+            label: Label::new(label_text, font).with_font_size(12.0),
+        }
+    }
+}
+
+impl Widget for TogglePill {
+    fn type_name(&self) -> &'static str { "TogglePill" }
+    fn bounds(&self) -> Rect { self.bounds }
+    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+
+    fn layout(&mut self, available: Size) -> Size {
+        self.bounds = Rect::new(0.0, 0.0, available.width, Self::H + 4.0);
+        let label_w = (available.width - Self::LEFT_PAD - Self::RIGHT_PAD).max(0.0);
+        let s = self.label.layout(Size::new(label_w, Self::H));
+        self.label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        Size::new(available.width, Self::H + 4.0)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        let active = self.show.get();
+
+        // Pill fills the full row width minus a small horizontal margin to
+        // match the 12-px gutter used elsewhere in the sidebar.
+        let gy = 2.0;
+        let r = Rect::new(12.0, gy, (self.bounds.width - 24.0).max(0.0), Self::H);
+
+        let bg = if active { v.accent }
+                 else if self.hovered { v.widget_bg_hovered }
+                 else { v.widget_bg };
+        ctx.set_fill_color(bg);
+        ctx.begin_path();
+        ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
+        ctx.fill();
+
+        let text_color = if active { Color::white() } else { v.text_color };
+        self.label.set_color(text_color);
+
+        let lw = self.label.bounds().width;
+        let lh = self.label.bounds().height;
+        let lx = r.x + Self::LEFT_PAD;
+        let ly = r.y + (r.height - lh) * 0.5;
+        self.label.set_bounds(Rect::new(lx, ly, lw, lh));
+
+        ctx.save();
+        ctx.translate(lx, ly);
+        paint_subtree(&mut self.label, ctx);
+        ctx.restore();
+    }
+
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        let gy = 2.0;
+        let r = Rect::new(12.0, gy, (self.bounds.width - 24.0).max(0.0), Self::H);
+        let hit = |p: agg_gui::Point| {
+            p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
+        };
+        match event {
+            Event::MouseMove { pos } => {
+                let was = self.hovered;
+                self.hovered = hit(*pos);
+                if was != self.hovered { agg_gui::animation::request_tick(); }
+                EventResult::Ignored
+            }
+            Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
+                if hit(*pos) {
+                    self.show.set(!self.show.get());
+                    agg_gui::animation::request_tick();
+                    return EventResult::Consumed;
+                }
+                EventResult::Ignored
+            }
+            _ => EventResult::Ignored,
+        }
+    }
+}
+
 // ── MSAA row ─────────────────────────────────────────────────────────────────
 
 /// MSAA sample-count selector — five segmented buttons (Off / 2× / 4× / 8× /
@@ -573,7 +678,7 @@ pub fn build_backend_panel(
     history:        Rc<RefCell<FrameHistory>>,
     screen_size:    Rc<Cell<(u32, u32)>>,
     show_inspector: Rc<Cell<bool>>,
-    msaa_samples:   Rc<Cell<u8>>,
+    show_system:    Rc<Cell<bool>>,
     renderer_name:  &'static str,
     backend_name:   &'static str,
     on_reset:       impl FnMut() + 'static,
@@ -654,35 +759,32 @@ pub fn build_backend_panel(
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
 
-    // ── MSAA sample count ─────────────────────────────────────────────────────
+    // ── agg-gui windows section (System + Inspector toggle pills) ─────────────
     //
-    // Applied at GL-context creation by the platform harness, so changing
-    // the value only takes effect on restart.  Label below the ComboBox
-    // surfaces that caveat so users don't think it's broken.
-    col.push(Box::new(
-        Label::new("MSAA (restart to apply)", Arc::clone(&font))
-            .with_font_size(11.0)
-            .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 0.0))
-    ), 0.0);
-    col.push(Box::new(MsaaRow::new(Arc::clone(&font), Rc::clone(&msaa_samples))), 0.0);
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-
-    // ── agg-gui windows section (Inspector checkbox) ───────────────────────────
+    // Styled like the top-bar "Backend" button: solid pill, accent-filled
+    // when the bound cell is true, label re-coloured for contrast.  Shared
+    // look across the top bar + this sidebar means hit-testing and visual
+    // affordance are consistent — checkboxes looked out of place next to
+    // the Mode segmented control above.  MSAA moved to the System window's
+    // "Render" tab (see `windows/system.rs`), so the sidebar stays focused
+    // on runtime-togglable state.
     col.push(Box::new(
         Label::new("agg-gui windows:", Arc::clone(&font))
             .with_font_size(11.0)
             .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 0.0))
     ), 0.0);
 
-    col.push(Box::new(
-        Checkbox::new("Inspector", Arc::clone(&font), show_inspector.get())
-            .with_font_size(13.0)
-            .with_state_cell(Rc::clone(&show_inspector))
-            .with_margin(Insets::from_sides(10.0, 0.0, 1.0, 1.0))
-    ), 0.0);
+    col.push(Box::new(TogglePill::new(
+        Arc::clone(&font),
+        "\u{F013} System",
+        Rc::clone(&show_system),
+    )), 0.0);
+    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
+    col.push(Box::new(TogglePill::new(
+        Arc::clone(&font),
+        "\u{F002} Inspector",
+        Rc::clone(&show_inspector),
+    )), 0.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     col.push(Box::new(Separator::horizontal()), 0.0);

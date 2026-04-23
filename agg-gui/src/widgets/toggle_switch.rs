@@ -30,6 +30,13 @@ const CIRCLE_MARGIN: f64 = 2.5;
 const CIRCLE_R: f64 = PILL_H / 2.0 - CIRCLE_MARGIN;
 /// Duration of the on/off slide animation in seconds.
 const ANIM_SECS: f64 = 0.14;
+/// Inset on each side between the widget's outer bounds and the pill
+/// geometry.  The halo-AA pipeline extrudes the pill's filled edges one
+/// pixel outward; without a margin that halo sits outside the widget's
+/// own bounds and gets clipped by the parent's `clip_rect(0, 0, w, h)` —
+/// the bottom edge loses its AA fade and looks flat-cut.  One pixel is
+/// enough to keep the full halo inside the clip.
+const PILL_HALO: f64 = 1.0;
 
 // ── Press-ring overlay ───────────────────────────────────────────────────
 //
@@ -132,10 +139,12 @@ impl ToggleSwitch {
     }
 
     /// X-center of the sliding circle given an interpolated position `t`
-    /// in `[0, 1]` (0 = off, 1 = on).
+    /// in `[0, 1]` (0 = off, 1 = on).  Expressed in widget-local coords,
+    /// so the `PILL_HALO` inset is baked in — callers don't need to know
+    /// about it.
     fn circle_cx_at(t: f64) -> f64 {
-        let x_off = CIRCLE_MARGIN + CIRCLE_R;
-        let x_on  = PILL_W - CIRCLE_MARGIN - CIRCLE_R;
+        let x_off = PILL_HALO + CIRCLE_MARGIN + CIRCLE_R;
+        let x_on  = PILL_HALO + PILL_W - CIRCLE_MARGIN - CIRCLE_R;
         x_off + (x_on - x_off) * t.clamp(0.0, 1.0)
     }
 }
@@ -169,9 +178,11 @@ impl Widget for ToggleSwitch {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
-    /// Always returns the fixed pill size; the available space is ignored.
+    /// Always returns the fixed pill size (plus a 1 px halo margin on
+    /// every side); the available space is ignored.  See [`PILL_HALO`]
+    /// for why the margin is needed.
     fn layout(&mut self, _available: Size) -> Size {
-        Size::new(PILL_W, PILL_H)
+        Size::new(PILL_W + 2.0 * PILL_HALO, PILL_H + 2.0 * PILL_HALO)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -183,9 +194,11 @@ impl Widget for ToggleSwitch {
         self.anim.set_target(if self.is_on() { 1.0 } else { 0.0 });
         let t = self.anim.tick();
 
-        // Origin (0,0) is the widget's bottom-left; framework has translated.
-        let pill_x = 0.0_f64;
-        let pill_y = 0.0_f64;
+        // Inset the pill by the halo margin so halo-AA has room inside
+        // the widget's own clip.  Origin (0,0) is the widget's bottom-
+        // left in Y-up; the framework has already translated there.
+        let pill_x = PILL_HALO;
+        let pill_y = PILL_HALO;
 
         // ── Pill background ────────────────────────────────────────────────
         // Interpolate between the off colour (gray) and the on colour (accent);
@@ -205,7 +218,7 @@ impl Widget for ToggleSwitch {
 
         // ── Sliding white circle ───────────────────────────────────────────
         let cx = Self::circle_cx_at(t);
-        let cy = PILL_H * 0.5;
+        let cy = PILL_HALO + PILL_H * 0.5;
         ctx.set_fill_color(Color::white());
         ctx.begin_path();
         ctx.circle(cx, cy, CIRCLE_R);
@@ -229,7 +242,7 @@ impl Widget for ToggleSwitch {
 
         let v  = ctx.visuals();
         let cx = Self::circle_cx_at(self.anim.value());
-        let cy = PILL_H * 0.5;
+        let cy = PILL_HALO + PILL_H * 0.5;
         let toggle_color = if self.is_on() { v.accent } else { v.widget_stroke };
         let alpha        = RING_PEAK_ALPHA * (ring_t as f32);
 
@@ -276,8 +289,10 @@ impl Widget for ToggleSwitch {
     }
 
     /// Hit test restricted to the pill bounds (matches the visible shape).
+    /// The halo margin is excluded so the ~1 px ring around the pill
+    /// doesn't register as pointer-over.
     fn hit_test(&self, local_pos: crate::geometry::Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= PILL_W
-            && local_pos.y >= 0.0 && local_pos.y <= PILL_H
+        local_pos.x >= PILL_HALO && local_pos.x <= PILL_HALO + PILL_W
+            && local_pos.y >= PILL_HALO && local_pos.y <= PILL_HALO + PILL_H
     }
 }

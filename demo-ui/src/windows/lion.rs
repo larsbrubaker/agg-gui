@@ -19,11 +19,14 @@
 //!
 //! # Interaction
 //!
-//! Matches the C++ `agg/examples/lion.cpp` reference exactly:
-//!   - **Left-drag**: rotate + scale (angle = `atan2(dy, dx)`,
-//!     scale = distance / 100).
+//!   - **Left-drag**: rotate + scale about the widget centre, **relative
+//!     to the mouse-down point**.  Unlike the C++ `lion.cpp` reference,
+//!     which snaps the lion's angle / scale to the raw cursor vector on
+//!     every event, we record the cursor position (and the current
+//!     angle / scale) on `MouseDown` and then apply deltas from there
+//!     so the lion doesn't jump when the gesture starts.
 //!   - **Right-drag**: skew (skew_x = cursor.x, skew_y = cursor.y, divided
-//!     by 1000 before entering the affine).
+//!     by 1000 before entering the affine).  Matches `lion.cpp`.
 //!   - **Alpha slider** above the lion.
 
 use std::cell::Cell;
@@ -130,6 +133,25 @@ struct LionView {
     skew_y:   f64,
     alpha:    Rc<Cell<f64>>,
     drag:     Drag,
+    /// Grip state captured on `MouseDown` for the active left-drag
+    /// rotate/scale gesture.  `None` while no left-drag is in flight.
+    /// See `apply_rotate` for how each field feeds into the delta math.
+    rotate_grip: Option<RotateGrip>,
+}
+
+/// Snapshot of the state at the instant a left-drag started — used so
+/// rotation / scale deltas accumulate from where the lion already was,
+/// rather than snapping to the raw cursor vector on every event.
+#[derive(Copy, Clone)]
+struct RotateGrip {
+    /// Angle (rad) from the widget centre to the mouse-down point.
+    grip_polar_angle: f64,
+    /// Distance from the widget centre to the mouse-down point.
+    grip_polar_dist:  f64,
+    /// `angle` at the moment the gesture began.
+    start_angle:      f64,
+    /// `mouse_scale` at the moment the gesture began.
+    start_scale:      f64,
 }
 
 impl LionView {
@@ -147,6 +169,7 @@ impl LionView {
             skew_y:   0.0,
             alpha,
             drag:     Drag::None,
+            rotate_grip: None,
         }
     }
 
@@ -160,13 +183,42 @@ impl LionView {
         sx.min(sy).max(0.01)
     }
 
-    fn apply_rotate(&mut self, pos: Point) {
+    /// Capture the gesture starting point on `MouseDown`.  The polar
+    /// coords of the click relative to the widget centre are stored
+    /// alongside the current angle / scale; subsequent drags compute
+    /// deltas against these anchors.
+    fn begin_rotate_grip(&mut self, pos: Point) {
         let cx = self.bounds.width  * 0.5;
         let cy = self.bounds.height * 0.5;
         let dx = pos.x - cx;
         let dy = pos.y - cy;
-        self.angle = dy.atan2(dx);
-        self.mouse_scale = (dx * dx + dy * dy).sqrt() / 100.0;
+        self.rotate_grip = Some(RotateGrip {
+            grip_polar_angle: dy.atan2(dx),
+            grip_polar_dist:  (dx * dx + dy * dy).sqrt(),
+            start_angle:      self.angle,
+            start_scale:      self.mouse_scale,
+        });
+    }
+
+    fn apply_rotate(&mut self, pos: Point) {
+        let Some(grip) = self.rotate_grip else { return; };
+        let cx = self.bounds.width  * 0.5;
+        let cy = self.bounds.height * 0.5;
+        let dx = pos.x - cx;
+        let dy = pos.y - cy;
+        let cur_angle = dy.atan2(dx);
+        let cur_dist  = (dx * dx + dy * dy).sqrt();
+
+        // Rotation: additive delta from the grip's polar angle.
+        self.angle = grip.start_angle + (cur_angle - grip.grip_polar_angle);
+
+        // Scale: multiplicative ratio of current / grip distance.  Guard
+        // a near-zero grip distance (click landed on the centre) so a
+        // tiny denominator doesn't explode the scale; in that case just
+        // leave the scale where it was.
+        if grip.grip_polar_dist > 1e-3 {
+            self.mouse_scale = grip.start_scale * (cur_dist / grip.grip_polar_dist);
+        }
     }
 
     fn apply_skew(&mut self, pos: Point) {
@@ -250,8 +302,13 @@ impl Widget for LionView {
         match event {
             Event::MouseDown { button, pos, .. } => {
                 match button {
-                    MouseButton::Left  => { self.drag = Drag::Rotate; self.apply_rotate(*pos); }
-                    MouseButton::Right => { self.drag = Drag::Skew;   self.apply_skew(*pos); }
+                    MouseButton::Left  => {
+                        self.drag = Drag::Rotate;
+                        // Capture the grip point so subsequent moves
+                        // translate into deltas from here — no snap.
+                        self.begin_rotate_grip(*pos);
+                    }
+                    MouseButton::Right => { self.drag = Drag::Skew; self.apply_skew(*pos); }
                     _ => return EventResult::Ignored,
                 }
                 agg_gui::animation::request_tick();
@@ -269,7 +326,31 @@ impl Widget for LionView {
             Event::MouseUp { .. } => {
                 let was = self.drag != Drag::None;
                 self.drag = Drag::None;
+                self.rotate_grip = None;
                 if was { EventResult::Consumed } else { EventResult::Ignored }
+            }
+            Event::MouseWheel { pos, delta_y, .. } => {
+                // Exponential zoom: each wheel notch multiplies scale by
+                // a fixed factor so zoom-in and zoom-out are symmetric
+                // and never cross zero.  Positive `delta_y` = wheel down
+                // in agg-gui's convention; treat that as zoom-out.
+                let factor = (-delta_y * 0.1).exp();
+                self.mouse_scale = (self.mouse_scale * factor).clamp(0.05, 50.0);
+                // If the user is mid-drag, fold the new scale into the
+                // grip's `start_scale` so the next `apply_rotate` doesn't
+                // undo this wheel input on the very next move event.
+                if let Some(grip) = self.rotate_grip.as_mut() {
+                    grip.start_scale = self.mouse_scale;
+                    let cx = self.bounds.width  * 0.5;
+                    let cy = self.bounds.height * 0.5;
+                    let dx = pos.x - cx;
+                    let dy = pos.y - cy;
+                    grip.grip_polar_dist  = (dx * dx + dy * dy).sqrt();
+                    grip.grip_polar_angle = dy.atan2(dx);
+                    grip.start_angle      = self.angle;
+                }
+                agg_gui::animation::request_tick();
+                EventResult::Consumed
             }
             _ => EventResult::Ignored,
         }
@@ -288,8 +369,9 @@ pub fn lion_demo(font: Arc<Font>) -> Box<dyn Widget> {
 
     let alp_label = Label::new("Alpha", Arc::clone(&font)).with_font_size(12.0);
     let note = Label::new(
-        "Left-drag: rotate + scale.  Right-drag: skew.  MSAA is off; \
-         smooth silhouette = halo-AA edges; fresh tess2 every frame.",
+        "Left-drag: rotate + scale (relative to click).  Wheel: zoom.  \
+         Right-drag: skew.  MSAA is off; smooth silhouette = halo-AA edges; \
+         fresh tess2 every frame.",
         Arc::clone(&font)
     ).with_font_size(11.0);
 

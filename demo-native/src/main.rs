@@ -238,12 +238,28 @@ fn main() {
     // positioning that HiDPI can otherwise express cleanly.
     agg_gui::set_device_scale(window.scale_factor());
 
+    // Relaunch flag — set by the Render tab's Relaunch button via
+    // `PlatformHooks::native`.  Polled in `AboutToWait` so the actual
+    // spawn+exit happens outside the event-dispatch frame, after state
+    // flush.  Keeping the flag local to `main.rs` means demo-ui never
+    // imports `std::process`.
+    let relaunch_requested = Rc::new(std::cell::Cell::new(false));
+    // Running sample count comes from the actual GL config we picked —
+    // drivers sometimes downgrade a request, so `gl_config.num_samples()`
+    // is the ground truth.  Feeds the Render tab's "enable Relaunch only
+    // when something changed" gate.
+    let running_msaa = gl_config.num_samples() as u8;
+    let platform = {
+        let flag = Rc::clone(&relaunch_requested);
+        demo_ui::PlatformHooks::native(running_msaa, move || flag.set(true))
+    };
     let (mut app, handles) = demo_ui::build_demo_ui(
         Arc::clone(&font),
         Box::new(GlCubeWidget::new()),
         "OpenGL 3.3",
         "native GL (glutin/winit)",
         initial_state,
+        platform,
     );
     let show_inspector     = Rc::clone(&handles.show_inspector);
     let inspector_nodes    = Rc::clone(&handles.inspector_nodes);
@@ -543,6 +559,30 @@ fn main() {
                                            (last_windowed_w, last_windowed_h)),
                         |s| save_state_to_disk(s),
                     );
+
+                    // Render-tab Relaunch button — flush state, spawn a
+                    // fresh copy of this executable, and exit the current
+                    // one.  The new process reads the just-saved state
+                    // (including the new MSAA sample count) and picks the
+                    // matching GL config on its next config-template pass.
+                    //
+                    // Clear the flag BEFORE spawning: `elwt.exit()` only
+                    // *requests* shutdown, so at least one more
+                    // `AboutToWait` tick fires before the loop actually
+                    // stops.  Without the reset we'd re-enter this branch
+                    // and spawn a second child.
+                    if relaunch_requested.get() {
+                        relaunch_requested.set(false);
+                        let s = serialize_state(
+                            &state_accessor,
+                            (last_windowed_w, last_windowed_h),
+                        );
+                        save_state_to_disk(&s);
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = std::process::Command::new(exe).spawn();
+                        }
+                        elwt.exit();
+                    }
                 }
                 _ => {}
             }
