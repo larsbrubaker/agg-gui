@@ -154,6 +154,19 @@ pub struct Window {
     /// while auto-size is active (dragging still works).
     auto_size: bool,
 
+    /// Whether the user can resize the window by dragging its edges.  When
+    /// `false`, no resize handles are active regardless of `resizable_h` /
+    /// `resizable_v` — matches egui's `.resizable(false)`.  Defaults to
+    /// `true` to preserve existing behaviour for call sites that don't
+    /// explicitly opt out.
+    resizable: bool,
+    /// Fine-grained axis control.  Both default to `true`; setting just
+    /// one to `false` produces an egui `.resizable([true, false])`-style
+    /// uni-axis resizable window.  Only consulted when `resizable` is
+    /// `true`.
+    resizable_h: bool,
+    resizable_v: bool,
+
     /// Window title string — stored so external callers (z-order
     /// persistence, inspector display, etc.) can identify this window
     /// without going through the inner `title_bar` sub-widget.
@@ -215,6 +228,9 @@ impl Window {
             canvas_size: Size::new(0.0, 0.0),
             constrain: true,
             auto_size: false,
+            resizable: true,
+            resizable_h: true,
+            resizable_v: true,
             title: title_str,
             on_raised: None,
         }
@@ -265,6 +281,45 @@ impl Window {
     /// Make the window size itself to the content's preferred size every frame.
     /// Top-left pin: as content grows/shrinks, the title bar stays where it is.
     pub fn with_auto_size(mut self, auto: bool) -> Self { self.auto_size = auto; self }
+
+    /// Toggle user-dragged resize.  `false` hides every edge/corner handle
+    /// and disables resize hit-tests.  Default: `true`.  Matches egui's
+    /// `Window::resizable(bool)`.
+    pub fn with_resizable(mut self, on: bool) -> Self { self.resizable = on; self }
+
+    /// Fine-grained axis-locking of the resize handles — pass `(true, false)`
+    /// for a horizontally-only resizable window, etc.  Implies
+    /// `with_resizable(true)`.  Matches egui's `Window::resizable([h, v])`.
+    pub fn with_resizable_axes(mut self, h: bool, v: bool) -> Self {
+        self.resizable   = h || v;
+        self.resizable_h = h;
+        self.resizable_v = v;
+        self
+    }
+
+    /// Wrap the window's content in a built-in vertical [`ScrollView`].
+    /// Matches egui's `Window::vscroll(true)`: lets the user shrink the
+    /// window below content height without the caller having to wrap the
+    /// content in a `ScrollView` manually.  Eager — happens at builder
+    /// time so the rest of the layout / event / paint paths see a single
+    /// child as usual.  Has no effect when called with `false` (matches
+    /// the default).
+    ///
+    /// Don't combine with [`with_auto_size`]: the ScrollView claims its
+    /// full available height, which would make auto-sizing grow the
+    /// window to the canvas.  egui's demo never combines the two flags
+    /// either.
+    pub fn with_vscroll(mut self, vscroll: bool) -> Self {
+        if vscroll {
+            if let Some(content) = self.children.pop() {
+                let scroll = crate::widgets::ScrollView::new(content)
+                    .vertical(true)
+                    .horizontal(false);
+                self.children.push(Box::new(scroll));
+            }
+        }
+        self
+    }
 
     pub fn on_close(mut self, cb: impl FnMut() + 'static) -> Self {
         self.on_close = Some(Box::new(cb));
@@ -396,6 +451,7 @@ impl Window {
     /// the interior (or the window is collapsed).
     fn resize_dir(&self, local: Point) -> Option<ResizeDir> {
         if self.collapsed || self.auto_size { return None; }
+        if !self.resizable { return None; }
         let w = self.bounds.width;
         let h = self.bounds.height;
         let x = local.x;
@@ -404,10 +460,11 @@ impl Window {
         // Outside the window altogether.
         if x < 0.0 || x > w || y < 0.0 || y > h { return None; }
 
-        let on_n = y > h - RESIZE_EDGE;
-        let on_s = y < RESIZE_EDGE;
-        let on_w = x < RESIZE_EDGE;
-        let on_e = x > w - RESIZE_EDGE;
+        // Mask each edge to the axes the window is allowed to resize on.
+        let on_n = self.resizable_v && y > h - RESIZE_EDGE;
+        let on_s = self.resizable_v && y < RESIZE_EDGE;
+        let on_w = self.resizable_h && x < RESIZE_EDGE;
+        let on_e = self.resizable_h && x > w - RESIZE_EDGE;
 
         match (on_n, on_e, on_s, on_w) {
             (true,  true,  _,     _    ) => Some(ResizeDir::NE),
@@ -586,10 +643,26 @@ impl Widget for Window {
         if self.auto_size && !self.collapsed && !self.maximized {
             if let Some(child) = self.children.first_mut() {
                 let max_sz = child.max_size();
-                let cap_w  = if max_sz.width.is_finite()  { max_sz.width  }
-                             else                        { available.width.max(MIN_W)  };
-                let cap_h  = if max_sz.height.is_finite() { max_sz.height }
-                             else                        { available.height.max(MIN_H) };
+                // `Size::MAX` uses `f64::MAX / 2.0` as its sentinel so
+                // widgets can add-without-overflow (see `geometry.rs`).
+                // That value is *technically* finite, so a plain
+                // `.is_finite()` check wrongly treats it as a real cap
+                // and cascades an ~`f64::MAX/2` width down to wrapped
+                // Labels, whose bounds then blow up LCD-backbuffer
+                // allocators to hundreds of GB.  Guard with a sane
+                // threshold: anything ≥ `CAP_SENTINEL` means "no cap,
+                // fall back to viewport-provided bounds".
+                const CAP_SENTINEL: f64 = 1.0e18;
+                let cap_w  = if max_sz.width.is_finite() && max_sz.width < CAP_SENTINEL {
+                    max_sz.width
+                } else {
+                    available.width.max(MIN_W)
+                };
+                let cap_h  = if max_sz.height.is_finite() && max_sz.height < CAP_SENTINEL {
+                    max_sz.height
+                } else {
+                    available.height.max(MIN_H)
+                };
                 let pref   = child.layout(Size::new(cap_w, cap_h));
                 let new_w  = pref.width.min(cap_w).max(MIN_W);
                 let new_h  = (pref.height + TITLE_H).min(cap_h + TITLE_H).max(MIN_H);
@@ -723,30 +796,37 @@ impl Widget for Window {
     // paint_overlay: draws the resize handle dots + edge highlights on top of content.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if !self.is_visible() || self.collapsed { return; }
+        // Skip all resize-related chrome when the window can't be resized,
+        // so an auto-sized or `.resizable(false)` window doesn't look
+        // deceptively interactive.
+        if !self.resizable || self.auto_size { return; }
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
 
         // ── SE corner drag grip (3 diagonal lines, egui-style) ───────────────
-        // Highlight when SE is hovered or actively being dragged.
-        let is_se_active = matches!(self.drag_mode, DragMode::Resize(ResizeDir::SE));
-        let is_se_hover  = self.hover_dir == Some(ResizeDir::SE);
-        let grip_color = if is_se_active {
-            v.window_resize_active
-        } else if is_se_hover {
-            v.window_resize_hover
-        } else {
-            v.window_stroke
-        };
-        ctx.set_stroke_color(grip_color);
-        ctx.set_line_width(1.5);
-        let m = 3.0_f64; // margin from corner edge
-        for i in 1..=3_i32 {
-            let off = i as f64 * 4.0 + m;
-            ctx.begin_path();
-            ctx.move_to(w - off, m);
-            ctx.line_to(w - m, off);
-            ctx.stroke();
+        // Only shown when both axes are resizable; for uni-axis resizable
+        // windows the SE grip would suggest a capability that isn't there.
+        if self.resizable_h && self.resizable_v {
+            let is_se_active = matches!(self.drag_mode, DragMode::Resize(ResizeDir::SE));
+            let is_se_hover  = self.hover_dir == Some(ResizeDir::SE);
+            let grip_color = if is_se_active {
+                v.window_resize_active
+            } else if is_se_hover {
+                v.window_resize_hover
+            } else {
+                v.window_stroke
+            };
+            ctx.set_stroke_color(grip_color);
+            ctx.set_line_width(1.5);
+            let m = 3.0_f64; // margin from corner edge
+            for i in 1..=3_i32 {
+                let off = i as f64 * 4.0 + m;
+                ctx.begin_path();
+                ctx.move_to(w - off, m);
+                ctx.line_to(w - m, off);
+                ctx.stroke();
+            }
         }
 
         // ── Resize edge / corner highlight ────────────────────────────────────

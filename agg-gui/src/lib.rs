@@ -81,7 +81,8 @@ pub use layout_props::{HAnchor, Insets, VAnchor, WidgetBase, resolve_fit_or_stre
 pub use text::{Font, TextMetrics, measure_text_metrics};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
-pub use widget::{App, InspectorNode, Widget, collect_inspector_nodes};
+pub use widget::{App, InspectorNode, Widget, collect_inspector_nodes,
+                  find_widget_by_id, find_widget_by_id_mut, find_widget_by_type};
 pub use widgets::{Button, Checkbox, ColorPicker, CollapsingHeader, ComboBox, Container, DragValue, FlexColumn, FlexRow,
                   Hyperlink, ImageView, InspectorPanel, InspectorSavedState,
                   Label, LabelAlign, MarkdownView, NodeIcon, Padding, ProgressBar, RadioGroup,

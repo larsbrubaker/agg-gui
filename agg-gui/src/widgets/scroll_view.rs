@@ -919,6 +919,23 @@ impl Widget for ScrollView {
             _ => EventResult::Ignored,
         }
     }
+
+    /// Surface the per-axis offsets and the maximum scroll distance as
+    /// inspector / test properties.  Tests use these to verify that a
+    /// shrunken viewport actually exposes scrollable overflow.
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        let (vw, vh) = self.viewport();
+        vec![
+            ("v_enabled",  self.v.enabled.to_string()),
+            ("h_enabled",  self.h.enabled.to_string()),
+            ("v_offset",   format!("{:.1}", self.v.offset)),
+            ("h_offset",   format!("{:.1}", self.h.offset)),
+            ("max_scroll", format!("{:.1}", self.v.max_scroll(vh))),
+            ("h_max_scroll", format!("{:.1}", self.h.max_scroll(vw))),
+            ("v_content",  format!("{:.1}", self.v.content)),
+            ("h_content",  format!("{:.1}", self.h.content)),
+        ]
+    }
 }
 
 impl ScrollView {

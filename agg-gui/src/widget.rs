@@ -822,6 +822,50 @@ pub struct InspectorNode {
     pub properties: Vec<(&'static str, String)>,
 }
 
+/// Depth-first search the subtree rooted at `widget` for one whose
+/// [`Widget::id`] matches `id`.  Returns the first match in paint order,
+/// including `widget` itself.  Used primarily by tests to locate a
+/// specific `Window` by its title without knowing the tree shape.
+pub fn find_widget_by_id<'a>(widget: &'a dyn Widget, id: &str) -> Option<&'a dyn Widget> {
+    if widget.id() == Some(id) { return Some(widget); }
+    for child in widget.children() {
+        if let Some(found) = find_widget_by_id(child.as_ref(), id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Mutable counterpart to [`find_widget_by_id`].  Required when a test
+/// needs to poke at a sub-widget's mutable state (e.g. calling a
+/// `ScrollView::set_scroll_offset`) after finding it by id.
+pub fn find_widget_by_id_mut<'a>(
+    widget: &'a mut dyn Widget,
+    id: &str,
+) -> Option<&'a mut dyn Widget> {
+    if widget.id() == Some(id) { return Some(widget); }
+    for child in widget.children_mut().iter_mut() {
+        if let Some(found) = find_widget_by_id_mut(child.as_mut(), id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Depth-first search for a widget by its [`Widget::type_name`].  Returns
+/// the first match in paint order.  Used by tests that want to assert on
+/// a specific widget kind inside an opaque content subtree (e.g.
+/// "find the ScrollView inside this window").
+pub fn find_widget_by_type<'a>(widget: &'a dyn Widget, type_name: &str) -> Option<&'a dyn Widget> {
+    if widget.type_name() == type_name { return Some(widget); }
+    for child in widget.children() {
+        if let Some(found) = find_widget_by_type(child.as_ref(), type_name) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Walk the subtree rooted at `widget` and collect an `InspectorNode` per
 /// widget in DFS paint order (root first).
 ///
@@ -937,6 +981,17 @@ impl App {
             touch_state: crate::touch_state::TouchState::new(),
         }
     }
+
+    /// Access the root widget — used by tests and inspectors that need to
+    /// introspect the laid-out tree without re-routing events through the
+    /// full dispatch machinery.  Pair with [`find_widget_by_id`] to locate
+    /// a specific widget by its `Widget::id()` (e.g. a Window's title).
+    pub fn root(&self) -> &dyn Widget { self.root.as_ref() }
+
+    /// Mutable counterpart to [`root`].  Required when a test wants to
+    /// drive a specific sub-widget directly (e.g. reading ScrollView
+    /// scroll offset) after the App has routed an event.
+    pub fn root_mut(&mut self) -> &mut dyn Widget { self.root.as_mut() }
 
     /// Register a global key handler invoked before the focused widget receives
     /// the key.  Return `true` to consume the event (suppress focused dispatch).

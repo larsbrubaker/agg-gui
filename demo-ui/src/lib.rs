@@ -19,6 +19,11 @@ mod windows;
 
 pub use state::{SavedState, StateAccessor, WindowState};
 pub use backend_panel::FrameHistory;
+// Exposed for Layer-1 behaviour tests: the builders that produce the
+// six Window Resize Test sub-windows and the helper type carrying each
+// window's egui-parity flags.  Kept re-exports minimal — tests drive
+// the library surface only, not internal modules.
+pub use windows::{window_resize_sub_windows, ResizeTestWindow};
 
 /// Encode a top-down RGBA8 buffer (first `width*4` bytes = top row, left→right)
 /// as a PNG.  Shared by the native harness (writes to disk) and the WASM
@@ -834,18 +839,34 @@ pub fn build_demo_ui(
         canvas = canvas.add(Box::new(win));
     }
 
-    // ── Window Resize Test — 5 additional sub-windows (all share test_entries[10].open) ──
-    // The sidebar checkbox "Window Resize Test" shows/hides all 6 windows together,
-    // matching the egui reference where a single `open: &mut bool` controls all.
+    // ── Window Resize Test — 6 sub-windows (all share test_entries[10].open) ──
+    //
+    // Each sub-window carries per-window flags (`auto_size`,
+    // `resizable`, `resizable_h/v`) so the builder below can apply
+    // exactly the egui behaviour the demo is testing.  A single
+    // sidebar checkbox toggles every sub-window in lock-step.
     {
         let wrt_open = Rc::clone(&test_entries[10].open);
-        for (title, content, initial_rect) in
-            windows::window_resize_sub_windows(Arc::clone(&font))
-        {
-            let win = Window::new(&title, Arc::clone(&font), content)
-                .with_bounds(initial_rect)
+        for entry in windows::window_resize_sub_windows(Arc::clone(&font)) {
+            let mut win = Window::new(&entry.title, Arc::clone(&font), entry.content)
+                .with_bounds(entry.initial_rect)
                 .with_visible_cell(Rc::clone(&wrt_open))
                 .on_raised(make_on_raised());
+            // `with_vscroll` mutates the children list, so it must run
+            // before any other builder that reads them.  Stage 2: gives
+            // each opt-in window an internal vertical ScrollView without
+            // the call site having to wrap content manually.
+            if entry.vscroll {
+                win = win.with_vscroll(true);
+            }
+            if entry.auto_size {
+                win = win.with_auto_size(true);
+            } else {
+                win = win.with_resizable_axes(entry.resizable_h, entry.resizable_v);
+                if !entry.resizable {
+                    win = win.with_resizable(false);
+                }
+            }
             canvas = canvas.add(Box::new(win));
         }
     }

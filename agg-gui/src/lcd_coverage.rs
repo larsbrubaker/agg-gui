@@ -93,7 +93,28 @@ impl LcdBuffer {
     /// 0, so composite-onto-destination leaves the destination
     /// unchanged wherever no paint has landed yet.
     pub fn new(width: u32, height: u32) -> Self {
-        let bytes = (width as usize) * (height as usize) * 3;
+        // Safety net: refuse to honour an obviously-pathological size
+        // rather than let the allocator try for gigabytes.  Returning a
+        // 1×1 buffer means the caller's text doesn't render this
+        // frame, but the app keeps running and the offending widget's
+        // bounds get clamped naturally on the next layout pass.  A
+        // debug build prints the caller info; release silently clamps.
+        const MAX_BYTES: usize = 512 * 1024 * 1024; // 512 MB per plane
+        let bytes = (width as usize).saturating_mul(height as usize).saturating_mul(3);
+        if bytes > MAX_BYTES {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[LcdBuffer] clamped pathological size ({}, {}); \
+                 widget bounds likely skipped a size cap",
+                width, height,
+            );
+            return Self {
+                color: vec![0u8; 3],
+                alpha: vec![0u8; 3],
+                width: 1,
+                height: 1,
+            };
+        }
         Self {
             color: vec![0u8; bytes],
             alpha: vec![0u8; bytes],

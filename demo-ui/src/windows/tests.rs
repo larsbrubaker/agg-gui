@@ -973,43 +973,129 @@ pub fn window_resize_test(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(col)
 }
 
-/// Build the five additional windows shown alongside "↔ auto-sized" when the
-/// "Window Resize Test" sidebar entry is enabled.
-///
-/// Returns `(title, content, initial_rect)` tuples; all windows share the same
-/// visible cell (Rc<Cell<bool>>) that the caller wires up.
-pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget>, Rect)> {
+/// One entry returned from [`window_resize_sub_windows`].  The caller
+/// wraps `content` in a `Window` and applies the flags to its builder
+/// (`with_auto_size`, `with_resizable` / `with_resizable_axes`) so each
+/// sub-window demonstrates the exact egui behaviour it's named after.
+pub struct ResizeTestWindow {
+    pub title:        String,
+    pub content:      Box<dyn Widget>,
+    pub initial_rect: Rect,
+    /// Window fits tightly to its content; ignores `resizable_*`.
+    pub auto_size:    bool,
+    /// Master user-resize toggle.  `false` → no handles active.
+    pub resizable:    bool,
+    /// Axis-specific locks (only consulted when `resizable` is `true`).
+    pub resizable_h:  bool,
+    pub resizable_v:  bool,
+    /// Wrap content in a built-in vertical `ScrollView` at window
+    /// build time.  Matches egui's `Window::vscroll(true)`.
+    pub vscroll:      bool,
+}
+
+impl ResizeTestWindow {
+    fn new(title: &str, content: Box<dyn Widget>, initial_rect: Rect) -> Self {
+        Self {
+            title: title.into(),
+            content,
+            initial_rect,
+            auto_size:   false,
+            resizable:   true,
+            resizable_h: true,
+            resizable_v: true,
+            vscroll:     false,
+        }
+    }
+    fn auto_sized(mut self) -> Self { self.auto_size = true; self.resizable = false; self }
+    fn with_vscroll(mut self) -> Self { self.vscroll = true; self }
+}
+
+/// Build the six sub-windows for the Window Resize Test, mirroring
+/// egui's `crates/egui_demo_lib/src/demo/tests/window_resize_test.rs`
+/// one-for-one.  Each window demonstrates a specific resize + scroll +
+/// content-fill combination; the caller applies the returned flags to
+/// its `Window` wrapper so those behaviours surface correctly.
+pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
     // Initial rects in Y-up canvas coordinates (default_canvas_h ≈ 720).
     // Staggered 3 × 2 so the windows are visible on a 1280×720 screen.
+    // Ordering matches egui's source, not layout order on screen.
     let rects: &[Rect] = &[
-        Rect::new( 30.0, 410.0, 300.0, 290.0), // ↔ resizable + scroll
-        Rect::new(350.0, 410.0, 300.0, 290.0), // ↔ resizable + embedded scroll
-        Rect::new(670.0, 410.0, 300.0, 290.0), // ↔ resizable without scroll
-        Rect::new( 30.0, 100.0, 300.0, 290.0), // ↔ resizable with TextEdit
-        Rect::new(350.0, 550.0, 250.0, 150.0), // ↔ freely resized
+        Rect::new( 30.0, 100.0, 360.0, 240.0), // 1. ↔ auto-sized
+        Rect::new(410.0, 100.0, 300.0, 290.0), // 2. ↔ resizable + scroll
+        Rect::new(730.0, 100.0, 300.0, 290.0), // 3. ↔ resizable + embedded scroll
+        Rect::new( 30.0, 410.0, 300.0, 290.0), // 4. ↔ resizable without scroll
+        Rect::new(410.0, 410.0, 300.0, 290.0), // 5. ↔ resizable with TextEdit
+        Rect::new(730.0, 410.0, 250.0, 150.0), // 6. ↔ freely resized
     ];
 
-    let mut out: Vec<(String, Box<dyn Widget>, Rect)> = Vec::new();
+    let mut out: Vec<ResizeTestWindow> = Vec::new();
 
-    // ── 1. resizable + scroll ─────────────────────────────────────────────────
+    // ── 1. ↔ auto-sized ──────────────────────────────────────────────────────
+    //
+    // Window sizes itself to its content; egui disables user resize while
+    // auto-sized.  The inner "Resize this area" container is a nested,
+    // independently-resizable region — Stage 3 lands a proper `Resize`
+    // widget for that; until then the middle region is a simple fixed-
+    // size `SizedBox` holding lorem ipsum.  A `Container`-wrapped
+    // placeholder was tried earlier and caused a runtime OOM — `Container`
+    // reports `Size::new(available.width, available.height)` (fills
+    // parent), which combined with auto-sized-window feedback blew up
+    // layout dimensions.  Filed as Stage 5 polish: have `Container` return
+    // a content-fit size.
+    {
+        let mut root = FlexColumn::new().with_gap(6.0).with_padding(10.0).with_panel_bg();
+        root.push(Box::new(Label::new(
+            "This window will auto-size based on its contents.",
+            Arc::clone(&font),
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
+        root.push(Box::new(Label::new(
+            "Resize this area:",
+            Arc::clone(&font),
+        ).with_font_size(14.0)), 0.0);
+        let mut inner = FlexColumn::new().with_gap(4.0).with_padding(8.0);
+        inner.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
+            .with_font_size(11.5)
+            .with_wrap(true)), 0.0);
+        // Fixed 320×120 "Resize this area" placeholder.  The nested
+        // `Resize` widget (Stage 3) will replace this `SizedBox` with a
+        // user-draggable region.
+        root.push(Box::new(
+            SizedBox::new().with_width(320.0).with_height(120.0)
+                .with_child(Box::new(inner)),
+        ), 0.0);
+        root.push(Box::new(Label::new(
+            "Resize the above area!",
+            Arc::clone(&font),
+        ).with_font_size(14.0)), 0.0);
+        out.push(ResizeTestWindow::new(
+            "↔ auto-sized", Box::new(root), rects[0],
+        ).auto_sized());
+    }
+
+    // ── 2. ↔ resizable + scroll ──────────────────────────────────────────────
+    //
+    // Window-level vscroll (egui's `.vscroll(true)`).  No manual
+    // ScrollView in the content tree — the `Window::with_vscroll(true)`
+    // call in `lib.rs` (Stage 2) wraps `root` itself in a vertical
+    // ScrollView at builder time.  The inner content is a single
+    // overflowing FlexColumn so the scroll bar has range.
     {
         let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
         root.push(Box::new(Label::new(
-            "This window is resizable and has a scroll area.\n\
-             You can shrink it to any size.",
+            "This window is resizable and has a scroll area. You can shrink it \
+             to any size.",
             Arc::clone(&font),
         ).with_font_size(12.0).with_wrap(true)), 0.0);
         root.push(Box::new(Separator::horizontal()), 0.0);
-        // Scrollable region fills remaining space.
-        let mut scroll_col = FlexColumn::new().with_gap(4.0).with_padding(4.0);
-        scroll_col.push(Box::new(Label::new(LOREM_IPSUM_LONG, Arc::clone(&font))
+        root.push(Box::new(Label::new(LOREM_IPSUM_LONG, Arc::clone(&font))
             .with_font_size(11.5)
             .with_wrap(true)), 0.0);
-        root.push(Box::new(ScrollView::new(Box::new(scroll_col))), 1.0);
-        out.push(("↔ resizable + scroll".into(), Box::new(root), rects[0]));
+        out.push(ResizeTestWindow::new(
+            "↔ resizable + scroll", Box::new(root), rects[1],
+        ).with_vscroll());
     }
 
-    // ── 2. resizable + embedded scroll ───────────────────────────────────────
+    // ── 3. ↔ resizable + embedded scroll ────────────────────────────────────
     {
         let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
         root.push(Box::new(Label::new(
@@ -1019,7 +1105,7 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
         root.push(Box::new(Label::new(
             "However, we have a sub-region with a scroll bar:",
             Arc::clone(&font),
-        ).with_font_size(12.0)), 0.0);
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
         root.push(Box::new(Separator::horizontal()), 0.0);
         let long2 = format!("{}\n\n{}", LOREM_IPSUM_LONG, LOREM_IPSUM_LONG);
         let mut inner = FlexColumn::new().with_gap(4.0).with_padding(4.0);
@@ -1027,53 +1113,77 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<(String, Box<dyn Widget
             .with_font_size(11.5)
             .with_wrap(true)), 0.0);
         root.push(Box::new(ScrollView::new(Box::new(inner))), 1.0);
-        out.push(("↔ resizable + embedded scroll".into(), Box::new(root), rects[1]));
+        out.push(ResizeTestWindow::new(
+            "↔ resizable + embedded scroll", Box::new(root), rects[2],
+        ));
     }
 
-    // ── 3. resizable without scroll ──────────────────────────────────────────
+    // ── 4. ↔ resizable without scroll ───────────────────────────────────────
+    //
+    // egui never clips window content and has no whitespace to add, so the
+    // user can only shrink down to a size that still fits all content.  Our
+    // `Window` already honours content min-size via the flex column's
+    // required height, so this window works out of the box — the
+    // demonstration is that attempting to drag smaller than the text needs
+    // simply stops at the content-bound height.
     {
         let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
         root.push(Box::new(Label::new(
-            "This window is resizable but has no scroll area. It can only be \
-             resized to a size where all contents are visible.",
+            "This window is resizable but has no scroll area. This means it \
+             can only be resized to a size where all the contents is visible.",
+            Arc::clone(&font),
+        ).with_font_size(12.0).with_wrap(true)), 0.0);
+        root.push(Box::new(Label::new(
+            "agg-gui will not clip the contents of a window, nor add \
+             whitespace to it.",
             Arc::clone(&font),
         ).with_font_size(12.0).with_wrap(true)), 0.0);
         root.push(Box::new(Separator::horizontal()), 0.0);
         root.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
             .with_font_size(11.5)
             .with_wrap(true)), 0.0);
-        root.push(Box::new(SizedBox::new()), 1.0);
-        out.push(("↔ resizable without scroll".into(), Box::new(root), rects[2]));
+        out.push(ResizeTestWindow::new(
+            "↔ resizable without scroll", Box::new(root), rects[3],
+        ));
     }
 
-    // ── 4. resizable with TextEdit ────────────────────────────────────────────
+    // ── 5. ↔ resizable with TextEdit ────────────────────────────────────────
+    //
+    // Stage 4 will swap this for a true multiline `TextArea` so the editor
+    // can grow with the window height; today's single-line `TextField`
+    // stretches horizontally but not vertically, so the visible behaviour
+    // is "TextEdit tracks the window width".  The flex-fill `SizedBox`
+    // below keeps the bottom of the window blank so the demo is still
+    // visibly resizable.
     {
         let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
         root.push(Box::new(Label::new(
-            "Shows how a widget can fill the available area.",
+            "Shows how you can fill an area with a widget.",
             Arc::clone(&font),
         ).with_font_size(12.0).with_wrap(true)), 0.0);
-        // TextField fills the remainder of the window content area.
-        // Wrapped in a flex SizedBox so it stretches with the window.
-        root.push(Box::new(SizedBox::new().with_child(Box::new(
+        root.push(Box::new(
             TextField::new(Arc::clone(&font))
                 .with_font_size(12.5)
-                .with_text("Edit me! Resize the window and this field follows.")
-        ))), 1.0);
-        out.push(("↔ resizable with TextEdit".into(), Box::new(root), rects[3]));
+                .with_text(LOREM_IPSUM),
+        ), 0.0);
+        root.push(Box::new(SizedBox::new()), 1.0);
+        out.push(ResizeTestWindow::new(
+            "↔ resizable with TextEdit", Box::new(root), rects[4],
+        ));
     }
 
-    // ── 5. freely resized ────────────────────────────────────────────────────
+    // ── 6. ↔ freely resized ─────────────────────────────────────────────────
     {
         let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
         root.push(Box::new(Label::new(
-            "This window has empty space that fills up the available area,\n\
+            "This window has empty space that fills up the available space, \
              preventing auto-shrink.",
             Arc::clone(&font),
         ).with_font_size(12.0).with_wrap(true)), 0.0);
-        // Flex fill prevents the window from auto-shrinking to content.
         root.push(Box::new(SizedBox::new()), 1.0);
-        out.push(("↔ freely resized".into(), Box::new(root), rects[4]));
+        out.push(ResizeTestWindow::new(
+            "↔ freely resized", Box::new(root), rects[5],
+        ));
     }
 
     out
