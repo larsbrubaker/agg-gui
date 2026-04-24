@@ -37,9 +37,10 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use agg_rust::arc::Arc as AggArc;
-use agg_rust::basics::PATH_FLAGS_NONE;
+use agg_rust::basics::{PATH_FLAGS_NONE, VertexSource};
 use agg_rust::comp_op::CompOp;
 use agg_rust::conv_curve::ConvCurve;
+use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::gsv_text::GsvText;
 use agg_rust::math_stroke::{LineCap, LineJoin};
@@ -48,7 +49,7 @@ use agg_rust::rounded_rect::RoundedRect;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
-use crate::draw_ctx::DrawCtx;
+use crate::draw_ctx::{DrawCtx, FillRule};
 use crate::lcd_coverage::{rasterize_text_lcd_cached, LcdBuffer, LcdMask};
 use crate::text::{measure_text_metrics, Font, TextMetrics};
 
@@ -64,9 +65,13 @@ struct LcdState {
     transform:    TransAffine,
     fill_color:   Color,
     stroke_color: Color,
+    fill_rule:    FillRule,
     line_width:   f64,
     line_join:    LineJoin,
     line_cap:     LineCap,
+    miter_limit:  f64,
+    line_dash:    Vec<f64>,
+    dash_offset:  f64,
     blend_mode:   CompOp,
     global_alpha: f64,
     font:         Option<Arc<Font>>,
@@ -83,9 +88,13 @@ impl Default for LcdState {
             transform:    TransAffine::new(),
             fill_color:   Color::black(),
             stroke_color: Color::black(),
+            fill_rule:    FillRule::NonZero,
             line_width:   1.0,
             line_join:    LineJoin::Round,
             line_cap:     LineCap::Round,
+            miter_limit:  4.0,
+            line_dash:    Vec::new(),
+            dash_offset:  0.0,
             blend_mode:   CompOp::SrcOver,
             global_alpha: 1.0,
             font:         None,
@@ -180,8 +189,15 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     fn set_line_width  (&mut self, w: f64)       { self.state.line_width   = w; }
     fn set_line_join   (&mut self, j: LineJoin)  { self.state.line_join    = j; }
     fn set_line_cap    (&mut self, c: LineCap)   { self.state.line_cap     = c; }
+    fn set_miter_limit (&mut self, limit: f64)   { self.state.miter_limit  = limit.max(1.0); }
+    fn set_line_dash   (&mut self, dashes: &[f64], offset: f64) {
+        self.state.line_dash.clear();
+        self.state.line_dash.extend(dashes.iter().copied().filter(|v| *v > 0.0));
+        self.state.dash_offset = offset;
+    }
     fn set_blend_mode  (&mut self, m: CompOp)    { self.state.blend_mode   = m; }
     fn set_global_alpha(&mut self, a: f64)       { self.state.global_alpha = a.clamp(0.0, 1.0); }
+    fn set_fill_rule   (&mut self, r: FillRule)  { self.state.fill_rule    = r; }
 
     // ── Font ──────────────────────────────────────────────────────────────
     fn set_font     (&mut self, f: Arc<Font>) { self.state.font      = Some(f); }
@@ -261,12 +277,13 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         color.a *= self.state.global_alpha as f32;
         let xform = self.state.transform;
         let clip  = self.state.clip;
+        let rule  = self.state.fill_rule;
         // Borrow gymnastics: `fill_path` needs `&mut path` AND `&mut buffer`,
         // both fields of `self`.  Take the path out, fill into the active
         // buffer, then put the path back — preserves the "path persists
         // across fill calls" GfxCtx contract.
         let mut path = std::mem::replace(&mut self.path, PathStorage::new());
-        self.active_buffer().fill_path(&mut path, color, &xform, clip);
+        self.active_buffer().fill_path(&mut path, color, &xform, clip, rule);
         self.path = path;
     }
     fn stroke(&mut self) {
@@ -285,15 +302,33 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         let mut materialized = PathStorage::new();
         {
             let mut curves = ConvCurve::new(&mut self.path);
-            let mut stroke = ConvStroke::new(&mut curves);
-            stroke.set_width(self.state.line_width);
-            stroke.set_line_join(self.state.line_join);
-            stroke.set_line_cap(self.state.line_cap);
-            materialized.concat_path(&mut stroke, 0);
+            if self.state.line_dash.is_empty() {
+                let mut stroke = ConvStroke::new(&mut curves);
+                configure_stroke(
+                    &mut stroke,
+                    self.state.line_width,
+                    self.state.line_join,
+                    self.state.line_cap,
+                    self.state.miter_limit,
+                );
+                materialized.concat_path(&mut stroke, 0);
+            } else {
+                let mut dash = ConvDash::new(&mut curves);
+                configure_dashes(&mut dash, &self.state.line_dash, self.state.dash_offset);
+                let mut stroke = ConvStroke::new(dash);
+                configure_stroke(
+                    &mut stroke,
+                    self.state.line_width,
+                    self.state.line_join,
+                    self.state.line_cap,
+                    self.state.miter_limit,
+                );
+                materialized.concat_path(&mut stroke, 0);
+            }
         }
         let xform = self.state.transform;
         let clip  = self.state.clip;
-        self.active_buffer().fill_path(&mut materialized, color, &xform, clip);
+        self.active_buffer().fill_path(&mut materialized, color, &xform, clip, FillRule::NonZero);
     }
     fn fill_and_stroke(&mut self) {
         self.fill();
@@ -391,7 +426,7 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         }
         let xform = self.state.transform;
         let clip  = self.state.clip;
-        self.active_buffer().fill_path(&mut materialized, color, &xform, clip);
+        self.active_buffer().fill_path(&mut materialized, color, &xform, clip, FillRule::NonZero);
     }
 
     fn measure_text(&self, text: &str) -> Option<TextMetrics> {
@@ -623,6 +658,30 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
             }
         }
     }
+}
+
+fn configure_stroke<VS: VertexSource>(
+    stroke: &mut ConvStroke<VS>,
+    width: f64,
+    join: LineJoin,
+    cap: LineCap,
+    miter_limit: f64,
+) {
+    stroke.set_width(width);
+    stroke.set_line_join(join);
+    stroke.set_line_cap(cap);
+    stroke.set_miter_limit(miter_limit);
+}
+
+fn configure_dashes<VS: VertexSource>(dash: &mut ConvDash<VS>, dashes: &[f64], dash_offset: f64) {
+    let mut chunks = dashes.chunks_exact(2);
+    for pair in &mut chunks {
+        dash.add_dash(pair[0], pair[1]);
+    }
+    if let Some(&last) = chunks.remainder().first() {
+        dash.add_dash(last, last);
+    }
+    dash.dash_start(dash_offset);
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

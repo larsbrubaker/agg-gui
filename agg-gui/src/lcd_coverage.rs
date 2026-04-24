@@ -45,6 +45,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use agg_rust::basics::FillingRule;
 use agg_rust::color::Gray8;
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_transform::ConvTransform;
@@ -249,9 +250,12 @@ impl LcdBuffer {
         color:     Color,
         transform: &TransAffine,
         clip:      Option<(f64, f64, f64, f64)>,
+        fill_rule: FillRule,
     ) {
         if self.width == 0 || self.height == 0 { return; }
-        let mut builder = LcdMaskBuilder::new(self.width, self.height).with_clip(clip);
+        let mut builder = LcdMaskBuilder::new(self.width, self.height)
+            .with_clip(clip)
+            .with_fill_rule(fill_rule);
         builder.with_paths(transform, |add| { add(path); });
         let mask = builder.finalize();
         // Convert clip → integer pixel rect for composite-time enforcement.
@@ -452,6 +456,7 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
+use crate::draw_ctx::FillRule;
 use crate::text::{measure_text_metrics, shape_text, Font};
 
 /// Identity transform — exposed so call sites that don't otherwise
@@ -767,6 +772,7 @@ pub struct LcdMaskBuilder {
     /// clip gets dropped at raster time (no need to also clip during
     /// the filter pass — zero gray = zero mask).
     clip:   Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
 }
 
 impl LcdMaskBuilder {
@@ -776,7 +782,7 @@ impl LcdMaskBuilder {
         let gray_w = mask_w.saturating_mul(3);
         let gray_h = mask_h;
         let gray   = vec![0u8; (gray_w as usize) * (gray_h as usize)];
-        Self { gray, gray_w, gray_h, mask_w, mask_h, clip: None }
+        Self { gray, gray_w, gray_h, mask_w, mask_h, clip: None, fill_rule: FillRule::NonZero }
     }
 
     /// Set a clip rectangle in screen-space (mask pixel coords).  All
@@ -786,6 +792,12 @@ impl LcdMaskBuilder {
     /// chain after `new`.
     pub fn with_clip(mut self, clip: Option<(f64, f64, f64, f64)>) -> Self {
         self.clip = clip;
+        self
+    }
+
+    /// Set the fill rule used by subsequent path rasterization.
+    pub fn with_fill_rule(mut self, fill_rule: FillRule) -> Self {
+        self.fill_rule = fill_rule;
         self
     }
 
@@ -799,7 +811,7 @@ impl LcdMaskBuilder {
     where F: FnOnce(&mut dyn FnMut(&mut PathStorage)),
     {
         rasterize_paths_into_gray(
-            &mut self.gray, self.gray_w, self.gray_h, transform, self.clip, f,
+            &mut self.gray, self.gray_w, self.gray_h, transform, self.clip, self.fill_rule, f,
         );
     }
 
@@ -831,6 +843,7 @@ fn rasterize_paths_into_gray<F>(
     gray_h:    u32,
     transform: &TransAffine,
     clip:      Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
     f:         F,
 )
 where F: FnOnce(&mut dyn FnMut(&mut PathStorage)),
@@ -853,6 +866,7 @@ where F: FnOnce(&mut dyn FnMut(&mut PathStorage)),
         rb.clip_box_i(x1, y1, x2, y2);
     }
     let mut ras = RasterizerScanlineAa::new();
+    ras.filling_rule(to_agg_fill_rule(fill_rule));
     let mut sl  = ScanlineU8::new();
 
     // Full coverage = 255.  AGG writes `gray_value * alpha / 255` per
@@ -875,6 +889,13 @@ where F: FnOnce(&mut dyn FnMut(&mut PathStorage)),
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &cov_color);
     };
     f(&mut add);
+}
+
+fn to_agg_fill_rule(rule: FillRule) -> FillingRule {
+    match rule {
+        FillRule::NonZero => FillingRule::NonZero,
+        FillRule::EvenOdd => FillingRule::EvenOdd,
+    }
 }
 
 /// Internal: run the 5-tap low-pass filter over `gray` and produce the
@@ -1391,7 +1412,7 @@ mod tests {
         path.line_to( 5.0, 7.0);
         path.close_polygon(PATH_FLAGS_NONE);
 
-        buf.fill_path(&mut path, Color::black(), &TransAffine::new(), None);
+        buf.fill_path(&mut path, Color::black(), &TransAffine::new(), None, FillRule::NonZero);
 
         let pixel = |x: usize, y: usize| -> (u8, u8, u8) {
             let i = (y * 20 + x) * 3;

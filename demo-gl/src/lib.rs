@@ -60,7 +60,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
 use agg_gui::color::Color;
-use agg_gui::draw_ctx::DrawCtx;
+use agg_gui::draw_ctx::{DrawCtx, FillRule};
 use agg_gui::gl_renderer::GlyphCache;
 use agg_gui::geometry::Rect;
 use agg_gui::text::{Font, TextMetrics, shape_glyphs};
@@ -293,6 +293,10 @@ pub struct GlGfxCtx {
     line_width:   f64,
     line_join:    LineJoin,
     line_cap:     LineCap,
+    fill_rule:    FillRule,
+    miter_limit:  f64,
+    line_dash:    Vec<f64>,
+    dash_offset:  f64,
     global_alpha: f64,
 
     // State stack: each entry holds a saved (transform, clip) pair.
@@ -440,6 +444,10 @@ impl GlGfxCtx {
             line_width:   1.0,
             line_join:    LineJoin::Miter,
             line_cap:     LineCap::Butt,
+            fill_rule:    FillRule::NonZero,
+            miter_limit:  4.0,
+            line_dash:    Vec::new(),
+            dash_offset:  0.0,
             global_alpha: 1.0,
             state_stack:  vec![(TransAffine::new(), None)],
             contours:     Vec::new(),
@@ -489,6 +497,10 @@ impl GlGfxCtx {
         self.fill_color   = Color::rgba(0.0, 0.0, 0.0, 1.0);
         self.stroke_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
         self.line_width   = 1.0;
+        self.fill_rule    = FillRule::NonZero;
+        self.miter_limit  = 4.0;
+        self.line_dash.clear();
+        self.dash_offset  = 0.0;
         self.global_alpha = 1.0;
         self.state_stack  = vec![(TransAffine::new(), None)];
         self.contours.clear();
@@ -901,7 +913,7 @@ impl GlGfxCtx {
             }
         }
 
-        if let Some((verts, idx)) = tessellate_path_aa(&mut path, 1.0) {
+        if let Some((verts, idx)) = tessellate_path_aa(&mut path, 1.0, self.fill_rule) {
             let color = self.fill_color;
             self.submit_aa_triangles(&verts, &idx, color);
         }
@@ -914,6 +926,7 @@ impl GlGfxCtx {
     ///   joins + butt/round/square caps) → [`tessellate_path_aa`] (AGG
     ///   VertexSource → tess2 → interior triangles + edge-flag halo strips).
     unsafe fn do_stroke(&mut self) {
+        use agg_rust::conv_dash::ConvDash;
         use agg_rust::conv_stroke::ConvStroke;
         use agg_rust::path_storage::PathStorage;
         use agg_gui::gl_renderer::tessellate_path_aa;
@@ -931,12 +944,26 @@ impl GlGfxCtx {
             }
         }
 
-        let mut stroke = ConvStroke::new(path);
-        stroke.set_width(self.line_width);
-        stroke.set_line_join(self.line_join);
-        stroke.set_line_cap(self.line_cap);
+        let mut materialized = PathStorage::new();
+        if self.line_dash.is_empty() {
+            let mut stroke = ConvStroke::new(path);
+            stroke.set_width(self.line_width);
+            stroke.set_line_join(self.line_join);
+            stroke.set_line_cap(self.line_cap);
+            stroke.set_miter_limit(self.miter_limit);
+            materialized.concat_path(&mut stroke, 0);
+        } else {
+            let mut dash = ConvDash::new(path);
+            configure_dashes(&mut dash, &self.line_dash, self.dash_offset);
+            let mut stroke = ConvStroke::new(dash);
+            stroke.set_width(self.line_width);
+            stroke.set_line_join(self.line_join);
+            stroke.set_line_cap(self.line_cap);
+            stroke.set_miter_limit(self.miter_limit);
+            materialized.concat_path(&mut stroke, 0);
+        }
 
-        if let Some((verts, idx)) = tessellate_path_aa(&mut stroke, 1.0) {
+        if let Some((verts, idx)) = tessellate_path_aa(&mut materialized, 1.0, FillRule::NonZero) {
             let color = self.stroke_color;
             self.submit_aa_triangles(&verts, &idx, color);
         }
@@ -1008,8 +1035,15 @@ impl DrawCtx for GlGfxCtx {
     fn set_line_width(&mut self, w: f64) { self.line_width = w; }
     fn set_line_join(&mut self, j: LineJoin) { self.line_join = j; }
     fn set_line_cap(&mut self, c: LineCap) { self.line_cap = c; }
+    fn set_miter_limit(&mut self, limit: f64) { self.miter_limit = limit.max(1.0); }
+    fn set_line_dash(&mut self, dashes: &[f64], offset: f64) {
+        self.line_dash.clear();
+        self.line_dash.extend(dashes.iter().copied().filter(|v| *v > 0.0));
+        self.dash_offset = offset;
+    }
     fn set_blend_mode(&mut self, _: CompOp) {}
     fn set_global_alpha(&mut self, a: f64) { self.global_alpha = a; }
+    fn set_fill_rule(&mut self, rule: FillRule) { self.fill_rule = rule; }
 
     // ── Font ─────────────────────────────────────────────────────────────────
 
@@ -1773,6 +1807,21 @@ impl DrawCtx for GlGfxCtx {
         // Re-apply our scissor after — the painter may have disabled it.
         self.apply_scissor();
     }
+}
+
+fn configure_dashes<VS: agg_rust::basics::VertexSource>(
+    dash: &mut agg_rust::conv_dash::ConvDash<VS>,
+    dashes: &[f64],
+    dash_offset: f64,
+) {
+    let mut chunks = dashes.chunks_exact(2);
+    for pair in &mut chunks {
+        dash.add_dash(pair[0], pair[1]);
+    }
+    if let Some(&last) = chunks.remainder().first() {
+        dash.add_dash(last, last);
+    }
+    dash.dash_start(dash_offset);
 }
 
 // ---------------------------------------------------------------------------

@@ -8,37 +8,51 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    DrawCtx, Event, EventResult, FlexColumn, Font, Rect, ScrollView, Separator,
-    Size, Widget,
+    DrawCtx, Event, EventResult, FlexColumn, Font, Rect, ScrollView, Separator, Size, Widget,
 };
 
 use super::helpers::wrapped_label;
 
-const NUM_ROWS:   usize = 10_000;
-const ROW_HEIGHT: f64   = 20.0;
-const FONT_SIZE:  f64   = 12.0;
+const NUM_ROWS: usize = 10_000;
+const ROW_HEIGHT: f64 = 20.0;
+const FONT_SIZE: f64 = 12.0;
 /// Maximum horizontal indent produced by `(i % 100) px` — plus a bit for text.
 const CONTENT_WIDTH: f64 = 700.0;
 
 struct VirtualCanvas {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
-    font:     Arc<Font>,
+    font: Arc<Font>,
     viewport: Rc<Cell<Rect>>,
 }
 
 impl VirtualCanvas {
     fn new(font: Arc<Font>, viewport: Rc<Cell<Rect>>) -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), font, viewport }
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font,
+            viewport,
+        }
     }
 }
 
 impl Widget for VirtualCanvas {
-    fn type_name(&self) -> &'static str { "VirtualCanvas" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "VirtualCanvas"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Parent `ScrollView` with horizontal scroll passes `f64::MAX/2` for
@@ -52,13 +66,13 @@ impl Widget for VirtualCanvas {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v  = ctx.visuals();
+        let v = ctx.visuals();
         let vp = self.viewport.get();
 
         // vp = viewport in content-space top-down coords: (x, y_top, w, h)
         let first = (vp.y / ROW_HEIGHT).floor().max(0.0) as usize;
-        let last  = ((vp.y + vp.height) / ROW_HEIGHT).ceil() as usize + 1;
-        let last  = last.min(NUM_ROWS);
+        let last = ((vp.y + vp.height) / ROW_HEIGHT).ceil() as usize + 1;
+        let last = last.min(NUM_ROWS);
 
         let total_h = (NUM_ROWS as f64) * ROW_HEIGHT;
         ctx.set_font(Arc::clone(&self.font));
@@ -66,29 +80,39 @@ impl Widget for VirtualCanvas {
         ctx.set_fill_color(v.text_color);
 
         for i in first..last {
-            let indent   = (i % 100) as f64;
-            let x        = indent;
+            let indent = (i % 100) as f64;
+            let x = indent;
             let y_bottom = total_h - (i as f64 + 1.0) * ROW_HEIGHT;
-            let y_text   = y_bottom + (ROW_HEIGHT - FONT_SIZE) * 0.5;
+            let y_text = y_bottom + (ROW_HEIGHT - FONT_SIZE) * 0.5;
             let text = format!(
                 "This is row {}/{}, indented by {} pixels",
-                i + 1, NUM_ROWS, indent as i32,
+                i + 1,
+                NUM_ROWS,
+                indent as i32,
             );
             ctx.fill_text(&text, x, y_text);
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
     let viewport = Rc::new(Cell::new(Rect::default()));
 
     let mut col = FlexColumn::new().with_gap(6.0).with_padding(10.0);
-    col.push(wrapped_label(Arc::clone(&font),
-        "10 000 rows, indented by their index mod 100, painted only where the \
+    col.push(
+        wrapped_label(
+            Arc::clone(&font),
+            "10 000 rows, indented by their index mod 100, painted only where the \
          viewport intersects them.  Both axes scroll — horizontal via shift+wheel \
-         or the bottom scrollbar.", 11.0), 0.0);
+         or the bottom scrollbar.",
+            11.0,
+        ),
+        0.0,
+    );
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     let canvas = VirtualCanvas::new(Arc::clone(&font), Rc::clone(&viewport));

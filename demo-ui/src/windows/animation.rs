@@ -11,9 +11,8 @@
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, Color, DrawCtx, Event, EventResult, FlexColumn, Font,
-    Label, MouseButton, Point, Rect, Size,
-    SizedBox, Widget,
+    Button, Color, DrawCtx, Event, EventResult, FlexColumn, Font, Label, MouseButton, Point, Rect,
+    Size, SizedBox, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -28,10 +27,10 @@ use agg_gui::{
 ///
 /// Coordinates in `pts` are in local canvas space (Y-up, origin bottom-left).
 struct BezierCanvas {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     /// Control-point positions in local canvas coordinates (Y-up).
-    pts:      [(f64, f64); 4],
+    pts: [(f64, f64); 4],
     /// Index of the control point currently being dragged, if any.
     dragging: Option<usize>,
 }
@@ -48,10 +47,10 @@ impl BezierCanvas {
         // Initial control points chosen so the curve opens upward in the
         // center of a 360×290 canvas (Y-up: y=0 is the bottom).
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
             pts: [
-                (80.0,  90.0),  // P0 — bottom-left anchor
+                (80.0, 90.0),   // P0 — bottom-left anchor
                 (140.0, 210.0), // P1 — upper-left handle (pulls curve up)
                 (220.0, 210.0), // P2 — upper-right handle
                 (280.0, 90.0),  // P3 — bottom-right anchor
@@ -63,11 +62,16 @@ impl BezierCanvas {
     /// Return the index of the nearest control point within `SNAP_R` of `pos`,
     /// or `None` if no point is close enough.
     fn nearest(&self, pos: Point) -> Option<usize> {
-        self.pts.iter()
+        self.pts
+            .iter()
             .enumerate()
             .filter_map(|(i, &(px, py))| {
                 let d = ((pos.x - px).powi(2) + (pos.y - py).powi(2)).sqrt();
-                if d <= Self::SNAP_R { Some((i, d)) } else { None }
+                if d <= Self::SNAP_R {
+                    Some((i, d))
+                } else {
+                    None
+                }
             })
             .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
             .map(|(i, _)| i)
@@ -75,11 +79,21 @@ impl BezierCanvas {
 }
 
 impl Widget for BezierCanvas {
-    fn type_name(&self) -> &'static str { "BezierCanvas" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "BezierCanvas"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -90,7 +104,7 @@ impl Widget for BezierCanvas {
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
-        let [(x0,y0),(x1,y1),(x2,y2),(x3,y3)] = self.pts;
+        let [(x0, y0), (x1, y1), (x2, y2), (x3, y3)] = self.pts;
 
         // Background.
         ctx.set_fill_color(v.bg_color);
@@ -104,7 +118,7 @@ impl Widget for BezierCanvas {
         ctx.set_line_width(1.0);
 
         // Draw dashed lines by alternating drawn/skipped segments (~8px each).
-        for (ax, ay, bx, by) in [(x0,y0,x1,y1), (x2,y2,x3,y3)] {
+        for (ax, ay, bx, by) in [(x0, y0, x1, y1), (x2, y2, x3, y3)] {
             let dx = bx - ax;
             let dy = by - ay;
             let len = (dx * dx + dy * dy).sqrt().max(1.0);
@@ -141,7 +155,11 @@ impl Widget for BezierCanvas {
         let hovered_pt = self.dragging; // highlight dragged point
         for (i, &(px, py)) in self.pts.iter().enumerate() {
             let is_endpoint = i == 0 || i == 3;
-            let r = if is_endpoint { Self::ENDPOINT_R } else { Self::HANDLE_R };
+            let r = if is_endpoint {
+                Self::ENDPOINT_R
+            } else {
+                Self::HANDLE_R
+            };
             let fill = if hovered_pt == Some(i) {
                 v.widget_bg_hovered
             } else {
@@ -158,7 +176,11 @@ impl Widget for BezierCanvas {
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
-            Event::MouseDown { pos, button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
                 if let Some(idx) = self.nearest(*pos) {
                     self.dragging = Some(idx);
                     return EventResult::Consumed;
@@ -175,7 +197,10 @@ impl Widget for BezierCanvas {
                     EventResult::Ignored
                 }
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 if self.dragging.is_some() {
                     self.dragging = None;
                     EventResult::Consumed
@@ -188,8 +213,10 @@ impl Widget for BezierCanvas {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 }
 
@@ -200,10 +227,10 @@ pub fn bezier_curve(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(8.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new(
-        "Drag the control points",
-        Arc::clone(&font),
-    ).with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("Drag the control points", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
     col.push(Box::new(BezierCanvas::new()), 1.0);
 
@@ -229,29 +256,39 @@ pub fn bezier_curve(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// Animated sine-wave display (egui parity).
 struct DancingStrings {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    start:    web_time::Instant,
-    colored:  std::rc::Rc<std::cell::Cell<bool>>,
+    start: web_time::Instant,
+    colored: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 impl DancingStrings {
     fn new(colored: std::rc::Rc<std::cell::Cell<bool>>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            start:    web_time::Instant::now(),
+            start: web_time::Instant::now(),
             colored,
         }
     }
 }
 
 impl Widget for DancingStrings {
-    fn type_name(&self) -> &'static str { "DancingStrings" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "DancingStrings"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     /// Continuous sine-wave animation — every frame samples
     /// `self.start.elapsed()` so the paint output changes every tick.
@@ -259,7 +296,9 @@ impl Widget for DancingStrings {
     /// visibility gate short-circuits at the enclosing Window when the
     /// Dancing Strings demo is closed, so this doesn't keep the loop
     /// running when the widget isn't on screen.
-    fn needs_paint(&self) -> bool { true }
+    fn needs_paint(&self) -> bool {
+        true
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -293,11 +332,19 @@ impl Widget for DancingStrings {
             Color::rgba(0.0, 0.0, 0.0, 240.0 / 255.0)
         };
         // Trans-flag gradient endpoints (egui hex_colors).
-        let center_color = Color::rgb(0x5B as f32 / 255.0, 0xCE as f32 / 255.0, 0xFA as f32 / 255.0);
-        let outer_color  = Color::rgb(0xF5 as f32 / 255.0, 0xA9 as f32 / 255.0, 0xB8 as f32 / 255.0);
+        let center_color = Color::rgb(
+            0x5B as f32 / 255.0,
+            0xCE as f32 / 255.0,
+            0xFA as f32 / 255.0,
+        );
+        let outer_color = Color::rgb(
+            0xF5 as f32 / 255.0,
+            0xA9 as f32 / 255.0,
+            0xB8 as f32 / 255.0,
+        );
 
         let speed = 1.5_f64;
-        let n     = 120_usize;
+        let n = 120_usize;
 
         for &mode_i in &[2_u32, 3, 5] {
             let mode = mode_i as f64;
@@ -311,19 +358,19 @@ impl Widget for DancingStrings {
                 ctx.set_line_width(thickness);
                 let mut prev: Option<(f64, f64)> = None;
                 for i in 0..=n {
-                    let t     = i as f64 / n as f64;
-                    let amp   = (time * speed * mode).sin() / mode;
-                    let y_n   = amp * (t * PI * mode).sin();      // −1..1
-                    // Map: t → x in [0, w];  y_n → y in [0, h] with y_n=−1 at
-                    // the top and y_n=+1 at the bottom of egui's screen.
-                    // Y-up: top = high Y, so flip: y = (1 − y_n) · 0.5 · h.
+                    let t = i as f64 / n as f64;
+                    let amp = (time * speed * mode).sin() / mode;
+                    let y_n = amp * (t * PI * mode).sin(); // −1..1
+                                                           // Map: t → x in [0, w];  y_n → y in [0, h] with y_n=−1 at
+                                                           // the top and y_n=+1 at the bottom of egui's screen.
+                                                           // Y-up: top = high Y, so flip: y = (1 − y_n) · 0.5 · h.
                     let x = t * w;
                     let y = (1.0 - y_n) * 0.5 * h;
 
                     if let Some((px, py)) = prev {
                         // Colour based on midpoint's x-offset from centre.
-                        let mid_x    = (px + x) * 0.5;
-                        let dist_n   = ((mid_x / w) * 2.0 - 1.0).abs() as f32; // 0..1
+                        let mid_x = (px + x) * 0.5;
+                        let dist_n = ((mid_x / w) * 2.0 - 1.0).abs() as f32; // 0..1
                         let col = Color::rgb(
                             lerp_f32(center_color.r, outer_color.r, dist_n),
                             lerp_f32(center_color.g, outer_color.g, dist_n),
@@ -342,28 +389,38 @@ impl Widget for DancingStrings {
                 ctx.set_line_width(thickness);
                 ctx.begin_path();
                 for i in 0..=n {
-                    let t     = i as f64 / n as f64;
-                    let amp   = (time * speed * mode).sin() / mode;
-                    let y_n   = amp * (t * PI * mode).sin();
+                    let t = i as f64 / n as f64;
+                    let amp = (time * speed * mode).sin() / mode;
+                    let y_n = amp * (t * PI * mode).sin();
                     let x = t * w;
                     let y = (1.0 - y_n) * 0.5 * h;
-                    if i == 0 { ctx.move_to(x, y); } else { ctx.line_to(x, y); }
+                    if i == 0 {
+                        ctx.move_to(x, y);
+                    } else {
+                        ctx.line_to(x, y);
+                    }
                 }
                 ctx.stroke();
             }
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 }
 
 #[inline]
-fn lerp_f32(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
 
 /// Build the Dancing Strings demo — Colored checkbox above the animated canvas.
 pub fn dancing_strings(font: Arc<Font>) -> Box<dyn Widget> {
@@ -378,11 +435,14 @@ pub fn dancing_strings(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     let cell = Rc::clone(&colored);
-    col.push(Box::new(
-        agg_gui::Checkbox::new("Colored", Arc::clone(&font), false)
-            .with_state_cell(Rc::clone(&colored))
-            .on_change(move |v| cell.set(v))
-    ), 0.0);
+    col.push(
+        Box::new(
+            agg_gui::Checkbox::new("Colored", Arc::clone(&font), false)
+                .with_state_cell(Rc::clone(&colored))
+                .on_change(move |v| cell.set(v)),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(DancingStrings::new(Rc::clone(&colored))), 1.0);
 
@@ -399,10 +459,10 @@ pub fn dancing_strings(font: Arc<Font>) -> Box<dyn Widget> {
 /// On paint, every stroke is replayed as a connected path.  A "Clear" button
 /// (built outside this widget) can reset the stroke list via an `Rc<RefCell>`.
 struct PaintCanvas {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     /// Completed and in-progress strokes, each a sequence of (x, y) points.
-    strokes:  Vec<Vec<(f64, f64)>>,
+    strokes: Vec<Vec<(f64, f64)>>,
     /// Whether the left mouse button is currently held inside the canvas.
     painting: bool,
 }
@@ -410,9 +470,9 @@ struct PaintCanvas {
 impl PaintCanvas {
     fn new() -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            strokes:  Vec::new(),
+            strokes: Vec::new(),
             painting: false,
         }
     }
@@ -424,11 +484,21 @@ impl PaintCanvas {
 }
 
 impl Widget for PaintCanvas {
-    fn type_name(&self) -> &'static str { "PaintCanvas" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "PaintCanvas"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -457,7 +527,9 @@ impl Widget for PaintCanvas {
         ctx.set_stroke_color(v.accent);
         ctx.set_line_width(2.5);
         for stroke in &self.strokes {
-            if stroke.len() < 2 { continue; }
+            if stroke.len() < 2 {
+                continue;
+            }
             ctx.begin_path();
             let (fx, fy) = stroke[0];
             ctx.move_to(fx, fy);
@@ -470,7 +542,11 @@ impl Widget for PaintCanvas {
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
-            Event::MouseDown { pos, button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
                 self.painting = true;
                 self.strokes.push(vec![(pos.x, pos.y)]);
                 EventResult::Consumed
@@ -485,7 +561,10 @@ impl Widget for PaintCanvas {
                     EventResult::Ignored
                 }
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 if self.painting {
                     self.painting = false;
                     EventResult::Consumed
@@ -498,8 +577,10 @@ impl Widget for PaintCanvas {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 }
 
@@ -513,25 +594,35 @@ impl Widget for PaintCanvas {
 /// container), and handles the Clear button click by accessing the canvas via
 /// `children_mut`.
 struct PaintingRoot {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>, // [0] = FlexColumn toolbar, [1] = PaintCanvas
 }
 
 impl PaintingRoot {
     fn new(toolbar: Box<dyn Widget>, canvas: Box<dyn Widget>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: vec![toolbar, canvas],
         }
     }
 }
 
 impl Widget for PaintingRoot {
-    fn type_name(&self) -> &'static str { "PaintingRoot" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "PaintingRoot"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -558,7 +649,9 @@ impl Widget for PaintingRoot {
         ctx.fill();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Build the Painting demo — a toolbar with a Clear button above the canvas.
@@ -575,15 +668,25 @@ pub fn painting(font: Arc<Font>) -> Box<dyn Widget> {
     // Canvas that polls the clear flag on every layout/paint.
     struct ClearablePaintCanvas {
         inner: PaintCanvas,
-        flag:  Rc<Cell<bool>>,
+        flag: Rc<Cell<bool>>,
     }
 
     impl Widget for ClearablePaintCanvas {
-        fn type_name(&self) -> &'static str { "ClearablePaintCanvas" }
-        fn bounds(&self) -> Rect { self.inner.bounds }
-        fn set_bounds(&mut self, b: Rect) { self.inner.bounds = b; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.inner.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.inner.children }
+        fn type_name(&self) -> &'static str {
+            "ClearablePaintCanvas"
+        }
+        fn bounds(&self) -> Rect {
+            self.inner.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.inner.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.inner.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.inner.children
+        }
 
         fn layout(&mut self, available: Size) -> Size {
             if self.flag.get() {
@@ -608,18 +711,24 @@ pub fn painting(font: Arc<Font>) -> Box<dyn Widget> {
 
     let flag_for_btn = Rc::clone(&clear_flag);
     let toolbar = {
-        let row = agg_gui::FlexRow::new().with_gap(8.0).with_padding(6.0)
-            .add(Box::new(SizedBox::new().with_height(26.0).with_child(Box::new(
-                Button::new("Clear", Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .on_click(move || { flag_for_btn.set(true); })
-            ))));
+        let row = agg_gui::FlexRow::new()
+            .with_gap(8.0)
+            .with_padding(6.0)
+            .add(Box::new(
+                SizedBox::new().with_height(26.0).with_child(Box::new(
+                    Button::new("Clear", Arc::clone(&font))
+                        .with_font_size(12.0)
+                        .on_click(move || {
+                            flag_for_btn.set(true);
+                        }),
+                )),
+            ));
         Box::new(row) as Box<dyn Widget>
     };
 
     let canvas = Box::new(ClearablePaintCanvas {
         inner: PaintCanvas::new(),
-        flag:  Rc::clone(&clear_flag),
+        flag: Rc::clone(&clear_flag),
     });
 
     Box::new(PaintingRoot::new(toolbar, canvas))

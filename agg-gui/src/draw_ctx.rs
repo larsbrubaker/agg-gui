@@ -22,6 +22,21 @@ use agg_rust::comp_op::CompOp;
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
 
+/// Fill rule used when rasterizing closed paths.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FillRule {
+    /// Non-zero winding rule.
+    NonZero,
+    /// Even-odd parity rule.
+    EvenOdd,
+}
+
+impl Default for FillRule {
+    fn default() -> Self {
+        Self::NonZero
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GL paint hook
 // ---------------------------------------------------------------------------
@@ -65,8 +80,11 @@ pub trait DrawCtx {
     fn set_line_width(&mut self, w: f64);
     fn set_line_join(&mut self, join: LineJoin);
     fn set_line_cap(&mut self, cap: LineCap);
+    fn set_miter_limit(&mut self, limit: f64);
+    fn set_line_dash(&mut self, dashes: &[f64], offset: f64);
     fn set_blend_mode(&mut self, mode: CompOp);
     fn set_global_alpha(&mut self, alpha: f64);
+    fn set_fill_rule(&mut self, rule: FillRule);
 
     // ── Font ──────────────────────────────────────────────────────────────────
 

@@ -13,13 +13,13 @@
 //!                         row counter — scrolls up detach, returning sticks.
 //!   6. **Bidirectional**— 100 lorem-ipsum paragraphs, no wrap, both axes.
 
-mod helpers;
 mod appearance;
-mod scroll_to;
-mod many_lines;
-mod large_canvas;
-mod stick_to_end;
 mod bidirectional;
+mod helpers;
+mod large_canvas;
+mod many_lines;
+mod scroll_to;
+mod stick_to_end;
 
 use std::sync::Arc;
 
@@ -28,11 +28,11 @@ use agg_gui::{Font, TabView, Widget};
 pub fn scrolling_demo(font: Arc<Font>) -> Box<dyn Widget> {
     let tv = TabView::new(Arc::clone(&font))
         .with_font_size(12.0)
-        .add_tab("Appearance",    appearance::build(Arc::clone(&font)))
-        .add_tab("Scroll to",     scroll_to::build(Arc::clone(&font)))
-        .add_tab("Many lines",    many_lines::build(Arc::clone(&font)))
-        .add_tab("Large canvas",  large_canvas::build(Arc::clone(&font)))
-        .add_tab("Stick to end",  stick_to_end::build(Arc::clone(&font)))
+        .add_tab("Appearance", appearance::build(Arc::clone(&font)))
+        .add_tab("Scroll to", scroll_to::build(Arc::clone(&font)))
+        .add_tab("Many lines", many_lines::build(Arc::clone(&font)))
+        .add_tab("Large canvas", large_canvas::build(Arc::clone(&font)))
+        .add_tab("Stick to end", stick_to_end::build(Arc::clone(&font)))
         .add_tab("Bidirectional", bidirectional::build(Arc::clone(&font)));
     Box::new(tv)
 }

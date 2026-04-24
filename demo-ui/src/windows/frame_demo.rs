@@ -21,29 +21,34 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{
-    Button, Checkbox, Color, ColorPicker, DragValue, DrawCtx, Event, EventResult,
-    FlexColumn, FlexRow, Font, Label, Rect, Size, Widget,
-};
 use agg_gui::layout_props::{HAnchor, VAnchor};
 use agg_gui::widget::paint_subtree;
-
+use agg_gui::{
+    Button, Checkbox, Color, ColorPicker, DragValue, DrawCtx, Event, EventResult, FlexColumn,
+    FlexRow, Font, Label, Rect, Size, Widget,
+};
 
 // ── egui FrameDemo defaults ──────────────────────────────────────────────────
 
-const DEF_CORNER_R:   f64 = 14.0;
-const DEF_INNER_M:    f64 = 12.0;
-const DEF_OUTER_M:    f64 = 24.0;
-const DEF_STROKE_W:   f64 = 1.0;
+const DEF_CORNER_R: f64 = 14.0;
+const DEF_INNER_M: f64 = 12.0;
+const DEF_OUTER_M: f64 = 24.0;
+const DEF_STROKE_W: f64 = 1.0;
 
-const DEF_SHADOW_DX:    f64 = 8.0;
-const DEF_SHADOW_DY:    f64 = 12.0;
-const DEF_SHADOW_BLUR:  f64 = 16.0;
-const DEF_SHADOW_SPREAD:f64 = 0.0;
+const DEF_SHADOW_DX: f64 = 8.0;
+const DEF_SHADOW_DY: f64 = 12.0;
+const DEF_SHADOW_BLUR: f64 = 16.0;
+const DEF_SHADOW_SPREAD: f64 = 0.0;
 
-fn def_fill()        -> Color { Color::rgba(97.0/255.0, 0.0, 1.0, 128.0/255.0) }
-fn def_stroke_col()  -> Color { Color::rgb(0.5, 0.5, 0.5) }
-fn def_shadow_col()  -> Color { Color::rgba(0.0, 0.0, 0.0, 180.0/255.0) }
+fn def_fill() -> Color {
+    Color::rgba(97.0 / 255.0, 0.0, 1.0, 128.0 / 255.0)
+}
+fn def_stroke_col() -> Color {
+    Color::rgb(0.5, 0.5, 0.5)
+}
+fn def_shadow_col() -> Color {
+    Color::rgba(0.0, 0.0, 0.0, 180.0 / 255.0)
+}
 
 const PREVIEW_W: f64 = 160.0;
 const PREVIEW_H: f64 = 140.0;
@@ -65,42 +70,53 @@ struct FourVal {
 impl FourVal {
     fn uniform(v: f64) -> Self {
         Self {
-            vals: [Rc::new(Cell::new(v)), Rc::new(Cell::new(v)),
-                   Rc::new(Cell::new(v)), Rc::new(Cell::new(v))],
+            vals: [
+                Rc::new(Cell::new(v)),
+                Rc::new(Cell::new(v)),
+                Rc::new(Cell::new(v)),
+                Rc::new(Cell::new(v)),
+            ],
             same: Rc::new(Cell::new(true)),
         }
     }
-    fn set_all(&self, v: f64) { for c in &self.vals { c.set(v); } self.same.set(true); }
-    fn get(&self, i: usize) -> f64 { self.vals[i].get() }
+    fn set_all(&self, v: f64) {
+        for c in &self.vals {
+            c.set(v);
+        }
+        self.same.set(true);
+    }
+    fn get(&self, i: usize) -> f64 {
+        self.vals[i].get()
+    }
 }
 
 struct FrameState {
-    inner_m:    FourVal,          // [L, R, T, B]
-    outer_m:    FourVal,
-    corner_r:   FourVal,          // [NW, NE, SW, SE]
-    shadow_dx:  Rc<Cell<f64>>,
-    shadow_dy:  Rc<Cell<f64>>,
-    shadow_blur:Rc<Cell<f64>>,
+    inner_m: FourVal, // [L, R, T, B]
+    outer_m: FourVal,
+    corner_r: FourVal, // [NW, NE, SW, SE]
+    shadow_dx: Rc<Cell<f64>>,
+    shadow_dy: Rc<Cell<f64>>,
+    shadow_blur: Rc<Cell<f64>>,
     shadow_spread: Rc<Cell<f64>>,
     shadow_col: Rc<Cell<Color>>,
-    fill:       Rc<Cell<Color>>,
-    stroke_w:   Rc<Cell<f64>>,
+    fill: Rc<Cell<Color>>,
+    stroke_w: Rc<Cell<f64>>,
     stroke_col: Rc<Cell<Color>>,
 }
 
 impl FrameState {
     fn defaults() -> Self {
         Self {
-            inner_m:    FourVal::uniform(DEF_INNER_M),
-            outer_m:    FourVal::uniform(DEF_OUTER_M),
-            corner_r:   FourVal::uniform(DEF_CORNER_R),
-            shadow_dx:  Rc::new(Cell::new(DEF_SHADOW_DX)),
-            shadow_dy:  Rc::new(Cell::new(DEF_SHADOW_DY)),
-            shadow_blur:Rc::new(Cell::new(DEF_SHADOW_BLUR)),
+            inner_m: FourVal::uniform(DEF_INNER_M),
+            outer_m: FourVal::uniform(DEF_OUTER_M),
+            corner_r: FourVal::uniform(DEF_CORNER_R),
+            shadow_dx: Rc::new(Cell::new(DEF_SHADOW_DX)),
+            shadow_dy: Rc::new(Cell::new(DEF_SHADOW_DY)),
+            shadow_blur: Rc::new(Cell::new(DEF_SHADOW_BLUR)),
             shadow_spread: Rc::new(Cell::new(DEF_SHADOW_SPREAD)),
             shadow_col: Rc::new(Cell::new(def_shadow_col())),
-            fill:       Rc::new(Cell::new(def_fill())),
-            stroke_w:   Rc::new(Cell::new(DEF_STROKE_W)),
+            fill: Rc::new(Cell::new(def_fill())),
+            stroke_w: Rc::new(Cell::new(DEF_STROKE_W)),
             stroke_col: Rc::new(Cell::new(def_stroke_col())),
         }
     }
@@ -136,8 +152,14 @@ const KAPPA: f64 = 0.5522847498307933;
 /// don't produce kinks.
 fn rounded_rect_4(
     ctx: &mut dyn DrawCtx,
-    x: f64, y: f64, w: f64, h: f64,
-    r_nw: f64, r_ne: f64, r_sw: f64, r_se: f64,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    r_nw: f64,
+    r_ne: f64,
+    r_sw: f64,
+    r_se: f64,
 ) {
     let max_r = (w.min(h)) * 0.5;
     let r_nw = r_nw.clamp(0.0, max_r);
@@ -152,34 +174,39 @@ fn rounded_rect_4(
     ctx.line_to(x + w - r_se, y);
     // SE corner: bottom-right, curve up to right edge.
     ctx.cubic_to(
-        x + w - r_se + k * r_se, y,
-        x + w,                   y + r_se - k * r_se,
-        x + w,                   y + r_se,
+        x + w - r_se + k * r_se,
+        y,
+        x + w,
+        y + r_se - k * r_se,
+        x + w,
+        y + r_se,
     );
     // Right edge → NE corner start.
     ctx.line_to(x + w, y + h - r_ne);
     // NE corner: top-right, curve left to top edge.
     ctx.cubic_to(
-        x + w,                   y + h - r_ne + k * r_ne,
-        x + w - r_ne + k * r_ne, y + h,
-        x + w - r_ne,            y + h,
+        x + w,
+        y + h - r_ne + k * r_ne,
+        x + w - r_ne + k * r_ne,
+        y + h,
+        x + w - r_ne,
+        y + h,
     );
     // Top edge → NW corner start.
     ctx.line_to(x + r_nw, y + h);
     // NW corner: top-left, curve down to left edge.
     ctx.cubic_to(
-        x + r_nw - k * r_nw, y + h,
-        x,                   y + h - r_nw + k * r_nw,
-        x,                   y + h - r_nw,
+        x + r_nw - k * r_nw,
+        y + h,
+        x,
+        y + h - r_nw + k * r_nw,
+        x,
+        y + h - r_nw,
     );
     // Left edge → SW corner start.
     ctx.line_to(x, y + r_sw);
     // SW corner: bottom-left, curve right to bottom edge.
-    ctx.cubic_to(
-        x,                   y + r_sw - k * r_sw,
-        x + r_sw - k * r_sw, y,
-        x + r_sw,            y,
-    );
+    ctx.cubic_to(x, y + r_sw - k * r_sw, x + r_sw - k * r_sw, y, x + r_sw, y);
     ctx.close_path();
 }
 
@@ -206,49 +233,79 @@ impl IntrinsicRow {
             bounds: Rect::default(),
             children,
             base: agg_gui::WidgetBase::new(),
-            gap, padding,
+            gap,
+            padding,
         }
     }
 }
 
 impl Widget for IntrinsicRow {
-    fn type_name(&self) -> &'static str { "IntrinsicRow" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "IntrinsicRow"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> agg_gui::Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> agg_gui::Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let n = self.children.len();
-        if n == 0 { return Size::new(0.0, 0.0); }
+        if n == 0 {
+            return Size::new(0.0, 0.0);
+        }
         let inner_h = (available.height - self.padding * 2.0).max(0.0);
 
         // Measure each child at its natural size.  For children whose layout
         // returns `available.width` (flex containers), we pass the child's own
         // `max_size.width` so they self-cap.
-        let mut widths  = vec![0.0f64; n];
+        let mut widths = vec![0.0f64; n];
         let mut heights = vec![0.0f64; n];
         for i in 0..n {
             let max_w = self.children[i].max_size().width;
-            let child_avail_w = if max_w.is_finite() { max_w } else { available.width };
+            let child_avail_w = if max_w.is_finite() {
+                max_w
+            } else {
+                available.width
+            };
             let sz = self.children[i].layout(Size::new(child_avail_w, inner_h));
-            widths[i]  = sz.width .clamp(self.children[i].min_size().width,
-                                         self.children[i].max_size().width);
-            heights[i] = sz.height.clamp(self.children[i].min_size().height,
-                                         self.children[i].max_size().height);
+            widths[i] = sz.width.clamp(
+                self.children[i].min_size().width,
+                self.children[i].max_size().width,
+            );
+            heights[i] = sz.height.clamp(
+                self.children[i].min_size().height,
+                self.children[i].max_size().height,
+            );
         }
 
         let total_w: f64 = widths.iter().sum::<f64>()
             + self.gap * (n.saturating_sub(1)) as f64
             + self.padding * 2.0;
-        let max_h: f64 = heights.iter().cloned().fold(0.0f64, f64::max)
-            + self.padding * 2.0;
+        let max_h: f64 = heights.iter().cloned().fold(0.0f64, f64::max) + self.padding * 2.0;
 
         // Place.
         let mut cursor_x = self.padding;
@@ -266,7 +323,9 @@ impl Widget for IntrinsicRow {
     }
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ── Reactive preview widget ──────────────────────────────────────────────────
@@ -275,10 +334,10 @@ impl Widget for IntrinsicRow {
 /// entirely from shared state cells each paint pass so the preview updates
 /// live as the user drags any control.
 struct FramePreview {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    st:       Rc<FrameState>,
-    content:  Label,
+    st: Rc<FrameState>,
+    content: Label,
 }
 
 impl FramePreview {
@@ -305,18 +364,28 @@ impl FramePreview {
 
         let frame_w = content_w + im_l + im_r;
         let frame_h = content_h + im_t + im_b;
-        let wrap_w  = (frame_w + om_l + om_r).max(PREVIEW_W);
-        let wrap_h  = (frame_h + om_t + om_b).max(PREVIEW_H);
+        let wrap_w = (frame_w + om_l + om_r).max(PREVIEW_W);
+        let wrap_h = (frame_h + om_t + om_b).max(PREVIEW_H);
         (wrap_w, wrap_h)
     }
 }
 
 impl Widget for FramePreview {
-    fn type_name(&self) -> &'static str { "FramePreview" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "FramePreview"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Preview size is derived from content + inner_margin (frame) +
@@ -325,14 +394,17 @@ impl Widget for FramePreview {
         // window frame itself — exactly what the user asked for.
         let (w, h) = self.preview_size();
         self.bounds = Rect::new(0.0, 0.0, w, h);
-        let _ = self.content.layout(Size::new(available.width.max(1.0), available.height.max(1.0)));
+        let _ = self.content.layout(Size::new(
+            available.width.max(1.0),
+            available.height.max(1.0),
+        ));
         Size::new(w, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v  = ctx.visuals();
-        let w  = self.bounds.width;
-        let h  = self.bounds.height;
+        let v = ctx.visuals();
+        let w = self.bounds.width;
+        let h = self.bounds.height;
         let st = &self.st;
 
         let om_l = st.outer_m.get(0);
@@ -348,13 +420,13 @@ impl Widget for FramePreview {
         let r_sw = st.corner_r.get(2);
         let r_se = st.corner_r.get(3);
 
-        let sw   = st.stroke_w.get();
+        let sw = st.stroke_w.get();
         let fill = st.fill.get();
         let stroke_col = st.stroke_col.get();
         let shadow_col = st.shadow_col.get();
-        let sdx  = st.shadow_dx.get();
-        let sdy  = st.shadow_dy.get();
-        let sblur= st.shadow_blur.get();
+        let sdx = st.shadow_dx.get();
+        let sdy = st.shadow_dy.get();
+        let sblur = st.shadow_blur.get();
         let sspread = st.shadow_spread.get();
 
         // Outer wrapper frame (thin noninteractive border at the edge of the
@@ -385,17 +457,23 @@ impl Widget for FramePreview {
         let sw_sh = iw + 2.0 * sspread;
         let sh_sh = ih + 2.0 * sspread;
         for i in (0..SHADOW_STEPS).rev() {
-            let t     = i as f64 / SHADOW_STEPS as f64;
-            let infl  = t * sblur;
+            let t = i as f64 / SHADOW_STEPS as f64;
+            let infl = t * sblur;
             let falloff = (1.0 - t).powi(2) as f32;
             let alpha = shadow_col.a * falloff / SHADOW_STEPS as f32 * 6.0;
-            ctx.set_fill_color(Color::rgba(
-                shadow_col.r, shadow_col.g, shadow_col.b, alpha));
+            ctx.set_fill_color(Color::rgba(shadow_col.r, shadow_col.g, shadow_col.b, alpha));
             ctx.begin_path();
-            rounded_rect_4(ctx,
-                sx_base - infl, sy_base - infl,
-                sw_sh + 2.0 * infl, sh_sh + 2.0 * infl,
-                r_nw + infl, r_ne + infl, r_sw + infl, r_se + infl);
+            rounded_rect_4(
+                ctx,
+                sx_base - infl,
+                sy_base - infl,
+                sw_sh + 2.0 * infl,
+                sh_sh + 2.0 * infl,
+                r_nw + infl,
+                r_ne + infl,
+                r_sw + infl,
+                r_se + infl,
+            );
             ctx.fill();
         }
 
@@ -420,14 +498,17 @@ impl Widget for FramePreview {
         let cx = ix + im_l;
         let cy = iy + im_b;
 
-        self.content.set_bounds(Rect::new(0.0, 0.0, content_w, content_h));
+        self.content
+            .set_bounds(Rect::new(0.0, 0.0, content_w, content_h));
         ctx.save();
         ctx.translate(cx, cy);
         paint_subtree(&mut self.content, ctx);
         ctx.restore();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ── FourValueField — "same" checkbox with 1 or 4 DragValues ──────────────────
@@ -461,11 +542,21 @@ struct FourValInner {
 }
 
 impl FourValueField {
-    fn new(four: &FourVal, labels: [&'static str; 4], font: Arc<Font>,
-           min: f64, max: f64, speed: f64) -> Self {
+    fn new(
+        four: &FourVal,
+        labels: [&'static str; 4],
+        font: Arc<Font>,
+        min: f64,
+        max: f64,
+        speed: f64,
+    ) -> Self {
         let inner = Rc::new(FourValInner {
-            vals: [Rc::clone(&four.vals[0]), Rc::clone(&four.vals[1]),
-                   Rc::clone(&four.vals[2]), Rc::clone(&four.vals[3])],
+            vals: [
+                Rc::clone(&four.vals[0]),
+                Rc::clone(&four.vals[1]),
+                Rc::clone(&four.vals[2]),
+                Rc::clone(&four.vals[3]),
+            ],
             same: Rc::clone(&four.same),
         });
         Self {
@@ -475,7 +566,9 @@ impl FourValueField {
             font_size: 13.0,
             labels,
             four: inner,
-            min, max, speed,
+            min,
+            max,
+            speed,
             last_built_same: Cell::new(None),
         }
     }
@@ -498,24 +591,33 @@ impl FourValueField {
                 if now_same {
                     // Collapse to the average of the four values.
                     let avg = (four_for_set.vals[0].get()
-                             + four_for_set.vals[1].get()
-                             + four_for_set.vals[2].get()
-                             + four_for_set.vals[3].get()) / 4.0;
-                    for c in &four_for_set.vals { c.set(avg); }
+                        + four_for_set.vals[1].get()
+                        + four_for_set.vals[2].get()
+                        + four_for_set.vals[3].get())
+                        / 4.0;
+                    for c in &four_for_set.vals {
+                        c.set(avg);
+                    }
                 }
             });
         top_row = top_row.add(Box::new(same_cb));
 
         if same {
             let v0 = Rc::clone(&self.four.vals[0]);
-            let all = [Rc::clone(&self.four.vals[0]), Rc::clone(&self.four.vals[1]),
-                       Rc::clone(&self.four.vals[2]), Rc::clone(&self.four.vals[3])];
+            let all = [
+                Rc::clone(&self.four.vals[0]),
+                Rc::clone(&self.four.vals[1]),
+                Rc::clone(&self.four.vals[2]),
+                Rc::clone(&self.four.vals[3]),
+            ];
             let dv = DragValue::new(v0.get(), self.min, self.max, Arc::clone(&self.font))
                 .with_speed(self.speed)
                 .with_decimals(0)
                 .with_min_size(Size::new(70.0, 22.0))
                 .on_change(move |v| {
-                    for c in &all { c.set(v); }
+                    for c in &all {
+                        c.set(v);
+                    }
                 });
             top_row = top_row.add_flex(Box::new(dv), 1.0);
         }
@@ -540,7 +642,12 @@ impl FourValueField {
 
                 let lbl = Label::new(self.labels[i], Arc::clone(&self.font))
                     .with_font_size(self.font_size)
-                    .with_margin(agg_gui::Insets { left: 20.0, right: 0.0, top: 0.0, bottom: 0.0 })
+                    .with_margin(agg_gui::Insets {
+                        left: 20.0,
+                        right: 0.0,
+                        top: 0.0,
+                        bottom: 0.0,
+                    })
                     .with_min_size(Size::new(46.0, 0.0))
                     .with_max_size(Size::new(46.0, f64::MAX));
                 let row = FlexRow::new()
@@ -557,11 +664,21 @@ impl FourValueField {
 }
 
 impl Widget for FourValueField {
-    fn type_name(&self) -> &'static str { "FourValueField" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "FourValueField"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Rebuild if `same` changed (or first-layout).
@@ -589,7 +706,9 @@ impl Widget for FourValueField {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ── Shadow editor — mini grid of 4 DragValues + colour picker ────────────────
@@ -600,10 +719,18 @@ fn shadow_editor(st: &Rc<FrameState>, font: Arc<Font>) -> Box<dyn Widget> {
     let bl_c = Rc::clone(&st.shadow_blur);
     let sp_c = Rc::clone(&st.shadow_spread);
 
-    let dx = labeled_drag("x:",      dx_c.clone(), -100.0, 100.0, 1.0, 0, Arc::clone(&font));
-    let dy = labeled_drag("y:",      dy_c.clone(), -100.0, 100.0, 1.0, 0, Arc::clone(&font));
-    let bl = labeled_drag("blur:",   bl_c.clone(),    0.0, 100.0, 1.0, 0, Arc::clone(&font));
-    let sp = labeled_drag("spread:", sp_c.clone(),    0.0, 100.0, 1.0, 0, Arc::clone(&font));
+    let dx = labeled_drag("x:", dx_c.clone(), -100.0, 100.0, 1.0, 0, Arc::clone(&font));
+    let dy = labeled_drag("y:", dy_c.clone(), -100.0, 100.0, 1.0, 0, Arc::clone(&font));
+    let bl = labeled_drag("blur:", bl_c.clone(), 0.0, 100.0, 1.0, 0, Arc::clone(&font));
+    let sp = labeled_drag(
+        "spread:",
+        sp_c.clone(),
+        0.0,
+        100.0,
+        1.0,
+        0,
+        Arc::clone(&font),
+    );
 
     let col_cell = Rc::clone(&st.shadow_col);
     let col_pick = ColorPicker::new(col_cell, Arc::clone(&font))
@@ -612,9 +739,16 @@ fn shadow_editor(st: &Rc<FrameState>, font: Arc<Font>) -> Box<dyn Widget> {
 
     // `add_flex(1.0)` so x & y (and blur & spread) share the row's width
     // equally instead of each one claiming the full width.
-    let row1 = FlexRow::new().with_gap(6.0).add_flex(dx, 1.0).add_flex(dy, 1.0);
-    let row2 = FlexRow::new().with_gap(6.0).add_flex(bl, 1.0).add_flex(sp, 1.0);
-    let col  = FlexColumn::new().with_gap(4.0)
+    let row1 = FlexRow::new()
+        .with_gap(6.0)
+        .add_flex(dx, 1.0)
+        .add_flex(dy, 1.0);
+    let row2 = FlexRow::new()
+        .with_gap(6.0)
+        .add_flex(bl, 1.0)
+        .add_flex(sp, 1.0);
+    let col = FlexColumn::new()
+        .with_gap(4.0)
         .add(Box::new(row1))
         .add(Box::new(row2))
         .add(Box::new(col_pick));
@@ -624,12 +758,12 @@ fn shadow_editor(st: &Rc<FrameState>, font: Arc<Font>) -> Box<dyn Widget> {
 
 fn labeled_drag(
     prefix: &'static str,
-    cell:   Rc<Cell<f64>>,
-    min:    f64,
-    max:    f64,
-    speed:  f64,
+    cell: Rc<Cell<f64>>,
+    min: f64,
+    max: f64,
+    speed: f64,
     decimals: usize,
-    font:   Arc<Font>,
+    font: Arc<Font>,
 ) -> Box<dyn Widget> {
     let c = Rc::clone(&cell);
     let row = FlexRow::new()
@@ -638,15 +772,18 @@ fn labeled_drag(
             Label::new(prefix, Arc::clone(&font))
                 .with_font_size(12.0)
                 .with_min_size(Size::new(40.0, 0.0))
-                .with_max_size(Size::new(40.0, f64::MAX))
+                .with_max_size(Size::new(40.0, f64::MAX)),
         ))
-        .add_flex(Box::new(
-            DragValue::new(cell.get(), min, max, font)
-                .with_speed(speed)
-                .with_decimals(decimals)
-                .with_min_size(Size::new(60.0, 22.0))
-                .on_change(move |v| c.set(v))
-        ), 1.0);
+        .add_flex(
+            Box::new(
+                DragValue::new(cell.get(), min, max, font)
+                    .with_speed(speed)
+                    .with_decimals(decimals)
+                    .with_min_size(Size::new(60.0, 22.0))
+                    .on_change(move |v| c.set(v)),
+            ),
+            1.0,
+        );
     Box::new(row)
 }
 
@@ -668,16 +805,17 @@ fn stroke_editor(st: &Rc<FrameState>, font: Arc<Font>) -> Box<dyn Widget> {
         .with_allow_none(false)
         .with_font_size(12.0);
     // Width on the left, colour picker (flex) takes the rest of the row.
-    Box::new(FlexRow::new().with_gap(6.0)
-        .add(Box::new(dv))
-        .add_flex(Box::new(cp), 1.0))
+    Box::new(
+        FlexRow::new()
+            .with_gap(6.0)
+            .add(Box::new(dv))
+            .add_flex(Box::new(cp), 1.0),
+    )
 }
 
 // ── Full row: [label][field] ────────────────────────────────────────────────
 
-fn labeled_row(label: &'static str, field: Box<dyn Widget>, font: Arc<Font>)
-    -> Box<dyn Widget>
-{
+fn labeled_row(label: &'static str, field: Box<dyn Widget>, font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(
         FlexRow::new()
             .with_gap(8.0)
@@ -685,15 +823,18 @@ fn labeled_row(label: &'static str, field: Box<dyn Widget>, font: Arc<Font>)
                 Label::new(label, Arc::clone(&font))
                     .with_font_size(13.0)
                     .with_min_size(Size::new(LABEL_W, 0.0))
-                    .with_max_size(Size::new(LABEL_W, f64::MAX))
+                    .with_max_size(Size::new(LABEL_W, f64::MAX)),
             ))
-            .add_flex(field, 1.0)
+            .add_flex(field, 1.0),
     )
 }
 
 fn field_row(f: Box<dyn Widget>) -> Box<dyn Widget> {
-    Box::new(FlexRow::new().add_flex(f, 1.0)
-        .with_min_size(Size::new(FIELD_W, 0.0)))
+    Box::new(
+        FlexRow::new()
+            .add_flex(f, 1.0)
+            .with_min_size(Size::new(FIELD_W, 0.0)),
+    )
 }
 
 // ── Main builder ─────────────────────────────────────────────────────────────
@@ -703,22 +844,35 @@ pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
     let st = Rc::new(FrameState::defaults());
 
     // ── Left column: controls ───────────────────────────────────────────────
-    let inner = FourValueField::new(&st.inner_m,
-        ["Left", "Right", "Top", "Bottom"], Arc::clone(&font),
-        0.0, 100.0, 1.0);
-    let outer = FourValueField::new(&st.outer_m,
-        ["Left", "Right", "Top", "Bottom"], Arc::clone(&font),
-        0.0, 100.0, 1.0);
-    let radius = FourValueField::new(&st.corner_r,
-        ["NW", "NE", "SW", "SE"], Arc::clone(&font),
-        0.0, 100.0, 1.0);
+    let inner = FourValueField::new(
+        &st.inner_m,
+        ["Left", "Right", "Top", "Bottom"],
+        Arc::clone(&font),
+        0.0,
+        100.0,
+        1.0,
+    );
+    let outer = FourValueField::new(
+        &st.outer_m,
+        ["Left", "Right", "Top", "Bottom"],
+        Arc::clone(&font),
+        0.0,
+        100.0,
+        1.0,
+    );
+    let radius = FourValueField::new(
+        &st.corner_r,
+        ["NW", "NE", "SW", "SE"],
+        Arc::clone(&font),
+        0.0,
+        100.0,
+        1.0,
+    );
 
-    let fill_pick = ColorPicker::new(Rc::clone(&st.fill), Arc::clone(&font))
-        .with_font_size(12.0);
+    let fill_pick = ColorPicker::new(Rc::clone(&st.fill), Arc::clone(&font)).with_font_size(12.0);
 
     let st_reset = Rc::clone(&st);
-    let reset = Button::new("Reset", Arc::clone(&font))
-        .on_click(move || st_reset.reset());
+    let reset = Button::new("Reset", Arc::clone(&font)).on_click(move || st_reset.reset());
 
     let controls = FlexColumn::new()
         .with_gap(8.0)
@@ -726,22 +880,46 @@ pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_min_size(Size::new(CONTROLS_W, 0.0))
         .with_max_size(Size::new(CONTROLS_W, f64::MAX))
         .with_v_anchor(VAnchor::FIT)
-        .add(labeled_row("Inner margin",  field_row(Box::new(inner)),  Arc::clone(&font)))
-        .add(labeled_row("Outer margin",  field_row(Box::new(outer)),  Arc::clone(&font)))
-        .add(labeled_row("Corner radius", field_row(Box::new(radius)), Arc::clone(&font)))
-        .add(labeled_row("Shadow",        field_row(shadow_editor(&st, Arc::clone(&font))), Arc::clone(&font)))
-        .add(labeled_row("Fill",          field_row(Box::new(fill_pick)), Arc::clone(&font)))
-        .add(labeled_row("Stroke",        field_row(stroke_editor(&st, Arc::clone(&font))), Arc::clone(&font)))
+        .add(labeled_row(
+            "Inner margin",
+            field_row(Box::new(inner)),
+            Arc::clone(&font),
+        ))
+        .add(labeled_row(
+            "Outer margin",
+            field_row(Box::new(outer)),
+            Arc::clone(&font),
+        ))
+        .add(labeled_row(
+            "Corner radius",
+            field_row(Box::new(radius)),
+            Arc::clone(&font),
+        ))
+        .add(labeled_row(
+            "Shadow",
+            field_row(shadow_editor(&st, Arc::clone(&font))),
+            Arc::clone(&font),
+        ))
+        .add(labeled_row(
+            "Fill",
+            field_row(Box::new(fill_pick)),
+            Arc::clone(&font),
+        ))
+        .add(labeled_row(
+            "Stroke",
+            field_row(stroke_editor(&st, Arc::clone(&font))),
+            Arc::clone(&font),
+        ))
         .add(Box::new(reset));
 
     // ── Right column: live preview ──────────────────────────────────────────
     let preview = FramePreview {
-        bounds:   Rect::default(),
+        bounds: Rect::default(),
         children: Vec::new(),
-        st:       Rc::clone(&st),
-        content:  Label::new("Content", Arc::clone(&font))
-                      .with_font_size(13.0)
-                      .with_color(Color::white()),
+        st: Rc::clone(&st),
+        content: Label::new("Content", Arc::clone(&font))
+            .with_font_size(13.0)
+            .with_color(Color::white()),
     };
 
     // ── Main row ────────────────────────────────────────────────────────────
@@ -749,7 +927,9 @@ pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
     // `IntrinsicRow` reports the SUM of its children widths (not `available`),
     // so `Window::with_auto_size` can grow / shrink the window to match the
     // preview's outer_margin size.
-    Box::new(
-        IntrinsicRow::new(8.0, 8.0, vec![Box::new(controls), Box::new(preview)])
-    )
+    Box::new(IntrinsicRow::new(
+        8.0,
+        8.0,
+        vec![Box::new(controls), Box::new(preview)],
+    ))
 }

@@ -25,6 +25,7 @@
 
 use tess2_rust::{ElementType, Tessellator, WindingRule};
 use agg_rust::basics::{is_end_poly, is_move_to, is_stop, VertexSource};
+use crate::draw_ctx::FillRule;
 
 // ---------------------------------------------------------------------------
 // Universal AGG VertexSource → tess2 contours
@@ -251,6 +252,7 @@ pub fn expand_aa_halo(
 pub fn tessellate_path_aa<VS: VertexSource>(
     path: &mut VS,
     halo_px: f32,
+    fill_rule: FillRule,
 ) -> Option<(Vec<[f32; 3]>, Vec<u32>)> {
     let contours = agg_path_to_contours(path);
     if contours.is_empty() { return None; }
@@ -267,7 +269,7 @@ pub fn tessellate_path_aa<VS: VertexSource>(
             let flat: Vec<f64> = c.iter().flat_map(|v| [v[0] as f64, v[1] as f64]).collect();
             tess.add_contour(2, &flat);
         }
-        let ok = tess.tessellate(WindingRule::Odd, ElementType::Polygons, 3, 2, None);
+        let ok = tess.tessellate(to_tess_winding_rule(fill_rule), ElementType::Polygons, 3, 2, None);
         if !ok || tess.vertex_count() == 0 { return None; }
         TessOut {
             verts:   tess.vertices().iter().map(|&v| v as f32).collect(),
@@ -352,6 +354,13 @@ pub fn tessellate_path_aa<VS: VertexSource>(
     }
 
     Some((out_verts, out_indices))
+}
+
+fn to_tess_winding_rule(fill_rule: FillRule) -> WindingRule {
+    match fill_rule {
+        FillRule::NonZero => WindingRule::NonZero,
+        FillRule::EvenOdd => WindingRule::Odd,
+    }
 }
 
 /// Tessellate a filled polygon described by one or more contour rings.

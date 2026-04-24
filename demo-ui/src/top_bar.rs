@@ -11,13 +11,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{
-    Color, DrawCtx, Event, EventResult,
-    FlexRow, Font, Hyperlink, Rect, Size, SizedBox, VAnchor, Widget,
-    ThemePreference, Visuals, set_visuals,
-};
-use agg_gui::widgets::label::Label;
 use agg_gui::widget::paint_subtree;
+use agg_gui::widgets::label::Label;
+use agg_gui::{
+    set_visuals, Color, DrawCtx, Event, EventResult, FlexRow, Font, Hyperlink, Rect, Size,
+    SizedBox, ThemePreference, VAnchor, Visuals, Widget,
+};
 
 /// Detect OS colour scheme and return the matching `ThemePreference`.
 pub fn detect_system_theme() -> ThemePreference {
@@ -30,8 +29,8 @@ pub fn detect_system_theme() -> ThemePreference {
 /// Apply visuals matching the current OS color scheme.
 fn apply_system_visuals() {
     match detect_system_theme() {
-        ThemePreference::Light  => set_visuals(Visuals::light()),
-        ThemePreference::Dark   => set_visuals(Visuals::dark()),
+        ThemePreference::Light => set_visuals(Visuals::light()),
+        ThemePreference::Dark => set_visuals(Visuals::dark()),
         ThemePreference::System => {} // won't happen
     }
 }
@@ -42,32 +41,30 @@ fn apply_system_visuals() {
 /// Writes the chosen `Visuals` via `set_visuals()` when clicked.
 /// Text is rendered through backbuffered Label children.
 struct ThemeToggle {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty — labels are stored separately
-    pref:     Rc<Cell<ThemePreference>>,
-    hovered:  Option<usize>,
+    pref: Rc<Cell<ThemePreference>>,
+    hovered: Option<usize>,
     /// One Label per segment. Positioned and painted manually.
-    labels:   Vec<Label>,
+    labels: Vec<Label>,
 }
 
 impl ThemeToggle {
     const BTN_W: f64 = 68.0;
     const BTN_H: f64 = 24.0;
     // Font Awesome 4 icon prefixes: sun-o, moon-o, desktop.
-    const LABELS: &'static [&'static str] = &[
-        "\u{F185} Light",
-        "\u{F186} Dark",
-        "\u{F108} System",
-    ];
+    const LABELS: &'static [&'static str] = &["\u{F185} Light", "\u{F186} Dark", "\u{F108} System"];
     const PREFS: [ThemePreference; 3] = [
-        ThemePreference::Light, ThemePreference::Dark, ThemePreference::System,
+        ThemePreference::Light,
+        ThemePreference::Dark,
+        ThemePreference::System,
     ];
 
     fn new(font: Arc<Font>, pref: Rc<Cell<ThemePreference>>) -> Self {
-        let labels = Self::LABELS.iter().map(|text| {
-            Label::new(*text, Arc::clone(&font))
-                .with_font_size(11.0)
-        }).collect();
+        let labels = Self::LABELS
+            .iter()
+            .map(|text| Label::new(*text, Arc::clone(&font)).with_font_size(11.0))
+            .collect();
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -77,7 +74,9 @@ impl ThemeToggle {
         }
     }
 
-    fn group_x(&self) -> f64 { 8.0 }
+    fn group_x(&self) -> f64 {
+        8.0
+    }
 
     fn btn_rect(&self, idx: usize) -> Rect {
         let gx = self.group_x();
@@ -88,20 +87,30 @@ impl ThemeToggle {
     fn hit_idx(&self, pos: agg_gui::Point) -> Option<usize> {
         for i in 0..3 {
             let r = self.btn_rect(i);
-            if pos.x >= r.x && pos.x <= r.x + r.width
-                && pos.y >= r.y && pos.y <= r.y + r.height
-            { return Some(i); }
+            if pos.x >= r.x && pos.x <= r.x + r.width && pos.y >= r.y && pos.y <= r.y + r.height {
+                return Some(i);
+            }
         }
         None
     }
 }
 
 impl Widget for ThemeToggle {
-    fn type_name(&self) -> &'static str { "ThemeToggle" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ThemeToggle"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let natural_w = (3.0 * Self::BTN_W + 16.0).min(available.width);
@@ -121,12 +130,16 @@ impl Widget for ThemeToggle {
 
         for (i, pref) in Self::PREFS.iter().enumerate() {
             let r = self.btn_rect(i);
-            let active  = std::mem::discriminant(&current) == std::mem::discriminant(pref);
+            let active = std::mem::discriminant(&current) == std::mem::discriminant(pref);
             let hovered = self.hovered == Some(i);
 
-            let bg = if active { v.accent }
-                     else if hovered { v.widget_bg_hovered }
-                     else { v.widget_bg };
+            let bg = if active {
+                v.accent
+            } else if hovered {
+                v.widget_bg_hovered
+            } else {
+                v.widget_bg
+            };
             ctx.set_fill_color(bg);
             ctx.begin_path();
             let radius = if i == 0 || i == 2 { 4.0 } else { 0.0 };
@@ -170,13 +183,17 @@ impl Widget for ThemeToggle {
                 }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: agg_gui::MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if let Some(idx) = self.hit_idx(*pos) {
                     let pref = Self::PREFS[idx];
                     self.pref.set(pref);
                     match pref {
-                        ThemePreference::Light  => set_visuals(Visuals::light()),
-                        ThemePreference::Dark   => set_visuals(Visuals::dark()),
+                        ThemePreference::Light => set_visuals(Visuals::light()),
+                        ThemePreference::Dark => set_visuals(Visuals::dark()),
                         ThemePreference::System => apply_system_visuals(),
                     }
                     // Theme change is global — every widget needs to re-paint.
@@ -195,11 +212,11 @@ impl Widget for ThemeToggle {
 /// "💻 Backend" button — toggles the left-side backend panel.
 /// Text rendered through a backbuffered Label child.
 struct BackendButton {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty — label stored separately
-    show:     Rc<Cell<bool>>,
-    hovered:  bool,
-    label:    Label,
+    show: Rc<Cell<bool>>,
+    hovered: bool,
+    label: Label,
 }
 
 impl BackendButton {
@@ -208,8 +225,7 @@ impl BackendButton {
 
     fn new(font: Arc<Font>, show: Rc<Cell<bool>>) -> Self {
         // FA4 "laptop" icon prefix.
-        let label = Label::new("\u{F109} Backend", Arc::clone(&font))
-            .with_font_size(12.0);
+        let label = Label::new("\u{F109} Backend", Arc::clone(&font)).with_font_size(12.0);
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -226,17 +242,28 @@ impl BackendButton {
 }
 
 impl Widget for BackendButton {
-    fn type_name(&self) -> &'static str { "BackendButton" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "BackendButton"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let w = Self::W + 8.0;
         self.bounds = Rect::new(0.0, 0.0, w, available.height);
         let s = self.label.layout(Size::new(Self::W, Self::H));
-        self.label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        self.label
+            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         Size::new(w, available.height)
     }
 
@@ -245,9 +272,13 @@ impl Widget for BackendButton {
         let r = self.btn_rect();
         let active = self.show.get();
 
-        let bg = if active { v.accent }
-                 else if self.hovered { v.widget_bg_hovered }
-                 else { v.widget_bg };
+        let bg = if active {
+            v.accent
+        } else if self.hovered {
+            v.widget_bg_hovered
+        } else {
+            v.widget_bg
+        };
         ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
@@ -284,7 +315,11 @@ impl Widget for BackendButton {
                 }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: agg_gui::MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: agg_gui::MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if in_btn(*pos) {
                     // Toggles backend-panel visibility — consumers read
                     // `show` at layout/paint time, so request a frame.
@@ -313,9 +348,9 @@ const GITHUB_URL: &str = "https://github.com/larsbrubaker/agg-gui";
 /// native (via the `webbrowser` crate) and WASM (via
 /// `window.open(_, "_blank")`).
 pub fn build_top_bar_inner(
-    font:         Arc<Font>,
+    font: Arc<Font>,
     show_backend: Rc<Cell<bool>>,
-    theme_pref:   Rc<Cell<ThemePreference>>,
+    theme_pref: Rc<Cell<ThemePreference>>,
 ) -> Box<dyn Widget> {
     let github_link = Hyperlink::new("View on GitHub", Arc::clone(&font))
         .with_font_size(13.0)
@@ -334,17 +369,24 @@ pub fn build_top_bar_inner(
     // without it FlexRow bottom-anchors the box (Y-up FIT default) and
     // the link would sit low next to the ThemeToggle.
     let github_widget: Box<dyn Widget> = Box::new(
-        SizedBox::new().with_width(110.0).with_height(28.0)
+        SizedBox::new()
+            .with_width(110.0)
+            .with_height(28.0)
             .with_v_anchor(VAnchor::CENTER)
-            .with_child(Box::new(github_link))
+            .with_child(Box::new(github_link)),
     );
 
-    Box::new(FlexRow::new()
-        .with_gap(0.0)
-        .add(Box::new(BackendButton::new(Arc::clone(&font), show_backend)))
-        .add(Box::new(SizedBox::new().with_width(8.0)))
-        .add_flex(Box::new(SizedBox::new()), 1.0)
-        .add(github_widget)
-        .add(Box::new(SizedBox::new().with_width(12.0)))
-        .add(Box::new(ThemeToggle::new(font, theme_pref))))
+    Box::new(
+        FlexRow::new()
+            .with_gap(0.0)
+            .add(Box::new(BackendButton::new(
+                Arc::clone(&font),
+                show_backend,
+            )))
+            .add(Box::new(SizedBox::new().with_width(8.0)))
+            .add_flex(Box::new(SizedBox::new()), 1.0)
+            .add(github_widget)
+            .add(Box::new(SizedBox::new().with_width(12.0)))
+            .add(Box::new(ThemeToggle::new(font, theme_pref))),
+    )
 }

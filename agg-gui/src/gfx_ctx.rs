@@ -15,8 +15,10 @@ use std::sync::Arc;
 
 use agg_rust::arc::Arc as AggArc;
 use agg_rust::basics::PATH_FLAGS_NONE;
+use agg_rust::basics::FillingRule;
 use agg_rust::comp_op::{CompOp, PixfmtRgba32CompOp};
 use agg_rust::conv_curve::ConvCurve;
+use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
 use agg_rust::gsv_text::GsvText;
@@ -29,8 +31,10 @@ use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::rounded_rect::RoundedRect;
 use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::trans_affine::TransAffine;
+use agg_rust::basics::VertexSource;
 
 use crate::color::Color;
+use crate::draw_ctx::FillRule;
 use crate::framebuffer::Framebuffer;
 use crate::text::{shape_text, measure_advance, Font, TextMetrics};
 
@@ -62,9 +66,13 @@ struct GfxState {
     transform: TransAffine,
     fill_color: Color,
     stroke_color: Color,
+    fill_rule: FillRule,
     line_width: f64,
     line_join: LineJoin,
     line_cap: LineCap,
+    miter_limit: f64,
+    line_dash: Vec<f64>,
+    dash_offset: f64,
     blend_mode: CompOp,
     /// Scissor clip in Y-up screen space: `(x, y, width, height)`.
     clip: Option<(f64, f64, f64, f64)>,
@@ -82,9 +90,13 @@ impl Default for GfxState {
             transform: TransAffine::new(),
             fill_color: Color::black(),
             stroke_color: Color::black(),
+            fill_rule: FillRule::NonZero,
             line_width: 1.0,
             line_join: LineJoin::Round,
             line_cap: LineCap::Round,
+            miter_limit: 4.0,
+            line_dash: Vec::new(),
+            dash_offset: 0.0,
             blend_mode: CompOp::SrcOver,
             clip: None,
             global_alpha: 1.0,
@@ -228,6 +240,13 @@ impl<'a> GfxCtx<'a> {
     pub fn set_line_width(&mut self, w: f64) { self.state.line_width = w; }
     pub fn set_line_join(&mut self, join: LineJoin) { self.state.line_join = join; }
     pub fn set_line_cap(&mut self, cap: LineCap) { self.state.line_cap = cap; }
+    pub fn set_miter_limit(&mut self, limit: f64) { self.state.miter_limit = limit.max(1.0); }
+    pub fn set_line_dash(&mut self, dashes: &[f64], offset: f64) {
+        self.state.line_dash.clear();
+        self.state.line_dash.extend(dashes.iter().copied().filter(|v| *v > 0.0));
+        self.state.dash_offset = offset;
+    }
+    pub fn set_fill_rule(&mut self, rule: FillRule) { self.state.fill_rule = rule; }
 
     /// Set the Porter-Duff compositing mode. Default: `SrcOver`.
     pub fn set_blend_mode(&mut self, mode: CompOp) { self.state.blend_mode = mode; }
@@ -380,9 +399,10 @@ impl<'a> GfxCtx<'a> {
         let rgba = color.to_rgba8();
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
+        let fill_rule = self.state.fill_rule;
         let transform = self.state.transform.clone();
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        rasterize_fill(fb, &mut self.path, &rgba, mode, clip, &transform);
+        rasterize_fill(fb, &mut self.path, &rgba, mode, clip, fill_rule, &transform);
     }
 
     /// Stroke the accumulated path.
@@ -393,11 +413,14 @@ impl<'a> GfxCtx<'a> {
         let width = self.state.line_width;
         let join = self.state.line_join;
         let cap = self.state.line_cap;
+        let miter_limit = self.state.miter_limit;
+        let dashes = self.state.line_dash.clone();
+        let dash_offset = self.state.dash_offset;
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        rasterize_stroke(fb, &mut self.path, &rgba, width, join, cap, mode, clip, &transform);
+        rasterize_stroke(fb, &mut self.path, &rgba, width, join, cap, miter_limit, &dashes, dash_offset, mode, clip, &transform);
     }
 
     /// Fill then stroke the accumulated path in one call.
@@ -482,7 +505,7 @@ impl<'a> GfxCtx<'a> {
         let (glyph_paths, _) = shape_text(&font, text, font_size, x, y);
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
         for mut path in glyph_paths {
-            rasterize_fill(fb, &mut path, &rgba, mode, clip, &transform);
+            rasterize_fill(fb, &mut path, &rgba, mode, clip, FillRule::NonZero, &transform);
         }
     }
 
@@ -626,6 +649,7 @@ pub(crate) fn rasterize_fill(
     color: &agg_rust::color::Rgba8,
     mode: CompOp,
     clip: Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
     transform: &TransAffine,
 ) {
     let w = fb.width();
@@ -638,11 +662,19 @@ pub(crate) fn rasterize_fill(
     apply_clip(&mut rb, clip);
 
     let mut ras = RasterizerScanlineAa::new();
+    ras.filling_rule(to_agg_fill_rule(fill_rule));
     let mut sl = ScanlineU8::new();
     let mut curves = ConvCurve::new(path);
     let mut transformed = ConvTransform::new(&mut curves, transform.clone());
     ras.add_path(&mut transformed, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+}
+
+fn to_agg_fill_rule(rule: FillRule) -> FillingRule {
+    match rule {
+        FillRule::NonZero => FillingRule::NonZero,
+        FillRule::EvenOdd => FillingRule::EvenOdd,
+    }
 }
 
 pub(crate) fn rasterize_stroke(
@@ -652,6 +684,33 @@ pub(crate) fn rasterize_stroke(
     width: f64,
     join: LineJoin,
     cap: LineCap,
+    miter_limit: f64,
+    dashes: &[f64],
+    dash_offset: f64,
+    mode: CompOp,
+    clip: Option<(f64, f64, f64, f64)>,
+    transform: &TransAffine,
+) {
+    let mut curves = ConvCurve::new(path);
+    if dashes.is_empty() {
+        let stroke = ConvStroke::new(&mut curves);
+        rasterize_stroke_source(fb, stroke, color, width, join, cap, miter_limit, mode, clip, transform);
+    } else {
+        let mut dash = ConvDash::new(&mut curves);
+        configure_dashes(&mut dash, dashes, dash_offset);
+        let stroke = ConvStroke::new(dash);
+        rasterize_stroke_source(fb, stroke, color, width, join, cap, miter_limit, mode, clip, transform);
+    }
+}
+
+fn rasterize_stroke_source<VS: VertexSource>(
+    fb: &mut Framebuffer,
+    source: VS,
+    color: &agg_rust::color::Rgba8,
+    width: f64,
+    join: LineJoin,
+    cap: LineCap,
+    miter_limit: f64,
     mode: CompOp,
     clip: Option<(f64, f64, f64, f64)>,
     transform: &TransAffine,
@@ -667,14 +726,25 @@ pub(crate) fn rasterize_stroke(
 
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
-    let mut curves = ConvCurve::new(path);
-    let mut stroke = ConvStroke::new(&mut curves);
+    let mut stroke = ConvStroke::new(source);
     stroke.set_width(width);
     stroke.set_line_join(join);
     stroke.set_line_cap(cap);
+    stroke.set_miter_limit(miter_limit);
     let mut transformed = ConvTransform::new(&mut stroke, transform.clone());
     ras.add_path(&mut transformed, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+}
+
+fn configure_dashes<VS: VertexSource>(dash: &mut ConvDash<VS>, dashes: &[f64], dash_offset: f64) {
+    let mut chunks = dashes.chunks_exact(2);
+    for pair in &mut chunks {
+        dash.add_dash(pair[0], pair[1]);
+    }
+    if let Some(&last) = chunks.remainder().first() {
+        dash.add_dash(last, last);
+    }
+    dash.dash_start(dash_offset);
 }
 
 // ---------------------------------------------------------------------------
@@ -687,6 +757,9 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn set_line_width(&mut self, w: f64)                      { self.set_line_width(w) }
     fn set_line_join(&mut self, j: agg_rust::math_stroke::LineJoin) { self.set_line_join(j) }
     fn set_line_cap(&mut self, c: agg_rust::math_stroke::LineCap)   { self.set_line_cap(c) }
+    fn set_miter_limit(&mut self, limit: f64)                  { self.set_miter_limit(limit) }
+    fn set_line_dash(&mut self, dashes: &[f64], offset: f64)    { self.set_line_dash(dashes, offset) }
+    fn set_fill_rule(&mut self, rule: crate::draw_ctx::FillRule)     { self.set_fill_rule(rule) }
     fn set_blend_mode(&mut self, m: agg_rust::comp_op::CompOp)      { self.set_blend_mode(m) }
     fn set_global_alpha(&mut self, a: f64)                   { self.set_global_alpha(a) }
     fn set_font(&mut self, f: Arc<crate::text::Font>)        { self.set_font(f) }

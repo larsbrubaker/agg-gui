@@ -25,7 +25,7 @@ use std::sync::Arc;
 use agg_gui::{ComboBox, Font, Widget};
 
 use crate::windows::{
-    apply_font_by_index, system_cells as cells, font_option_names, load_all_fonts,
+    apply_font_by_index, font_option_names, load_all_fonts, system_cells as cells,
 };
 
 /// Build a font-picker `ComboBox` ready to drop into any layout.
@@ -40,9 +40,9 @@ use crate::windows::{
 /// font-picker behaviour comes from `ComboBox`'s built-in features
 /// plus the cell-binding + on-change wiring set up here.
 pub fn font_picker(label_font: Arc<Font>) -> Box<dyn Widget> {
-    let cells       = cells();
-    let names       = font_option_names();
-    let per_item    = load_all_fonts();
+    let cells = cells();
+    let names = font_option_names();
+    let per_item = load_all_fonts();
     let initial_idx = cells.font_index.get().min(names.len().saturating_sub(1));
 
     let cells_for_change = cells.clone();
@@ -53,7 +53,7 @@ pub fn font_picker(label_font: Arc<Font>) -> Box<dyn Widget> {
             .with_selected_cell(Rc::clone(&cells.font_index))
             .on_change(move |idx| {
                 apply_font_by_index(&cells_for_change, idx);
-            })
+            }),
     )
 }
 
@@ -61,9 +61,9 @@ pub fn font_picker(label_font: Arc<Font>) -> Box<dyn Widget> {
 /// (default is 13 pt to match the System window's body widgets).  Use
 /// when the picker sits in a denser or sparser layout context.
 pub fn font_picker_with_size(label_font: Arc<Font>, font_size: f64) -> Box<dyn Widget> {
-    let cells       = cells();
-    let names       = font_option_names();
-    let per_item    = load_all_fonts();
+    let cells = cells();
+    let names = font_option_names();
+    let per_item = load_all_fonts();
     let initial_idx = cells.font_index.get().min(names.len().saturating_sub(1));
 
     let cells_for_change = cells.clone();
@@ -74,6 +74,6 @@ pub fn font_picker_with_size(label_font: Arc<Font>, font_size: f64) -> Box<dyn W
             .with_selected_cell(Rc::clone(&cells.font_index))
             .on_change(move |idx| {
                 apply_font_by_index(&cells_for_change, idx);
-            })
+            }),
     )
 }

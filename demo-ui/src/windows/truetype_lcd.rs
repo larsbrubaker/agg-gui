@@ -27,8 +27,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    font_settings, FlexColumn, FlexRow, Font, Label,
-    ScrollView, Separator, SizedBox, Slider,
+    font_settings, FlexColumn, FlexRow, Font, Label, ScrollView, Separator, SizedBox, Slider,
     ToggleSwitch, Widget,
 };
 
@@ -104,18 +103,22 @@ pub fn truetype_lcd_view(font: Arc<Font>) -> Box<dyn Widget> {
     let style_row = {
         let font = Arc::clone(&font);
         move |label_text: &'static str,
-              min: f64, max: f64, step: f64, decimals: usize,
+              min: f64,
+              max: f64,
+              step: f64,
+              decimals: usize,
               cell: Rc<Cell<f64>>,
               apply: Box<dyn Fn(f64)>|
               -> Box<dyn Widget> {
             // Label column — matches slider row height so vertical
             // centring lines up.
             let label_w = Box::new(
-                SizedBox::new().with_width(120.0).with_height(22.0)
+                SizedBox::new()
+                    .with_width(120.0)
+                    .with_height(22.0)
                     .with_child(Box::new(
-                        Label::new(label_text, Arc::clone(&font))
-                            .with_font_size(13.0)
-                    ))
+                        Label::new(label_text, Arc::clone(&font)).with_font_size(13.0),
+                    )),
             );
             let slider = Slider::new(cell.get(), min, max, Arc::clone(&font))
                 .with_step(step)
@@ -126,34 +129,98 @@ pub fn truetype_lcd_view(font: Arc<Font>) -> Box<dyn Widget> {
             // to the space left after the fixed-width label column and
             // gap.  Without the flex factor, Slider's `layout` reports
             // the full available width and the row overflows.
-            let row = FlexRow::new().with_gap(10.0)
+            let row = FlexRow::new()
+                .with_gap(10.0)
                 .add(label_w)
                 .add_flex(Box::new(slider), 1.0);
             Box::new(row) as Box<dyn Widget>
         }
     };
 
-    col.push(style_row("Font Scale", 0.5, 2.0, 0.01, 2,
-        Rc::clone(&cells.font_size_scale),
-        Box::new(font_settings::set_font_size_scale)), 0.0);
-    col.push(style_row("Faux Italic", -1.0, 1.0, 0.01, 2,
-        Rc::clone(&cells.faux_italic),
-        Box::new(font_settings::set_faux_italic)), 0.0);
-    col.push(style_row("Faux Weight", -1.0, 1.0, 0.01, 2,
-        Rc::clone(&cells.faux_weight),
-        Box::new(font_settings::set_faux_weight)), 0.0);
-    col.push(style_row("Interval", -0.2, 0.2, 0.001, 3,
-        Rc::clone(&cells.interval),
-        Box::new(font_settings::set_interval)), 0.0);
-    col.push(style_row("Width", 0.75, 1.25, 0.01, 2,
-        Rc::clone(&cells.width_scale),
-        Box::new(font_settings::set_width)), 0.0);
-    col.push(style_row("Gamma", 0.5, 2.5, 0.01, 2,
-        Rc::clone(&cells.gamma),
-        Box::new(font_settings::set_gamma)), 0.0);
-    col.push(style_row("Primary Weight", 0.0, 1.0, 0.01, 2,
-        Rc::clone(&cells.primary_weight),
-        Box::new(font_settings::set_primary_weight)), 0.0);
+    col.push(
+        style_row(
+            "Font Scale",
+            0.5,
+            2.0,
+            0.01,
+            2,
+            Rc::clone(&cells.font_size_scale),
+            Box::new(font_settings::set_font_size_scale),
+        ),
+        0.0,
+    );
+    col.push(
+        style_row(
+            "Faux Italic",
+            -1.0,
+            1.0,
+            0.01,
+            2,
+            Rc::clone(&cells.faux_italic),
+            Box::new(font_settings::set_faux_italic),
+        ),
+        0.0,
+    );
+    col.push(
+        style_row(
+            "Faux Weight",
+            -1.0,
+            1.0,
+            0.01,
+            2,
+            Rc::clone(&cells.faux_weight),
+            Box::new(font_settings::set_faux_weight),
+        ),
+        0.0,
+    );
+    col.push(
+        style_row(
+            "Interval",
+            -0.2,
+            0.2,
+            0.001,
+            3,
+            Rc::clone(&cells.interval),
+            Box::new(font_settings::set_interval),
+        ),
+        0.0,
+    );
+    col.push(
+        style_row(
+            "Width",
+            0.75,
+            1.25,
+            0.01,
+            2,
+            Rc::clone(&cells.width_scale),
+            Box::new(font_settings::set_width),
+        ),
+        0.0,
+    );
+    col.push(
+        style_row(
+            "Gamma",
+            0.5,
+            2.5,
+            0.01,
+            2,
+            Rc::clone(&cells.gamma),
+            Box::new(font_settings::set_gamma),
+        ),
+        0.0,
+    );
+    col.push(
+        style_row(
+            "Primary Weight",
+            0.0,
+            1.0,
+            0.01,
+            2,
+            Rc::clone(&cells.primary_weight),
+            Box::new(font_settings::set_primary_weight),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
@@ -162,39 +229,40 @@ pub fn truetype_lcd_view(font: Arc<Font>) -> Box<dyn Widget> {
 
     {
         let font2 = Arc::clone(&font);
-        let cell  = Rc::clone(&cells.lcd_enabled);
+        let cell = Rc::clone(&cells.lcd_enabled);
         let cell2 = Rc::clone(&cell);
-        let row = FlexRow::new().with_gap(12.0)
+        let row = FlexRow::new()
+            .with_gap(12.0)
             .add(Box::new(
                 ToggleSwitch::new(cell.get())
                     .with_state_cell(Rc::clone(&cell))
                     .on_change(move |on| {
                         font_settings::set_lcd_enabled(on);
                         cell2.set(on);
-                    })
+                    }),
             ))
             .add(Box::new(
-                Label::new("LCD subpixel rendering",
-                    Arc::clone(&font2)).with_font_size(13.0),
+                Label::new("LCD subpixel rendering", Arc::clone(&font2)).with_font_size(13.0),
             ));
         col.push(Box::new(row), 0.0);
     }
     {
         let font2 = Arc::clone(&font);
-        let cell  = Rc::clone(&cells.hinting_enabled);
+        let cell = Rc::clone(&cells.hinting_enabled);
         let cell2 = Rc::clone(&cell);
-        let row = FlexRow::new().with_gap(12.0)
+        let row = FlexRow::new()
+            .with_gap(12.0)
             .add(Box::new(
                 ToggleSwitch::new(cell.get())
                     .with_state_cell(Rc::clone(&cell))
                     .on_change(move |on| {
                         font_settings::set_hinting_enabled(on);
                         cell2.set(on);
-                    })
+                    }),
             ))
             .add(Box::new(
-                Label::new("Hinting (Y-axis baseline snap)",
-                    Arc::clone(&font2)).with_font_size(13.0),
+                Label::new("Hinting (Y-axis baseline snap)", Arc::clone(&font2))
+                    .with_font_size(13.0),
             ));
         col.push(Box::new(row), 0.0);
     }
@@ -205,11 +273,14 @@ pub fn truetype_lcd_view(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(heading("Sample text"), 0.0);
 
     for text in [TEXT1, TEXT2, TEXT3, TEXT4] {
-        col.push(Box::new(
-            Label::new(text, Arc::clone(&font))
-                .with_font_size(14.0)
-                .with_wrap(true),
-        ), 0.0);
+        col.push(
+            Box::new(
+                Label::new(text, Arc::clone(&font))
+                    .with_font_size(14.0)
+                    .with_wrap(true),
+            ),
+            0.0,
+        );
     }
 
     Box::new(ScrollView::new(Box::new(col)))

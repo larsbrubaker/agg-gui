@@ -5,9 +5,11 @@
 
 use std::sync::Arc;
 
-use agg_gui::{DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Label,
-              Rect, ScrollView, Separator, Size, SizedBox, Widget};
 use agg_gui::widget::paint_subtree;
+use agg_gui::{
+    DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Label, Rect, ScrollView, Separator,
+    Size, SizedBox, Widget,
+};
 
 // ---------------------------------------------------------------------------
 // GlyphCell
@@ -15,10 +17,10 @@ use agg_gui::widget::paint_subtree;
 
 /// A single-glyph cell: shows the character large, with a tiny codepoint label.
 pub(super) struct GlyphCell {
-    bounds:      Rect,
-    children:    Vec<Box<dyn Widget>>,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
     glyph_label: Label,
-    cp_label:    Label,
+    cp_label: Label,
 }
 
 impl GlyphCell {
@@ -35,11 +37,21 @@ impl GlyphCell {
 }
 
 impl Widget for GlyphCell {
-    fn type_name(&self) -> &'static str { "GlyphCell" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "GlyphCell"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, _available: Size) -> Size {
         const W: f64 = 38.0;
@@ -49,11 +61,13 @@ impl Widget for GlyphCell {
         let gs = self.glyph_label.layout(Size::new(W, H * 0.75));
         let gx = (W - gs.width) * 0.5;
         let gy = (H * 0.75 - gs.height) * 0.5 + H * 0.05;
-        self.glyph_label.set_bounds(Rect::new(gx, gy, gs.width, gs.height));
+        self.glyph_label
+            .set_bounds(Rect::new(gx, gy, gs.width, gs.height));
 
         let cs = self.cp_label.layout(Size::new(W, H * 0.25));
         let cx = (W - cs.width) * 0.5;
-        self.cp_label.set_bounds(Rect::new(cx, 3.0, cs.width, cs.height));
+        self.cp_label
+            .set_bounds(Rect::new(cx, 3.0, cs.width, cs.height));
 
         Size::new(W, H)
     }
@@ -70,18 +84,22 @@ impl Widget for GlyphCell {
 
         self.glyph_label.set_color(v.text_color);
         let gb = self.glyph_label.bounds();
-        ctx.save(); ctx.translate(gb.x, gb.y);
+        ctx.save();
+        ctx.translate(gb.x, gb.y);
         paint_subtree(&mut self.glyph_label, ctx);
         ctx.restore();
 
         self.cp_label.set_color(v.text_dim);
         let cb = self.cp_label.bounds();
-        ctx.save(); ctx.translate(cb.x, cb.y);
+        ctx.save();
+        ctx.translate(cb.x, cb.y);
         paint_subtree(&mut self.cp_label, ctx);
         ctx.restore();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -121,8 +139,8 @@ pub fn font_book(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     let math_syms: &[char] = &[
-        '∑', '∏', '∫', '√', '∂', '∞', '≈', '≠', '≤', '≥',
-        '±', '×', '÷', '∈', '∉', '⊂', '⊃', '∩', '∪', '∅',
+        '∑', '∏', '∫', '√', '∂', '∞', '≈', '≠', '≤', '≥', '±', '×', '÷', '∈', '∉', '⊂', '⊃', '∩',
+        '∪', '∅',
     ];
     col.push(header("Math symbols", &font), 0.0);
     col.push(glyph_row(math_syms, &font), 0.0);

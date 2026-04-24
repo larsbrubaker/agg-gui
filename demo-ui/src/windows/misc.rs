@@ -8,12 +8,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{
-    Checkbox, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult,
-    FlexColumn, FlexRow, Font, Label, MouseButton, Point, RadioGroup, Rect, ScrollView,
-    Separator, Size, SizedBox, Slider, Widget,
-};
 use agg_gui::widget::paint_subtree;
+use agg_gui::{
+    Checkbox, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow,
+    Font, Label, MouseButton, Point, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox,
+    Slider, Widget,
+};
 
 // ---------------------------------------------------------------------------
 // Extra Viewport demo
@@ -26,10 +26,16 @@ pub fn extra_viewport(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(16.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new(
-        "Extra viewports are not supported on this platform.",
-        Arc::clone(&font),
-    ).with_font_size(13.0)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Extra viewports are not supported on this platform.",
+                Arc::clone(&font),
+            )
+            .with_font_size(13.0),
+        ),
+        0.0,
+    );
 
     Box::new(col)
 }
@@ -44,19 +50,29 @@ pub fn extra_viewport(font: Arc<Font>) -> Box<dyn Widget> {
 /// each word is measured, a highlight rect is drawn behind it, and then the
 /// word is drawn on top.
 struct HighlightWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
+    font: Arc<Font>,
     /// (word, highlight_color, text_color).
-    words:    Vec<(&'static str, Color, Color)>,
+    words: Vec<(&'static str, Color, Color)>,
 }
 
 impl Widget for HighlightWidget {
-    fn type_name(&self) -> &'static str { "HighlightWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "HighlightWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, 36.0);
@@ -67,16 +83,16 @@ impl Widget for HighlightWidget {
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(14.0);
 
-        let pad   = 4.0;
-        let h     = self.bounds.height;
+        let pad = 4.0;
+        let h = self.bounds.height;
         let mut x = pad;
         let baseline = h * 0.35; // Y-up: baseline in lower portion
 
         for (word, bg, fg) in &self.words {
             if let Some(m) = ctx.measure_text(word) {
                 let word_w = m.width;
-                let box_h  = m.ascent - m.descent + 4.0;
-                let box_y  = baseline + m.descent - 2.0;
+                let box_h = m.ascent - m.descent + 4.0;
+                let box_y = baseline + m.descent - 2.0;
 
                 // Highlight box.
                 ctx.set_fill_color(*bg);
@@ -93,7 +109,9 @@ impl Widget for HighlightWidget {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Build the Highlighting demo — several highlighted word spans demonstrating
@@ -104,38 +122,84 @@ pub fn highlighting(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(14.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("Colored text segments", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("Colored text segments", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
-    col.push(Box::new(HighlightWidget {
-        bounds:   Rect::default(),
-        children: Vec::new(),
-        font:     Arc::clone(&font),
-        words: vec![
-            ("fn",     Color::rgba(0.22, 0.45, 0.88, 0.30), Color::rgb(0.22, 0.45, 0.88)),
-            ("main",   Color::rgba(0.86, 0.78, 0.40, 0.30), Color::rgb(0.86, 0.78, 0.40)),
-            ("()",     Color::rgba(0.90, 0.90, 0.90, 0.10), Color::rgb(0.70, 0.70, 0.70)),
-            ("{",      Color::rgba(0.90, 0.90, 0.90, 0.10), Color::rgb(0.90, 0.90, 0.90)),
-        ],
-    }), 0.0);
+    col.push(
+        Box::new(HighlightWidget {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font: Arc::clone(&font),
+            words: vec![
+                (
+                    "fn",
+                    Color::rgba(0.22, 0.45, 0.88, 0.30),
+                    Color::rgb(0.22, 0.45, 0.88),
+                ),
+                (
+                    "main",
+                    Color::rgba(0.86, 0.78, 0.40, 0.30),
+                    Color::rgb(0.86, 0.78, 0.40),
+                ),
+                (
+                    "()",
+                    Color::rgba(0.90, 0.90, 0.90, 0.10),
+                    Color::rgb(0.70, 0.70, 0.70),
+                ),
+                (
+                    "{",
+                    Color::rgba(0.90, 0.90, 0.90, 0.10),
+                    Color::rgb(0.90, 0.90, 0.90),
+                ),
+            ],
+        }),
+        0.0,
+    );
 
-    col.push(Box::new(HighlightWidget {
-        bounds:   Rect::default(),
-        children: Vec::new(),
-        font:     Arc::clone(&font),
-        words: vec![
-            ("let",    Color::rgba(0.22, 0.45, 0.88, 0.30), Color::rgb(0.22, 0.45, 0.88)),
-            ("x",      Color::rgba(0.90, 0.90, 0.90, 0.10), Color::rgb(0.90, 0.90, 0.90)),
-            ("=",      Color::rgba(0.90, 0.90, 0.90, 0.10), Color::rgb(0.60, 0.60, 0.60)),
-            ("42;",    Color::rgba(0.82, 0.60, 0.45, 0.30), Color::rgb(0.82, 0.60, 0.45)),
-        ],
-    }), 0.0);
+    col.push(
+        Box::new(HighlightWidget {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font: Arc::clone(&font),
+            words: vec![
+                (
+                    "let",
+                    Color::rgba(0.22, 0.45, 0.88, 0.30),
+                    Color::rgb(0.22, 0.45, 0.88),
+                ),
+                (
+                    "x",
+                    Color::rgba(0.90, 0.90, 0.90, 0.10),
+                    Color::rgb(0.90, 0.90, 0.90),
+                ),
+                (
+                    "=",
+                    Color::rgba(0.90, 0.90, 0.90, 0.10),
+                    Color::rgb(0.60, 0.60, 0.60),
+                ),
+                (
+                    "42;",
+                    Color::rgba(0.82, 0.60, 0.45, 0.30),
+                    Color::rgb(0.82, 0.60, 0.45),
+                ),
+            ],
+        }),
+        0.0,
+    );
 
     col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new(
-        "Each token is measured, a highlight rect is drawn, then the text.",
-        Arc::clone(&font),
-    ).with_font_size(11.0)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Each token is measured, a highlight rect is drawn, then the text.",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.0),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -151,11 +215,11 @@ pub fn highlighting(font: Arc<Font>) -> Box<dyn Widget> {
 /// count changes rarely (only on mouse-up), the label cache stays warm most
 /// frames and avoids unnecessary glyph rasterization.
 struct InteractiveBox {
-    bounds:       Rect,
-    children:     Vec<Box<dyn Widget>>,
-    hovered:      bool,
-    pressed:      bool,
-    clicks:       u32,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    hovered: bool,
+    pressed: bool,
+    clicks: u32,
     /// Backbuffered label for the centered text.
     label_widget: Label,
 }
@@ -163,22 +227,32 @@ struct InteractiveBox {
 impl InteractiveBox {
     fn new(font: Arc<Font>) -> Self {
         Self {
-            bounds:       Rect::default(),
-            children:     Vec::new(),
-            hovered:      false,
-            pressed:      false,
-            clicks:       0,
+            bounds: Rect::default(),
+            children: Vec::new(),
+            hovered: false,
+            pressed: false,
+            clicks: 0,
             label_widget: Label::new("Click me!", font).with_font_size(13.0),
         }
     }
 }
 
 impl Widget for InteractiveBox {
-    fn type_name(&self) -> &'static str { "InteractiveBox" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "InteractiveBox"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let w = available.width.min(200.0);
@@ -189,7 +263,11 @@ impl Widget for InteractiveBox {
         let text = if self.clicks == 0 {
             "Click me!".to_string()
         } else {
-            format!("Clicked {} time{}", self.clicks, if self.clicks == 1 { "" } else { "s" })
+            format!(
+                "Clicked {} time{}",
+                self.clicks,
+                if self.clicks == 1 { "" } else { "s" }
+            )
         };
         self.label_widget.set_text(text);
 
@@ -197,7 +275,8 @@ impl Widget for InteractiveBox {
         let ls = self.label_widget.layout(Size::new(w, h));
         let lx = (w - ls.width) * 0.5;
         let ly = (h - ls.height) * 0.5;
-        self.label_widget.set_bounds(Rect::new(lx, ly, ls.width, ls.height));
+        self.label_widget
+            .set_bounds(Rect::new(lx, ly, ls.width, ls.height));
 
         Size::new(w, h)
     }
@@ -220,17 +299,26 @@ impl Widget for InteractiveBox {
         ctx.rounded_rect(0.0, 0.0, w, h, 8.0);
         ctx.fill();
 
-        ctx.set_stroke_color(if self.hovered { v.accent } else { v.widget_stroke });
+        ctx.set_stroke_color(if self.hovered {
+            v.accent
+        } else {
+            v.widget_stroke
+        });
         ctx.set_line_width(if self.hovered { 2.0 } else { 1.0 });
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, 8.0);
         ctx.stroke();
 
         // Paint label via backbuffered child.
-        let text_color = if self.pressed { Color::white() } else { v.text_color };
+        let text_color = if self.pressed {
+            Color::white()
+        } else {
+            v.text_color
+        };
         self.label_widget.set_color(text_color);
         let lb = self.label_widget.bounds();
-        ctx.save(); ctx.translate(lb.x, lb.y);
+        ctx.save();
+        ctx.translate(lb.x, lb.y);
         paint_subtree(&mut self.label_widget, ctx);
         ctx.restore();
     }
@@ -239,11 +327,20 @@ impl Widget for InteractiveBox {
         match event {
             Event::MouseMove { pos } => {
                 let was_hovered = self.hovered;
-                self.hovered = pos.x >= 0.0 && pos.x <= self.bounds.width
-                    && pos.y >= 0.0 && pos.y <= self.bounds.height;
-                if self.hovered != was_hovered { EventResult::Consumed } else { EventResult::Ignored }
+                self.hovered = pos.x >= 0.0
+                    && pos.x <= self.bounds.width
+                    && pos.y >= 0.0
+                    && pos.y <= self.bounds.height;
+                if self.hovered != was_hovered {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
-            Event::MouseDown { button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                ..
+            } => {
                 if self.hovered {
                     self.pressed = true;
                     EventResult::Consumed
@@ -251,10 +348,15 @@ impl Widget for InteractiveBox {
                     EventResult::Ignored
                 }
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 if self.pressed {
                     self.pressed = false;
-                    if self.hovered { self.clicks += 1; }
+                    if self.hovered {
+                        self.clicks += 1;
+                    }
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -265,8 +367,10 @@ impl Widget for InteractiveBox {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 }
 
@@ -277,16 +381,24 @@ pub fn interactive_container(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(16.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("Hover and click the box", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("Hover and click the box", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
     col.push(Box::new(InteractiveBox::new(Arc::clone(&font))), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new(
-        "Background, border, and label change on hover / press.",
-        Arc::clone(&font),
-    ).with_font_size(11.0)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Background, border, and label change on hover / press.",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.0),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -299,23 +411,38 @@ pub fn interactive_container(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// A color swatch + name row used by the Colors section of misc_demos.
 struct SwatchRow {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    color:    Color,
-    label:    Label,
+    color: Color,
+    label: Label,
 }
 
 impl Widget for SwatchRow {
-    fn type_name(&self) -> &'static str { "SwatchRow" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "SwatchRow"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, 22.0);
         let ls = self.label.layout(Size::new(available.width - 30.0, 22.0));
-        self.label.set_bounds(Rect::new(28.0, (22.0 - ls.height) * 0.5, ls.width, ls.height));
+        self.label.set_bounds(Rect::new(
+            28.0,
+            (22.0 - ls.height) * 0.5,
+            ls.width,
+            ls.height,
+        ));
         Size::new(available.width, 22.0)
     }
 
@@ -327,30 +454,43 @@ impl Widget for SwatchRow {
         ctx.fill();
         self.label.set_color(v.text_color);
         let lb = self.label.bounds();
-        ctx.save(); ctx.translate(lb.x, lb.y);
+        ctx.save();
+        ctx.translate(lb.x, lb.y);
         paint_subtree(&mut self.label, ctx);
         ctx.restore();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Box painting widget — draws N boxes whose visual properties are controlled
 /// by shared cells (sliders set them externally).
 struct BoxPainter {
-    bounds:        Rect,
-    children:      Vec<Box<dyn Widget>>,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
     corner_radius: Rc<Cell<f64>>,
-    stroke_width:  Rc<Cell<f64>>,
-    num_boxes:     Rc<Cell<f64>>,
+    stroke_width: Rc<Cell<f64>>,
+    num_boxes: Rc<Cell<f64>>,
 }
 
 impl Widget for BoxPainter {
-    fn type_name(&self) -> &'static str { "BoxPainter" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "BoxPainter"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let h = 60.0_f64;
@@ -359,10 +499,10 @@ impl Widget for BoxPainter {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v  = ctx.visuals();
+        let v = ctx.visuals();
         let cr = self.corner_radius.get();
         let sw = self.stroke_width.get();
-        let n  = self.num_boxes.get() as usize;
+        let n = self.num_boxes.get() as usize;
         let bw = 60.0_f64;
         let bh = 32.0_f64;
         let gap = 8.0_f64;
@@ -370,7 +510,10 @@ impl Widget for BoxPainter {
         for i in 0..n {
             let x = i as f64 * (bw + gap);
             ctx.set_fill_color(Color::rgba(
-                v.text_color.r, v.text_color.g, v.text_color.b, 0.35,
+                v.text_color.r,
+                v.text_color.g,
+                v.text_color.b,
+                0.35,
             ));
             ctx.begin_path();
             ctx.rounded_rect(x, start_y, bw, bh, cr);
@@ -385,21 +528,33 @@ impl Widget for BoxPainter {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Stress-test circles widget — draws 100 circles of increasing radius.
 struct ManyCirclesWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
 
 impl Widget for ManyCirclesWidget {
-    fn type_name(&self) -> &'static str { "ManyCirclesWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ManyCirclesWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Lay out 100 circles of radius 0..10 in wrapping rows.
@@ -432,24 +587,35 @@ impl Widget for ManyCirclesWidget {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Build a FlexColumn section content for the Label section of Misc Demos.
 fn label_section(font: &Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new().with_gap(4.0);
 
-    let color_row = FlexRow::new().with_gap(6.0)
-        .add(Box::new(Label::new("Text can have", Arc::clone(font)).with_font_size(12.0)))
-        .add(Box::new(Label::new("color,", Arc::clone(font))
-            .with_font_size(12.0)
-            .with_color(Color::rgb(0.43, 1.0, 0.43))))
-        .add(Box::new(Label::new("size,", Arc::clone(font))
-            .with_font_size(12.0)
-            .with_color(Color::rgb(0.50, 0.55, 1.0))))
-        .add(Box::new(Label::new("and style.", Arc::clone(font))
-            .with_font_size(12.0)
-            .with_color(Color::rgb(1.0, 0.75, 0.40))));
+    let color_row = FlexRow::new()
+        .with_gap(6.0)
+        .add(Box::new(
+            Label::new("Text can have", Arc::clone(font)).with_font_size(12.0),
+        ))
+        .add(Box::new(
+            Label::new("color,", Arc::clone(font))
+                .with_font_size(12.0)
+                .with_color(Color::rgb(0.43, 1.0, 0.43)),
+        ))
+        .add(Box::new(
+            Label::new("size,", Arc::clone(font))
+                .with_font_size(12.0)
+                .with_color(Color::rgb(0.50, 0.55, 1.0)),
+        ))
+        .add(Box::new(
+            Label::new("and style.", Arc::clone(font))
+                .with_font_size(12.0)
+                .with_color(Color::rgb(1.0, 0.75, 0.40)),
+        ));
     col.push(Box::new(color_row), 0.0);
 
     col.push(Box::new(Label::new(
@@ -467,25 +633,41 @@ fn misc_widgets_section(font: &Arc<Font>) -> Box<dyn Widget> {
     let angle_cell = Rc::new(Cell::new(2.094_f64));
     {
         let ac = Rc::clone(&angle_cell);
-        let angle_row = FlexRow::new().with_gap(8.0)
-            .add(Box::new(Label::new("An angle:", Arc::clone(font)).with_font_size(12.5)))
-            .add(Box::new(SizedBox::new().with_height(28.0).with_width(80.0).with_child(
-                Box::new(DragValue::new(angle_cell.get(), -6.283, 6.283, Arc::clone(font))
-                    .with_speed(0.02)
-                    .with_decimals(2)
-                    .on_change(move |v| ac.set(v)))
-            )));
+        let angle_row = FlexRow::new()
+            .with_gap(8.0)
+            .add(Box::new(
+                Label::new("An angle:", Arc::clone(font)).with_font_size(12.5),
+            ))
+            .add(Box::new(
+                SizedBox::new()
+                    .with_height(28.0)
+                    .with_width(80.0)
+                    .with_child(Box::new(
+                        DragValue::new(angle_cell.get(), -6.283, 6.283, Arc::clone(font))
+                            .with_speed(0.02)
+                            .with_decimals(2)
+                            .on_change(move |v| ac.set(v)),
+                    )),
+            ));
         col.push(Box::new(angle_row), 0.0);
     }
 
-    let pw_row = FlexRow::new().with_gap(8.0)
-        .add(Box::new(Label::new("Password:", Arc::clone(font)).with_font_size(12.5)))
-        .add_flex(Box::new(SizedBox::new().with_height(28.0).with_child(
-            Box::new(agg_gui::TextField::new(Arc::clone(font))
-                .with_font_size(12.5)
-                .with_placeholder("hunter2")
-                .with_password_mode(true))
-        )), 1.0);
+    let pw_row = FlexRow::new()
+        .with_gap(8.0)
+        .add(Box::new(
+            Label::new("Password:", Arc::clone(font)).with_font_size(12.5),
+        ))
+        .add_flex(
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    agg_gui::TextField::new(Arc::clone(font))
+                        .with_font_size(12.5)
+                        .with_placeholder("hunter2")
+                        .with_password_mode(true),
+                )),
+            ),
+            1.0,
+        );
     col.push(Box::new(pw_row), 0.0);
 
     Box::new(col)
@@ -495,43 +677,67 @@ fn misc_widgets_section(font: &Arc<Font>) -> Box<dyn Widget> {
 fn checkboxes_section(font: &Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new().with_gap(4.0);
 
-    col.push(Box::new(Label::new(
-        "Checkboxes with empty labels take up very little space:",
-        Arc::clone(font),
-    ).with_font_size(11.5)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Checkboxes with empty labels take up very little space:",
+                Arc::clone(font),
+            )
+            .with_font_size(11.5),
+        ),
+        0.0,
+    );
 
     let shared_bool = Rc::new(Cell::new(false));
     for _row in 0..4 {
         let mut cb_row = FlexRow::new().with_gap(2.0);
         for _c in 0..16 {
             let cell = Rc::clone(&shared_bool);
-            cb_row.push(Box::new(SizedBox::new().with_height(22.0).with_width(22.0).with_child(
-                Box::new(Checkbox::new("", Arc::clone(font), cell.get())
-                    .with_font_size(11.0)
-                    .with_state_cell(Rc::clone(&cell))
-                    .on_change(move |v| cell.set(v)))
-            )), 0.0);
+            cb_row.push(
+                Box::new(
+                    SizedBox::new()
+                        .with_height(22.0)
+                        .with_width(22.0)
+                        .with_child(Box::new(
+                            Checkbox::new("", Arc::clone(font), cell.get())
+                                .with_font_size(11.0)
+                                .with_state_cell(Rc::clone(&cell))
+                                .on_change(move |v| cell.set(v)),
+                        )),
+                ),
+                0.0,
+            );
         }
         col.push(Box::new(cb_row), 0.0);
     }
 
-    col.push(Box::new(SizedBox::new().with_height(28.0).with_child(
-        Box::new(Checkbox::new("checkbox", Arc::clone(font), false)
-            .with_font_size(12.5))
-    )), 0.0);
+    col.push(
+        Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
+            Checkbox::new("checkbox", Arc::clone(font), false).with_font_size(12.5),
+        ))),
+        0.0,
+    );
 
-    col.push(Box::new(Label::new("Radio buttons:", Arc::clone(font))
-        .with_font_size(11.5)), 0.0);
+    col.push(
+        Box::new(Label::new("Radio buttons:", Arc::clone(font)).with_font_size(11.5)),
+        0.0,
+    );
 
     let radio_sel = Rc::new(Cell::new(0_usize));
     {
         let rs = Rc::clone(&radio_sel);
-        col.push(Box::new(RadioGroup::new(
-            vec!["Option A", "Option B", "Option C"],
-            radio_sel.get(),
-            Arc::clone(font),
-        ).with_font_size(12.5)
-         .on_change(move |i| rs.set(i))), 0.0);
+        col.push(
+            Box::new(
+                RadioGroup::new(
+                    vec!["Option A", "Option B", "Option C"],
+                    radio_sel.get(),
+                    Arc::clone(font),
+                )
+                .with_font_size(12.5)
+                .on_change(move |i| rs.set(i)),
+            ),
+            0.0,
+        );
     }
 
     Box::new(col)
@@ -542,20 +748,25 @@ fn colors_section(font: &Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new().with_gap(2.0);
 
     let named_colors: &[(&str, Color)] = &[
-        ("Red",    Color::rgb(0.88, 0.25, 0.18)),
+        ("Red", Color::rgb(0.88, 0.25, 0.18)),
         ("Orange", Color::rgb(0.92, 0.55, 0.15)),
         ("Yellow", Color::rgb(0.92, 0.85, 0.15)),
-        ("Green",  Color::rgb(0.25, 0.78, 0.30)),
-        ("Cyan",   Color::rgb(0.22, 0.65, 0.88)),
-        ("Blue",   Color::rgb(0.22, 0.45, 0.88)),
+        ("Green", Color::rgb(0.25, 0.78, 0.30)),
+        ("Cyan", Color::rgb(0.22, 0.65, 0.88)),
+        ("Blue", Color::rgb(0.22, 0.45, 0.88)),
         ("Purple", Color::rgb(0.60, 0.25, 0.88)),
-        ("Pink",   Color::rgb(0.88, 0.25, 0.65)),
+        ("Pink", Color::rgb(0.88, 0.25, 0.65)),
     ];
     for &(name, color) in named_colors {
-        col.push(Box::new(SwatchRow {
-            bounds: Rect::default(), children: Vec::new(), color,
-            label: Label::new(name, Arc::clone(font)).with_font_size(11.5),
-        }), 0.0);
+        col.push(
+            Box::new(SwatchRow {
+                bounds: Rect::default(),
+                children: Vec::new(),
+                color,
+                label: Label::new(name, Arc::clone(font)).with_font_size(11.5),
+            }),
+            0.0,
+        );
     }
 
     Box::new(col)
@@ -571,35 +782,66 @@ fn box_rendering_section(font: &Arc<Font>) -> Box<dyn Widget> {
 
     {
         let cr = Rc::clone(&corner_r);
-        col.push(Box::new(SizedBox::new().with_height(28.0).with_child(
-            Box::new(Slider::new(corner_r.get(), 0.0, 50.0, Arc::clone(font))
-                .with_step(0.5).on_change(move |v| cr.set(v)))
-        )), 0.0);
-        col.push(Box::new(Label::new("corner radius", Arc::clone(font)).with_font_size(10.5)), 0.0);
+        col.push(
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    Slider::new(corner_r.get(), 0.0, 50.0, Arc::clone(font))
+                        .with_step(0.5)
+                        .on_change(move |v| cr.set(v)),
+                )),
+            ),
+            0.0,
+        );
+        col.push(
+            Box::new(Label::new("corner radius", Arc::clone(font)).with_font_size(10.5)),
+            0.0,
+        );
     }
     {
         let sw = Rc::clone(&stroke_w);
-        col.push(Box::new(SizedBox::new().with_height(28.0).with_child(
-            Box::new(Slider::new(stroke_w.get(), 0.0, 10.0, Arc::clone(font))
-                .with_step(0.5).on_change(move |v| sw.set(v)))
-        )), 0.0);
-        col.push(Box::new(Label::new("stroke width", Arc::clone(font)).with_font_size(10.5)), 0.0);
+        col.push(
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    Slider::new(stroke_w.get(), 0.0, 10.0, Arc::clone(font))
+                        .with_step(0.5)
+                        .on_change(move |v| sw.set(v)),
+                )),
+            ),
+            0.0,
+        );
+        col.push(
+            Box::new(Label::new("stroke width", Arc::clone(font)).with_font_size(10.5)),
+            0.0,
+        );
     }
     {
         let nb = Rc::clone(&num_boxes);
-        col.push(Box::new(SizedBox::new().with_height(28.0).with_child(
-            Box::new(Slider::new(num_boxes.get(), 0.0, 8.0, Arc::clone(font))
-                .with_step(1.0).on_change(move |v| nb.set(v)))
-        )), 0.0);
-        col.push(Box::new(Label::new("number of boxes", Arc::clone(font)).with_font_size(10.5)), 0.0);
+        col.push(
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    Slider::new(num_boxes.get(), 0.0, 8.0, Arc::clone(font))
+                        .with_step(1.0)
+                        .on_change(move |v| nb.set(v)),
+                )),
+            ),
+            0.0,
+        );
+        col.push(
+            Box::new(Label::new("number of boxes", Arc::clone(font)).with_font_size(10.5)),
+            0.0,
+        );
     }
 
-    col.push(Box::new(BoxPainter {
-        bounds: Rect::default(), children: Vec::new(),
-        corner_radius: Rc::clone(&corner_r),
-        stroke_width:  Rc::clone(&stroke_w),
-        num_boxes:     Rc::clone(&num_boxes),
-    }), 0.0);
+    col.push(
+        Box::new(BoxPainter {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            corner_radius: Rc::clone(&corner_r),
+            stroke_width: Rc::clone(&stroke_w),
+            num_boxes: Rc::clone(&num_boxes),
+        }),
+        0.0,
+    );
 
     Box::new(col)
 }
@@ -615,48 +857,67 @@ pub fn misc_demos(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     // ── Label (default open) ────────────────────────────────────────────────
-    col.push(Box::new(
-        CollapsingHeader::new("Label", Arc::clone(&font))
-            .default_open(true)
-            .with_content(label_section(&font))
-    ), 0.0);
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Label", Arc::clone(&font))
+                .default_open(true)
+                .with_content(label_section(&font)),
+        ),
+        0.0,
+    );
 
     // ── Misc widgets (default closed) ───────────────────────────────────────
-    col.push(Box::new(
-        CollapsingHeader::new("Misc widgets", Arc::clone(&font))
-            .default_open(false)
-            .with_content(misc_widgets_section(&font))
-    ), 0.0);
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Misc widgets", Arc::clone(&font))
+                .default_open(false)
+                .with_content(misc_widgets_section(&font)),
+        ),
+        0.0,
+    );
 
     // ── Checkboxes (default closed) ─────────────────────────────────────────
-    col.push(Box::new(
-        CollapsingHeader::new("Checkboxes", Arc::clone(&font))
-            .default_open(false)
-            .with_content(checkboxes_section(&font))
-    ), 0.0);
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Checkboxes", Arc::clone(&font))
+                .default_open(false)
+                .with_content(checkboxes_section(&font)),
+        ),
+        0.0,
+    );
 
     // ── Colors (default closed) ──────────────────────────────────────────────
-    col.push(Box::new(
-        CollapsingHeader::new("Colors", Arc::clone(&font))
-            .default_open(false)
-            .with_content(colors_section(&font))
-    ), 0.0);
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Colors", Arc::clone(&font))
+                .default_open(false)
+                .with_content(colors_section(&font)),
+        ),
+        0.0,
+    );
 
     // ── Test box rendering (default closed) ─────────────────────────────────
-    col.push(Box::new(
-        CollapsingHeader::new("Test box rendering", Arc::clone(&font))
-            .default_open(false)
-            .with_content(box_rendering_section(&font))
-    ), 0.0);
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Test box rendering", Arc::clone(&font))
+                .default_open(false)
+                .with_content(box_rendering_section(&font)),
+        ),
+        0.0,
+    );
 
     // ── Many circles (default closed) ────────────────────────────────────────
-    col.push(Box::new(
-        CollapsingHeader::new("Many circles of different sizes", Arc::clone(&font))
-            .default_open(false)
-            .with_content(Box::new(ManyCirclesWidget {
-                bounds: Rect::default(), children: Vec::new(),
-            }))
-    ), 0.0);
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Many circles of different sizes", Arc::clone(&font))
+                .default_open(false)
+                .with_content(Box::new(ManyCirclesWidget {
+                    bounds: Rect::default(),
+                    children: Vec::new(),
+                })),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
 

@@ -44,6 +44,7 @@ pub mod lcd_coverage;
 pub mod lcd_gfx_ctx;
 pub mod layout_props;
 pub mod screenshot;
+pub mod svg;
 pub mod text;
 pub mod touch_state;
 pub mod persistence;
@@ -67,10 +68,13 @@ pub mod web_adapter;
 // Re-export the most commonly used types at the crate root.
 pub use app_state::{OsWindowHandle, OsWindowState};
 pub use screenshot::ScreenshotHandle;
+pub use svg::{render_svg, render_svg_to_framebuffer, render_svg_to_lcd_buffer,
+              render_svg_tree, render_svg_tree_to_framebuffer,
+              render_svg_tree_to_lcd_buffer, SvgRenderError};
 pub use color::Color;
 pub use cursor::{CursorIcon, current_cursor_icon, set_cursor_icon, reset_cursor_icon};
 pub use device_scale::{device_scale, set_device_scale};
-pub use draw_ctx::{DrawCtx, GlPaint};
+pub use draw_ctx::{DrawCtx, FillRule, GlPaint};
 pub use theme::{ThemePreference, Visuals, current_visuals, current_visuals_epoch, set_visuals};
 pub use font_settings::current_typography_epoch;
 pub use event::{Event, EventResult, Key, Modifiers, MouseButton};

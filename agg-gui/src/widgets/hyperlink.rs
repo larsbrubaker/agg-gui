@@ -11,7 +11,7 @@ use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::Font;
+use crate::text::{Font, measure_text_metrics};
 use crate::widget::Widget;
 
 // Colors are resolved from ctx.visuals() at paint time.
@@ -89,14 +89,15 @@ impl Widget for Hyperlink {
         }
     }
 
-    fn layout(&mut self, available: Size) -> Size {
+    fn layout(&mut self, _available: Size) -> Size {
         let sig = (self.hovered, self.bounds.width.to_bits(), self.bounds.height.to_bits());
         if self.last_sig != Some(sig) {
             self.last_sig = Some(sig);
             self.cache.invalidate();
         }
         let h = self.font_size * 1.5;
-        Size::new(available.width, h)
+        let w = measure_text_metrics(&self.font, &self.text, self.font_size).width;
+        Size::new(w, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {

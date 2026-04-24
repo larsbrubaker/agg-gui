@@ -6,13 +6,15 @@
 
 use std::sync::Arc;
 
-use agg_gui::{
-    Color, Container, CursorIcon, DrawCtx, Event, EventResult,
-    FlexColumn, FlexRow, Font, Hyperlink, Label,
-    Point, Rect, Resize, ScrollView, Separator, set_cursor_icon,
-    Size, SizedBox, TextArea, TextField, Widget,
-};
+use agg_gui::framebuffer::unpremultiply_rgba_inplace;
+use agg_gui::lcd_coverage::LcdBuffer;
 use agg_gui::widget::paint_subtree;
+use agg_gui::{
+    render_svg, render_svg_to_framebuffer, render_svg_to_lcd_buffer, set_cursor_icon, Color,
+    Container, CursorIcon, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink,
+    Label, Point, Rect, Resize, ScrollView, Separator, Size, SizedBox, TextArea, TextField,
+    Visuals, Widget,
+};
 
 // ---------------------------------------------------------------------------
 // Clipboard Test
@@ -25,31 +27,63 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(16.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("Clipboard test", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("Clipboard test", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
-    let row = FlexRow::new().with_gap(10.0)
-        .add_flex(Box::new(FlexColumn::new().with_gap(6.0)
-            .add(Box::new(Label::new("Copy from:", Arc::clone(&font)).with_font_size(11.5)))
-            .add(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-                TextField::new(Arc::clone(&font))
-                    .with_font_size(13.0).with_text("Select and copy me")
-            ))))), 1.0)
-        .add_flex(Box::new(FlexColumn::new().with_gap(6.0)
-            .add(Box::new(Label::new("Paste into:", Arc::clone(&font)).with_font_size(11.5)))
-            .add(Box::new(SizedBox::new().with_height(32.0).with_child(Box::new(
-                TextField::new(Arc::clone(&font))
-                    .with_font_size(13.0).with_placeholder("Ctrl+V here")
-            ))))), 1.0);
+    let row = FlexRow::new()
+        .with_gap(10.0)
+        .add_flex(
+            Box::new(
+                FlexColumn::new()
+                    .with_gap(6.0)
+                    .add(Box::new(
+                        Label::new("Copy from:", Arc::clone(&font)).with_font_size(11.5),
+                    ))
+                    .add(Box::new(
+                        SizedBox::new().with_height(32.0).with_child(Box::new(
+                            TextField::new(Arc::clone(&font))
+                                .with_font_size(13.0)
+                                .with_text("Select and copy me"),
+                        )),
+                    )),
+            ),
+            1.0,
+        )
+        .add_flex(
+            Box::new(
+                FlexColumn::new()
+                    .with_gap(6.0)
+                    .add(Box::new(
+                        Label::new("Paste into:", Arc::clone(&font)).with_font_size(11.5),
+                    ))
+                    .add(Box::new(
+                        SizedBox::new().with_height(32.0).with_child(Box::new(
+                            TextField::new(Arc::clone(&font))
+                                .with_font_size(13.0)
+                                .with_placeholder("Ctrl+V here"),
+                        )),
+                    )),
+            ),
+            1.0,
+        );
     col.push(Box::new(row), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new(
-        "Ctrl+C / Ctrl+X — copy or cut selected text\n\
+    col.push(
+        Box::new(
+            Label::new(
+                "Ctrl+C / Ctrl+X — copy or cut selected text\n\
          Ctrl+V           — paste from clipboard\n\
          Ctrl+A           — select all",
-        Arc::clone(&font),
-    ).with_font_size(11.5).with_wrap(true)), 0.0);
+                Arc::clone(&font),
+            )
+            .with_font_size(11.5)
+            .with_wrap(true),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -61,50 +95,50 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// All cursor icons in display order — mirrors egui's `CursorIcon::ALL`.
 const ALL_CURSORS: &[(CursorIcon, &str)] = &[
-    (CursorIcon::Default,          "Default"),
-    (CursorIcon::None,             "None"),
-    (CursorIcon::ContextMenu,      "ContextMenu"),
-    (CursorIcon::Help,             "Help"),
-    (CursorIcon::PointingHand,     "PointingHand"),
-    (CursorIcon::Progress,         "Progress"),
-    (CursorIcon::Wait,             "Wait"),
-    (CursorIcon::Cell,             "Cell"),
-    (CursorIcon::Crosshair,        "Crosshair"),
-    (CursorIcon::Text,             "Text"),
-    (CursorIcon::VerticalText,     "VerticalText"),
-    (CursorIcon::Alias,            "Alias"),
-    (CursorIcon::Copy,             "Copy"),
-    (CursorIcon::Move,             "Move"),
-    (CursorIcon::NoDrop,           "NoDrop"),
-    (CursorIcon::NotAllowed,       "NotAllowed"),
-    (CursorIcon::Grab,             "Grab"),
-    (CursorIcon::Grabbing,         "Grabbing"),
-    (CursorIcon::AllScroll,        "AllScroll"),
+    (CursorIcon::Default, "Default"),
+    (CursorIcon::None, "None"),
+    (CursorIcon::ContextMenu, "ContextMenu"),
+    (CursorIcon::Help, "Help"),
+    (CursorIcon::PointingHand, "PointingHand"),
+    (CursorIcon::Progress, "Progress"),
+    (CursorIcon::Wait, "Wait"),
+    (CursorIcon::Cell, "Cell"),
+    (CursorIcon::Crosshair, "Crosshair"),
+    (CursorIcon::Text, "Text"),
+    (CursorIcon::VerticalText, "VerticalText"),
+    (CursorIcon::Alias, "Alias"),
+    (CursorIcon::Copy, "Copy"),
+    (CursorIcon::Move, "Move"),
+    (CursorIcon::NoDrop, "NoDrop"),
+    (CursorIcon::NotAllowed, "NotAllowed"),
+    (CursorIcon::Grab, "Grab"),
+    (CursorIcon::Grabbing, "Grabbing"),
+    (CursorIcon::AllScroll, "AllScroll"),
     (CursorIcon::ResizeHorizontal, "ResizeHorizontal"),
-    (CursorIcon::ResizeNeSw,       "ResizeNeSw"),
-    (CursorIcon::ResizeNwSe,       "ResizeNwSe"),
-    (CursorIcon::ResizeVertical,   "ResizeVertical"),
-    (CursorIcon::ResizeEast,       "ResizeEast"),
-    (CursorIcon::ResizeSouthEast,  "ResizeSouthEast"),
-    (CursorIcon::ResizeSouth,      "ResizeSouth"),
-    (CursorIcon::ResizeSouthWest,  "ResizeSouthWest"),
-    (CursorIcon::ResizeWest,       "ResizeWest"),
-    (CursorIcon::ResizeNorthWest,  "ResizeNorthWest"),
-    (CursorIcon::ResizeNorth,      "ResizeNorth"),
-    (CursorIcon::ResizeNorthEast,  "ResizeNorthEast"),
-    (CursorIcon::ResizeColumn,     "ResizeColumn"),
-    (CursorIcon::ResizeRow,        "ResizeRow"),
-    (CursorIcon::ZoomIn,           "ZoomIn"),
-    (CursorIcon::ZoomOut,          "ZoomOut"),
+    (CursorIcon::ResizeNeSw, "ResizeNeSw"),
+    (CursorIcon::ResizeNwSe, "ResizeNwSe"),
+    (CursorIcon::ResizeVertical, "ResizeVertical"),
+    (CursorIcon::ResizeEast, "ResizeEast"),
+    (CursorIcon::ResizeSouthEast, "ResizeSouthEast"),
+    (CursorIcon::ResizeSouth, "ResizeSouth"),
+    (CursorIcon::ResizeSouthWest, "ResizeSouthWest"),
+    (CursorIcon::ResizeWest, "ResizeWest"),
+    (CursorIcon::ResizeNorthWest, "ResizeNorthWest"),
+    (CursorIcon::ResizeNorth, "ResizeNorth"),
+    (CursorIcon::ResizeNorthEast, "ResizeNorthEast"),
+    (CursorIcon::ResizeColumn, "ResizeColumn"),
+    (CursorIcon::ResizeRow, "ResizeRow"),
+    (CursorIcon::ZoomIn, "ZoomIn"),
+    (CursorIcon::ZoomOut, "ZoomOut"),
 ];
 
 /// Full-width row button that sets the OS cursor to `icon` on hover.
 struct CursorRow {
-    bounds:  Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    icon:    CursorIcon,
+    icon: CursorIcon,
     hovered: bool,
-    label:   Label,
+    label: Label,
 }
 
 impl CursorRow {
@@ -122,22 +156,37 @@ impl CursorRow {
 }
 
 impl Widget for CursorRow {
-    fn type_name(&self) -> &'static str { "CursorRow" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "CursorRow"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, Self::H);
         let ls = self.label.layout(Size::new(available.width, Self::H));
-        self.label.set_bounds(Rect::new(0.0, 0.0, ls.width, ls.height));
+        self.label
+            .set_bounds(Rect::new(0.0, 0.0, ls.width, ls.height));
         Size::new(available.width, Self::H)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let bg = if self.hovered { v.widget_bg_hovered } else { v.widget_bg };
+        let bg = if self.hovered {
+            v.widget_bg_hovered
+        } else {
+            v.widget_bg
+        };
         ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, self.bounds.width, Self::H, 3.0);
@@ -159,14 +208,18 @@ impl Widget for CursorRow {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
-                let in_bounds = pos.x >= 0.0 && pos.x <= self.bounds.width
-                    && pos.y >= 0.0 && pos.y <= Self::H;
+                let in_bounds =
+                    pos.x >= 0.0 && pos.x <= self.bounds.width && pos.y >= 0.0 && pos.y <= Self::H;
                 if in_bounds {
                     set_cursor_icon(self.icon);
                 }
                 let was = self.hovered;
                 self.hovered = in_bounds;
-                if self.hovered != was { EventResult::Consumed } else { EventResult::Ignored }
+                if self.hovered != was {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             _ => EventResult::Ignored,
         }
@@ -183,7 +236,7 @@ impl Widget for CursorRow {
 /// Hovering each row sets the OS cursor.
 pub fn cursor_test(font: Arc<Font>) -> Box<dyn Widget> {
     let half = ALL_CURSORS.len() / 2;
-    let left_cursors  = &ALL_CURSORS[..half];
+    let left_cursors = &ALL_CURSORS[..half];
     let right_cursors = &ALL_CURSORS[half..];
 
     let mut left_col = FlexColumn::new().with_gap(2.0).with_padding(0.0);
@@ -206,10 +259,12 @@ pub fn cursor_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(8.0)
         .with_panel_bg();
 
-    col.push(Box::new(
-        Label::new("Hover to switch cursor icon:", Arc::clone(&font))
-            .with_font_size(13.0)
-    ), 0.0);
+    col.push(
+        Box::new(
+            Label::new("Hover to switch cursor icon:", Arc::clone(&font)).with_font_size(13.0),
+        ),
+        0.0,
+    );
     col.push(Box::new(cols_row), 0.0);
     col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
     // Flex fill so panel_bg covers full window content area.
@@ -224,19 +279,29 @@ pub fn cursor_test(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// A custom-painted grid of colored cells showing alignment.
 struct GridPainter {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    cols:     usize,
-    rows:     usize,
+    font: Arc<Font>,
+    cols: usize,
+    rows: usize,
 }
 
 impl Widget for GridPainter {
-    fn type_name(&self) -> &'static str { "GridPainter" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "GridPainter"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -244,10 +309,10 @@ impl Widget for GridPainter {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v   = ctx.visuals();
-        let cw  = self.bounds.width  / self.cols as f64;
-        let ch  = self.bounds.height / self.rows as f64;
-        let n   = self.cols * self.rows;
+        let v = ctx.visuals();
+        let cw = self.bounds.width / self.cols as f64;
+        let ch = self.bounds.height / self.rows as f64;
+        let n = self.cols * self.rows;
 
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(9.5);
@@ -274,7 +339,9 @@ impl Widget for GridPainter {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Build the Grid Test — an 8×6 colored grid with coordinate labels.
@@ -284,13 +351,21 @@ pub fn grid_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(12.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("8 × 6 alignment grid", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("8 × 6 alignment grid", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
-    col.push(Box::new(GridPainter {
-        bounds: Rect::default(), children: Vec::new(),
-        font: Arc::clone(&font), cols: 8, rows: 6,
-    }), 1.0);
+    col.push(
+        Box::new(GridPainter {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font: Arc::clone(&font),
+            cols: 8,
+            rows: 6,
+        }),
+        1.0,
+    );
 
     Box::new(col)
 }
@@ -302,16 +377,16 @@ pub fn grid_test(font: Arc<Font>) -> Box<dyn Widget> {
 /// Build the Id Test — static informational display of widget type names.
 pub fn id_test(font: Arc<Font>) -> Box<dyn Widget> {
     let types = [
-        ("Button",         "btn_primary"),
-        ("Checkbox",       "cb_feature_a"),
-        ("Slider",         "slider_val_0"),
-        ("TextField",      "tf_search"),
-        ("Label",          "lbl_title"),
-        ("FlexColumn",     "col_root"),
-        ("FlexRow",        "row_buttons"),
-        ("Container",      "container_panel"),
-        ("ScrollView",     "scroll_main"),
-        ("ProgressBar",    "pb_loading"),
+        ("Button", "btn_primary"),
+        ("Checkbox", "cb_feature_a"),
+        ("Slider", "slider_val_0"),
+        ("TextField", "tf_search"),
+        ("Label", "lbl_title"),
+        ("FlexColumn", "col_root"),
+        ("FlexRow", "row_buttons"),
+        ("Container", "container_panel"),
+        ("ScrollView", "scroll_main"),
+        ("ProgressBar", "pb_loading"),
     ];
 
     let mut col = FlexColumn::new()
@@ -319,27 +394,39 @@ pub fn id_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(14.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("Widget type → generated ID", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("Widget type → generated ID", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
     for (ty, id) in types {
-        let row = FlexRow::new().with_gap(8.0)
-            .add(Box::new(SizedBox::new().with_width(120.0).with_child(Box::new(
-                Label::new(ty, Arc::clone(&font)).with_font_size(12.5)
-            ))))
-            .add(Box::new(Label::new(id, Arc::clone(&font))
-                .with_font_size(12.0)
-                .with_color(Color::rgb(0.22, 0.45, 0.88))));
+        let row = FlexRow::new()
+            .with_gap(8.0)
+            .add(Box::new(SizedBox::new().with_width(120.0).with_child(
+                Box::new(Label::new(ty, Arc::clone(&font)).with_font_size(12.5)),
+            )))
+            .add(Box::new(
+                Label::new(id, Arc::clone(&font))
+                    .with_font_size(12.0)
+                    .with_color(Color::rgb(0.22, 0.45, 0.88)),
+            ));
         col.push(Box::new(row), 0.0);
     }
 
     col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new(
-        "IDs are hashed from the widget type name + call-site path.",
-        Arc::clone(&font),
-    ).with_font_size(11.0).with_wrap(true)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "IDs are hashed from the widget type name + call-site path.",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.0)
+            .with_wrap(true),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -351,18 +438,21 @@ pub fn id_test(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// Records the last N events and renders them as a scrollable list.
 struct EventHistoryWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    events:   Vec<String>,
-    max:      usize,
+    font: Arc<Font>,
+    events: Vec<String>,
+    max: usize,
 }
 
 impl EventHistoryWidget {
     fn new(font: Arc<Font>) -> Self {
         Self {
-            bounds: Rect::default(), children: Vec::new(),
-            font, events: Vec::new(), max: 20,
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font,
+            events: Vec::new(),
+            max: 20,
         }
     }
 
@@ -373,11 +463,21 @@ impl EventHistoryWidget {
 }
 
 impl Widget for EventHistoryWidget {
-    fn type_name(&self) -> &'static str { "EventHistoryWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "EventHistoryWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -385,9 +485,9 @@ impl Widget for EventHistoryWidget {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v    = ctx.visuals();
-        let w    = self.bounds.width;
-        let h    = self.bounds.height;
+        let v = ctx.visuals();
+        let w = self.bounds.width;
+        let h = self.bounds.height;
         let line = 18.0_f64;
 
         ctx.set_fill_color(v.widget_bg);
@@ -405,10 +505,15 @@ impl Widget for EventHistoryWidget {
 
         for (i, ev) in self.events.iter().enumerate() {
             let y = h - (i as f64 + 1.0) * line;
-            if y < 0.0 { break; }
+            if y < 0.0 {
+                break;
+            }
             let alpha = 1.0 - i as f64 * 0.045;
             ctx.set_fill_color(Color::rgba(
-                v.text_color.r, v.text_color.g, v.text_color.b, alpha as f32,
+                v.text_color.r,
+                v.text_color.g,
+                v.text_color.b,
+                alpha as f32,
             ));
             ctx.fill_text(ev, 6.0, y + 4.0);
         }
@@ -422,18 +527,14 @@ impl Widget for EventHistoryWidget {
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         let desc = match event {
-            Event::MouseMove { pos } =>
-                format!("MouseMove ({:.0}, {:.0})", pos.x, pos.y),
-            Event::MouseDown { pos, button, .. } =>
-                format!("MouseDown {:?} ({:.0},{:.0})", button, pos.x, pos.y),
-            Event::MouseUp { button, .. } =>
-                format!("MouseUp {:?}", button),
-            Event::KeyDown { key, .. } =>
-                format!("KeyDown {:?}", key),
-            Event::KeyUp { key, .. } =>
-                format!("KeyUp {:?}", key),
-            Event::MouseWheel { delta_y, .. } =>
-                format!("MouseWheel {:.1}", delta_y),
+            Event::MouseMove { pos } => format!("MouseMove ({:.0}, {:.0})", pos.x, pos.y),
+            Event::MouseDown { pos, button, .. } => {
+                format!("MouseDown {:?} ({:.0},{:.0})", button, pos.x, pos.y)
+            }
+            Event::MouseUp { button, .. } => format!("MouseUp {:?}", button),
+            Event::KeyDown { key, .. } => format!("KeyDown {:?}", key),
+            Event::KeyUp { key, .. } => format!("KeyUp {:?}", key),
+            Event::MouseWheel { delta_y, .. } => format!("MouseWheel {:.1}", delta_y),
             _ => return EventResult::Ignored,
         };
         self.push_event(desc);
@@ -441,8 +542,7 @@ impl Widget for EventHistoryWidget {
     }
 
     fn hit_test(&self, p: Point) -> bool {
-        p.x >= 0.0 && p.x <= self.bounds.width
-            && p.y >= 0.0 && p.y <= self.bounds.height
+        p.x >= 0.0 && p.x <= self.bounds.width && p.y >= 0.0 && p.y <= self.bounds.height
     }
 }
 
@@ -453,10 +553,17 @@ pub fn input_event_history(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(10.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new(
-        "Interact inside the box to record events (last 20)",
-        Arc::clone(&font),
-    ).with_font_size(11.5).with_wrap(true)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Interact inside the box to record events (last 20)",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.5)
+            .with_wrap(true),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(EventHistoryWidget::new(Arc::clone(&font))), 1.0);
     Box::new(col)
@@ -468,19 +575,29 @@ pub fn input_event_history(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// Records the last-pressed key name and mouse position.
 struct InputStateWidget {
-    bounds:      Rect,
-    children:    Vec<Box<dyn Widget>>,
-    font:        Arc<Font>,
-    last_key:    Option<String>,
-    mouse_pos:   Point,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    font: Arc<Font>,
+    last_key: Option<String>,
+    mouse_pos: Point,
 }
 
 impl Widget for InputStateWidget {
-    fn type_name(&self) -> &'static str { "InputStateWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "InputStateWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let h = 100.0_f64.min(available.height);
@@ -510,8 +627,12 @@ impl Widget for InputStateWidget {
         let key_str = self.last_key.as_deref().unwrap_or("—");
         ctx.fill_text(&format!("Last key:   {}", key_str), 10.0, h - 20.0);
         ctx.fill_text(
-            &format!("Mouse pos:  ({:.0}, {:.0})", self.mouse_pos.x, self.mouse_pos.y),
-            10.0, h - 44.0,
+            &format!(
+                "Mouse pos:  ({:.0}, {:.0})",
+                self.mouse_pos.x, self.mouse_pos.y
+            ),
+            10.0,
+            h - 44.0,
         );
     }
 
@@ -530,8 +651,7 @@ impl Widget for InputStateWidget {
     }
 
     fn hit_test(&self, p: Point) -> bool {
-        p.x >= 0.0 && p.x <= self.bounds.width
-            && p.y >= 0.0 && p.y <= self.bounds.height
+        p.x >= 0.0 && p.x <= self.bounds.width && p.y >= 0.0 && p.y <= self.bounds.height
     }
 }
 
@@ -542,17 +662,28 @@ pub fn input_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(12.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new(
-        "Move the mouse or press keys inside the status box",
-        Arc::clone(&font),
-    ).with_font_size(11.5).with_wrap(true)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Move the mouse or press keys inside the status box",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.5)
+            .with_wrap(true),
+        ),
+        0.0,
+    );
 
-    col.push(Box::new(InputStateWidget {
-        bounds: Rect::default(), children: Vec::new(),
-        font: Arc::clone(&font),
-        last_key: None,
-        mouse_pos: Point { x: 0.0, y: 0.0 },
-    }), 0.0);
+    col.push(
+        Box::new(InputStateWidget {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font: Arc::clone(&font),
+            last_key: None,
+            mouse_pos: Point { x: 0.0, y: 0.0 },
+        }),
+        0.0,
+    );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -577,8 +708,10 @@ pub fn layout_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(14.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("Alignment examples", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("Alignment examples", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
     for (i, (&lbl, &bg)) in labels.iter().zip(colors.iter()).enumerate() {
         let box_w = match i {
@@ -592,25 +725,35 @@ pub fn layout_test(font: Arc<Font>) -> Box<dyn Widget> {
             .with_background(bg)
             .with_border(Color::rgba(0.0, 0.0, 0.0, 0.15), 1.0)
             .with_padding(6.0)
-            .add(Box::new(Label::new(lbl, Arc::clone(&font)).with_font_size(12.0)));
+            .add(Box::new(
+                Label::new(lbl, Arc::clone(&font)).with_font_size(12.0),
+            ));
 
         if i == 3 {
             // Stretch row.
             let row = FlexRow::new().add_flex(Box::new(cell), 1.0);
             col.push(Box::new(row), 0.0);
         } else {
-            let row = FlexRow::new()
-                .add(Box::new(SizedBox::new().with_width(box_w).with_child(Box::new(cell))));
+            let row = FlexRow::new().add(Box::new(
+                SizedBox::new().with_width(box_w).with_child(Box::new(cell)),
+            ));
             col.push(Box::new(row), 0.0);
         }
     }
 
     col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(Label::new(
-        "FlexRow / FlexColumn control alignment.\n\
+    col.push(
+        Box::new(
+            Label::new(
+                "FlexRow / FlexColumn control alignment.\n\
          add() = fixed-size child, add_flex() = fills remaining space.",
-        Arc::clone(&font),
-    ).with_font_size(11.0).with_wrap(true)), 0.0);
+                Arc::clone(&font),
+            )
+            .with_font_size(11.0)
+            .with_wrap(true),
+        ),
+        0.0,
+    );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
@@ -622,17 +765,27 @@ pub fn layout_test(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// A custom-painted widget showing absolutely-positioned boxes with corner labels.
 struct ManualLayoutWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
+    font: Arc<Font>,
 }
 
 impl Widget for ManualLayoutWidget {
-    fn type_name(&self) -> &'static str { "ManualLayoutWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ManualLayoutWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -654,12 +807,46 @@ impl Widget for ManualLayoutWidget {
 
         // Absolutely-positioned boxes.
         let boxes: &[(f64, f64, f64, f64, Color, &str)] = &[
-            (10.0,  h - 60.0, 80.0, 40.0, Color::rgba(0.22, 0.45, 0.88, 0.25), "TL"),
-            (w - 90.0, h - 60.0, 80.0, 40.0, Color::rgba(0.18, 0.72, 0.42, 0.25), "TR"),
-            (10.0,  20.0, 80.0, 40.0, Color::rgba(0.88, 0.25, 0.18, 0.25), "BL"),
-            (w - 90.0, 20.0, 80.0, 40.0, Color::rgba(0.86, 0.78, 0.40, 0.25), "BR"),
-            ((w - 100.0) * 0.5, (h - 50.0) * 0.5, 100.0, 50.0,
-             Color::rgba(0.60, 0.25, 0.88, 0.20), "Center"),
+            (
+                10.0,
+                h - 60.0,
+                80.0,
+                40.0,
+                Color::rgba(0.22, 0.45, 0.88, 0.25),
+                "TL",
+            ),
+            (
+                w - 90.0,
+                h - 60.0,
+                80.0,
+                40.0,
+                Color::rgba(0.18, 0.72, 0.42, 0.25),
+                "TR",
+            ),
+            (
+                10.0,
+                20.0,
+                80.0,
+                40.0,
+                Color::rgba(0.88, 0.25, 0.18, 0.25),
+                "BL",
+            ),
+            (
+                w - 90.0,
+                20.0,
+                80.0,
+                40.0,
+                Color::rgba(0.86, 0.78, 0.40, 0.25),
+                "BR",
+            ),
+            (
+                (w - 100.0) * 0.5,
+                (h - 50.0) * 0.5,
+                100.0,
+                50.0,
+                Color::rgba(0.60, 0.25, 0.88, 0.20),
+                "Center",
+            ),
         ];
 
         for &(bx, by, bw, bh, bg, label) in boxes {
@@ -682,7 +869,9 @@ impl Widget for ManualLayoutWidget {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Build the Manual Layout Test — five absolutely positioned boxes.
@@ -692,14 +881,26 @@ pub fn manual_layout_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(8.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new(
-        "Absolutely-positioned boxes with coordinate labels",
-        Arc::clone(&font),
-    ).with_font_size(11.5).with_wrap(true)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Absolutely-positioned boxes with coordinate labels",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.5)
+            .with_wrap(true),
+        ),
+        0.0,
+    );
 
-    col.push(Box::new(ManualLayoutWidget {
-        bounds: Rect::default(), children: Vec::new(), font,
-    }), 1.0);
+    col.push(
+        Box::new(ManualLayoutWidget {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font,
+        }),
+        1.0,
+    );
 
     Box::new(col)
 }
@@ -708,100 +909,406 @@ pub fn manual_layout_test(font: Arc<Font>) -> Box<dyn Widget> {
 // SVG Test
 // ---------------------------------------------------------------------------
 
-/// Build the SVG Test — informational placeholder with a drawn rectangle.
+/// Build the SVG Test — live progress viewer for the library SVG renderer.
 pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new()
-        .with_gap(12.0)
-        .with_padding(16.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new(
-        "SVG rendering not yet implemented.",
-        Arc::clone(&font),
-    ).with_font_size(13.0)), 0.0);
-
-    col.push(Box::new(Label::new(
-        "agg-gui uses a raster-based renderer (Anti-Grain Geometry).  SVG\n\
-         support would require a full SVG parse + rasterize pipeline.\n\n\
-         Placeholder shape below:",
-        Arc::clone(&font),
-    ).with_font_size(12.0).with_wrap(true)), 0.0);
-
-    // A simple drawn placeholder.
-    col.push(Box::new(SvgPlaceholder::new(Arc::clone(&font))), 0.0);
-
-    Box::new(col)
+    Box::new(SvgProgressViewer::new(font))
 }
 
-/// A visual placeholder for SVG rendering (not yet implemented).
-///
-/// The "SVG placeholder" text is a backbuffered Label child.
-struct SvgPlaceholder {
-    bounds:   Rect,
+struct SvgProgressViewer {
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    label:    Label,
+    font: Arc<Font>,
+    samples: Vec<SvgSampleRender>,
 }
 
-impl SvgPlaceholder {
+struct SvgSampleRender {
+    name: &'static str,
+    svg: &'static str,
+    width: u32,
+    height: u32,
+    rgba: Result<Arc<Vec<u8>>, String>,
+    lcd: Result<Arc<Vec<u8>>, String>,
+}
+
+impl SvgProgressViewer {
     fn new(font: Arc<Font>) -> Self {
+        let samples = SVG_SAMPLES.iter().map(SvgSampleRender::new).collect();
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            label:    Label::new("SVG placeholder", font).with_font_size(10.0),
+            font,
+            samples,
         }
     }
 }
 
-impl Widget for SvgPlaceholder {
-    fn type_name(&self) -> &'static str { "SvgPlaceholder" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+impl SvgSampleRender {
+    fn new(sample: &SvgSample) -> Self {
+        let rgba = render_svg_to_framebuffer(sample.svg.as_bytes())
+            .map(|fb| {
+                let mut pixels = fb.pixels_flipped();
+                unpremultiply_rgba_inplace(&mut pixels);
+                Arc::new(pixels)
+            })
+            .map_err(|e| e.to_string());
+
+        let lcd = render_svg_to_lcd_buffer(sample.svg.as_bytes())
+            .map(|buffer| Arc::new(lcd_buffer_to_preview_rgba(&buffer)))
+            .map_err(|e| e.to_string());
+
+        Self {
+            name: sample.name,
+            svg: sample.svg,
+            width: sample.width,
+            height: sample.height,
+            rgba,
+            lcd,
+        }
+    }
+}
+
+impl Widget for SvgProgressViewer {
+    fn type_name(&self) -> &'static str {
+        "SvgProgressViewer"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
-        let h = 80.0_f64.min(available.height);
-        self.bounds = Rect::new(0.0, 0.0, available.width, h);
-
-        // Position label at 12px from left, vertically near center.
-        let ls = self.label.layout(Size::new(available.width - 16.0, 16.0));
-        let ly = (h - ls.height) * 0.5;
-        self.label.set_bounds(Rect::new(12.0, ly, ls.width, ls.height));
-
-        Size::new(available.width, h)
+        self.bounds = Rect::new(
+            0.0,
+            0.0,
+            available.width.max(760.0),
+            available.height.max(360.0),
+        );
+        Size::new(self.bounds.width, self.bounds.height)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let w = self.bounds.width;
-        let h = self.bounds.height;
+        ctx.set_font(Arc::clone(&self.font));
+        let w = self.bounds.width.max(760.0);
+        let h = self.bounds.height.max(360.0);
+        let pad = 8.0;
+        let gap = 8.0;
+        let title_h = 50.0;
+        let header_h = 32.0;
+        let row_h =
+            ((h - title_h - header_h - pad * 2.0) / self.samples.len() as f64).clamp(118.0, 170.0);
+        let col_w = ((w - pad * 2.0 - gap * 3.0) / 4.0).max(120.0);
+        let titles = [
+            "reference.png / control",
+            "agg-rgba-bitmap render",
+            "agg-lcd-bitmap render",
+            "hardware render",
+        ];
 
         ctx.set_fill_color(v.widget_bg);
         ctx.begin_path();
-        ctx.rect(0.0, 0.0, w, h);
+        ctx.rounded_rect(0.0, 0.0, w, h, 6.0);
         ctx.fill();
-        ctx.set_stroke_color(Color::rgba(0.22, 0.45, 0.88, 0.60));
-        ctx.set_line_width(1.5);
-        ctx.begin_path();
-        ctx.rect(8.0, 8.0, w - 16.0, h - 16.0);
-        ctx.stroke();
-        // Diagonal cross.
-        ctx.begin_path();
-        ctx.move_to(8.0, 8.0);
-        ctx.line_to(w - 8.0, h - 8.0);
-        ctx.move_to(w - 8.0, 8.0);
-        ctx.line_to(8.0, h - 8.0);
-        ctx.stroke();
 
-        // Paint label via backbuffered child.
-        self.label.set_color(v.text_dim);
-        let lb = self.label.bounds();
-        ctx.save(); ctx.translate(lb.x, lb.y);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        let title_y = h - 22.0;
+        draw_small_text(
+            ctx,
+            "SVG renderer progress viewer",
+            pad + 2.0,
+            title_y,
+            13.0,
+            v.text_color,
+        );
+        draw_small_text(
+            ctx,
+            "Headers are fixed; each row compares the direct control image with library RGBA, LCD, and live hardware DrawCtx output.",
+            pad + 2.0,
+            title_y - 18.0,
+            10.5,
+            v.text_dim,
+        );
+
+        let header_y = h - title_h - 22.0;
+        ctx.set_fill_color(v.window_title_fill);
+        ctx.begin_path();
+        ctx.rect(0.0, h - title_h - header_h, w, header_h);
+        ctx.fill();
+        for (i, title) in titles.iter().enumerate() {
+            let x = pad + i as f64 * (col_w + gap);
+            draw_small_text(ctx, title, x + 6.0, header_y, 10.5, v.text_color);
+        }
+
+        for (row, sample) in self.samples.iter().enumerate() {
+            let row_top = h - title_h - header_h - row as f64 * row_h;
+            let y = row_top - row_h + 6.0;
+            draw_small_text(
+                ctx,
+                sample.name,
+                pad + 6.0,
+                row_top - 17.0,
+                10.0,
+                v.text_dim,
+            );
+
+            for col in 0..4 {
+                let x = pad + col as f64 * (col_w + gap);
+                draw_panel(ctx, x, y, col_w, row_h - 26.0, &v);
+                match col {
+                    0 => draw_reference_control(ctx, row, x, y, col_w, row_h - 26.0, &v),
+                    1 => draw_raster_column(
+                        ctx,
+                        &sample.rgba,
+                        sample.width,
+                        sample.height,
+                        x,
+                        y,
+                        col_w,
+                        row_h - 26.0,
+                        &v,
+                    ),
+                    2 => draw_raster_column(
+                        ctx,
+                        &sample.lcd,
+                        sample.width,
+                        sample.height,
+                        x,
+                        y,
+                        col_w,
+                        row_h - 26.0,
+                        &v,
+                    ),
+                    3 => draw_hardware_column(ctx, sample, x, y, col_w, row_h - 26.0, &v),
+                    _ => {}
+                }
+            }
+        }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
+struct SvgSample {
+    name: &'static str,
+    svg: &'static str,
+    width: u32,
+    height: u32,
+}
+
+const SVG_SAMPLES: &[SvgSample] = &[
+    SvgSample {
+        name: "Solid fill + stroke",
+        width: 120,
+        height: 90,
+        svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90">
+            <rect x="8" y="8" width="104" height="74" rx="10" fill="#3b82f6" stroke="#111827" stroke-width="4"/>
+            <circle cx="38" cy="45" r="18" fill="#f97316"/>
+        </svg>"##,
+    },
+    SvgSample {
+        name: "Even-odd fill rule",
+        width: 120,
+        height: 90,
+        svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90">
+            <path fill="#22c55e" fill-rule="evenodd"
+                  d="M10 10 H110 V80 H10 Z M35 30 H85 V60 H35 Z"/>
+            <path d="M18 72 L102 18" stroke="#0f172a" stroke-width="4" stroke-dasharray="8 6"/>
+        </svg>"##,
+    },
+    SvgSample {
+        name: "Transforms + curves",
+        width: 120,
+        height: 90,
+        svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90">
+            <g transform="translate(60 45) rotate(20)">
+                <path d="M-38 -18 C-20 -42 28 -35 38 -6 C48 23 8 38 -32 24 Z" fill="#a855f7"/>
+                <path d="M-30 0 C-10 20 12 20 30 0" fill="none" stroke="#f8fafc" stroke-width="5" stroke-linecap="round"/>
+            </g>
+        </svg>"##,
+    },
+];
+
+fn draw_panel(ctx: &mut dyn DrawCtx, x: f64, y: f64, w: f64, h: f64, v: &Visuals) {
+    ctx.set_fill_color(v.panel_fill);
+    ctx.begin_path();
+    ctx.rounded_rect(x, y, w, h, 5.0);
+    ctx.fill();
+    ctx.set_stroke_color(Color::rgba(
+        v.text_color.r,
+        v.text_color.g,
+        v.text_color.b,
+        0.18,
+    ));
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.rounded_rect(x, y, w, h, 5.0);
+    ctx.stroke();
+}
+
+fn draw_reference_control(
+    ctx: &mut dyn DrawCtx,
+    row: usize,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    v: &Visuals,
+) {
+    let (dx, dy, dw, dh) = fit_rect(120.0, 90.0, x, y, w, h);
+    ctx.save();
+    ctx.translate(dx, dy);
+    ctx.scale(dw / 120.0, dh / 90.0);
+    match row {
+        0 => {
+            ctx.set_fill_color(Color::rgb(0.23, 0.51, 0.96));
+            ctx.begin_path();
+            ctx.rounded_rect(8.0, 8.0, 104.0, 74.0, 10.0);
+            ctx.fill();
+            ctx.set_stroke_color(Color::rgb(0.07, 0.09, 0.15));
+            ctx.set_line_width(4.0);
+            ctx.begin_path();
+            ctx.rounded_rect(8.0, 8.0, 104.0, 74.0, 10.0);
+            ctx.stroke();
+            ctx.set_fill_color(Color::rgb(0.98, 0.45, 0.09));
+            ctx.begin_path();
+            ctx.circle(38.0, 45.0, 18.0);
+            ctx.fill();
+        }
+        1 => {
+            ctx.set_fill_color(Color::rgb(0.13, 0.77, 0.37));
+            ctx.begin_path();
+            ctx.rect(10.0, 10.0, 100.0, 70.0);
+            ctx.fill();
+            ctx.set_fill_color(v.panel_fill);
+            ctx.begin_path();
+            ctx.rect(35.0, 30.0, 50.0, 30.0);
+            ctx.fill();
+            ctx.set_stroke_color(Color::rgb(0.06, 0.09, 0.16));
+            ctx.set_line_width(4.0);
+            ctx.begin_path();
+            ctx.move_to(18.0, 18.0);
+            ctx.line_to(102.0, 72.0);
+            ctx.stroke();
+        }
+        _ => {
+            ctx.translate(60.0, 45.0);
+            ctx.rotate(20.0_f64.to_radians());
+            ctx.set_fill_color(Color::rgb(0.66, 0.33, 0.97));
+            ctx.begin_path();
+            ctx.move_to(-38.0, -18.0);
+            ctx.cubic_to(-20.0, -42.0, 28.0, -35.0, 38.0, -6.0);
+            ctx.cubic_to(48.0, 23.0, 8.0, 38.0, -32.0, 24.0);
+            ctx.close_path();
+            ctx.fill();
+            ctx.set_stroke_color(Color::rgb(0.97, 0.98, 0.99));
+            ctx.set_line_width(5.0);
+            ctx.begin_path();
+            ctx.move_to(-30.0, 0.0);
+            ctx.cubic_to(-10.0, 20.0, 12.0, 20.0, 30.0, 0.0);
+            ctx.stroke();
+        }
+    }
+    ctx.restore();
+    draw_small_text(ctx, "direct control", x + 8.0, y + 14.0, 9.0, v.text_dim);
+}
+
+fn draw_raster_column(
+    ctx: &mut dyn DrawCtx,
+    pixels: &Result<Arc<Vec<u8>>, String>,
+    img_w: u32,
+    img_h: u32,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    v: &Visuals,
+) {
+    match pixels {
+        Ok(pixels) => {
+            let (dx, dy, dw, dh) = fit_rect(img_w as f64, img_h as f64, x, y, w, h);
+            ctx.draw_image_rgba_arc(pixels, img_w, img_h, dx, dy, dw, dh);
+        }
+        Err(err) => draw_small_text(ctx, err, x + 8.0, y + h * 0.5, 9.0, v.text_dim),
+    }
+}
+
+fn draw_hardware_column(
+    ctx: &mut dyn DrawCtx,
+    sample: &SvgSampleRender,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    v: &Visuals,
+) {
+    let (dx, dy, dw, dh) = fit_rect(sample.width as f64, sample.height as f64, x, y, w, h);
+    let scale = (dw / sample.width as f64).min(dh / sample.height as f64);
+    ctx.save();
+    ctx.translate(dx, dy);
+    ctx.scale(scale, scale);
+    if let Err(err) = render_svg(sample.svg.as_bytes(), ctx) {
+        ctx.restore();
+        draw_small_text(ctx, &err.to_string(), x + 8.0, y + h * 0.5, 9.0, v.text_dim);
+        return;
+    }
+    ctx.restore();
+}
+
+fn fit_rect(src_w: f64, src_h: f64, x: f64, y: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {
+    let scale = ((w - 16.0) / src_w).min((h - 16.0) / src_h).max(0.01);
+    let dw = src_w * scale;
+    let dh = src_h * scale;
+    (x + (w - dw) * 0.5, y + (h - dh) * 0.5, dw, dh)
+}
+
+fn draw_small_text(ctx: &mut dyn DrawCtx, text: &str, x: f64, y: f64, size: f64, color: Color) {
+    ctx.set_font_size(size);
+    ctx.set_fill_color(color);
+    ctx.fill_text(text, x, y);
+}
+
+fn lcd_buffer_to_preview_rgba(buffer: &LcdBuffer) -> Vec<u8> {
+    let w = buffer.width() as usize;
+    let h = buffer.height() as usize;
+    let color = buffer.color_plane();
+    let alpha = buffer.alpha_plane();
+    let mut out = vec![0_u8; w * h * 4];
+
+    for y in 0..h {
+        let src_y = h - 1 - y;
+        for x in 0..w {
+            let src = (src_y * w + x) * 3;
+            let dst = (y * w + x) * 4;
+            let ar = alpha[src] as u16;
+            let ag = alpha[src + 1] as u16;
+            let ab = alpha[src + 2] as u16;
+            let a = ((ar + ag + ab) / 3) as u8;
+
+            out[dst] = unpremul_byte(color[src], a);
+            out[dst + 1] = unpremul_byte(color[src + 1], a);
+            out[dst + 2] = unpremul_byte(color[src + 2], a);
+            out[dst + 3] = a;
+        }
+    }
+
+    out
+}
+
+fn unpremul_byte(c: u8, a: u8) -> u8 {
+    if a == 0 {
+        0
+    } else {
+        (((c as u16) * 255 + (a as u16 / 2)) / a as u16).min(255) as u8
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -835,27 +1342,27 @@ officia deserunt mollitia animi, id est laborum et dolorum fuga.";
 /// (`with_auto_size`, `with_resizable` / `with_resizable_axes`) so each
 /// sub-window demonstrates the exact egui behaviour it's named after.
 pub struct ResizeTestWindow {
-    pub title:        String,
-    pub content:      Box<dyn Widget>,
+    pub title: String,
+    pub content: Box<dyn Widget>,
     pub initial_rect: Rect,
     /// Window fits tightly to its content; ignores `resizable_*`.
-    pub auto_size:    bool,
+    pub auto_size: bool,
     /// Master user-resize toggle.  `false` → no handles active.
-    pub resizable:    bool,
+    pub resizable: bool,
     /// Axis-specific locks (only consulted when `resizable` is `true`).
-    pub resizable_h:  bool,
-    pub resizable_v:  bool,
+    pub resizable_h: bool,
+    pub resizable_v: bool,
     /// Wrap content in a built-in vertical `ScrollView` at window
     /// build time.  Matches egui's `Window::vscroll(true)`.
-    pub vscroll:      bool,
+    pub vscroll: bool,
     /// Resize floor + ceiling follow content natural height.
     /// Matches egui's no-scroll-no-clip-no-whitespace contract for
     /// W4 (window snaps to content height in both directions).
-    pub tight_fit:    bool,
+    pub tight_fit: bool,
     /// Resize FLOOR only follows content height; user can pull the
     /// window taller (whitespace below).  Used for W5 where a
     /// flex-fill `TextArea` absorbs extra space.
-    pub floor_fit:    bool,
+    pub floor_fit: bool,
 }
 
 impl ResizeTestWindow {
@@ -864,19 +1371,32 @@ impl ResizeTestWindow {
             title: title.into(),
             content,
             initial_rect,
-            auto_size:   false,
-            resizable:   true,
+            auto_size: false,
+            resizable: true,
             resizable_h: true,
             resizable_v: true,
-            vscroll:     false,
-            tight_fit:   false,
-            floor_fit:   false,
+            vscroll: false,
+            tight_fit: false,
+            floor_fit: false,
         }
     }
-    fn auto_sized(mut self) -> Self { self.auto_size = true; self.resizable = false; self }
-    fn with_vscroll(mut self) -> Self { self.vscroll = true; self }
-    fn with_tight_fit(mut self) -> Self { self.tight_fit = true; self }
-    fn with_floor_fit(mut self) -> Self { self.floor_fit = true; self }
+    fn auto_sized(mut self) -> Self {
+        self.auto_size = true;
+        self.resizable = false;
+        self
+    }
+    fn with_vscroll(mut self) -> Self {
+        self.vscroll = true;
+        self
+    }
+    fn with_tight_fit(mut self) -> Self {
+        self.tight_fit = true;
+        self
+    }
+    fn with_floor_fit(mut self) -> Self {
+        self.floor_fit = true;
+        self
+    }
 }
 
 /// URL of the source file containing the six Window Resize Test
@@ -894,7 +1414,7 @@ fn source_link(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(
         Hyperlink::new("(source code)", font)
             .with_font_size(11.0)
-            .on_click(|| crate::url::open_url(RESIZE_TEST_SOURCE_URL))
+            .on_click(|| crate::url::open_url(RESIZE_TEST_SOURCE_URL)),
     )
 }
 
@@ -908,10 +1428,10 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
     // Staggered 3 × 2 so the windows are visible on a 1280×720 screen.
     // Ordering matches egui's source, not layout order on screen.
     let rects: &[Rect] = &[
-        Rect::new( 30.0, 100.0, 360.0, 240.0), // 1. ↔ auto-sized
+        Rect::new(30.0, 100.0, 360.0, 240.0),  // 1. ↔ auto-sized
         Rect::new(410.0, 100.0, 300.0, 290.0), // 2. ↔ resizable + scroll
         Rect::new(730.0, 100.0, 300.0, 290.0), // 3. ↔ resizable + embedded scroll
-        Rect::new( 30.0, 410.0, 300.0, 290.0), // 4. ↔ resizable without scroll
+        Rect::new(30.0, 410.0, 300.0, 290.0),  // 4. ↔ resizable without scroll
         Rect::new(410.0, 410.0, 300.0, 290.0), // 5. ↔ resizable with TextEdit
         Rect::new(730.0, 410.0, 250.0, 150.0), // 6. ↔ freely resized
     ];
@@ -937,23 +1457,31 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
     // visible double outline).
     {
         let mut root = FlexColumn::new()
-            .with_gap(6.0).with_padding(10.0).with_panel_bg()
+            .with_gap(6.0)
+            .with_padding(10.0)
+            .with_panel_bg()
             .with_fit_width(true);
-        // Outer labels are NOT wrapped: in an auto-sized window,
-        // wrap=true Labels would claim the full current slot width
-        // and prevent the window from shrinking back down when the
-        // inner Resize narrows.  Non-wrapped Labels report their
-        // single-line natural width, which becomes the stable
-        // minimum the window tracks to — same pattern egui's
-        // auto-sized demo uses.
-        root.push(Box::new(Label::new(
-            "This window will auto-size based on its contents.",
-            Arc::clone(&font),
-        ).with_font_size(12.0)), 0.0);
-        root.push(Box::new(Label::new(
-            "Resize this area:",
-            Arc::clone(&font),
-        ).with_font_size(14.0)), 0.0);
+        // Keep explanatory text from dictating the auto-sized
+        // window's width: W1 should track the inner Resize width
+        // plus padding, while fixed-width wrapped prose can grow
+        // taller instead of leaving stale right-side whitespace.
+        root.push(
+            Box::new(
+                SizedBox::new().with_width(320.0).with_child(Box::new(
+                    Label::new(
+                        "This window will auto-size based on its contents.",
+                        Arc::clone(&font),
+                    )
+                    .with_font_size(12.0)
+                    .with_wrap(true),
+                )),
+            ),
+            0.0,
+        );
+        root.push(
+            Box::new(Label::new("Resize this area:", Arc::clone(&font)).with_font_size(14.0)),
+            0.0,
+        );
         // The lorem ipsum INSIDE the Resize widget still wraps so it
         // reshapes as the user narrows / widens the Resize.  The
         // Resize widget enforces a content-natural minimum so the
@@ -963,31 +1491,38 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
         // would leave the text pinned to the BOTTOM of the frame
         // with whitespace above (the bug visible in image #24).
         let mut inner = FlexColumn::new()
-            .with_gap(4.0).with_padding(8.0)
+            .with_gap(4.0)
+            .with_padding(8.0)
             .with_fit_width(true)
             .with_top_anchor(true);
-        inner.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
-            .with_font_size(11.5)
-            .with_wrap(true)), 0.0);
+        inner.push(
+            Box::new(
+                Label::new(LOREM_IPSUM, Arc::clone(&font))
+                    .with_font_size(11.5)
+                    .with_wrap(true),
+            ),
+            0.0,
+        );
         // No explicit max_size_hint here — we want the user to be
         // able to drag the inner Resize all the way to the canvas
         // extent, letting the outer auto-sized Window grow with it.
         // The `Window::auto_size` clamp to `available.width` caps
         // final growth at the surrounding layout's inner width.
-        root.push(Box::new(
-            Resize::new(Box::new(inner))
-                .with_default_size(Size::new(320.0, 120.0))
-                .with_min_size_hint(Size::new(120.0, 60.0))
-                .with_max_size_hint(Size::new(4000.0, 3000.0)),
-        ), 0.0);
-        root.push(Box::new(Label::new(
-            "Resize the above area!",
-            Arc::clone(&font),
-        ).with_font_size(14.0)), 0.0);
+        root.push(
+            Box::new(
+                Resize::new(Box::new(inner))
+                    .with_default_size(Size::new(320.0, 120.0))
+                    .with_min_size_hint(Size::new(120.0, 60.0))
+                    .with_max_size_hint(Size::new(4000.0, 3000.0)),
+            ),
+            0.0,
+        );
+        root.push(
+            Box::new(Label::new("Resize the above area!", Arc::clone(&font)).with_font_size(14.0)),
+            0.0,
+        );
         root.push(source_link(Arc::clone(&font)), 0.0);
-        out.push(ResizeTestWindow::new(
-            "↔ auto-sized", Box::new(root), rects[0],
-        ).auto_sized());
+        out.push(ResizeTestWindow::new("↔ auto-sized", Box::new(root), rects[0]).auto_sized());
     }
 
     // ── 2. ↔ resizable + scroll ──────────────────────────────────────────────
@@ -998,43 +1533,82 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
     // ScrollView at builder time.  The inner content is a single
     // overflowing FlexColumn so the scroll bar has range.
     {
-        let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
-        root.push(Box::new(Label::new(
-            "This window is resizable and has a scroll area. You can shrink it \
+        let mut root = FlexColumn::new()
+            .with_gap(8.0)
+            .with_padding(10.0)
+            .with_panel_bg();
+        root.push(
+            Box::new(
+                Label::new(
+                    "This window is resizable and has a scroll area. You can shrink it \
              to any size.",
-            Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            0.0,
+        );
         root.push(Box::new(Separator::horizontal()), 0.0);
-        root.push(Box::new(Label::new(LOREM_IPSUM_LONG, Arc::clone(&font))
-            .with_font_size(11.5)
-            .with_wrap(true)), 0.0);
+        root.push(
+            Box::new(
+                Label::new(LOREM_IPSUM_LONG, Arc::clone(&font))
+                    .with_font_size(11.5)
+                    .with_wrap(true),
+            ),
+            0.0,
+        );
         root.push(source_link(Arc::clone(&font)), 0.0);
-        out.push(ResizeTestWindow::new(
-            "↔ resizable + scroll", Box::new(root), rects[1],
-        ).with_vscroll());
+        out.push(
+            ResizeTestWindow::new("↔ resizable + scroll", Box::new(root), rects[1]).with_vscroll(),
+        );
     }
 
     // ── 3. ↔ resizable + embedded scroll ────────────────────────────────────
     {
-        let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
-        root.push(Box::new(Label::new(
-            "This window is resizable but has no built-in scroll area.",
-            Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
-        root.push(Box::new(Label::new(
-            "However, we have a sub-region with a scroll bar:",
-            Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
+        let mut root = FlexColumn::new()
+            .with_gap(8.0)
+            .with_padding(10.0)
+            .with_panel_bg();
+        root.push(
+            Box::new(
+                Label::new(
+                    "This window is resizable but has no built-in scroll area.",
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            0.0,
+        );
+        root.push(
+            Box::new(
+                Label::new(
+                    "However, we have a sub-region with a scroll bar:",
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            0.0,
+        );
         root.push(Box::new(Separator::horizontal()), 0.0);
         let long2 = format!("{}\n\n{}", LOREM_IPSUM_LONG, LOREM_IPSUM_LONG);
         let mut inner = FlexColumn::new().with_gap(4.0).with_padding(4.0);
-        inner.push(Box::new(Label::new(&long2, Arc::clone(&font))
-            .with_font_size(11.5)
-            .with_wrap(true)), 0.0);
+        inner.push(
+            Box::new(
+                Label::new(&long2, Arc::clone(&font))
+                    .with_font_size(11.5)
+                    .with_wrap(true),
+            ),
+            0.0,
+        );
         root.push(Box::new(ScrollView::new(Box::new(inner))), 1.0);
         root.push(source_link(Arc::clone(&font)), 0.0);
         out.push(ResizeTestWindow::new(
-            "↔ resizable + embedded scroll", Box::new(root), rects[2],
+            "↔ resizable + embedded scroll",
+            Box::new(root),
+            rects[2],
         ));
     }
 
@@ -1046,25 +1620,48 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
     // makes the resize clamp floor honour the content's natural height
     // observed in the last layout.
     {
-        let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
-        root.push(Box::new(Label::new(
-            "This window is resizable but has no scroll area. This means it \
+        let mut root = FlexColumn::new()
+            .with_gap(8.0)
+            .with_padding(10.0)
+            .with_panel_bg();
+        root.push(
+            Box::new(
+                Label::new(
+                    "This window is resizable but has no scroll area. This means it \
              can only be resized to a size where all the contents is visible.",
-            Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
-        root.push(Box::new(Label::new(
-            "agg-gui will not clip the contents of a window, nor add \
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            0.0,
+        );
+        root.push(
+            Box::new(
+                Label::new(
+                    "agg-gui will not clip the contents of a window, nor add \
              whitespace to it.",
-            Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            0.0,
+        );
         root.push(Box::new(Separator::horizontal()), 0.0);
-        root.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
-            .with_font_size(11.5)
-            .with_wrap(true)), 0.0);
+        root.push(
+            Box::new(
+                Label::new(LOREM_IPSUM, Arc::clone(&font))
+                    .with_font_size(11.5)
+                    .with_wrap(true),
+            ),
+            0.0,
+        );
         root.push(source_link(Arc::clone(&font)), 0.0);
-        out.push(ResizeTestWindow::new(
-            "↔ resizable without scroll", Box::new(root), rects[3],
-        ).with_tight_fit());
+        out.push(
+            ResizeTestWindow::new("↔ resizable without scroll", Box::new(root), rects[3])
+                .with_tight_fit(),
+        );
     }
 
     // ── 5. ↔ resizable with TextEdit ────────────────────────────────────────
@@ -1076,34 +1673,60 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
     // height ≥ TextArea content height, so wrapping text never falls
     // off-screen.
     {
-        let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
-        root.push(Box::new(Label::new(
-            "Shows how you can fill an area with a widget.",
-            Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
-        root.push(Box::new(
-            TextArea::new(Arc::clone(&font))
-                .with_font_size(12.5)
-                .with_text(LOREM_IPSUM),
-        ), 1.0);
+        let mut root = FlexColumn::new()
+            .with_gap(8.0)
+            .with_padding(10.0)
+            .with_panel_bg();
+        root.push(
+            Box::new(
+                Label::new(
+                    "Shows how you can fill an area with a widget.",
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            0.0,
+        );
+        root.push(
+            Box::new(
+                TextArea::new(Arc::clone(&font))
+                    .with_font_size(12.5)
+                    .with_text(LOREM_IPSUM),
+            ),
+            1.0,
+        );
         root.push(source_link(Arc::clone(&font)), 0.0);
-        out.push(ResizeTestWindow::new(
-            "↔ resizable with TextEdit", Box::new(root), rects[4],
-        ).with_floor_fit());
+        out.push(
+            ResizeTestWindow::new("↔ resizable with TextEdit", Box::new(root), rects[4])
+                .with_floor_fit(),
+        );
     }
 
     // ── 6. ↔ freely resized ─────────────────────────────────────────────────
     {
-        let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
-        root.push(Box::new(Label::new(
-            "This window has empty space that fills up the available space, \
+        let mut root = FlexColumn::new()
+            .with_gap(8.0)
+            .with_padding(10.0)
+            .with_panel_bg();
+        root.push(
+            Box::new(
+                Label::new(
+                    "This window has empty space that fills up the available space, \
              preventing auto-shrink.",
-            Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            0.0,
+        );
         root.push(source_link(Arc::clone(&font)), 0.0);
         root.push(Box::new(SizedBox::new()), 1.0);
         out.push(ResizeTestWindow::new(
-            "↔ freely resized", Box::new(root), rects[5],
+            "↔ freely resized",
+            Box::new(root),
+            rects[5],
         ));
     }
 

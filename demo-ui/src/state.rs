@@ -19,7 +19,10 @@ use agg_gui::Rect;
 #[derive(Clone, Debug)]
 pub struct WindowState {
     pub open: bool,
-    pub x: f64, pub y: f64, pub w: f64, pub h: f64,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
 }
 
 impl WindowState {
@@ -64,37 +67,36 @@ pub struct SavedState {
     // demo-ui `FONT_OPTIONS` display names (e.g. "Cascadia Code") — we
     // persist the name, not an `Arc<Font>`, and re-load the bytes on
     // next startup from the bundled assets.
-
     /// Selected font's display name.  `None` or unknown name → keep the
     /// app default (Cascadia Code).
-    pub font_name:       Option<String>,
+    pub font_name: Option<String>,
     /// Font-size multiplier applied system-wide.  Default 1.0.
     pub font_size_scale: f64,
     /// LCD subpixel rendering toggle.
-    pub lcd_enabled:     bool,
+    pub lcd_enabled: bool,
     /// Hinting toggle (Y-axis baseline snap).
     pub hinting_enabled: bool,
     /// Output gamma curve.  1.0 = off.
-    pub gamma:           f64,
+    pub gamma: f64,
     /// Horizontal glyph width scale.
-    pub width_scale:     f64,
+    pub width_scale: f64,
     /// Extra letter-spacing as fraction of em.
-    pub interval:        f64,
+    pub interval: f64,
     /// Faux-weight offset (synthetic bold).
-    pub faux_weight:     f64,
+    pub faux_weight: f64,
     /// Faux-italic shear factor.
-    pub faux_italic:     f64,
+    pub faux_italic: f64,
     /// LCD primary-weight tap ratio.
-    pub primary_weight:  f64,
+    pub primary_weight: f64,
 
     /// OS GL-surface MSAA sample count.  0 = off (halo-AA does all work);
     /// 2/4/8/16 request hardware multisampling at context creation.
     /// Change takes effect on next launch.
-    pub msaa_samples:    u8,
+    pub msaa_samples: u8,
 
     /// Active tab index inside the System window (`Font` = 0, `Render` = 1).
     /// Defaults to 0 on first run so new users land on the Font settings.
-    pub system_tab:      usize,
+    pub system_tab: usize,
 
     /// Window z-order — list of titles (DEMOS / TESTS / About) in
     /// **back-to-front** order.  Recorded each time a window is raised
@@ -113,9 +115,9 @@ pub struct SavedState {
 pub struct InspectorPersist {
     pub expanded: Vec<bool>,
     pub selected: Option<usize>,
-    pub props_h:  f64,
+    pub props_h: f64,
     /// Whether the Inspector window itself was visible at save time.
-    pub open:     bool,
+    pub open: bool,
 }
 
 impl SavedState {
@@ -125,31 +127,40 @@ impl SavedState {
         out.push_str(&format!("demos={}\n", self.demos.len()));
         out.push_str(&format!("tests={}\n", self.tests.len()));
         for (i, w) in self.demos.iter().enumerate() {
-            out.push_str(&format!("d{}={},{},{},{},{}\n",
-                i, w.open as u8, w.x, w.y, w.w, w.h));
+            out.push_str(&format!(
+                "d{}={},{},{},{},{}\n",
+                i, w.open as u8, w.x, w.y, w.w, w.h
+            ));
         }
         for (i, w) in self.tests.iter().enumerate() {
-            out.push_str(&format!("t{}={},{},{},{},{}\n",
-                i, w.open as u8, w.x, w.y, w.w, w.h));
+            out.push_str(&format!(
+                "t{}={},{},{},{},{}\n",
+                i, w.open as u8, w.x, w.y, w.w, w.h
+            ));
         }
-        out.push_str(&format!("about={},{},{},{},{}\n",
-            self.about.open as u8, self.about.x, self.about.y,
-            self.about.w, self.about.h));
+        out.push_str(&format!(
+            "about={},{},{},{},{}\n",
+            self.about.open as u8, self.about.x, self.about.y, self.about.w, self.about.h
+        ));
         out.push_str(&format!("backend={}\n", self.backend_open as u8));
         if let (Some(w), Some(h)) = (self.window_w, self.window_h) {
-            out.push_str(&format!("window={},{},{},{}\n",
-                w, h,
-                self.window_fullscreen as u8,
-                self.window_maximized  as u8));
+            out.push_str(&format!(
+                "window={},{},{},{}\n",
+                w, h, self.window_fullscreen as u8, self.window_maximized as u8
+            ));
         }
         if let Some(insp) = &self.inspector {
             // `inspector=selected,props_h,open;expanded-bits`
             let sel = insp.selected.map(|i| i as i64).unwrap_or(-1);
-            let bits: String = insp.expanded.iter()
+            let bits: String = insp
+                .expanded
+                .iter()
                 .map(|b| if *b { '1' } else { '0' })
                 .collect();
-            out.push_str(&format!("inspector={},{},{};{}\n",
-                sel, insp.props_h, insp.open as u8, bits));
+            out.push_str(&format!(
+                "inspector={},{},{};{}\n",
+                sel, insp.props_h, insp.open as u8, bits
+            ));
         }
         // System settings — each on its own key so the parser can add
         // future entries without breaking old state files.
@@ -166,16 +177,16 @@ impl SavedState {
             out.push_str(&format!("z_order={}\n", self.z_order.join("|")));
         }
         out.push_str(&format!("font_size_scale={}\n", self.font_size_scale));
-        out.push_str(&format!("lcd={}\n",     self.lcd_enabled     as u8));
+        out.push_str(&format!("lcd={}\n", self.lcd_enabled as u8));
         out.push_str(&format!("hinting={}\n", self.hinting_enabled as u8));
-        out.push_str(&format!("gamma={}\n",          self.gamma));
-        out.push_str(&format!("width_scale={}\n",    self.width_scale));
-        out.push_str(&format!("interval={}\n",       self.interval));
-        out.push_str(&format!("faux_weight={}\n",    self.faux_weight));
-        out.push_str(&format!("faux_italic={}\n",    self.faux_italic));
+        out.push_str(&format!("gamma={}\n", self.gamma));
+        out.push_str(&format!("width_scale={}\n", self.width_scale));
+        out.push_str(&format!("interval={}\n", self.interval));
+        out.push_str(&format!("faux_weight={}\n", self.faux_weight));
+        out.push_str(&format!("faux_italic={}\n", self.faux_italic));
         out.push_str(&format!("primary_weight={}\n", self.primary_weight));
-        out.push_str(&format!("msaa={}\n",           self.msaa_samples));
-        out.push_str(&format!("system_tab={}\n",     self.system_tab));
+        out.push_str(&format!("msaa={}\n", self.msaa_samples));
+        out.push_str(&format!("system_tab={}\n", self.system_tab));
         out
     }
 
@@ -189,55 +200,101 @@ impl SavedState {
         let mut window_w: Option<u32> = None;
         let mut window_h: Option<u32> = None;
         let mut window_fullscreen = false;
-        let mut window_maximized  = false;
+        let mut window_maximized = false;
         let mut inspector: Option<InspectorPersist> = None;
-        let mut font_name:       Option<String> = None;
-        let mut font_size_scale: f64  = 1.0;
-        let mut lcd_enabled:     bool = false;
+        let mut font_name: Option<String> = None;
+        let mut font_size_scale: f64 = 1.0;
+        let mut lcd_enabled: bool = false;
         let mut hinting_enabled: bool = false;
-        let mut gamma:           f64 = 1.0;
-        let mut width_scale:     f64 = 1.0;
-        let mut interval:        f64 = 0.0;
-        let mut faux_weight:     f64 = 0.0;
-        let mut faux_italic:     f64 = 0.0;
-        let mut primary_weight:  f64 = 1.0 / 3.0;
-        let mut msaa_samples:    u8  = 0;
-        let mut system_tab:      usize = 0;
-        let mut z_order:         Vec<String> = Vec::new();
+        let mut gamma: f64 = 1.0;
+        let mut width_scale: f64 = 1.0;
+        let mut interval: f64 = 0.0;
+        let mut faux_weight: f64 = 0.0;
+        let mut faux_italic: f64 = 0.0;
+        let mut primary_weight: f64 = 1.0 / 3.0;
+        let mut msaa_samples: u8 = 0;
+        let mut system_tab: usize = 0;
+        let mut z_order: Vec<String> = Vec::new();
 
         for line in s.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
             let (key, val) = line.split_once('=')?;
             match key {
-                "version" => { if val != "1" { return None; } }
-                "demos"   => { let n: usize = val.parse().ok()?; demos_count = Some(n); demos = vec![None; n]; }
-                "tests"   => { let n: usize = val.parse().ok()?; tests_count = Some(n); tests = vec![None; n]; }
-                "about"   => { about = Some(parse_window_state(val)?); }
-                "backend" => { let v: u8 = val.parse().ok()?; backend_open = v != 0; }
-                "window"  => {
+                "version" => {
+                    if val != "1" {
+                        return None;
+                    }
+                }
+                "demos" => {
+                    let n: usize = val.parse().ok()?;
+                    demos_count = Some(n);
+                    demos = vec![None; n];
+                }
+                "tests" => {
+                    let n: usize = val.parse().ok()?;
+                    tests_count = Some(n);
+                    tests = vec![None; n];
+                }
+                "about" => {
+                    about = Some(parse_window_state(val)?);
+                }
+                "backend" => {
+                    let v: u8 = val.parse().ok()?;
+                    backend_open = v != 0;
+                }
+                "window" => {
                     let mut it = val.splitn(4, ',');
                     window_w = it.next()?.parse().ok();
                     window_h = it.next()?.parse().ok();
                     let fs: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
                     window_fullscreen = fs != 0;
                     let mx: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    window_maximized  = mx != 0;
+                    window_maximized = mx != 0;
                 }
-                "font_name"       => { font_name = Some(val.to_string()); }
-                "font_size_scale" => { font_size_scale = val.parse().unwrap_or(1.0); }
-                "lcd"             => { let v: u8 = val.parse().unwrap_or(0); lcd_enabled = v != 0; }
-                "hinting"         => { let v: u8 = val.parse().unwrap_or(0); hinting_enabled = v != 0; }
-                "gamma"           => { gamma          = val.parse().unwrap_or(1.0); }
-                "width_scale"     => { width_scale    = val.parse().unwrap_or(1.0); }
-                "interval"        => { interval       = val.parse().unwrap_or(0.0); }
-                "faux_weight"     => { faux_weight    = val.parse().unwrap_or(0.0); }
-                "faux_italic"     => { faux_italic    = val.parse().unwrap_or(0.0); }
-                "primary_weight"  => { primary_weight = val.parse().unwrap_or(1.0 / 3.0); }
-                "msaa"            => { msaa_samples  = val.parse().unwrap_or(0); }
-                "system_tab"      => { system_tab    = val.parse().unwrap_or(0); }
-                "z_order"         => {
-                    z_order = val.split('|')
+                "font_name" => {
+                    font_name = Some(val.to_string());
+                }
+                "font_size_scale" => {
+                    font_size_scale = val.parse().unwrap_or(1.0);
+                }
+                "lcd" => {
+                    let v: u8 = val.parse().unwrap_or(0);
+                    lcd_enabled = v != 0;
+                }
+                "hinting" => {
+                    let v: u8 = val.parse().unwrap_or(0);
+                    hinting_enabled = v != 0;
+                }
+                "gamma" => {
+                    gamma = val.parse().unwrap_or(1.0);
+                }
+                "width_scale" => {
+                    width_scale = val.parse().unwrap_or(1.0);
+                }
+                "interval" => {
+                    interval = val.parse().unwrap_or(0.0);
+                }
+                "faux_weight" => {
+                    faux_weight = val.parse().unwrap_or(0.0);
+                }
+                "faux_italic" => {
+                    faux_italic = val.parse().unwrap_or(0.0);
+                }
+                "primary_weight" => {
+                    primary_weight = val.parse().unwrap_or(1.0 / 3.0);
+                }
+                "msaa" => {
+                    msaa_samples = val.parse().unwrap_or(0);
+                }
+                "system_tab" => {
+                    system_tab = val.parse().unwrap_or(0);
+                }
+                "z_order" => {
+                    z_order = val
+                        .split('|')
                         .filter(|s| !s.is_empty())
                         .map(str::to_string)
                         .collect();
@@ -250,20 +307,32 @@ impl SavedState {
                     let sel_raw: i64 = hit.next().and_then(|s| s.parse().ok()).unwrap_or(-1);
                     let props_h: f64 = hit.next().and_then(|s| s.parse().ok()).unwrap_or(160.0);
                     let open_u8: u8 = hit.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    let expanded: Vec<bool> = bits.chars()
-                        .map(|c| c == '1').collect();
-                    let selected = if sel_raw < 0 { None } else { Some(sel_raw as usize) };
-                    inspector = Some(InspectorPersist { expanded, selected, props_h, open: open_u8 != 0 });
+                    let expanded: Vec<bool> = bits.chars().map(|c| c == '1').collect();
+                    let selected = if sel_raw < 0 {
+                        None
+                    } else {
+                        Some(sel_raw as usize)
+                    };
+                    inspector = Some(InspectorPersist {
+                        expanded,
+                        selected,
+                        props_h,
+                        open: open_u8 != 0,
+                    });
                 }
                 k if k.starts_with('d') => {
                     let i: usize = k[1..].parse().ok()?;
                     let ws = parse_window_state(val)?;
-                    if i < demos.len() { demos[i] = Some(ws); }
+                    if i < demos.len() {
+                        demos[i] = Some(ws);
+                    }
                 }
                 k if k.starts_with('t') => {
                     let i: usize = k[1..].parse().ok()?;
                     let ws = parse_window_state(val)?;
-                    if i < tests.len() { tests[i] = Some(ws); }
+                    if i < tests.len() {
+                        tests[i] = Some(ws);
+                    }
                 }
                 _ => {}
             }
@@ -271,7 +340,9 @@ impl SavedState {
 
         let demos_count = demos_count?;
         let tests_count = tests_count?;
-        if demos.len() != demos_count || tests.len() != tests_count { return None; }
+        if demos.len() != demos_count || tests.len() != tests_count {
+            return None;
+        }
 
         Some(SavedState {
             demos: demos.into_iter().collect::<Option<Vec<_>>>()?,
@@ -303,11 +374,17 @@ impl SavedState {
 fn parse_window_state(s: &str) -> Option<WindowState> {
     let mut it = s.splitn(5, ',');
     let open: u8 = it.next()?.parse().ok()?;
-    let x: f64   = it.next()?.parse().ok()?;
-    let y: f64   = it.next()?.parse().ok()?;
-    let w: f64   = it.next()?.parse().ok()?;
-    let h: f64   = it.next()?.parse().ok()?;
-    Some(WindowState { open: open != 0, x, y, w, h })
+    let x: f64 = it.next()?.parse().ok()?;
+    let y: f64 = it.next()?.parse().ok()?;
+    let w: f64 = it.next()?.parse().ok()?;
+    let h: f64 = it.next()?.parse().ok()?;
+    Some(WindowState {
+        open: open != 0,
+        x,
+        y,
+        w,
+        h,
+    })
 }
 
 // ── StateAccessor ─────────────────────────────────────────────────────────────
@@ -318,18 +395,18 @@ fn parse_window_state(s: &str) -> Option<WindowState> {
 /// `current_state()` when it needs to persist the layout.
 pub struct StateAccessor {
     pub demo_open: Vec<Rc<Cell<bool>>>,
-    pub demo_pos:  Vec<Rc<Cell<Rect>>>,
+    pub demo_pos: Vec<Rc<Cell<Rect>>>,
     pub test_open: Vec<Rc<Cell<bool>>>,
-    pub test_pos:  Vec<Rc<Cell<Rect>>>,
+    pub test_pos: Vec<Rc<Cell<Rect>>>,
     pub about_open: Rc<Cell<bool>>,
-    pub about_pos:  Rc<Cell<Rect>>,
+    pub about_pos: Rc<Cell<Rect>>,
     pub backend_open: Rc<Cell<bool>>,
     /// Latest OS-window size, updated by the platform harness on Resized.
     pub window_size: Rc<Cell<(u32, u32)>>,
     /// Whether the OS window is currently borderless-fullscreen.
     pub window_fullscreen: Rc<Cell<bool>>,
     /// Whether the OS window is currently maximized.
-    pub window_maximized:  Rc<Cell<bool>>,
+    pub window_maximized: Rc<Cell<bool>>,
     /// Pulled each tick by `current_state` to snapshot the Inspector panel's
     /// expand/select/split state.  Returns `None` when the inspector has
     /// never been laid out yet.
@@ -341,35 +418,34 @@ pub struct StateAccessor {
     // DragValue / ToggleSwitch write to them, `current_state` reads
     // them for disk save.  The auto-save loop picks any change up
     // within a frame.
-
     /// Name of the currently-selected font (matches an entry in
     /// `system::FONT_OPTIONS`).  `None` = default (Cascadia Code).
-    pub font_name:       Rc<RefCell<Option<String>>>,
+    pub font_name: Rc<RefCell<Option<String>>>,
     /// Font-size multiplier.  Mirrors
     /// [`agg_gui::font_settings::current_font_size_scale`].
     pub font_size_scale: Rc<Cell<f64>>,
     /// LCD subpixel toggle mirror.
-    pub lcd_enabled:     Rc<Cell<bool>>,
+    pub lcd_enabled: Rc<Cell<bool>>,
     /// Hinting toggle mirror.
     pub hinting_enabled: Rc<Cell<bool>>,
     /// Typography-style parameter mirrors — shared with the System window
     /// and the TrueType LCD Subpixel demo so changes in either route
     /// write through to disk via the auto-save loop.
-    pub gamma:           Rc<Cell<f64>>,
-    pub width_scale:     Rc<Cell<f64>>,
-    pub interval:        Rc<Cell<f64>>,
-    pub faux_weight:     Rc<Cell<f64>>,
-    pub faux_italic:     Rc<Cell<f64>>,
-    pub primary_weight:  Rc<Cell<f64>>,
+    pub gamma: Rc<Cell<f64>>,
+    pub width_scale: Rc<Cell<f64>>,
+    pub interval: Rc<Cell<f64>>,
+    pub faux_weight: Rc<Cell<f64>>,
+    pub faux_italic: Rc<Cell<f64>>,
+    pub primary_weight: Rc<Cell<f64>>,
     /// OS-level MSAA sample count (0/2/4/8/16).  Read by the backend panel
     /// dropdown; the platform harness reads the persisted value at boot to
     /// configure the GL surface — changing this at runtime therefore only
     /// takes effect after a restart.
-    pub msaa_samples:    Rc<Cell<u8>>,
+    pub msaa_samples: Rc<Cell<u8>>,
 
     /// Active tab index inside the System window — persisted so users
     /// stay on the Render / Font tab they were last on.
-    pub system_tab:      Rc<Cell<usize>>,
+    pub system_tab: Rc<Cell<usize>>,
 
     /// Shared z-order tracker — back-to-front list of window titles
     /// updated whenever any `Window` fires its `on_raised` callback.
@@ -381,14 +457,44 @@ pub struct StateAccessor {
 
 impl StateAccessor {
     pub fn current_state(&self) -> SavedState {
-        let demos = self.demo_open.iter().zip(&self.demo_pos)
-            .map(|(o, p)| { let r = p.get(); WindowState { open: o.get(), x: r.x, y: r.y, w: r.width, h: r.height } })
+        let demos = self
+            .demo_open
+            .iter()
+            .zip(&self.demo_pos)
+            .map(|(o, p)| {
+                let r = p.get();
+                WindowState {
+                    open: o.get(),
+                    x: r.x,
+                    y: r.y,
+                    w: r.width,
+                    h: r.height,
+                }
+            })
             .collect();
-        let tests = self.test_open.iter().zip(&self.test_pos)
-            .map(|(o, p)| { let r = p.get(); WindowState { open: o.get(), x: r.x, y: r.y, w: r.width, h: r.height } })
+        let tests = self
+            .test_open
+            .iter()
+            .zip(&self.test_pos)
+            .map(|(o, p)| {
+                let r = p.get();
+                WindowState {
+                    open: o.get(),
+                    x: r.x,
+                    y: r.y,
+                    w: r.width,
+                    h: r.height,
+                }
+            })
             .collect();
         let r = self.about_pos.get();
-        let about = WindowState { open: self.about_open.get(), x: r.x, y: r.y, w: r.width, h: r.height };
+        let about = WindowState {
+            open: self.about_open.get(),
+            x: r.x,
+            y: r.y,
+            w: r.width,
+            h: r.height,
+        };
         let (ww, wh) = self.window_size.get();
         SavedState {
             demos,
@@ -398,21 +504,21 @@ impl StateAccessor {
             window_w: if ww > 0 { Some(ww) } else { None },
             window_h: if wh > 0 { Some(wh) } else { None },
             window_fullscreen: self.window_fullscreen.get(),
-            window_maximized:  self.window_maximized.get(),
-            inspector:         (self.inspector_snapshot)(),
-            font_name:         self.font_name.borrow().clone(),
-            font_size_scale:   self.font_size_scale.get(),
-            lcd_enabled:       self.lcd_enabled.get(),
-            hinting_enabled:   self.hinting_enabled.get(),
-            gamma:             self.gamma.get(),
-            width_scale:       self.width_scale.get(),
-            interval:          self.interval.get(),
-            faux_weight:       self.faux_weight.get(),
-            faux_italic:       self.faux_italic.get(),
-            primary_weight:    self.primary_weight.get(),
-            msaa_samples:      self.msaa_samples.get(),
-            system_tab:        self.system_tab.get(),
-            z_order:           self.z_order.borrow().clone(),
+            window_maximized: self.window_maximized.get(),
+            inspector: (self.inspector_snapshot)(),
+            font_name: self.font_name.borrow().clone(),
+            font_size_scale: self.font_size_scale.get(),
+            lcd_enabled: self.lcd_enabled.get(),
+            hinting_enabled: self.hinting_enabled.get(),
+            gamma: self.gamma.get(),
+            width_scale: self.width_scale.get(),
+            interval: self.interval.get(),
+            faux_weight: self.faux_weight.get(),
+            faux_italic: self.faux_italic.get(),
+            primary_weight: self.primary_weight.get(),
+            msaa_samples: self.msaa_samples.get(),
+            system_tab: self.system_tab.get(),
+            z_order: self.z_order.borrow().clone(),
         }
     }
 }
@@ -439,11 +545,25 @@ mod tests {
     /// caller filter zero rects back to the tile-rect default.
     #[test]
     fn zero_sized_window_state_is_not_valid() {
-        let never_laid_out = WindowState { open: false, x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        assert!(!never_laid_out.has_valid_bounds(),
-            "zero-size rect must be rejected so the restore path can fall back to tile_rect");
+        let never_laid_out = WindowState {
+            open: false,
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        };
+        assert!(
+            !never_laid_out.has_valid_bounds(),
+            "zero-size rect must be rejected so the restore path can fall back to tile_rect"
+        );
 
-        let real = WindowState { open: true, x: 60.0, y: 60.0, w: 360.0, h: 280.0 };
+        let real = WindowState {
+            open: true,
+            x: 60.0,
+            y: 60.0,
+            w: 360.0,
+            h: 280.0,
+        };
         assert!(real.has_valid_bounds());
     }
 
@@ -456,16 +576,34 @@ mod tests {
     fn serialised_zero_entries_round_trip_as_invalid() {
         let saved = SavedState {
             demos: vec![
-                WindowState { open: true,  x: 60.0, y: 60.0, w: 360.0, h: 280.0 },
-                WindowState { open: false, x: 0.0,  y: 0.0,  w: 0.0,   h: 0.0   },
+                WindowState {
+                    open: true,
+                    x: 60.0,
+                    y: 60.0,
+                    w: 360.0,
+                    h: 280.0,
+                },
+                WindowState {
+                    open: false,
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.0,
+                    h: 0.0,
+                },
             ],
             tests: vec![],
-            about: WindowState { open: false, x: 80.0, y: 80.0, w: 440.0, h: 500.0 },
+            about: WindowState {
+                open: false,
+                x: 80.0,
+                y: 80.0,
+                w: 440.0,
+                h: 500.0,
+            },
             backend_open: false,
             window_w: None,
             window_h: None,
             window_fullscreen: false,
-            window_maximized:  false,
+            window_maximized: false,
             inspector: None,
             font_name: None,
             font_size_scale: 1.0,
@@ -484,7 +622,13 @@ mod tests {
 
         let text = saved.serialize();
         let back = SavedState::deserialize(&text).expect("round-trip must parse");
-        assert!( back.demos[0].has_valid_bounds(), "opened demo must survive round-trip as valid");
-        assert!(!back.demos[1].has_valid_bounds(), "never-opened demo must remain flagged as invalid");
+        assert!(
+            back.demos[0].has_valid_bounds(),
+            "opened demo must survive round-trip as valid"
+        );
+        assert!(
+            !back.demos[1].has_valid_bounds(),
+            "never-opened demo must remain flagged as invalid"
+        );
     }
 }
