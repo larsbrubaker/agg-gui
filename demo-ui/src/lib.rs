@@ -383,7 +383,6 @@ const TESTS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F0E4} Layout Test",         label: "\u{F0E4} Layout Test",         group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F0AD} Manual Layout Test",  label: "\u{F0AD} Manual Layout Test",  group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F03E} SVG Test",            label: "\u{F03E} SVG Test",            group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "\u{F1E0} Tessellation Test",   label: "\u{F1E0} Tessellation Test",   group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
     // The original "Window Resize Test" sidebar entry was a single
     // group toggle that opened all six sub-windows together.  egui's
     // demo treats each sub-window as its own first-class test, so
@@ -895,7 +894,6 @@ pub fn build_demo_ui(
             "\u{F0E4} Layout Test"         => windows::layout_test(Arc::clone(&font)),
             "\u{F0AD} Manual Layout Test"  => windows::manual_layout_test(Arc::clone(&font)),
             "\u{F03E} SVG Test"            => windows::svg_test(Arc::clone(&font)),
-            "\u{F1E0} Tessellation Test"   => windows::tessellation_test(Arc::clone(&font)),
             _                              => windows::coming_soon(),
         };
         let win = Window::new(spec.title, Arc::clone(&font), content)

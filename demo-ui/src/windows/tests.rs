@@ -1,4 +1,4 @@
-//! Test window implementations for all 11 egui test windows.
+//! Test window implementations for egui-inspired diagnostic windows.
 //!
 //! These are diagnostic/test widgets that verify framework behaviour.  Where
 //! native capabilities (clipboard, OS cursors, SVG) are not yet wired up, a
@@ -802,110 +802,6 @@ impl Widget for SvgPlaceholder {
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-}
-
-// ---------------------------------------------------------------------------
-// Tessellation Test
-// ---------------------------------------------------------------------------
-
-/// A custom-painted widget showing circle approximations with N segments.
-struct TessellationWidget {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-}
-
-impl Widget for TessellationWidget {
-    fn type_name(&self) -> &'static str { "TessellationWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
-        available
-    }
-
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v   = ctx.visuals();
-        let w   = self.bounds.width;
-        let h   = self.bounds.height;
-
-        ctx.set_fill_color(v.bg_color);
-        ctx.begin_path();
-        ctx.rect(0.0, 0.0, w, h);
-        ctx.fill();
-
-        // 5 polygons: 3, 6, 12, 24, 48 segments.
-        let segments_list = [3_usize, 6, 12, 24, 48];
-        let count = segments_list.len() as f64;
-        let r     = (h * 0.30).min(w / count / 2.0 - 10.0);
-        let cy    = h * 0.55;
-
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(10.0);
-
-        for (i, &n) in segments_list.iter().enumerate() {
-            let cx = w * (i as f64 + 0.5) / count;
-
-            let t = i as f64 / (segments_list.len() - 1) as f64;
-            let fill = Color::rgba(
-                (0.3 + t * 0.4) as f32,
-                (0.6 - t * 0.2) as f32,
-                (0.9 - t * 0.4) as f32,
-                0.70,
-            );
-
-            ctx.set_fill_color(fill);
-            ctx.begin_path();
-            for k in 0..n {
-                let angle = k as f64 * std::f64::consts::TAU / n as f64
-                    - std::f64::consts::FRAC_PI_2;
-                let px = cx + r * angle.cos();
-                let py = cy + r * angle.sin();
-                if k == 0 { ctx.move_to(px, py); } else { ctx.line_to(px, py); }
-            }
-            ctx.fill();
-            ctx.set_stroke_color(v.widget_stroke);
-            ctx.set_line_width(1.0);
-            ctx.begin_path();
-            for k in 0..n {
-                let angle = k as f64 * std::f64::consts::TAU / n as f64
-                    - std::f64::consts::FRAC_PI_2;
-                let px = cx + r * angle.cos();
-                let py = cy + r * angle.sin();
-                if k == 0 { ctx.move_to(px, py); } else { ctx.line_to(px, py); }
-            }
-            ctx.stroke();
-
-            // Label.
-            ctx.set_fill_color(v.text_dim);
-            let label = format!("n={}", n);
-            ctx.fill_text(&label, cx - 10.0, cy - r - 6.0);
-        }
-    }
-
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-}
-
-/// Build the Tessellation Test — circle approximations with increasing segment counts.
-pub fn tessellation_test(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new()
-        .with_gap(8.0)
-        .with_padding(8.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new(
-        "Circle approximations: n = 3, 6, 12, 24, 48 segments",
-        Arc::clone(&font),
-    ).with_font_size(11.5).with_wrap(true)), 0.0);
-
-    col.push(Box::new(TessellationWidget {
-        bounds: Rect::default(), children: Vec::new(), font,
-    }), 1.0);
-
-    Box::new(col)
 }
 
 // ---------------------------------------------------------------------------
