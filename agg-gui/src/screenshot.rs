@@ -59,6 +59,7 @@
 //! `Blob` + `URL.createObjectURL` + synthetic `<a download>` click.
 
 use std::cell::{Cell, RefCell};
+use std::fmt;
 use std::rc::Rc;
 
 /// Shared capture state.  Clone freely; all inner fields are `Rc<...>`.
@@ -70,29 +71,293 @@ pub struct ScreenshotHandle {
     pub request: Rc<Cell<bool>>,
     /// Most recent captured image — top-down RGBA8, plus `(width, height)`.
     /// `None` until the first capture completes.
-    pub image:   Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
+    pub image: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
 }
 
 impl ScreenshotHandle {
     pub fn new() -> Self {
         Self {
             request: Rc::new(Cell::new(false)),
-            image:   Rc::new(RefCell::new(None)),
+            image: Rc::new(RefCell::new(None)),
         }
     }
 
     /// Convenience: request a capture.  Equivalent to `self.request.set(true)`.
-    pub fn take(&self) { self.request.set(true); }
+    pub fn take(&self) {
+        self.request.set(true);
+    }
 
     /// `true` while the latest request has not yet been fulfilled.
-    pub fn pending(&self) -> bool { self.request.get() }
+    pub fn pending(&self) -> bool {
+        self.request.get()
+    }
 
     /// Access the most recent capture without consuming it.
-    pub fn has_image(&self) -> bool { self.image.borrow().is_some() }
+    pub fn has_image(&self) -> bool {
+        self.image.borrow().is_some()
+    }
 }
 
 impl Default for ScreenshotHandle {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─── Export helpers ───────────────────────────────────────────────────────
+
+/// Result of a platform screenshot export operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScreenshotExportOutcome {
+    /// Native targets write the PNG to disk and return the saved path.
+    Saved(std::path::PathBuf),
+    /// Browser targets hand the operation to the DOM and return immediately.
+    Started,
+}
+
+/// Error returned by screenshot export helpers.
+#[derive(Debug)]
+pub enum ScreenshotExportError {
+    InvalidBuffer { expected: usize, actual: usize },
+    Encode(String),
+    Io(std::io::Error),
+    Clipboard(String),
+    Unsupported(&'static str),
+}
+
+impl fmt::Display for ScreenshotExportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidBuffer { expected, actual } => {
+                write!(
+                    f,
+                    "invalid RGBA buffer: expected {expected} bytes, got {actual}"
+                )
+            }
+            Self::Encode(msg) => write!(f, "PNG encode failed: {msg}"),
+            Self::Io(err) => write!(f, "I/O failed: {err}"),
+            Self::Clipboard(msg) => write!(f, "clipboard failed: {msg}"),
+            Self::Unsupported(msg) => write!(f, "unsupported screenshot export: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ScreenshotExportError {}
+
+impl From<std::io::Error> for ScreenshotExportError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+fn validate_rgba_len(rgba: &[u8], width: u32, height: u32) -> Result<(), ScreenshotExportError> {
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|px| px.checked_mul(4))
+        .ok_or_else(|| ScreenshotExportError::Encode("image dimensions overflow".to_string()))?;
+    if rgba.len() != expected {
+        return Err(ScreenshotExportError::InvalidBuffer {
+            expected,
+            actual: rgba.len(),
+        });
+    }
+    Ok(())
+}
+
+/// Encode a top-down RGBA8 image as a PNG.
+pub fn encode_png_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, ScreenshotExportError> {
+    validate_rgba_len(rgba, width, height)?;
+
+    let mut out = Vec::with_capacity(rgba.len() / 2);
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| ScreenshotExportError::Encode(e.to_string()))?;
+        writer
+            .write_image_data(rgba)
+            .map_err(|e| ScreenshotExportError::Encode(e.to_string()))?;
+    }
+    Ok(out)
+}
+
+/// Download or save a top-down RGBA8 screenshot as a PNG.
+pub fn download_rgba_as_png(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    filename: &str,
+) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
+    let png = encode_png_rgba(rgba, width, height)?;
+    download_png(filename, &png)
+}
+
+/// Copy a top-down RGBA8 screenshot to the system clipboard.
+pub fn copy_rgba_to_clipboard(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
+    validate_rgba_len(rgba, width, height)?;
+    copy_rgba_to_clipboard_impl(rgba, width, height)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn download_png(
+    filename: &str,
+    png: &[u8],
+) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
+    let dir = downloads_dir();
+    std::fs::create_dir_all(&dir)?;
+    let path = unique_download_path(&dir, filename);
+    std::fs::write(&path, png)?;
+    Ok(ScreenshotExportOutcome::Saved(path))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn downloads_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            return std::path::PathBuf::from(profile).join("Downloads");
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            return std::path::PathBuf::from(home).join("Downloads");
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn unique_download_path(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
+    let candidate = dir.join(filename);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let path = std::path::Path::new(filename);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("screenshot");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("png");
+    for i in 1.. {
+        let name = format!("{stem}-{i}.{ext}");
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded integer iterator should always produce a path")
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "clipboard"))]
+fn copy_rgba_to_clipboard_impl(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
+    let image = arboard::ImageData {
+        width: width as usize,
+        height: height as usize,
+        bytes: std::borrow::Cow::Borrowed(rgba),
+    };
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.set_image(image))
+        .map_err(|e| ScreenshotExportError::Clipboard(e.to_string()))?;
+    Ok(ScreenshotExportOutcome::Started)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "clipboard")))]
+fn copy_rgba_to_clipboard_impl(
+    _: &[u8],
+    _: u32,
+    _: u32,
+) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
+    Err(ScreenshotExportError::Unsupported(
+        "enable the `clipboard` feature for native image clipboard support",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn download_png(
+    filename: &str,
+    png: &[u8],
+) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
+    if wasm_download_png(filename, png) {
+        Ok(ScreenshotExportOutcome::Started)
+    } else {
+        Err(ScreenshotExportError::Unsupported(
+            "browser download API is unavailable",
+        ))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn copy_rgba_to_clipboard_impl(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
+    let png = encode_png_rgba(rgba, width, height)?;
+    if wasm_copy_png_to_clipboard(&png) {
+        Ok(ScreenshotExportOutcome::Started)
+    } else {
+        Err(ScreenshotExportError::Unsupported(
+            "browser image clipboard API is unavailable",
+        ))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
+export function wasm_download_png(filename, bytes) {
+    try {
+        const blob = new Blob([bytes], { type: "image/png" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename || "agg-gui-screenshot.png";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return true;
+    } catch (err) {
+        console.error("agg-gui screenshot download failed", err);
+        return false;
+    }
+}
+
+export function wasm_copy_png_to_clipboard(bytes) {
+    try {
+        if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+            return false;
+        }
+        const blob = new Blob([bytes], { type: "image/png" });
+        navigator.clipboard
+            .write([new ClipboardItem({ "image/png": blob })])
+            .catch(err => console.error("agg-gui screenshot clipboard failed", err));
+        return true;
+    } catch (err) {
+        console.error("agg-gui screenshot clipboard failed", err);
+        return false;
+    }
+}
+"#)]
+extern "C" {
+    fn wasm_download_png(filename: &str, bytes: &[u8]) -> bool;
+    fn wasm_copy_png_to_clipboard(bytes: &[u8]) -> bool;
 }
 
 // ─── Capture-aware render orchestration ─────────────────────────────────
@@ -134,12 +399,12 @@ impl Default for ScreenshotHandle {
 /// texture cache can key on the Arc's pointer identity — see
 /// `gfx_ctx::draw_image_rgba_arc`.
 pub fn run_frame_with_capture<C>(
-    request:            &Rc<Cell<bool>>,
-    capturing:          &Rc<Cell<bool>>,
-    image:              &Rc<RefCell<Option<(std::sync::Arc<Vec<u8>>, u32, u32)>>>,
-    ctx:                &mut C,
-    mut render_fn:      impl FnMut(&mut C),
-    read_back_buffer:   impl FnOnce(&mut C) -> (Vec<u8>, u32, u32),
+    request: &Rc<Cell<bool>>,
+    capturing: &Rc<Cell<bool>>,
+    image: &Rc<RefCell<Option<(std::sync::Arc<Vec<u8>>, u32, u32)>>>,
+    ctx: &mut C,
+    mut render_fn: impl FnMut(&mut C),
+    read_back_buffer: impl FnOnce(&mut C) -> (Vec<u8>, u32, u32),
 ) {
     if !request.get() {
         render_fn(ctx);

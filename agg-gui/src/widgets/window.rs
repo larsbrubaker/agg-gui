@@ -35,13 +35,13 @@ use std::sync::Arc;
 use web_time::Instant;
 
 use crate::color::Color;
-use crate::cursor::{CursorIcon, set_cursor_icon};
+use crate::cursor::{set_cursor_icon, CursorIcon};
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::window_title_bar::{TitleBarView, WindowTitleBar};
 
 /// Round all four components of a Rect to the nearest integer so widgets
@@ -50,32 +50,39 @@ fn snap(r: Rect) -> Rect {
     Rect::new(r.x.round(), r.y.round(), r.width.round(), r.height.round())
 }
 
-const TITLE_H:      f64 = 28.0;
-const CORNER_R:     f64 = 8.0;
+const TITLE_H: f64 = 28.0;
+const CORNER_R: f64 = 8.0;
 /// Shadow blur radius in pixels (egui default Shadow::blur is ≈16; we use 14
 /// for a slightly tighter falloff since windows live on a panel background).
-const SHADOW_BLUR:  f64 = 14.0;
+const SHADOW_BLUR: f64 = 14.0;
 /// Shadow offset from the window (Y-down visually → −y in Y-up space).
-const SHADOW_DX:    f64 = 2.0;
-const SHADOW_DY:    f64 = 6.0;
+const SHADOW_DX: f64 = 2.0;
+const SHADOW_DY: f64 = 6.0;
 /// Number of stacked layers approximating a Gaussian blur falloff.
 const SHADOW_STEPS: usize = 10;
-const CLOSE_R:      f64 = 6.0;
-const CLOSE_PAD:    f64 = 10.0;
+const CLOSE_R: f64 = 6.0;
+const CLOSE_PAD: f64 = 10.0;
 /// Horizontal distance from the right edge to the maximize button centre.
 /// = CLOSE_PAD + CLOSE_R*2 + 4 px gap
-const MAX_PAD:      f64 = CLOSE_PAD + CLOSE_R * 2.0 + 4.0; // 26 px
-const RESIZE_EDGE:  f64 = 6.0;   // px from the edge that counts as a resize zone
-const MIN_W:        f64 = 120.0;
-const MIN_H:        f64 = 80.0;
-const DBL_CLICK_MS: u128 = 500;  // double-click detection window
+const MAX_PAD: f64 = CLOSE_PAD + CLOSE_R * 2.0 + 4.0; // 26 px
+const RESIZE_EDGE: f64 = 6.0; // px from the edge that counts as a resize zone
+const MIN_W: f64 = 120.0;
+const MIN_H: f64 = 80.0;
+const DBL_CLICK_MS: u128 = 500; // double-click detection window
 
 // ── Resize direction ───────────────────────────────────────────────────────────
 
 /// Which edge(s) are being dragged during a resize operation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ResizeDir {
-    N, NE, E, SE, S, SW, W, NW,
+    N,
+    NE,
+    E,
+    SE,
+    S,
+    SW,
+    W,
+    NW,
 }
 
 // ── Window state ───────────────────────────────────────────────────────────────
@@ -140,7 +147,7 @@ pub struct Window {
     /// `paint()` so `clip_children_rect` can keep content clipped to the
     /// body area.  Display state is written into `title_state` every
     /// layout pass; the sub-widget reads it at paint time.
-    title_bar:   WindowTitleBar,
+    title_bar: WindowTitleBar,
     title_state: Rc<RefCell<TitleBarView>>,
 
     /// Canvas size supplied by the last `layout()` call; used for clamping.
@@ -257,7 +264,9 @@ impl Window {
     }
 
     /// Returns the window title as it was passed to [`Window::new`].
-    pub fn title(&self) -> &str { &self.title }
+    pub fn title(&self) -> &str {
+        &self.title
+    }
 
     /// Register a callback fired whenever this window requests a raise
     /// (click-to-front or visibility rising-edge from the sidebar).
@@ -273,7 +282,10 @@ impl Window {
         self.bounds = b;
         self
     }
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self
+    }
 
     pub fn with_visible_cell(mut self, cell: Rc<Cell<bool>>) -> Self {
         self.visible_cell = Some(cell);
@@ -290,28 +302,52 @@ impl Window {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
-    pub fn with_constrain(mut self, constrain: bool) -> Self { self.constrain = constrain; self }
+    pub fn with_constrain(mut self, constrain: bool) -> Self {
+        self.constrain = constrain;
+        self
+    }
 
     /// Make the window size itself to the content's preferred size every frame.
     /// Top-left pin: as content grows/shrinks, the title bar stays where it is.
-    pub fn with_auto_size(mut self, auto: bool) -> Self { self.auto_size = auto; self }
+    pub fn with_auto_size(mut self, auto: bool) -> Self {
+        self.auto_size = auto;
+        self
+    }
 
     /// Toggle user-dragged resize.  `false` hides every edge/corner handle
     /// and disables resize hit-tests.  Default: `true`.  Matches egui's
     /// `Window::resizable(bool)`.
-    pub fn with_resizable(mut self, on: bool) -> Self { self.resizable = on; self }
+    pub fn with_resizable(mut self, on: bool) -> Self {
+        self.resizable = on;
+        self
+    }
 
     /// Fine-grained axis-locking of the resize handles — pass `(true, false)`
     /// for a horizontally-only resizable window, etc.  Implies
     /// `with_resizable(true)`.  Matches egui's `Window::resizable([h, v])`.
     pub fn with_resizable_axes(mut self, h: bool, v: bool) -> Self {
-        self.resizable   = h || v;
+        self.resizable = h || v;
         self.resizable_h = h;
         self.resizable_v = v;
         self
@@ -370,7 +406,9 @@ impl Window {
     }
 
     fn clamp_to_canvas(&mut self) {
-        if !self.constrain { return; }
+        if !self.constrain {
+            return;
+        }
         let cw = self.canvas_size.width;
         let ch = self.canvas_size.height;
         // **Policy: keep the TITLE BAR grabbable**, not the whole window.
@@ -395,23 +433,37 @@ impl Window {
         self.bounds.y = self.bounds.y.clamp(min_y, max_y).round();
     }
 
-    pub fn show(&mut self) { self.visible = true; }
-    pub fn hide(&mut self) { self.visible = false; }
-    pub fn toggle(&mut self) { self.visible = !self.visible; }
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+    pub fn hide(&mut self) {
+        self.visible = false;
+    }
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+    }
     /// Current visibility — honours an optional shared `visible_cell` when
     /// wired (sidebar toggles, programmatic show/hide).  The inherent
     /// `self.visible` field is a fallback for windows that aren't wired to
     /// a cell.  Must match the Widget-trait impl below so rising-edge
     /// detection in `layout()` observes sidebar toggles.
     pub fn is_visible(&self) -> bool {
-        if let Some(ref cell) = self.visible_cell { cell.get() } else { self.visible }
+        if let Some(ref cell) = self.visible_cell {
+            cell.get()
+        } else {
+            self.visible
+        }
     }
 
-    fn title_bar_bottom(&self) -> f64 { self.bounds.height - TITLE_H }
+    fn title_bar_bottom(&self) -> f64 {
+        self.bounds.height - TITLE_H
+    }
 
     fn in_title_bar(&self, local: Point) -> bool {
-        local.y >= self.title_bar_bottom() && local.y <= self.bounds.height
-            && local.x >= 0.0 && local.x <= self.bounds.width
+        local.y >= self.title_bar_bottom()
+            && local.y <= self.bounds.height
+            && local.x >= 0.0
+            && local.x <= self.bounds.width
     }
 
     fn close_center(&self) -> Point {
@@ -451,8 +503,7 @@ impl Window {
         let cx = 12.0;
         let cy = self.bounds.height - TITLE_H * 0.5;
         let half = 8.0;
-        local.x >= cx - half && local.x <= cx + half
-            && local.y >= cy - half && local.y <= cy + half
+        local.x >= cx - half && local.x <= cx + half && local.y >= cy - half && local.y <= cy + half
     }
 
     /// Toggle collapsed <-> expanded, keeping the top edge of the window
@@ -480,7 +531,8 @@ impl Window {
         } else {
             self.pre_maximize_bounds = self.bounds;
             self.bounds = snap(Rect::new(
-                0.0, 0.0,
+                0.0,
+                0.0,
                 self.canvas_size.width,
                 self.canvas_size.height,
             ));
@@ -493,15 +545,21 @@ impl Window {
     /// Return the resize direction for `local`, or `None` if the point is in
     /// the interior (or the window is collapsed).
     fn resize_dir(&self, local: Point) -> Option<ResizeDir> {
-        if self.collapsed || self.auto_size { return None; }
-        if !self.resizable { return None; }
+        if self.collapsed || self.auto_size {
+            return None;
+        }
+        if !self.resizable {
+            return None;
+        }
         let w = self.bounds.width;
         let h = self.bounds.height;
         let x = local.x;
         let y = local.y;
 
         // Outside the window altogether.
-        if x < 0.0 || x > w || y < 0.0 || y > h { return None; }
+        if x < 0.0 || x > w || y < 0.0 || y > h {
+            return None;
+        }
 
         // Mask each edge to the axes the window is allowed to resize on.
         let on_n = self.resizable_v && y > h - RESIZE_EDGE;
@@ -510,15 +568,15 @@ impl Window {
         let on_e = self.resizable_h && x > w - RESIZE_EDGE;
 
         match (on_n, on_e, on_s, on_w) {
-            (true,  true,  _,     _    ) => Some(ResizeDir::NE),
-            (true,  _,     _,     true ) => Some(ResizeDir::NW),
-            (_,     _,     true,  true ) => Some(ResizeDir::SW),
-            (_,     true,  true,  _    ) => Some(ResizeDir::SE),
-            (true,  _,     _,     _    ) => Some(ResizeDir::N),
-            (_,     true,  _,     _    ) => Some(ResizeDir::E),
-            (_,     _,     true,  _    ) => Some(ResizeDir::S),
-            (_,     _,     _,     true ) => Some(ResizeDir::W),
-            _                            => None,
+            (true, true, _, _) => Some(ResizeDir::NE),
+            (true, _, _, true) => Some(ResizeDir::NW),
+            (_, _, true, true) => Some(ResizeDir::SW),
+            (_, true, true, _) => Some(ResizeDir::SE),
+            (true, _, _, _) => Some(ResizeDir::N),
+            (_, true, _, _) => Some(ResizeDir::E),
+            (_, _, true, _) => Some(ResizeDir::S),
+            (_, _, _, true) => Some(ResizeDir::W),
+            _ => None,
         }
     }
 
@@ -547,14 +605,58 @@ impl Window {
 
         if let DragMode::Resize(dir) = self.drag_mode {
             match dir {
-                ResizeDir::N  => { h = (sb.height + dy).max(min_h); }
-                ResizeDir::S  => { y = sb.y + dy; h = (sb.height - dy).max(min_h); if h == min_h { y = sb.y + sb.height - min_h; } }
-                ResizeDir::E  => { w = (sb.width  + dx).max(MIN_W); }
-                ResizeDir::W  => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } }
-                ResizeDir::NE => { w = (sb.width  + dx).max(MIN_W); h = (sb.height + dy).max(min_h); }
-                ResizeDir::NW => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } h = (sb.height + dy).max(min_h); }
-                ResizeDir::SE => { w = (sb.width  + dx).max(MIN_W); y = sb.y + dy; h = (sb.height - dy).max(min_h); if h == min_h { y = sb.y + sb.height - min_h; } }
-                ResizeDir::SW => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } y = sb.y + dy; h = (sb.height - dy).max(min_h); if h == min_h { y = sb.y + sb.height - min_h; } }
+                ResizeDir::N => {
+                    h = (sb.height + dy).max(min_h);
+                }
+                ResizeDir::S => {
+                    y = sb.y + dy;
+                    h = (sb.height - dy).max(min_h);
+                    if h == min_h {
+                        y = sb.y + sb.height - min_h;
+                    }
+                }
+                ResizeDir::E => {
+                    w = (sb.width + dx).max(MIN_W);
+                }
+                ResizeDir::W => {
+                    x = sb.x + dx;
+                    w = (sb.width - dx).max(MIN_W);
+                    if w == MIN_W {
+                        x = sb.x + sb.width - MIN_W;
+                    }
+                }
+                ResizeDir::NE => {
+                    w = (sb.width + dx).max(MIN_W);
+                    h = (sb.height + dy).max(min_h);
+                }
+                ResizeDir::NW => {
+                    x = sb.x + dx;
+                    w = (sb.width - dx).max(MIN_W);
+                    if w == MIN_W {
+                        x = sb.x + sb.width - MIN_W;
+                    }
+                    h = (sb.height + dy).max(min_h);
+                }
+                ResizeDir::SE => {
+                    w = (sb.width + dx).max(MIN_W);
+                    y = sb.y + dy;
+                    h = (sb.height - dy).max(min_h);
+                    if h == min_h {
+                        y = sb.y + sb.height - min_h;
+                    }
+                }
+                ResizeDir::SW => {
+                    x = sb.x + dx;
+                    w = (sb.width - dx).max(MIN_W);
+                    if w == MIN_W {
+                        x = sb.x + sb.width - MIN_W;
+                    }
+                    y = sb.y + dy;
+                    h = (sb.height - dy).max(min_h);
+                    if h == min_h {
+                        y = sb.y + sb.height - min_h;
+                    }
+                }
             }
         }
 
@@ -566,10 +668,10 @@ impl Window {
 /// Map a resize direction to the appropriate OS cursor icon.
 fn resize_cursor(dir: ResizeDir) -> CursorIcon {
     match dir {
-        ResizeDir::N  => CursorIcon::ResizeNorth,
-        ResizeDir::S  => CursorIcon::ResizeSouth,
-        ResizeDir::E  => CursorIcon::ResizeEast,
-        ResizeDir::W  => CursorIcon::ResizeWest,
+        ResizeDir::N => CursorIcon::ResizeNorth,
+        ResizeDir::S => CursorIcon::ResizeSouth,
+        ResizeDir::E => CursorIcon::ResizeEast,
+        ResizeDir::W => CursorIcon::ResizeWest,
         ResizeDir::NE => CursorIcon::ResizeNorthEast,
         ResizeDir::NW => CursorIcon::ResizeNorthWest,
         ResizeDir::SE => CursorIcon::ResizeSouthEast,
@@ -578,12 +680,20 @@ fn resize_cursor(dir: ResizeDir) -> CursorIcon {
 }
 
 impl Widget for Window {
-    fn type_name(&self) -> &'static str { "Window" }
+    fn type_name(&self) -> &'static str {
+        "Window"
+    }
     /// External identity for z-order persistence, inspector lookup, etc.
-    fn id(&self) -> Option<&str> { Some(&self.title) }
+    fn id(&self) -> Option<&str> {
+        Some(&self.title)
+    }
 
     fn is_visible(&self) -> bool {
-        if let Some(ref cell) = self.visible_cell { cell.get() } else { self.visible }
+        if let Some(ref cell) = self.visible_cell {
+            cell.get()
+        } else {
+            self.visible
+        }
     }
 
     /// A collapsed window paints only its title bar — nothing inside the
@@ -593,28 +703,47 @@ impl Widget for Window {
     /// hover tween inside a collapsed/closed window would keep the host
     /// loop awake despite being invisible.
     fn needs_paint(&self) -> bool {
-        if !self.is_visible() || self.collapsed { return false; }
+        if !self.is_visible() || self.collapsed {
+            return false;
+        }
         self.children().iter().any(|c| c.needs_paint())
     }
 
     fn next_paint_deadline(&self) -> Option<web_time::Instant> {
-        if !self.is_visible() || self.collapsed { return None; }
+        if !self.is_visible() || self.collapsed {
+            return None;
+        }
         let mut best: Option<web_time::Instant> = None;
         for c in self.children() {
             if let Some(t) = c.next_paint_deadline() {
-                best = Some(match best { Some(b) if b <= t => b, _ => t });
+                best = Some(match best {
+                    Some(b) if b <= t => b,
+                    _ => t,
+                });
             }
         }
         best
     }
 
-    fn bounds(&self) -> Rect { self.bounds }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     /// Pop this window to the top of the parent `Stack` when the
     /// false→true visibility edge fires (see `layout`).
@@ -640,14 +769,20 @@ impl Widget for Window {
         }
     }
 
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     /// Clip child painting to the content area (below the title bar).
     /// When collapsed bounds.height == TITLE_H so the content rect has zero height,
     /// preventing any child from drawing outside the visible title-bar strip.
     fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
-        if !self.is_visible() { return None; }
+        if !self.is_visible() {
+            return None;
+        }
         let w = self.bounds.width;
         let content_h = (self.bounds.height - TITLE_H).max(0.0);
         // Clip to content area: y=0 (bottom) up to content_h, full width.
@@ -655,11 +790,17 @@ impl Widget for Window {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        if !self.is_visible() { return false; }
-        if self.drag_mode != DragMode::None { return true; }
+        if !self.is_visible() {
+            return false;
+        }
+        if self.drag_mode != DragMode::None {
+            return true;
+        }
         let b = self.bounds();
-        local_pos.x >= 0.0 && local_pos.x <= b.width
-            && local_pos.y >= 0.0 && local_pos.y <= b.height
+        local_pos.x >= 0.0
+            && local_pos.x <= b.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= b.height
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -670,14 +811,16 @@ impl Widget for Window {
         let now_visible = self.is_visible();
         if now_visible && !self.last_visible.get() {
             self.raise_request.set(true);
-            if let Some(cb) = self.on_raised.as_mut() { cb(&self.title); }
+            if let Some(cb) = self.on_raised.as_mut() {
+                cb(&self.title);
+            }
             // Un-maximize on reopen.  Clicking a sidebar checkbox is "open
             // this window for use" — the user expects the window to come
             // up at its normal size, not still stretched to fill the canvas
             // from the last session's maximise.  Restore `pre_maximize_bounds`
             // which `toggle_maximize` saved when the user maximised.
             if self.maximized {
-                self.bounds    = self.pre_maximize_bounds;
+                self.bounds = self.pre_maximize_bounds;
                 self.maximized = false;
             }
         }
@@ -718,13 +861,13 @@ impl Widget for Window {
                 // width here, the window grows to the canvas on the
                 // first frame and never shrinks back.  egui's
                 // equivalent is `default_width`, which also pins.
-                let cap_w  = self.bounds.width.max(MIN_W);
-                let cap_h  = if max_sz.height.is_finite() && max_sz.height < CAP_SENTINEL {
+                let cap_w = self.bounds.width.max(MIN_W);
+                let cap_h = if max_sz.height.is_finite() && max_sz.height < CAP_SENTINEL {
                     max_sz.height
                 } else {
                     available.height.max(MIN_H)
                 };
-                let pref   = child.layout(Size::new(cap_w, cap_h));
+                let pref = child.layout(Size::new(cap_w, cap_h));
                 // Auto-size follows content in BOTH directions — so
                 // the window can also shrink back down when the
                 // inner Resize (or any other sizing widget) narrows.
@@ -732,14 +875,12 @@ impl Widget for Window {
                 // provided `available.width` (main_area / canvas).
                 // Matches egui where auto_sized tracks content size
                 // symmetrically.
-                let new_w  = pref.width
-                    .max(MIN_W)
-                    .min(available.width.max(MIN_W));
-                let new_h  = (pref.height + TITLE_H).min(cap_h + TITLE_H).max(MIN_H);
-                let top    = self.bounds.y + self.bounds.height;
-                self.bounds.width   = new_w;
-                self.bounds.height  = new_h;
-                self.bounds.y       = top - new_h;
+                let new_w = pref.width.max(MIN_W).min(available.width.max(MIN_W));
+                let new_h = (pref.height + TITLE_H).min(cap_h + TITLE_H).max(MIN_H);
+                let top = self.bounds.y + self.bounds.height;
+                self.bounds.width = new_w;
+                self.bounds.height = new_h;
+                self.bounds.y = top - new_h;
                 self.pre_collapse_h = new_h;
             }
         }
@@ -758,17 +899,13 @@ impl Widget for Window {
         // its `layout` returns the full slot.  This is what makes
         // egui's "no scroll, no clip, no whitespace" contract work
         // for windows whose content includes a flex-fill child.
-        if self.tight_content_fit
-            && !self.auto_size
-            && !self.collapsed
-            && !self.maximized
-        {
+        if self.tight_content_fit && !self.auto_size && !self.collapsed && !self.maximized {
             if let Some(child) = self.children.first() {
                 let needed = child.measure_min_height(self.bounds.width);
-                let new_h  = (needed + TITLE_H).max(MIN_H);
-                let top    = self.bounds.y + self.bounds.height;
+                let new_h = (needed + TITLE_H).max(MIN_H);
+                let top = self.bounds.y + self.bounds.height;
                 self.bounds.height = new_h;
-                self.bounds.y      = top - new_h;
+                self.bounds.y = top - new_h;
                 self.last_content_natural_h.set(needed);
             }
         }
@@ -793,16 +930,16 @@ impl Widget for Window {
         // requirement at the supplied width.
         if (self.tight_content_fit || self.floor_content_height) && !self.collapsed {
             if let Some(child) = self.children.first() {
-                self.last_content_natural_h.set(
-                    child.measure_min_height(self.bounds.width)
-                );
+                self.last_content_natural_h
+                    .set(child.measure_min_height(self.bounds.width));
             }
         }
 
         // Position the title-bar strip at the top of the window and
         // give it a layout pass so the title label knows its size.
         let tb_y = self.bounds.height - TITLE_H;
-        self.title_bar.set_bounds(Rect::new(0.0, tb_y, self.bounds.width, TITLE_H));
+        self.title_bar
+            .set_bounds(Rect::new(0.0, tb_y, self.bounds.width, TITLE_H));
         self.title_bar.layout(Size::new(self.bounds.width, TITLE_H));
 
         // Record the canvas size — used by drag / resize / collapse clamp
@@ -837,20 +974,22 @@ impl Widget for Window {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        if !self.is_visible() { return; }
+        if !self.is_visible() {
+            return;
+        }
 
-        let v  = ctx.visuals();
-        let w  = self.bounds.width;
+        let v = ctx.visuals();
+        let w = self.bounds.width;
         // bounds.height == TITLE_H when collapsed (adjusted on toggle).
-        let h  = self.bounds.height;
+        let h = self.bounds.height;
 
         // Drop shadow — stacked rounded rects approximating a Gaussian blur.
         // Outer layers inflate outward and fade with a (1−t)² falloff; drawn
         // outside-in so the denser core overlays the softer halo.
         let base = v.window_shadow;
         for i in (0..SHADOW_STEPS).rev() {
-            let t     = i as f64 / SHADOW_STEPS as f64;
-            let infl  = t * SHADOW_BLUR;
+            let t = i as f64 / SHADOW_STEPS as f64;
+            let infl = t * SHADOW_BLUR;
             let falloff = (1.0 - t).powi(2) as f32;
             let alpha = base.a * falloff / SHADOW_STEPS as f32 * 6.0;
             ctx.set_fill_color(Color::rgba(base.r, base.g, base.b, alpha));
@@ -883,10 +1022,10 @@ impl Widget for Window {
             } else {
                 v.window_title_fill
             };
-            st.title_color      = v.window_title_text;
-            st.collapsed        = self.collapsed;
-            st.maximized        = self.maximized;
-            st.close_hovered    = self.close_hovered;
+            st.title_color = v.window_title_text;
+            st.collapsed = self.collapsed;
+            st.maximized = self.maximized;
+            st.close_hovered = self.close_hovered;
             st.maximize_hovered = self.maximize_hovered;
         }
         let tb_bounds = self.title_bar.bounds();
@@ -901,18 +1040,21 @@ impl Widget for Window {
         ctx.set_stroke_color(v.window_stroke);
         ctx.set_line_width(1.0);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
+        ctx.rounded_rect(0.5, 0.5, (w - 1.0).max(0.0), (h - 1.0).max(0.0), CORNER_R);
         ctx.stroke();
-
     }
 
     // paint_overlay: draws the resize handle dots + edge highlights on top of content.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        if !self.is_visible() || self.collapsed { return; }
+        if !self.is_visible() || self.collapsed {
+            return;
+        }
         // Skip all resize-related chrome when the window can't be resized,
         // so an auto-sized or `.resizable(false)` window doesn't look
         // deceptively interactive.
-        if !self.resizable || self.auto_size { return; }
+        if !self.resizable || self.auto_size {
+            return;
+        }
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -922,7 +1064,7 @@ impl Widget for Window {
         // windows the SE grip would suggest a capability that isn't there.
         if self.resizable_h && self.resizable_v {
             let is_se_active = matches!(self.drag_mode, DragMode::Resize(ResizeDir::SE));
-            let is_se_hover  = self.hover_dir == Some(ResizeDir::SE);
+            let is_se_hover = self.hover_dir == Some(ResizeDir::SE);
             let grip_color = if is_se_active {
                 v.window_resize_active
             } else if is_se_hover {
@@ -946,25 +1088,32 @@ impl Widget for Window {
         // Determine the highlighted direction and whether it is actively dragging.
         let (highlight, is_active) = match self.drag_mode {
             DragMode::Resize(d) => (Some(d), true),
-            DragMode::Move      => (None, false), // no edge highlight while moving
-            DragMode::None      => (self.hover_dir, false),
+            DragMode::Move => (None, false), // no edge highlight while moving
+            DragMode::None => (self.hover_dir, false),
         };
-        let dir = match highlight { Some(d) => d, None => return };
+        let dir = match highlight {
+            Some(d) => d,
+            None => return,
+        };
 
-        let color = if is_active { v.window_resize_active } else { v.window_resize_hover };
+        let color = if is_active {
+            v.window_resize_active
+        } else {
+            v.window_resize_hover
+        };
         ctx.set_stroke_color(color);
         ctx.set_line_width(2.0);
 
         // Which edges to highlight (derived from direction).
         let (top, bottom, left, right) = match dir {
-            ResizeDir::N  => (true,  false, false, false),
-            ResizeDir::S  => (false, true,  false, false),
-            ResizeDir::E  => (false, false, false, true),
-            ResizeDir::W  => (false, false, true,  false),
-            ResizeDir::NE => (true,  false, false, true),
-            ResizeDir::NW => (true,  false, true,  false),
-            ResizeDir::SE => (false, true,  false, true),
-            ResizeDir::SW => (false, true,  true,  false),
+            ResizeDir::N => (true, false, false, false),
+            ResizeDir::S => (false, true, false, false),
+            ResizeDir::E => (false, false, false, true),
+            ResizeDir::W => (false, false, true, false),
+            ResizeDir::NE => (true, false, false, true),
+            ResizeDir::NW => (true, false, true, false),
+            ResizeDir::SE => (false, true, false, true),
+            ResizeDir::SW => (false, true, true, false),
         };
 
         // Segments run between the rounded-corner tangent points.
@@ -996,14 +1145,16 @@ impl Widget for Window {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        if !self.is_visible() { return EventResult::Ignored; }
+        if !self.is_visible() {
+            return EventResult::Ignored;
+        }
 
         match event {
             Event::MouseMove { pos } => {
                 let was_close = self.close_hovered;
-                let was_max   = self.maximize_hovered;
-                let was_dir   = self.hover_dir;
-                self.close_hovered    = self.in_close_button(*pos);
+                let was_max = self.maximize_hovered;
+                let was_dir = self.hover_dir;
+                self.close_hovered = self.in_close_button(*pos);
                 self.maximize_hovered = self.in_maximize_button(*pos);
 
                 match self.drag_mode {
@@ -1044,7 +1195,11 @@ impl Widget for Window {
                 EventResult::Ignored
             }
 
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 // Click-to-raise — any left click that reaches this Window
                 // (hit-test routed it here in reverse paint order, so we
                 // ARE the topmost widget under the cursor in the stack
@@ -1056,13 +1211,19 @@ impl Widget for Window {
                 self.raise_request.set(true);
                 // Z-order changes are visible; repaint.
                 crate::animation::request_tick();
-                if let Some(cb) = self.on_raised.as_mut() { cb(&self.title); }
+                if let Some(cb) = self.on_raised.as_mut() {
+                    cb(&self.title);
+                }
 
                 // Close button — highest priority.
                 if self.in_close_button(*pos) {
                     self.visible = false;
-                    if let Some(ref cell) = self.visible_cell { cell.set(false); }
-                    if let Some(cb) = self.on_close.as_mut() { cb(); }
+                    if let Some(ref cell) = self.visible_cell {
+                        cell.set(false);
+                    }
+                    if let Some(cb) = self.on_close.as_mut() {
+                        cb();
+                    }
                     crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
@@ -1091,7 +1252,7 @@ impl Widget for Window {
                     // The N edge overlaps the title bar — prefer resize over drag from the top N px.
                     let world = Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y);
                     self.drag_mode = DragMode::Resize(dir);
-                    self.drag_start_world  = world;
+                    self.drag_start_world = world;
                     self.drag_start_bounds = self.bounds;
                     return EventResult::Consumed;
                 }
@@ -1100,7 +1261,8 @@ impl Widget for Window {
                 if self.in_title_bar(*pos) {
                     // Double-click detection.
                     let now = Instant::now();
-                    let is_double = self.last_title_click
+                    let is_double = self
+                        .last_title_click
                         .map(|t| now.duration_since(t).as_millis() < DBL_CLICK_MS)
                         .unwrap_or(false);
 
@@ -1115,7 +1277,7 @@ impl Widget for Window {
                         self.last_title_click = Some(now);
                         let world = Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y);
                         self.drag_mode = DragMode::Move;
-                        self.drag_start_world  = world;
+                        self.drag_start_world = world;
                         self.drag_start_bounds = self.bounds;
                     }
                     return EventResult::Consumed;
@@ -1129,7 +1291,10 @@ impl Widget for Window {
                 }
             }
 
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 let was_dragging = self.drag_mode != DragMode::None;
                 self.drag_mode = DragMode::None;
                 if was_dragging {

@@ -7,9 +7,9 @@
 
 use crate::color::Color;
 use crate::device_scale::device_scale;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
@@ -56,7 +56,10 @@ impl Container {
     /// an auto-sized ancestor (e.g. `Window::with_auto_size(true)`),
     /// which would otherwise pick up the full available height as
     /// the container's preferred size and inflate the window.
-    pub fn with_fit_height(mut self, fit: bool) -> Self { self.fit_height = fit; self }
+    pub fn with_fit_height(mut self, fit: bool) -> Self {
+        self.fit_height = fit;
+        self
+    }
 
     /// Append a child widget.
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
@@ -90,11 +93,26 @@ impl Container {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
 impl Default for Container {
@@ -104,18 +122,38 @@ impl Default for Container {
 }
 
 impl Widget for Container {
-    fn type_name(&self) -> &'static str { "Container" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, bounds: Rect) { self.bounds = bounds; }
+    fn type_name(&self) -> &'static str {
+        "Container"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
+    }
 
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let pad_l = self.inner_padding.left;
@@ -159,7 +197,7 @@ impl Widget for Container {
         // `with_fit_height(true)` — matches egui `Frame` semantics.
         if self.fit_height {
             let consumed_h = (start_cursor - cursor_y).max(0.0);
-            let natural_h  = (consumed_h + pad_t + pad_b).min(available.height);
+            let natural_h = (consumed_h + pad_t + pad_b).min(available.height);
             Size::new(available.width, natural_h)
         } else {
             Size::new(available.width, available.height)
@@ -184,7 +222,14 @@ impl Widget for Container {
             ctx.set_stroke_color(bc);
             ctx.set_line_width(self.border_width);
             ctx.begin_path();
-            ctx.rounded_rect(0.0, 0.0, w, h, r);
+            let inset = self.border_width * 0.5;
+            ctx.rounded_rect(
+                inset,
+                inset,
+                (w - self.border_width).max(0.0),
+                (h - self.border_width).max(0.0),
+                r,
+            );
             ctx.stroke();
         }
     }

@@ -9,80 +9,98 @@
 //! - `about()`, `load_png()`, `cube_content()` — tightly coupled to the demo
 //!   shell and unlikely to grow beyond their current size.
 
-mod gallery;
+mod animation;
 mod basic;
 mod code_example;
-mod animation;
 mod font_book;
 mod frame_demo;
+mod gallery;
+mod interaction;
 mod lion;
 mod misc;
-mod interaction;
+mod screenshot_demo;
 mod scrolling;
 mod system;
-mod text_demos;
 mod tests;
+mod text_demos;
 mod truetype_lcd;
 
 // Re-export every public demo builder so callers use `windows::foo(font)`.
-pub use gallery::widget_gallery;
-pub use basic::{sliders, text_edit, tooltips, code_editor};
-pub use code_example::code_example;
 pub use animation::{bezier_curve, dancing_strings, painting};
+pub use basic::{code_editor, sliders, text_edit, tooltips};
+pub use code_example::code_example;
 pub use font_book::font_book;
 pub use frame_demo::frame_demo;
+pub use gallery::widget_gallery;
+pub use interaction::{drag_and_drop, panels_demo, popups_demo, scene_demo};
 pub use lion::lion_demo;
 pub use misc::{extra_viewport, highlighting, interactive_container, misc_demos};
-pub use interaction::{drag_and_drop, panels_demo, popups_demo,
-                      scene_demo, screenshot_demo};
+pub use screenshot_demo::screenshot_demo;
 pub use scrolling::scrolling_demo;
-pub use system::{system_view, load_font_by_name, font_option_index,
-                 font_option_names, load_all_fonts, apply_font_by_index,
-                 default_font_index,
-                 cells as system_cells, init_cells as init_system_cells, SystemCells};
+pub use system::{
+    apply_font_by_index, cells as system_cells, default_font_index, font_option_index,
+    font_option_names, init_cells as init_system_cells, load_all_fonts, load_font_by_name,
+    system_view, SystemCells,
+};
+pub use tests::{
+    clipboard_test, cursor_test, grid_test, id_test, input_event_history, input_test, layout_test,
+    manual_layout_test, svg_test, window_resize_sub_windows, ResizeTestWindow,
+};
+pub use text_demos::{
+    modals_demo, multi_touch, strip_demo, table_demo, text_layout, undo_redo, window_options,
+};
 pub use truetype_lcd::truetype_lcd_view;
-pub use text_demos::{strip_demo, table_demo, text_layout, undo_redo,
-                     window_options, modals_demo, multi_touch};
-pub use tests::{clipboard_test, cursor_test, grid_test, id_test,
-                input_event_history, input_test, layout_test, manual_layout_test,
-                svg_test, window_resize_sub_windows, ResizeTestWindow};
 
 use std::sync::Arc;
 
-use agg_gui::{
-    Color, DrawCtx, Event, EventResult,
-    FlexColumn, Font, Insets, Label, MarkdownView,
-    Rect, ScrollView, Size, SizedBox, Widget,
-};
 use agg_gui::widget::paint_subtree;
+use agg_gui::{
+    Color, DrawCtx, Event, EventResult, FlexColumn, Font, Insets, Label, MarkdownView, Rect,
+    ScrollView, Size, SizedBox, Widget,
+};
 
 // ---------------------------------------------------------------------------
 // "Coming Soon" placeholder
 // ---------------------------------------------------------------------------
 
 struct ComingSoon {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
 
 impl ComingSoon {
     fn new() -> Self {
-        Self { bounds: Rect::default(), children: Vec::new() }
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+        }
     }
 }
 
 impl Widget for ComingSoon {
-    fn type_name(&self) -> &'static str { "ComingSoon" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ComingSoon"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
         available
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Returns a minimal placeholder window content for unimplemented demos.
@@ -96,11 +114,11 @@ pub fn coming_soon() -> Box<dyn Widget> {
 // ---------------------------------------------------------------------------
 
 struct LogoWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     /// Bold lowercase "a" centered inside the window shape.
-    letter:   Label,
-    size:     f64,
+    letter: Label,
+    size: f64,
 }
 
 impl LogoWidget {
@@ -118,24 +136,35 @@ impl LogoWidget {
 }
 
 impl Widget for LogoWidget {
-    fn type_name(&self) -> &'static str { "LogoWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "LogoWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, _available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, self.size, self.size);
         let s = self.letter.layout(Size::new(self.size, self.size));
-        self.letter.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        self.letter
+            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         Size::new(self.size, self.size)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let s  = self.size;
-        let r  = s * 0.16;           // corner radius
-        let tb = s * 0.20;           // title-bar height
-        let dr = s * 0.032;          // dot radius
+        let s = self.size;
+        let r = s * 0.16; // corner radius
+        let tb = s * 0.20; // title-bar height
+        let dr = s * 0.032; // dot radius
 
         // Window body (accent blue).
         ctx.set_fill_color(Color::rgb(0.29, 0.56, 0.89));
@@ -183,7 +212,9 @@ impl Widget for LogoWidget {
         ctx.restore();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,9 +259,7 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
         .with_margin(Insets::from_sides(0.0, 0.0, 16.0, 8.0))
         .with_child(Box::new(LogoWidget::new(Arc::clone(&font), 96.0)));
 
-    let mut col = FlexColumn::new()
-        .with_gap(0.0)
-        .with_padding(0.0);
+    let mut col = FlexColumn::new().with_gap(0.0).with_padding(0.0);
     col.push(Box::new(logo), 0.0);
     col.push(Box::new(md_view), 0.0);
 

@@ -21,9 +21,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -31,25 +31,25 @@ use crate::widgets::label::{Label, LabelAlign};
 
 /// A theme for [`Button`] visual states.
 pub struct ButtonTheme {
-    pub background:         Color,
+    pub background: Color,
     pub background_hovered: Color,
     pub background_pressed: Color,
-    pub label_color:        Color,
-    pub border_radius:      f64,
-    pub focus_ring_color:   Color,
-    pub focus_ring_width:   f64,
+    pub label_color: Color,
+    pub border_radius: f64,
+    pub focus_ring_color: Color,
+    pub focus_ring_width: f64,
 }
 
 impl Default for ButtonTheme {
     fn default() -> Self {
         Self {
-            background:         Color::rgb(0.22, 0.45, 0.88),
+            background: Color::rgb(0.22, 0.45, 0.88),
             background_hovered: Color::rgb(0.30, 0.52, 0.92),
             background_pressed: Color::rgb(0.16, 0.36, 0.72),
-            label_color:        Color::white(),
-            border_radius:      6.0,
-            focus_ring_color:   Color::rgba(0.22, 0.45, 0.88, 0.55),
-            focus_ring_width:   2.5,
+            label_color: Color::white(),
+            border_radius: 6.0,
+            focus_ring_color: Color::rgba(0.22, 0.45, 0.88, 0.55),
+            focus_ring_width: 2.5,
         }
     }
 }
@@ -111,7 +111,8 @@ impl Button {
 
     pub fn with_theme(mut self, theme: ButtonTheme) -> Self {
         self.theme = theme;
-        self.children[0] = Self::build_label(&self.label_text, &self.font, self.font_size, &self.theme);
+        self.children[0] =
+            Self::build_label(&self.label_text, &self.font, self.font_size, &self.theme);
         self
     }
 
@@ -131,15 +132,43 @@ impl Button {
         self.enabled_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     fn fire_click(&mut self) {
         if let Some(cb) = self.on_click.as_mut() {
             cb();
+        }
+    }
+
+    fn disabled_colors(v: &crate::theme::Visuals) -> (Color, Color, Color) {
+        let luma = v.bg_color.r * 0.299 + v.bg_color.g * 0.587 + v.bg_color.b * 0.114;
+        if luma < 0.5 {
+            (
+                v.window_fill,
+                Color::rgba(1.0, 1.0, 1.0, 0.22),
+                v.text_dim.with_alpha(0.42),
+            )
+        } else {
+            (v.track_bg, v.widget_stroke.with_alpha(0.45), v.text_dim)
         }
     }
 
@@ -148,10 +177,10 @@ impl Button {
     /// Called from `new()`, `with_theme()`, and `with_font_size()` so the
     /// child always reflects the button's configuration.
     fn build_label(
-        text:      &str,
-        font:      &Arc<Font>,
+        text: &str,
+        font: &Arc<Font>,
         font_size: f64,
-        theme:     &ButtonTheme,
+        theme: &ButtonTheme,
     ) -> Box<dyn Widget> {
         Box::new(
             Label::new(text, Arc::clone(font))
@@ -163,20 +192,42 @@ impl Button {
 }
 
 impl Widget for Button {
-    fn type_name(&self) -> &'static str { "Button" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, bounds: Rect) { self.bounds = bounds; }
+    fn type_name(&self) -> &'static str {
+        "Button"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
+    }
 
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { self.is_enabled() }
+    fn is_focusable(&self) -> bool {
+        self.is_enabled()
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let height = (self.font_size * 2.4).max(28.0);
@@ -192,9 +243,14 @@ impl Widget for Button {
         let natural_w = (label_size.width + pad_h).max(48.0);
         let width = natural_w.min(available.width);
         let size = Size::new(width, height);
-        let label_x = ((size.width  - label_size.width)  * 0.5).max(0.0);
+        let label_x = ((size.width - label_size.width) * 0.5).max(0.0);
         let label_y = ((size.height - label_size.height) * 0.5).max(0.0);
-        self.children[0].set_bounds(Rect::new(label_x, label_y, label_size.width, label_size.height));
+        self.children[0].set_bounds(Rect::new(
+            label_x,
+            label_y,
+            label_size.width,
+            label_size.height,
+        ));
         size
     }
 
@@ -215,9 +271,9 @@ impl Widget for Button {
             ctx.stroke();
         }
 
-        // Background — color depends on interaction state.  Disabled state
-        // desaturates the theme colour toward mid-grey so the button still
-        // looks like a button, just clearly inactive.
+        // Background — color depends on interaction state. Disabled buttons
+        // use neutral widget colors instead of a washed-out accent, so they
+        // don't look like secondary active actions.
         let base_bg = if self.pressed {
             self.theme.background_pressed
         } else if self.hovered {
@@ -225,24 +281,60 @@ impl Widget for Button {
         } else {
             self.theme.background
         };
-        let bg = if enabled {
-            base_bg
-        } else {
-            let k = 0.45;
-            Color::rgba(
-                base_bg.r * k + 0.5 * (1.0 - k),
-                base_bg.g * k + 0.5 * (1.0 - k),
-                base_bg.b * k + 0.5 * (1.0 - k),
-                base_bg.a,
-            )
-        };
+        let v = ctx.visuals();
+        let (disabled_bg, disabled_stroke, _) = Self::disabled_colors(&v);
+        let bg = if enabled { base_bg } else { disabled_bg };
         ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.fill();
 
+        if !enabled {
+            ctx.set_stroke_color(disabled_stroke);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            ctx.rounded_rect(0.5, 0.5, (w - 1.0).max(0.0), (h - 1.0).max(0.0), r);
+            ctx.stroke();
+        }
+
         // Text is NOT drawn here. `paint_subtree` recurses into the Label
         // child automatically after this method returns.
+    }
+
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if self.is_enabled() {
+            return;
+        }
+
+        // The normal child Label was built for the enabled foreground color.
+        // Cover it and repaint the label with the disabled text color.
+        let w = self.bounds.width;
+        let h = self.bounds.height;
+        let r = self.theme.border_radius;
+        let v = ctx.visuals();
+        let (disabled_bg, disabled_stroke, disabled_text) = Self::disabled_colors(&v);
+
+        ctx.set_fill_color(disabled_bg);
+        ctx.begin_path();
+        ctx.rounded_rect(0.0, 0.0, w, h, r);
+        ctx.fill();
+
+        ctx.set_stroke_color(disabled_stroke);
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.rounded_rect(0.5, 0.5, (w - 1.0).max(0.0), (h - 1.0).max(0.0), r);
+        ctx.stroke();
+
+        let font =
+            crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font));
+        ctx.set_font(font);
+        ctx.set_font_size(self.font_size * crate::font_settings::current_font_size_scale());
+        ctx.set_fill_color(disabled_text);
+        if let Some(m) = ctx.measure_text(&self.label_text) {
+            let tx = ((w - m.width) * 0.5).max(0.0);
+            let ty = ((h - (m.ascent - m.descent)) * 0.5).max(0.0);
+            ctx.fill_text(&self.label_text, tx, ty);
+        }
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
@@ -266,15 +358,25 @@ impl Widget for Button {
                 }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, .. } => {
-                if !self.pressed { crate::animation::request_tick(); }
+            Event::MouseDown {
+                button: MouseButton::Left,
+                ..
+            } => {
+                if !self.pressed {
+                    crate::animation::request_tick();
+                }
                 self.pressed = true;
                 EventResult::Consumed
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 let was_pressed = self.pressed;
                 self.pressed = false;
-                if was_pressed { crate::animation::request_tick(); }
+                if was_pressed {
+                    crate::animation::request_tick();
+                }
                 if was_pressed && self.hovered {
                     self.fire_click();
                     // Click handler almost always mutates app state that
@@ -312,7 +414,7 @@ impl Widget for Button {
 
     fn properties(&self) -> Vec<(&'static str, String)> {
         vec![
-            ("label",     self.label_text.clone()),
+            ("label", self.label_text.clone()),
             ("font_size", format!("{:.1}", self.font_size)),
         ]
     }

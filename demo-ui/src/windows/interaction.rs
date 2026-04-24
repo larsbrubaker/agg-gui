@@ -8,13 +8,11 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{
-    Button, Color, DrawCtx, Event, EventResult,
-    FlexColumn, Font, Label,
-    MouseButton, Point, Rect, Separator,
-    Size, SizedBox, VAnchor, Widget,
-};
 use agg_gui::widget::paint_subtree;
+use agg_gui::{
+    Button, Color, DrawCtx, Event, EventResult, FlexColumn, Font, Label, MouseButton, Point, Rect,
+    Separator, Size, SizedBox, Widget,
+};
 
 // ---------------------------------------------------------------------------
 // Drag and Drop demo
@@ -22,10 +20,10 @@ use agg_gui::widget::paint_subtree;
 
 // Layout constants shared by DragAndDropWidget painting and hit-testing.
 const DND_HEADER_H: f64 = 26.0;
-const DND_ITEM_H:   f64 = 26.0;
+const DND_ITEM_H: f64 = 26.0;
 const DND_ITEM_GAP: f64 = 3.0;
-const DND_PAD:      f64 = 5.0;
-const DND_COL_GAP:  f64 = 8.0;
+const DND_PAD: f64 = 5.0;
+const DND_COL_GAP: f64 = 8.0;
 /// Minimum cursor movement (px) before a click becomes a drag.
 const DND_DRAG_THRESHOLD: f64 = 4.0;
 
@@ -42,7 +40,9 @@ fn dnd_item_y_mid(h: f64, i: usize) -> f64 {
 /// Given a cursor Y within a column, return the insertion index (0 = before all items).
 fn dnd_find_insert_row(cursor_y: f64, col_h: f64, n: usize) -> usize {
     for i in 0..n {
-        if cursor_y > dnd_item_y_mid(col_h, i) { return i; }
+        if cursor_y > dnd_item_y_mid(col_h, i) {
+            return i;
+        }
     }
     n
 }
@@ -53,9 +53,9 @@ fn dnd_find_insert_row(cursor_y: f64, col_h: f64, n: usize) -> usize {
 /// mouse to a target column (an insertion preview line appears), then release
 /// to drop.  Items can be reordered within and between columns.
 struct DragAndDropWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
+    font: Arc<Font>,
 
     /// Items for each of the 3 columns.
     columns: Vec<Vec<String>>,
@@ -81,20 +81,30 @@ struct DragAndDropWidget {
 impl DragAndDropWidget {
     fn new(font: Arc<Font>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
             font,
             columns: vec![
-                vec!["Item A".into(), "Item B".into(), "Item C".into(), "Item D".into()],
+                vec![
+                    "Item A".into(),
+                    "Item B".into(),
+                    "Item C".into(),
+                    "Item D".into(),
+                ],
                 vec!["Item E".into(), "Item F".into(), "Item G".into()],
-                vec!["Item H".into(), "Item I".into(), "Item J".into(), "Item K".into()],
+                vec![
+                    "Item H".into(),
+                    "Item I".into(),
+                    "Item J".into(),
+                    "Item K".into(),
+                ],
             ],
-            drag_active:  false,
-            drag_source:  None,
-            cursor:       Point::ORIGIN,
-            press_pos:    Point::ORIGIN,
-            drop_target:  None,
-            hovered:      None,
+            drag_active: false,
+            drag_source: None,
+            cursor: Point::ORIGIN,
+            press_pos: Point::ORIGIN,
+            drop_target: None,
+            hovered: None,
         }
     }
 
@@ -113,14 +123,20 @@ impl DragAndDropWidget {
         let h = self.bounds.height;
         for (c, col) in self.columns.iter().enumerate() {
             let cr = self.col_rect(c, w, h);
-            if pos.x < cr.x || pos.x > cr.x + cr.width { continue; }
+            if pos.x < cr.x || pos.x > cr.x + cr.width {
+                continue;
+            }
             let local_x = pos.x - cr.x;
             let local_y = pos.y;
-            if local_x < DND_PAD || local_x > cr.width - DND_PAD { continue; }
+            if local_x < DND_PAD || local_x > cr.width - DND_PAD {
+                continue;
+            }
             for (i, _) in col.iter().enumerate() {
                 let yb = dnd_item_y_bottom(h, i);
                 let yt = yb + DND_ITEM_H;
-                if local_y >= yb && local_y <= yt { return Some((c, i)); }
+                if local_y >= yb && local_y <= yt {
+                    return Some((c, i));
+                }
             }
         }
         None
@@ -143,12 +159,22 @@ impl DragAndDropWidget {
 
     /// Execute the pending drop: move `drag_source` item to `drop_target`.
     fn commit_drop(&mut self) {
-        let (sc, sr) = match self.drag_source.take() { Some(x) => x, None => return };
-        let (tc, mut tr) = match self.drop_target.take() { Some(x) => x, None => return };
-        if sc >= self.columns.len() || sr >= self.columns[sc].len() { return; }
+        let (sc, sr) = match self.drag_source.take() {
+            Some(x) => x,
+            None => return,
+        };
+        let (tc, mut tr) = match self.drop_target.take() {
+            Some(x) => x,
+            None => return,
+        };
+        if sc >= self.columns.len() || sr >= self.columns[sc].len() {
+            return;
+        }
         let item = self.columns[sc].remove(sr);
         // Adjust insertion index if moving within the same column and shifting left.
-        if sc == tc && sr < tr { tr -= 1; }
+        if sc == tc && sr < tr {
+            tr -= 1;
+        }
         let col = &mut self.columns[tc];
         tr = tr.min(col.len());
         col.insert(tr, item);
@@ -170,9 +196,7 @@ impl DragAndDropWidget {
         if self.drag_active {
             if let Some((tc, _)) = self.drop_target {
                 if tc == c {
-                    ctx.set_fill_color(Color::rgba(
-                        v.accent.r, v.accent.g, v.accent.b, 0.08,
-                    ));
+                    ctx.set_fill_color(Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.08));
                     ctx.begin_path();
                     ctx.rounded_rect(0.0, 0.0, w, h, 6.0);
                     ctx.fill();
@@ -195,7 +219,8 @@ impl DragAndDropWidget {
         ctx.fill_text(labels[c], DND_PAD + 2.0, header_y);
 
         // Items.
-        let (drag_src_col, drag_src_row) = self.drag_source
+        let (drag_src_col, drag_src_row) = self
+            .drag_source
             .map(|(sc, sr)| (sc, Some(sr)))
             .unwrap_or((usize::MAX, None));
 
@@ -206,10 +231,16 @@ impl DragAndDropWidget {
                 continue;
             }
             let yb = dnd_item_y_bottom(h, i);
-            if yb + DND_ITEM_H < 0.0 { continue; }
+            if yb + DND_ITEM_H < 0.0 {
+                continue;
+            }
 
             let is_hov = !self.drag_active && self.hovered == Some((c, i));
-            let bg = if is_hov { v.widget_bg_hovered } else { v.widget_bg };
+            let bg = if is_hov {
+                v.widget_bg_hovered
+            } else {
+                v.widget_bg
+            };
             ctx.set_fill_color(bg);
             ctx.begin_path();
             ctx.rounded_rect(DND_PAD, yb, w - DND_PAD * 2.0, DND_ITEM_H, 4.0);
@@ -228,7 +259,9 @@ impl DragAndDropWidget {
                     // Account for the missing dragged item in this column.
                     let effective_n = if c == drag_src_col && drag_src_row.is_some() {
                         n.saturating_sub(1)
-                    } else { n };
+                    } else {
+                        n
+                    };
 
                     let line_y = if tr == 0 {
                         // Above all items.
@@ -254,11 +287,21 @@ impl DragAndDropWidget {
 }
 
 impl Widget for DragAndDropWidget {
-    fn type_name(&self) -> &'static str { "DragAndDropWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "DragAndDropWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -288,7 +331,10 @@ impl Widget for DragAndDropWidget {
                     let gy = self.cursor.y - ghost_h * 0.5;
 
                     ctx.set_fill_color(Color::rgba(
-                        v.widget_bg.r, v.widget_bg.g, v.widget_bg.b, 0.85,
+                        v.widget_bg.r,
+                        v.widget_bg.g,
+                        v.widget_bg.b,
+                        0.85,
                     ));
                     ctx.begin_path();
                     ctx.rounded_rect(gx, gy, ghost_w, ghost_h, 4.0);
@@ -329,12 +375,20 @@ impl Widget for DragAndDropWidget {
                 // Not dragging — update hover.
                 let prev = self.hovered;
                 self.hovered = self.col_row_at(*pos);
-                if self.hovered != prev { EventResult::Consumed } else { EventResult::Ignored }
+                if self.hovered != prev {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
 
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 self.press_pos = *pos;
-                self.cursor    = *pos;
+                self.cursor = *pos;
                 self.drag_active = false;
                 // Find which item was pressed.
                 if let Some((c, r)) = self.col_row_at(*pos) {
@@ -344,7 +398,11 @@ impl Widget for DragAndDropWidget {
                 EventResult::Ignored
             }
 
-            Event::MouseUp { button: MouseButton::Left, pos, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 self.cursor = *pos;
                 if self.drag_active {
                     self.drop_target = self.find_drop_target(*pos);
@@ -361,8 +419,7 @@ impl Widget for DragAndDropWidget {
     }
 
     fn hit_test(&self, p: Point) -> bool {
-        p.x >= 0.0 && p.x <= self.bounds.width
-            && p.y >= 0.0 && p.y <= self.bounds.height
+        p.x >= 0.0 && p.x <= self.bounds.width && p.y >= 0.0 && p.y <= self.bounds.height
     }
 }
 
@@ -374,14 +431,20 @@ pub fn drag_and_drop(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(12.0)
         .with_panel_bg();
 
-    outer.push(Box::new(Label::new(
-        "This is a simple example of drag-and-drop in agg-gui.",
-        Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
-    outer.push(Box::new(Label::new(
-        "Drag items between columns.",
-        Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
+    outer.push(
+        Box::new(
+            Label::new(
+                "This is a simple example of drag-and-drop in agg-gui.",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.5),
+        ),
+        0.0,
+    );
+    outer.push(
+        Box::new(Label::new("Drag items between columns.", Arc::clone(&font)).with_font_size(11.5)),
+        0.0,
+    );
 
     outer.push(Box::new(DragAndDropWidget::new(Arc::clone(&font))), 1.0);
     Box::new(outer)
@@ -393,17 +456,27 @@ pub fn drag_and_drop(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// A simple panels layout: top, bottom, left, right, and center areas.
 struct PanelsLayout {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
+    font: Arc<Font>,
 }
 
 impl Widget for PanelsLayout {
-    fn type_name(&self) -> &'static str { "PanelsLayout" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "PanelsLayout"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -411,22 +484,28 @@ impl Widget for PanelsLayout {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v  = ctx.visuals();
-        let w  = self.bounds.width;
-        let h  = self.bounds.height;
+        let v = ctx.visuals();
+        let w = self.bounds.width;
+        let h = self.bounds.height;
         let tp = 36.0_f64; // top panel height
         let bp = 36.0_f64; // bottom panel height
         let lp = 72.0_f64; // left panel width
         let rp = 72.0_f64; // right panel width
 
         // Colors.
-        let top_bg    = Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.25);
-        let bot_bg    = v.track_bg;
-        let side_bg   = v.panel_fill;
+        let top_bg = Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.25);
+        let bot_bg = v.track_bg;
+        let side_bg = v.panel_fill;
         let center_bg = v.bg_color;
 
-        let draw_panel = |ctx: &mut dyn DrawCtx, x: f64, y: f64, pw: f64, ph: f64,
-                          bg: Color, label: &str, font: &Arc<Font>| {
+        let draw_panel = |ctx: &mut dyn DrawCtx,
+                          x: f64,
+                          y: f64,
+                          pw: f64,
+                          ph: f64,
+                          bg: Color,
+                          label: &str,
+                          font: &Arc<Font>| {
             ctx.set_fill_color(bg);
             ctx.begin_path();
             ctx.rect(x, y, pw, ph);
@@ -449,7 +528,16 @@ impl Widget for PanelsLayout {
         // Left panel.
         draw_panel(ctx, 0.0, bp, lp, h - tp - bp, side_bg, "Left", &self.font);
         // Right panel.
-        draw_panel(ctx, w - rp, bp, rp, h - tp - bp, side_bg, "Right", &self.font);
+        draw_panel(
+            ctx,
+            w - rp,
+            bp,
+            rp,
+            h - tp - bp,
+            side_bg,
+            "Right",
+            &self.font,
+        );
         // Center.
         let cx = lp;
         let cy = bp;
@@ -458,13 +546,17 @@ impl Widget for PanelsLayout {
         draw_panel(ctx, cx, cy, cw, ch, center_bg, "Central panel", &self.font);
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Build the Panels demo — a static five-area panel layout.
 pub fn panels_demo(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(PanelsLayout {
-        bounds: Rect::default(), children: Vec::new(), font,
+        bounds: Rect::default(),
+        children: Vec::new(),
+        font,
     })
 }
 
@@ -481,16 +573,25 @@ pub fn popups_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(14.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new("Popups demo", Arc::clone(&font))
-        .with_font_size(12.0)), 0.0);
+    col.push(
+        Box::new(Label::new("Popups demo", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
 
     {
         let open_for_btn = Rc::clone(&open);
-        col.push(Box::new(SizedBox::new().with_height(30.0).with_child(Box::new(
-            Button::new("Open popup", Arc::clone(&font))
-                .with_font_size(13.0)
-                .on_click(move || { open_for_btn.set(true); })
-        ))), 0.0);
+        col.push(
+            Box::new(
+                SizedBox::new().with_height(30.0).with_child(Box::new(
+                    Button::new("Open popup", Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .on_click(move || {
+                            open_for_btn.set(true);
+                        }),
+                )),
+            ),
+            0.0,
+        );
     }
 
     // Inline popup panel (shown when open == true).
@@ -506,13 +607,13 @@ pub fn popups_demo(font: Arc<Font>) -> Box<dyn Widget> {
 /// Text is rendered through backbuffered Label children so rasterization
 /// is cached to a framebuffer and never repeated while the text is unchanged.
 struct InlinePopup {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    open:     Rc<Cell<bool>>,
+    open: Rc<Cell<bool>>,
     /// "Popup is open!" — body label.
     label_title: Label,
     /// "Click 'Close' to dismiss." — hint label.
-    label_hint:  Label,
+    label_hint: Label,
 }
 
 impl InlinePopup {
@@ -522,17 +623,28 @@ impl InlinePopup {
             children: Vec::new(),
             open,
             label_title: Label::new("Popup is open!", Arc::clone(&font)).with_font_size(13.0),
-            label_hint:  Label::new("Click inside the popup to dismiss.", Arc::clone(&font)).with_font_size(11.0),
+            label_hint: Label::new("Click inside the popup to dismiss.", Arc::clone(&font))
+                .with_font_size(11.0),
         }
     }
 }
 
 impl Widget for InlinePopup {
-    fn type_name(&self) -> &'static str { "InlinePopup" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "InlinePopup"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         if !self.open.get() {
@@ -543,17 +655,33 @@ impl Widget for InlinePopup {
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
 
         // Layout labels — position them within the popup panel.
-        let title_s = self.label_title.layout(Size::new(available.width - 20.0, 24.0));
-        self.label_title.set_bounds(Rect::new(10.0, h - title_s.height - 14.0, title_s.width, title_s.height));
+        let title_s = self
+            .label_title
+            .layout(Size::new(available.width - 20.0, 24.0));
+        self.label_title.set_bounds(Rect::new(
+            10.0,
+            h - title_s.height - 14.0,
+            title_s.width,
+            title_s.height,
+        ));
 
-        let hint_s = self.label_hint.layout(Size::new(available.width - 20.0, 20.0));
-        self.label_hint.set_bounds(Rect::new(10.0, h - title_s.height - hint_s.height - 24.0, hint_s.width, hint_s.height));
+        let hint_s = self
+            .label_hint
+            .layout(Size::new(available.width - 20.0, 20.0));
+        self.label_hint.set_bounds(Rect::new(
+            10.0,
+            h - title_s.height - hint_s.height - 24.0,
+            hint_s.width,
+            hint_s.height,
+        ));
 
         Size::new(available.width, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        if !self.open.get() { return; }
+        if !self.open.get() {
+            return;
+        }
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -571,21 +699,30 @@ impl Widget for InlinePopup {
         // Paint labels via backbuffered Label children.
         self.label_title.set_color(v.text_color);
         let tb = self.label_title.bounds();
-        ctx.save(); ctx.translate(tb.x, tb.y);
+        ctx.save();
+        ctx.translate(tb.x, tb.y);
         paint_subtree(&mut self.label_title, ctx);
         ctx.restore();
 
         self.label_hint.set_color(v.text_dim);
         let hb = self.label_hint.bounds();
-        ctx.save(); ctx.translate(hb.x, hb.y);
+        ctx.save();
+        ctx.translate(hb.x, hb.y);
         paint_subtree(&mut self.label_hint, ctx);
         ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        if !self.open.get() { return EventResult::Ignored; }
+        if !self.open.get() {
+            return EventResult::Ignored;
+        }
         // A simple "close" area: clicking anywhere in the bottom half dismisses.
-        if let Event::MouseDown { pos, button: MouseButton::Left, .. } = event {
+        if let Event::MouseDown {
+            pos,
+            button: MouseButton::Left,
+            ..
+        } = event
+        {
             if pos.y <= self.bounds.height * 0.45 {
                 self.open.set(false);
                 return EventResult::Consumed;
@@ -601,31 +738,31 @@ impl Widget for InlinePopup {
 
 /// A custom scene viewer showing circles and rectangles with hover highlight.
 struct SceneWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    cursor:   Option<Point>,
+    cursor: Option<Point>,
     /// (cx, cy, radius) for each circle.
-    circles:  [(f64, f64, f64); 6],
+    circles: [(f64, f64, f64); 6],
     /// (x, y, w, h) for each rectangle.
-    rects:    [(f64, f64, f64, f64); 4],
+    rects: [(f64, f64, f64, f64); 4],
 }
 
 impl SceneWidget {
     fn new() -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            cursor:   None,
+            cursor: None,
             circles: [
-                (60.0,  80.0, 22.0),
+                (60.0, 80.0, 22.0),
                 (130.0, 60.0, 16.0),
                 (200.0, 90.0, 28.0),
-                (80.0,  160.0, 18.0),
+                (80.0, 160.0, 18.0),
                 (170.0, 170.0, 24.0),
                 (250.0, 130.0, 14.0),
             ],
             rects: [
-                (20.0,  20.0, 50.0, 30.0),
+                (20.0, 20.0, 50.0, 30.0),
                 (110.0, 30.0, 40.0, 22.0),
                 (210.0, 50.0, 60.0, 28.0),
                 (150.0, 200.0, 45.0, 20.0),
@@ -634,26 +771,42 @@ impl SceneWidget {
     }
 
     fn nearest_circle(&self, p: Point) -> Option<usize> {
-        self.circles.iter().enumerate().find(|(_, &(cx, cy, r))| {
-            let dx = p.x - cx;
-            let dy = p.y - cy;
-            dx * dx + dy * dy <= r * r
-        }).map(|(i, _)| i)
+        self.circles
+            .iter()
+            .enumerate()
+            .find(|(_, &(cx, cy, r))| {
+                let dx = p.x - cx;
+                let dy = p.y - cy;
+                dx * dx + dy * dy <= r * r
+            })
+            .map(|(i, _)| i)
     }
 
     fn nearest_rect(&self, p: Point) -> Option<usize> {
-        self.rects.iter().enumerate().find(|(_, &(x, y, w, h))| {
-            p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h
-        }).map(|(i, _)| i)
+        self.rects
+            .iter()
+            .enumerate()
+            .find(|(_, &(x, y, w, h))| p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h)
+            .map(|(i, _)| i)
     }
 }
 
 impl Widget for SceneWidget {
-    fn type_name(&self) -> &'static str { "SceneWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "SceneWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -690,7 +843,11 @@ impl Widget for SceneWidget {
         // Draw circles.
         for (i, &(cx, cy, r)) in self.circles.iter().enumerate() {
             let hov = cursor.map_or(false, |p| self.nearest_circle(p) == Some(i));
-            let fill = if hov { v.accent } else { Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.55) };
+            let fill = if hov {
+                v.accent
+            } else {
+                Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.55)
+            };
             ctx.set_fill_color(fill);
             ctx.begin_path();
             ctx.circle(cx, cy, r);
@@ -709,8 +866,7 @@ impl Widget for SceneWidget {
     }
 
     fn hit_test(&self, p: Point) -> bool {
-        p.x >= 0.0 && p.x <= self.bounds.width
-            && p.y >= 0.0 && p.y <= self.bounds.height
+        p.x >= 0.0 && p.x <= self.bounds.width && p.y >= 0.0 && p.y <= self.bounds.height
     }
 }
 
@@ -721,223 +877,23 @@ pub fn scene_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(8.0)
         .with_panel_bg();
 
-    col.push(Box::new(Label::new(
-        "Hover shapes to highlight them",
-        Arc::clone(&font),
-    ).with_font_size(11.5)), 0.0);
-    col.push(Box::new(Label::new(
-        "Pan: middle-drag, Zoom: scroll (not yet implemented)",
-        Arc::clone(&font),
-    ).with_font_size(11.0)), 0.0);
+    col.push(
+        Box::new(
+            Label::new("Hover shapes to highlight them", Arc::clone(&font)).with_font_size(11.5),
+        ),
+        0.0,
+    );
+    col.push(
+        Box::new(
+            Label::new(
+                "Pan: middle-drag, Zoom: scroll (not yet implemented)",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.0),
+        ),
+        0.0,
+    );
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(SceneWidget::new()), 1.0);
     Box::new(col)
-}
-
-// ---------------------------------------------------------------------------
-// Screenshot demo
-// ---------------------------------------------------------------------------
-
-/// Build the Screenshot demo.  Matches egui's `ScreenshotDemo`:
-///
-/// 1. "Take Screenshot" button + "Capture continuously" toggle.
-/// 2. Below: a preview panel that displays the most recent capture (via
-///    `DrawCtx::draw_image_rgba`) or a "No screenshot taken yet." placeholder.
-///
-/// The platform harness watches `screenshot_request` AND `screenshot_continuous`.
-/// On a capture frame it renders twice: pass 1 paints an empty preview pane
-/// (so the captured pixels don't nest a stale previous capture), then reads
-/// the GL back buffer into `screenshot_image`; pass 2 re-renders with the
-/// fresh image visible.  `screenshot_capturing` is the flag the harness sets
-/// around pass 1 so the preview pane knows to hide itself.
-pub fn screenshot_demo(
-    font: Arc<Font>,
-    screenshot_request: Rc<Cell<bool>>,
-    screenshot_image:   std::rc::Rc<std::cell::RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
-    screenshot_capturing:  Rc<Cell<bool>>,
-) -> Box<dyn Widget> {
-    // "Capture continuously" is window-local: a sub-widget re-arms the
-    // screenshot request every layout while the checkbox is on, and
-    // independently issues a repaint request so the host loop keeps running.
-    // Nothing about continuous capture leaks to DemoHandles / the harness.
-    let continuous = Rc::new(Cell::new(false));
-
-    let mut col = FlexColumn::new()
-        .with_gap(10.0)
-        .with_padding(12.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new(
-        "Capture the current frame and display it below.",
-        Arc::clone(&font),
-    ).with_font_size(12.0).with_wrap(true)), 0.0);
-
-    let req_for_btn   = Rc::clone(&screenshot_request);
-    let continuous_cb = Rc::clone(&continuous);
-
-    // VAnchor::CENTER on each child — without it FlexRow FIT-anchors to the
-    // bottom (Y-up convention), so the shorter Checkbox sits flush with the
-    // base of the taller Button rather than centred beside it.
-    let button_row = agg_gui::FlexRow::new().with_gap(10.0)
-        .add(Box::new(
-            Button::new("\u{F030}  Take Screenshot", Arc::clone(&font))
-                .with_font_size(12.0)
-                .with_v_anchor(VAnchor::CENTER)
-                .on_click(move || {
-                    req_for_btn.set(true);
-                    agg_gui::animation::request_tick();
-                })
-        ))
-        .add(Box::new(
-            agg_gui::Checkbox::new(
-                "Capture continuously", Arc::clone(&font), continuous_cb.get()
-            )
-                .with_font_size(12.0)
-                .with_v_anchor(VAnchor::CENTER)
-                .with_state_cell(Rc::clone(&continuous_cb))
-        ));
-    col.push(Box::new(button_row), 0.0);
-
-    // Drives continuous-capture cadence: while enabled AND this widget is
-    // being painted (i.e. the Screenshot window is visible), arm the
-    // screenshot_request and request another frame.  When the window is
-    // collapsed/hidden, this widget's paint isn't called → no re-arm → loop
-    // goes idle naturally.  When the checkbox is off, no request is armed.
-    col.push(Box::new(ContinuousCapture {
-        bounds:   Rect::default(), children: Vec::new(),
-        enabled:  Rc::clone(&continuous),
-        request:  Rc::clone(&screenshot_request),
-    }), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    // Preview pane.  During a capture pass (screenshot_capturing=true) it
-    // paints only the frame background so the captured pixels don't include
-    // the preview-of-a-preview from the previous frame.
-    col.push(Box::new(ImageView {
-        bounds:   Rect::default(), children: Vec::new(),
-        font:     Arc::clone(&font),
-        source:   Rc::clone(&screenshot_image),
-        capturing: Rc::clone(&screenshot_capturing),
-    }), 1.0);
-
-    Box::new(col)
-}
-
-// ── ContinuousCapture: while enabled + painted, drive capture cadence ──
-//
-// Zero-height widget whose only job is to be in the widget tree so that its
-// `paint` runs exactly when the enclosing Screenshot window is visible.  The
-// parent Window's `paint` is skipped when collapsed / closed / hidden, which
-// transitively skips this widget, which ends the capture loop — exactly
-// what the user wants (no global `screenshot_continuous` flag that fires
-// even while the window is out of view).
-struct ContinuousCapture {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    enabled:  Rc<Cell<bool>>,
-    request:  Rc<Cell<bool>>,
-}
-
-impl Widget for ContinuousCapture {
-    fn type_name(&self) -> &'static str { "ContinuousCapture" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-    fn show_in_inspector(&self) -> bool { false }
-    fn layout(&mut self, _: Size) -> Size { Size::ZERO }
-    fn paint(&mut self, _: &mut dyn DrawCtx) {
-        if self.enabled.get() {
-            self.request.set(true);
-            agg_gui::animation::request_tick();
-        }
-    }
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-}
-
-// ── ImageView: paints an `Rc<RefCell<Option<(rgba, w, h)>>>` as an image ─────
-
-struct ImageView {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,
-    font:     Arc<Font>,
-    source:   std::rc::Rc<std::cell::RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
-    /// Set by the platform harness during the FIRST pass of a capture
-    /// frame.  When true, paint only the background so the captured pixels
-    /// don't contain this pane's previous image.
-    capturing: Rc<Cell<bool>>,
-}
-
-impl Widget for ImageView {
-    fn type_name(&self) -> &'static str { "ImageView" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, available.height.max(120.0));
-        Size::new(self.bounds.width, self.bounds.height)
-    }
-
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let w = self.bounds.width;
-        let h = self.bounds.height;
-
-        // Frame — use the app background rather than the widget fill so it
-        // reads as a neutral preview pane, not a white card, on every theme.
-        ctx.set_fill_color(v.bg_color);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
-        ctx.fill();
-
-        // During the first render pass of a capture frame, skip painting
-        // the image / placeholder so the captured pixels show an empty pane
-        // instead of the previous capture (which would produce the "mirror
-        // in a mirror" nested-screenshot recursion).
-        if self.capturing.get() { return; }
-
-        let src = self.source.borrow();
-        if let Some((pixels, iw, ih)) = src.as_ref() {
-            // Shrink-to-fit preserving aspect ratio.
-            let iwf = *iw as f64;
-            let ihf = *ih as f64;
-            let scale = (w / iwf).min(h / ihf);
-            let dw = iwf * scale;
-            let dh = ihf * scale;
-            let dx = (w - dw) * 0.5;
-            let dy = (h - dh) * 0.5;
-            // Arc-keyed draw: the GL backend caches textures by the Arc's
-            // pointer identity, so a new screenshot (new Arc) evicts the
-            // prior entry correctly.  `draw_image_rgba` with a raw slice
-            // keys on `(ptr, len, first/last 8 bytes)`, which gave false
-            // cache hits when the allocator recycled addresses for
-            // same-size captures whose corner pixels were stable.
-            ctx.draw_image_rgba_arc(pixels, *iw, *ih, dx, dy, dw, dh);
-
-            // Outline in the text color so the image boundary is always
-            // visible against the neutral pane, even when the screenshot's
-            // outer pixels happen to match the background colour.
-            ctx.set_stroke_color(v.text_color);
-            ctx.set_line_width(1.0);
-            ctx.begin_path();
-            ctx.rect(dx, dy, dw, dh);
-            ctx.stroke();
-        } else {
-            // Placeholder text.
-            ctx.set_font(Arc::clone(&self.font));
-            ctx.set_font_size(13.0);
-            ctx.set_fill_color(v.text_dim);
-            let msg = "No screenshot taken yet.";
-            if let Some(m) = ctx.measure_text(msg) {
-                let tx = (w - m.width) * 0.5;
-                let ty = (h - (m.ascent - m.descent)) * 0.5;
-                ctx.fill_text(msg, tx, ty);
-            }
-        }
-    }
-
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 }

@@ -36,3 +36,6 @@ clipboard      = ["dep:arboard"]
 # crate's input/cursor types.  Off by default so consumers that don't use
 # winit (wasm, bring-your-own event loop) don't pull the dep.
 winit-adapter  = ["dep:winit"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"

@@ -16,16 +16,17 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::Label;
 
 const BOX_SIZE: f64 = 16.0;
 const GAP: f64 = 8.0;
+const BOX_STROKE_WIDTH: f64 = 1.5;
 
 /// A boolean toggle with a square box and a text label.
 pub struct Checkbox {
@@ -52,8 +53,7 @@ impl Checkbox {
     pub fn new(label: impl Into<String>, font: Arc<Font>, checked: bool) -> Self {
         let label_str: String = label.into();
         let font_size = 14.0;
-        let label_widget = Label::new(&label_str, Arc::clone(&font))
-            .with_font_size(font_size);
+        let label_widget = Label::new(&label_str, Arc::clone(&font)).with_font_size(font_size);
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -72,13 +72,14 @@ impl Checkbox {
 
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.font_size = size;
-        self.label_widget = Label::new(
-            self.label_widget.text_str(),
-            Arc::clone(&self.font),
-        ).with_font_size(size);
+        self.label_widget =
+            Label::new(self.label_widget.text_str(), Arc::clone(&self.font)).with_font_size(size);
         self
     }
-    pub fn with_label_color(mut self, c: Color) -> Self { self.label_color = Some(c); self }
+    pub fn with_label_color(mut self, c: Color) -> Self {
+        self.label_color = Some(c);
+        self
+    }
 
     /// Bind checked state to a shared cell.
     ///
@@ -90,49 +91,113 @@ impl Checkbox {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     pub fn on_change(mut self, cb: impl FnMut(bool) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
         self
     }
 
-    pub fn checked(&self) -> bool { self.checked }
-    pub fn set_checked(&mut self, v: bool) { self.checked = v; }
+    pub fn checked(&self) -> bool {
+        self.checked
+    }
+    pub fn set_checked(&mut self, v: bool) {
+        self.checked = v;
+    }
 
     fn toggle(&mut self) {
         let new_val = !self.effective_checked();
         self.checked = new_val;
-        if let Some(ref cell) = self.state_cell { cell.set(new_val); }
-        if let Some(cb) = self.on_change.as_mut() { cb(new_val); }
+        if let Some(ref cell) = self.state_cell {
+            cell.set(new_val);
+        }
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(new_val);
+        }
     }
 
     /// Returns the authoritative checked state: the cell value if bound, else
     /// the internal `checked` field.
     #[inline]
     fn effective_checked(&self) -> bool {
-        if let Some(ref cell) = self.state_cell { cell.get() } else { self.checked }
+        if let Some(ref cell) = self.state_cell {
+            cell.get()
+        } else {
+            self.checked
+        }
+    }
+
+    fn unchecked_colors(v: &crate::theme::Visuals, hovered: bool) -> (Color, Color) {
+        let luma = v.bg_color.r * 0.299 + v.bg_color.g * 0.587 + v.bg_color.b * 0.114;
+        if luma < 0.5 {
+            let fill = if hovered { v.widget_bg } else { v.window_fill };
+            (fill, Color::rgba(1.0, 1.0, 1.0, 0.34))
+        } else {
+            let fill = if hovered {
+                v.widget_bg_hovered
+            } else {
+                v.widget_bg
+            };
+            (fill, v.widget_stroke)
+        }
     }
 }
 
 impl Widget for Checkbox {
-    fn type_name(&self) -> &'static str { "Checkbox" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Checkbox"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let h = BOX_SIZE.max(self.font_size * 1.5);
@@ -140,7 +205,8 @@ impl Widget for Checkbox {
         // Layout the label within the remaining width after the box + gap.
         let label_avail_w = (available.width - BOX_SIZE - GAP).max(0.0);
         let s = self.label_widget.layout(Size::new(label_avail_w, h));
-        self.label_widget.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        self.label_widget
+            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         Size::new(available.width, h)
     }
 
@@ -161,24 +227,30 @@ impl Widget for Checkbox {
         let checked = self.effective_checked();
 
         // Box background
-        let bg = if checked {
-            v.accent
-        } else if self.hovered {
-            v.widget_bg_hovered
-        } else {
-            v.widget_bg
-        };
+        let (unchecked_bg, unchecked_border) = Self::unchecked_colors(&v, self.hovered);
+        let bg = if checked { v.accent } else { unchecked_bg };
         ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(0.0, box_y, BOX_SIZE, BOX_SIZE, 3.0);
         ctx.fill();
 
         // Box border
-        let border = if checked { v.widget_stroke_active } else { v.widget_stroke };
+        let border = if checked {
+            v.widget_stroke_active
+        } else {
+            unchecked_border
+        };
         ctx.set_stroke_color(border);
-        ctx.set_line_width(1.5);
+        ctx.set_line_width(BOX_STROKE_WIDTH);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, box_y, BOX_SIZE, BOX_SIZE, 3.0);
+        let stroke_inset = BOX_STROKE_WIDTH * 0.5;
+        ctx.rounded_rect(
+            stroke_inset,
+            box_y + stroke_inset,
+            BOX_SIZE - BOX_STROKE_WIDTH,
+            BOX_SIZE - BOX_STROKE_WIDTH,
+            3.0,
+        );
         ctx.stroke();
 
         // Checkmark — coordinates in Y-up space (origin = box bottom-left).
@@ -188,9 +260,9 @@ impl Widget for Checkbox {
             ctx.begin_path();
             let bx = 0.0;
             let by = box_y;
-            ctx.move_to(bx + 3.0,              by + BOX_SIZE * 0.55);
-            ctx.line_to(bx + BOX_SIZE * 0.42,  by + BOX_SIZE * 0.28);
-            ctx.line_to(bx + BOX_SIZE - 3.0,   by + BOX_SIZE * 0.75);
+            ctx.move_to(bx + 3.0, by + BOX_SIZE * 0.55);
+            ctx.line_to(bx + BOX_SIZE * 0.42, by + BOX_SIZE * 0.28);
+            ctx.line_to(bx + BOX_SIZE - 3.0, by + BOX_SIZE * 0.75);
             ctx.stroke();
         }
 
@@ -215,20 +287,30 @@ impl Widget for Checkbox {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, .. } => {
-                EventResult::Consumed
-            }
-            Event::MouseUp { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                ..
+            } => EventResult::Consumed,
+            Event::MouseUp {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if self.hit_test(*pos) {
                     self.toggle();
                     crate::animation::request_tick();
                 }
                 EventResult::Consumed
             }
-            Event::KeyDown { key: Key::Char(' '), .. } => {
+            Event::KeyDown {
+                key: Key::Char(' '),
+                ..
+            } => {
                 self.toggle();
                 crate::animation::request_tick();
                 EventResult::Consumed
@@ -238,7 +320,7 @@ impl Widget for Checkbox {
                 crate::animation::request_tick();
                 EventResult::Ignored
             }
-            Event::FocusLost   => {
+            Event::FocusLost => {
                 self.focused = false;
                 crate::animation::request_tick();
                 EventResult::Ignored

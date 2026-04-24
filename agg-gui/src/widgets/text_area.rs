@@ -29,16 +29,14 @@ use std::sync::Arc;
 
 use web_time::Instant;
 
-use crate::cursor::{CursorIcon, set_cursor_icon};
+use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::{Font, measure_advance, measure_text_metrics};
+use crate::text::{measure_advance, measure_text_metrics, Font};
 use crate::widget::Widget;
-use crate::widgets::text_field_core::{
-    TextEditState, next_char_boundary, prev_char_boundary,
-};
+use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary, TextEditState};
 
 // ─── Clipboard shim (same cfg matrix as `TextField`) ─────────────────────────
 
@@ -47,9 +45,13 @@ fn clipboard_get() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
 }
 #[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
-fn clipboard_get() -> Option<String> { None }
+fn clipboard_get() -> Option<String> {
+    None
+}
 #[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn clipboard_get() -> Option<String> { crate::wasm_clipboard::get() }
+fn clipboard_get() -> Option<String> {
+    crate::wasm_clipboard::get()
+}
 
 #[cfg(feature = "clipboard")]
 fn clipboard_set(text: &str) {
@@ -60,7 +62,9 @@ fn clipboard_set(text: &str) {
 #[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
 fn clipboard_set(_: &str) {}
 #[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn clipboard_set(text: &str) { crate::wasm_clipboard::set(text); }
+fn clipboard_set(text: &str) {
+    crate::wasm_clipboard::set(text);
+}
 
 // ─── Wrapping helper ─────────────────────────────────────────────────────────
 
@@ -72,9 +76,9 @@ struct WrappedLine {
     start: usize,
     /// Exclusive byte offset where this visual line's content ends
     /// (not including a trailing newline).
-    end:   usize,
+    end: usize,
     /// Rendered text for this visual line (a substring of the source).
-    text:  String,
+    text: String,
     /// Whether this visual line ended because of an explicit `\n` in
     /// the source (vs. a soft wrap at word boundary).  Used to choose
     /// whether moving the cursor past the end of the line lands on
@@ -88,8 +92,8 @@ struct WrappedLine {
 /// keep each visual line ≤ `max_width`.  An empty source still returns
 /// one empty line (so the cursor has somewhere to sit).
 fn wrap_text_indexed(
-    font:      &Arc<Font>,
-    text:      &str,
+    font: &Arc<Font>,
+    text: &str,
     font_size: f64,
     max_width: f64,
 ) -> Vec<WrappedLine> {
@@ -99,11 +103,11 @@ fn wrap_text_indexed(
         let _ = rel_end;
         let para = chunk;
         let para_abs_start = para_start;
-        let para_abs_end   = para_abs_start + para.len();
+        let para_abs_end = para_abs_start + para.len();
         // Each paragraph soft-wraps independently.  Walk its char
         // byte indices and fill lines up to `max_width`.
         let mut cursor = 0usize; // byte offset within `para`
-        let mut last_boundary = 0usize;
+        let last_boundary = 0usize;
         while cursor < para.len() {
             // Find the longest prefix of `para[line_start..]` that
             // fits in `max_width`.  Use word boundaries — fall back
@@ -141,22 +145,26 @@ fn wrap_text_indexed(
             let _ = last_boundary; // reserved for future hyphenation
             let line_text = para[line_start..break_at].trim_end().to_string();
             let abs_start = para_abs_start + line_start;
-            let abs_end   = para_abs_start + break_at;
+            let abs_end = para_abs_start + break_at;
             out.push(WrappedLine {
                 start: abs_start,
-                end:   abs_end,
-                text:  line_text,
+                end: abs_end,
+                text: line_text,
                 hard_break: false,
             });
             // Skip over the whitespace we just consumed as a separator.
             let mut next_line_start = break_at;
             while next_line_start < para.len() {
                 let ch = para[next_line_start..].chars().next().unwrap_or('x');
-                if !ch.is_whitespace() || ch == '\n' { break; }
+                if !ch.is_whitespace() || ch == '\n' {
+                    break;
+                }
                 next_line_start = next_char_boundary(para, next_line_start);
             }
             cursor = next_line_start;
-            if cursor >= para.len() { break; }
+            if cursor >= para.len() {
+                break;
+            }
         }
         // Emit at least one line for an empty paragraph (blank line
         // between \n\n, or a fresh doc with no content).
@@ -164,8 +172,8 @@ fn wrap_text_indexed(
             if para.is_empty() {
                 out.push(WrappedLine {
                     start: para_abs_start,
-                    end:   para_abs_end,
-                    text:  String::new(),
+                    end: para_abs_end,
+                    text: String::new(),
                     hard_break: false,
                 });
             }
@@ -174,15 +182,26 @@ fn wrap_text_indexed(
         // break if the source had a trailing newline (see
         // `split_keep_newlines` contract below).
         let source_end = para_abs_end + 1; // +1 for the consumed '\n', if any
-        let had_newline = source_end <= text.len()
-            && text.as_bytes().get(para_abs_end) == Some(&b'\n');
+        let had_newline =
+            source_end <= text.len() && text.as_bytes().get(para_abs_end) == Some(&b'\n');
         if had_newline {
-            if let Some(last) = out.last_mut() { last.hard_break = true; }
+            if let Some(last) = out.last_mut() {
+                last.hard_break = true;
+            }
         }
-        para_start = if had_newline { source_end } else { para_abs_end };
+        para_start = if had_newline {
+            source_end
+        } else {
+            para_abs_end
+        };
     }
     if out.is_empty() {
-        out.push(WrappedLine { start: 0, end: 0, text: String::new(), hard_break: false });
+        out.push(WrappedLine {
+            start: 0,
+            end: 0,
+            text: String::new(),
+            hard_break: false,
+        });
     }
     out
 }
@@ -201,47 +220,47 @@ fn split_keep_newlines(text: &str) -> impl Iterator<Item = &str> + '_ {
 
 /// A multiline text editor that fills its available area.
 pub struct TextArea {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
-    base:     WidgetBase,
+    base: WidgetBase,
 
-    font:      Arc<Font>,
+    font: Arc<Font>,
     font_size: f64,
-    padding:   f64,
+    padding: f64,
 
     /// Live edit state.  Shared with future undo / clipboard wiring.
-    edit:       Rc<RefCell<TextEditState>>,
+    edit: Rc<RefCell<TextEditState>>,
 
     /// Cached layout — invalidated when text / font / width changes.
     cached_wrap_width: f64,
-    cached_lines:      Vec<WrappedLine>,
-    cached_line_h:     f64,
+    cached_lines: Vec<WrappedLine>,
+    cached_line_h: f64,
 
     /// Ephemeral input state.
-    focused:          bool,
-    hovered:          bool,
-    selecting_drag:   bool,
-    focus_time:       Option<Instant>,
+    focused: bool,
+    hovered: bool,
+    selecting_drag: bool,
+    focus_time: Option<Instant>,
     blink_last_phase: Cell<u64>,
 }
 
 impl TextArea {
     pub fn new(font: Arc<Font>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            base:     WidgetBase::new(),
+            base: WidgetBase::new(),
             font,
             font_size: 13.0,
-            padding:   8.0,
-            edit:      Rc::new(RefCell::new(TextEditState::default())),
+            padding: 8.0,
+            edit: Rc::new(RefCell::new(TextEditState::default())),
             cached_wrap_width: -1.0,
-            cached_lines:      Vec::new(),
-            cached_line_h:     0.0,
-            focused:          false,
-            hovered:          false,
-            selecting_drag:   false,
-            focus_time:       None,
+            cached_lines: Vec::new(),
+            cached_line_h: 0.0,
+            focused: false,
+            hovered: false,
+            selecting_drag: false,
+            focus_time: None,
             blink_last_phase: Cell::new(0),
         }
     }
@@ -249,26 +268,57 @@ impl TextArea {
     pub fn with_text(self, text: impl Into<String>) -> Self {
         let t: String = text.into();
         let cursor = t.len();
-        *self.edit.borrow_mut() = TextEditState { text: t, cursor, anchor: cursor };
+        *self.edit.borrow_mut() = TextEditState {
+            text: t,
+            cursor,
+            anchor: cursor,
+        };
         self
     }
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
-    pub fn with_padding(mut self, p: f64)    -> Self { self.padding   = p; self }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self
+    }
+    pub fn with_padding(mut self, p: f64) -> Self {
+        self.padding = p;
+        self
+    }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     /// Current text.  Cheap — clones the underlying `String`.
-    pub fn text(&self) -> String { self.edit.borrow().text.clone() }
+    pub fn text(&self) -> String {
+        self.edit.borrow().text.clone()
+    }
 
     /// Current byte-offset cursor position (for tests and inspectors).
-    pub fn cursor(&self) -> usize { self.edit.borrow().cursor }
+    pub fn cursor(&self) -> usize {
+        self.edit.borrow().cursor
+    }
 
     /// Count of visual lines at the last layout pass (cache).
-    pub fn visual_line_count(&self) -> usize { self.cached_lines.len() }
+    pub fn visual_line_count(&self) -> usize {
+        self.cached_lines.len()
+    }
 
     /// Ensure the wrap cache matches the current text + width.
     fn refresh_wrap(&mut self, inner_w: f64) {
@@ -307,13 +357,17 @@ impl TextArea {
     /// Hit-test a widget-local point to a text byte offset.  Clamps to
     /// `[0, text.len()]` at the edges.  `local` is Y-UP.
     fn byte_offset_at(&self, local: Point) -> usize {
-        if self.cached_lines.is_empty() || self.cached_line_h <= 0.0 { return 0; }
+        if self.cached_lines.is_empty() || self.cached_line_h <= 0.0 {
+            return 0;
+        }
         // Visual lines stack top-to-bottom; Y-up flips their y coords.
         // Line 0 sits at the top (high Y), line N at the bottom (low Y).
-        let inner_top_y    = self.bounds.height - self.padding;
-        let rel_from_top   = inner_top_y - local.y;
+        let inner_top_y = self.bounds.height - self.padding;
+        let rel_from_top = inner_top_y - local.y;
         let mut line_idx = (rel_from_top / self.cached_line_h).floor() as isize;
-        if line_idx < 0 { line_idx = 0; }
+        if line_idx < 0 {
+            line_idx = 0;
+        }
         if line_idx as usize >= self.cached_lines.len() {
             line_idx = self.cached_lines.len() as isize - 1;
         }
@@ -322,8 +376,8 @@ impl TextArea {
         // the nearest grapheme boundary.
         let pad_x = self.padding;
         let rel_x = (local.x - pad_x).max(0.0);
-        let txt   = &line.text;
-        let mut best_byte  = 0usize;
+        let txt = &line.text;
+        let mut best_byte = 0usize;
         let mut best_delta = f64::INFINITY;
         let mut acc = 0.0_f64;
         let mut prev_byte = 0usize;
@@ -337,7 +391,7 @@ impl TextArea {
             let d = (acc - rel_x).abs();
             if d < best_delta {
                 best_delta = d;
-                best_byte  = i;
+                best_byte = i;
             }
             prev_byte = i;
         }
@@ -348,16 +402,16 @@ impl TextArea {
     /// offset.  Returns the bottom-left corner of the cursor glyph
     /// cell.
     fn pos_for_cursor(&self, byte_pos: usize) -> Point {
-        if self.cached_lines.is_empty() { return Point::ORIGIN; }
+        if self.cached_lines.is_empty() {
+            return Point::ORIGIN;
+        }
         let line_idx = self.line_for_cursor(byte_pos);
-        let line     = &self.cached_lines[line_idx];
-        let offset   = byte_pos.saturating_sub(line.start)
-                                .min(line.text.len());
-        let x = self.padding
-            + measure_advance(&self.font, &line.text[..offset], self.font_size);
+        let line = &self.cached_lines[line_idx];
+        let offset = byte_pos.saturating_sub(line.start).min(line.text.len());
+        let x = self.padding + measure_advance(&self.font, &line.text[..offset], self.font_size);
         // Y-up: line i top-edge = inner_top - i * line_h.
         let inner_top_y = self.bounds.height - self.padding;
-        let line_top    = inner_top_y - line_idx as f64 * self.cached_line_h;
+        let line_top = inner_top_y - line_idx as f64 * self.cached_line_h;
         let line_bottom = line_top - self.cached_line_h;
         Point::new(x, line_bottom)
     }
@@ -408,7 +462,9 @@ impl TextArea {
         let mut st = self.edit.borrow_mut();
         let p = pos.min(st.text.len());
         st.cursor = p;
-        if !with_selection { st.anchor = p; }
+        if !with_selection {
+            st.anchor = p;
+        }
     }
 
     /// Cursor one char left / right.
@@ -425,7 +481,9 @@ impl TextArea {
 
     /// Cursor one visual line up / down.  `dir` = −1 for up, +1 for down.
     fn move_line(&mut self, dir: i32, with_selection: bool) {
-        if self.cached_lines.is_empty() { return; }
+        if self.cached_lines.is_empty() {
+            return;
+        }
         let cursor = self.edit.borrow().cursor;
         let cur_line = self.line_for_cursor(cursor);
         let target_line = if dir < 0 {
@@ -433,13 +491,15 @@ impl TextArea {
         } else {
             (cur_line + 1).min(self.cached_lines.len() - 1)
         };
-        if target_line == cur_line { return; }
+        if target_line == cur_line {
+            return;
+        }
         // Preserve horizontal position (pixel column, not byte column).
         let cur_x = self.pos_for_cursor(cursor).x - self.padding;
         // Find byte offset in target_line closest to `cur_x`.
         let line = &self.cached_lines[target_line];
-        let txt  = &line.text;
-        let mut best_byte  = 0usize;
+        let txt = &line.text;
+        let mut best_byte = 0usize;
         let mut best_delta = f64::INFINITY;
         let mut acc = 0.0_f64;
         let mut prev_byte = 0usize;
@@ -451,7 +511,10 @@ impl TextArea {
             };
             acc += w;
             let d = (acc - cur_x).abs();
-            if d < best_delta { best_delta = d; best_byte = i; }
+            if d < best_delta {
+                best_delta = d;
+                best_byte = i;
+            }
             prev_byte = i;
         }
         let target = line.start + best_byte;
@@ -460,19 +523,41 @@ impl TextArea {
 }
 
 impl Widget for TextArea {
-    fn type_name(&self) -> &'static str { "TextArea" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "TextArea"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn measure_min_height(&self, available_w: f64) -> f64 {
         // Wrap our text at the supplied width and report the total
@@ -502,7 +587,9 @@ impl Widget for TextArea {
         // natural size gets the same (the caller is opting into
         // "whatever you want" with `available`).
         let w = available.width.max(self.padding * 2.0 + 20.0);
-        let h = available.height.max(self.padding * 2.0 + self.font_size * 1.6);
+        let h = available
+            .height
+            .max(self.padding * 2.0 + self.font_size * 1.6);
         self.bounds = Rect::new(0.0, 0.0, w, h);
         let inner_w = (w - self.padding * 2.0).max(1.0);
         self.refresh_wrap(inner_w);
@@ -522,9 +609,12 @@ impl Widget for TextArea {
 
         // Clip content to the padded inner rect so overflow text can't
         // leak across the border.
-        ctx.clip_rect(self.padding, self.padding,
-                      (w - self.padding * 2.0).max(0.0),
-                      (h - self.padding * 2.0).max(0.0));
+        ctx.clip_rect(
+            self.padding,
+            self.padding,
+            (w - self.padding * 2.0).max(0.0),
+            (h - self.padding * 2.0).max(0.0),
+        );
 
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
@@ -541,16 +631,20 @@ impl Widget for TextArea {
             };
             ctx.set_fill_color(hl_color);
             for (i, line) in self.cached_lines.iter().enumerate() {
-                if line.end < lo || line.start > hi { continue; }
+                if line.end < lo || line.start > hi {
+                    continue;
+                }
                 let sel_s = lo.max(line.start) - line.start;
                 let sel_e = hi.min(line.end) - line.start;
                 let sel_e = sel_e.min(line.text.len());
-                if sel_e <= sel_s { continue; }
-                let x0 = self.padding
-                    + measure_advance(&self.font, &line.text[..sel_s], self.font_size);
-                let x1 = self.padding
-                    + measure_advance(&self.font, &line.text[..sel_e], self.font_size);
-                let line_top    = h - self.padding - i as f64 * self.cached_line_h;
+                if sel_e <= sel_s {
+                    continue;
+                }
+                let x0 =
+                    self.padding + measure_advance(&self.font, &line.text[..sel_s], self.font_size);
+                let x1 =
+                    self.padding + measure_advance(&self.font, &line.text[..sel_e], self.font_size);
+                let line_top = h - self.padding - i as f64 * self.cached_line_h;
                 let line_bottom = line_top - self.cached_line_h;
                 ctx.begin_path();
                 ctx.rect(x0, line_bottom, x1 - x0, self.cached_line_h);
@@ -564,45 +658,63 @@ impl Widget for TextArea {
         // sits `descent` above each line's bottom edge.
         let m = ctx.measure_text("Ag").unwrap_or_default();
         for (i, line) in self.cached_lines.iter().enumerate() {
-            if line.text.is_empty() { continue; }
-            let line_top    = h - self.padding - i as f64 * self.cached_line_h;
+            if line.text.is_empty() {
+                continue;
+            }
+            let line_top = h - self.padding - i as f64 * self.cached_line_h;
             let line_bottom = line_top - self.cached_line_h;
-            let baseline_y  = line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5
-                              + m.descent;
+            let baseline_y =
+                line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
             ctx.fill_text(&line.text, self.padding, baseline_y);
         }
 
         // ── Placeholder when empty + unfocused ─────────────────────
         if st.text.is_empty() && !self.focused {
             ctx.set_fill_color(v.text_dim);
-            let line_top    = h - self.padding;
+            let line_top = h - self.padding;
             let line_bottom = line_top - self.cached_line_h;
-            let baseline_y  = line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5
-                              + m.descent;
+            let baseline_y =
+                line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
             ctx.fill_text("Type here…", self.padding, baseline_y);
         }
 
         ctx.reset_clip();
 
         // ── Border ────────────────────────────────────────────────
-        let border = if self.focused { v.accent }
-                     else if self.hovered { v.widget_stroke_active }
-                     else { v.widget_stroke };
+        let border = if self.focused {
+            v.accent
+        } else if self.hovered {
+            v.widget_stroke_active
+        } else {
+            v.widget_stroke
+        };
+        let line_width = if self.focused { 2.0 } else { 1.0 };
         ctx.set_stroke_color(border);
-        ctx.set_line_width(if self.focused { 2.0 } else { 1.0 });
+        ctx.set_line_width(line_width);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
+        let inset = line_width * 0.5;
+        ctx.rounded_rect(
+            inset,
+            inset,
+            (w - line_width).max(0.0),
+            (h - line_width).max(0.0),
+            4.0,
+        );
         ctx.stroke();
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         // Cursor blink (drawn in overlay so the blink doesn't
         // invalidate a cached text bitmap).  500 ms half-cycle.
-        if !self.focused { return; }
+        if !self.focused {
+            return;
+        }
         if let Some(t) = self.focus_time {
             let phase = (t.elapsed().as_millis() / 500) as u64;
             self.blink_last_phase.set(phase);
-            if phase % 2 == 1 { return; }
+            if phase % 2 == 1 {
+                return;
+            }
         }
         let st = self.edit.borrow().clone();
         let p = self.pos_for_cursor(st.cursor);
@@ -620,24 +732,35 @@ impl Widget for TextArea {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
-                if self.hovered { set_cursor_icon(CursorIcon::Text); }
+                if self.hovered {
+                    set_cursor_icon(CursorIcon::Text);
+                }
                 if self.selecting_drag {
                     let off = self.byte_offset_at(*pos);
-                    self.move_cursor_to(off, /*with_selection=*/true);
+                    self.move_cursor_to(off, /*with_selection=*/ true);
                     crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, pos, modifiers } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                modifiers,
+            } => {
                 let off = self.byte_offset_at(*pos);
-                self.move_cursor_to(off, /*with_selection=*/modifiers.shift);
+                self.move_cursor_to(off, /*with_selection=*/ modifiers.shift);
                 self.selecting_drag = true;
                 crate::animation::request_tick();
                 EventResult::Consumed
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 self.selecting_drag = false;
                 EventResult::Consumed
             }
@@ -655,12 +778,20 @@ impl Widget for TextArea {
             }
             Event::KeyDown { key, modifiers } => {
                 let shift = modifiers.shift;
-                let cmd   = modifiers.ctrl || modifiers.meta;
+                let cmd = modifiers.ctrl || modifiers.meta;
                 match key {
-                    Key::ArrowLeft   => { self.move_char(-1, shift); }
-                    Key::ArrowRight  => { self.move_char( 1, shift); }
-                    Key::ArrowUp     => { self.move_line(-1, shift); }
-                    Key::ArrowDown   => { self.move_line( 1, shift); }
+                    Key::ArrowLeft => {
+                        self.move_char(-1, shift);
+                    }
+                    Key::ArrowRight => {
+                        self.move_char(1, shift);
+                    }
+                    Key::ArrowUp => {
+                        self.move_line(-1, shift);
+                    }
+                    Key::ArrowDown => {
+                        self.move_line(1, shift);
+                    }
                     Key::Home => {
                         let cur = self.edit.borrow().cursor;
                         let line = self.line_for_cursor(cur);
@@ -673,10 +804,18 @@ impl Widget for TextArea {
                         let end = self.cached_lines[line].end;
                         self.move_cursor_to(end, shift);
                     }
-                    Key::Backspace => { self.delete(-1); }
-                    Key::Delete    => { self.delete( 1); }
-                    Key::Enter     => { self.insert_str("\n"); }
-                    Key::Tab       => { self.insert_str("    "); }
+                    Key::Backspace => {
+                        self.delete(-1);
+                    }
+                    Key::Delete => {
+                        self.delete(1);
+                    }
+                    Key::Enter => {
+                        self.insert_str("\n");
+                    }
+                    Key::Tab => {
+                        self.insert_str("    ");
+                    }
                     Key::Char('a') | Key::Char('A') if cmd => {
                         // Select-all — set anchor to start, cursor to
                         // end.  Common Ctrl+A shortcut.
@@ -723,19 +862,23 @@ impl Widget for TextArea {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 
     fn properties(&self) -> Vec<(&'static str, String)> {
         let st = self.edit.borrow();
         vec![
-            ("len",     st.text.len().to_string()),
-            ("cursor",  st.cursor.to_string()),
-            ("lines",   self.cached_lines.len().to_string()),
+            ("len", st.text.len().to_string()),
+            ("cursor", st.cursor.to_string()),
+            ("lines", self.cached_lines.len().to_string()),
             ("focused", self.focused.to_string()),
         ]
     }
 
-    fn needs_paint(&self) -> bool { self.focused }
+    fn needs_paint(&self) -> bool {
+        self.focused
+    }
 }
