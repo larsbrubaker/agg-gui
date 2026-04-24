@@ -14,10 +14,12 @@ pub mod markdown;
 pub mod primitives;
 pub mod progress_bar;
 pub mod radio_group;
+pub mod resize;
 pub mod scroll_view;
 pub mod slider;
 pub mod splitter;
 pub mod tab_view;
+pub mod text_area;
 pub mod text_field;
 pub mod text_field_core;
 pub mod toggle_switch;
@@ -42,6 +44,7 @@ pub use markdown::MarkdownView;
 pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
 pub use progress_bar::ProgressBar;
 pub use radio_group::RadioGroup;
+pub use resize::Resize;
 pub use scroll_view::{
     ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
     current_scroll_style, current_scroll_visibility,
@@ -50,6 +53,7 @@ pub use scroll_view::{
 pub use slider::Slider;
 pub use splitter::Splitter;
 pub use tab_view::TabView;
+pub use text_area::TextArea;
 pub use text_field::TextField;
 pub use toggle_switch::ToggleSwitch;
 pub use tooltip::Tooltip;

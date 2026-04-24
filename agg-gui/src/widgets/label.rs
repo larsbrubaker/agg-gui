@@ -454,6 +454,21 @@ impl Widget for Label {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
+    fn measure_min_height(&self, available_w: f64) -> f64 {
+        // Wrapped: count lines at the supplied width.  Non-wrapped:
+        // a single line tall.  Used by ancestor `Window::tight_content_fit`
+        // to compute a content-bound for height.
+        let font   = self.active_font();
+        let size   = self.active_font_size();
+        let line_h = size * 1.5;
+        if self.wrap && available_w > 0.0 {
+            let lines = wrap_text(&font, &self.text, size, available_w);
+            (lines.len().max(1) as f64) * line_h
+        } else {
+            line_h
+        }
+    }
+
     fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
 
     fn properties(&self) -> Vec<(&'static str, String)> {

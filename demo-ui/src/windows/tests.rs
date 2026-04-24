@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use agg_gui::{
     Color, Container, CursorIcon, DrawCtx, Event, EventResult,
-    FlexColumn, FlexRow, Font, Label,
-    Point, Rect, ScrollView, Separator, set_cursor_icon,
-    Size, SizedBox, TextField, Widget,
+    FlexColumn, FlexRow, Font, Hyperlink, Label,
+    Point, Rect, Resize, ScrollView, Separator, set_cursor_icon,
+    Size, SizedBox, TextArea, TextField, Widget,
 };
 use agg_gui::widget::paint_subtree;
 
@@ -934,45 +934,6 @@ praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias \
 excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui \
 officia deserunt mollitia animi, id est laborum et dolorum fuga.";
 
-/// Build the "↔ auto-sized" Window Resize Test window content.
-///
-/// This is the first of six windows shown when the "Window Resize Test" sidebar
-/// entry is enabled.  The window auto-sizes to fit its content; the user can
-/// resize it via the edge/corner handles to see it snap back to content size.
-pub fn window_resize_test(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new()
-        .with_gap(8.0)
-        .with_padding(14.0)
-        .with_panel_bg();
-
-    col.push(Box::new(Label::new(
-        "This window will auto-size based on its contents.",
-        Arc::clone(&font),
-    ).with_font_size(12.0)), 0.0);
-
-    col.push(Box::new(Label::new(
-        "Resize this area:",
-        Arc::clone(&font),
-    ).with_font_size(13.0)), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    col.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
-        .with_font_size(11.5)
-        .with_wrap(true)), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    col.push(Box::new(Label::new(
-        "Resize the above area!",
-        Arc::clone(&font),
-    ).with_font_size(12.0)), 0.0);
-
-    // Flex fill keeps panel_bg painted to the bottom of the content area.
-    col.push(Box::new(SizedBox::new()), 1.0);
-    Box::new(col)
-}
-
 /// One entry returned from [`window_resize_sub_windows`].  The caller
 /// wraps `content` in a `Window` and applies the flags to its builder
 /// (`with_auto_size`, `with_resizable` / `with_resizable_axes`) so each
@@ -991,6 +952,14 @@ pub struct ResizeTestWindow {
     /// Wrap content in a built-in vertical `ScrollView` at window
     /// build time.  Matches egui's `Window::vscroll(true)`.
     pub vscroll:      bool,
+    /// Resize floor + ceiling follow content natural height.
+    /// Matches egui's no-scroll-no-clip-no-whitespace contract for
+    /// W4 (window snaps to content height in both directions).
+    pub tight_fit:    bool,
+    /// Resize FLOOR only follows content height; user can pull the
+    /// window taller (whitespace below).  Used for W5 where a
+    /// flex-fill `TextArea` absorbs extra space.
+    pub floor_fit:    bool,
 }
 
 impl ResizeTestWindow {
@@ -1004,10 +973,33 @@ impl ResizeTestWindow {
             resizable_h: true,
             resizable_v: true,
             vscroll:     false,
+            tight_fit:   false,
+            floor_fit:   false,
         }
     }
     fn auto_sized(mut self) -> Self { self.auto_size = true; self.resizable = false; self }
     fn with_vscroll(mut self) -> Self { self.vscroll = true; self }
+    fn with_tight_fit(mut self) -> Self { self.tight_fit = true; self }
+    fn with_floor_fit(mut self) -> Self { self.floor_fit = true; self }
+}
+
+/// URL of the source file containing the six Window Resize Test
+/// sub-window builders — surfaced via the "(source code)" footer
+/// link on each window so developers can see exactly how each
+/// layout was assembled, matching egui's `egui_github_link_file!`
+/// pattern in the original demo.
+const RESIZE_TEST_SOURCE_URL: &str =
+    "https://github.com/larsbrubaker/agg-gui/blob/main/demo-ui/src/windows/tests.rs";
+
+/// Helper: a small "(source code)" hyperlink that opens the test
+/// source file in a browser.  Callers push this as the final child
+/// of each sub-window's root column, just like egui's demo.
+fn source_link(font: Arc<Font>) -> Box<dyn Widget> {
+    Box::new(
+        Hyperlink::new("(source code)", font)
+            .with_font_size(11.0)
+            .on_click(|| crate::url::open_url(RESIZE_TEST_SOURCE_URL))
+    )
 }
 
 /// Build the six sub-windows for the Window Resize Test, mirroring
@@ -1032,41 +1024,71 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
 
     // ── 1. ↔ auto-sized ──────────────────────────────────────────────────────
     //
-    // Window sizes itself to its content; egui disables user resize while
-    // auto-sized.  The inner "Resize this area" container is a nested,
-    // independently-resizable region — Stage 3 lands a proper `Resize`
-    // widget for that; until then the middle region is a simple fixed-
-    // size `SizedBox` holding lorem ipsum.  A `Container`-wrapped
-    // placeholder was tried earlier and caused a runtime OOM — `Container`
-    // reports `Size::new(available.width, available.height)` (fills
-    // parent), which combined with auto-sized-window feedback blew up
-    // layout dimensions.  Filed as Stage 5 polish: have `Container` return
-    // a content-fit size.
+    // Outer window is `auto_sized()`, so it fits its content each
+    // frame and disables its own user-drag resize.  The inner area is
+    // the Stage-3 `Resize` widget — a user-draggable nested region.
+    // Dragging its SE grip:
+    //   * Grows the Resize past its content's natural size (the
+    //     `Resize` widget enforces content-natural as a min, so it
+    //     can never shrink past what fits).
+    //   * Pushes the surrounding Window wider when the Resize
+    //     demands more width than the current window inner area —
+    //     via `FlexColumn::with_fit_width(true)` reporting the
+    //     widest child's natural size up through `Window::auto_size`.
+    //
+    // Styling: `Resize` already draws its own rounded outline; no
+    // `Container` wrapper needed (previously we had both, giving a
+    // visible double outline).
     {
-        let mut root = FlexColumn::new().with_gap(6.0).with_padding(10.0).with_panel_bg();
+        let mut root = FlexColumn::new()
+            .with_gap(6.0).with_padding(10.0).with_panel_bg()
+            .with_fit_width(true);
+        // Outer labels are NOT wrapped: in an auto-sized window,
+        // wrap=true Labels would claim the full current slot width
+        // and prevent the window from shrinking back down when the
+        // inner Resize narrows.  Non-wrapped Labels report their
+        // single-line natural width, which becomes the stable
+        // minimum the window tracks to — same pattern egui's
+        // auto-sized demo uses.
         root.push(Box::new(Label::new(
             "This window will auto-size based on its contents.",
             Arc::clone(&font),
-        ).with_font_size(12.0).with_wrap(true)), 0.0);
+        ).with_font_size(12.0)), 0.0);
         root.push(Box::new(Label::new(
             "Resize this area:",
             Arc::clone(&font),
         ).with_font_size(14.0)), 0.0);
-        let mut inner = FlexColumn::new().with_gap(4.0).with_padding(8.0);
+        // The lorem ipsum INSIDE the Resize widget still wraps so it
+        // reshapes as the user narrows / widens the Resize.  The
+        // Resize widget enforces a content-natural minimum so the
+        // wrapped text can never be clipped.  `top_anchor` keeps the
+        // text at the top of the Resize frame when the user pulls it
+        // taller — without this, FlexColumn's default natural-anchor
+        // would leave the text pinned to the BOTTOM of the frame
+        // with whitespace above (the bug visible in image #24).
+        let mut inner = FlexColumn::new()
+            .with_gap(4.0).with_padding(8.0)
+            .with_fit_width(true)
+            .with_top_anchor(true);
         inner.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
             .with_font_size(11.5)
             .with_wrap(true)), 0.0);
-        // Fixed 320×120 "Resize this area" placeholder.  The nested
-        // `Resize` widget (Stage 3) will replace this `SizedBox` with a
-        // user-draggable region.
+        // No explicit max_size_hint here — we want the user to be
+        // able to drag the inner Resize all the way to the canvas
+        // extent, letting the outer auto-sized Window grow with it.
+        // The `Window::auto_size` clamp to `available.width` caps
+        // final growth at the surrounding layout's inner width.
         root.push(Box::new(
-            SizedBox::new().with_width(320.0).with_height(120.0)
-                .with_child(Box::new(inner)),
+            Resize::new(Box::new(inner))
+                .with_default_size(Size::new(320.0, 120.0))
+                .with_min_size_hint(Size::new(120.0, 60.0))
+                .with_max_size_hint(Size::new(4000.0, 3000.0)),
         ), 0.0);
         root.push(Box::new(Label::new(
             "Resize the above area!",
             Arc::clone(&font),
         ).with_font_size(14.0)), 0.0);
+        root.push(source_link(Arc::clone(&font)), 0.0);
         out.push(ResizeTestWindow::new(
             "↔ auto-sized", Box::new(root), rects[0],
         ).auto_sized());
@@ -1090,6 +1112,7 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
         root.push(Box::new(Label::new(LOREM_IPSUM_LONG, Arc::clone(&font))
             .with_font_size(11.5)
             .with_wrap(true)), 0.0);
+        root.push(source_link(Arc::clone(&font)), 0.0);
         out.push(ResizeTestWindow::new(
             "↔ resizable + scroll", Box::new(root), rects[1],
         ).with_vscroll());
@@ -1113,6 +1136,7 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
             .with_font_size(11.5)
             .with_wrap(true)), 0.0);
         root.push(Box::new(ScrollView::new(Box::new(inner))), 1.0);
+        root.push(source_link(Arc::clone(&font)), 0.0);
         out.push(ResizeTestWindow::new(
             "↔ resizable + embedded scroll", Box::new(root), rects[2],
         ));
@@ -1121,11 +1145,10 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
     // ── 4. ↔ resizable without scroll ───────────────────────────────────────
     //
     // egui never clips window content and has no whitespace to add, so the
-    // user can only shrink down to a size that still fits all content.  Our
-    // `Window` already honours content min-size via the flex column's
-    // required height, so this window works out of the box — the
-    // demonstration is that attempting to drag smaller than the text needs
-    // simply stops at the content-bound height.
+    // user can only shrink down to a size that still fits all content.
+    // Stage 5 enforces that at the library level: `with_tight_content_fit`
+    // makes the resize clamp floor honour the content's natural height
+    // observed in the last layout.
     {
         let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
         root.push(Box::new(Label::new(
@@ -1142,19 +1165,20 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
         root.push(Box::new(Label::new(LOREM_IPSUM, Arc::clone(&font))
             .with_font_size(11.5)
             .with_wrap(true)), 0.0);
+        root.push(source_link(Arc::clone(&font)), 0.0);
         out.push(ResizeTestWindow::new(
             "↔ resizable without scroll", Box::new(root), rects[3],
-        ));
+        ).with_tight_fit());
     }
 
     // ── 5. ↔ resizable with TextEdit ────────────────────────────────────────
     //
-    // Stage 4 will swap this for a true multiline `TextArea` so the editor
-    // can grow with the window height; today's single-line `TextField`
-    // stretches horizontally but not vertically, so the visible behaviour
-    // is "TextEdit tracks the window width".  The flex-fill `SizedBox`
-    // below keeps the bottom of the window blank so the demo is still
-    // visibly resizable.
+    // Stage-4 multiline `TextArea` fills the remaining space — so as
+    // the user resizes the window, the editor follows both axes.
+    // Pre-seeded with lorem ipsum so wrap + selection are immediately
+    // demonstrable.  `tight_fit` enforces the egui contract: window
+    // height ≥ TextArea content height, so wrapping text never falls
+    // off-screen.
     {
         let mut root = FlexColumn::new().with_gap(8.0).with_padding(10.0).with_panel_bg();
         root.push(Box::new(Label::new(
@@ -1162,14 +1186,14 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
             Arc::clone(&font),
         ).with_font_size(12.0).with_wrap(true)), 0.0);
         root.push(Box::new(
-            TextField::new(Arc::clone(&font))
+            TextArea::new(Arc::clone(&font))
                 .with_font_size(12.5)
                 .with_text(LOREM_IPSUM),
-        ), 0.0);
-        root.push(Box::new(SizedBox::new()), 1.0);
+        ), 1.0);
+        root.push(source_link(Arc::clone(&font)), 0.0);
         out.push(ResizeTestWindow::new(
             "↔ resizable with TextEdit", Box::new(root), rects[4],
-        ));
+        ).with_floor_fit());
     }
 
     // ── 6. ↔ freely resized ─────────────────────────────────────────────────
@@ -1180,6 +1204,7 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
              preventing auto-shrink.",
             Arc::clone(&font),
         ).with_font_size(12.0).with_wrap(true)), 0.0);
+        root.push(source_link(Arc::clone(&font)), 0.0);
         root.push(Box::new(SizedBox::new()), 1.0);
         out.push(ResizeTestWindow::new(
             "↔ freely resized", Box::new(root), rects[5],

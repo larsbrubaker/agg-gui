@@ -166,6 +166,23 @@ pub struct Window {
     /// `true`.
     resizable_h: bool,
     resizable_v: bool,
+    /// Content-bound resize floor + ceiling.  When `true`, the
+    /// window's height is locked to its content's required height
+    /// each layout (snap pre-pass) AND `apply_resize` refuses to
+    /// drag it smaller than content.  Matches egui's no-scroll-no-
+    /// clip-no-whitespace W4 contract.  Off by default.
+    tight_content_fit: bool,
+    /// Floor-only variant of [`tight_content_fit`].  Same minimum-
+    /// height enforcement, but allows the user to grow the window
+    /// past the content (whitespace below).  Used by W5 where a
+    /// `TextArea` flex-fills extra space and the user can pull the
+    /// window taller than the wrapped text.  Off by default.
+    floor_content_height: bool,
+    /// Most recently observed content required height (via
+    /// `Widget::measure_min_height`).  Updated each layout pass so
+    /// `apply_resize` and the tight-fit pre-pass see a current value
+    /// even when the content tree contains a flex-fill widget.
+    last_content_natural_h: Cell<f64>,
 
     /// Window title string — stored so external callers (z-order
     /// persistence, inspector display, etc.) can identify this window
@@ -231,6 +248,9 @@ impl Window {
             resizable: true,
             resizable_h: true,
             resizable_v: true,
+            tight_content_fit: false,
+            floor_content_height: false,
+            last_content_natural_h: Cell::new(0.0),
             title: title_str,
             on_raised: None,
         }
@@ -294,6 +314,29 @@ impl Window {
         self.resizable   = h || v;
         self.resizable_h = h;
         self.resizable_v = v;
+        self
+    }
+
+    /// Lock the window's height to its content's required height.
+    /// The user can grab a vertical resize handle but the next
+    /// layout snaps back — egui's W4 "no scroll, no clip, no
+    /// whitespace" contract.  Requires the content tree to expose
+    /// its required height via [`Widget::measure_min_height`]; our
+    /// `FlexColumn`, `Label`, `TextArea`, and `Container::with_fit_height`
+    /// all do.
+    pub fn with_tight_content_fit(mut self, on: bool) -> Self {
+        self.tight_content_fit = on;
+        self
+    }
+
+    /// Floor-only variant of [`with_tight_content_fit`]: refuses to
+    /// shrink past content but allows the user to pull the window
+    /// taller (whitespace below).  Used for windows whose content
+    /// includes a flex-fill child like a multiline `TextArea` —
+    /// matches egui's W5 where the TextEdit fills extra height and
+    /// the user can grow the window further.
+    pub fn with_height_floor_to_content(mut self, on: bool) -> Self {
+        self.floor_content_height = on;
         self
     }
 
@@ -479,24 +522,39 @@ impl Window {
         }
     }
 
+    /// Effective minimum height for this resize pass.  Honours
+    /// either `tight_content_fit` (lock + floor) or
+    /// `floor_content_height` (floor only) so a window whose content
+    /// has a natural height > MIN_H can never be dragged smaller
+    /// than its content.
+    fn effective_min_h(&self) -> f64 {
+        if self.tight_content_fit || self.floor_content_height {
+            let content_min = self.last_content_natural_h.get() + TITLE_H;
+            MIN_H.max(content_min)
+        } else {
+            MIN_H
+        }
+    }
+
     /// Apply a mouse-world-space delta to bounds according to the resize direction.
     fn apply_resize(&mut self, world_pos: Point) {
         let dx = world_pos.x - self.drag_start_world.x;
         let dy = world_pos.y - self.drag_start_world.y;
         let sb = self.drag_start_bounds;
+        let min_h = self.effective_min_h();
 
         let (mut x, mut y, mut w, mut h) = (sb.x, sb.y, sb.width, sb.height);
 
         if let DragMode::Resize(dir) = self.drag_mode {
             match dir {
-                ResizeDir::N  => { h = (sb.height + dy).max(MIN_H); }
-                ResizeDir::S  => { y = sb.y + dy; h = (sb.height - dy).max(MIN_H); if h == MIN_H { y = sb.y + sb.height - MIN_H; } }
+                ResizeDir::N  => { h = (sb.height + dy).max(min_h); }
+                ResizeDir::S  => { y = sb.y + dy; h = (sb.height - dy).max(min_h); if h == min_h { y = sb.y + sb.height - min_h; } }
                 ResizeDir::E  => { w = (sb.width  + dx).max(MIN_W); }
                 ResizeDir::W  => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } }
-                ResizeDir::NE => { w = (sb.width  + dx).max(MIN_W); h = (sb.height + dy).max(MIN_H); }
-                ResizeDir::NW => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } h = (sb.height + dy).max(MIN_H); }
-                ResizeDir::SE => { w = (sb.width  + dx).max(MIN_W); y = sb.y + dy; h = (sb.height - dy).max(MIN_H); if h == MIN_H { y = sb.y + sb.height - MIN_H; } }
-                ResizeDir::SW => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } y = sb.y + dy; h = (sb.height - dy).max(MIN_H); if h == MIN_H { y = sb.y + sb.height - MIN_H; } }
+                ResizeDir::NE => { w = (sb.width  + dx).max(MIN_W); h = (sb.height + dy).max(min_h); }
+                ResizeDir::NW => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } h = (sb.height + dy).max(min_h); }
+                ResizeDir::SE => { w = (sb.width  + dx).max(MIN_W); y = sb.y + dy; h = (sb.height - dy).max(min_h); if h == min_h { y = sb.y + sb.height - min_h; } }
+                ResizeDir::SW => { x = sb.x + dx; w = (sb.width  - dx).max(MIN_W); if w == MIN_W { x = sb.x + sb.width - MIN_W; } y = sb.y + dy; h = (sb.height - dy).max(min_h); if h == min_h { y = sb.y + sb.height - min_h; } }
             }
         }
 
@@ -653,24 +711,65 @@ impl Widget for Window {
                 // threshold: anything ≥ `CAP_SENTINEL` means "no cap,
                 // fall back to viewport-provided bounds".
                 const CAP_SENTINEL: f64 = 1.0e18;
-                let cap_w  = if max_sz.width.is_finite() && max_sz.width < CAP_SENTINEL {
-                    max_sz.width
-                } else {
-                    available.width.max(MIN_W)
-                };
+                // WIDTH is PINNED to the current bounds.width (seeded
+                // by `with_bounds` and preserved across frames).
+                // Why: wrapping Labels inside the content claim their
+                // full available width — if we pass the viewport
+                // width here, the window grows to the canvas on the
+                // first frame and never shrinks back.  egui's
+                // equivalent is `default_width`, which also pins.
+                let cap_w  = self.bounds.width.max(MIN_W);
                 let cap_h  = if max_sz.height.is_finite() && max_sz.height < CAP_SENTINEL {
                     max_sz.height
                 } else {
                     available.height.max(MIN_H)
                 };
                 let pref   = child.layout(Size::new(cap_w, cap_h));
-                let new_w  = pref.width.min(cap_w).max(MIN_W);
+                // Auto-size follows content in BOTH directions — so
+                // the window can also shrink back down when the
+                // inner Resize (or any other sizing widget) narrows.
+                // Lower bound: `MIN_W`.  Upper bound: the parent-
+                // provided `available.width` (main_area / canvas).
+                // Matches egui where auto_sized tracks content size
+                // symmetrically.
+                let new_w  = pref.width
+                    .max(MIN_W)
+                    .min(available.width.max(MIN_W));
                 let new_h  = (pref.height + TITLE_H).min(cap_h + TITLE_H).max(MIN_H);
                 let top    = self.bounds.y + self.bounds.height;
                 self.bounds.width   = new_w;
                 self.bounds.height  = new_h;
                 self.bounds.y       = top - new_h;
                 self.pre_collapse_h = new_h;
+            }
+        }
+
+        // ── Tight-fit pre-pass ───────────────────────────────────
+        //
+        // When `with_tight_content_fit(true)` is set (and we're not
+        // already in the auto_size block above, which handles both
+        // axes), ask the content tree what minimum height it needs
+        // at our current width and SNAP `bounds.height` to that.
+        //
+        // Uses `Widget::measure_min_height` rather than `layout` so
+        // the result is independent of flex distribution — a
+        // flex-fill widget like `TextArea` reports its true wrapped-
+        // content height through `measure_min_height` even though
+        // its `layout` returns the full slot.  This is what makes
+        // egui's "no scroll, no clip, no whitespace" contract work
+        // for windows whose content includes a flex-fill child.
+        if self.tight_content_fit
+            && !self.auto_size
+            && !self.collapsed
+            && !self.maximized
+        {
+            if let Some(child) = self.children.first() {
+                let needed = child.measure_min_height(self.bounds.width);
+                let new_h  = (needed + TITLE_H).max(MIN_H);
+                let top    = self.bounds.y + self.bounds.height;
+                self.bounds.height = new_h;
+                self.bounds.y      = top - new_h;
+                self.last_content_natural_h.set(needed);
             }
         }
 
@@ -684,6 +783,20 @@ impl Widget for Window {
             }
             // When collapsed the child keeps its last bounds but is not visible
             // because hit_test returns false for the content area.
+        }
+
+        // Cache the child's required height via `measure_min_height`
+        // so `apply_resize` and the tight-fit floor see a current
+        // value EVEN when the content's `layout` returns the slot
+        // size (the flex-fill case).  `Widget::measure_min_height`
+        // walks the content tree and returns the actual content
+        // requirement at the supplied width.
+        if (self.tight_content_fit || self.floor_content_height) && !self.collapsed {
+            if let Some(child) = self.children.first() {
+                self.last_content_natural_h.set(
+                    child.measure_min_height(self.bounds.width)
+                );
+            }
         }
 
         // Position the title-bar strip at the top of the window and

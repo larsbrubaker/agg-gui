@@ -360,7 +360,7 @@ const DEMOS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F030} Screenshot",             label: "\u{F030} Screenshot",             group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F0D0} Highlighting",           label: "\u{F0D0} Highlighting",           group: "Graphics", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F1B3} 3D Animation",          label: "\u{F1B3} 3D Animation",           group: "Graphics", open: false, win_w: 300.0, win_h: 260.0 },
-    DemoSpec { title: "\u{F013} System",                 label: "\u{F013} System",                 group: "Graphics", open: false, win_w: 520.0, win_h: 640.0 },
+    DemoSpec { title: "\u{F013} System",                 label: "\u{F013} System",                 group: "Tools",    open: false, win_w: 520.0, win_h: 640.0 },
     DemoSpec { title: "\u{F031} LCD Subpixel",           label: "\u{F031} LCD Subpixel",           group: "Graphics", open: false, win_w: 640.0, win_h: 720.0 },
 
     // ── Interaction ──
@@ -384,7 +384,18 @@ const TESTS: &[DemoSpec] = &[
     DemoSpec { title: "\u{F0AD} Manual Layout Test",  label: "\u{F0AD} Manual Layout Test",  group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F03E} SVG Test",            label: "\u{F03E} SVG Test",            group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
     DemoSpec { title: "\u{F1E0} Tessellation Test",   label: "\u{F1E0} Tessellation Test",   group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
-    DemoSpec { title: "\u{F065} Window Resize Test",  label: "\u{F065} Window Resize Test",  group: "Tests", open: false, win_w: WIN_W, win_h: WIN_H },
+    // The original "Window Resize Test" sidebar entry was a single
+    // group toggle that opened all six sub-windows together.  egui's
+    // demo treats each sub-window as its own first-class test, so
+    // the six entries below replace it — each opens / closes
+    // independently from the sidebar.  Initial sizes match the
+    // hard-coded rects in `windows::tests::window_resize_sub_windows`.
+    DemoSpec { title: "↔ auto-sized",                  label: "↔ auto-sized",                  group: "Window Resize Test", open: false, win_w: 360.0, win_h: 240.0 },
+    DemoSpec { title: "↔ resizable + scroll",          label: "↔ resizable + scroll",          group: "Window Resize Test", open: false, win_w: 300.0, win_h: 290.0 },
+    DemoSpec { title: "↔ resizable + embedded scroll", label: "↔ resizable + embedded scroll", group: "Window Resize Test", open: false, win_w: 300.0, win_h: 290.0 },
+    DemoSpec { title: "↔ resizable without scroll",    label: "↔ resizable without scroll",    group: "Window Resize Test", open: false, win_w: 300.0, win_h: 290.0 },
+    DemoSpec { title: "↔ resizable with TextEdit",     label: "↔ resizable with TextEdit",     group: "Window Resize Test", open: false, win_w: 300.0, win_h: 290.0 },
+    DemoSpec { title: "↔ freely resized",              label: "↔ freely resized",              group: "Window Resize Test", open: false, win_w: 250.0, win_h: 150.0 },
 ];
 
 // ── Index of the 3D Animation in DEMOS ─────────────────────────────
@@ -702,7 +713,8 @@ pub fn build_demo_ui(
     // stripping the leading Font Awesome icon (PUA range 0xE000–0xF8FF) +
     // separating whitespace before comparing.
     let group_names: &[&'static str] = &[
-        "Widgets", "Layout", "Graphics", "Interaction", "Tests", "Tools",
+        "Widgets", "Layout", "Graphics", "Interaction",
+        "Tests", "Window Resize Test", "Tools",
     ];
     /// Case-insensitive sort key for an entry label like "\u{F1DE} Sliders".
     fn sidebar_sort_key(s: &str) -> String {
@@ -715,9 +727,28 @@ pub fn build_demo_ui(
     }
     let sidebar_groups: Vec<SidebarGroup> = group_names.iter()
         .map(|&name| {
+            // The TESTS array is split between two visual groups —
+            // entries that start with "↔" go under the new
+            // "Window Resize Test" accordion, the rest stay in the
+            // generic "Tests" group.
             let mut entries: Vec<&SidebarEntry> = match name {
-                "Tests" => test_entries.iter().collect(),
-                "Tools" => tool_entries.iter().collect(),
+                "Tests" => test_entries.iter().enumerate()
+                    .filter(|(_, e)| !e.label.starts_with('↔'))
+                    .map(|(_, e)| e)
+                    .collect(),
+                "Window Resize Test" => test_entries.iter().enumerate()
+                    .filter(|(_, e)| e.label.starts_with('↔'))
+                    .map(|(_, e)| e)
+                    .collect(),
+                // Tools = the standalone tool entries (Inspector,
+                // etc.) PLUS any DEMOS tagged with `group="Tools"`
+                // (e.g. System, which is conceptually a tool the
+                // developer reaches for, not a content demo).
+                "Tools" => tool_entries.iter()
+                    .chain(demo_entries.iter().enumerate()
+                        .filter(|(i, _)| DEMOS[*i].group == "Tools")
+                        .map(|(_, e)| e))
+                    .collect(),
                 _       => demo_entries.iter().enumerate()
                     .filter(|(i, _)| DEMOS[*i].group == name)
                     .map(|(_, e)| e)
@@ -806,6 +837,18 @@ pub fn build_demo_ui(
         canvas.children_mut()[1 + cube_idx] = Box::new(win);
     }
 
+    // Pre-build the six "↔" sub-windows from the resize-test set so
+    // we can pop the matching entry as the TEST loop visits each
+    // title.  The result is one Window per sidebar entry — the sub-
+    // windows are no longer lumped under a single "Window Resize
+    // Test" group toggle, matching egui where each ↔ window is its
+    // own first-class demo with its own open / close state.
+    let mut resize_sub: std::collections::HashMap<String, windows::ResizeTestWindow> =
+        windows::window_resize_sub_windows(Arc::clone(&font))
+            .into_iter()
+            .map(|e| (e.title.clone(), e))
+            .collect();
+
     // Add TEST windows.
     for (i, spec) in TESTS.iter().enumerate() {
         let total_i    = DEMOS.len() + i;
@@ -816,6 +859,32 @@ pub fn build_demo_ui(
             .filter(|ws| ws.has_valid_bounds())
             .map(|ws| ws.to_rect())
             .unwrap_or_else(|| tile_rect(total_i, default_canvas_h, spec.win_w, spec.win_h));
+
+        // Resize sub-windows go through their own builder so the
+        // per-window flags (`auto_size`, `vscroll`, `tight_fit`,
+        // axis-locked resize) get applied exactly as egui requires.
+        if let Some(sub) = resize_sub.remove(spec.title) {
+            let mut win = Window::new(spec.title, Arc::clone(&font), sub.content)
+                .with_bounds(Rect::new(initial.x, initial.y, initial.width, initial.height))
+                .with_visible_cell(open_cell)
+                .with_reset_cell(reset_cell)
+                .with_position_cell(Rc::clone(&test_pos_cells[i]))
+                .on_raised(make_on_raised());
+            // `with_vscroll` mutates the children list, so it must
+            // run before any other builder that reads them.
+            if sub.vscroll        { win = win.with_vscroll(true); }
+            if sub.auto_size {
+                win = win.with_auto_size(true);
+            } else {
+                win = win.with_resizable_axes(sub.resizable_h, sub.resizable_v);
+                if !sub.resizable { win = win.with_resizable(false); }
+            }
+            if sub.tight_fit      { win = win.with_tight_content_fit(true); }
+            if sub.floor_fit      { win = win.with_height_floor_to_content(true); }
+            canvas = canvas.add(Box::new(win));
+            continue;
+        }
+
         let content: Box<dyn Widget> = match spec.title {
             "\u{F0EA} Clipboard Test"      => windows::clipboard_test(Arc::clone(&font)),
             "\u{F05B} Cursor Test"         => windows::cursor_test(Arc::clone(&font)),
@@ -827,7 +896,6 @@ pub fn build_demo_ui(
             "\u{F0AD} Manual Layout Test"  => windows::manual_layout_test(Arc::clone(&font)),
             "\u{F03E} SVG Test"            => windows::svg_test(Arc::clone(&font)),
             "\u{F1E0} Tessellation Test"   => windows::tessellation_test(Arc::clone(&font)),
-            "\u{F065} Window Resize Test"  => windows::window_resize_test(Arc::clone(&font)),
             _                              => windows::coming_soon(),
         };
         let win = Window::new(spec.title, Arc::clone(&font), content)
@@ -837,38 +905,6 @@ pub fn build_demo_ui(
             .with_position_cell(Rc::clone(&test_pos_cells[i]))
             .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(win));
-    }
-
-    // ── Window Resize Test — 6 sub-windows (all share test_entries[10].open) ──
-    //
-    // Each sub-window carries per-window flags (`auto_size`,
-    // `resizable`, `resizable_h/v`) so the builder below can apply
-    // exactly the egui behaviour the demo is testing.  A single
-    // sidebar checkbox toggles every sub-window in lock-step.
-    {
-        let wrt_open = Rc::clone(&test_entries[10].open);
-        for entry in windows::window_resize_sub_windows(Arc::clone(&font)) {
-            let mut win = Window::new(&entry.title, Arc::clone(&font), entry.content)
-                .with_bounds(entry.initial_rect)
-                .with_visible_cell(Rc::clone(&wrt_open))
-                .on_raised(make_on_raised());
-            // `with_vscroll` mutates the children list, so it must run
-            // before any other builder that reads them.  Stage 2: gives
-            // each opt-in window an internal vertical ScrollView without
-            // the call site having to wrap content manually.
-            if entry.vscroll {
-                win = win.with_vscroll(true);
-            }
-            if entry.auto_size {
-                win = win.with_auto_size(true);
-            } else {
-                win = win.with_resizable_axes(entry.resizable_h, entry.resizable_v);
-                if !entry.resizable {
-                    win = win.with_resizable(false);
-                }
-            }
-            canvas = canvas.add(Box::new(win));
-        }
     }
 
     // ── About window ──────────────────────────────────────────────────────────

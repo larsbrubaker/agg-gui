@@ -27,6 +27,11 @@ pub struct Container {
     pub border_width: f64,
     pub corner_radius: f64,
     pub inner_padding: Insets,
+    /// When `true`, `layout` returns the content's natural height + vertical
+    /// padding instead of the full available height.  Off by default for
+    /// backward compatibility (callers that used `Container` as a fill-
+    /// parent decoration still work).  Match egui's `Frame` by opting in.
+    pub fit_height: bool,
 }
 
 impl Container {
@@ -41,8 +46,17 @@ impl Container {
             border_width: 1.0,
             corner_radius: 0.0,
             inner_padding: Insets::ZERO,
+            fit_height: false,
         }
     }
+
+    /// Opt into content-fit height — [`layout`] returns
+    /// `content_height + vertical_padding` instead of the full
+    /// available height.  Required when this `Container` sits inside
+    /// an auto-sized ancestor (e.g. `Window::with_auto_size(true)`),
+    /// which would otherwise pick up the full available height as
+    /// the container's preferred size and inflate the window.
+    pub fn with_fit_height(mut self, fit: bool) -> Self { self.fit_height = fit; self }
 
     /// Append a child widget.
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
@@ -116,7 +130,8 @@ impl Widget for Container {
         // Child margins are additive: top margin pushes the cursor down before
         // placing the child; bottom margin is consumed after it.
         let scale = device_scale();
-        let mut cursor_y = available.height - pad_t;
+        let start_cursor = available.height - pad_t;
+        let mut cursor_y = start_cursor;
 
         for child in self.children.iter_mut() {
             let m = child.margin().scale(scale);
@@ -138,8 +153,17 @@ impl Widget for Container {
             cursor_y = child_y - m.bottom;
         }
 
-        // Container fills all available space.
-        Size::new(available.width, available.height)
+        // Default: fill the full available area (legacy — many demo
+        // sites use `Container` as a decorated wrapper around content
+        // that should stretch).  Opt in to content-fit via
+        // `with_fit_height(true)` — matches egui `Frame` semantics.
+        if self.fit_height {
+            let consumed_h = (start_cursor - cursor_y).max(0.0);
+            let natural_h  = (consumed_h + pad_t + pad_b).min(available.height);
+            Size::new(available.width, natural_h)
+        } else {
+            Size::new(available.width, available.height)
+        }
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {

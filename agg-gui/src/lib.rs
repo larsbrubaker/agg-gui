@@ -82,13 +82,15 @@ pub use text::{Font, TextMetrics, measure_text_metrics};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
 pub use widget::{App, InspectorNode, Widget, collect_inspector_nodes,
-                  find_widget_by_id, find_widget_by_id_mut, find_widget_by_type};
+                  current_mouse_world, find_widget_by_id, find_widget_by_id_mut,
+                  find_widget_by_type};
 pub use widgets::{Button, Checkbox, ColorPicker, CollapsingHeader, ComboBox, Container, DragValue, FlexColumn, FlexRow,
                   Hyperlink, ImageView, InspectorPanel, InspectorSavedState,
                   Label, LabelAlign, MarkdownView, NodeIcon, Padding, ProgressBar, RadioGroup,
+                  Resize,
                   ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility,
                   ScrollView, Separator, SizedBox, Slider, Spacer, Splitter, Stack,
-                  TabView, TextField, ToggleSwitch, Tooltip, TreeView, Window,
+                  TabView, TextArea, TextField, ToggleSwitch, Tooltip, TreeView, Window,
                   current_scroll_style, current_scroll_visibility,
                   set_scroll_style, set_scroll_visibility};
 

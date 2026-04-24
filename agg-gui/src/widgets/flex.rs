@@ -155,6 +155,18 @@ pub struct FlexColumn {
     /// When `true`, paint background using `ctx.visuals().panel_fill`
     /// regardless of the stored `background` colour.
     pub use_panel_bg: bool,
+    /// When `true`, `layout` reports the column's natural content
+    /// width (max over children, + horizontal padding) instead of the
+    /// full `available.width`.  Used by auto-sized ancestors that
+    /// want the column to shrink-to-content rather than stretch.
+    /// Off by default for backward compatibility.
+    pub fit_width: bool,
+    /// When `true`, children are anchored to the TOP of the column's
+    /// inner area, with any extra height appearing as whitespace at
+    /// the BOTTOM.  Off by default — legacy callers (e.g. ScrollView
+    /// content) rely on the natural-anchored layout where children
+    /// occupy the BOTTOM of their slot when oversized.
+    pub top_anchor: bool,
 }
 
 impl FlexColumn {
@@ -168,6 +180,8 @@ impl FlexColumn {
             inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
             use_panel_bg: false,
+            fit_width: false,
+            top_anchor: false,
         }
     }
 
@@ -177,6 +191,25 @@ impl FlexColumn {
     pub fn with_background(mut self, c: Color) -> Self { self.background = c; self }
     /// Use `ctx.visuals().panel_fill` as background instead of the stored color.
     pub fn with_panel_bg(mut self) -> Self { self.use_panel_bg = true; self }
+
+    /// Opt into content-fit width — `layout` reports the widest
+    /// child's natural width (+ horizontal padding) instead of the
+    /// full available width.  Required when this column is the
+    /// content of an auto-sized `Window`; without it, wrapped Labels
+    /// claim the full available width and the window grows to the
+    /// canvas.  Matches egui's per-column shrink-to-content option.
+    pub fn with_fit_width(mut self, fit: bool) -> Self { self.fit_width = fit; self }
+
+    /// Anchor children to the TOP of the inner area rather than the
+    /// bottom of the natural content extent.  Default is bottom (the
+    /// classic Y-up "natural-anchored" placement) so callers like
+    /// `ScrollView` whose layout pass uses `available.height ≈ ∞`
+    /// keep working — they need cursor_y to be derived from natural
+    /// extent, not from the supplied (huge) available.  Opt in for
+    /// containers placed inside a `Resize` widget or other oversized
+    /// slot where you want the visible content to start at the top
+    /// of the frame and any extra space to appear below.
+    pub fn with_top_anchor(mut self, on: bool) -> Self { self.top_anchor = on; self }
 
     pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
@@ -220,6 +253,31 @@ impl Widget for FlexColumn {
     fn min_size(&self) -> Size    { self.base.min_size }
     fn max_size(&self) -> Size    { self.base.max_size }
 
+    fn measure_min_height(&self, available_w: f64) -> f64 {
+        // Sum each child's required height (recursing through any
+        // FlexColumn / TextArea / Container chains) plus our own
+        // padding and inter-child gaps.  Used by ancestor
+        // `Window::tight_content_fit` to compute a content-bound
+        // height even when one of our children is a flex-fill widget
+        // whose `layout` would just return the available slot.
+        let pad_l = self.inner_padding.left;
+        let pad_r = self.inner_padding.right;
+        let pad_t = self.inner_padding.top;
+        let pad_b = self.inner_padding.bottom;
+        let inner_w = (available_w - pad_l - pad_r).max(0.0);
+        let scale   = device_scale();
+        let n       = self.children.len();
+        let mut total = 0.0_f64;
+        for child in self.children.iter() {
+            let m = child.margin().scale(scale);
+            let slot_w = (inner_w - m.left - m.right).max(0.0);
+            total += child.measure_min_height(slot_w) + m.vertical();
+        }
+        total += pad_t + pad_b;
+        if n > 1 { total += self.gap * (n - 1) as f64; }
+        total.max(self.base.min_size.height)
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         let pad_l = self.inner_padding.left;
         let pad_r = self.inner_padding.right;
@@ -250,6 +308,7 @@ impl Widget for FlexColumn {
         let mut total_fixed_with_margins = 0.0f64;
         let mut total_flex               = 0.0f64;
         let mut total_flex_margin_v      = 0.0f64;
+        let mut max_child_natural_w      = 0.0f64;
 
         for i in 0..n {
             let m     = &margins[i];
@@ -263,6 +322,8 @@ impl Widget for FlexColumn {
                            self.children[i].max_size().height);
                 content_heights[i]       = clamped_h;
                 total_fixed_with_margins += clamped_h + m.vertical();
+                max_child_natural_w = max_child_natural_w
+                    .max(desired.width + m.horizontal());
             } else {
                 total_flex          += self.flex_factors[i];
                 total_flex_margin_v += m.vertical();
@@ -296,10 +357,26 @@ impl Widget for FlexColumn {
         // -------------------------------------------------------------------
         // Step 3: place children top-to-bottom.
         //
-        // In Y-up coordinates "top" = high Y.  The cursor starts at the top
-        // of the inner area and decrements for each child.
-        // -------------------------------------------------------------------
-        let mut cursor_y = pad_b + effective_h;
+        // In Y-up coordinates "top" = high Y.  Two cursor seeds:
+        //
+        //   - **Default** (`top_anchor=false`): start at `pad_b +
+        //     effective_h`.  For all-fixed children this is the top
+        //     of the natural-content extent; for flex children
+        //     (`effective_h = inner_h`) it's the top of the inner
+        //     area.  This matches what `ScrollView` expects when it
+        //     calls `layout(MAX/2)` to measure natural size — children
+        //     get placed at finite y-coords inside the natural area.
+        //
+        //   - **`top_anchor=true`**: start at the top of the inner
+        //     area.  Used by columns embedded inside an oversized
+        //     slot (e.g. inside a `Resize` widget) where the content
+        //     should hug the TOP of the frame and any extra height
+        //     should appear as whitespace below.
+        let mut cursor_y = if self.top_anchor {
+            available.height - pad_t
+        } else {
+            pad_b + effective_h
+        };
 
         for i in 0..n {
             let m          = &margins[i];
@@ -333,10 +410,22 @@ impl Widget for FlexColumn {
 
         // Return natural size for all-fixed layouts so ScrollView can read
         // the true content height from layout()'s return value.
-        if total_flex > 0.0 {
-            available
+        //
+        // Width: by default we report the full available width (legacy
+        // behaviour many callers rely on).  `fit_width(true)` opts in
+        // to reporting the widest non-flex child's natural width +
+        // padding — NOT clamped to `available.width` so the parent
+        // (typically an auto-sized `Window`) can grow to fit content
+        // that exceeds the current slot.
+        let reported_w = if self.fit_width {
+            max_child_natural_w + pad_l + pad_r
         } else {
-            Size::new(available.width, natural_content_h + pad_t + pad_b)
+            available.width
+        };
+        if total_flex > 0.0 {
+            Size::new(reported_w, available.height)
+        } else {
+            Size::new(reported_w, natural_content_h + pad_t + pad_b)
         }
     }
 

@@ -374,6 +374,25 @@ pub trait Widget {
         crate::pixel_bounds::default_enforce_integer_bounds()
     }
 
+    /// Report the minimum height this widget needs to fully render
+    /// its content when given the supplied `available_w` for width.
+    ///
+    /// Used by parents whose layout strategy depends on a true
+    /// content-required height that's independent of the slot they
+    /// might hand the widget — most importantly by
+    /// `Window::with_tight_content_fit(true)` to enforce "no
+    /// clipping, no whitespace" on the height axis even when the
+    /// content tree contains a flex-fill widget that would
+    /// otherwise return `available.height` from `layout`.
+    ///
+    /// Default returns `min_size().height` — accurate for widgets
+    /// whose minimum doesn't depend on width.  Width-sensitive
+    /// widgets (wrapped text containers like `TextArea`, recursive
+    /// containers like `FlexColumn`) override and compute properly.
+    fn measure_min_height(&self, _available_w: f64) -> f64 {
+        self.min_size().height
+    }
+
     /// Container widgets (notably [`crate::widgets::Stack`]) call this on each
     /// child at the start of `layout()`.  A widget that returns `true` is
     /// moved to the END of its parent's child list — painted last, i.e.
@@ -822,6 +841,30 @@ pub struct InspectorNode {
     pub properties: Vec<(&'static str, String)>,
 }
 
+// ── Global mouse-world-pos (for nested drags that can't use widget-
+//    local coords because ancestor layout shifts under them each frame) ─────
+
+thread_local! {
+    static CURRENT_MOUSE_WORLD: std::cell::Cell<Option<Point>> =
+        std::cell::Cell::new(None);
+}
+
+/// Record the current mouse cursor position in app-level (world / Y-up
+/// logical) coordinates.  Called by `App`'s mouse entry points.
+pub fn set_current_mouse_world(p: Point) {
+    CURRENT_MOUSE_WORLD.with(|c| c.set(Some(p)));
+}
+
+/// Retrieve the latest world-space mouse position.  Widgets doing a
+/// drag gesture that needs invariance against ancestor-layout shifts
+/// (e.g. a nested `Resize` inside an auto-sized `Window`, where the
+/// window grows/shrinks as the user drags and moves the widget's
+/// ancestor frame) should prefer this over the widget-local `pos`
+/// carried in `Event::Mouse*`.
+pub fn current_mouse_world() -> Option<Point> {
+    CURRENT_MOUSE_WORLD.with(|c| c.get())
+}
+
 /// Depth-first search the subtree rooted at `widget` for one whose
 /// [`Widget::id`] matches `id`.  Returns the first match in paint order,
 /// including `widget` itself.  Used primarily by tests to locate a
@@ -1085,12 +1128,14 @@ impl App {
         // Reset cursor so the hovered widget can set it; Default if nothing sets it.
         crate::cursor::reset_cursor_icon();
         let pos = self.flip_y(screen_x, screen_y);
+        set_current_mouse_world(pos);
         self.dispatch_mouse_move(pos);
     }
 
     /// Mouse button pressed. `screen_y` is Y-down physical pixels.
     pub fn on_mouse_down(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
         let pos = self.flip_y(screen_x, screen_y);
+        set_current_mouse_world(pos);
         let hit = self.compute_hit(pos);
 
         // Click-to-focus: if the hit widget is focusable, give it focus.
@@ -1123,6 +1168,7 @@ impl App {
     /// Mouse button released. `screen_y` is Y-down.
     pub fn on_mouse_up(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
         let pos = self.flip_y(screen_x, screen_y);
+        set_current_mouse_world(pos);
         let event = Event::MouseUp { pos, button, modifiers: mods };
         // Deliver release to captured widget first (if any), then clear capture.
         if let Some(path) = self.captured.take() {
