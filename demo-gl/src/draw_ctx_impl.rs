@@ -478,7 +478,16 @@ impl DrawCtx for GlGfxCtx {
                 glow::DYNAMIC_DRAW,
             );
             gl.enable(glow::BLEND);
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            // Preserve framebuffer alpha just like begin_frame(). On WebGL the
+            // browser composites the canvas alpha over the page, so image
+            // blits must not switch later translucent UI draws into an
+            // alpha-punching blend mode.
+            gl.blend_func_separate(
+                glow::SRC_ALPHA,
+                glow::ONE_MINUS_SRC_ALPHA,
+                glow::ZERO,
+                glow::ONE,
+            );
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
             gl.bind_vertex_array(None);
         }
@@ -632,7 +641,14 @@ impl DrawCtx for GlGfxCtx {
                 glow::DYNAMIC_DRAW,
             );
             gl.enable(glow::BLEND);
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            // Keep the default framebuffer alpha opaque on WebGL; see the
+            // slice blit path above for the failure mode this avoids.
+            gl.blend_func_separate(
+                glow::SRC_ALPHA,
+                glow::ONE_MINUS_SRC_ALPHA,
+                glow::ZERO,
+                glow::ONE,
+            );
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
             gl.bind_vertex_array(None);
         }

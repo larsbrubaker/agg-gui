@@ -36,6 +36,7 @@ use crate::widgets::label::Label;
 const CLOSE_R: f64 = 6.0;
 const CLOSE_PAD: f64 = 10.0;
 const MAX_PAD: f64 = CLOSE_PAD + CLOSE_R * 2.0 + 4.0;
+const CORNER_R: f64 = 8.0;
 
 /// Display-state snapshot `Window` hands to the title bar each frame.
 pub(crate) struct TitleBarView {
@@ -131,12 +132,16 @@ impl Widget for WindowTitleBar {
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        // Title bar fill — full rect.  The parent Window has already
-        // painted the rounded-rect body beneath; the clip on children
-        // keeps the top corners rounded for us.
+        // Title bar fill. Expanded windows need a square bottom edge against
+        // the content separator; collapsed windows are title-bar-only, so the
+        // fill must carry the window's bottom corner radius too.
         ctx.set_fill_color(st.bar_color);
         ctx.begin_path();
-        ctx.rect(0.0, 0.0, w, h);
+        if st.collapsed {
+            ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
+        } else {
+            ctx.rect(0.0, 0.0, w, h);
+        }
         ctx.fill();
 
         // 1-px separator below the title bar (= Y=0 in local space),

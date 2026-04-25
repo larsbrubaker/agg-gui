@@ -261,6 +261,109 @@ fn test_scroll_bar_style_defaults_match_egui() {
 }
 
 #[test]
+fn test_scroll_fade_does_not_overpaint_front_window() {
+    use crate::widget::paint_subtree;
+    use crate::widgets::{primitives::Stack, window::Window};
+    use crate::{DrawCtx, Event, EventResult, Rect};
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    struct SolidBox {
+        bounds: Rect,
+        color: Color,
+    }
+
+    impl SolidBox {
+        fn new(color: Color) -> Self {
+            Self {
+                bounds: Rect::default(),
+                color,
+            }
+        }
+    }
+
+    impl Widget for SolidBox {
+        fn type_name(&self) -> &'static str {
+            "SolidBox"
+        }
+
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &[]
+        }
+
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            panic!("SolidBox has no children")
+        }
+
+        fn layout(&mut self, available: Size) -> Size {
+            self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+            available
+        }
+
+        fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+            ctx.set_fill_color(self.color);
+            ctx.begin_path();
+            ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
+            ctx.fill();
+        }
+
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+    }
+
+    let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
+    let offset = Rc::new(Cell::new(120.0));
+    let mut scroll_style = ScrollBarStyle::default();
+    scroll_style.fade_strength = 1.0;
+    scroll_style.fade_size = 80.0;
+
+    let back_content = Box::new(SizedBox::new().with_height(600.0));
+    let back_scroll = ScrollView::new(back_content)
+        .with_offset_cell(Rc::clone(&offset))
+        .with_style(scroll_style);
+    let back = Window::new("Back", Arc::clone(&font), Box::new(back_scroll))
+        .with_bounds(Rect::new(20.0, 20.0, 260.0, 220.0));
+
+    let front_color = Color::rgba(1.0, 0.0, 0.0, 1.0);
+    let front = Window::new(
+        "Front",
+        Arc::clone(&font),
+        Box::new(SolidBox::new(front_color)),
+    )
+    .with_bounds(Rect::new(70.0, 70.0, 180.0, 140.0));
+
+    let mut stack = Stack::new().add(Box::new(back)).add(Box::new(front));
+    stack.set_bounds(Rect::new(0.0, 0.0, 320.0, 260.0));
+    stack.layout(Size::new(320.0, 260.0));
+
+    let mut fb = Framebuffer::new(320, 260);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::black());
+        paint_subtree(&mut stack, &mut ctx);
+    }
+
+    // This pixel is inside the front window's content area and also inside the
+    // back ScrollView's top fade band. The front window paints later, so the
+    // scroll fade from the back window must not affect it.
+    let p = sample(&fb, 120, 150);
+    assert!(
+        p[0] > 230 && p[1] < 40 && p[2] < 40,
+        "back window scroll fade overpainted the front window; sampled {p:?}"
+    );
+}
+
+#[test]
 fn test_combo_popup_opens_up_when_space_below_is_limited() {
     use crate::text::Font;
     use std::cell::Cell;
@@ -538,5 +641,52 @@ fn test_window_close_hides_content() {
     assert!(
         hidden_all_black,
         "hidden window must not paint anything; content child leaked"
+    );
+}
+
+/// A collapsed Window is only its title bar, so the title-bar fill must not
+/// square off the bottom corners of the outer rounded window shape.
+#[test]
+fn test_collapsed_window_title_bar_rounds_bottom_corners() {
+    use crate::text::Font;
+    use crate::widget::{paint_subtree, Widget};
+    use crate::widgets::window::Window;
+    use std::sync::Arc;
+
+    fn sample(fb: &Framebuffer, x: u32, y: u32) -> [u8; 4] {
+        let i = ((y * fb.width() + x) * 4) as usize;
+        let p = &fb.pixels()[i..i + 4];
+        [p[0], p[1], p[2], p[3]]
+    }
+
+    fn brightness(px: [u8; 4]) -> u16 {
+        px[0] as u16 + px[1] as u16 + px[2] as u16
+    }
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let content = Button::new("Content", Arc::clone(&font)).with_font_size(14.0);
+    let mut win = Window::new("Test", Arc::clone(&font), Box::new(content))
+        .with_bounds(crate::Rect::new(0.0, 0.0, 200.0, 80.0));
+
+    win.layout(Size::new(240.0, 120.0));
+    win.on_event(&crate::Event::MouseDown {
+        pos: crate::Point::new(12.0, 66.0),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    win.layout(Size::new(240.0, 120.0));
+
+    let mut fb = Framebuffer::new(220, 60);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::black());
+        paint_subtree(&mut win, &mut ctx);
+    }
+
+    let bottom_left_corner = sample(&fb, 1, 1);
+    let title_bar_interior = sample(&fb, 100, 14);
+    assert!(
+        brightness(bottom_left_corner) + 40 < brightness(title_bar_interior),
+        "collapsed title bar should leave the bottom-left corner rounded; corner={bottom_left_corner:?}, interior={title_bar_interior:?}"
     );
 }

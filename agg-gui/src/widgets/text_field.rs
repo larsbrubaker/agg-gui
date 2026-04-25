@@ -40,6 +40,7 @@ use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 // Clipboard stubs
 // ---------------------------------------------------------------------------
 
+mod binding;
 mod clipboard;
 mod widget_impl;
 
@@ -217,17 +218,6 @@ impl TextField {
         self
     }
 
-    /// Bind the field to external text state.
-    ///
-    /// `layout` picks up external writes (e.g. a Clear button) and
-    /// `on_change` writes user edits back into the cell.
-    pub fn with_text_cell(mut self, cell: Rc<RefCell<String>>) -> Self {
-        let text = cell.borrow().clone();
-        self.set_text(text);
-        self.text_cell = Some(cell);
-        self
-    }
-
     pub fn on_change(mut self, cb: impl FnMut(&str) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
         self
@@ -290,16 +280,6 @@ impl TextField {
         }
         self.undo.clear_history();
         self.pending_insert = None;
-    }
-
-    pub(crate) fn sync_from_text_cell(&mut self) {
-        let Some(cell) = &self.text_cell else {
-            return;
-        };
-        let external = cell.borrow().clone();
-        if external != self.edit.borrow().text {
-            self.set_text(external);
-        }
     }
 
     // ── Private state helpers ────────────────────────────────────────────────

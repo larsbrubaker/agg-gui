@@ -32,8 +32,13 @@ fn faded_strip_color(color: Color) -> Color {
 }
 
 fn strip_demo_regions(width: f64, height: f64, body_text_size: f64) -> Vec<StripRegion> {
-    let w = width.max(0.0);
-    let h = height.max(0.0);
+    // Egui's `StripBuilder` exact sizes and `at_least` constraints impose
+    // lower bounds even when the surrounding window gets small. Preserve those
+    // content constraints in our hand-rolled Y-up layout.
+    const MIN_WIDTH_FROM_EXACT_RECTS: f64 = 120.0 + 70.0;
+    let footer_min = body_text_size.max(12.0);
+    let w = width.max(MIN_WIDTH_FROM_EXACT_RECTS);
+    let h = height.max(50.0 + 60.0 + footer_min);
     let footer_h = body_text_size.max(12.0).min(h);
     let top_h = 50.0_f64.min((h - footer_h).max(0.0));
     let remaining = (h - footer_h - top_h).max(0.0);
@@ -45,8 +50,8 @@ fn strip_demo_regions(width: f64, height: f64, body_text_size: f64) -> Vec<Strip
 
     let middle_half_w = w * 0.5;
     let yellow_h = middle_h / 3.0;
-    let fixed_w = 120.0 + 70.0;
-    let lower_gap_w = ((w - fixed_w).max(0.0)) * 0.5;
+    let fixed_w = MIN_WIDTH_FROM_EXACT_RECTS;
+    let lower_gap_w = (w - fixed_w) * 0.5;
     let gold_x = lower_gap_w;
     let green_x = (w - 70.0).max(0.0);
     let gold_y = lower_y + (lower_h - 60.0).max(0.0) * 0.5;
@@ -181,6 +186,21 @@ mod strip_tests {
         assert_rect(&regions[2].rect, 200.0, 171.333, 200.0, 39.333);
         assert_rect(&regions[3].rect, 105.0, 43.0, 120.0, 60.0);
         assert_rect(&regions[4].rect, 330.0, 43.0, 70.0, 60.0);
+    }
+
+    #[test]
+    fn strip_regions_respect_exact_and_at_least_lower_limits() {
+        let regions = strip_demo_regions(120.0, 80.0, 14.0);
+
+        // Exact 120px + 70px horizontal regions must keep their required width
+        // instead of collapsing/overlapping when the host asks for too little.
+        assert!(regions.iter().all(|r| r.rect.width <= 190.0));
+        assert_rect(&regions[3].rect, 0.0, 14.0, 120.0, 60.0);
+        assert_rect(&regions[4].rect, 120.0, 14.0, 70.0, 60.0);
+        assert!(
+            regions[0].rect.height >= 50.0 && regions[4].rect.height >= 60.0,
+            "exact and at-least strip heights must be preserved"
+        );
     }
 
     fn assert_rect(rect: &agg_gui::Rect, x: f64, y: f64, w: f64, h: f64) {

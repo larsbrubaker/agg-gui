@@ -1,226 +1,15 @@
-#![allow(unused_imports)]
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    measure_text_metrics, Button, Checkbox, Color, Container, DoUndoActions, DragValue, DrawCtx,
-    Event, EventResult, FlexColumn, FlexRow, Font, Key, Label, LabelAlign, MouseButton, Point,
-    Rect, ScrollView, Separator, Size, SizedBox, TextField, UndoBuffer, Widget,
+    Button, Color, ComboBox, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Key, Label,
+    MouseButton, Point, Rect, Size, SizedBox, TextField, Widget,
 };
 
-// ---------------------------------------------------------------------------
-// Undo Redo demo
-// ---------------------------------------------------------------------------
-
-/// Build the Undo Redo demo — a TextField plus usage instructions.
-/// (TextField manages its own internal undo history via Ctrl+Z / Ctrl+Y.)
-pub fn undo_redo(font: Arc<Font>) -> Box<dyn Widget> {
-    let checkbox_value = Rc::new(Cell::new(false));
-    let undoer = Rc::new(RefCell::new(UndoBuffer::new()));
-
-    let mut col = FlexColumn::new()
-        .with_gap(12.0)
-        .with_padding(16.0)
-        .with_panel_bg();
-
-    col.push(
-        Box::new(Label::new("Undo Redo", Arc::clone(&font)).with_font_size(13.0)),
-        0.0,
-    );
-
-    {
-        let value_for_change = Rc::clone(&checkbox_value);
-        let undoer_for_change = Rc::clone(&undoer);
-        col.push(
-            Box::new(
-                Checkbox::new(
-                    "Checkbox with undo/redo",
-                    Arc::clone(&font),
-                    checkbox_value.get(),
-                )
-                .with_font_size(13.0)
-                .with_state_cell(Rc::clone(&checkbox_value))
-                .on_change(move |new_value| {
-                    let old_value = !new_value;
-                    let redo_value = Rc::clone(&value_for_change);
-                    let undo_value = Rc::clone(&value_for_change);
-                    undoer_for_change
-                        .borrow_mut()
-                        .add(Box::new(DoUndoActions::new(
-                            "toggle checkbox",
-                            move || redo_value.set(new_value),
-                            move || undo_value.set(old_value),
-                        )));
-                }),
-            ),
-            0.0,
-        );
-    }
-
-    col.push(
-        Box::new(
-            SizedBox::new().with_height(34.0).with_child(Box::new(
-                TextField::new(Arc::clone(&font))
-                    .with_font_size(13.0)
-                    .with_text("Text with undo/redo"),
-            )),
-        ),
-        0.0,
-    );
-
-    let mut buttons = FlexRow::new().with_gap(8.0);
-    {
-        let undoer_for_enabled = Rc::clone(&undoer);
-        let undoer_for_click = Rc::clone(&undoer);
-        buttons.push(
-            Box::new(
-                Button::new("Undo", Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_enabled_fn(move || undoer_for_enabled.borrow().can_undo())
-                    .on_click(move || {
-                        undoer_for_click.borrow_mut().undo();
-                        agg_gui::animation::request_tick();
-                    }),
-            ),
-            0.0,
-        );
-    }
-    {
-        let undoer_for_enabled = Rc::clone(&undoer);
-        let undoer_for_click = Rc::clone(&undoer);
-        buttons.push(
-            Box::new(
-                Button::new("Redo", Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_enabled_fn(move || undoer_for_enabled.borrow().can_redo())
-                    .on_click(move || {
-                        undoer_for_click.borrow_mut().redo();
-                        agg_gui::animation::request_tick();
-                    }),
-            ),
-            0.0,
-        );
-    }
-    col.push(Box::new(buttons), 0.0);
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    col.push(
-        Box::new(Label::new("Keyboard shortcuts:", Arc::clone(&font)).with_font_size(12.0)),
-        0.0,
-    );
-
-    for line in [
-        "Ctrl+Z         — undo last edit",
-        "Ctrl+Y         — redo",
-        "Ctrl+Shift+Z   — redo (alternate)",
-        "Ctrl+A         — select all",
-        "Ctrl+C / X / V — clipboard",
-    ] {
-        col.push(
-            Box::new(Label::new(line, Arc::clone(&font)).with_font_size(12.0)),
-            0.0,
-        );
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(
-        Box::new(
-            Label::new(
-                "The buttons use agg-gui's shared UndoBuffer for the checkbox. The text field \
-         keeps its own edit history for Ctrl+Z / Ctrl+Y, matching the command-history pattern \
-         egui demonstrates with Undoer<State>.",
-                Arc::clone(&font),
-            )
-            .with_font_size(11.0),
-        ),
-        0.0,
-    );
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(col)
-}
-
-// ---------------------------------------------------------------------------
-// Window Options demo
-// ---------------------------------------------------------------------------
-
-/// Build the Window Options demo — checkboxes reflecting window capabilities.
-pub fn window_options(font: Arc<Font>) -> Box<dyn Widget> {
-    let resizable = Rc::new(Cell::new(true));
-    let collapsible = Rc::new(Cell::new(true));
-    let auto_sized = Rc::new(Cell::new(false));
-    let anchored = Rc::new(Cell::new(false));
-
-    let mut col = FlexColumn::new()
-        .with_gap(14.0)
-        .with_padding(16.0)
-        .with_panel_bg();
-
-    col.push(
-        Box::new(Label::new("Window options", Arc::clone(&font)).with_font_size(12.0)),
-        0.0,
-    );
-
-    {
-        let v = Rc::clone(&resizable);
-        col.push(
-            Box::new(
-                Checkbox::new("Resizable", Arc::clone(&font), resizable.get())
-                    .with_font_size(13.0)
-                    .on_change(move |b| v.set(b)),
-            ),
-            0.0,
-        );
-    }
-    {
-        let v = Rc::clone(&collapsible);
-        col.push(
-            Box::new(
-                Checkbox::new("Collapsible", Arc::clone(&font), collapsible.get())
-                    .with_font_size(13.0)
-                    .on_change(move |b| v.set(b)),
-            ),
-            0.0,
-        );
-    }
-    {
-        let v = Rc::clone(&auto_sized);
-        col.push(
-            Box::new(
-                Checkbox::new("Auto-sized", Arc::clone(&font), auto_sized.get())
-                    .with_font_size(13.0)
-                    .on_change(move |b| v.set(b)),
-            ),
-            0.0,
-        );
-    }
-    {
-        let v = Rc::clone(&anchored);
-        col.push(
-            Box::new(
-                Checkbox::new("Anchored", Arc::clone(&font), anchored.get())
-                    .with_font_size(13.0)
-                    .on_change(move |b| v.set(b)),
-            ),
-            0.0,
-        );
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(
-        Box::new(
-            Label::new("Current window size: 360 \u{00d7} 290", Arc::clone(&font))
-                .with_font_size(12.0),
-        ),
-        0.0,
-    );
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(col)
-}
+mod basic;
+pub use basic::{undo_redo, window_options};
 
 // ---------------------------------------------------------------------------
 // Modals demo
@@ -231,6 +20,8 @@ struct ModalState {
     user_open: Cell<bool>,
     save_open: Cell<bool>,
     save_progress: Cell<Option<f64>>,
+    name: Rc<RefCell<String>>,
+    role: Rc<Cell<usize>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -240,21 +31,37 @@ enum ModalLayer {
     Progress,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModalFocus {
+    Name,
+}
+
 /// Inline modal overlay: shown while any modal layer is open.
 struct ModalOverlay {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     state: Rc<ModalState>,
     font: Arc<Font>,
+    name_field: TextField,
+    role_combo: ComboBox,
+    focus: Option<ModalFocus>,
 }
 
 impl ModalOverlay {
     fn new(font: Arc<Font>, state: Rc<ModalState>) -> Self {
+        let name_field = TextField::new(Arc::clone(&font))
+            .with_font_size(12.0)
+            .with_text_cell(Rc::clone(&state.name));
+        let role_combo = ComboBox::new(vec!["user", "admin"], state.role.get(), Arc::clone(&font))
+            .with_selected_cell(Rc::clone(&state.role));
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
             state,
             font,
+            name_field,
+            role_combo,
+            focus: None,
         }
     }
 
@@ -307,6 +114,38 @@ impl ModalOverlay {
         }
     }
 
+    fn name_rect(&self, modal: Rect) -> Rect {
+        Rect::new(
+            54.0,
+            modal.height - 64.0,
+            (modal.width - 70.0).max(60.0),
+            26.0,
+        )
+    }
+
+    fn role_rect(&self, modal: Rect) -> Rect {
+        Rect::new(
+            54.0,
+            modal.height - 96.0,
+            (modal.width - 70.0).max(60.0),
+            24.0,
+        )
+    }
+
+    fn prepare_user_controls(&mut self, modal: Rect) {
+        let name_rect = self.name_rect(modal);
+        self.name_field
+            .layout(Size::new(name_rect.width, name_rect.height));
+        self.name_field
+            .set_bounds(Rect::new(0.0, 0.0, name_rect.width, name_rect.height));
+
+        let role_rect = self.role_rect(modal);
+        self.role_combo
+            .layout(Size::new(role_rect.width, role_rect.height));
+        self.role_combo
+            .set_bounds(Rect::new(0.0, 0.0, role_rect.width, role_rect.height));
+    }
+
     fn draw_text(
         &self,
         ctx: &mut dyn DrawCtx,
@@ -338,9 +177,12 @@ impl ModalOverlay {
         ctx.restore();
     }
 
-    fn draw_modal(&self, ctx: &mut dyn DrawCtx, layer: ModalLayer) {
+    fn draw_modal(&mut self, ctx: &mut dyn DrawCtx, layer: ModalLayer) {
         let v = ctx.visuals();
         let rect = self.modal_rect(layer);
+        if layer == ModalLayer::User {
+            self.prepare_user_controls(rect);
+        }
         ctx.set_fill_color(v.window_fill);
         ctx.begin_path();
         ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, 8.0);
@@ -363,22 +205,19 @@ impl ModalOverlay {
                     14.0,
                     v.text_color,
                 );
-                self.draw_text(
-                    ctx,
-                    "Name: John Doe",
-                    12.0,
-                    rect.height - 52.0,
-                    11.5,
-                    v.text_dim,
-                );
-                self.draw_text(
-                    ctx,
-                    "Role: user",
-                    12.0,
-                    rect.height - 76.0,
-                    11.5,
-                    v.text_dim,
-                );
+                self.draw_text(ctx, "Name:", 12.0, rect.height - 52.0, 11.5, v.text_dim);
+                let name_rect = self.name_rect(rect);
+                ctx.save();
+                ctx.translate(name_rect.x, name_rect.y);
+                paint_subtree(&mut self.name_field, ctx);
+                ctx.restore();
+
+                self.draw_text(ctx, "Role:", 12.0, rect.height - 76.0, 11.5, v.text_dim);
+                let role_rect = self.role_rect(rect);
+                ctx.save();
+                ctx.translate(role_rect.x, role_rect.y);
+                paint_subtree(&mut self.role_combo, ctx);
+                ctx.restore();
             }
             ModalLayer::Save => {
                 self.draw_text(
@@ -527,8 +366,52 @@ impl Widget for ModalOverlay {
                     return EventResult::Consumed;
                 }
                 let local = Point::new(pos.x - modal_rect.x, pos.y - modal_rect.y);
+                if layer == ModalLayer::User {
+                    self.prepare_user_controls(modal_rect);
+                    let name_rect = self.name_rect(modal_rect);
+                    if Self::point_in_rect(local, name_rect) {
+                        self.focus = Some(ModalFocus::Name);
+                        self.name_field.on_event(&Event::FocusGained);
+                        let field_pos = Point::new(local.x - name_rect.x, local.y - name_rect.y);
+                        let result = self.name_field.on_event(&Event::MouseDown {
+                            pos: field_pos,
+                            button: MouseButton::Left,
+                            modifiers: Default::default(),
+                        });
+                        agg_gui::animation::request_tick();
+                        return if result == EventResult::Consumed {
+                            EventResult::Consumed
+                        } else {
+                            EventResult::Consumed
+                        };
+                    }
+
+                    let role_rect = self.role_rect(modal_rect);
+                    if Self::point_in_rect(local, role_rect)
+                        || (self
+                            .role_combo
+                            .hit_test(Point::new(local.x - role_rect.x, local.y - role_rect.y)))
+                    {
+                        if self.focus == Some(ModalFocus::Name) {
+                            self.name_field.on_event(&Event::FocusLost);
+                        }
+                        self.focus = None;
+                        let combo_pos = Point::new(local.x - role_rect.x, local.y - role_rect.y);
+                        self.role_combo.on_event(&Event::MouseDown {
+                            pos: combo_pos,
+                            button: MouseButton::Left,
+                            modifiers: Default::default(),
+                        });
+                        agg_gui::animation::request_tick();
+                        return EventResult::Consumed;
+                    }
+                }
                 for (label, rect) in self.button_rects(layer) {
                     if Self::point_in_rect(local, rect) {
+                        if self.focus == Some(ModalFocus::Name) {
+                            self.name_field.on_event(&Event::FocusLost);
+                            self.focus = None;
+                        }
                         match (layer, label) {
                             (ModalLayer::User, "Save") => self.state.save_open.set(true),
                             (ModalLayer::User, "Cancel") => self.state.user_open.set(false),
@@ -541,6 +424,76 @@ impl Widget for ModalOverlay {
                         agg_gui::animation::request_tick();
                         return EventResult::Consumed;
                     }
+                }
+                EventResult::Consumed
+            }
+            Event::MouseUp {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
+                if layer == ModalLayer::User {
+                    let pos = agg_gui::current_mouse_world().unwrap_or(*pos);
+                    let modal_rect = self.modal_rect(layer);
+                    let local = Point::new(pos.x - modal_rect.x, pos.y - modal_rect.y);
+                    let name_rect = self.name_rect(modal_rect);
+                    if Self::point_in_rect(local, name_rect) {
+                        let field_pos = Point::new(local.x - name_rect.x, local.y - name_rect.y);
+                        self.name_field.on_event(&Event::MouseUp {
+                            pos: field_pos,
+                            button: MouseButton::Left,
+                            modifiers: Default::default(),
+                        });
+                    }
+                    let role_rect = self.role_rect(modal_rect);
+                    let combo_pos = Point::new(local.x - role_rect.x, local.y - role_rect.y);
+                    self.role_combo.on_event(&Event::MouseUp {
+                        pos: combo_pos,
+                        button: MouseButton::Left,
+                        modifiers: Default::default(),
+                    });
+                }
+                EventResult::Consumed
+            }
+            Event::MouseMove { pos } => {
+                if layer == ModalLayer::User {
+                    let pos = agg_gui::current_mouse_world().unwrap_or(*pos);
+                    let modal_rect = self.modal_rect(layer);
+                    let local = Point::new(pos.x - modal_rect.x, pos.y - modal_rect.y);
+                    let name_rect = self.name_rect(modal_rect);
+                    self.name_field.on_event(&Event::MouseMove {
+                        pos: Point::new(local.x - name_rect.x, local.y - name_rect.y),
+                    });
+                    let role_rect = self.role_rect(modal_rect);
+                    self.role_combo.on_event(&Event::MouseMove {
+                        pos: Point::new(local.x - role_rect.x, local.y - role_rect.y),
+                    });
+                }
+                EventResult::Consumed
+            }
+            Event::MouseWheel {
+                pos,
+                delta_y,
+                delta_x,
+                modifiers,
+            } => {
+                if layer == ModalLayer::User {
+                    let pos = agg_gui::current_mouse_world().unwrap_or(*pos);
+                    let modal_rect = self.modal_rect(layer);
+                    let local = Point::new(pos.x - modal_rect.x, pos.y - modal_rect.y);
+                    let role_rect = self.role_rect(modal_rect);
+                    self.role_combo.on_event(&Event::MouseWheel {
+                        pos: Point::new(local.x - role_rect.x, local.y - role_rect.y),
+                        delta_y: *delta_y,
+                        delta_x: *delta_x,
+                        modifiers: *modifiers,
+                    });
+                }
+                EventResult::Consumed
+            }
+            Event::KeyDown { .. } | Event::KeyUp { .. } => {
+                if self.focus == Some(ModalFocus::Name) {
+                    return self.name_field.on_event(event);
                 }
                 EventResult::Consumed
             }
@@ -673,6 +626,50 @@ mod tests {
 
         assert_eq!(state.save_progress.get(), Some(0.0));
         assert_eq!(overlay.top_layer(), Some(ModalLayer::Progress));
+    }
+
+    #[test]
+    fn user_modal_edits_name_and_role_state() {
+        let state = Rc::new(ModalState::default());
+        state.user_open.set(true);
+        let mut overlay = ModalOverlay::new(test_font(), Rc::clone(&state));
+        agg_gui::widget::set_current_viewport(Size::new(360.0, 220.0));
+        overlay.layout(Size::new(360.0, 220.0));
+        let modal = overlay.modal_rect(ModalLayer::User);
+
+        let name_rect = overlay.name_rect(modal);
+        let name_click = Point::new(modal.x + name_rect.x + 8.0, modal.y + name_rect.y + 12.0);
+        agg_gui::widget::set_current_mouse_world(name_click);
+        overlay.on_event(&Event::MouseDown {
+            pos: name_click,
+            button: MouseButton::Left,
+            modifiers: Default::default(),
+        });
+        for c in "Z".chars() {
+            overlay.on_event(&Event::KeyDown {
+                key: Key::Char(c),
+                modifiers: Default::default(),
+            });
+        }
+        assert!(state.name.borrow().contains('Z'));
+
+        let role_rect = overlay.role_rect(modal);
+        let combo_click = Point::new(modal.x + role_rect.x + 8.0, modal.y + role_rect.y + 12.0);
+        agg_gui::widget::set_current_mouse_world(combo_click);
+        overlay.on_event(&Event::MouseDown {
+            pos: combo_click,
+            button: MouseButton::Left,
+            modifiers: Default::default(),
+        });
+
+        let admin_click = Point::new(modal.x + role_rect.x + 8.0, modal.y + role_rect.y - 33.0);
+        agg_gui::widget::set_current_mouse_world(admin_click);
+        overlay.on_event(&Event::MouseDown {
+            pos: admin_click,
+            button: MouseButton::Left,
+            modifiers: Default::default(),
+        });
+        assert_eq!(state.role.get(), 1);
     }
 
     #[test]

@@ -151,12 +151,17 @@ impl App {
             crate::widgets::combo_box::paint_global_combo_popups(ctx);
             crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
             paint_global_overlays(self.root.as_mut(), ctx);
+            // Modal/global overlays can contain ComboBox widgets. They submit
+            // their popups while `paint_global_overlays` runs, so drain once
+            // more to draw those popups above the modal body.
+            crate::widgets::combo_box::paint_global_combo_popups(ctx);
             ctx.restore();
         } else {
             paint_subtree(self.root.as_mut(), ctx);
             crate::widgets::combo_box::paint_global_combo_popups(ctx);
             crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
             paint_global_overlays(self.root.as_mut(), ctx);
+            crate::widgets::combo_box::paint_global_combo_popups(ctx);
         }
     }
 
