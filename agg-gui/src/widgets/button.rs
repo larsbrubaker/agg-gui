@@ -332,7 +332,7 @@ impl Widget for Button {
         ctx.set_fill_color(disabled_text);
         if let Some(m) = ctx.measure_text(&self.label_text) {
             let tx = ((w - m.width) * 0.5).max(0.0);
-            let ty = ((h - (m.ascent - m.descent)) * 0.5).max(0.0);
+            let ty = m.centered_baseline_y(h).max(0.0);
             ctx.fill_text(&self.label_text, tx, ty);
         }
     }

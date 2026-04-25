@@ -867,11 +867,15 @@ fn translate_event(event: &Event, new_pos: Point) -> Event {
             modifiers: *modifiers,
         },
         Event::MouseWheel {
-            delta_y, delta_x, ..
+            delta_y,
+            delta_x,
+            modifiers,
+            ..
         } => Event::MouseWheel {
             pos: new_pos,
             delta_y: *delta_y,
             delta_x: *delta_x,
+            modifiers: *modifiers,
         },
         other => other.clone(),
     }
@@ -1319,18 +1323,31 @@ impl App {
     /// Mouse wheel scrolled. `screen_y` is Y-down. `delta_y` positive = scroll up.
     /// `delta_x` positive = content moves right.
     pub fn on_mouse_wheel(&mut self, screen_x: f64, screen_y: f64, delta_y: f64) {
-        self.on_mouse_wheel_xy(screen_x, screen_y, 0.0, delta_y);
+        self.on_mouse_wheel_xy_mods(screen_x, screen_y, 0.0, delta_y, Modifiers::default());
     }
 
     /// Mouse wheel with an explicit horizontal component (trackpad pan,
     /// shift+wheel via the platform harness).
     pub fn on_mouse_wheel_xy(&mut self, screen_x: f64, screen_y: f64, delta_x: f64, delta_y: f64) {
+        self.on_mouse_wheel_xy_mods(screen_x, screen_y, delta_x, delta_y, Modifiers::default());
+    }
+
+    /// Mouse wheel with explicit horizontal component and modifier state.
+    pub fn on_mouse_wheel_xy_mods(
+        &mut self,
+        screen_x: f64,
+        screen_y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: Modifiers,
+    ) {
         let pos = self.flip_y(screen_x, screen_y);
         let hit = self.compute_hit(pos);
         let event = Event::MouseWheel {
             pos,
             delta_y,
             delta_x,
+            modifiers,
         };
         if let Some(path) = hit {
             dispatch_event(&mut self.root, &path, &event, pos);

@@ -93,6 +93,7 @@ pub enum Event {
         pos: Point,
         delta_y: f64,
         delta_x: f64,
+        modifiers: Modifiers,
     },
 }
 

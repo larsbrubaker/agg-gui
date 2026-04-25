@@ -326,11 +326,16 @@ pub struct ScrollView {
     // ── External cell bindings ──
     offset_cell: Option<Rc<Cell<f64>>>,
     max_scroll_cell: Option<Rc<Cell<f64>>>,
+    h_offset_cell: Option<Rc<Cell<f64>>>,
+    h_max_scroll_cell: Option<Rc<Cell<f64>>>,
     visibility_cell: Option<Rc<Cell<ScrollBarVisibility>>>,
     style_cell: Option<Rc<Cell<ScrollBarStyle>>>,
     /// Visible viewport rect in content-space Y-up coordinates, written each
     /// layout.  Children doing virtual rendering read this cell.
     viewport_cell: Option<Rc<Cell<Rect>>>,
+
+    middle_dragging: bool,
+    middle_last_pos: Point,
 }
 
 impl ScrollView {
@@ -352,9 +357,13 @@ impl ScrollView {
             style_explicit: false,
             offset_cell: None,
             max_scroll_cell: None,
+            h_offset_cell: None,
+            h_max_scroll_cell: None,
             visibility_cell: None,
             style_cell: None,
             viewport_cell: None,
+            middle_dragging: false,
+            middle_last_pos: Point::ORIGIN,
         }
     }
 
@@ -393,6 +402,16 @@ impl ScrollView {
 
     pub fn with_max_scroll_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
         self.max_scroll_cell = Some(cell);
+        self
+    }
+
+    pub fn with_h_offset_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
+        self.h_offset_cell = Some(cell);
+        self
+    }
+
+    pub fn with_h_max_scroll_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
+        self.h_max_scroll_cell = Some(cell);
         self
     }
 
@@ -585,6 +604,15 @@ impl ScrollView {
         self.h.offset = self.h.offset.clamp(0.0, self.h.max_scroll(vw)).round();
     }
 
+    fn publish_offsets(&self) {
+        if let Some(c) = &self.offset_cell {
+            c.set(self.v.offset);
+        }
+        if let Some(c) = &self.h_offset_cell {
+            c.set(self.h.offset);
+        }
+    }
+
     // ── Layout property forwarding ────────────────────────────────────────────
 
     pub fn with_margin(mut self, m: Insets) -> Self {
@@ -678,7 +706,7 @@ impl Widget for ScrollView {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        if self.v.dragging || self.h.dragging {
+        if self.v.dragging || self.h.dragging || self.middle_dragging {
             return true;
         }
         let b = self.bounds();
@@ -689,7 +717,7 @@ impl Widget for ScrollView {
     }
 
     fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
-        if self.v.dragging || self.h.dragging {
+        if self.v.dragging || self.h.dragging || self.middle_dragging {
             return true;
         }
         let (vw, vh) = self.viewport();
@@ -706,6 +734,9 @@ impl Widget for ScrollView {
         // Pull live state from external cells first.
         if let Some(c) = &self.offset_cell {
             self.v.offset = c.get();
+        }
+        if let Some(c) = &self.h_offset_cell {
+            self.h.offset = c.get();
         }
         if let Some(c) = &self.visibility_cell {
             self.bar_visibility = c.get();
@@ -759,6 +790,12 @@ impl Widget for ScrollView {
         }
         if let Some(c) = &self.max_scroll_cell {
             c.set(self.v.max_scroll(vh));
+        }
+        if let Some(c) = &self.h_offset_cell {
+            c.set(self.h.offset);
+        }
+        if let Some(c) = &self.h_max_scroll_cell {
+            c.set(self.h.max_scroll(vw));
         }
         if let Some(c) = &self.viewport_cell {
             // Content-space viewport rect in Y-UP content coords:
@@ -920,6 +957,9 @@ impl Widget for ScrollView {
                 if let Some(c) = &self.offset_cell {
                     c.set(self.v.offset);
                 }
+                if let Some(c) = &self.h_offset_cell {
+                    c.set(self.h.offset);
+                }
                 if consumed {
                     crate::animation::request_tick();
                     EventResult::Consumed
@@ -930,6 +970,24 @@ impl Widget for ScrollView {
 
             // ── Mouse move ────────────────────────────────────────────────────
             Event::MouseMove { pos } => {
+                if self.middle_dragging {
+                    let dx = pos.x - self.middle_last_pos.x;
+                    let dy = pos.y - self.middle_last_pos.y;
+                    if self.h.enabled {
+                        self.h.offset -= dx;
+                    }
+                    if self.v.enabled {
+                        self.v.offset += dy;
+                    }
+                    self.middle_last_pos = *pos;
+                    self.clamp_offsets();
+                    let (_, vh) = self.viewport();
+                    self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+                    self.publish_offsets();
+                    crate::animation::request_tick();
+                    return EventResult::Consumed;
+                }
+
                 let (vw, vh) = self.viewport();
                 let v_scroll = self.v.enabled && self.v.content > vh;
                 let h_scroll = self.h.enabled && self.h.content > vw;
@@ -973,6 +1031,9 @@ impl Widget for ScrollView {
                         let frac = (new_tx - lo) / travel;
                         self.h.offset = (frac * self.h.max_scroll(vw)).max(0.0);
                         self.clamp_offsets();
+                        if let Some(c) = &self.h_offset_cell {
+                            c.set(self.h.offset);
+                        }
                     }
                     crate::animation::request_tick();
                     return EventResult::Consumed;
@@ -981,6 +1042,23 @@ impl Widget for ScrollView {
             }
 
             // ── Mouse down ────────────────────────────────────────────────────
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                let (vw, vh) = self.viewport();
+                if (self.v.enabled && self.v.content > vh)
+                    || (self.h.enabled && self.h.content > vw)
+                {
+                    self.middle_dragging = true;
+                    self.middle_last_pos = *pos;
+                    crate::animation::request_tick();
+                    return EventResult::Consumed;
+                }
+                EventResult::Ignored
+            }
+
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
@@ -1031,6 +1109,9 @@ impl Widget for ScrollView {
                             self.h.offset = (self.h.offset + page).min(self.h.max_scroll(vw));
                         }
                         self.clamp_offsets();
+                        if let Some(c) = &self.h_offset_cell {
+                            c.set(self.h.offset);
+                        }
                         crate::animation::request_tick();
                     }
                     return EventResult::Consumed;
@@ -1039,13 +1120,15 @@ impl Widget for ScrollView {
             }
 
             // ── Mouse up ──────────────────────────────────────────────────────
-            Event::MouseUp {
-                button: MouseButton::Left,
-                ..
-            } => {
-                let was = self.v.dragging || self.h.dragging;
+            Event::MouseUp { button, .. } => {
+                let was = self.v.dragging
+                    || self.h.dragging
+                    || (*button == MouseButton::Middle && self.middle_dragging);
                 self.v.dragging = false;
                 self.h.dragging = false;
+                if *button == MouseButton::Middle {
+                    self.middle_dragging = false;
+                }
                 if was {
                     crate::animation::request_tick();
                     EventResult::Consumed

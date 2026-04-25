@@ -101,69 +101,46 @@ SVG path node
 
 ---
 
-## 3. Phased Implementation Plan
+## 3. Current Status
 
-The plan is broken into phases that each produce a working, testable subset of SVG. Ship phase by phase.
+Done, briefly:
 
-### Phase 1 — Foundation (Week 1)
+- Library-owned SVG walker lives in `agg-gui` and renders only through `DrawCtx`.
+- RGBA, LCD coverage, and hardware demo targets share the same SVG render path.
+- Implemented solid fills, fill rules, transforms, cubic/quadratic paths, strokes, line caps/joins, miter limits, dashes, opacity, embedded raster images, and explicit reference-size rendering.
+- Added `resvg-test-suite` as the reference corpus and use its paired PNGs in tests and demos.
+- SVG Test shows four fixed columns: `reference.png`, `agg-rgba-bitmap render`, `agg-lcd-bitmap render`, and `hardware render`.
+- SVG Test supports fixed headers, bidirectional scrolling, default 50% zoom, 50%/100%/Custom zoom controls, and Ctrl+wheel zoom around the mouse position.
+- LCD demo display now preserves and blits the LCD color/alpha planes instead of collapsing them to RGBA.
 
-**Deliverable:** Render solid-filled, untransformed paths from a parsed SVG through the gfx bridge, with the same renderer callable for `agg_rgb`, `agg_lcd`, and `agg_hardware` targets.
+Current SVG Test rows are intentionally sparse and represent broad capability boundaries:
 
-Tasks:
-
-1. Add dependencies. Pin `usvg` to a specific recent version (0.44 or later — the segment iterator API changed significantly post-0.40).
-2. Add the renderer as library code in the `agg-gui` crate and expose it from `lib.rs`. The SVG test suite and demo viewer must import and call this API; they must not contain their own renderer copy.
-3. Build the tree-walker scaffold. Recursive descent over `usvg::Node`, with an SVG paint-state stack that maps into `DrawCtx` state.
-4. Define the public rendering entry point around the bridge, not around a concrete framebuffer:
-   ```rust
-   pub fn render_svg(tree: &usvg::Tree, ctx: &mut dyn DrawCtx) -> Result<(), SvgRenderError> {
-       // Walk tree and emit bridge calls only.
-       Ok(())
-   }
-   ```
-5. Implement the path-segment converter as bridge calls:
-   ```rust
-   fn emit_usvg_path(path: &usvg::Path, ctx: &mut dyn DrawCtx) {
-       ctx.begin_path();
-       for seg in path.data().segments() {
-           match seg {
-               PathSegment::MoveTo(p)         => ctx.move_to(p.x as f64, p.y as f64),
-               PathSegment::LineTo(p)         => ctx.line_to(p.x as f64, p.y as f64),
-               PathSegment::QuadTo(p1, p2)    => ctx.quad_to(p1.x as f64, p1.y as f64,
-                                                             p2.x as f64, p2.y as f64),
-               PathSegment::CubicTo(p1,p2,p3) => ctx.cubic_to(p1.x as f64, p1.y as f64,
-                                                              p2.x as f64, p2.y as f64,
-                                                              p3.x as f64, p3.y as f64),
-               PathSegment::Close             => ctx.close_path(),
-           }
-       }
-   }
-   ```
-6. Implement solid fill dispatch by setting the bridge fill paint and calling `ctx.fill()`. Map `usvg::FillRule` to a bridge-level fill-rule setting; if the bridge lacks this today, add it there and implement it for each target.
-7. Set up test/demo target factories for `agg_rgb`, `agg_lcd`, and `agg_hardware`. These factories own the framebuffer/buffer/window setup, then call the same library `render_svg(..., &mut dyn DrawCtx)` function.
-
-**Acceptance:** All tests under `resvg-test-suite/svg/shapes/` and `resvg-test-suite/svg/paths/` pass.
+- `shapes/rect/simple-case.svg` — basic solid fill and viewport mapping.
+- `shapes/path/M-L-L-Z.svg` — path construction and fill.
+- `painting/stroke/line-as-curve-1.svg` — stroke pipeline.
+- `structure/image/embedded-png.svg` — embedded raster image decode/blit.
 
 ---
 
-### Phase 2 — Strokes and transforms (Week 2)
+## 4. Remaining Implementation Plan
 
-Tasks:
+Keep landing features through the bridge first, then add focused regression tests and one or more curated SVG Test rows only when the feature adds meaningfully different visual capability.
 
-1. Map each node's SVG transform into the bridge transform stack. `usvg` exposes transforms as `tiny_skia_path::Transform` (a 6-element affine); convert them into `TransAffine`, including the SVG-to-project coordinate conversion described below.
-2. Map `usvg::Stroke` fields onto bridge state:
-   - `width` → stroke width
-   - `linecap` (Butt/Round/Square) → AGG line cap
-   - `linejoin` (Miter/Round/Bevel) → AGG line join
-   - `miterlimit` → miter limit
-3. Dashing: easiest path is to let `usvg` pre-flatten dashes (it does this by default). If we ever need to preserve dashes through non-affine effects, add a bridge dash primitive and implement it behind the bridge rather than calling `ConvDash` directly from the SVG layer.
-4. Stroke-to-fill ordering: per SVG spec, fill is painted before stroke. Render in that order per node.
+### Completed Foundation
 
-**Acceptance:** All tests under `resvg-test-suite/svg/painting-stroke-*` and `resvg-test-suite/svg/structure-transform-*` pass.
+Keep covered by tests; do not add more demo rows unless they show a visually distinct capability:
+
+- Solid fills and paths.
+- Fill rules.
+- Transforms and root SVG Y-down to `agg-gui` Y-up mapping.
+- Strokes, caps, joins, miter limits, and dashes.
+- Opacity.
+- Embedded raster images.
+- Explicit output sizing to match reference PNG resolution.
 
 ---
 
-### Phase 3 — Gradients and patterns (Weeks 3–4)
+### Next: Gradients and Patterns
 
 Tasks:
 
@@ -172,11 +149,11 @@ Tasks:
 3. **Spread modes:** Pad / Reflect / Repeat — represent these at the bridge paint level and implement them per target.
 4. **Patterns:** Render the pattern's content tree into an offscreen target through the same bridge, then feed the resulting pattern source back through a bridge pattern primitive. Pattern transforms apply on top.
 
-**Acceptance:** All tests under `resvg-test-suite/svg/pservers-grad-*` and `resvg-test-suite/svg/pservers-pattern-*` pass.
+Acceptance: representative `resvg-test-suite/tests/paint-servers/linearGradient`, `radialGradient`, and `pattern` cases pass through RGBA/LCD/hardware targets.
 
 ---
 
-### Phase 4 — Clipping and masking (Week 5)
+### Clipping and Masking
 
 This is where we lean on `clipper2-rust`.
 
@@ -187,11 +164,11 @@ Tasks:
 3. **Nested clipping:** Push/pop a clip stack. Each push intersects the new clip with the current effective clip via `clipper2-rust`, then updates bridge clip state.
 4. **Masks (`<mask>`):** Render the mask content through the bridge into a grayscale/luminance mask target, then apply that mask through the bridge mask primitive.
 
-**Acceptance:** All tests under `resvg-test-suite/svg/masking-path-*` and `resvg-test-suite/svg/masking-mask-*` pass.
+Acceptance: representative `resvg-test-suite/tests/masking/clipPath` and `mask` cases pass.
 
 ---
 
-### Phase 5 — Text (Week 6)
+### Text
 
 Recommended approach: enable `usvg`'s built-in text-to-path conversion. Text becomes outlined paths and flows through the existing path renderer with no additional code.
 
@@ -201,23 +178,23 @@ Tasks:
 2. Call `usvg::Tree::postprocess()` (or the equivalent in the version we pin) to convert all `<text>` to paths before walking.
 3. Verify font fallback behavior on systems without the requested fonts.
 
-**Acceptance:** All tests under `resvg-test-suite/svg/text-*` render with correct glyphs and positioning.
+Acceptance: representative `resvg-test-suite/tests/text` cases render with correct glyphs and positioning.
 
 ---
 
-### Phase 6 — Images and `<use>` (Week 7)
+### Images and `<use>`
 
 Tasks:
 
-1. **Raster images:** Decode `usvg::Image` data (PNG/JPEG) using `image` crate. Blit through a bridge image primitive with interpolation selected from the SVG `image-rendering` hint; software backends can use AGG image span generators behind that primitive.
+1. **Raster images:** done for embedded images; continue with external images and `image-rendering` interpolation.
 2. **Nested SVG images:** `usvg` flattens these into the main tree, so no special handling is usually needed.
 3. **`<use>` elements:** Already expanded by `usvg`. No work required.
 
-**Acceptance:** Images appear with correct positioning, scaling, and interpolation quality.
+Acceptance: embedded and external image cases render with correct positioning, scaling, and interpolation quality.
 
 ---
 
-### Phase 7 — Filters (Weeks 8+, optional)
+### Filters
 
 This is the largest feature surface and lowest priority. `usvg` resolves the filter graph but does not execute it.
 
@@ -228,11 +205,11 @@ Strategy: implement filters **on demand**, starting with the most common:
 3. `feOffset`, `feFlood`, `feComposite`, `feMerge` — needed for drop shadows, which account for the majority of real-world filter usage.
 4. Everything else — defer until a real document needs it.
 
-**Acceptance:** Drop-shadow filter chain renders correctly. Other filters degrade gracefully (skip with a warning rather than crash).
+Acceptance: drop-shadow filter chains render correctly. Other filters degrade gracefully until implemented.
 
 ---
 
-## 4. Mapping Reference
+## 5. Mapping Reference
 
 Quick lookup for developers:
 
@@ -255,7 +232,7 @@ Quick lookup for developers:
 
 ---
 
-## 5. Coordinate System and Numeric Type Notes
+## 6. Coordinate System and Numeric Type Notes
 
 - The bridge and widget system use **Y-up** coordinates: origin at bottom-left, positive Y upward. SVG uses Y-down document coordinates. The SVG renderer owns this conversion at its root transform, so backends do not special-case SVG orientation.
 - AGG 2.6 (and our port) uses `f64` throughout. `usvg` returns coordinates as `f32` (it builds on `tiny-skia-path`). Cast at the bridge boundary; no precision concerns for typical SVG content.
@@ -264,11 +241,11 @@ Quick lookup for developers:
 
 ---
 
-## 6. Testing Strategy
+## 7. Testing Strategy
 
 We use a single source of test SVGs — the **`resvg` test suite** — for both automated regression testing and a developer-facing visual demo. One corpus, two consumers. This keeps maintenance low and ensures the demo always reflects what CI is actually testing.
 
-### 6.1 Test corpus: `resvg-test-suite`
+### 7.1 Test corpus: `resvg-test-suite`
 
 **Source:** https://github.com/RazrFalcon/resvg-test-suite (also mirrored under `linebender/resvg-test-suite`)
 **License:** MIT
@@ -286,19 +263,18 @@ We use a single source of test SVGs — the **`resvg` test suite** — for both 
 
 ```
 resvg-test-suite/
-├── svg/              ← test SVG files, organized by feature
-├── png/              ← expected reference rendering for each SVG
+├── tests/            ← SVG files and paired PNG references, organized by feature
 ├── images/           ← raster assets referenced by SVGs
 └── fonts/            ← bundled fonts for text tests
 ```
 
 **Vendoring:** Add `resvg-test-suite` as a git submodule under `tests/resvg-test-suite/`. Pin to a specific commit hash so reference renderings don't drift under us. Update the pin deliberately when we want to pull in new tests.
 
-### 6.2 Integration tests (CI)
+### 7.2 Integration tests (CI)
 
 **Location:** `tests/svg_regression.rs`
 
-**Mechanism:** A single parameterized integration test that walks `tests/resvg-test-suite/svg/`, imports the SVG renderer from the `agg-gui` library crate, renders each SVG through that shared library API into each available target (`agg_rgb`, `agg_lcd`, and headless/recorded `agg_hardware` where CI supports it), and diffs against the corresponding PNG in `tests/resvg-test-suite/png/`.
+**Mechanism:** A single parameterized integration test that walks `tests/resvg-test-suite/tests/`, imports the SVG renderer from the `agg-gui` library crate, renders each SVG through that shared library API into each available target (`agg_rgb`, `agg_lcd`, and headless/recorded `agg_hardware` where CI supports it), and diffs against the paired PNG next to the SVG.
 
 ```rust
 // tests/svg_regression.rs
@@ -360,15 +336,28 @@ Use `--release` — debug builds of the rasterizer are 10–20× slower and the 
 
 **Output artifact:** The test writes `target/svg-regression/results.json` containing `{ test_path, status_by_target, diff_ratio_by_target, reference_path, agg_rgb_path, agg_lcd_path, agg_hardware_path }` per test. The demo viewer reads this file directly. This means **the demo always reflects the latest CI run** — there's no separate process for generating demo data.
 
-### 6.3 Visual demo viewer
+### 7.3 Visual demo rows
 
-A standalone interactive viewer that lets developers and users page through every test SVG with side-by-side comparison across every production output path.
+The in-app `SVG Test` window is a curated capability gallery, not a dump of every suite case. It should show roughly **40-50 attractive, differentiated rows** selected from the ~1,500 `resvg-test-suite` examples.
 
-**Format:** Single-page web app, served as a static site. Compiled to WebAssembly using `agg-rust`'s existing WASM setup (the same toolchain that powers the AGG demo gallery at `larsbrubaker.github.io/agg-rust/`). This means **the demo renders SVGs live in the browser using the actual pipeline** — not just showing pre-rendered PNGs.
+Each row must demonstrate a meaningfully distinct renderer capability. Avoid adding near-duplicates just because a test exists. The full suite belongs in automated regression tests; the demo rows are for fast visual understanding of progress and breadth.
 
-**Location:** `demos/svg-viewer/`
+Candidate row categories as features land:
 
-**Layout per test:** when a demo window is open it always shows exactly four render columns in this order:
+- Basic fills and simple paths.
+- Fill rules and self-intersections.
+- Transforms and viewBox scaling.
+- Stroke joins, caps, miter limits, and dashes.
+- Group opacity and paint opacity.
+- Embedded and external raster images.
+- Linear gradients, radial gradients, spread modes, and gradient transforms.
+- Patterns.
+- Clip paths and masks.
+- Text converted to paths, including fallback fonts and positioning.
+- Filters, starting with drop shadows.
+- Stress/complex illustration cases once performance work begins.
+
+**Layout:** when the demo window is open it always shows exactly four render columns in this order:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -385,39 +374,28 @@ A standalone interactive viewer that lets developers and users page through ever
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Four columns per test:**
+**Four columns per row:**
 1. **`reference.png`** — the PNG from `resvg-test-suite/png/`, displayed as-is.
 2. **`agg-rgba-bitmap render`** — the SVG rendered through the shared walker into the RGBA bitmap target.
 3. **`agg-lcd-bitmap render`** — the same SVG rendered through the shared walker into the LCD coverage bitmap target, then composited for display.
 4. **`hardware render`** — the same SVG rendered through the shared walker into the hardware target.
 
-Diff overlays are per target and compare each rendered output to `reference.png`. They are controls/overlays on the corresponding render column, not a replacement for any of the four required columns.
+Diff overlays, when added, are per target and compare each rendered output to `reference.png`. They are controls/overlays on the corresponding render column, not a replacement for any of the four required columns.
 
-**Navigation:**
-- Prev/Next buttons and arrow-key shortcuts.
-- A **filter sidebar** with checkboxes for each feature category (paths, strokes, gradients, clipping, text, filters, etc.), derived from the suite's directory structure.
-- A **status filter** — show all / passing only / failing only / known-diff. Driven by the `results.json` from CI.
-- A **search box** that matches against test path/filename.
-- URL hash reflects current test (`#test=gradients/linear-04`) so links are shareable.
+**Viewer controls:**
+- Fixed column headers.
+- Bidirectional scrolling.
+- Default 50% zoom.
+- `50%`, `100%`, and `Custom` zoom state buttons.
+- Ctrl+wheel zooms around the mouse position while normal wheel scrolling still scrolls.
 
-**Aggregate dashboard view:** A landing page with summary stats — pass count, fail count, pass rate per feature category, and a small chart over time if we persist history. Same idea as the resvg suite's own support table at `razrfalcon.github.io/resvg-test-suite/svg-support-table.html`.
-
-**Build:**
-```bash
-cd demos/svg-viewer
-wasm-pack build --target web --release
-# Outputs static files to demos/svg-viewer/dist/ — serve with any static server
-```
-
-**Hosting:** Publish to GitHub Pages on each push to main, alongside the existing AGG demo gallery. URL like `larsbrubaker.github.io/agg-rust/svg-viewer/`.
-
-### 6.4 Performance benchmarks
+### 7.4 Performance benchmarks
 
 Separate from correctness. A small set of large SVGs (city maps, complex illustrations) timed via Criterion. Compare wall-clock render time against `resvg`/`tiny-skia` rendering the same files. We expect AGG to be in the same ballpark; if we're significantly slower, profile and optimize. Located in `benches/svg_render.rs`.
 
 ---
 
-## 7. Open Questions for the Team
+## 8. Open Questions for the Team
 
 1. **Color management.** SVG 2 specifies linear-light blending for many operations. Do we need correct color-space handling now, or is sRGB-naive acceptable for v1? (resvg is sRGB-naive in many places too.)
 2. **Text fallback policy.** Which fonts do we bundle? Do we surface "font not found" warnings to callers, or silently substitute?
@@ -426,7 +404,7 @@ Separate from correctness. A small set of large SVGs (city maps, complex illustr
 
 ---
 
-## 8. References
+## 9. References
 
 - `usvg` on crates.io: https://crates.io/crates/usvg
 - `resvg` source (reference implementation): https://github.com/linebender/resvg

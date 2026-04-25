@@ -4,16 +4,17 @@
 //! native capabilities (clipboard, OS cursors, SVG) are not yet wired up, a
 //! clear informational placeholder is shown instead of broken code.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::framebuffer::unpremultiply_rgba_inplace;
-use agg_gui::lcd_coverage::LcdBuffer;
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
     render_svg_at_size, render_svg_to_framebuffer_at_size, render_svg_to_lcd_buffer_at_size,
     set_cursor_icon, Color, Container, CursorIcon, DrawCtx, Event, EventResult, FlexColumn,
-    FlexRow, Font, Hyperlink, Label, Point, Rect, Resize, ScrollBarVisibility, ScrollView,
-    Separator, Size, SizedBox, TextArea, TextField, Visuals, Widget,
+    FlexRow, Font, Hyperlink, Label, MouseButton, Point, Rect, Resize, ScrollBarVisibility,
+    ScrollView, Separator, Size, SizedBox, TextArea, TextField, Visuals, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -917,6 +918,11 @@ pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
             .map(SvgSampleRender::new)
             .collect::<Vec<_>>(),
     );
+    let zoom = Rc::new(Cell::new(SVG_DEFAULT_ZOOM));
+    let v_offset = Rc::new(Cell::new(0.0));
+    let v_max = Rc::new(Cell::new(0.0));
+    let h_offset = Rc::new(Cell::new(0.0));
+    let h_max = Rc::new(Cell::new(0.0));
 
     let mut root = FlexColumn::new()
         .with_gap(0.0)
@@ -926,14 +932,30 @@ pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
         Box::new(SvgProgressHeader::new(
             Arc::clone(&font),
             Arc::clone(&samples),
+            Rc::clone(&zoom),
+            Rc::clone(&v_offset),
+            Rc::clone(&v_max),
+            Rc::clone(&h_offset),
+            Rc::clone(&h_max),
         )),
         0.0,
     );
     root.push(
         Box::new(
-            ScrollView::new(Box::new(SvgProgressBody::new(Arc::clone(&samples))))
-                .horizontal(true)
-                .with_bar_visibility(ScrollBarVisibility::AlwaysVisible),
+            ScrollView::new(Box::new(SvgProgressBody::new(
+                Arc::clone(&samples),
+                Rc::clone(&zoom),
+                Rc::clone(&v_offset),
+                Rc::clone(&v_max),
+                Rc::clone(&h_offset),
+                Rc::clone(&h_max),
+            )))
+            .horizontal(true)
+            .with_offset_cell(Rc::clone(&v_offset))
+            .with_max_scroll_cell(Rc::clone(&v_max))
+            .with_h_offset_cell(Rc::clone(&h_offset))
+            .with_h_max_scroll_cell(Rc::clone(&h_max))
+            .with_bar_visibility(ScrollBarVisibility::AlwaysVisible),
         ),
         1.0,
     );
@@ -941,23 +963,48 @@ pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(root)
 }
 
-const SVG_HEADER_H: f64 = 82.0;
-const SVG_TITLE_H: f64 = 50.0;
+const SVG_HEADER_H: f64 = 124.0;
+const SVG_TITLE_H: f64 = 92.0;
 const SVG_COLUMN_HEADER_H: f64 = 32.0;
 const SVG_PAD: f64 = 8.0;
 const SVG_GAP: f64 = 8.0;
+const SVG_DEFAULT_ZOOM: f64 = 0.5;
+const SVG_MIN_ZOOM: f64 = 0.1;
+const SVG_MAX_ZOOM: f64 = 8.0;
 
 struct SvgProgressHeader {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     font: Arc<Font>,
     samples: Arc<Vec<SvgSampleRender>>,
+    zoom: Rc<Cell<f64>>,
 }
 
 struct SvgProgressBody {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     samples: Arc<Vec<SvgSampleRender>>,
+    zoom: Rc<Cell<f64>>,
+    v_offset: Rc<Cell<f64>>,
+    v_max: Rc<Cell<f64>>,
+    h_offset: Rc<Cell<f64>>,
+    h_max: Rc<Cell<f64>>,
+}
+
+struct SvgZoomButton {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    label: &'static str,
+    target_zoom: Option<f64>,
+    font: Arc<Font>,
+    samples: Arc<Vec<SvgSampleRender>>,
+    zoom: Rc<Cell<f64>>,
+    v_offset: Rc<Cell<f64>>,
+    v_max: Rc<Cell<f64>>,
+    h_offset: Rc<Cell<f64>>,
+    h_max: Rc<Cell<f64>>,
+    pressed: bool,
+    hovered: bool,
 }
 
 struct SvgSampleRender {
@@ -967,26 +1014,118 @@ struct SvgSampleRender {
     height: u32,
     reference: Result<Arc<Vec<u8>>, String>,
     rgba: Result<Arc<Vec<u8>>, String>,
-    lcd: Result<Arc<Vec<u8>>, String>,
+    lcd: Result<SvgLcdPreview, String>,
 }
 
-impl SvgProgressHeader {
-    fn new(font: Arc<Font>, samples: Arc<Vec<SvgSampleRender>>) -> Self {
+impl SvgZoomButton {
+    fn new(
+        label: &'static str,
+        target_zoom: Option<f64>,
+        font: Arc<Font>,
+        samples: Arc<Vec<SvgSampleRender>>,
+        zoom: Rc<Cell<f64>>,
+        v_offset: Rc<Cell<f64>>,
+        v_max: Rc<Cell<f64>>,
+        h_offset: Rc<Cell<f64>>,
+        h_max: Rc<Cell<f64>>,
+    ) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
+            label,
+            target_zoom,
             font,
             samples,
+            zoom,
+            v_offset,
+            v_max,
+            h_offset,
+            h_max,
+            pressed: false,
+            hovered: false,
+        }
+    }
+
+    fn active(&self) -> bool {
+        match self.target_zoom {
+            Some(target) => is_zoom_level(self.zoom.get(), target),
+            None => !is_zoom_level(self.zoom.get(), 0.5) && !is_zoom_level(self.zoom.get(), 1.0),
+        }
+    }
+
+    fn contains(&self, pos: Point) -> bool {
+        pos.x >= 0.0 && pos.x <= self.bounds.width && pos.y >= 0.0 && pos.y <= self.bounds.height
+    }
+}
+
+struct SvgLcdPreview {
+    color: Arc<Vec<u8>>,
+    alpha: Arc<Vec<u8>>,
+}
+
+impl SvgProgressHeader {
+    fn new(
+        font: Arc<Font>,
+        samples: Arc<Vec<SvgSampleRender>>,
+        zoom: Rc<Cell<f64>>,
+        v_offset: Rc<Cell<f64>>,
+        v_max: Rc<Cell<f64>>,
+        h_offset: Rc<Cell<f64>>,
+        h_max: Rc<Cell<f64>>,
+    ) -> Self {
+        let mut children: Vec<Box<dyn Widget>> = Vec::new();
+        for (label, target_zoom) in [("50%", 0.5), ("100%", 1.0)] {
+            children.push(Box::new(SvgZoomButton::new(
+                label,
+                Some(target_zoom),
+                Arc::clone(&font),
+                Arc::clone(&samples),
+                Rc::clone(&zoom),
+                Rc::clone(&v_offset),
+                Rc::clone(&v_max),
+                Rc::clone(&h_offset),
+                Rc::clone(&h_max),
+            )));
+        }
+        children.push(Box::new(SvgZoomButton::new(
+            "Custom",
+            None,
+            Arc::clone(&font),
+            Arc::clone(&samples),
+            Rc::clone(&zoom),
+            Rc::clone(&v_offset),
+            Rc::clone(&v_max),
+            Rc::clone(&h_offset),
+            Rc::clone(&h_max),
+        )));
+        Self {
+            bounds: Rect::default(),
+            children,
+            font,
+            samples,
+            zoom,
         }
     }
 }
 
 impl SvgProgressBody {
-    fn new(samples: Arc<Vec<SvgSampleRender>>) -> Self {
+    fn new(
+        samples: Arc<Vec<SvgSampleRender>>,
+        zoom: Rc<Cell<f64>>,
+        v_offset: Rc<Cell<f64>>,
+        v_max: Rc<Cell<f64>>,
+        h_offset: Rc<Cell<f64>>,
+        h_max: Rc<Cell<f64>>,
+    ) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
             samples,
+            zoom,
+            v_offset,
+            v_max,
+            h_offset,
+            h_max,
         }
     }
 }
@@ -1008,7 +1147,10 @@ impl SvgSampleRender {
             .map_err(|e| e.to_string());
 
         let lcd = render_svg_to_lcd_buffer_at_size(sample.svg, width, height)
-            .map(|buffer| Arc::new(lcd_buffer_to_preview_rgba(&buffer)))
+            .map(|buffer| SvgLcdPreview {
+                color: Arc::new(buffer.color_plane_flipped()),
+                alpha: Arc::new(buffer.alpha_plane_flipped()),
+            })
             .map_err(|e| e.to_string());
 
         Self {
@@ -1019,6 +1161,126 @@ impl SvgSampleRender {
             reference: reference.map(|(pixels, _, _)| Arc::new(pixels)),
             rgba,
             lcd,
+        }
+    }
+}
+
+impl Widget for SvgZoomButton {
+    fn type_name(&self) -> &'static str {
+        "SvgZoomButton"
+    }
+
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+
+    fn layout(&mut self, _: Size) -> Size {
+        Size::new(if self.label == "Custom" { 58.0 } else { 48.0 }, 22.0)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        let active = self.active();
+        let fill = if active {
+            v.accent
+        } else if self.pressed {
+            v.accent_pressed
+        } else if self.hovered {
+            v.widget_bg_hovered
+        } else {
+            v.widget_bg
+        };
+        let text_color = if active { Color::white() } else { v.text_color };
+
+        ctx.set_fill_color(fill);
+        ctx.set_stroke_color(if active { v.accent } else { v.widget_stroke });
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.rounded_rect(
+            0.5,
+            0.5,
+            self.bounds.width - 1.0,
+            self.bounds.height - 1.0,
+            6.0,
+        );
+        ctx.fill_and_stroke();
+
+        ctx.set_font(Arc::clone(&self.font));
+        ctx.set_font_size(10.5);
+        ctx.set_fill_color(text_color);
+        let metrics = ctx.measure_text(self.label);
+        let text_w = metrics
+            .as_ref()
+            .map(|m| m.width)
+            .unwrap_or(self.label.len() as f64 * 6.0);
+        let baseline_y = metrics
+            .as_ref()
+            .map(|m| m.centered_baseline_y(self.bounds.height))
+            .unwrap_or(7.0);
+        ctx.fill_text(self.label, (self.bounds.width - text_w) * 0.5, baseline_y);
+    }
+
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        match event {
+            Event::MouseMove { pos } => {
+                let hovered = self.contains(*pos);
+                if self.hovered != hovered {
+                    self.hovered = hovered;
+                    agg_gui::animation::request_tick();
+                }
+                EventResult::Ignored
+            }
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } if self.contains(*pos) => {
+                self.pressed = true;
+                agg_gui::animation::request_tick();
+                EventResult::Consumed
+            }
+            Event::MouseUp {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let was_pressed = self.pressed;
+                self.pressed = false;
+                if was_pressed && self.contains(*pos) {
+                    if let Some(target_zoom) = self.target_zoom {
+                        zoom_svg_around_viewport_center(
+                            &self.samples,
+                            &self.zoom,
+                            &self.v_offset,
+                            &self.v_max,
+                            &self.h_offset,
+                            &self.h_max,
+                            target_zoom,
+                        );
+                    } else {
+                        agg_gui::animation::request_tick();
+                    }
+                    EventResult::Consumed
+                } else if was_pressed {
+                    agg_gui::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+            _ => EventResult::Ignored,
         }
     }
 }
@@ -1042,6 +1304,12 @@ impl Widget for SvgProgressHeader {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, SVG_HEADER_H);
+        let mut x = SVG_PAD + 2.0;
+        for child in &mut self.children {
+            let size = child.layout(Size::new(78.0, 22.0));
+            child.set_bounds(Rect::new(x, SVG_HEADER_H - 80.0, size.width, 22.0));
+            x += size.width + 6.0;
+        }
         Size::new(available.width, SVG_HEADER_H)
     }
 
@@ -1050,7 +1318,8 @@ impl Widget for SvgProgressHeader {
         ctx.set_font(Arc::clone(&self.font));
         let w = self.bounds.width;
         let h = self.bounds.height.max(self.min_content_height());
-        let col_w = column_width(&self.samples, w);
+        let zoom = self.zoom.get();
+        let col_w = column_width(&self.samples, w, zoom);
         let titles = [
             "reference.png / control",
             "agg-rgba-bitmap render",
@@ -1077,6 +1346,22 @@ impl Widget for SvgProgressHeader {
             "Headers are fixed; reference.png is from resvg-test-suite and every output is rendered/displayed at that native pixel size.",
             SVG_PAD + 2.0,
             title_y - 18.0,
+            10.5,
+            v.text_dim,
+        );
+        draw_small_text(
+            ctx,
+            &format!("Zoom: {:.0}%", zoom * 100.0),
+            SVG_PAD + 2.0,
+            h - 54.0,
+            10.5,
+            v.text_dim,
+        );
+        draw_small_text(
+            ctx,
+            "Ctrl+wheel zooms at cursor",
+            SVG_PAD + 184.0,
+            h - 74.0,
             10.5,
             v.text_dim,
         );
@@ -1120,17 +1405,22 @@ impl Widget for SvgProgressBody {
     }
 
     fn layout(&mut self, _: Size) -> Size {
-        let size = Size::new(self.min_content_width(), self.min_content_height());
+        let zoom = self.zoom.get();
+        let size = Size::new(
+            self.min_content_width_at(zoom),
+            self.min_content_height_at(zoom),
+        );
         self.bounds = Rect::new(0.0, 0.0, size.width, size.height);
         size
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let w = self.bounds.width.max(self.min_content_width());
-        let h = self.bounds.height.max(self.min_content_height());
-        let row_h = self.row_height();
-        let col_w = column_width(&self.samples, w);
+        let zoom = self.zoom.get();
+        let w = self.bounds.width.max(self.min_content_width_at(zoom));
+        let h = self.bounds.height.max(self.min_content_height_at(zoom));
+        let row_h = self.row_height_at(zoom);
+        let col_w = column_width(&self.samples, w, zoom);
 
         ctx.set_fill_color(v.widget_bg);
         ctx.begin_path();
@@ -1158,6 +1448,7 @@ impl Widget for SvgProgressBody {
                         &sample.reference,
                         sample.width,
                         sample.height,
+                        zoom,
                         x,
                         y,
                         col_w,
@@ -1169,32 +1460,58 @@ impl Widget for SvgProgressBody {
                         &sample.rgba,
                         sample.width,
                         sample.height,
+                        zoom,
                         x,
                         y,
                         col_w,
                         row_h - 26.0,
                         &v,
                     ),
-                    2 => draw_raster_column(
+                    2 => draw_lcd_column(
                         ctx,
                         &sample.lcd,
                         sample.width,
                         sample.height,
+                        zoom,
                         x,
                         y,
                         col_w,
                         row_h - 26.0,
                         &v,
                     ),
-                    3 => draw_hardware_column(ctx, sample, x, y, col_w, row_h - 26.0, &v),
+                    3 => draw_hardware_column(ctx, sample, zoom, x, y, col_w, row_h - 26.0, &v),
                     _ => {}
                 }
             }
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        match event {
+            Event::MouseWheel {
+                pos,
+                delta_y,
+                modifiers,
+                ..
+            } if modifiers.ctrl => {
+                let old_zoom = self.zoom.get();
+                let factor = (-delta_y * 0.1).exp();
+                let new_zoom = (old_zoom * factor).clamp(SVG_MIN_ZOOM, SVG_MAX_ZOOM);
+                zoom_svg_around_content_point(
+                    &self.samples,
+                    &self.zoom,
+                    &self.v_offset,
+                    &self.v_max,
+                    &self.h_offset,
+                    &self.h_max,
+                    pos.x,
+                    svg_content_height(&self.samples, old_zoom) - pos.y,
+                    new_zoom,
+                );
+                EventResult::Consumed
+            }
+            _ => EventResult::Ignored,
+        }
     }
 }
 
@@ -1205,44 +1522,124 @@ impl SvgProgressHeader {
 }
 
 impl SvgProgressBody {
-    fn row_height(&self) -> f64 {
+    fn row_height_at(&self, zoom: f64) -> f64 {
         self.samples
             .iter()
-            .map(|sample| sample.height as f64)
+            .map(|sample| sample.height as f64 * zoom)
             .fold(90.0, f64::max)
             + 26.0
     }
 
-    fn min_content_width(&self) -> f64 {
-        svg_content_width(&self.samples)
+    fn min_content_width_at(&self, zoom: f64) -> f64 {
+        svg_content_width(&self.samples, zoom)
     }
 
-    fn min_content_height(&self) -> f64 {
-        SVG_PAD * 2.0 + self.row_height() * self.samples.len().max(1) as f64
+    fn min_content_height_at(&self, zoom: f64) -> f64 {
+        SVG_PAD * 2.0 + self.row_height_at(zoom) * self.samples.len().max(1) as f64
     }
 }
 
-fn svg_content_width(samples: &[SvgSampleRender]) -> f64 {
+fn svg_content_width(samples: &[SvgSampleRender], zoom: f64) -> f64 {
     let max_sample_w = samples
         .iter()
-        .map(|sample| sample.width as f64)
+        .map(|sample| sample.width as f64 * zoom)
         .fold(120.0, f64::max);
     SVG_PAD * 2.0 + (max_sample_w + 16.0) * 4.0 + SVG_GAP * 3.0
 }
 
-fn column_width(samples: &[SvgSampleRender], available_width: f64) -> f64 {
+fn svg_content_height(samples: &[SvgSampleRender], zoom: f64) -> f64 {
+    SVG_PAD * 2.0 + svg_row_height(samples, zoom) * samples.len().max(1) as f64
+}
+
+fn svg_row_height(samples: &[SvgSampleRender], zoom: f64) -> f64 {
+    samples
+        .iter()
+        .map(|sample| sample.height as f64 * zoom)
+        .fold(90.0, f64::max)
+        + 26.0
+}
+
+fn column_width(samples: &[SvgSampleRender], available_width: f64, zoom: f64) -> f64 {
     let max_sample_w = samples
         .iter()
-        .map(|sample| sample.width as f64)
+        .map(|sample| sample.width as f64 * zoom)
         .fold(120.0, f64::max);
     ((available_width - SVG_PAD * 2.0 - SVG_GAP * 3.0) / 4.0).max(max_sample_w + 16.0)
+}
+
+fn is_zoom_level(actual: f64, expected: f64) -> bool {
+    (actual - expected).abs() < 0.001
+}
+
+fn zoom_svg_around_viewport_center(
+    samples: &[SvgSampleRender],
+    zoom: &Rc<Cell<f64>>,
+    v_offset: &Rc<Cell<f64>>,
+    v_max: &Rc<Cell<f64>>,
+    h_offset: &Rc<Cell<f64>>,
+    h_max: &Rc<Cell<f64>>,
+    new_zoom: f64,
+) {
+    let old_zoom = zoom.get();
+    let old_w = svg_content_width(samples, old_zoom);
+    let old_h = svg_content_height(samples, old_zoom);
+    let viewport_w = (old_w - h_max.get()).max(1.0);
+    let viewport_h = (old_h - v_max.get()).max(1.0);
+    zoom_svg_around_content_point(
+        samples,
+        zoom,
+        v_offset,
+        v_max,
+        h_offset,
+        h_max,
+        h_offset.get() + viewport_w * 0.5,
+        v_offset.get() + viewport_h * 0.5,
+        new_zoom,
+    );
+}
+
+fn zoom_svg_around_content_point(
+    samples: &[SvgSampleRender],
+    zoom: &Rc<Cell<f64>>,
+    v_offset: &Rc<Cell<f64>>,
+    v_max: &Rc<Cell<f64>>,
+    h_offset: &Rc<Cell<f64>>,
+    h_max: &Rc<Cell<f64>>,
+    anchor_x: f64,
+    anchor_top_y: f64,
+    new_zoom: f64,
+) {
+    let old_zoom = zoom.get();
+    if (new_zoom - old_zoom).abs() < 0.001 {
+        return;
+    }
+
+    let old_w = svg_content_width(samples, old_zoom);
+    let old_h = svg_content_height(samples, old_zoom);
+    let new_w = svg_content_width(samples, new_zoom);
+    let new_h = svg_content_height(samples, new_zoom);
+    let viewport_w = (old_w - h_max.get()).max(1.0);
+    let viewport_h = (old_h - v_max.get()).max(1.0);
+    let screen_x = anchor_x - h_offset.get();
+    let screen_top_y = anchor_top_y - v_offset.get();
+    let new_h_max = (new_w - viewport_w).max(0.0);
+    let new_v_max = (new_h - viewport_h).max(0.0);
+    let scaled_anchor_x = anchor_x * (new_w / old_w.max(1.0));
+    let scaled_anchor_top_y = anchor_top_y * (new_h / old_h.max(1.0));
+
+    zoom.set(new_zoom);
+    h_max.set(new_h_max);
+    v_max.set(new_v_max);
+    h_offset.set((scaled_anchor_x - screen_x).clamp(0.0, new_h_max));
+    v_offset.set((scaled_anchor_top_y - screen_top_y).clamp(0.0, new_v_max));
+    agg_gui::animation::request_tick();
 }
 
 #[cfg(test)]
 mod svg_tests {
     use std::sync::Arc;
 
-    use agg_gui::{find_widget_by_type, Font, Size};
+    use agg_gui::{find_widget_by_type, Event, Font, Modifiers, MouseButton, Point, Size};
 
     #[test]
     fn svg_test_keeps_header_fixed_above_bidirectional_scroll_area() {
@@ -1256,6 +1653,13 @@ mod svg_tests {
         assert_eq!(children[0].type_name(), "SvgProgressHeader");
         assert_eq!(children[1].type_name(), "ScrollView");
         assert_eq!(children[0].bounds().height, super::SVG_HEADER_H);
+        assert_eq!(children[0].children().len(), 3);
+        for button in children[0].children() {
+            assert!(
+                button.bounds().y > super::SVG_COLUMN_HEADER_H,
+                "zoom buttons should sit above the fixed column header"
+            );
+        }
 
         let scroll =
             find_widget_by_type(root.as_ref(), "ScrollView").expect("SVG Test scroll view");
@@ -1267,23 +1671,91 @@ mod svg_tests {
         assert_positive_property(&props, "h_max_scroll");
     }
 
+    #[test]
+    fn svg_test_defaults_to_half_zoom() {
+        const BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+        let font = Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"));
+        let mut root = super::svg_test(font);
+
+        root.layout(Size::new(520.0, 260.0));
+
+        let scroll =
+            find_widget_by_type(root.as_ref(), "ScrollView").expect("SVG Test scroll view");
+        let props = scroll.properties();
+        let h_content = property_value(&props, "h_content").parse::<f64>().unwrap();
+        assert!(
+            h_content < 1400.0,
+            "SVG Test should default to 50% zoom, got h_content={h_content}"
+        );
+    }
+
+    #[test]
+    fn svg_zoom_buttons_change_to_their_own_targets() {
+        const BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+        let font = Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"));
+        let mut root = super::svg_test(font);
+        root.layout(Size::new(520.0, 260.0));
+
+        let default_content_w = svg_scroll_property(&root, "h_content");
+        click_header_button(&mut root, 1);
+        root.layout(Size::new(520.0, 260.0));
+        let zoom_100_content_w = svg_scroll_property(&root, "h_content");
+        assert!(
+            zoom_100_content_w > default_content_w,
+            "100% button should increase content width"
+        );
+
+        click_header_button(&mut root, 0);
+        root.layout(Size::new(520.0, 260.0));
+        let zoom_50_content_w = svg_scroll_property(&root, "h_content");
+        assert!(
+            zoom_50_content_w < zoom_100_content_w,
+            "50% button should restore the smaller half-zoom content width"
+        );
+    }
+
     fn assert_property(props: &[(&'static str, String)], name: &str, expected: &str) {
-        let actual = props
-            .iter()
-            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
-            .unwrap_or_else(|| panic!("missing property {name}"));
+        let actual = property_value(props, name);
         assert_eq!(actual, expected);
     }
 
     fn assert_positive_property(props: &[(&'static str, String)], name: &str) {
-        let actual = props
-            .iter()
-            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
-            .unwrap_or_else(|| panic!("missing property {name}"));
+        let actual = property_value(props, name);
         let value = actual
             .parse::<f64>()
             .unwrap_or_else(|_| panic!("{name} should be a number, got {actual:?}"));
         assert!(value > 0.0, "{name} should be positive, got {value}");
+    }
+
+    fn property_value<'a>(props: &'a [(&'static str, String)], name: &str) -> &'a str {
+        props
+            .iter()
+            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
+            .unwrap_or_else(|| panic!("missing property {name}"))
+    }
+
+    fn click_header_button(root: &mut Box<dyn agg_gui::Widget>, index: usize) {
+        let button = &mut root.children_mut()[0].children_mut()[index];
+        let center = Point::new(button.bounds().width * 0.5, button.bounds().height * 0.5);
+        let mods = Modifiers::default();
+        button.on_event(&Event::MouseDown {
+            pos: center,
+            button: MouseButton::Left,
+            modifiers: mods,
+        });
+        button.on_event(&Event::MouseUp {
+            pos: center,
+            button: MouseButton::Left,
+            modifiers: mods,
+        });
+    }
+
+    fn svg_scroll_property(root: &Box<dyn agg_gui::Widget>, name: &str) -> f64 {
+        let scroll =
+            find_widget_by_type(root.as_ref(), "ScrollView").expect("SVG Test scroll view");
+        property_value(&scroll.properties(), name)
+            .parse::<f64>()
+            .unwrap_or_else(|_| panic!("{name} should be a number"))
     }
 }
 
@@ -1317,6 +1789,15 @@ const SVG_SAMPLES: &[SvgSample] = &[
             "../../../tests/resvg-test-suite/tests/painting/stroke/line-as-curve-1.png"
         ),
     },
+    SvgSample {
+        name: "structure/image/embedded-png.svg",
+        svg: include_bytes!(
+            "../../../tests/resvg-test-suite/tests/structure/image/embedded-png.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../tests/resvg-test-suite/tests/structure/image/embedded-png.png"
+        ),
+    },
 ];
 
 fn draw_panel(ctx: &mut dyn DrawCtx, x: f64, y: f64, w: f64, h: f64, v: &Visuals) {
@@ -1341,6 +1822,7 @@ fn draw_raster_column(
     pixels: &Result<Arc<Vec<u8>>, String>,
     img_w: u32,
     img_h: u32,
+    zoom: f64,
     x: f64,
     y: f64,
     w: f64,
@@ -1349,8 +1831,31 @@ fn draw_raster_column(
 ) {
     match pixels {
         Ok(pixels) => {
-            let (dx, dy, dw, dh) = native_rect(img_w as f64, img_h as f64, x, y, w, h);
+            let (dx, dy, dw, dh) =
+                native_rect(img_w as f64 * zoom, img_h as f64 * zoom, x, y, w, h);
             ctx.draw_image_rgba_arc(pixels, img_w, img_h, dx, dy, dw, dh);
+        }
+        Err(err) => draw_small_text(ctx, err, x + 8.0, y + h * 0.5, 9.0, v.text_dim),
+    }
+}
+
+fn draw_lcd_column(
+    ctx: &mut dyn DrawCtx,
+    pixels: &Result<SvgLcdPreview, String>,
+    img_w: u32,
+    img_h: u32,
+    zoom: f64,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    v: &Visuals,
+) {
+    match pixels {
+        Ok(pixels) => {
+            let (dx, dy, dw, dh) =
+                native_rect(img_w as f64 * zoom, img_h as f64 * zoom, x, y, w, h);
+            ctx.draw_lcd_backbuffer_arc(&pixels.color, &pixels.alpha, img_w, img_h, dx, dy, dw, dh);
         }
         Err(err) => draw_small_text(ctx, err, x + 8.0, y + h * 0.5, 9.0, v.text_dim),
     }
@@ -1359,15 +1864,24 @@ fn draw_raster_column(
 fn draw_hardware_column(
     ctx: &mut dyn DrawCtx,
     sample: &SvgSampleRender,
+    zoom: f64,
     x: f64,
     y: f64,
     w: f64,
     h: f64,
     v: &Visuals,
 ) {
-    let (dx, dy, _, _) = native_rect(sample.width as f64, sample.height as f64, x, y, w, h);
+    let (dx, dy, _, _) = native_rect(
+        sample.width as f64 * zoom,
+        sample.height as f64 * zoom,
+        x,
+        y,
+        w,
+        h,
+    );
     ctx.save();
     ctx.translate(dx, dy);
+    ctx.scale(zoom, zoom);
     if let Err(err) = render_svg_at_size(sample.svg, ctx, sample.width, sample.height) {
         ctx.restore();
         draw_small_text(ctx, &err.to_string(), x + 8.0, y + h * 0.5, 9.0, v.text_dim);
@@ -1421,41 +1935,6 @@ fn decode_png_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
     };
 
     Ok((rgba, info.width, info.height))
-}
-
-fn lcd_buffer_to_preview_rgba(buffer: &LcdBuffer) -> Vec<u8> {
-    let w = buffer.width() as usize;
-    let h = buffer.height() as usize;
-    let color = buffer.color_plane();
-    let alpha = buffer.alpha_plane();
-    let mut out = vec![0_u8; w * h * 4];
-
-    for y in 0..h {
-        let src_y = h - 1 - y;
-        for x in 0..w {
-            let src = (src_y * w + x) * 3;
-            let dst = (y * w + x) * 4;
-            let ar = alpha[src] as u16;
-            let ag = alpha[src + 1] as u16;
-            let ab = alpha[src + 2] as u16;
-            let a = ((ar + ag + ab) / 3) as u8;
-
-            out[dst] = unpremul_byte(color[src], a);
-            out[dst + 1] = unpremul_byte(color[src + 1], a);
-            out[dst + 2] = unpremul_byte(color[src + 2], a);
-            out[dst + 3] = a;
-        }
-    }
-
-    out
-}
-
-fn unpremul_byte(c: u8, a: u8) -> u8 {
-    if a == 0 {
-        0
-    } else {
-        (((c as u16) * 255 + (a as u16 / 2)) / a as u16).min(255) as u8
-    }
 }
 
 // ---------------------------------------------------------------------------

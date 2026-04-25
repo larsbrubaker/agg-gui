@@ -49,6 +49,13 @@ pub struct TextMetrics {
     pub line_height: f64,
 }
 
+impl TextMetrics {
+    /// Baseline Y that visually centers this text run in a Y-up box.
+    pub fn centered_baseline_y(&self, height: f64) -> f64 {
+        (height - (self.ascent - self.descent)) * 0.5
+    }
+}
+
 /// A loaded font, ready for shaping and rasterization.
 ///
 /// Constructed from raw TTF/OTF bytes via [`Font::from_bytes`]. The data is

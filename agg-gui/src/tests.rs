@@ -651,6 +651,39 @@ fn test_scroll_view_tall_content_child_y() {
     );
 }
 
+#[test]
+fn test_scroll_view_middle_drag_pans_both_axes() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let v_offset = Rc::new(Cell::new(80.0));
+    let h_offset = Rc::new(Cell::new(80.0));
+    let content = SizedBox::new().with_width(500.0).with_height(500.0);
+    let mut scroll = ScrollView::new(Box::new(content))
+        .horizontal(true)
+        .with_offset_cell(Rc::clone(&v_offset))
+        .with_h_offset_cell(Rc::clone(&h_offset));
+    scroll.layout(Size::new(200.0, 200.0));
+
+    let mods = Modifiers::default();
+    scroll.on_event(&crate::Event::MouseDown {
+        pos: crate::Point::new(100.0, 100.0),
+        button: MouseButton::Middle,
+        modifiers: mods,
+    });
+    scroll.on_event(&crate::Event::MouseMove {
+        pos: crate::Point::new(80.0, 120.0),
+    });
+    scroll.on_event(&crate::Event::MouseUp {
+        pos: crate::Point::new(80.0, 120.0),
+        button: MouseButton::Middle,
+        modifiers: mods,
+    });
+
+    assert_eq!(h_offset.get(), 100.0);
+    assert_eq!(v_offset.get(), 100.0);
+}
+
 /// Default scroll details mirror egui's floating ScrollStyle defaults.
 #[test]
 fn test_scroll_bar_style_defaults_match_egui() {

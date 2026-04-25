@@ -512,6 +512,24 @@ mod tests {
     }
 
     #[test]
+    fn lcd_target_preserves_per_channel_coverage() {
+        let svg = br##"
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+                <path d="M 4 28 L 28 4" stroke="#000000" stroke-width="3" fill="none"/>
+            </svg>
+        "##;
+
+        let buffer = render_svg_to_lcd_buffer_at_size(svg, 32, 32).expect("SVG should render");
+        assert!(
+            buffer
+                .alpha_plane()
+                .chunks_exact(3)
+                .any(|px| px[0] != px[1] || px[1] != px[2]),
+            "LCD SVG target should retain per-channel coverage, not collapse to grayscale alpha"
+        );
+    }
+
+    #[test]
     fn honors_even_odd_fill_rule() {
         let svg = br##"
             <svg xmlns="http://www.w3.org/2000/svg" width="5" height="5">

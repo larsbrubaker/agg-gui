@@ -503,7 +503,7 @@ fn main() {
                         dx = dy;
                         dy = 0.0;
                     }
-                    app.on_mouse_wheel_xy(cursor_x, cursor_y, dx, dy);
+                    app.on_mouse_wheel_xy_mods(cursor_x, cursor_y, dx, dy, current_mods);
                 }
                 Event::WindowEvent {
                     event:

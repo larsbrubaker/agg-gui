@@ -476,7 +476,7 @@ impl Widget for Label {
                 }
                 if let Some(m) = ctx.measure_text(line) {
                     let line_center_y = total_h - (i as f64 + 0.5) * line_h;
-                    let ty = line_center_y - (m.ascent - m.descent) * 0.5;
+                    let ty = line_center_y - line_h * 0.5 + m.centered_baseline_y(line_h);
                     let tx = match self.align {
                         LabelAlign::Left => 0.0,
                         LabelAlign::Center => (w - m.width) * 0.5,
@@ -486,7 +486,7 @@ impl Widget for Label {
                 }
             }
         } else if let Some(m) = ctx.measure_text(&self.text) {
-            let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
+            let ty = m.centered_baseline_y(h);
             let tx = match self.align {
                 LabelAlign::Left => 0.0,
                 LabelAlign::Center => (w - m.width) * 0.5,
