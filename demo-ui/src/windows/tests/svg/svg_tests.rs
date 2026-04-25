@@ -73,6 +73,51 @@ fn svg_zoom_buttons_change_to_their_own_targets() {
     );
 }
 
+#[test]
+fn svg_test_includes_current_linear_gradient_capability_rows() {
+    let names: Vec<&str> = super::SVG_SAMPLES
+        .iter()
+        .map(|sample| sample.name)
+        .collect();
+    for expected in [
+        "paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg",
+        "paint-servers/linearGradient/gradientTransform.svg",
+        "paint-servers/linearGradient/spreadMethod=reflect.svg",
+        "paint-servers/linearGradient/spreadMethod=repeat.svg",
+        "paint-servers/linearGradient/many-stops.svg",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "SVG Test should include capability row {expected}"
+        );
+    }
+}
+
+#[test]
+fn svg_test_sample_rows_decode_and_render_for_bitmap_targets() {
+    for sample in super::SVG_SAMPLES {
+        let rendered = super::SvgSampleRender::new(sample);
+        assert!(
+            rendered.reference.is_ok(),
+            "{} reference PNG should decode: {:?}",
+            sample.name,
+            rendered.reference.err()
+        );
+        assert!(
+            rendered.rgba.is_ok(),
+            "{} should render through RGBA target: {:?}",
+            sample.name,
+            rendered.rgba.err()
+        );
+        assert!(
+            rendered.lcd.is_ok(),
+            "{} should render through LCD target: {:?}",
+            sample.name,
+            rendered.lcd.err()
+        );
+    }
+}
+
 fn assert_property(props: &[(&'static str, String)], name: &str, expected: &str) {
     let actual = property_value(props, name);
     assert_eq!(actual, expected);

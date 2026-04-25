@@ -49,9 +49,12 @@ use agg_rust::rounded_rect::RoundedRect;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
-use crate::draw_ctx::{DrawCtx, FillRule};
+use crate::draw_ctx::{DrawCtx, FillRule, LinearGradientPaint};
 use crate::lcd_coverage::{rasterize_text_lcd_cached, LcdBuffer, LcdMask};
 use crate::text::{measure_text_metrics, Font, TextMetrics};
+
+mod gradient;
+mod image;
 
 // ── State ──────────────────────────────────────────────────────────────────
 //
@@ -64,6 +67,7 @@ use crate::text::{measure_text_metrics, Font, TextMetrics};
 struct LcdState {
     transform: TransAffine,
     fill_color: Color,
+    fill_linear_gradient: Option<LinearGradientPaint>,
     stroke_color: Color,
     fill_rule: FillRule,
     line_width: f64,
@@ -87,6 +91,7 @@ impl Default for LcdState {
         Self {
             transform: TransAffine::new(),
             fill_color: Color::black(),
+            fill_linear_gradient: None,
             stroke_color: Color::black(),
             fill_rule: FillRule::NonZero,
             line_width: 1.0,
@@ -188,6 +193,13 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     // ── State ─────────────────────────────────────────────────────────────
     fn set_fill_color(&mut self, color: Color) {
         self.state.fill_color = color;
+        self.state.fill_linear_gradient = None;
+    }
+    fn set_fill_linear_gradient(&mut self, gradient: LinearGradientPaint) {
+        self.state.fill_linear_gradient = Some(gradient);
+    }
+    fn supports_fill_linear_gradient(&self) -> bool {
+        true
     }
     fn set_stroke_color(&mut self, color: Color) {
         self.state.stroke_color = color;
@@ -325,8 +337,6 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
 
     // ── Path drawing ──────────────────────────────────────────────────────
     fn fill(&mut self) {
-        let mut color = self.state.fill_color;
-        color.a *= self.state.global_alpha as f32;
         let xform = self.state.transform;
         let clip = self.state.clip;
         let rule = self.state.fill_rule;
@@ -335,8 +345,23 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         // buffer, then put the path back — preserves the "path persists
         // across fill calls" GfxCtx contract.
         let mut path = std::mem::replace(&mut self.path, PathStorage::new());
-        self.active_buffer()
-            .fill_path(&mut path, color, &xform, clip, rule);
+        if let Some(gradient) = self.state.fill_linear_gradient.clone() {
+            let global_alpha = self.state.global_alpha as f32;
+            gradient::fill_linear_gradient(
+                self.active_buffer(),
+                &mut path,
+                &gradient,
+                global_alpha,
+                &xform,
+                clip,
+                rule,
+            );
+        } else {
+            let mut color = self.state.fill_color;
+            color.a *= self.state.global_alpha as f32;
+            self.active_buffer()
+                .fill_path(&mut path, color, &xform, clip, rule);
+        }
         self.path = path;
     }
     fn stroke(&mut self) {
@@ -652,115 +677,22 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         dst_w: f64,
         dst_h: f64,
     ) {
-        if img_w == 0 || img_h == 0 {
-            return;
-        }
-        if dst_w <= 0.0 || dst_h <= 0.0 {
-            return;
-        }
-        if data.len() < (img_w as usize) * (img_h as usize) * 4 {
-            return;
-        }
-
-        // Apply CTM to destination origin, snap to integer pixel grid.
-        // Pixel-snap matters here for the same reason it matters for LCD
-        // text: NEAREST sampling at fractional offsets picks the wrong
-        // texel half the time and the icon visibly shifts.  Sample-area
-        // size is taken from the CTM's scale factors — for the typical
-        // pure-translation CTM that's just dst_w × dst_h.
-        let t = &self.state.transform;
-        let ox = (dst_x * t.sx + dst_y * t.shx + t.tx).round() as i32;
-        let oy = (dst_x * t.shy + dst_y * t.sy + t.ty).round() as i32;
-        let scaled_w = ((dst_w * t.sx).abs()).round() as i32;
-        let scaled_h = ((dst_h * t.sy).abs()).round() as i32;
-        if scaled_w <= 0 || scaled_h <= 0 {
-            return;
-        }
-
-        let global_alpha = (self.state.global_alpha as f32).clamp(0.0, 1.0);
-        let clip_i = self.state.clip.map(crate::lcd_coverage::rect_to_pixel_clip);
-
-        let buf = self.active_buffer();
-        let buf_w = buf.width() as i32;
-        let buf_h = buf.height() as i32;
-        let buf_w_u = buf_w as usize;
-        let img_w_u = img_w as usize;
-
-        // Intersect any active clip with the buffer's bounds — the inner
-        // loop becomes a single range check per pixel against this rect.
-        let (cx1, cy1, cx2, cy2) = match clip_i {
-            Some((x1, y1, x2, y2)) => (x1.max(0), y1.max(0), x2.min(buf_w), y2.min(buf_h)),
-            None => (0, 0, buf_w, buf_h),
-        };
-        if cx1 >= cx2 || cy1 >= cy2 {
-            return;
-        }
-
-        let (color_plane, alpha_plane) = buf.planes_mut();
-        for ly in 0..scaled_h {
-            let dy = oy + ly;
-            if dy < cy1 || dy >= cy2 {
-                continue;
-            }
-            // ly = 0 is bottom of dst rect (Y-up).  Source image is stored
-            // top-row-first, so the bottom of the visual image is row
-            // `img_h - 1` and that's what we sample first.
-            let frac_y = (ly as f64 + 0.5) / (scaled_h as f64);
-            let sy_visual = (frac_y * img_h as f64) as u32;
-            let sy_visual = sy_visual.min(img_h - 1);
-            let sy_storage = (img_h - 1 - sy_visual) as usize;
-
-            for lx in 0..scaled_w {
-                let dx = ox + lx;
-                if dx < cx1 || dx >= cx2 {
-                    continue;
-                }
-                let frac_x = (lx as f64 + 0.5) / (scaled_w as f64);
-                let sx_storage = ((frac_x * img_w as f64) as u32).min(img_w - 1) as usize;
-
-                // Source image is straight-alpha RGBA; effective src alpha =
-                // image alpha × ctx global_alpha.  Regular images have one
-                // alpha per pixel — we apply it identically across all three
-                // subpixel channels (no per-subpixel variation for source).
-                // That's the one case where the per-channel-alpha buffer
-                // takes redundant data; true per-subpixel image edges would
-                // come from a rasteriser-based image path, not NEAREST blit.
-                let si = (sy_storage * img_w_u + sx_storage) * 4;
-                let sa = (data[si + 3] as f32 / 255.0) * global_alpha;
-                if sa <= 0.0 {
-                    continue;
-                }
-                let sr = (data[si] as f32 / 255.0) * sa; // premultiply
-                let sg = (data[si + 1] as f32 / 255.0) * sa;
-                let sb = (data[si + 2] as f32 / 255.0) * sa;
-
-                let di = ((dy as usize) * buf_w_u + (dx as usize)) * 3;
-
-                // Read current premult colour + per-channel alpha.
-                let bc_r = color_plane[di] as f32 / 255.0;
-                let bc_g = color_plane[di + 1] as f32 / 255.0;
-                let bc_b = color_plane[di + 2] as f32 / 255.0;
-                let ba_r = alpha_plane[di] as f32 / 255.0;
-                let ba_g = alpha_plane[di + 1] as f32 / 255.0;
-                let ba_b = alpha_plane[di + 2] as f32 / 255.0;
-
-                // Premult src-over per channel (all three share `sa` since
-                // the source image had a single per-pixel alpha).
-                let rc_r = sr + bc_r * (1.0 - sa);
-                let rc_g = sg + bc_g * (1.0 - sa);
-                let rc_b = sb + bc_b * (1.0 - sa);
-                let ra_r = sa + ba_r * (1.0 - sa);
-                let ra_g = sa + ba_g * (1.0 - sa);
-                let ra_b = sa + ba_b * (1.0 - sa);
-
-                color_plane[di] = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                color_plane[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                color_plane[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                alpha_plane[di] = (ra_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                alpha_plane[di + 1] = (ra_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                alpha_plane[di + 2] = (ra_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-            }
-        }
+        let transform = self.state.transform;
+        let global_alpha = self.state.global_alpha as f32;
+        let clip = self.state.clip;
+        image::draw_image_rgba(
+            self.active_buffer(),
+            data,
+            img_w,
+            img_h,
+            dst_x,
+            dst_y,
+            dst_w,
+            dst_h,
+            &transform,
+            global_alpha,
+            clip,
+        );
     }
 }
 

@@ -28,6 +28,23 @@ pub(crate) const AA_FRAG: &str = "#version 300 es\nprecision mediump float;\nin 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const AA_FRAG: &str = "#version 330 core\nin float v_alpha;uniform vec4 u_color;out vec4 frag_color;void main(){frag_color=vec4(u_color.rgb,u_color.a*v_alpha);}";
 
+// ── AA linear-gradient fill pipeline ────────────────────────────────────────
+//
+// Reuses the same `[x, y, alpha]` tessellation output as the AA solid path.
+// The fragment shader maps screen-space pixels back through the current CTM
+// and gradientTransform, computes SVG's linear-gradient parameter, applies the
+// spread mode, then samples a 1-D ramp texture built from all gradient stops.
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) const GRADIENT_VERT: &str = "#version 300 es\nprecision mediump float;\nlayout(location=0)in vec2 a_pos;layout(location=1)in float a_alpha;uniform vec2 u_resolution;out vec2 v_pos;out float v_alpha;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_pos=a_pos;v_alpha=a_alpha;}";
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const GRADIENT_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;layout(location=1)in float a_alpha;uniform vec2 u_resolution;out vec2 v_pos;out float v_alpha;void main(){vec2 ndc=(a_pos/u_resolution)*2.0-1.0;gl_Position=vec4(ndc,0.0,1.0);v_pos=a_pos;v_alpha=a_alpha;}";
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) const GRADIENT_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_pos;in float v_alpha;uniform sampler2D u_ramp;uniform vec4 u_line;uniform vec4 u_screen_inv_a;uniform vec2 u_screen_inv_b;uniform vec4 u_gradient_inv_a;uniform vec2 u_gradient_inv_b;uniform int u_spread;uniform float u_global_alpha;out vec4 frag_color;vec2 aff(vec4 a,vec2 b,vec2 p){return vec2(p.x*a.x+p.y*a.z+b.x,p.x*a.y+p.y*a.w+b.y);}float spread(float t){if(u_spread==1){return 1.0-abs(mod(t,2.0)-1.0);}if(u_spread==2){return fract(t);}return clamp(t,0.0,1.0);}void main(){vec2 p=aff(u_screen_inv_a,u_screen_inv_b,v_pos);p=aff(u_gradient_inv_a,u_gradient_inv_b,p);vec2 a=u_line.xy;vec2 b=u_line.zw;vec2 d=b-a;float l2=max(dot(d,d),0.000001);float t=spread(dot(p-a,d)/l2);vec4 c=texture(u_ramp,vec2(t,0.5));frag_color=vec4(c.rgb,c.a*v_alpha*u_global_alpha);}";
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const GRADIENT_FRAG: &str = "#version 330 core\nin vec2 v_pos;in float v_alpha;uniform sampler2D u_ramp;uniform vec4 u_line;uniform vec4 u_screen_inv_a;uniform vec2 u_screen_inv_b;uniform vec4 u_gradient_inv_a;uniform vec2 u_gradient_inv_b;uniform int u_spread;uniform float u_global_alpha;out vec4 frag_color;vec2 aff(vec4 a,vec2 b,vec2 p){return vec2(p.x*a.x+p.y*a.z+b.x,p.x*a.y+p.y*a.w+b.y);}float spread(float t){if(u_spread==1){return 1.0-abs(mod(t,2.0)-1.0);}if(u_spread==2){return fract(t);}return clamp(t,0.0,1.0);}void main(){vec2 p=aff(u_screen_inv_a,u_screen_inv_b,v_pos);p=aff(u_gradient_inv_a,u_gradient_inv_b,p);vec2 a=u_line.xy;vec2 b=u_line.zw;vec2 d=b-a;float l2=max(dot(d,d),0.000001);float t=spread(dot(p-a,d)/l2);vec4 c=texture(u_ramp,vec2(t,0.5));frag_color=vec4(c.rgb,c.a*v_alpha*u_global_alpha);}";
+
 // ── Textured-quad pipeline (used by draw_image_rgba) ────────────────────────
 //
 // Same screen-space → NDC math as the solid pipeline, with an extra `a_uv`

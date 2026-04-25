@@ -10,6 +10,13 @@ impl DrawCtx for GlGfxCtx {
 
     fn set_fill_color(&mut self, c: Color) {
         self.fill_color = c;
+        self.fill_linear_gradient = None;
+    }
+    fn set_fill_linear_gradient(&mut self, gradient: LinearGradientPaint) {
+        self.fill_linear_gradient = Some(gradient);
+    }
+    fn supports_fill_linear_gradient(&self) -> bool {
+        true
     }
     fn set_stroke_color(&mut self, c: Color) {
         self.stroke_color = c;

@@ -108,6 +108,7 @@ Done, briefly:
 - Library-owned SVG walker lives in `agg-gui` and renders only through `DrawCtx`.
 - RGBA, LCD coverage, and hardware demo targets share the same SVG render path.
 - Implemented solid fills, fill rules, transforms, cubic/quadratic paths, strokes, line caps/joins, miter limits, dashes, opacity, embedded raster images, and explicit reference-size rendering.
+- Started bridge-level linear gradient fills for RGBA, LCD, and hardware targets. The hardware path uses a native shader ramp so the same SVG paint model reaches every active backend.
 - Added `resvg-test-suite` as the reference corpus and use its paired PNGs in tests and demos.
 - SVG Test shows four fixed columns: `reference.png`, `agg-rgba-bitmap render`, `agg-lcd-bitmap render`, and `hardware render`.
 - SVG Test supports fixed headers, bidirectional scrolling, default 50% zoom, 50%/100%/Custom zoom controls, and Ctrl+wheel zoom around the mouse position.
@@ -119,6 +120,11 @@ Current SVG Test rows are intentionally sparse and represent broad capability bo
 - `shapes/path/M-L-L-Z.svg` — path construction and fill.
 - `painting/stroke/line-as-curve-1.svg` — stroke pipeline.
 - `structure/image/embedded-png.svg` — embedded raster image decode/blit.
+- `paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg` — basic user-space linear gradient fill.
+- `paint-servers/linearGradient/gradientTransform.svg` — gradient transform handling.
+- `paint-servers/linearGradient/spreadMethod=reflect.svg` — reflected linear-gradient spread mode.
+- `paint-servers/linearGradient/spreadMethod=repeat.svg` — repeated linear-gradient spread mode.
+- `paint-servers/linearGradient/many-stops.svg` — multi-stop gradient interpolation.
 
 ---
 
@@ -144,7 +150,7 @@ Keep covered by tests; do not add more demo rows unless they show a visually dis
 
 Tasks:
 
-1. **Linear gradients:** Map `usvg::LinearGradient` to a bridge gradient paint. The RGBA and LCD backends can implement it with AGG `GradientX` / `GradientY` / `SpanGradient`; the hardware backend can implement the same paint with shader uniforms/textures.
+1. **Linear gradients:** Initial filled-path support is in place for RGBA, LCD, and hardware via a bridge gradient paint. Remaining work: stroke gradients, object-bounding-box regression cases, and gradient transforms against the reference suite.
 2. **Radial gradients:** Map `usvg::RadialGradient` to a bridge radial/focal gradient paint. The RGBA and LCD backends can implement it with AGG `GradientRadial` / `GradientRadialFocus`; the hardware backend can use the matching shader path.
 3. **Spread modes:** Pad / Reflect / Repeat — represent these at the bridge paint level and implement them per target.
 4. **Patterns:** Render the pattern's content tree into an offscreen target through the same bridge, then feed the resulting pattern source back through a bridge pattern primitive. Pattern transforms apply on top.

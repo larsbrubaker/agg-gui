@@ -34,7 +34,7 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
-use crate::draw_ctx::FillRule;
+use crate::draw_ctx::{FillRule, LinearGradientPaint};
 use crate::framebuffer::Framebuffer;
 use crate::text::{measure_advance, shape_text, Font, TextMetrics};
 
@@ -65,6 +65,7 @@ pub use agg_rust::comp_op::CompOp as BlendMode;
 struct GfxState {
     transform: TransAffine,
     fill_color: Color,
+    fill_linear_gradient: Option<LinearGradientPaint>,
     stroke_color: Color,
     fill_rule: FillRule,
     line_width: f64,
@@ -89,6 +90,7 @@ impl Default for GfxState {
         Self {
             transform: TransAffine::new(),
             fill_color: Color::black(),
+            fill_linear_gradient: None,
             stroke_color: Color::black(),
             fill_rule: FillRule::NonZero,
             line_width: 1.0,
@@ -251,6 +253,10 @@ impl<'a> GfxCtx<'a> {
 
     pub fn set_fill_color(&mut self, color: Color) {
         self.state.fill_color = color;
+        self.state.fill_linear_gradient = None;
+    }
+    pub fn set_fill_linear_gradient(&mut self, gradient: LinearGradientPaint) {
+        self.state.fill_linear_gradient = Some(gradient);
     }
     pub fn set_stroke_color(&mut self, color: Color) {
         self.state.stroke_color = color;
@@ -459,15 +465,28 @@ impl<'a> GfxCtx<'a> {
 
     /// Fill the accumulated path.
     pub fn fill(&mut self) {
-        let mut color = self.state.fill_color;
-        color.a *= self.state.global_alpha as f32;
-        let rgba = color.to_rgba8();
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
         let fill_rule = self.state.fill_rule;
         let transform = self.state.transform.clone();
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        rasterize_fill(fb, &mut self.path, &rgba, mode, clip, fill_rule, &transform);
+        if let Some(gradient) = self.state.fill_linear_gradient.clone() {
+            draw_impl::rasterize_linear_gradient_fill(
+                fb,
+                &mut self.path,
+                &gradient,
+                self.state.global_alpha as f32,
+                mode,
+                clip,
+                fill_rule,
+                &transform,
+            );
+        } else {
+            let mut color = self.state.fill_color;
+            color.a *= self.state.global_alpha as f32;
+            let rgba = color.to_rgba8();
+            rasterize_fill(fb, &mut self.path, &rgba, mode, clip, fill_rule, &transform);
+        }
     }
 
     /// Stroke the accumulated path.

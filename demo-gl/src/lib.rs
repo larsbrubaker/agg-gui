@@ -62,7 +62,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
 use agg_gui::color::Color;
-use agg_gui::draw_ctx::{DrawCtx, FillRule};
+use agg_gui::draw_ctx::{DrawCtx, FillRule, LinearGradientPaint};
 use agg_gui::gl_renderer::GlyphCache;
 use agg_gui::text::{shape_glyphs, Font, TextMetrics};
 use agg_gui::CompOp;
@@ -80,10 +80,12 @@ use glow::HasContext;
 
 mod ctx_core;
 mod draw_ctx_impl;
+mod gradient;
 mod overlays;
 mod shaders;
 mod text_render;
 
+use gradient::GradientPipeline;
 pub use overlays::{draw_hover_overlay, draw_status_overlay};
 
 // ---------------------------------------------------------------------------
@@ -105,6 +107,7 @@ struct ArcTextureEntry {
 struct SavedGlDrawState {
     viewport: (f32, f32),
     fill_color: Color,
+    fill_linear_gradient: Option<LinearGradientPaint>,
     stroke_color: Color,
     line_width: f64,
     line_join: LineJoin,
@@ -172,6 +175,9 @@ pub struct GlGfxCtx {
     aa_res_loc: Option<glow::UniformLocation>,
     aa_color_loc: Option<glow::UniformLocation>,
 
+    // AA linear-gradient pipeline — shares `aa_vao` / `aa_vbo` / `aa_ibo`.
+    gradient: GradientPipeline,
+
     // Textured-quad pipeline (draw_image_rgba — markdown images, screenshots,
     // AGG-rasterised Label backbuffers).
     tex_prog: glow::Program,
@@ -238,6 +244,7 @@ pub struct GlGfxCtx {
 
     // Drawing state
     fill_color: Color,
+    fill_linear_gradient: Option<LinearGradientPaint>,
     stroke_color: Color,
     line_width: f64,
     line_join: LineJoin,

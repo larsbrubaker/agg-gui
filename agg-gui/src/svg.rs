@@ -12,7 +12,7 @@ use agg_rust::trans_affine::TransAffine;
 use usvg::tiny_skia_path::PathSegment;
 
 use crate::color::Color;
-use crate::draw_ctx::{DrawCtx, FillRule};
+use crate::draw_ctx::{DrawCtx, FillRule, GradientSpread, GradientStop, LinearGradientPaint};
 use crate::framebuffer::Framebuffer;
 use crate::gfx_ctx::GfxCtx;
 use crate::lcd_coverage::LcdBuffer;
@@ -262,12 +262,11 @@ fn fill_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
     let Some(fill) = path.fill() else {
         return;
     };
-    let Some(color) = solid_paint(fill.paint(), state.opacity * fill.opacity().get()) else {
-        return;
-    };
 
     emit_path(path, ctx);
-    ctx.set_fill_color(color);
+    if !apply_fill_paint(ctx, fill.paint(), state.opacity * fill.opacity().get()) {
+        return;
+    }
     ctx.set_fill_rule(map_fill_rule(fill.rule()));
     ctx.fill();
 }
@@ -378,18 +377,81 @@ fn solid_paint(paint: &usvg::Paint, opacity: f32) -> Option<Color> {
     }
 }
 
+fn apply_fill_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) -> bool {
+    match paint {
+        usvg::Paint::Color(_) => {
+            if let Some(color) = solid_paint(paint, opacity) {
+                ctx.set_fill_color(color);
+                true
+            } else {
+                false
+            }
+        }
+        usvg::Paint::LinearGradient(gradient) => {
+            if !ctx.supports_fill_linear_gradient() {
+                return false;
+            }
+            let stops = gradient_stops(gradient.stops(), opacity);
+            if stops.is_empty() {
+                return false;
+            }
+            ctx.set_fill_linear_gradient(LinearGradientPaint {
+                x1: gradient.x1() as f64,
+                y1: gradient.y1() as f64,
+                x2: gradient.x2() as f64,
+                y2: gradient.y2() as f64,
+                transform: to_trans_affine(gradient.transform()),
+                spread: map_spread(gradient.spread_method()),
+                stops,
+            });
+            true
+        }
+        usvg::Paint::RadialGradient(_) | usvg::Paint::Pattern(_) => false,
+    }
+}
+
+fn gradient_stops(stops: &[usvg::Stop], opacity: f32) -> Vec<GradientStop> {
+    stops
+        .iter()
+        .map(|stop| {
+            let color = stop.color();
+            GradientStop {
+                offset: stop.offset().get() as f64,
+                color: Color::rgba(
+                    color.red as f32 / 255.0,
+                    color.green as f32 / 255.0,
+                    color.blue as f32 / 255.0,
+                    opacity * stop.opacity().get(),
+                ),
+            }
+        })
+        .collect()
+}
+
 fn apply_transform(ctx: &mut dyn DrawCtx, transform: usvg::Transform) {
     let mut current = ctx.transform();
-    let node_transform = TransAffine::new_custom(
+    let node_transform = to_trans_affine(transform);
+    current.premultiply(&node_transform);
+    ctx.set_transform(current);
+}
+
+fn to_trans_affine(transform: usvg::Transform) -> TransAffine {
+    TransAffine::new_custom(
         transform.sx as f64,
         transform.ky as f64,
         transform.kx as f64,
         transform.sy as f64,
         transform.tx as f64,
         transform.ty as f64,
-    );
-    current.premultiply(&node_transform);
-    ctx.set_transform(current);
+    )
+}
+
+fn map_spread(spread: usvg::SpreadMethod) -> GradientSpread {
+    match spread {
+        usvg::SpreadMethod::Pad => GradientSpread::Pad,
+        usvg::SpreadMethod::Reflect => GradientSpread::Reflect,
+        usvg::SpreadMethod::Repeat => GradientSpread::Repeat,
+    }
 }
 
 fn transformed_rect(transform: &TransAffine, width: f64, height: f64) -> (f64, f64, f64, f64) {
@@ -596,6 +658,65 @@ mod tests {
         assert!(
             fb.pixels().chunks_exact(4).any(|px| px == [0, 255, 0, 255]),
             "embedded image should paint at least one green pixel"
+        );
+    }
+
+    #[test]
+    fn renders_linear_gradient_fill_via_rgba_target() {
+        let svg = br##"
+            <svg xmlns="http://www.w3.org/2000/svg" width="4" height="2">
+                <defs>
+                    <linearGradient id="g" gradientUnits="userSpaceOnUse"
+                                    x1="0" y1="0" x2="4" y2="0">
+                        <stop offset="0" stop-color="#ff0000"/>
+                        <stop offset="1" stop-color="#0000ff"/>
+                    </linearGradient>
+                </defs>
+                <rect width="4" height="2" fill="url(#g)"/>
+            </svg>
+        "##;
+
+        let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
+        let left = ((fb.width() + 0) * 4) as usize;
+        let right = ((fb.width() + 3) * 4) as usize;
+
+        assert!(
+            fb.pixels()[left] > fb.pixels()[left + 2],
+            "left side should be more red than blue"
+        );
+        assert!(
+            fb.pixels()[right + 2] > fb.pixels()[right],
+            "right side should be more blue than red"
+        );
+    }
+
+    #[test]
+    fn renders_linear_gradient_fill_via_lcd_target() {
+        let svg = br##"
+            <svg xmlns="http://www.w3.org/2000/svg" width="4" height="2">
+                <defs>
+                    <linearGradient id="g" gradientUnits="userSpaceOnUse"
+                                    x1="0" y1="0" x2="4" y2="0">
+                        <stop offset="0" stop-color="#ff0000"/>
+                        <stop offset="1" stop-color="#0000ff"/>
+                    </linearGradient>
+                </defs>
+                <rect width="4" height="2" fill="url(#g)"/>
+            </svg>
+        "##;
+
+        let buffer = render_svg_to_lcd_buffer(svg).expect("SVG should render");
+        let row = buffer.width() as usize;
+        let left = (row + 0) * 3;
+        let right = (row + 3) * 3;
+
+        assert!(
+            buffer.color_plane()[left] > buffer.color_plane()[left + 2],
+            "left side should be more red than blue"
+        );
+        assert!(
+            buffer.color_plane()[right + 2] > buffer.color_plane()[right],
+            "right side should be more blue than red"
         );
     }
 

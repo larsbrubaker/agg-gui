@@ -39,4 +39,49 @@ pub(super) const SVG_SAMPLES: &[SvgSample] = &[
             "../../../../../tests/resvg-test-suite/tests/structure/image/embedded-png.png"
         ),
     },
+    SvgSample {
+        name: "paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg",
+        svg: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientUnits=userSpaceOnUse.png"
+        ),
+    },
+    SvgSample {
+        name: "paint-servers/linearGradient/gradientTransform.svg",
+        svg: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientTransform.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientTransform.png"
+        ),
+    },
+    SvgSample {
+        name: "paint-servers/linearGradient/spreadMethod=reflect.svg",
+        svg: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=reflect.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=reflect.png"
+        ),
+    },
+    SvgSample {
+        name: "paint-servers/linearGradient/spreadMethod=repeat.svg",
+        svg: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=repeat.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=repeat.png"
+        ),
+    },
+    SvgSample {
+        name: "paint-servers/linearGradient/many-stops.svg",
+        svg: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/many-stops.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/many-stops.png"
+        ),
+    },
 ];

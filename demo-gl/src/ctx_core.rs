@@ -50,6 +50,8 @@ impl GlGfxCtx {
         gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(aa_ibo));
         gl.bind_vertex_array(None);
 
+        let gradient = GradientPipeline::new(&gl);
+
         // ── Textured-quad pipeline ─────────────────────────────────────────
         let tex_prog = compile_program(&gl, TEX_VERT, TEX_FRAG).expect("tex shader compile/link");
         let tex_res_loc = gl.get_uniform_location(tex_prog, "u_resolution");
@@ -117,6 +119,7 @@ impl GlGfxCtx {
             aa_ibo,
             aa_res_loc,
             aa_color_loc,
+            gradient,
             tex_prog,
             tex_vao,
             tex_vbo,
@@ -146,6 +149,7 @@ impl GlGfxCtx {
             lcb_alpha_sampler,
             lcb_channel_loc,
             fill_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
+            fill_linear_gradient: None,
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             line_width: 1.0,
             line_join: LineJoin::Miter,
@@ -204,6 +208,7 @@ impl GlGfxCtx {
         self.viewport = (width, height);
         self.current_fbo = None;
         self.fill_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
+        self.fill_linear_gradient = None;
         self.stroke_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
         self.line_width = 1.0;
         self.fill_rule = FillRule::NonZero;
@@ -236,6 +241,7 @@ impl GlGfxCtx {
         SavedGlDrawState {
             viewport: self.viewport,
             fill_color: self.fill_color,
+            fill_linear_gradient: self.fill_linear_gradient.clone(),
             stroke_color: self.stroke_color,
             line_width: self.line_width,
             line_join: self.line_join,
@@ -255,6 +261,7 @@ impl GlGfxCtx {
     pub(crate) fn restore_draw_state(&mut self, saved: SavedGlDrawState) {
         self.viewport = saved.viewport;
         self.fill_color = saved.fill_color;
+        self.fill_linear_gradient = saved.fill_linear_gradient;
         self.stroke_color = saved.stroke_color;
         self.line_width = saved.line_width;
         self.line_join = saved.line_join;
@@ -1149,8 +1156,12 @@ impl GlGfxCtx {
         };
 
         if let Some((verts, idx)) = tess {
-            let color = self.fill_color;
-            self.submit_aa_triangles(&verts, &idx, color);
+            if let Some(gradient) = self.fill_linear_gradient.clone() {
+                self.submit_linear_gradient_triangles(&verts, &idx, &gradient, &transform);
+            } else {
+                let color = self.fill_color;
+                self.submit_aa_triangles(&verts, &idx, color);
+            }
         }
     }
 

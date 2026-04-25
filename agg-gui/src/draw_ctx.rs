@@ -37,6 +37,100 @@ impl Default for FillRule {
     }
 }
 
+/// How a gradient behaves outside the normalized `0..=1` range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GradientSpread {
+    /// Clamp to the nearest edge stop.
+    Pad,
+    /// Mirror each repeated interval.
+    Reflect,
+    /// Repeat the gradient ramp.
+    Repeat,
+}
+
+impl Default for GradientSpread {
+    fn default() -> Self {
+        Self::Pad
+    }
+}
+
+/// One color stop in a bridge-level gradient paint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradientStop {
+    pub offset: f64,
+    pub color: Color,
+}
+
+/// Linear gradient fill paint expressed in local drawing coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinearGradientPaint {
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+    pub transform: TransAffine,
+    pub spread: GradientSpread,
+    pub stops: Vec<GradientStop>,
+}
+
+impl LinearGradientPaint {
+    pub fn sample(&self, mut x: f64, mut y: f64) -> Color {
+        if self.stops.is_empty() {
+            return Color::transparent();
+        }
+
+        self.transform.inverse_transform(&mut x, &mut y);
+
+        let dx = self.x2 - self.x1;
+        let dy = self.y2 - self.y1;
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 > f64::EPSILON {
+            ((x - self.x1) * dx + (y - self.y1) * dy) / len2
+        } else {
+            0.0
+        };
+        let t = apply_spread(t, self.spread);
+
+        if t <= self.stops[0].offset {
+            return self.stops[0].color;
+        }
+        for pair in self.stops.windows(2) {
+            let a = pair[0];
+            let b = pair[1];
+            if t <= b.offset {
+                let span = (b.offset - a.offset).max(f64::EPSILON);
+                let u = ((t - a.offset) / span).clamp(0.0, 1.0) as f32;
+                return lerp_color(a.color, b.color, u);
+            }
+        }
+        self.stops[self.stops.len() - 1].color
+    }
+}
+
+fn apply_spread(t: f64, spread: GradientSpread) -> f64 {
+    match spread {
+        GradientSpread::Pad => t.clamp(0.0, 1.0),
+        GradientSpread::Repeat => t - t.floor(),
+        GradientSpread::Reflect => {
+            let period = t.rem_euclid(2.0);
+            if period <= 1.0 {
+                period
+            } else {
+                2.0 - period
+            }
+        }
+    }
+}
+
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    Color::rgba(
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+        a.a + (b.a - a.a) * t,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // GL paint hook
 // ---------------------------------------------------------------------------
@@ -77,6 +171,10 @@ pub trait DrawCtx {
 
     fn set_fill_color(&mut self, color: Color);
     fn set_stroke_color(&mut self, color: Color);
+    fn set_fill_linear_gradient(&mut self, _gradient: LinearGradientPaint) {}
+    fn supports_fill_linear_gradient(&self) -> bool {
+        false
+    }
     fn set_line_width(&mut self, w: f64);
     fn set_line_join(&mut self, join: LineJoin);
     fn set_line_cap(&mut self, cap: LineCap);

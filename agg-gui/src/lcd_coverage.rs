@@ -387,6 +387,88 @@ impl LcdBuffer {
         }
     }
 
+    /// Composite an [`LcdMask`] using a per-pixel source colour callback.
+    ///
+    /// The callback receives destination pixel coordinates in this buffer's
+    /// Y-up pixel space.  This keeps the LCD coverage pipeline shared for
+    /// solid and gradient fills while allowing colour to vary across the mask.
+    pub fn composite_mask_with_color<F>(
+        &mut self,
+        mask: &LcdMask,
+        dst_x: i32,
+        dst_y: i32,
+        clip: Option<(i32, i32, i32, i32)>,
+        mut color_at: F,
+    ) where
+        F: FnMut(i32, i32) -> Color,
+    {
+        if mask.width == 0 || mask.height == 0 {
+            return;
+        }
+        let dst_w_i = self.width as i32;
+        let dst_h_i = self.height as i32;
+        let dst_w_u = self.width as usize;
+        let mw = mask.width as i32;
+        let mh = mask.height as i32;
+        let (cx1, cy1, cx2, cy2) = match clip {
+            Some((cx1, cy1, cx2, cy2)) => {
+                (cx1.max(0), cy1.max(0), cx2.min(dst_w_i), cy2.min(dst_h_i))
+            }
+            None => (0, 0, dst_w_i, dst_h_i),
+        };
+        if cx1 >= cx2 || cy1 >= cy2 {
+            return;
+        }
+
+        for my in 0..mh {
+            let dy = dst_y + my;
+            if dy < cy1 || dy >= cy2 {
+                continue;
+            }
+            let dy_u = dy as usize;
+            for mx in 0..mw {
+                let dx = dst_x + mx;
+                if dx < cx1 || dx >= cx2 {
+                    continue;
+                }
+                let mi = ((my * mw + mx) * 3) as usize;
+                let src = color_at(dx, dy);
+                let sa = src.a.clamp(0.0, 1.0);
+                let sr = src.r.clamp(0.0, 1.0);
+                let sg = src.g.clamp(0.0, 1.0);
+                let sb = src.b.clamp(0.0, 1.0);
+                let ea_r = sa * (mask.data[mi] as f32 / 255.0);
+                let ea_g = sa * (mask.data[mi + 1] as f32 / 255.0);
+                let ea_b = sa * (mask.data[mi + 2] as f32 / 255.0);
+                if ea_r == 0.0 && ea_g == 0.0 && ea_b == 0.0 {
+                    continue;
+                }
+
+                let di = (dy_u * dst_w_u + (dx as usize)) * 3;
+                let bc_r = self.color[di] as f32 / 255.0;
+                let bc_g = self.color[di + 1] as f32 / 255.0;
+                let bc_b = self.color[di + 2] as f32 / 255.0;
+                let ba_r = self.alpha[di] as f32 / 255.0;
+                let ba_g = self.alpha[di + 1] as f32 / 255.0;
+                let ba_b = self.alpha[di + 2] as f32 / 255.0;
+
+                let rc_r = sr * ea_r + bc_r * (1.0 - ea_r);
+                let rc_g = sg * ea_g + bc_g * (1.0 - ea_g);
+                let rc_b = sb * ea_b + bc_b * (1.0 - ea_b);
+                let ra_r = ea_r + ba_r * (1.0 - ea_r);
+                let ra_g = ea_g + ba_g * (1.0 - ea_g);
+                let ra_b = ea_b + ba_b * (1.0 - ea_b);
+
+                self.color[di] = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.color[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.color[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di] = (ra_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di + 1] = (ra_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                self.alpha[di + 2] = (ra_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+
     /// Composite `src` onto this buffer at offset `(dst_x, dst_y)` via
     /// **per-channel premultiplied src-over** — the buffer-level
     /// analogue of [`Self::composite_mask`].  Each of the three
