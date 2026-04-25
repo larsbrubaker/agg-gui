@@ -203,6 +203,15 @@ pub trait Widget {
         false
     }
 
+    /// Whether this widget currently owns an app-modal interaction layer.
+    ///
+    /// When true anywhere in the tree, [`App`](crate::App) routes pointer and
+    /// key events to that modal subtree before normal hit testing so content
+    /// underneath the modal backdrop cannot be interacted with.
+    fn has_active_modal(&self) -> bool {
+        false
+    }
+
     /// Handle an event. The event's positions are already in **local** Y-up
     /// coordinates. Return [`EventResult::Consumed`] to stop bubbling.
     fn on_event(&mut self, event: &Event) -> EventResult;
@@ -328,6 +337,12 @@ pub trait Widget {
     /// to draw overlays (e.g. resize handles, drag previews) that must not
     /// be occluded by child content.
     fn paint_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
+
+    /// Paint app-level overlays after the entire widget tree has been painted.
+    ///
+    /// This is for overlays whose visual stacking is global, not parent-local
+    /// (e.g. modal backdrops). Normal widgets should use [`paint_overlay`].
+    fn paint_global_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
 
     /// Return a clip rectangle (in local coordinates) that constrains all child
     /// painting.  `paint_subtree` applies this clip before recursing into
@@ -491,9 +506,9 @@ mod paint;
 mod tree;
 
 pub use app::App;
-pub use paint::paint_subtree;
+pub use paint::{paint_global_overlays, paint_subtree};
 pub use tree::{
-    collect_inspector_nodes, current_mouse_world, dispatch_event, find_widget_by_id,
-    find_widget_by_id_mut, find_widget_by_type, hit_test_subtree, set_current_mouse_world,
-    InspectorNode,
+    active_modal_path, collect_inspector_nodes, current_mouse_world, current_viewport,
+    dispatch_event, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type,
+    hit_test_subtree, set_current_mouse_world, set_current_viewport, InspectorNode,
 };

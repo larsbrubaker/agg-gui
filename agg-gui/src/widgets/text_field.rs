@@ -106,6 +106,7 @@ pub struct TextField {
     on_change: Option<Box<dyn FnMut(&str)>>,
     on_enter: Option<Box<dyn FnMut(&str)>>,
     on_edit_complete: Option<Box<dyn FnMut(&str)>>,
+    text_cell: Option<Rc<RefCell<String>>>,
 
     // ── Backbuffer cache ─────────────────────────────────────────────
     //
@@ -164,6 +165,7 @@ impl TextField {
             on_change: None,
             on_enter: None,
             on_edit_complete: None,
+            text_cell: None,
             cache: BackbufferCache::default(),
             last_sig: None,
         }
@@ -212,6 +214,17 @@ impl TextField {
         st.cursor = len;
         st.anchor = len;
         drop(st);
+        self
+    }
+
+    /// Bind the field to external text state.
+    ///
+    /// `layout` picks up external writes (e.g. a Clear button) and
+    /// `on_change` writes user edits back into the cell.
+    pub fn with_text_cell(mut self, cell: Rc<RefCell<String>>) -> Self {
+        let text = cell.borrow().clone();
+        self.set_text(text);
+        self.text_cell = Some(cell);
         self
     }
 
@@ -268,12 +281,25 @@ impl TextField {
         let t = s.into();
         let len = t.len();
         let mut st = self.edit.borrow_mut();
-        st.text = t;
+        st.text = t.clone();
         st.cursor = len;
         st.anchor = len;
         drop(st);
+        if let Some(cell) = &self.text_cell {
+            *cell.borrow_mut() = t;
+        }
         self.undo.clear_history();
         self.pending_insert = None;
+    }
+
+    pub(crate) fn sync_from_text_cell(&mut self) {
+        let Some(cell) = &self.text_cell else {
+            return;
+        };
+        let external = cell.borrow().clone();
+        if external != self.edit.borrow().text {
+            self.set_text(external);
+        }
     }
 
     // ── Private state helpers ────────────────────────────────────────────────
@@ -486,8 +512,11 @@ impl TextField {
     // ── Callback dispatchers ─────────────────────────────────────────────────
 
     fn notify_change(&mut self) {
+        let t = self.text();
+        if let Some(cell) = &self.text_cell {
+            *cell.borrow_mut() = t.clone();
+        }
         if let Some(mut cb) = self.on_change.take() {
-            let t = self.text();
             cb(&t);
             self.on_change = Some(cb);
         }

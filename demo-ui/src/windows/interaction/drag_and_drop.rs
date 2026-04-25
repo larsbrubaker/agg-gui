@@ -171,6 +171,9 @@ impl DragAndDropWidget {
         if sc >= self.columns.len() || sr >= self.columns[sc].len() {
             return;
         }
+        if sc == tc && sr < tr {
+            tr -= 1;
+        }
         let item = self.columns[sc].remove(sr);
         let col = &mut self.columns[tc];
         tr = tr.min(col.len());
@@ -458,4 +461,39 @@ pub fn drag_and_drop(font: Arc<Font>) -> Box<dyn Widget> {
 
     outer.push(Box::new(DragAndDropWidget::new(Arc::clone(&font))), 1.0);
     Box::new(outer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_font() -> Arc<Font> {
+        const BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+        Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"))
+    }
+
+    #[test]
+    fn same_column_drop_adjusts_removed_row() {
+        let mut widget = DragAndDropWidget::new(test_font());
+        widget.drag_active = true;
+        widget.drag_source = Some((0, 1));
+        widget.drop_target = Some((0, 3));
+
+        widget.commit_drop();
+
+        assert_eq!(widget.columns[0], ["Item A", "Item C", "Item B", "Item D"]);
+    }
+
+    #[test]
+    fn cross_column_drop_keeps_destination_row() {
+        let mut widget = DragAndDropWidget::new(test_font());
+        widget.drag_active = true;
+        widget.drag_source = Some((0, 1));
+        widget.drop_target = Some((1, 1));
+
+        widget.commit_drop();
+
+        assert_eq!(widget.columns[0], ["Item A", "Item C", "Item D"]);
+        assert_eq!(widget.columns[1], ["Item E", "Item B", "Item F", "Item G"]);
+    }
 }

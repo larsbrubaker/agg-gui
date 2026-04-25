@@ -20,35 +20,88 @@ use agg_gui::{
 // Strip demo
 // ---------------------------------------------------------------------------
 
-/// A fixed-width labeled box used to visualise "strip" regions.
-///
-/// Text is rendered through a backbuffered Label child so the glyph rasterization
-/// is cached to a framebuffer rather than repeated each frame.
-struct StripCell {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-    label_widget: Label,
+#[derive(Clone, Copy)]
+struct StripRegion {
+    rect: Rect,
+    label: &'static str,
     bg: Color,
-    w: f64,
-    h: f64,
 }
 
-impl StripCell {
-    fn new(label: impl Into<String>, font: Arc<Font>, bg: Color, w: f64, h: f64) -> Self {
+fn faded_strip_color(color: Color) -> Color {
+    Color::rgba(color.r, color.g, color.b, 0.22)
+}
+
+fn strip_demo_regions(width: f64, height: f64, body_text_size: f64) -> Vec<StripRegion> {
+    let w = width.max(0.0);
+    let h = height.max(0.0);
+    let footer_h = body_text_size.max(12.0).min(h);
+    let top_h = 50.0_f64.min((h - footer_h).max(0.0));
+    let remaining = (h - footer_h - top_h).max(0.0);
+    let lower_h = (remaining * 0.5).max(60.0).min(remaining);
+    let middle_h = (remaining - lower_h).max(0.0);
+    let lower_y = footer_h;
+    let middle_y = lower_y + lower_h;
+    let top_y = middle_y + middle_h;
+
+    let middle_half_w = w * 0.5;
+    let yellow_h = middle_h / 3.0;
+    let fixed_w = 120.0 + 70.0;
+    let lower_gap_w = ((w - fixed_w).max(0.0)) * 0.5;
+    let gold_x = lower_gap_w;
+    let green_x = (w - 70.0).max(0.0);
+    let gold_y = lower_y + (lower_h - 60.0).max(0.0) * 0.5;
+    let green_h = (lower_h * 0.5).max(60.0).min(lower_h);
+    let green_y = lower_y + (lower_h - green_h) * 0.5;
+
+    vec![
+        StripRegion {
+            rect: Rect::new(0.0, top_y, w, top_h),
+            label: "width: 100%\nheight: 50px",
+            bg: faded_strip_color(Color::rgb(0.0, 0.0, 1.0)),
+        },
+        StripRegion {
+            rect: Rect::new(0.0, middle_y, middle_half_w, middle_h),
+            label: "width: 50%\nheight: remaining",
+            bg: faded_strip_color(Color::rgb(1.0, 0.0, 0.0)),
+        },
+        StripRegion {
+            rect: Rect::new(middle_half_w, middle_y + yellow_h, middle_half_w, yellow_h),
+            label: "width: 50%\nheight: 1/3 of the red region",
+            bg: faded_strip_color(Color::rgb(1.0, 1.0, 0.0)),
+        },
+        StripRegion {
+            rect: Rect::new(gold_x, gold_y, 120.0_f64.min(w), 60.0_f64.min(lower_h)),
+            label: "width: 120px\nheight: 60px",
+            bg: faded_strip_color(Color::rgb(1.0, 0.84, 0.0)),
+        },
+        StripRegion {
+            rect: Rect::new(green_x, green_y, 70.0_f64.min(w), green_h),
+            label: "width: 70px\n\nheight: 50%, but at least 60px.",
+            bg: faded_strip_color(Color::rgb(0.0, 1.0, 0.0)),
+        },
+    ]
+}
+
+/// Custom painter for the egui Strip demo's exact/remainder/relative regions.
+struct StripDemoCanvas {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    font: Arc<Font>,
+}
+
+impl StripDemoCanvas {
+    fn new(font: Arc<Font>) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
-            label_widget: Label::new(label, font).with_font_size(11.0),
-            bg,
-            w,
-            h,
+            font,
         }
     }
 }
 
-impl Widget for StripCell {
+impl Widget for StripDemoCanvas {
     fn type_name(&self) -> &'static str {
-        "StripCell"
+        "StripDemoCanvas"
     }
     fn bounds(&self) -> Rect {
         self.bounds
@@ -63,35 +116,45 @@ impl Widget for StripCell {
         &mut self.children
     }
 
-    fn layout(&mut self, _available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, self.w, self.h);
-        // Position the label at 4px from the left, vertically centered.
-        let ls = self.label_widget.layout(Size::new(self.w - 8.0, self.h));
-        let ly = (self.h - ls.height) * 0.5;
-        self.label_widget
-            .set_bounds(Rect::new(4.0, ly, ls.width, ls.height));
-        Size::new(self.w, self.h)
+    fn layout(&mut self, available: Size) -> Size {
+        let w = if available.width.is_finite() {
+            available.width.max(360.0)
+        } else {
+            400.0
+        };
+        let h = if available.height.is_finite() {
+            available.height.max(260.0)
+        } else {
+            320.0
+        };
+        self.bounds = Rect::new(0.0, 0.0, w, h);
+        Size::new(w, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        ctx.set_fill_color(self.bg);
-        ctx.begin_path();
-        ctx.rect(0.0, 0.0, self.w, self.h);
-        ctx.fill();
-        ctx.set_stroke_color(v.widget_stroke);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rect(0.0, 0.0, self.w, self.h);
-        ctx.stroke();
+        ctx.set_font(Arc::clone(&self.font));
+        ctx.set_font_size(11.0);
+        for region in strip_demo_regions(self.bounds.width, self.bounds.height, 14.0) {
+            let r = region.rect;
+            ctx.set_fill_color(region.bg);
+            ctx.begin_path();
+            ctx.rect(r.x, r.y, r.width, r.height);
+            ctx.fill();
+            ctx.set_stroke_color(v.widget_stroke);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            ctx.rect(r.x, r.y, r.width, r.height);
+            ctx.stroke();
 
-        // Paint label via backbuffered child.
-        self.label_widget.set_color(v.text_color);
-        let lb = self.label_widget.bounds();
-        ctx.save();
-        ctx.translate(lb.x, lb.y);
-        paint_subtree(&mut self.label_widget, ctx);
-        ctx.restore();
+            ctx.set_fill_color(v.text_color);
+            for (line_i, line) in region.label.lines().enumerate() {
+                let y = r.y + r.height - 15.0 - line_i as f64 * 13.0;
+                if y >= r.y {
+                    ctx.fill_text(line, r.x + 6.0, y);
+                }
+            }
+        }
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
@@ -99,70 +162,38 @@ impl Widget for StripCell {
     }
 }
 
-/// Build the Strip demo — a horizontal row of fixed-width strips, then a
-/// vertical column of fixed-height strips.
+/// Build the Strip demo — nested exact/remainder/relative strips matching egui.
 pub fn strip_demo(font: Arc<Font>) -> Box<dyn Widget> {
-    let mut outer = FlexColumn::new()
-        .with_gap(16.0)
-        .with_padding(14.0)
-        .with_panel_bg();
+    Box::new(StripDemoCanvas::new(font))
+}
 
-    outer.push(
-        Box::new(Label::new("Horizontal strips", Arc::clone(&font)).with_font_size(12.0)),
-        0.0,
-    );
+#[cfg(test)]
+mod strip_tests {
+    use super::strip_demo_regions;
 
-    let colors_h = [
-        Color::rgba(0.22, 0.45, 0.88, 0.18),
-        Color::rgba(0.18, 0.72, 0.42, 0.18),
-        Color::rgba(0.88, 0.25, 0.18, 0.18),
-        Color::rgba(0.86, 0.78, 0.40, 0.18),
-        Color::rgba(0.60, 0.25, 0.88, 0.18),
-    ];
-    let mut h_row = FlexRow::new().with_gap(4.0);
-    for (i, &bg) in colors_h.iter().enumerate() {
-        h_row.push(
-            Box::new(StripCell::new(
-                format!("S{}", i + 1),
-                Arc::clone(&font),
-                bg,
-                55.0,
-                40.0,
-            )),
-            0.0,
+    #[test]
+    fn strip_regions_match_reference_shape() {
+        let regions = strip_demo_regions(400.0, 300.0, 14.0);
+
+        assert_eq!(regions.len(), 5);
+        assert_rect(&regions[0].rect, 0.0, 250.0, 400.0, 50.0);
+        assert_rect(&regions[1].rect, 0.0, 132.0, 200.0, 118.0);
+        assert_rect(&regions[2].rect, 200.0, 171.333, 200.0, 39.333);
+        assert_rect(&regions[3].rect, 105.0, 43.0, 120.0, 60.0);
+        assert_rect(&regions[4].rect, 330.0, 43.0, 70.0, 60.0);
+    }
+
+    fn assert_rect(rect: &agg_gui::Rect, x: f64, y: f64, w: f64, h: f64) {
+        assert!((rect.x - x).abs() < 0.001, "x: {} != {}", rect.x, x);
+        assert!((rect.y - y).abs() < 0.001, "y: {} != {}", rect.y, y);
+        assert!((rect.width - w).abs() < 0.001, "w: {} != {}", rect.width, w);
+        assert!(
+            (rect.height - h).abs() < 0.001,
+            "h: {} != {}",
+            rect.height,
+            h
         );
     }
-    outer.push(Box::new(h_row), 0.0);
-
-    outer.push(Box::new(Separator::horizontal()), 0.0);
-    outer.push(
-        Box::new(Label::new("Vertical strips", Arc::clone(&font)).with_font_size(12.0)),
-        0.0,
-    );
-
-    let colors_v = [
-        Color::rgba(0.22, 0.65, 0.88, 0.18),
-        Color::rgba(0.88, 0.55, 0.15, 0.18),
-        Color::rgba(0.88, 0.25, 0.65, 0.18),
-        Color::rgba(0.50, 0.50, 0.50, 0.18),
-    ];
-    let mut v_col = FlexColumn::new().with_gap(4.0);
-    for (i, &bg) in colors_v.iter().enumerate() {
-        v_col.push(
-            Box::new(StripCell::new(
-                format!("Strip {}", i + 1),
-                Arc::clone(&font),
-                bg,
-                200.0,
-                32.0,
-            )),
-            0.0,
-        );
-    }
-    outer.push(Box::new(v_col), 0.0);
-
-    outer.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(outer)
 }
 
 // ---------------------------------------------------------------------------

@@ -47,6 +47,8 @@ pub struct App {
     captured: Option<Vec<usize>>,
     /// Viewport height in pixels — used for Y-down → Y-up conversion.
     viewport_height: f64,
+    /// Viewport size in logical pixels from the most recent layout pass.
+    viewport_size: Size,
     /// Optional global key handler called *before* dispatching to the focused widget.
     /// Returns `true` if the key was handled globally (suppresses focused dispatch).
     global_key_handler: Option<Box<dyn FnMut(Key, Modifiers) -> bool>>,
@@ -65,6 +67,7 @@ impl App {
             hovered: None,
             captured: None,
             viewport_height: 1.0,
+            viewport_size: Size::new(1.0, 1.0),
             global_key_handler: None,
             touch_state: crate::touch_state::TouchState::new(),
         }
@@ -114,6 +117,8 @@ impl App {
         let scale = crate::device_scale::device_scale().max(1e-6);
         let logical = Size::new(viewport.width / scale, viewport.height / scale);
         self.viewport_height = logical.height;
+        self.viewport_size = logical;
+        set_current_viewport(logical);
         self.root
             .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);
@@ -130,7 +135,7 @@ impl App {
     /// after `paint` returns to decide whether to schedule continuous redraws.
     pub fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         crate::animation::clear_tick();
-        let viewport = Size::new(self.root.bounds().width, self.root.bounds().height);
+        let viewport = self.viewport_size;
         crate::widgets::combo_box::begin_combo_popup_frame(viewport);
         crate::widgets::tooltip::begin_tooltip_frame();
         // Recompute the multi-touch aggregate once per paint and publish
@@ -145,11 +150,13 @@ impl App {
             paint_subtree(self.root.as_mut(), ctx);
             crate::widgets::combo_box::paint_global_combo_popups(ctx);
             crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
+            paint_global_overlays(self.root.as_mut(), ctx);
             ctx.restore();
         } else {
             paint_subtree(self.root.as_mut(), ctx);
             crate::widgets::combo_box::paint_global_combo_popups(ctx);
             crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
+            paint_global_overlays(self.root.as_mut(), ctx);
         }
     }
 
@@ -189,6 +196,12 @@ impl App {
         crate::cursor::reset_cursor_icon();
         let pos = self.flip_y(screen_x, screen_y);
         set_current_mouse_world(pos);
+        if let Some(path) = active_modal_path(self.root.as_ref()) {
+            let event = Event::MouseMove { pos };
+            dispatch_event(&mut self.root, &path, &event, pos);
+            self.hovered = Some(path);
+            return;
+        }
         self.dispatch_mouse_move(pos);
     }
 
@@ -202,6 +215,19 @@ impl App {
     ) {
         let pos = self.flip_y(screen_x, screen_y);
         set_current_mouse_world(pos);
+        let modal_path = active_modal_path(self.root.as_ref());
+        let event = Event::MouseDown {
+            pos,
+            button,
+            modifiers: mods,
+        };
+        if let Some(path) = modal_path {
+            self.set_focus(None);
+            if dispatch_event(&mut self.root, &path, &event, pos) == EventResult::Consumed {
+                self.captured = Some(path);
+            }
+            return;
+        }
         let hit = self.compute_hit(pos);
 
         // Click-to-focus: if the hit widget is focusable, give it focus.
@@ -216,11 +242,6 @@ impl App {
             self.set_focus(None);
         }
 
-        let event = Event::MouseDown {
-            pos,
-            button,
-            modifiers: mods,
-        };
         if let Some(mut path) = hit {
             let result = dispatch_event(&mut self.root, &path, &event, pos);
             if result == EventResult::Consumed {
@@ -250,6 +271,11 @@ impl App {
             button,
             modifiers: mods,
         };
+        if let Some(path) = active_modal_path(self.root.as_ref()) {
+            self.captured = None;
+            dispatch_event(&mut self.root, &path, &event, pos);
+            return;
+        }
         // Deliver release to captured widget first (if any), then clear capture.
         if let Some(path) = self.captured.take() {
             dispatch_event(&mut self.root, &path, &event, pos);
@@ -281,7 +307,9 @@ impl App {
             key,
             modifiers: mods,
         };
-        if let Some(path) = self.focus.clone() {
+        if let Some(path) = active_modal_path(self.root.as_ref()) {
+            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
+        } else if let Some(path) = self.focus.clone() {
             dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
         }
     }
@@ -319,7 +347,8 @@ impl App {
         modifiers: Modifiers,
     ) {
         let pos = self.flip_y(screen_x, screen_y);
-        let hit = self.compute_hit(pos);
+        set_current_mouse_world(pos);
+        let hit = active_modal_path(self.root.as_ref()).or_else(|| self.compute_hit(pos));
         let event = Event::MouseWheel {
             pos,
             delta_y,

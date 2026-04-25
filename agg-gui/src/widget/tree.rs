@@ -31,6 +31,26 @@ pub fn hit_test_subtree(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usi
     Some(vec![]) // hit this widget, no child claimed it
 }
 
+/// Return the path to the topmost active modal subtree, ignoring normal
+/// hit-testing bounds. Modal overlays paint at app level, so their event
+/// routing must also bypass regular child clipping/window hit regions.
+pub fn active_modal_path(widget: &dyn Widget) -> Option<Vec<usize>> {
+    if !widget.is_visible() {
+        return None;
+    }
+    for (i, child) in widget.children().iter().enumerate().rev() {
+        if let Some(mut sub_path) = active_modal_path(child.as_ref()) {
+            sub_path.insert(0, i);
+            return Some(sub_path);
+        }
+    }
+    if widget.has_active_modal() {
+        Some(vec![])
+    } else {
+        None
+    }
+}
+
 /// Dispatch `event` through a path (list of child indices from the root).
 /// The event bubbles leaf → root; returns `Consumed` if any widget consumed it.
 ///
@@ -128,6 +148,8 @@ pub struct InspectorNode {
 thread_local! {
     static CURRENT_MOUSE_WORLD: std::cell::Cell<Option<Point>> =
         std::cell::Cell::new(None);
+    static CURRENT_VIEWPORT: std::cell::Cell<Size> =
+        std::cell::Cell::new(Size::new(1.0, 1.0));
 }
 
 /// Record the current mouse cursor position in app-level (world / Y-up
@@ -144,6 +166,16 @@ pub fn set_current_mouse_world(p: Point) {
 /// carried in `Event::Mouse*`.
 pub fn current_mouse_world() -> Option<Point> {
     CURRENT_MOUSE_WORLD.with(|c| c.get())
+}
+
+/// Record the current app-level viewport in logical Y-up coordinates.
+pub fn set_current_viewport(s: Size) {
+    CURRENT_VIEWPORT.with(|c| c.set(s));
+}
+
+/// Retrieve the latest app-level viewport in logical coordinates.
+pub fn current_viewport() -> Size {
+    CURRENT_VIEWPORT.with(|c| c.get())
 }
 
 /// Depth-first search the subtree rooted at `widget` for one whose

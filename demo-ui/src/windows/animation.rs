@@ -228,7 +228,14 @@ pub fn bezier_curve(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(
-        Box::new(Label::new("Drag the control points", Arc::clone(&font)).with_font_size(12.0)),
+        Box::new(
+            Label::new(
+                "Move the points by dragging them. Only convex curves can be accurately filled.",
+                Arc::clone(&font),
+            )
+            .with_font_size(12.0)
+            .with_wrap(true),
+        ),
         0.0,
     );
 
@@ -627,7 +634,7 @@ impl Widget for PaintingRoot {
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
         // Toolbar gets its natural height; canvas fills the rest.
-        let toolbar_size = self.children[0].layout(Size::new(available.width, 40.0));
+        let toolbar_size = self.children[0].layout(Size::new(available.width, 64.0));
         let canvas_h = (available.height - toolbar_size.height).max(0.0);
         let canvas_size = self.children[1].layout(Size::new(available.width, canvas_h));
         // Position toolbar at top, canvas below (Y-up: canvas at y=0, toolbar above).
@@ -716,7 +723,7 @@ pub fn painting(font: Arc<Font>) -> Box<dyn Widget> {
             .with_padding(6.0)
             .add(Box::new(
                 SizedBox::new().with_height(26.0).with_child(Box::new(
-                    Button::new("Clear", Arc::clone(&font))
+                    Button::new("Clear Painting", Arc::clone(&font))
                         .with_font_size(12.0)
                         .on_click(move || {
                             flag_for_btn.set(true);
@@ -725,6 +732,10 @@ pub fn painting(font: Arc<Font>) -> Box<dyn Widget> {
             ));
         Box::new(row) as Box<dyn Widget>
     };
+
+    let toolbar = Box::new(FlexColumn::new().with_gap(6.0).add(toolbar).add(Box::new(
+        Label::new("Paint with your mouse/touch!", Arc::clone(&font)).with_font_size(12.0),
+    ))) as Box<dyn Widget>;
 
     let canvas = Box::new(ClearablePaintCanvas {
         inner: PaintCanvas::new(),

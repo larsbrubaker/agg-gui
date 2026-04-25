@@ -90,8 +90,8 @@ pub use theme::{current_visuals, current_visuals_epoch, set_visuals, ThemePrefer
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
 pub use widget::{
-    collect_inspector_nodes, current_mouse_world, find_widget_by_id, find_widget_by_id_mut,
-    find_widget_by_type, App, InspectorNode, Widget,
+    collect_inspector_nodes, current_mouse_world, current_viewport, find_widget_by_id,
+    find_widget_by_id_mut, find_widget_by_type, App, InspectorNode, Widget,
 };
 pub use widgets::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,

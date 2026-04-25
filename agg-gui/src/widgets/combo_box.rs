@@ -660,6 +660,9 @@ impl Widget for ComboBox {
             ("selected", self.selected.to_string()),
             ("open", self.open.to_string()),
             ("options", self.options.len().to_string()),
+            ("popup_opens_up", self.popup_opens_up.to_string()),
+            ("popup_visible_count", self.popup_visible_count.to_string()),
+            ("scroll_offset", self.scroll_offset.to_string()),
         ]
     }
 }

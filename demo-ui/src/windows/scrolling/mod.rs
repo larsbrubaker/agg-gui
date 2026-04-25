@@ -30,8 +30,14 @@ pub fn scrolling_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .with_font_size(12.0)
         .add_tab("Appearance", appearance::build(Arc::clone(&font)))
         .add_tab("Scroll to", scroll_to::build(Arc::clone(&font)))
-        .add_tab("Many lines", many_lines::build(Arc::clone(&font)))
-        .add_tab("Large canvas", large_canvas::build(Arc::clone(&font)))
+        .add_tab(
+            "Scroll a lot of lines",
+            many_lines::build(Arc::clone(&font)),
+        )
+        .add_tab(
+            "Scroll a large canvas",
+            large_canvas::build(Arc::clone(&font)),
+        )
         .add_tab("Stick to end", stick_to_end::build(Arc::clone(&font)))
         .add_tab("Bidirectional", bidirectional::build(Arc::clone(&font)));
     Box::new(tv)

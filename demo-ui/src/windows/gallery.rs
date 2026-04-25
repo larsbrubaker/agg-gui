@@ -9,249 +9,423 @@
 //! active theme (`ctx.visuals().text_color`) and remain readable in both dark
 //! and light mode.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use agg_gui::widget::paint_subtree;
 use agg_gui::widgets::button::ButtonTheme;
 use agg_gui::{
-    Button, Checkbox, Color, ComboBox, DragValue, FlexColumn, FlexRow, Font, Hyperlink, Label,
-    ProgressBar, RadioGroup, ScrollView, Separator, SizedBox, Slider, TextField, ToggleSwitch,
-    Widget,
+    Button, Checkbox, CollapsingHeader, Color, ColorPicker, ComboBox, DragValue, DrawCtx, Event,
+    EventResult, FlexColumn, FlexRow, Font, Hyperlink, ImageView, Label, ProgressBar, RadioGroup,
+    Rect, ScrollView, Separator, Size, SizedBox, Slider, TextField, ToggleSwitch, Widget,
 };
+
+const EGUI_DOCS_URL: &str = "https://docs.rs/egui/";
+const AGG_GUI_REPO_URL: &str = "https://github.com/larsbrubaker/agg-gui";
+
+/// ProgressBar wrapper that follows a shared scalar, matching egui's gallery
+/// where the slider and progress bar reflect the same value.
+struct ScalarProgress {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    scalar: Rc<Cell<f64>>,
+    bar: ProgressBar,
+}
+
+impl ScalarProgress {
+    fn new(scalar: Rc<Cell<f64>>, font: Arc<Font>) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            scalar,
+            bar: ProgressBar::new(0.0, font),
+        }
+    }
+}
+
+impl Widget for ScalarProgress {
+    fn type_name(&self) -> &'static str {
+        "ScalarProgress"
+    }
+
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+
+    fn layout(&mut self, available: Size) -> Size {
+        self.bar.set_value(self.scalar.get() / 360.0);
+        let size = self.bar.layout(available);
+        self.bounds = Rect::new(0.0, 0.0, size.width, size.height);
+        self.bar.set_bounds(self.bounds);
+        size
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        paint_subtree(&mut self.bar, ctx);
+    }
+
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
 
 /// Build the Widget Gallery demo — a scrollable showcase of all interactive
 /// widgets with section headers.
 pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
-    let slider_val = Rc::new(Cell::new(0.42_f64));
-    let cb1 = Rc::new(Cell::new(true));
-    let cb2 = Rc::new(Cell::new(false));
+    let boolean = Rc::new(Cell::new(false));
     let radio_sel = Rc::new(Cell::new(0_usize));
-    let combo_sel = Rc::new(Cell::new(0_usize));
+    let scalar = Rc::new(Cell::new(42.0_f64));
+    let color = Rc::new(Cell::new(Color::rgba(0.35, 0.55, 0.90, 0.50)));
+    let custom_toggle = Rc::new(Cell::new(false));
 
-    /// Section header — no explicit color so it inherits the active theme.
-    fn section(text: &str, font: &Arc<Font>) -> Box<dyn Widget> {
-        Box::new(Label::new(text, Arc::clone(font)).with_font_size(12.0))
+    /// Left-column doc link label, following egui's gallery structure.
+    fn doc_link(title: &str, search_term: &str, font: &Arc<Font>) -> Box<dyn Widget> {
+        let url = format!("https://docs.rs/egui?search={search_term}");
+        Box::new(
+            Hyperlink::new(title, Arc::clone(font))
+                .with_font_size(13.0)
+                .on_click(move || crate::url::open_url(&url)),
+        )
+    }
+
+    fn grid_row(left: Box<dyn Widget>, right: Box<dyn Widget>) -> Box<dyn Widget> {
+        Box::new(
+            FlexRow::new()
+                .with_gap(40.0)
+                .add(Box::new(SizedBox::new().with_width(132.0).with_child(left)))
+                .add_flex(right, 1.0),
+        )
+    }
+
+    fn selectable_button(
+        label: &'static str,
+        value: usize,
+        selected: Rc<Cell<usize>>,
+        font: Arc<Font>,
+    ) -> Box<dyn Widget> {
+        Box::new(
+            Button::new(label, font)
+                .with_font_size(12.0)
+                .on_click(move || selected.set(value)),
+        )
     }
 
     let mut col = FlexColumn::new()
-        .with_gap(14.0)
+        .with_gap(8.0)
         .with_padding(16.0)
         .with_panel_bg();
 
-    // ── Buttons ───────────────────────────────────────────────────────────────
-    col.push(section("Buttons", &font), 0.0);
-    let row = FlexRow::new()
-        .with_gap(8.0)
-        .add(Box::new(
-            SizedBox::new().with_height(28.0).with_child(Box::new(
-                Button::new("Primary", Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .on_click(|| {}),
-            )),
-        ))
-        .add(Box::new(
-            SizedBox::new().with_height(28.0).with_child(Box::new(
-                Button::new("Secondary", Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_theme(ButtonTheme {
-                        background: Color::rgba(0.22, 0.45, 0.88, 0.12),
-                        background_hovered: Color::rgba(0.22, 0.45, 0.88, 0.22),
-                        background_pressed: Color::rgba(0.22, 0.45, 0.88, 0.35),
-                        label_color: Color::rgb(0.22, 0.45, 0.88),
-                        border_radius: 6.0,
-                        focus_ring_color: Color::rgba(0.22, 0.45, 0.88, 0.55),
-                        focus_ring_width: 2.5,
-                    })
-                    .on_click(|| {}),
-            )),
-        ))
-        .add(Box::new(
-            SizedBox::new().with_height(28.0).with_child(Box::new(
-                Button::new("Danger", Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_theme(ButtonTheme {
-                        background: Color::rgb(0.88, 0.25, 0.18),
-                        background_hovered: Color::rgb(0.95, 0.32, 0.24),
-                        background_pressed: Color::rgb(0.72, 0.18, 0.12),
-                        label_color: Color::white(),
-                        border_radius: 6.0,
-                        focus_ring_color: Color::rgba(0.88, 0.25, 0.18, 0.55),
-                        focus_ring_width: 2.5,
-                    })
-                    .on_click(|| {}),
-            )),
-        ));
-    col.push(Box::new(row), 0.0);
-
-    // ── Checkboxes ────────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Checkboxes", &font), 0.0);
-    {
-        let v = Rc::clone(&cb1);
-        col.push(
-            Box::new(
-                Checkbox::new("Enable feature A", Arc::clone(&font), cb1.get())
-                    .with_font_size(13.0)
-                    .on_change(move |v2| v.set(v2)),
-            ),
-            0.0,
-        );
-    }
-    {
-        let v = Rc::clone(&cb2);
-        col.push(
-            Box::new(
-                Checkbox::new("Enable feature B", Arc::clone(&font), cb2.get())
-                    .with_font_size(13.0)
-                    .on_change(move |v2| v.set(v2)),
-            ),
-            0.0,
-        );
-    }
-
-    // ── Radio ─────────────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Radio buttons", &font), 0.0);
-    {
-        let rs = Rc::clone(&radio_sel);
-        col.push(
-            Box::new(
-                RadioGroup::new(
-                    vec!["Option A", "Option B", "Option C"],
-                    radio_sel.get(),
-                    Arc::clone(&font),
-                )
-                .with_font_size(13.0)
-                .on_change(move |i| rs.set(i)),
-            ),
-            0.0,
-        );
-    }
-
-    // ── ComboBox ──────────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Combo box", &font), 0.0);
-    {
-        let cs = Rc::clone(&combo_sel);
-        col.push(
-            Box::new(
-                ComboBox::new(
-                    vec!["Spring", "Summer", "Autumn", "Winter"],
-                    combo_sel.get(),
-                    Arc::clone(&font),
-                )
-                .on_change(move |i| cs.set(i)),
-            ),
-            0.0,
-        );
-    }
-
-    // ── Slider ────────────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Slider", &font), 0.0);
-    {
-        let sv = Rc::clone(&slider_val);
-        col.push(
-            Box::new(
-                Slider::new(slider_val.get(), 0.0, 1.0, Arc::clone(&font))
-                    .with_step(0.01)
-                    .on_change(move |v| sv.set(v)),
-            ),
-            0.0,
-        );
-    }
-
-    // ── Progress bar ──────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Progress bar (tracks slider)", &font), 0.0);
     col.push(
-        Box::new(ProgressBar::new(slider_val.get(), Arc::clone(&font))),
-        0.0,
-    );
-
-    // ── Toggle switch ─────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Toggle switch", &font), 0.0);
-    {
-        let ts1 = Rc::new(Cell::new(true));
-        let ts2 = Rc::new(Cell::new(false));
-        let row = FlexRow::new()
-            .with_gap(16.0)
-            .add(Box::new(
-                ToggleSwitch::new(ts1.get()).with_state_cell(Rc::clone(&ts1)),
-            ))
-            .add(Box::new(
-                Label::new("Enabled", Arc::clone(&font)).with_font_size(13.0),
-            ))
-            .add(Box::new(
-                ToggleSwitch::new(ts2.get()).with_state_cell(Rc::clone(&ts2)),
-            ))
-            .add(Box::new(
-                Label::new("Disabled", Arc::clone(&font)).with_font_size(13.0),
-            ));
-        col.push(Box::new(row), 0.0);
-    }
-
-    // ── Drag value ────────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Drag value", &font), 0.0);
-    {
-        let dv1 = Rc::new(Cell::new(42.0_f64));
-        let dv2 = Rc::new(Cell::new(3.14_f64));
-        let row = FlexRow::new()
-            .with_gap(8.0)
-            .add(Box::new(
-                SizedBox::new()
-                    .with_width(120.0)
-                    .with_height(28.0)
-                    .with_child({
-                        let v = Rc::clone(&dv1);
-                        Box::new(
-                            DragValue::new(dv1.get(), 0.0, 100.0, Arc::clone(&font))
-                                .with_decimals(0)
-                                .on_change(move |x| v.set(x)),
-                        )
-                    }),
-            ))
-            .add(Box::new(
-                SizedBox::new()
-                    .with_width(120.0)
-                    .with_height(28.0)
-                    .with_child({
-                        let v = Rc::clone(&dv2);
-                        Box::new(
-                            DragValue::new(dv2.get(), 0.0, 10.0, Arc::clone(&font))
-                                .with_decimals(2)
-                                .on_change(move |x| v.set(x)),
-                        )
-                    }),
-            ));
-        col.push(Box::new(row), 0.0);
-    }
-
-    // ── Hyperlink ─────────────────────────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Hyperlink", &font), 0.0);
-    col.push(
-        Box::new(
-            Hyperlink::new("Visit the agg-gui repository", Arc::clone(&font))
-                .with_font_size(13.0)
-                .on_click(|| {}),
+        grid_row(
+            doc_link("Label", "label", &font),
+            Box::new(Label::new(
+                "Welcome to the widget gallery!",
+                Arc::clone(&font),
+            )),
         ),
         0.0,
     );
 
-    // ── Text input ────────────────────────────────────────────────────────────
+    col.push(
+        grid_row(
+            doc_link("Hyperlink", "Hyperlink", &font),
+            Box::new(
+                Hyperlink::new("agg-gui on GitHub", Arc::clone(&font))
+                    .with_font_size(13.0)
+                    .on_click(|| crate::url::open_url(AGG_GUI_REPO_URL)),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("TextEdit", "TextEdit", &font),
+            Box::new(
+                SizedBox::new().with_height(30.0).with_child(Box::new(
+                    TextField::new(Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .with_placeholder("Write something here"),
+                )),
+            ),
+        ),
+        0.0,
+    );
+
+    {
+        let b = Rc::clone(&boolean);
+        col.push(
+            grid_row(
+                doc_link("Button", "button", &font),
+                Box::new(
+                    SizedBox::new().with_height(28.0).with_child(Box::new(
+                        Button::new("Click me!", Arc::clone(&font))
+                            .with_font_size(13.0)
+                            .on_click(move || b.set(!b.get())),
+                    )),
+                ),
+            ),
+            0.0,
+        );
+    }
+
+    {
+        let b = Rc::clone(&boolean);
+        col.push(
+            grid_row(
+                doc_link("Link", "link", &font),
+                Box::new(
+                    Hyperlink::new("Click me!", Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .on_click(move || b.set(!b.get())),
+                ),
+            ),
+            0.0,
+        );
+    }
+
+    col.push(
+        grid_row(
+            doc_link("Checkbox", "checkbox", &font),
+            Box::new(
+                Checkbox::new("Checkbox", Arc::clone(&font), boolean.get())
+                    .with_font_size(13.0)
+                    .with_state_cell(Rc::clone(&boolean)),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("RadioButton", "radio", &font),
+            Box::new(
+                RadioGroup::new(
+                    vec!["First", "Second", "Third"],
+                    radio_sel.get(),
+                    Arc::clone(&font),
+                )
+                .with_font_size(13.0)
+                .with_selected_cell(Rc::clone(&radio_sel)),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("SelectableLabel", "SelectableLabel", &font),
+            Box::new(
+                FlexRow::new()
+                    .with_gap(6.0)
+                    .add(selectable_button(
+                        "First",
+                        0,
+                        Rc::clone(&radio_sel),
+                        Arc::clone(&font),
+                    ))
+                    .add(selectable_button(
+                        "Second",
+                        1,
+                        Rc::clone(&radio_sel),
+                        Arc::clone(&font),
+                    ))
+                    .add(selectable_button(
+                        "Third",
+                        2,
+                        Rc::clone(&radio_sel),
+                        Arc::clone(&font),
+                    )),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("ComboBox", "ComboBox", &font),
+            Box::new(
+                FlexRow::new()
+                    .with_gap(8.0)
+                    .add(Box::new(
+                        Label::new("Take your pick", Arc::clone(&font)).with_font_size(13.0),
+                    ))
+                    .add_flex(
+                        Box::new(
+                            ComboBox::new(
+                                vec!["First", "Second", "Third"],
+                                radio_sel.get(),
+                                Arc::clone(&font),
+                            )
+                            .with_selected_cell(Rc::clone(&radio_sel)),
+                        ),
+                        1.0,
+                    ),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("Slider", "Slider", &font),
+            Box::new(
+                Slider::new(scalar.get(), 0.0, 360.0, Arc::clone(&font))
+                    .with_step(1.0)
+                    .with_decimals(0)
+                    .with_value_cell(Rc::clone(&scalar)),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("DragValue", "DragValue", &font),
+            Box::new(
+                SizedBox::new()
+                    .with_width(120.0)
+                    .with_height(28.0)
+                    .with_child(Box::new(
+                        DragValue::new(scalar.get(), 0.0, 360.0, Arc::clone(&font))
+                            .with_decimals(0)
+                            .on_change({
+                                let scalar = Rc::clone(&scalar);
+                                move |x| scalar.set(x)
+                            }),
+                    )),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("ProgressBar", "ProgressBar", &font),
+            Box::new(ScalarProgress::new(Rc::clone(&scalar), Arc::clone(&font))),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("Color picker", "color_edit", &font),
+            Box::new(ColorPicker::new(Rc::clone(&color), Arc::clone(&font))),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("Image", "Image", &font),
+            Box::new(
+                SizedBox::new().with_height(72.0).with_child(Box::new(
+                    ImageView::new(Arc::clone(&font), Rc::new(RefCell::new(None)))
+                        .with_placeholder("Image widget")
+                        .with_min_height(72.0),
+                )),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("Button with image", "Button::image_and_text", &font),
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    Button::new("Image + text", Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .with_theme(ButtonTheme {
+                            background: Color::rgba(0.22, 0.45, 0.88, 0.12),
+                            background_hovered: Color::rgba(0.22, 0.45, 0.88, 0.22),
+                            background_pressed: Color::rgba(0.22, 0.45, 0.88, 0.35),
+                            label_color: Color::rgb(0.22, 0.45, 0.88),
+                            border_radius: 6.0,
+                            focus_ring_color: Color::rgba(0.22, 0.45, 0.88, 0.55),
+                            focus_ring_width: 2.5,
+                        })
+                        .on_click({
+                            let boolean = Rc::clone(&boolean);
+                            move || boolean.set(!boolean.get())
+                        }),
+                )),
+            ),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("Separator", "separator", &font),
+            Box::new(Separator::horizontal()),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("CollapsingHeader", "collapsing", &font),
+            Box::new(
+                CollapsingHeader::new("Click to see what is hidden!", Arc::clone(&font))
+                    .default_open(false)
+                    .with_content(Box::new(
+                        Label::new("It's a custom toggle switch:", Arc::clone(&font))
+                            .with_font_size(13.0),
+                    )),
+            ),
+        ),
+        0.0,
+    );
+
+    {
+        let row = FlexRow::new().with_gap(8.0).add(Box::new(
+            ToggleSwitch::new(custom_toggle.get()).with_state_cell(Rc::clone(&custom_toggle)),
+        ));
+        col.push(
+            grid_row(
+                Box::new(
+                    Hyperlink::new("Custom widget", Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .on_click(|| crate::url::open_url(AGG_GUI_REPO_URL)),
+                ),
+                Box::new(row),
+            ),
+            0.0,
+        );
+    }
+
     col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(section("Text input", &font), 0.0);
     col.push(
         Box::new(
-            SizedBox::new().with_height(32.0).with_child(Box::new(
-                TextField::new(Arc::clone(&font))
-                    .with_font_size(13.0)
-                    .with_placeholder("Type something…"),
-            )),
+            FlexColumn::new()
+                .with_gap(4.0)
+                .add(Box::new(
+                    Hyperlink::new(EGUI_DOCS_URL, Arc::clone(&font))
+                        .with_font_size(12.0)
+                        .on_click(|| crate::url::open_url(EGUI_DOCS_URL)),
+                ))
+                .add(Box::new(
+                    Label::new(
+                        "Click widget names to search egui docs. agg-gui-only styling and demo widgets are preserved where they add coverage.",
+                        Arc::clone(&font),
+                    )
+                    .with_font_size(11.0)
+                    .with_wrap(true),
+                )),
         ),
         0.0,
     );

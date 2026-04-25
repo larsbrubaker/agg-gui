@@ -24,6 +24,10 @@ use agg_gui::{
 // proportions, zoom/rotate/translate accumulators, pressure-driven
 // stroke width, and the half-life reset animation — is the same.
 
+thread_local! {
+    static RELATIVE_POINTER_GESTURE: Cell<bool> = const { Cell::new(false) };
+}
+
 /// Accumulated zoom / rotation / translation state for the arrow.
 /// Mirrors the fields on egui's `MultiTouch` struct.
 struct MultiTouchView {
@@ -230,6 +234,25 @@ impl Widget for MultiTouchView {
         // user single-finger-drags over the canvas.  Matches the
         // `Sense::drag()` workaround egui uses for the same reason.
         match _event {
+            agg_gui::Event::MouseWheel {
+                delta_y,
+                delta_x,
+                modifiers,
+                ..
+            } => {
+                let scale = self.unit_scale();
+                if modifiers.ctrl || modifiers.meta {
+                    let zoom_delta = (1.0 + *delta_y * 0.002).clamp(0.2, 5.0);
+                    self.zoom *= zoom_delta;
+                } else if scale > 0.0 {
+                    self.translation_x += *delta_x / scale;
+                    self.translation_y += *delta_y / scale;
+                }
+                self.last_touch_time = Some(web_time::Instant::now());
+                RELATIVE_POINTER_GESTURE.with(|flag| flag.set(true));
+                agg_gui::animation::request_tick();
+                agg_gui::EventResult::Consumed
+            }
             agg_gui::Event::MouseDown { .. }
             | agg_gui::Event::MouseMove { .. }
             | agg_gui::Event::MouseUp { .. } => agg_gui::EventResult::Consumed,
@@ -275,11 +298,15 @@ pub fn multi_touch(font: Arc<Font>) -> Box<dyn Widget> {
         }
         fn layout(&mut self, available: agg_gui::Size) -> agg_gui::Size {
             let txt = match agg_gui::current_multi_touch() {
-                Some(mt) => format!(
-                    "Input source: {}-finger touch   force: {:.2}",
-                    mt.num_touches, mt.force,
-                ),
-                None => "Input source: none".to_string(),
+                Some(mt) => format!("Input source: {}-finger touch", mt.num_touches,),
+                None => {
+                    let cursor = RELATIVE_POINTER_GESTURE.with(|flag| flag.get());
+                    if cursor {
+                        "Input source: cursor".to_string()
+                    } else {
+                        "Input source: none".to_string()
+                    }
+                }
             };
             self.inner.set_text(&txt);
             self.inner.layout(available)

@@ -17,7 +17,9 @@ use agg_gui::{
 };
 
 mod blending;
+mod color;
 use blending::BlendingTest;
+use color::ColorTest;
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -106,6 +108,25 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
             children: Vec::new(),
             bitmap_vertical: None,
             bitmap_horizontal: None,
+        }),
+        0.0,
+    );
+
+    col.push(Box::new(Separator::horizontal()), 0.0);
+    col.push(heading("Color test", &font), 0.0);
+    col.push(
+        lbl(
+            "If the rendering is done right, all groups of gradients will look uniform.",
+            13.0,
+            &font,
+        ),
+        0.0,
+    );
+    col.push(
+        Box::new(ColorTest {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            font: Arc::clone(&font),
         }),
         0.0,
     );

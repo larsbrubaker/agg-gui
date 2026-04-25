@@ -175,6 +175,7 @@ const GRID_ROWS: u32 = 8;
 /// at the **base** so the vertex shader's Y scaling grows the bar
 /// upward rather than expanding it from its centre.
 const BAR_HALF: f32 = 0.45; // ⇒ 0.9 wide on a 1.0 grid pitch (gutter = 0.1)
+const BAR_WAVE_SPEED: f64 = 1.4;
 
 const BAR_VERT: &str = r#"#version 300 es
 precision mediump float;
@@ -185,7 +186,7 @@ layout(location = 1) in vec3 a_normal;  // face normal
 layout(location = 2) in vec2 a_grid;    // (column, row), integer in [0,N)
 
 uniform mat4  u_view_proj;
-uniform float u_time;
+uniform float u_phase;
 uniform vec2  u_grid_size;
 
 out vec3  v_world_pos;
@@ -195,7 +196,6 @@ out float v_height;
 
 void main() {
     const float freq  = 0.55;
-    const float speed = 1.4;
     // Wave range: bars never collapse below `MAX_H * 0.05` so the
     // top face stays a measurable distance above the bottom face —
     // without this the two coplanar surfaces z-fight at minimum
@@ -206,7 +206,7 @@ void main() {
     const float MAX_H = 2.10;
     const float MIN_H = MAX_H * 0.4;
 
-    float wave_unit = sin(a_grid.x * freq + a_grid.y * freq + u_time * speed)
+    float wave_unit = sin(a_grid.x * freq + a_grid.y * freq + u_phase)
                       * 0.5 + 0.5;            // sin in [-1, 1]  →  [0, 1]
     float height    = mix(MIN_H, MAX_H, wave_unit);
 
@@ -319,6 +319,10 @@ fn bar_instance_data() -> Vec<f32> {
     out
 }
 
+fn bar_wave_phase(elapsed_secs: f64) -> f32 {
+    (elapsed_secs * BAR_WAVE_SPEED).rem_euclid(std::f64::consts::TAU) as f32
+}
+
 pub struct BarGridGlRenderer {
     program: glow::Program,
     vao: glow::VertexArray,
@@ -326,7 +330,7 @@ pub struct BarGridGlRenderer {
     _ibo: glow::Buffer,
     _instance_vbo: glow::Buffer,
     vp_loc: Option<glow::UniformLocation>,
-    time_loc: Option<glow::UniformLocation>,
+    phase_loc: Option<glow::UniformLocation>,
     grid_size_loc: Option<glow::UniformLocation>,
     light_dir_loc: Option<glow::UniformLocation>,
     col_left_loc: Option<glow::UniformLocation>,
@@ -344,7 +348,7 @@ impl BarGridGlRenderer {
         let program = compile_program(gl, BAR_VERT, BAR_FRAG);
 
         let vp_loc = gl.get_uniform_location(program, "u_view_proj");
-        let time_loc = gl.get_uniform_location(program, "u_time");
+        let phase_loc = gl.get_uniform_location(program, "u_phase");
         let grid_size_loc = gl.get_uniform_location(program, "u_grid_size");
         let light_dir_loc = gl.get_uniform_location(program, "u_light_dir");
         let col_left_loc = gl.get_uniform_location(program, "u_col_left");
@@ -412,7 +416,7 @@ impl BarGridGlRenderer {
             _ibo: ibo,
             _instance_vbo: instance_vbo,
             vp_loc,
-            time_loc,
+            phase_loc,
             grid_size_loc,
             light_dir_loc,
             col_left_loc,
@@ -481,8 +485,11 @@ impl BarGridGlRenderer {
         if let Some(loc) = self.vp_loc.as_ref() {
             gl.uniform_matrix_4_f32_slice(Some(loc), false, &view_proj);
         }
-        if let Some(loc) = self.time_loc.as_ref() {
-            gl.uniform_1_f32(Some(loc), self.start.elapsed().as_secs_f32());
+        if let Some(loc) = self.phase_loc.as_ref() {
+            gl.uniform_1_f32(
+                Some(loc),
+                bar_wave_phase(self.start.elapsed().as_secs_f64()),
+            );
         }
         if let Some(loc) = self.grid_size_loc.as_ref() {
             gl.uniform_2_f32(Some(loc), GRID_COLS as f32, GRID_ROWS as f32);
@@ -704,4 +711,27 @@ fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 fn normalize3(v: [f32; 3]) -> [f32; 3] {
     let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-9);
     [v[0] / len, v[1] / len, v[2] / len]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bar_wave_phase_stays_bounded_for_long_running_animation() {
+        let short_elapsed = 12.345;
+        let cycles = 100_000.0;
+        let period = std::f64::consts::TAU / BAR_WAVE_SPEED;
+        let long_elapsed = short_elapsed + period * cycles;
+
+        let short_phase = bar_wave_phase(short_elapsed);
+        let long_phase = bar_wave_phase(long_elapsed);
+
+        assert!(long_phase >= 0.0);
+        assert!(long_phase < std::f32::consts::TAU);
+        assert!(
+            (short_phase - long_phase).abs() < 0.0001,
+            "phase drifted after many cycles: short={short_phase}, long={long_phase}"
+        );
+    }
 }

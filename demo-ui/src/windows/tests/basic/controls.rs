@@ -22,7 +22,7 @@ use agg_gui::{
 // Clipboard Test
 // ---------------------------------------------------------------------------
 
-/// Build the Clipboard Test — two side-by-side TextFields for copy/paste.
+/// Build the Clipboard Test — egui wording with agg-gui's editable TextField.
 pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()
         .with_gap(14.0)
@@ -30,46 +30,37 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
         .with_panel_bg();
 
     col.push(
-        Box::new(Label::new("Clipboard test", Arc::clone(&font)).with_font_size(12.0)),
+        Box::new(
+            Label::new(
+                "egui integrates with the system clipboard.",
+                Arc::clone(&font),
+            )
+            .with_font_size(12.0),
+        ),
+        0.0,
+    );
+    col.push(
+        Box::new(
+            Label::new(
+                "Try copy-cut-pasting text in the text edit below.",
+                Arc::clone(&font),
+            )
+            .with_font_size(12.0)
+            .with_wrap(true),
+        ),
         0.0,
     );
 
-    let row = FlexRow::new()
-        .with_gap(10.0)
-        .add_flex(
-            Box::new(
-                FlexColumn::new()
-                    .with_gap(6.0)
-                    .add(Box::new(
-                        Label::new("Copy from:", Arc::clone(&font)).with_font_size(11.5),
-                    ))
-                    .add(Box::new(
-                        SizedBox::new().with_height(32.0).with_child(Box::new(
-                            TextField::new(Arc::clone(&font))
-                                .with_font_size(13.0)
-                                .with_text("Select and copy me"),
-                        )),
-                    )),
-            ),
-            1.0,
-        )
-        .add_flex(
-            Box::new(
-                FlexColumn::new()
-                    .with_gap(6.0)
-                    .add(Box::new(
-                        Label::new("Paste into:", Arc::clone(&font)).with_font_size(11.5),
-                    ))
-                    .add(Box::new(
-                        SizedBox::new().with_height(32.0).with_child(Box::new(
-                            TextField::new(Arc::clone(&font))
-                                .with_font_size(13.0)
-                                .with_placeholder("Ctrl+V here"),
-                        )),
-                    )),
-            ),
-            1.0,
-        );
+    let row = FlexRow::new().with_gap(10.0).add_flex(
+        Box::new(
+            SizedBox::new().with_height(32.0).with_child(Box::new(
+                TextField::new(Arc::clone(&font))
+                    .with_font_size(13.0)
+                    .with_text("Example text you can copy-and-paste"),
+            )),
+        ),
+        1.0,
+    );
     col.push(Box::new(row), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);

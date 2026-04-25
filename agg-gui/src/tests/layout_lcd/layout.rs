@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::{
-    device_scale, resolve_fit_or_stretch, set_device_scale, HAnchor, Insets, Padding, VAnchor,
-    WidgetBase,
+    device_scale, resolve_fit_or_stretch, set_device_scale, HAnchor, Insets, Padding, Spacer,
+    VAnchor, WidgetBase,
 };
 
 // --- Insets arithmetic ------------------------------------------------------

@@ -1,13 +1,13 @@
 #![allow(unused_imports)]
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    measure_text_metrics, Button, Checkbox, Color, Container, DragValue, DrawCtx, Event,
-    EventResult, FlexColumn, FlexRow, Font, Label, LabelAlign, MouseButton, Point, Rect,
-    ScrollView, Separator, Size, SizedBox, TextField, Widget,
+    measure_text_metrics, Button, Checkbox, Color, Container, DoUndoActions, DragValue, DrawCtx,
+    Event, EventResult, FlexColumn, FlexRow, Font, Key, Label, LabelAlign, MouseButton, Point,
+    Rect, ScrollView, Separator, Size, SizedBox, TextField, UndoBuffer, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -17,26 +17,93 @@ use agg_gui::{
 /// Build the Undo Redo demo — a TextField plus usage instructions.
 /// (TextField manages its own internal undo history via Ctrl+Z / Ctrl+Y.)
 pub fn undo_redo(font: Arc<Font>) -> Box<dyn Widget> {
+    let checkbox_value = Rc::new(Cell::new(false));
+    let undoer = Rc::new(RefCell::new(UndoBuffer::new()));
+
     let mut col = FlexColumn::new()
-        .with_gap(14.0)
+        .with_gap(12.0)
         .with_padding(16.0)
         .with_panel_bg();
 
     col.push(
-        Box::new(Label::new("Text field with undo/redo", Arc::clone(&font)).with_font_size(12.0)),
+        Box::new(Label::new("Undo Redo", Arc::clone(&font)).with_font_size(13.0)),
         0.0,
     );
+
+    {
+        let value_for_change = Rc::clone(&checkbox_value);
+        let undoer_for_change = Rc::clone(&undoer);
+        col.push(
+            Box::new(
+                Checkbox::new(
+                    "Checkbox with undo/redo",
+                    Arc::clone(&font),
+                    checkbox_value.get(),
+                )
+                .with_font_size(13.0)
+                .with_state_cell(Rc::clone(&checkbox_value))
+                .on_change(move |new_value| {
+                    let old_value = !new_value;
+                    let redo_value = Rc::clone(&value_for_change);
+                    let undo_value = Rc::clone(&value_for_change);
+                    undoer_for_change
+                        .borrow_mut()
+                        .add(Box::new(DoUndoActions::new(
+                            "toggle checkbox",
+                            move || redo_value.set(new_value),
+                            move || undo_value.set(old_value),
+                        )));
+                }),
+            ),
+            0.0,
+        );
+    }
 
     col.push(
         Box::new(
             SizedBox::new().with_height(34.0).with_child(Box::new(
                 TextField::new(Arc::clone(&font))
                     .with_font_size(13.0)
-                    .with_text("Edit me — then Ctrl+Z to undo"),
+                    .with_text("Text with undo/redo"),
             )),
         ),
         0.0,
     );
+
+    let mut buttons = FlexRow::new().with_gap(8.0);
+    {
+        let undoer_for_enabled = Rc::clone(&undoer);
+        let undoer_for_click = Rc::clone(&undoer);
+        buttons.push(
+            Box::new(
+                Button::new("Undo", Arc::clone(&font))
+                    .with_font_size(12.0)
+                    .with_enabled_fn(move || undoer_for_enabled.borrow().can_undo())
+                    .on_click(move || {
+                        undoer_for_click.borrow_mut().undo();
+                        agg_gui::animation::request_tick();
+                    }),
+            ),
+            0.0,
+        );
+    }
+    {
+        let undoer_for_enabled = Rc::clone(&undoer);
+        let undoer_for_click = Rc::clone(&undoer);
+        buttons.push(
+            Box::new(
+                Button::new("Redo", Arc::clone(&font))
+                    .with_font_size(12.0)
+                    .with_enabled_fn(move || undoer_for_enabled.borrow().can_redo())
+                    .on_click(move || {
+                        undoer_for_click.borrow_mut().redo();
+                        agg_gui::animation::request_tick();
+                    }),
+            ),
+            0.0,
+        );
+    }
+    col.push(Box::new(buttons), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
 
@@ -62,8 +129,9 @@ pub fn undo_redo(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(
         Box::new(
             Label::new(
-                "Each character insertion/deletion is recorded in the TextField's internal \
-         UndoBuffer. Undo collapses runs of single-character edits into a single step.",
+                "The buttons use agg-gui's shared UndoBuffer for the checkbox. The text field \
+         keeps its own edit history for Ctrl+Z / Ctrl+Y, matching the command-history pattern \
+         egui demonstrates with Undoer<State>.",
                 Arc::clone(&font),
             )
             .with_font_size(11.0),
@@ -158,33 +226,213 @@ pub fn window_options(font: Arc<Font>) -> Box<dyn Widget> {
 // Modals demo
 // ---------------------------------------------------------------------------
 
-/// Inline modal overlay: shown/hidden by the `open` cell.
-///
-/// Text is rendered through backbuffered Label children so glyph rasterization
-/// is cached rather than repeated each frame.
+#[derive(Default)]
+struct ModalState {
+    user_open: Cell<bool>,
+    save_open: Cell<bool>,
+    save_progress: Cell<Option<f64>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModalLayer {
+    User,
+    Save,
+    Progress,
+}
+
+/// Inline modal overlay: shown while any modal layer is open.
 struct ModalOverlay {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    open: Rc<Cell<bool>>,
-    lbl_title: Label,
-    lbl_body: Label,
-    lbl_dismiss: Label,
+    state: Rc<ModalState>,
+    font: Arc<Font>,
 }
 
 impl ModalOverlay {
-    fn new(font: Arc<Font>, open: Rc<Cell<bool>>) -> Self {
+    fn new(font: Arc<Font>, state: Rc<ModalState>) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
-            open,
-            lbl_title: Label::new("Modal dialog", Arc::clone(&font)).with_font_size(13.0),
-            lbl_body: Label::new(
-                "This is a modal. Click anywhere to dismiss.",
-                Arc::clone(&font),
-            )
-            .with_font_size(11.5),
-            lbl_dismiss: Label::new("[ Dismiss ]", Arc::clone(&font)).with_font_size(11.0),
+            state,
+            font,
         }
+    }
+
+    fn top_layer(&self) -> Option<ModalLayer> {
+        if self.state.save_progress.get().is_some() {
+            Some(ModalLayer::Progress)
+        } else if self.state.save_open.get() {
+            Some(ModalLayer::Save)
+        } else if self.state.user_open.get() {
+            Some(ModalLayer::User)
+        } else {
+            None
+        }
+    }
+
+    fn close_top(&self) {
+        match self.top_layer() {
+            Some(ModalLayer::Progress) => self.state.save_progress.set(None),
+            Some(ModalLayer::Save) => self.state.save_open.set(false),
+            Some(ModalLayer::User) => self.state.user_open.set(false),
+            None => {}
+        }
+    }
+
+    fn modal_rect(&self, layer: ModalLayer) -> Rect {
+        let (dw, dh): (f64, f64) = match layer {
+            ModalLayer::User => (250.0, 142.0),
+            ModalLayer::Save => (220.0, 112.0),
+            ModalLayer::Progress => (120.0, 82.0),
+        };
+        let viewport = agg_gui::current_viewport();
+        let area_w = viewport.width.max(self.bounds.width);
+        let area_h = viewport.height.max(self.bounds.height);
+        let w = dw.min(area_w - 24.0).max(80.0);
+        let h = dh.min(area_h - 24.0).max(64.0);
+        Rect::new((area_w - w) * 0.5, (area_h - h) * 0.5, w, h)
+    }
+
+    fn button_rects(&self, layer: ModalLayer) -> Vec<(&'static str, Rect)> {
+        match layer {
+            ModalLayer::User => vec![
+                ("Save", Rect::new(102.0, 14.0, 58.0, 24.0)),
+                ("Cancel", Rect::new(166.0, 14.0, 70.0, 24.0)),
+            ],
+            ModalLayer::Save => vec![
+                ("Yes Please", Rect::new(42.0, 14.0, 86.0, 24.0)),
+                ("No Thanks", Rect::new(134.0, 14.0, 78.0, 24.0)),
+            ],
+            ModalLayer::Progress => Vec::new(),
+        }
+    }
+
+    fn draw_text(
+        &self,
+        ctx: &mut dyn DrawCtx,
+        text: &str,
+        x: f64,
+        y: f64,
+        size: f64,
+        color: Color,
+    ) {
+        ctx.set_font(Arc::clone(&self.font));
+        ctx.set_font_size(size);
+        ctx.set_fill_color(color);
+        ctx.fill_text(text, x, y);
+    }
+
+    fn draw_button(&self, ctx: &mut dyn DrawCtx, rect: Rect, label: &str) {
+        let mut button = SizedBox::new()
+            .with_width(rect.width)
+            .with_height(rect.height)
+            .with_child(Box::new(
+                Button::new(label, Arc::clone(&self.font)).with_font_size(11.0),
+            ));
+        button.layout(Size::new(rect.width, rect.height));
+        button.set_bounds(Rect::new(0.0, 0.0, rect.width, rect.height));
+
+        ctx.save();
+        ctx.translate(rect.x, rect.y);
+        paint_subtree(&mut button, ctx);
+        ctx.restore();
+    }
+
+    fn draw_modal(&self, ctx: &mut dyn DrawCtx, layer: ModalLayer) {
+        let v = ctx.visuals();
+        let rect = self.modal_rect(layer);
+        ctx.set_fill_color(v.window_fill);
+        ctx.begin_path();
+        ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, 8.0);
+        ctx.fill();
+        ctx.set_stroke_color(v.widget_stroke);
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, 8.0);
+        ctx.stroke();
+
+        ctx.save();
+        ctx.translate(rect.x, rect.y);
+        match layer {
+            ModalLayer::User => {
+                self.draw_text(
+                    ctx,
+                    "Edit User",
+                    12.0,
+                    rect.height - 24.0,
+                    14.0,
+                    v.text_color,
+                );
+                self.draw_text(
+                    ctx,
+                    "Name: John Doe",
+                    12.0,
+                    rect.height - 52.0,
+                    11.5,
+                    v.text_dim,
+                );
+                self.draw_text(
+                    ctx,
+                    "Role: user",
+                    12.0,
+                    rect.height - 76.0,
+                    11.5,
+                    v.text_dim,
+                );
+            }
+            ModalLayer::Save => {
+                self.draw_text(
+                    ctx,
+                    "Save? Are you sure?",
+                    12.0,
+                    rect.height - 26.0,
+                    13.0,
+                    v.text_color,
+                );
+                self.draw_text(
+                    ctx,
+                    "This opens a progress modal.",
+                    12.0,
+                    rect.height - 54.0,
+                    11.0,
+                    v.text_dim,
+                );
+            }
+            ModalLayer::Progress => {
+                self.draw_text(
+                    ctx,
+                    "Saving...",
+                    12.0,
+                    rect.height - 24.0,
+                    13.0,
+                    v.text_color,
+                );
+                let progress = self
+                    .state
+                    .save_progress
+                    .get()
+                    .unwrap_or(0.0)
+                    .clamp(0.0, 1.0);
+                let bar = Rect::new(12.0, 20.0, rect.width - 24.0, 14.0);
+                ctx.set_fill_color(v.track_bg);
+                ctx.begin_path();
+                ctx.rounded_rect(bar.x, bar.y, bar.width, bar.height, 7.0);
+                ctx.fill();
+                ctx.set_fill_color(v.accent);
+                ctx.begin_path();
+                ctx.rounded_rect(bar.x, bar.y, bar.width * progress, bar.height, 7.0);
+                ctx.fill();
+            }
+        }
+
+        for (label, rect) in self.button_rects(layer) {
+            self.draw_button(ctx, rect, label);
+        }
+        ctx.restore();
+    }
+
+    fn point_in_rect(p: Point, r: Rect) -> bool {
+        p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
     }
 }
 
@@ -206,128 +454,116 @@ impl Widget for ModalOverlay {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        if !self.open.get() {
+        if self.top_layer().is_none() {
             self.bounds = Rect::new(0.0, 0.0, 0.0, 0.0);
             return Size::new(0.0, 0.0);
         }
-        let h = 120.0_f64;
+        let h = 180.0_f64.min(available.height.max(180.0));
         let w = available.width;
         self.bounds = Rect::new(0.0, 0.0, w, h);
-
-        // Dialog dimensions (computed same as paint).
-        let dw = w.min(280.0);
-        let dh = 90.0_f64;
-        let dx = (w - dw) * 0.5;
-        let dy = (h - dh) * 0.5;
-        let inner_w = dw - 20.0;
-
-        let ts = self.lbl_title.layout(Size::new(inner_w, 20.0));
-        self.lbl_title.set_bounds(Rect::new(
-            dx + 10.0,
-            dy + dh - ts.height - 10.0,
-            ts.width,
-            ts.height,
-        ));
-
-        let bs = self.lbl_body.layout(Size::new(inner_w, 18.0));
-        self.lbl_body.set_bounds(Rect::new(
-            dx + 10.0,
-            dy + dh - ts.height - bs.height - 18.0,
-            bs.width,
-            bs.height,
-        ));
-
-        let ds = self.lbl_dismiss.layout(Size::new(inner_w, 18.0));
-        self.lbl_dismiss.set_bounds(Rect::new(
-            dx + 10.0,
-            dy + dh - ts.height - bs.height - ds.height - 26.0,
-            ds.width,
-            ds.height,
-        ));
-
         Size::new(w, h)
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        if !self.open.get() {
-            return;
-        }
-        let v = ctx.visuals();
-        let w = self.bounds.width;
-        let h = self.bounds.height;
+    fn paint(&mut self, _: &mut dyn DrawCtx) {}
 
-        // Semi-transparent overlay.
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        let Some(_) = self.top_layer() else { return };
+        let viewport = agg_gui::current_viewport();
+        let w = viewport.width.max(self.bounds.width);
+        let h = viewport.height.max(self.bounds.height);
+
+        ctx.save();
+        ctx.reset_clip();
+        ctx.reset_transform();
         ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.35));
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
 
-        // Dialog box.
-        let dw = w.min(280.0);
-        let dh = 90.0_f64;
-        let dx = (w - dw) * 0.5;
-        let dy = (h - dh) * 0.5;
-        ctx.set_fill_color(v.window_fill);
-        ctx.begin_path();
-        ctx.rounded_rect(dx, dy, dw, dh, 8.0);
-        ctx.fill();
-        ctx.set_stroke_color(v.widget_stroke);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rounded_rect(dx, dy, dw, dh, 8.0);
-        ctx.stroke();
-
-        // Paint labels via backbuffered children.
-        self.lbl_title.set_color(v.text_color);
-        let tb = self.lbl_title.bounds();
-        ctx.save();
-        ctx.translate(tb.x, tb.y);
-        paint_subtree(&mut self.lbl_title, ctx);
-        ctx.restore();
-
-        self.lbl_body.set_color(v.text_dim);
-        let bb = self.lbl_body.bounds();
-        ctx.save();
-        ctx.translate(bb.x, bb.y);
-        paint_subtree(&mut self.lbl_body, ctx);
-        ctx.restore();
-
-        self.lbl_dismiss.set_color(v.accent);
-        let db = self.lbl_dismiss.bounds();
-        ctx.save();
-        ctx.translate(db.x, db.y);
-        paint_subtree(&mut self.lbl_dismiss, ctx);
+        if self.state.user_open.get() {
+            self.draw_modal(ctx, ModalLayer::User);
+        }
+        if self.state.save_open.get() {
+            self.draw_modal(ctx, ModalLayer::Save);
+        }
+        if let Some(progress) = self.state.save_progress.get() {
+            self.draw_modal(ctx, ModalLayer::Progress);
+            if progress >= 1.0 {
+                self.state.save_progress.set(None);
+                self.state.save_open.set(false);
+                self.state.user_open.set(false);
+            } else {
+                self.state
+                    .save_progress
+                    .set(Some((progress + 0.025).min(1.0)));
+                agg_gui::animation::request_tick();
+            }
+        }
         ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        if !self.open.get() {
+        let Some(layer) = self.top_layer() else {
             return EventResult::Ignored;
+        };
+        match event {
+            Event::KeyDown {
+                key: Key::Escape, ..
+            } => {
+                self.close_top();
+                agg_gui::animation::request_tick();
+                EventResult::Consumed
+            }
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let pos = agg_gui::current_mouse_world().unwrap_or(*pos);
+                let modal_rect = self.modal_rect(layer);
+                if !Self::point_in_rect(pos, modal_rect) {
+                    self.close_top();
+                    agg_gui::animation::request_tick();
+                    return EventResult::Consumed;
+                }
+                let local = Point::new(pos.x - modal_rect.x, pos.y - modal_rect.y);
+                for (label, rect) in self.button_rects(layer) {
+                    if Self::point_in_rect(local, rect) {
+                        match (layer, label) {
+                            (ModalLayer::User, "Save") => self.state.save_open.set(true),
+                            (ModalLayer::User, "Cancel") => self.state.user_open.set(false),
+                            (ModalLayer::Save, "Yes Please") => {
+                                self.state.save_progress.set(Some(0.0))
+                            }
+                            (ModalLayer::Save, "No Thanks") => self.state.save_open.set(false),
+                            _ => {}
+                        }
+                        agg_gui::animation::request_tick();
+                        return EventResult::Consumed;
+                    }
+                }
+                EventResult::Consumed
+            }
+            _ => EventResult::Consumed,
         }
-        // Click anywhere dismisses.
-        if let Event::MouseDown {
-            button: MouseButton::Left,
-            ..
-        } = event
-        {
-            self.open.set(false);
-            return EventResult::Consumed;
-        }
-        EventResult::Ignored
     }
 
     fn hit_test(&self, p: Point) -> bool {
-        self.open.get()
+        self.top_layer().is_some()
             && p.x >= 0.0
             && p.x <= self.bounds.width
             && p.y >= 0.0
             && p.y <= self.bounds.height
     }
+
+    fn has_active_modal(&self) -> bool {
+        self.top_layer().is_some()
+    }
 }
 
 /// Build the Modals demo — a button that shows an inline modal overlay.
 pub fn modals_demo(font: Arc<Font>) -> Box<dyn Widget> {
-    let open = Rc::new(Cell::new(false));
+    let state = Rc::new(ModalState::default());
 
     let mut col = FlexColumn::new()
         .with_gap(12.0)
@@ -339,38 +575,172 @@ pub fn modals_demo(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
+    let mut row = FlexRow::new().with_gap(8.0);
     {
-        let open_for_btn = Rc::clone(&open);
-        col.push(
+        let state_for_btn = Rc::clone(&state);
+        row.push(
             Box::new(
-                SizedBox::new().with_height(30.0).with_child(Box::new(
-                    Button::new("Open modal", Arc::clone(&font))
-                        .with_font_size(13.0)
-                        .on_click(move || {
-                            open_for_btn.set(true);
-                        }),
-                )),
+                Button::new("Open User Modal", Arc::clone(&font))
+                    .with_font_size(13.0)
+                    .on_click(move || {
+                        state_for_btn.user_open.set(true);
+                    }),
             ),
             0.0,
         );
     }
+    {
+        let state_for_btn = Rc::clone(&state);
+        row.push(
+            Box::new(
+                Button::new("Open Save Modal", Arc::clone(&font))
+                    .with_font_size(13.0)
+                    .on_click(move || {
+                        state_for_btn.save_open.set(true);
+                    }),
+            ),
+            0.0,
+        );
+    }
+    col.push(Box::new(row), 0.0);
 
     col.push(
-        Box::new(ModalOverlay::new(Arc::clone(&font), Rc::clone(&open))),
+        Box::new(ModalOverlay::new(Arc::clone(&font), Rc::clone(&state))),
         0.0,
     );
 
-    col.push(
-        Box::new(
-            Label::new(
-                "Click 'Open modal' to show the dialog. Click anywhere in it to dismiss.",
-                Arc::clone(&font),
-            )
-            .with_font_size(11.0),
-        ),
-        0.0,
-    );
+    for line in [
+        "Click one of the buttons to open a modal.",
+        "Modals have a backdrop and prevent interaction with the rest of the UI.",
+        "You can show modals on top of each other and close the topmost modal with escape or by clicking outside the modal.",
+    ] {
+        col.push(
+            Box::new(Label::new(line, Arc::clone(&font)).with_font_size(11.0)),
+            0.0,
+        );
+    }
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
     Box::new(col)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_font() -> Arc<Font> {
+        const BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+        Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"))
+    }
+
+    #[test]
+    fn modal_escape_closes_only_top_layer() {
+        let state = Rc::new(ModalState::default());
+        state.user_open.set(true);
+        state.save_open.set(true);
+        let mut overlay = ModalOverlay::new(test_font(), Rc::clone(&state));
+        overlay.layout(Size::new(360.0, 220.0));
+
+        assert_eq!(
+            overlay.on_event(&Event::KeyDown {
+                key: Key::Escape,
+                modifiers: Default::default(),
+            }),
+            EventResult::Consumed
+        );
+
+        assert!(state.user_open.get());
+        assert!(!state.save_open.get());
+    }
+
+    #[test]
+    fn modal_save_button_opens_progress_layer() {
+        let state = Rc::new(ModalState::default());
+        state.save_open.set(true);
+        let mut overlay = ModalOverlay::new(test_font(), Rc::clone(&state));
+        agg_gui::widget::set_current_viewport(Size::new(360.0, 220.0));
+        overlay.layout(Size::new(360.0, 220.0));
+        let save = overlay.modal_rect(ModalLayer::Save);
+        let yes = overlay.button_rects(ModalLayer::Save)[0].1;
+        let click = Point::new(save.x + yes.x + 4.0, save.y + yes.y + 4.0);
+        agg_gui::widget::set_current_mouse_world(click);
+
+        overlay.on_event(&Event::MouseDown {
+            pos: click,
+            button: MouseButton::Left,
+            modifiers: Default::default(),
+        });
+
+        assert_eq!(state.save_progress.get(), Some(0.0));
+        assert_eq!(overlay.top_layer(), Some(ModalLayer::Progress));
+    }
+
+    #[test]
+    fn modal_rect_centers_in_app_viewport_not_window_slot() {
+        let state = Rc::new(ModalState::default());
+        state.user_open.set(true);
+        let mut overlay = ModalOverlay::new(test_font(), Rc::clone(&state));
+        agg_gui::widget::set_current_viewport(Size::new(800.0, 600.0));
+        overlay.layout(Size::new(300.0, 160.0));
+
+        let rect = overlay.modal_rect(ModalLayer::User);
+        assert!(
+            (rect.x - 275.0).abs() < 1.0 && (rect.y - 229.0).abs() < 1.0,
+            "modal should center in viewport, got {rect:?}"
+        );
+    }
+
+    #[test]
+    fn active_modal_blocks_underlying_app_content() {
+        let font = test_font();
+        let clicked = Rc::new(Cell::new(false));
+        let clicked_for_button = Rc::clone(&clicked);
+        let state = Rc::new(ModalState::default());
+        state.user_open.set(true);
+
+        let root = agg_gui::Stack::new()
+            .add(Box::new(
+                Button::new("Under modal", Arc::clone(&font)).on_click(move || {
+                    clicked_for_button.set(true);
+                }),
+            ))
+            .add(Box::new(ModalOverlay::new(font, Rc::clone(&state))));
+        let mut app = agg_gui::App::new(Box::new(root));
+        app.layout(Size::new(640.0, 480.0));
+
+        // Click far from the modal body, over where regular content could be.
+        // The modal backdrop should consume it and close the modal without
+        // letting the underlying button see the press/release.
+        app.on_mouse_down(20.0, 460.0, MouseButton::Left, Default::default());
+        app.on_mouse_up(20.0, 460.0, MouseButton::Left, Default::default());
+
+        assert!(
+            !clicked.get(),
+            "underlying content must not receive modal backdrop clicks"
+        );
+        assert!(
+            !state.user_open.get(),
+            "outside click should close the top modal"
+        );
+    }
+
+    #[test]
+    fn modal_global_overlay_paints_after_normal_tree() {
+        let state = Rc::new(ModalState::default());
+        state.user_open.set(true);
+        let mut overlay = ModalOverlay::new(test_font(), Rc::clone(&state));
+        agg_gui::widget::set_current_viewport(Size::new(640.0, 480.0));
+        overlay.layout(Size::new(200.0, 120.0));
+
+        let mut fb = agg_gui::Framebuffer::new(640, 480);
+        let mut ctx = agg_gui::GfxCtx::new(&mut fb);
+        overlay.paint(&mut ctx);
+        overlay.paint_global_overlay(&mut ctx);
+
+        let alpha = fb.pixels()[(20 * 640 + 20) * 4 + 3];
+        assert!(
+            alpha > 0,
+            "modal global overlay should paint backdrop alpha"
+        );
+    }
 }

@@ -26,7 +26,7 @@ use agg_gui::layout_props::{HAnchor, VAnchor};
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
     Button, Checkbox, Color, ColorPicker, DragValue, DrawCtx, Event, EventResult, FlexColumn,
-    FlexRow, Font, Label, Rect, Size, Widget,
+    FlexRow, Font, Label, Rect, Separator, Size, Widget,
 };
 
 mod core;
@@ -251,6 +251,15 @@ pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(IntrinsicRow::new(
         8.0,
         8.0,
-        vec![Box::new(controls), Box::new(preview)],
+        vec![
+            Box::new(controls),
+            Box::new(
+                Separator::vertical()
+                    .with_line_inset(0.0)
+                    .with_min_size(Size::new(1.0, 0.0))
+                    .with_max_size(Size::new(1.0, f64::MAX)),
+            ),
+            Box::new(preview),
+        ],
     ))
 }

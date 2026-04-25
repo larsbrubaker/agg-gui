@@ -375,6 +375,80 @@ fn bottom_panel(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(col)
 }
 
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+
+    struct Probe {
+        bounds: Rect,
+        children: Vec<Box<dyn Widget>>,
+    }
+
+    impl Probe {
+        fn boxed() -> Box<dyn Widget> {
+            Box::new(Self {
+                bounds: Rect::default(),
+                children: Vec::new(),
+            })
+        }
+    }
+
+    impl Widget for Probe {
+        fn type_name(&self) -> &'static str {
+            "Probe"
+        }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
+        fn paint(&mut self, _: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+    }
+
+    fn layout() -> PanelsLayout {
+        PanelsLayout {
+            bounds: Rect::default(),
+            children: vec![
+                Probe::boxed(),
+                Probe::boxed(),
+                Probe::boxed(),
+                Probe::boxed(),
+                Probe::boxed(),
+            ],
+            top_h: 112.0,
+            left_w: 150.0,
+            right_w: 150.0,
+            hover: None,
+            drag: None,
+        }
+    }
+
+    #[test]
+    fn panels_match_egui_order_with_y_up_geometry() {
+        let mut p = layout();
+        p.layout(Size::new(600.0, 400.0));
+
+        assert_eq!(p.children[0].bounds(), Rect::new(0.0, 288.0, 600.0, 112.0));
+        assert_eq!(p.children[1].bounds(), Rect::new(0.0, 0.0, 150.0, 284.0));
+        assert_eq!(p.children[2].bounds(), Rect::new(450.0, 0.0, 150.0, 284.0));
+        assert_eq!(p.children[3].bounds(), Rect::new(154.0, 0.0, 292.0, 52.0));
+        assert_eq!(p.children[4].bounds(), Rect::new(154.0, 56.0, 292.0, 228.0));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Popups demo
 // ---------------------------------------------------------------------------

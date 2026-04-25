@@ -11,7 +11,7 @@ use agg_gui::{FlexColumn, Font, ScrollView, Widget};
 use super::helpers::{wrapped_label, CounterTicker, RowList};
 
 pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
-    let counter = Rc::new(Cell::new(20_usize));
+    let counter = Rc::new(Cell::new(0_usize));
 
     let mut col = FlexColumn::new().with_gap(6.0).with_padding(10.0);
     col.push(
@@ -25,9 +25,6 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
-    // Ticker layouts before the ScrollView so the row count is current.
-    col.push(Box::new(CounterTicker::new(Rc::clone(&counter))), 0.0);
-
     let list = RowList::new(
         Arc::clone(&font),
         Rc::clone(&counter),
@@ -35,6 +32,9 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
     );
     let scroll = ScrollView::new(Box::new(list)).with_stick_to_bottom(true);
     col.push(Box::new(scroll), 1.0);
+    // Match egui: show the current row count, then append one row for the
+    // next repaint/layout pass.
+    col.push(Box::new(CounterTicker::new(Rc::clone(&counter))), 0.0);
 
     Box::new(col)
 }

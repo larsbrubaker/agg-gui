@@ -24,8 +24,9 @@ const EXPORT_BUTTON_LABEL: &str = "\u{F019}  Download";
 
 /// Build the Screenshot demo.  Matches egui's `ScreenshotDemo`:
 ///
-/// 1. "Take Screenshot" button + "Capture continuously" toggle.
-/// 2. Below: export actions for the most recent screenshot.
+/// 1. Egui wording plus "Take Screenshot" button and "Capture continuously"
+///    toggle on one row.
+/// 2. Below: agg-gui export actions for the most recent screenshot.
 /// 3. Below: a preview panel that displays the most recent capture (via
 ///    `DrawCtx::draw_image_rgba`) or a "No screenshot taken yet." placeholder.
 ///
@@ -52,10 +53,12 @@ pub fn screenshot_demo(
         .with_padding(12.0)
         .with_panel_bg();
 
+    let continuous_cb = Rc::clone(&continuous);
+
     col.push(
         Box::new(
             Label::new(
-                "Capture the current frame and display it below.",
+                "This demo showcases how to take screenshots via ViewportCommand::Screenshot.",
                 Arc::clone(&font),
             )
             .with_font_size(12.0)
@@ -64,28 +67,19 @@ pub fn screenshot_demo(
         0.0,
     );
 
-    let continuous_cb = Rc::clone(&continuous);
-
     col.push(
-        Box::new(action_row(
+        Box::new(capture_row(
             Arc::clone(&font),
             Rc::clone(&screenshot_request),
-            Rc::clone(&screenshot_image),
+            Rc::clone(&continuous_cb),
         )),
         0.0,
     );
 
-    let checkbox_row = FlexRow::new().with_gap(10.0).add(Box::new(
-        agg_gui::Checkbox::new(
-            "Capture continuously",
-            Arc::clone(&font),
-            continuous_cb.get(),
-        )
-        .with_font_size(12.0)
-        .with_v_anchor(VAnchor::CENTER)
-        .with_state_cell(Rc::clone(&continuous_cb)),
-    ));
-    col.push(Box::new(checkbox_row), 0.0);
+    col.push(
+        Box::new(export_row(Arc::clone(&font), Rc::clone(&screenshot_image))),
+        0.0,
+    );
 
     // Drives continuous-capture cadence: while enabled AND this widget is
     // being painted (i.e. the Screenshot window is visible), arm the
@@ -121,16 +115,12 @@ pub fn screenshot_demo(
     Box::new(col)
 }
 
-fn action_row(
+fn capture_row(
     font: Arc<Font>,
     screenshot_request: Rc<Cell<bool>>,
-    screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
+    continuous: Rc<Cell<bool>>,
 ) -> FlexRow {
     let req_for_btn = Rc::clone(&screenshot_request);
-    let download_image = Rc::clone(&screenshot_image);
-    let download_enabled = Rc::clone(&screenshot_image);
-    let copy_image = Rc::clone(&screenshot_image);
-    let copy_enabled = Rc::clone(&screenshot_image);
 
     FlexRow::new()
         .with_gap(10.0)
@@ -143,6 +133,25 @@ fn action_row(
                     agg_gui::animation::request_tick();
                 }),
         ))
+        .add(Box::new(
+            agg_gui::Checkbox::new("Capture continuously", Arc::clone(&font), continuous.get())
+                .with_font_size(12.0)
+                .with_v_anchor(VAnchor::CENTER)
+                .with_state_cell(Rc::clone(&continuous)),
+        ))
+}
+
+fn export_row(
+    font: Arc<Font>,
+    screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
+) -> FlexRow {
+    let download_image = Rc::clone(&screenshot_image);
+    let download_enabled = Rc::clone(&screenshot_image);
+    let copy_image = Rc::clone(&screenshot_image);
+    let copy_enabled = Rc::clone(&screenshot_image);
+
+    FlexRow::new()
+        .with_gap(10.0)
         .add(Box::new(
             Button::new(EXPORT_BUTTON_LABEL, Arc::clone(&font))
                 .with_font_size(12.0)
@@ -317,5 +326,34 @@ impl Widget for ImageView {
 
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn font() -> Arc<Font> {
+        const BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+        Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"))
+    }
+
+    #[test]
+    fn screenshot_demo_keeps_egui_capture_row_before_export_actions() {
+        let mut demo = screenshot_demo(
+            font(),
+            Rc::new(Cell::new(false)),
+            Rc::new(RefCell::new(None)),
+            Rc::new(Cell::new(false)),
+        );
+
+        demo.layout(Size::new(320.0, 260.0));
+        let children = demo.children();
+
+        assert_eq!(children.len(), 6);
+        assert_eq!(children[1].type_name(), "FlexRow");
+        assert_eq!(children[2].type_name(), "FlexRow");
+        assert_eq!(children[3].type_name(), "ContinuousCapture");
+        assert_eq!(children[5].type_name(), "ImageView");
     }
 }

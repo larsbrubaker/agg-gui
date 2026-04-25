@@ -4,9 +4,9 @@
 //! and GfxCtx layers. They run on every commit.
 
 use crate::{
-    App, Button, Color, CompOp, Container, FlexColumn, FlexRow, Framebuffer, GfxCtx, Key,
+    App, Button, Color, ComboBox, CompOp, Container, FlexColumn, FlexRow, Framebuffer, GfxCtx, Key,
     Modifiers, MouseButton, ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollView, Size,
-    SizedBox, Spacer, Splitter, TabView, TextField, Widget,
+    SizedBox, Splitter, TabView, TextField, Widget,
 };
 
 /// Sample RGBA at pixel (x, y) in a framebuffer.

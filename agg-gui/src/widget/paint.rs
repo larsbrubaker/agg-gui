@@ -30,6 +30,23 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     }
 }
 
+/// Paint app-level overlays after the whole tree has rendered.
+///
+/// Traverses children first so deeper/modal content wins, then lets each widget
+/// draw any global overlay it owns. No parent-local translation is applied:
+/// implementors paint in app-level logical coordinates.
+pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
+    if !widget.is_visible() {
+        return;
+    }
+    let n = widget.children().len();
+    for i in 0..n {
+        let child = &mut widget.children_mut()[i];
+        paint_global_overlays(child.as_mut(), ctx);
+    }
+    widget.paint_global_overlay(ctx);
+}
+
 /// Direct (non-cached) paint: widget and its children paint onto `ctx`
 /// at the current CTM.  This is the default path for widgets that don't
 /// opt into backbuffer caching via `Widget::backbuffer_cache_mut`.

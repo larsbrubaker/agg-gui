@@ -18,6 +18,34 @@ enum ScrollAlign {
     Top,
     Center,
     Bottom,
+    BringIntoView,
+}
+
+fn scroll_target_for_item(
+    item_index: usize,
+    row_height: f64,
+    viewport: f64,
+    current_offset: f64,
+    max_scroll: f64,
+    align: ScrollAlign,
+) -> f64 {
+    let item_top = (item_index as f64) * row_height;
+    let item_bottom = item_top + row_height;
+    let target = match align {
+        ScrollAlign::Top => item_top,
+        ScrollAlign::Center => item_top - (viewport - row_height) * 0.5,
+        ScrollAlign::Bottom => item_top - viewport + row_height,
+        ScrollAlign::BringIntoView => {
+            if item_top < current_offset {
+                item_top
+            } else if item_bottom > current_offset + viewport {
+                item_bottom - viewport
+            } else {
+                current_offset
+            }
+        }
+    };
+    target.clamp(0.0, max_scroll)
 }
 
 pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
@@ -55,13 +83,14 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
         let content_h = (num_items as f64) * row_height;
         let max = ms_cb.get();
         let viewport = (content_h - max).max(row_height);
-        let item_top = (i as f64) * row_height;
-        let target = match al_cb.get() {
-            ScrollAlign::Top => item_top,
-            ScrollAlign::Center => item_top - (viewport - row_height) * 0.5,
-            ScrollAlign::Bottom => item_top - viewport + row_height,
-        };
-        so_cb.set(target.clamp(0.0, max));
+        so_cb.set(scroll_target_for_item(
+            i,
+            row_height,
+            viewport,
+            so_cb.get(),
+            max,
+            al_cb.get(),
+        ));
     });
 
     // ── Track item slider ──
@@ -114,6 +143,7 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
                                     ("Top", ScrollAlign::Top),
                                     ("Center", ScrollAlign::Center),
                                     ("Bottom", ScrollAlign::Bottom),
+                                    ("None (Bring into view)", ScrollAlign::BringIntoView),
                                 ],
                                 Rc::clone(&align),
                             )
@@ -241,4 +271,27 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
     );
 
     Box::new(col)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{scroll_target_for_item, ScrollAlign};
+
+    #[test]
+    fn bring_into_view_keeps_visible_item_at_current_offset() {
+        let target =
+            scroll_target_for_item(8, 20.0, 100.0, 100.0, 1_000.0, ScrollAlign::BringIntoView);
+        assert_eq!(target, 100.0);
+    }
+
+    #[test]
+    fn bring_into_view_scrolls_only_enough_for_hidden_edges() {
+        let above =
+            scroll_target_for_item(2, 20.0, 100.0, 100.0, 1_000.0, ScrollAlign::BringIntoView);
+        let below =
+            scroll_target_for_item(12, 20.0, 100.0, 100.0, 1_000.0, ScrollAlign::BringIntoView);
+
+        assert_eq!(above, 40.0);
+        assert_eq!(below, 160.0);
+    }
 }

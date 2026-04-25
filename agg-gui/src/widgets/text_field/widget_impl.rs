@@ -80,6 +80,7 @@ impl Widget for TextField {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        self.sync_from_text_cell();
         // Sig excludes cursor-blink phase.  Cursor paints in
         // `paint_overlay` after cache blit — no blink-driven
         // invalidation.

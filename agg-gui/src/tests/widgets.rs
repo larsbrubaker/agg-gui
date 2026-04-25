@@ -91,6 +91,27 @@ fn test_click_outside_bounds_ignored() {
     );
 }
 
+#[test]
+fn test_text_field_tracks_external_text_cell() {
+    use crate::text::Font;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let text = Rc::new(RefCell::new("initial".to_string()));
+    let mut field = TextField::new(font).with_text_cell(Rc::clone(&text));
+    field.layout(Size::new(160.0, 32.0));
+    assert_eq!(field.text(), "initial");
+
+    *text.borrow_mut() = "cleared externally".to_string();
+    field.layout(Size::new(160.0, 32.0));
+    assert_eq!(field.text(), "cleared externally");
+
+    field.set_text("typed locally");
+    assert_eq!(text.borrow().as_str(), "typed locally");
+}
+
 /// Tab key advances focus through focusable widgets.
 #[test]
 fn test_tab_focus_advance() {
@@ -237,6 +258,168 @@ fn test_scroll_bar_style_defaults_match_egui() {
     assert_eq!(style.content_margin, 0.0);
     assert_eq!(style.fade_strength, 0.5);
     assert_eq!(style.fade_size, 20.0);
+}
+
+#[test]
+fn test_combo_popup_opens_up_when_space_below_is_limited() {
+    use crate::text::Font;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let selected = Rc::new(Cell::new(0_usize));
+    let combo = ComboBox::new(
+        vec![
+            "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
+        ],
+        0,
+        font,
+    )
+    .with_selected_cell(Rc::clone(&selected));
+
+    let mut app = App::new(Box::new(combo));
+    let viewport = Size::new(180.0, 120.0);
+    app.layout(viewport);
+
+    // Open from a root-level combo near the bottom of the viewport. There is
+    // no room below in Y-up space, so the popup should choose the space above.
+    let button_screen_y = viewport.height - 12.0;
+    app.on_mouse_down(
+        12.0,
+        button_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        12.0,
+        button_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(
+        app.root()
+            .properties()
+            .into_iter()
+            .find(|(k, _)| *k == "open")
+            .map(|(_, v)| v),
+        Some("true".to_string())
+    );
+
+    // Paint once so the global popup pass computes up/down geometry.
+    let mut fb = Framebuffer::new(viewport.width as u32, viewport.height as u32);
+    let mut ctx = GfxCtx::new(&mut fb);
+    app.paint(&mut ctx);
+    assert_eq!(
+        app.root()
+            .properties()
+            .into_iter()
+            .find(|(k, _)| *k == "popup_opens_up")
+            .map(|(_, v)| v),
+        Some("true".to_string())
+    );
+
+    // If the popup opened upward, row 3 is above the closed button and
+    // selectable. If it incorrectly opened downward, this click misses it.
+    let row_three_y_up = 35.0;
+    assert!(
+        app.root().hit_test(crate::Point::new(12.0, row_three_y_up)),
+        "open ComboBox popup should extend hit testing above the root-level button"
+    );
+    app.on_mouse_down(
+        12.0,
+        viewport.height - row_three_y_up,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        12.0,
+        viewport.height - row_three_y_up,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+
+    assert_eq!(selected.get(), 3);
+}
+
+#[test]
+fn test_combo_popup_wheel_uses_system_scroll_direction() {
+    use crate::text::Font;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let selected = Rc::new(Cell::new(0_usize));
+    let combo = ComboBox::new(
+        vec![
+            "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
+        ],
+        0,
+        font,
+    )
+    .with_selected_cell(Rc::clone(&selected));
+
+    let mut app = App::new(Box::new(combo));
+    let viewport = Size::new(180.0, 120.0);
+    app.layout(viewport);
+    let button_screen_y = viewport.height - 12.0;
+    app.on_mouse_down(
+        12.0,
+        button_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        12.0,
+        button_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(
+        app.root()
+            .properties()
+            .into_iter()
+            .find(|(k, _)| *k == "open")
+            .map(|(_, v)| v),
+        Some("true".to_string())
+    );
+
+    let mut fb = Framebuffer::new(viewport.width as u32, viewport.height as u32);
+    let mut ctx = GfxCtx::new(&mut fb);
+    app.paint(&mut ctx);
+    assert_eq!(
+        app.root()
+            .properties()
+            .into_iter()
+            .find(|(k, _)| *k == "popup_opens_up")
+            .map(|(_, v)| v),
+        Some("true".to_string())
+    );
+
+    // App convention: positive delta_y means content moves up. In a popup list
+    // that should advance the first visible item downward through the options.
+    let top_popup_row_y_up = 101.0;
+    assert!(
+        app.root()
+            .hit_test(crate::Point::new(12.0, top_popup_row_y_up)),
+        "open ComboBox popup should be hittable in the space above the button"
+    );
+    app.on_mouse_wheel(12.0, viewport.height - top_popup_row_y_up, 44.0);
+    app.on_mouse_down(
+        12.0,
+        viewport.height - top_popup_row_y_up,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        12.0,
+        viewport.height - top_popup_row_y_up,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+
+    assert_eq!(selected.get(), 2);
 }
 
 /// Splitter updates its ratio when dragged across the divider.

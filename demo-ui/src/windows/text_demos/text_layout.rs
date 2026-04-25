@@ -603,7 +603,7 @@ pub fn text_layout(font: Arc<Font>) -> Box<dyn Widget> {
         text_layout_control_row(
             "Line-break:",
             Box::new(SelectionButtons::new(
-                vec!["Word boundaries", "Anywhere"],
+                vec!["word boundaries", "anywhere"],
                 Rc::clone(&state.break_mode),
                 Arc::clone(&font),
             )),
@@ -616,7 +616,7 @@ pub fn text_layout(font: Arc<Font>) -> Box<dyn Widget> {
         text_layout_control_row(
             "Overflow character:",
             Box::new(SelectionButtons::new(
-                vec!["None", "…", "—", " - "],
+                vec!["None", "…", "—", "  -  "],
                 Rc::clone(&state.overflow),
                 Arc::clone(&font),
             )),
