@@ -431,20 +431,16 @@ impl Widget for FlexColumn {
         //
         // In Y-up coordinates "top" = high Y.  Two cursor seeds:
         //
-        //   - **Default** (`top_anchor=false`): start at `pad_b +
-        //     effective_h`.  For all-fixed children this is the top
-        //     of the natural-content extent; for flex children
-        //     (`effective_h = inner_h`) it's the top of the inner
-        //     area.  This matches what `ScrollView` expects when it
-        //     calls `layout(MAX/2)` to measure natural size — children
-        //     get placed at finite y-coords inside the natural area.
+        //   - **Default**: start at the top of the finite inner area,
+        //     matching egui's top-down layout.  When a parent passes a
+        //     deliberately huge height to measure natural content (the
+        //     `ScrollView` path), fall back to the natural-content extent
+        //     so children keep finite y-coordinates.
         //
-        //   - **`top_anchor=true`**: start at the top of the inner
-        //     area.  Used by columns embedded inside an oversized
-        //     slot (e.g. inside a `Resize` widget) where the content
-        //     should hug the TOP of the frame and any extra height
-        //     should appear as whitespace below.
-        let mut cursor_y = if self.top_anchor {
+        //   - **`top_anchor=true`**: always start at the top of the inner
+        //     area, even for very tall measurement slots.
+        let measuring_natural_height = available.height > 1.0e9;
+        let mut cursor_y = if self.top_anchor || !measuring_natural_height {
             available.height - pad_t
         } else {
             pad_b + effective_h

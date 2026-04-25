@@ -1,15 +1,15 @@
 //! `ComboBox` — a single-selection dropdown widget.
 //!
 //! The widget always occupies its compact closed height.  When open, options
-//! are painted as a floating panel in `paint_overlay()` so sibling widgets are
-//! not pushed down by the dropdown.
+//! are painted as a floating panel below the button in `paint_overlay()` so
+//! sibling widgets are not pushed down by the dropdown.
 //!
 //! Text for the selected value and dropdown items is rendered through
 //! backbuffered [`Label`] children maintained in `selected_label` and
 //! `item_labels`.  Colors are updated from `ctx.visuals()` in `paint()` so the
 //! widget responds correctly to dark / light mode switches.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -27,6 +27,31 @@ const ITEM_H: f64 = 22.0;
 const PAD_X: f64 = 8.0;
 const ARROW_W: f64 = 20.0;
 const CORNER_R: f64 = 4.0;
+const POPUP_MARGIN: f64 = 4.0;
+const MIN_VISIBLE_ITEMS: usize = 3;
+const DEFAULT_VISIBLE_ITEMS: usize = 8;
+const SCROLLBAR_W: f64 = 6.0;
+
+struct ComboPopupRequest {
+    x: f64,
+    y: f64,
+    width: f64,
+    popup_h: f64,
+    opens_up: bool,
+    first_item: usize,
+    visible_count: usize,
+    selected: usize,
+    hovered_item: Option<usize>,
+    options: Vec<String>,
+    font: Arc<Font>,
+    font_size: f64,
+    item_fonts: Option<Vec<Arc<Font>>>,
+}
+
+thread_local! {
+    static COMBO_POPUP_QUEUE: RefCell<Vec<ComboPopupRequest>> = const { RefCell::new(Vec::new()) };
+    static CURRENT_COMBO_VIEWPORT: Cell<Option<Size>> = const { Cell::new(None) };
+}
 
 /// A single-selection dropdown.
 ///
@@ -67,6 +92,10 @@ pub struct ComboBox {
     /// the selected label uses `vec[selected]`, ignoring the system
     /// font override so font-preview UI stays stable.
     item_fonts: Option<Vec<Arc<Font>>>,
+
+    popup_opens_up: bool,
+    popup_visible_count: usize,
+    scroll_offset: usize,
 }
 
 impl ComboBox {
@@ -104,6 +133,9 @@ impl ComboBox {
             selected_label,
             item_labels,
             item_fonts: None,
+            popup_opens_up: false,
+            popup_visible_count: DEFAULT_VISIBLE_ITEMS,
+            scroll_offset: 0,
         }
     }
 
@@ -258,13 +290,32 @@ impl ComboBox {
     }
 
     fn popup_h(&self) -> f64 {
-        self.options.len() as f64 * ITEM_H
+        self.popup_visible_count.min(self.options.len()) as f64 * ITEM_H
+    }
+
+    fn popup_top(&self) -> f64 {
+        if self.popup_opens_up {
+            CLOSED_H + self.popup_h()
+        } else {
+            0.0
+        }
+    }
+
+    fn popup_bottom(&self) -> f64 {
+        self.popup_top() - self.popup_h()
     }
 
     fn item_rect(&self, i: usize) -> Rect {
+        let Some(row) = i.checked_sub(self.scroll_offset) else {
+            return Rect::new(0.0, 0.0, 0.0, 0.0);
+        };
         let w = self.bounds.width;
-        let popup_top = CLOSED_H + self.popup_h();
-        Rect::new(0.0, popup_top - (i as f64 + 1.0) * ITEM_H, w, ITEM_H)
+        Rect::new(
+            0.0,
+            self.popup_top() - (row as f64 + 1.0) * ITEM_H,
+            w,
+            ITEM_H,
+        )
     }
 
     /// Which dropdown item (if any) contains local point `p`.
@@ -272,17 +323,66 @@ impl ComboBox {
         if !self.open {
             return None;
         }
-        for i in 0..self.options.len() {
-            let r = self.item_rect(i);
-            if p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height {
-                return Some(i);
-            }
+        if p.x < 0.0
+            || p.x > self.bounds.width
+            || p.y < self.popup_bottom()
+            || p.y > self.popup_top()
+        {
+            return None;
         }
-        None
+        let row = ((self.popup_top() - p.y) / ITEM_H).floor().max(0.0) as usize;
+        let idx = self.scroll_offset + row;
+        (row < self.popup_visible_count && idx < self.options.len()).then_some(idx)
     }
 
     fn in_button(&self, p: Point) -> bool {
         p.x >= 0.0 && p.x <= self.bounds.width && p.y >= 0.0 && p.y <= CLOSED_H
+    }
+
+    fn ensure_selected_visible(&mut self) {
+        let n = self.options.len();
+        if n == 0 {
+            self.scroll_offset = 0;
+            return;
+        }
+        let visible = self.popup_visible_count.max(1).min(n);
+        if self.selected < self.scroll_offset {
+            self.scroll_offset = self.selected;
+        } else if self.selected >= self.scroll_offset + visible {
+            self.scroll_offset = self.selected + 1 - visible;
+        }
+        self.scroll_offset = self.scroll_offset.min(n.saturating_sub(visible));
+    }
+
+    fn scroll_items(&mut self, delta_rows: isize) {
+        let n = self.options.len();
+        let visible = self.popup_visible_count.max(1).min(n);
+        let max_scroll = n.saturating_sub(visible);
+        let next = if delta_rows < 0 {
+            self.scroll_offset.saturating_sub(delta_rows.unsigned_abs())
+        } else {
+            self.scroll_offset.saturating_add(delta_rows as usize)
+        };
+        self.scroll_offset = next.min(max_scroll);
+    }
+
+    fn configure_popup_geometry(&mut self, origin_y: f64, viewport_h: f64) {
+        let n = self.options.len();
+        if n == 0 {
+            self.popup_visible_count = 0;
+            self.popup_opens_up = false;
+            self.scroll_offset = 0;
+            return;
+        }
+
+        let desired_h = n as f64 * ITEM_H;
+        let below = (origin_y - POPUP_MARGIN).max(ITEM_H);
+        let above = (viewport_h - (origin_y + CLOSED_H) - POPUP_MARGIN).max(ITEM_H);
+        self.popup_opens_up = below < desired_h && above > below;
+        let available_h = if self.popup_opens_up { above } else { below };
+        let fit_count = (available_h / ITEM_H).floor().max(1.0) as usize;
+        self.popup_visible_count = fit_count.clamp(MIN_VISIBLE_ITEMS.min(n), n);
+        self.ensure_selected_visible();
     }
 }
 
@@ -312,8 +412,8 @@ impl Widget for ComboBox {
             || (self.open
                 && local_pos.x >= 0.0
                 && local_pos.x <= self.bounds.width
-                && local_pos.y >= CLOSED_H
-                && local_pos.y <= CLOSED_H + self.popup_h())
+                && local_pos.y >= self.popup_bottom()
+                && local_pos.y <= self.popup_top())
     }
 
     fn margin(&self) -> Insets {
@@ -360,7 +460,8 @@ impl Widget for ComboBox {
         self.selected_label
             .set_bounds(Rect::new(PAD_X, sl_y, sl.width, sl.height));
 
-        // Layout item labels in the floating panel above the closed button.
+        // Layout item labels in the floating panel. The panel may open
+        // above or below depending on available screen space.
         for i in 0..self.item_labels.len() {
             let s = self.item_labels[i].layout(Size::new(inner_w, ITEM_H));
             let ir = self.item_rect(i);
@@ -412,55 +513,29 @@ impl Widget for ComboBox {
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if self.open {
-            let v = ctx.visuals();
-            let w = self.bounds.width;
-            let popup_h = self.popup_h();
-
-            // Dropdown panel background.
-            ctx.set_fill_color(v.widget_bg);
-            ctx.begin_path();
-            ctx.rounded_rect(0.0, CLOSED_H, w, popup_h, CORNER_R);
-            ctx.fill();
-
-            ctx.set_stroke_color(v.widget_stroke);
-            ctx.set_line_width(1.0);
-            ctx.begin_path();
-            ctx.rounded_rect(0.0, CLOSED_H, w, popup_h, CORNER_R);
-            ctx.stroke();
-
-            // Items.
-            for i in 0..self.options.len() {
-                let ir = self.item_rect(i);
-
-                // Hover / selected highlight.
-                let is_hovered = self.hovered_item == Some(i);
-                let is_selected = i == self.selected;
-                if is_selected || is_hovered {
-                    let bg = if is_selected {
-                        v.accent
-                    } else {
-                        v.widget_bg_hovered
-                    };
-                    ctx.set_fill_color(bg);
-                    ctx.begin_path();
-                    ctx.rounded_rect(2.0, ir.y + 1.0, w - 4.0, ir.height - 2.0, 3.0);
-                    ctx.fill();
-                }
-
-                // Label.
-                let text_color = if is_selected {
-                    Color::white()
-                } else {
-                    v.text_color
-                };
-                self.item_labels[i].set_color(text_color);
-                let lb = self.item_labels[i].bounds();
-
-                ctx.save();
-                ctx.translate(lb.x, lb.y);
-                paint_subtree(&mut self.item_labels[i], ctx);
-                ctx.restore();
-            }
+            let mut x = 0.0;
+            let mut y = 0.0;
+            let t = ctx.transform();
+            t.transform(&mut x, &mut y);
+            let viewport_h = crate::widgets::combo_box::current_combo_viewport()
+                .map(|s| s.height)
+                .unwrap_or(f64::MAX / 4.0);
+            self.configure_popup_geometry(y, viewport_h);
+            submit_combo_popup(ComboPopupRequest {
+                x,
+                y,
+                width: self.bounds.width,
+                popup_h: self.popup_h(),
+                opens_up: self.popup_opens_up,
+                first_item: self.scroll_offset,
+                visible_count: self.popup_visible_count,
+                selected: self.selected,
+                hovered_item: self.hovered_item,
+                options: self.options.clone(),
+                font: Arc::clone(&self.font),
+                font_size: self.font_size,
+                item_fonts: self.item_fonts.clone(),
+            });
         }
     }
 
@@ -474,6 +549,9 @@ impl Widget for ComboBox {
                 if self.in_button(*pos) {
                     self.open = !self.open;
                     self.hovered_item = None;
+                    if self.open {
+                        self.ensure_selected_visible();
+                    }
                     crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
@@ -507,11 +585,30 @@ impl Widget for ComboBox {
                 self.hovered_item = self.item_for_pos(*pos);
                 EventResult::Ignored
             }
+            Event::MouseWheel { delta_y, .. } => {
+                if self.open && self.options.len() > self.popup_visible_count {
+                    let rows = (*delta_y / ITEM_H).round() as isize;
+                    let rows = if rows == 0 {
+                        delta_y.signum() as isize
+                    } else {
+                        rows
+                    };
+                    self.scroll_items(rows);
+                    self.hovered_item = None;
+                    crate::animation::request_tick();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
             Event::KeyDown { key, .. } => {
                 let n = self.options.len();
                 match key {
                     Key::Enter | Key::Char(' ') => {
                         self.open = !self.open;
+                        if self.open {
+                            self.ensure_selected_visible();
+                        }
                         crate::animation::request_tick();
                         EventResult::Consumed
                     }
@@ -527,6 +624,7 @@ impl Widget for ComboBox {
                     Key::ArrowDown => {
                         if self.selected + 1 < n {
                             self.set_selected(self.selected + 1);
+                            self.ensure_selected_visible();
                             self.fire();
                             crate::animation::request_tick();
                         }
@@ -535,6 +633,7 @@ impl Widget for ComboBox {
                     Key::ArrowUp => {
                         if self.selected > 0 {
                             self.set_selected(self.selected - 1);
+                            self.ensure_selected_visible();
                             self.fire();
                             crate::animation::request_tick();
                         }
@@ -563,4 +662,131 @@ impl Widget for ComboBox {
             ("options", self.options.len().to_string()),
         ]
     }
+}
+
+fn submit_combo_popup(request: ComboPopupRequest) {
+    COMBO_POPUP_QUEUE.with(|q| q.borrow_mut().push(request));
+}
+
+fn current_combo_viewport() -> Option<Size> {
+    CURRENT_COMBO_VIEWPORT.with(|v| v.get())
+}
+
+pub(crate) fn begin_combo_popup_frame(viewport: Size) {
+    CURRENT_COMBO_VIEWPORT.with(|v| v.set(Some(viewport)));
+    COMBO_POPUP_QUEUE.with(|q| q.borrow_mut().clear());
+}
+
+pub(crate) fn paint_global_combo_popups(ctx: &mut dyn DrawCtx) {
+    let requests = COMBO_POPUP_QUEUE.with(|q| q.borrow_mut().drain(..).collect::<Vec<_>>());
+    if requests.is_empty() {
+        return;
+    }
+
+    ctx.save();
+    ctx.reset_clip();
+    for request in requests {
+        paint_combo_popup(ctx, request);
+    }
+    ctx.restore();
+}
+
+fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
+    let v = ctx.visuals();
+    let popup_y = if request.opens_up {
+        request.y + CLOSED_H
+    } else {
+        request.y - request.popup_h
+    };
+
+    // Opaque backing first. Some widget fills are intentionally subtle; the
+    // popup itself must always obscure the content underneath.
+    ctx.set_fill_color(v.window_fill);
+    ctx.begin_path();
+    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
+    ctx.fill();
+
+    ctx.set_fill_color(v.widget_bg);
+    ctx.begin_path();
+    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
+    ctx.fill();
+
+    let has_scroll = request.options.len() > request.visible_count;
+    let text_w = if has_scroll {
+        (request.width - SCROLLBAR_W - 4.0).max(0.0)
+    } else {
+        request.width
+    };
+
+    for row in 0..request.visible_count {
+        let idx = request.first_item + row;
+        let Some(text) = request.options.get(idx) else {
+            break;
+        };
+        let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
+        let is_selected = idx == request.selected;
+        let is_hovered = request.hovered_item == Some(idx);
+        if is_selected || is_hovered {
+            let bg = if is_selected {
+                v.accent
+            } else {
+                v.widget_bg_hovered
+            };
+            ctx.set_fill_color(bg);
+            ctx.begin_path();
+            ctx.rounded_rect(
+                request.x + 2.0,
+                item_y + 1.0,
+                text_w - 4.0,
+                ITEM_H - 2.0,
+                3.0,
+            );
+            ctx.fill();
+        }
+
+        let font = request
+            .item_fonts
+            .as_ref()
+            .and_then(|fonts| fonts.get(idx))
+            .cloned()
+            .unwrap_or_else(|| Arc::clone(&request.font));
+        ctx.set_font(font);
+        ctx.set_font_size(request.font_size);
+        ctx.set_fill_color(if is_selected {
+            Color::white()
+        } else {
+            v.text_color
+        });
+        let baseline = item_y + (ITEM_H - request.font_size) * 0.5;
+        ctx.fill_text(text, request.x + PAD_X, baseline);
+    }
+
+    if has_scroll {
+        let track_x = request.x + request.width - SCROLLBAR_W - 2.0;
+        let track_y = popup_y + 3.0;
+        let track_h = (request.popup_h - 6.0).max(1.0);
+        ctx.set_fill_color(v.scroll_track);
+        ctx.begin_path();
+        ctx.rounded_rect(track_x, track_y, SCROLLBAR_W, track_h, SCROLLBAR_W * 0.5);
+        ctx.fill();
+
+        let total = request.options.len();
+        let visible = request.visible_count.max(1);
+        let thumb_h = (track_h * visible as f64 / total as f64)
+            .max(12.0)
+            .min(track_h);
+        let max_scroll = total.saturating_sub(visible).max(1);
+        let travel = (track_h - thumb_h).max(0.0);
+        let thumb_y = track_y + travel * (1.0 - request.first_item as f64 / max_scroll as f64);
+        ctx.set_fill_color(v.scroll_thumb);
+        ctx.begin_path();
+        ctx.rounded_rect(track_x, thumb_y, SCROLLBAR_W, thumb_h, SCROLLBAR_W * 0.5);
+        ctx.fill();
+    }
+
+    ctx.set_stroke_color(v.widget_stroke);
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
+    ctx.stroke();
 }

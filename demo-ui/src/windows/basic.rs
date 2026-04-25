@@ -11,8 +11,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, Color, FlexColumn, FlexRow, Font, Label, ScrollView, Separator, SizedBox, Slider,
-    TextField, Tooltip, Widget,
+    Button, Checkbox, Color, FlexColumn, FlexRow, Font, HAnchor, Hyperlink, Label, ScrollView,
+    Separator, SizedBox, Slider, Splitter, TextField, Tooltip, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -180,68 +180,199 @@ pub fn text_edit(font: Arc<Font>) -> Box<dyn Widget> {
 // Tooltips demo
 // ---------------------------------------------------------------------------
 
-/// Build the Tooltips demo — buttons demonstrating hover-over tooltip behavior.
-///
-/// Each button is wrapped in a [`Tooltip`] widget that shows a small info panel
-/// after the cursor rests over it for ~0.5 s.
+const TOOLTIP_SOURCE_URL: &str =
+    "https://github.com/larsbrubaker/agg-gui/blob/main/demo-ui/src/windows/basic.rs";
+
+/// Build the Tooltips demo — mirrors egui's tooltip stress/demo window.
 pub fn tooltips(font: Arc<Font>) -> Box<dyn Widget> {
+    let enabled = Rc::new(Cell::new(true));
+
+    let left = tooltip_misc_tests(Arc::clone(&font), Rc::clone(&enabled));
+    let right = tooltip_scroll_test(font);
+    Box::new(
+        Splitter::new(left, right)
+            .with_ratio(0.62)
+            .with_divider_width(4.0),
+    )
+}
+
+fn tooltip_misc_tests(font: Arc<Font>, enabled: Rc<Cell<bool>>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()
-        .with_gap(14.0)
-        .with_padding(16.0)
+        .with_gap(8.0)
+        .with_padding(14.0)
         .with_panel_bg();
 
+    col.push(source_link(Arc::clone(&font)), 0.0);
+
     col.push(
-        Box::new(
-            Label::new(
-                "Tooltip demos — hover a button to see its tip",
-                Arc::clone(&font),
-            )
-            .with_font_size(12.0),
+        tooltip_label(
+            "All labels in this demo have tooltips.",
+            "Yes, even this one.",
+            Arc::clone(&font),
         ),
         0.0,
     );
 
-    let tips = [
-        ("Hover me (A)", "This is tooltip A.\nHover delay: ~0.5 s"),
-        ("Hover me (B)", "Tooltip B: click to activate the button"),
-        (
-            "Hover me (C)",
-            "Tooltip C: the panel follows the cursor position",
+    col.push(
+        Box::new(
+            Tooltip::new(
+                Box::new(Label::new(
+                    "Some widgets have multiple tooltips!",
+                    Arc::clone(&font),
+                )),
+                "The first tooltip.",
+                Arc::clone(&font),
+            )
+            .with_text("The second tooltip."),
         ),
-    ];
+        0.0,
+    );
 
-    for (label, tip) in tips {
-        let btn = Box::new(
-            Button::new(label, Arc::clone(&font))
-                .with_font_size(13.0)
-                .on_click(|| {}),
-        );
-        let wrapped = Tooltip::new(btn, tip, Arc::clone(&font));
-        col.push(
+    col.push(
+        Box::new(
+            Tooltip::new(
+                Box::new(Label::new(
+                    "Tooltips can contain interactive widgets.",
+                    Arc::clone(&font),
+                )),
+                "This tooltip contains a link:",
+                Arc::clone(&font),
+            )
+            .with_link_line("www.egui.rs"),
+        ),
+        0.0,
+    );
+
+    col.push(
+        tooltip_label(
+            "You can put selectable text in tooltips too.",
+            "You can select this text.",
+            Arc::clone(&font),
+        ),
+        0.0,
+    );
+
+    col.push(
+        Box::new(
+            Tooltip::new(
+                Box::new(Label::new(
+                    "This tooltip shows at the mouse cursor.",
+                    Arc::clone(&font),
+                )),
+                "Move me around!!",
+                Arc::clone(&font),
+            )
+            .at_pointer(),
+        ),
+        0.0,
+    );
+
+    col.push(Box::new(Separator::horizontal()), 0.0);
+
+    col.push(
+        tooltip_label(
+            "You can have different tooltips depending on whether or not a widget is enabled:",
+            "Check the tooltip of the button below, and see how it changes depending on whether or not it is enabled.",
+            Arc::clone(&font),
+        ),
+        0.0,
+    );
+
+    let mut row = FlexRow::new().with_gap(8.0);
+    row.push(
+        Box::new(Tooltip::new(
             Box::new(
-                SizedBox::new()
-                    .with_height(30.0)
-                    .with_child(Box::new(wrapped)),
+                Checkbox::new("Enabled", Arc::clone(&font), enabled.get())
+                    .with_state_cell(Rc::clone(&enabled)),
+            ),
+            "Controls whether or not the following button is enabled.",
+            Arc::clone(&font),
+        )),
+        0.0,
+    );
+
+    let enabled_for_button = Rc::clone(&enabled);
+    let enabled_for_tip = Rc::clone(&enabled);
+    row.push(
+        Box::new(
+            Tooltip::new(
+                Box::new(
+                    Button::new("Sometimes clickable", Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .with_enabled_fn(move || enabled_for_button.get())
+                        .on_click(|| {}),
+                ),
+                "This tooltip was created with",
+                Arc::clone(&font),
+            )
+            .with_code_line(".on_hover_ui(...)")
+            .with_disabled_text(
+                "A different tooltip when widget is disabled.\nThis tooltip was created with\n.on_disabled_hover_ui(...)",
+                move || !enabled_for_tip.get(),
+            ),
+        ),
+        0.0,
+    );
+    col.push(Box::new(row), 0.0);
+
+    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+    Box::new(col)
+}
+
+fn tooltip_scroll_test(font: Arc<Font>) -> Box<dyn Widget> {
+    let mut col = FlexColumn::new()
+        .with_gap(8.0)
+        .with_padding(10.0)
+        .with_panel_bg();
+    col.push(
+        Box::new(Tooltip::new(
+            Box::new(
+                Label::new(
+                    "The scroll area below has many labels with interactive tooltips. The purpose is to test that the tooltips close when you scroll.",
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_wrap(true),
+            ),
+            "Try hovering a label below, then scroll!",
+            Arc::clone(&font),
+        )),
+        0.0,
+    );
+
+    let mut lines = FlexColumn::new().with_gap(2.0);
+    for i in 0..1000 {
+        lines.push(
+            Box::new(
+                Tooltip::new(
+                    Box::new(Label::new(format!("This is line {i}"), Arc::clone(&font))),
+                    "This tooltip is interactive, because the text in it is selectable.",
+                    Arc::clone(&font),
+                )
+                .with_margin(agg_gui::Insets::from_sides(0.0, 0.0, 1.0, 1.0)),
             ),
             0.0,
         );
     }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(
-        Box::new(
-            Label::new(
-                "Tooltips are rendered inline within the widget's local space.\n\
-         A future global overlay layer will allow true floating tooltips.",
-                Arc::clone(&font),
-            )
-            .with_font_size(11.0),
-        ),
-        0.0,
-    );
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+    col.push(Box::new(ScrollView::new(Box::new(lines))), 1.0);
     Box::new(col)
+}
+
+fn tooltip_label(label: &'static str, tip: &'static str, font: Arc<Font>) -> Box<dyn Widget> {
+    Box::new(Tooltip::new(
+        Box::new(Label::new(label, Arc::clone(&font))),
+        tip,
+        font,
+    ))
+}
+
+fn source_link(font: Arc<Font>) -> Box<dyn Widget> {
+    Box::new(
+        Hyperlink::new("(source code)", font)
+            .with_font_size(11.0)
+            .with_h_anchor(HAnchor::CENTER)
+            .on_click(|| crate::url::open_url(TOOLTIP_SOURCE_URL)),
+    )
 }
 
 // ---------------------------------------------------------------------------

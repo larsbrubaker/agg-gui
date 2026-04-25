@@ -130,6 +130,9 @@ impl App {
     /// after `paint` returns to decide whether to schedule continuous redraws.
     pub fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         crate::animation::clear_tick();
+        let viewport = Size::new(self.root.bounds().width, self.root.bounds().height);
+        crate::widgets::combo_box::begin_combo_popup_frame(viewport);
+        crate::widgets::tooltip::begin_tooltip_frame();
         // Recompute the multi-touch aggregate once per paint and publish
         // to the thread-local — widgets read it during `on_event` or
         // `paint` without an explicit `&App` reference.
@@ -140,9 +143,13 @@ impl App {
             ctx.save();
             ctx.scale(scale, scale);
             paint_subtree(self.root.as_mut(), ctx);
+            crate::widgets::combo_box::paint_global_combo_popups(ctx);
+            crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
             ctx.restore();
         } else {
             paint_subtree(self.root.as_mut(), ctx);
+            crate::widgets::combo_box::paint_global_combo_popups(ctx);
+            crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
         }
     }
 

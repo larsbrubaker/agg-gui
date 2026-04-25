@@ -1,16 +1,9 @@
-//! `Tooltip` — a wrapper widget that shows a hover tooltip.
+//! `Tooltip` — a wrapper widget that shows egui-style hover help.
 //!
-//! Wraps any child widget and renders a small info panel near the cursor when
-//! the user hovers over the child.  The panel appears after a short delay
-//! (`HOVER_DELAY_FRAMES`) and is rendered inline within the widget's own `paint()`
-//! call, which means it renders within the widget's local clip region.
-//!
-//! # Limitations
-//!
-//! Because the tooltip is painted in local coordinate space it will be clipped by
-//! the parent `ScrollView` if the child is near the edge.  True floating tooltips
-//! require a global overlay layer.  This implementation covers the common case
-//! where the tooltip fits within the visible widget area.
+//! Tooltips are submitted during the normal widget paint pass, but drawn at the
+//! end of the frame by [`crate::widget::App`].  That makes them true floating
+//! overlays instead of child-local decorations, so they can escape scroll-area
+//! clips and window content clips.
 //!
 //! # Usage
 //!
@@ -22,6 +15,8 @@
 //! )
 //! ```
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -30,17 +25,42 @@ use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{paint_subtree, Widget};
-use crate::widgets::label::Label;
+use crate::widget::{current_mouse_world, Widget};
 
 /// Number of consecutive hovered frames before the tooltip appears.
-/// At ~60 fps this gives a ~0.5 second delay.
-const HOVER_DELAY_FRAMES: u32 = 30;
+/// At ~60 fps this gives an egui-like short hover delay.
+const HOVER_DELAY_FRAMES: u32 = 18;
+const TOOLTIP_FONT_SIZE: f64 = 12.0;
+const TOOLTIP_PAD_X: f64 = 8.0;
+const TOOLTIP_PAD_Y: f64 = 6.0;
+const TOOLTIP_GAP: f64 = 4.0;
+const SCREEN_MARGIN: f64 = 4.0;
+
+#[derive(Clone)]
+enum TooltipLineKind {
+    Text,
+    Code,
+    Link,
+}
+
+#[derive(Clone)]
+struct TooltipLine {
+    text: String,
+    kind: TooltipLineKind,
+}
+
+struct TooltipRequest {
+    font: Arc<Font>,
+    lines: Vec<TooltipLine>,
+    anchor: Point,
+    at_pointer: bool,
+}
+
+thread_local! {
+    static TOOLTIP_QUEUE: RefCell<Vec<TooltipRequest>> = const { RefCell::new(Vec::new()) };
+}
 
 /// A wrapper widget that shows a text tooltip on hover.
-///
-/// The tooltip panel is drawn above the child widget (Y-up: higher Y = visually above).
-/// The text is rendered through a backbuffered [`Label`] child.
 pub struct Tooltip {
     bounds: Rect,
     /// The wrapped child widget is stored in `children[0]`.
@@ -54,8 +74,11 @@ pub struct Tooltip {
     /// Last known cursor position in local coordinates.
     cursor: Point,
 
-    /// Backbuffered label for the tooltip text.
-    tip_label: Label,
+    font: Arc<Font>,
+    lines: Vec<TooltipLine>,
+    disabled_lines: Vec<TooltipLine>,
+    disabled_when: Option<Rc<dyn Fn() -> bool>>,
+    at_pointer: bool,
 }
 
 impl Tooltip {
@@ -68,8 +91,56 @@ impl Tooltip {
             hover_frames: 0,
             hovered: false,
             cursor: Point::ORIGIN,
-            tip_label: Label::new(text, font).with_font_size(11.5),
+            font,
+            lines: text_to_lines(text),
+            disabled_lines: Vec::new(),
+            disabled_when: None,
+            at_pointer: false,
         }
+    }
+
+    /// Add another hover text block, matching egui's ability to chain
+    /// `.on_hover_text(...)` calls.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.lines.extend(text_to_lines(text));
+        self
+    }
+
+    /// Add a code-styled line to the tooltip.
+    pub fn with_code_line(mut self, text: impl Into<String>) -> Self {
+        self.lines.push(TooltipLine {
+            text: text.into(),
+            kind: TooltipLineKind::Code,
+        });
+        self
+    }
+
+    /// Add a link-styled line to the tooltip.  Tooltip overlays are
+    /// informational; the line is styled like a link but does not receive
+    /// pointer events.
+    pub fn with_link_line(mut self, text: impl Into<String>) -> Self {
+        self.lines.push(TooltipLine {
+            text: text.into(),
+            kind: TooltipLineKind::Link,
+        });
+        self
+    }
+
+    /// Place the tooltip relative to the mouse cursor instead of the widget.
+    pub fn at_pointer(mut self) -> Self {
+        self.at_pointer = true;
+        self
+    }
+
+    /// Use alternate tooltip text while `disabled_when` returns true.
+    pub fn with_disabled_text(
+        mut self,
+        text: impl Into<String>,
+        disabled_when: impl Fn() -> bool + 'static,
+    ) -> Self {
+        self.disabled_lines = text_to_lines(text);
+        self.disabled_when = Some(Rc::new(disabled_when));
+        self
     }
 
     pub fn with_margin(mut self, m: Insets) -> Self {
@@ -87,6 +158,16 @@ impl Tooltip {
 
     fn show_tip(&self) -> bool {
         self.hovered && self.hover_frames >= HOVER_DELAY_FRAMES
+    }
+
+    fn active_lines(&self) -> Vec<TooltipLine> {
+        if self.disabled_when.as_ref().map(|f| f()).unwrap_or(false)
+            && !self.disabled_lines.is_empty()
+        {
+            self.disabled_lines.clone()
+        } else {
+            self.lines.clone()
+        }
     }
 }
 
@@ -136,70 +217,39 @@ impl Widget for Tooltip {
         s
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        // Increment hover counter each paint frame while hovered.
+    fn paint(&mut self, _: &mut dyn DrawCtx) {}
+
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if self.hovered {
             self.hover_frames = self.hover_frames.saturating_add(1);
+            if !self.show_tip() {
+                crate::animation::request_tick();
+            }
         }
 
-        // Paint the wrapped child widget.
-        if let Some(child) = self.children.first_mut() {
-            paint_subtree(child.as_mut(), ctx);
-        }
-
-        // Draw tooltip panel if hovered long enough.
         if !self.show_tip() {
             return;
         }
 
-        let v = ctx.visuals();
-        let pad_x = 8.0_f64;
-        let pad_y = 5.0_f64;
+        let mut anchor = if self.at_pointer {
+            current_mouse_world().unwrap_or(self.cursor)
+        } else {
+            let mut x = self.bounds.width * 0.5;
+            let mut y = self.bounds.height;
+            ctx.transform().transform(&mut x, &mut y);
+            Point::new(x, y)
+        };
+        if self.at_pointer {
+            anchor.x += 14.0;
+            anchor.y += 14.0;
+        }
 
-        // Layout the label.
-        let max_tip_w = self.bounds.width.max(120.0).min(260.0);
-        let ls = self.tip_label.layout(Size::new(max_tip_w, 100.0));
-
-        let panel_w = ls.width + pad_x * 2.0;
-        let panel_h = ls.height + pad_y * 2.0;
-
-        // Position panel above the cursor (Y-up: above = larger Y).
-        let cursor_y = self.cursor.y;
-        let cursor_x = self.cursor.x;
-        let panel_x = (cursor_x - panel_w * 0.5)
-            .max(0.0)
-            .min(self.bounds.width - panel_w);
-        let panel_y = cursor_y + 10.0; // 10px above cursor in Y-up space
-
-        // Draw tooltip shadow.
-        ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.20));
-        ctx.begin_path();
-        ctx.rounded_rect(panel_x + 1.0, panel_y - 1.0, panel_w, panel_h, 4.0);
-        ctx.fill();
-
-        // Draw tooltip panel background.
-        ctx.set_fill_color(v.window_fill);
-        ctx.begin_path();
-        ctx.rounded_rect(panel_x, panel_y, panel_w, panel_h, 4.0);
-        ctx.fill();
-
-        // Border.
-        ctx.set_stroke_color(v.widget_stroke);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rounded_rect(panel_x, panel_y, panel_w, panel_h, 4.0);
-        ctx.stroke();
-
-        // Paint the label.
-        self.tip_label.set_color(v.text_color);
-        self.tip_label
-            .set_bounds(Rect::new(0.0, 0.0, ls.width, ls.height));
-        let lx = panel_x + pad_x;
-        let ly = panel_y + pad_y;
-        ctx.save();
-        ctx.translate(lx, ly);
-        paint_subtree(&mut self.tip_label, ctx);
-        ctx.restore();
+        submit_tooltip(TooltipRequest {
+            font: Arc::clone(&self.font),
+            lines: self.active_lines(),
+            anchor,
+            at_pointer: self.at_pointer,
+        });
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
@@ -211,27 +261,17 @@ impl Widget for Tooltip {
                 if !self.hovered {
                     self.hover_frames = 0;
                 }
-                // Forward to child.
-                let result = if let Some(child) = self.children.first_mut() {
-                    child.on_event(event)
-                } else {
-                    EventResult::Ignored
-                };
-                // If hover state changed, request a repaint and consume.
                 if self.hovered != was {
                     crate::animation::request_tick();
-                    EventResult::Consumed
-                } else {
-                    result
                 }
+                EventResult::Ignored
             }
-            _ => {
-                if let Some(child) = self.children.first_mut() {
-                    child.on_event(event)
-                } else {
-                    EventResult::Ignored
-                }
+            Event::MouseWheel { .. } => {
+                self.hovered = false;
+                self.hover_frames = 0;
+                EventResult::Ignored
             }
+            _ => EventResult::Ignored,
         }
     }
 
@@ -240,5 +280,126 @@ impl Widget for Tooltip {
             && local_pos.x <= self.bounds.width
             && local_pos.y >= 0.0
             && local_pos.y <= self.bounds.height
+    }
+}
+
+fn text_to_lines(text: impl Into<String>) -> Vec<TooltipLine> {
+    text.into()
+        .lines()
+        .map(|line| TooltipLine {
+            text: line.to_owned(),
+            kind: TooltipLineKind::Text,
+        })
+        .collect()
+}
+
+fn submit_tooltip(request: TooltipRequest) {
+    TOOLTIP_QUEUE.with(|q| q.borrow_mut().push(request));
+}
+
+pub(crate) fn begin_tooltip_frame() {
+    TOOLTIP_QUEUE.with(|q| q.borrow_mut().clear());
+}
+
+pub(crate) fn paint_global_tooltips(ctx: &mut dyn DrawCtx, viewport: Size) {
+    let requests = TOOLTIP_QUEUE.with(|q| q.borrow_mut().drain(..).collect::<Vec<_>>());
+    for request in requests {
+        paint_request(ctx, viewport, request);
+    }
+}
+
+fn paint_request(ctx: &mut dyn DrawCtx, viewport: Size, request: TooltipRequest) {
+    if request.lines.is_empty() {
+        return;
+    }
+
+    let v = ctx.visuals();
+    ctx.set_font(Arc::clone(&request.font));
+    ctx.set_font_size(TOOLTIP_FONT_SIZE);
+
+    let line_h = TOOLTIP_FONT_SIZE * 1.45;
+    let mut max_w = 0.0_f64;
+    for line in &request.lines {
+        if let Some(m) = ctx.measure_text(&line.text) {
+            max_w = max_w.max(m.width);
+        }
+    }
+
+    let panel_w = (max_w + TOOLTIP_PAD_X * 2.0).max(64.0);
+    let panel_h = request.lines.len() as f64 * line_h + TOOLTIP_PAD_Y * 2.0;
+    let mut panel_x = if request.at_pointer {
+        request.anchor.x
+    } else {
+        request.anchor.x - panel_w * 0.5
+    };
+    let mut panel_y = request.anchor.y + TOOLTIP_GAP;
+
+    if panel_x + panel_w > viewport.width - SCREEN_MARGIN {
+        panel_x = viewport.width - panel_w - SCREEN_MARGIN;
+    }
+    if panel_y + panel_h > viewport.height - SCREEN_MARGIN {
+        panel_y = request.anchor.y - panel_h - TOOLTIP_GAP * 3.0;
+    }
+    panel_x = panel_x.clamp(
+        SCREEN_MARGIN,
+        (viewport.width - panel_w - SCREEN_MARGIN).max(SCREEN_MARGIN),
+    );
+    panel_y = panel_y.clamp(
+        SCREEN_MARGIN,
+        (viewport.height - panel_h - SCREEN_MARGIN).max(SCREEN_MARGIN),
+    );
+
+    ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.20));
+    ctx.begin_path();
+    ctx.rounded_rect(panel_x + 1.0, panel_y - 1.0, panel_w, panel_h, 5.0);
+    ctx.fill();
+
+    ctx.set_fill_color(v.window_fill);
+    ctx.begin_path();
+    ctx.rounded_rect(panel_x, panel_y, panel_w, panel_h, 5.0);
+    ctx.fill();
+
+    ctx.set_stroke_color(v.widget_stroke);
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.rounded_rect(panel_x, panel_y, panel_w, panel_h, 5.0);
+    ctx.stroke();
+
+    for (i, line) in request.lines.iter().enumerate() {
+        let y = panel_y + panel_h - TOOLTIP_PAD_Y - (i as f64 + 1.0) * line_h + 2.0;
+        match line.kind {
+            TooltipLineKind::Text => {
+                ctx.set_fill_color(v.text_color);
+                ctx.fill_text(&line.text, panel_x + TOOLTIP_PAD_X, y);
+            }
+            TooltipLineKind::Code => {
+                if let Some(m) = ctx.measure_text(&line.text) {
+                    ctx.set_fill_color(v.track_bg);
+                    ctx.begin_path();
+                    ctx.rounded_rect(
+                        panel_x + TOOLTIP_PAD_X - 3.0,
+                        y - 3.0,
+                        m.width + 6.0,
+                        line_h,
+                        3.0,
+                    );
+                    ctx.fill();
+                }
+                ctx.set_fill_color(v.text_color);
+                ctx.fill_text(&line.text, panel_x + TOOLTIP_PAD_X, y);
+            }
+            TooltipLineKind::Link => {
+                ctx.set_fill_color(v.text_link);
+                ctx.fill_text(&line.text, panel_x + TOOLTIP_PAD_X, y);
+                if let Some(m) = ctx.measure_text(&line.text) {
+                    ctx.set_stroke_color(v.text_link);
+                    ctx.set_line_width(1.0);
+                    ctx.begin_path();
+                    ctx.move_to(panel_x + TOOLTIP_PAD_X, y - 2.0);
+                    ctx.line_to(panel_x + TOOLTIP_PAD_X + m.width, y - 2.0);
+                    ctx.stroke();
+                }
+            }
+        }
     }
 }

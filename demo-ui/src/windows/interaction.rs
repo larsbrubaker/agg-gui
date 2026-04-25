@@ -379,7 +379,7 @@ fn bottom_panel(font: Arc<Font>) -> Box<dyn Widget> {
 // Popups demo
 // ---------------------------------------------------------------------------
 
-/// Build the Popups demo — a button that reveals an inline "popup" panel.
+/// Build the Popups demo — a button that reveals a floating popup panel.
 pub fn popups_demo(font: Arc<Font>) -> Box<dyn Widget> {
     let open = Rc::new(Cell::new(false));
 
@@ -409,7 +409,7 @@ pub fn popups_demo(font: Arc<Font>) -> Box<dyn Widget> {
         );
     }
 
-    // Inline popup panel (shown when open == true).
+    // Floating popup panel (shown when open == true, without taking layout space).
     let popup_panel = InlinePopup::new(Arc::clone(&font), Rc::clone(&open));
     col.push(Box::new(popup_panel), 0.0);
 
@@ -417,7 +417,7 @@ pub fn popups_demo(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(col)
 }
 
-/// An inline panel that is only visible (and takes space) when `open` is true.
+/// A floating panel that is only visible when `open` is true.
 ///
 /// Text is rendered through backbuffered Label children so rasterization
 /// is cached to a framebuffer and never repeated while the text is unchanged.
@@ -430,6 +430,8 @@ struct InlinePopup {
     /// "Click 'Close' to dismiss." — hint label.
     label_hint: Label,
 }
+
+const POPUP_H: f64 = 90.0;
 
 impl InlinePopup {
     fn new(font: Arc<Font>, open: Rc<Cell<bool>>) -> Self {
@@ -462,53 +464,53 @@ impl Widget for InlinePopup {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        let w = available.width.min(260.0);
+        self.bounds = Rect::new(0.0, 0.0, w, 0.0);
         if !self.open.get() {
-            self.bounds = Rect::new(0.0, 0.0, 0.0, 0.0);
-            return Size::new(0.0, 0.0);
+            return Size::new(w, 0.0);
         }
-        let h = 90.0_f64;
-        self.bounds = Rect::new(0.0, 0.0, available.width, h);
 
         // Layout labels — position them within the popup panel.
-        let title_s = self
-            .label_title
-            .layout(Size::new(available.width - 20.0, 24.0));
+        let title_s = self.label_title.layout(Size::new(w - 20.0, 24.0));
         self.label_title.set_bounds(Rect::new(
             10.0,
-            h - title_s.height - 14.0,
+            -title_s.height - 14.0,
             title_s.width,
             title_s.height,
         ));
 
-        let hint_s = self
-            .label_hint
-            .layout(Size::new(available.width - 20.0, 20.0));
+        let hint_s = self.label_hint.layout(Size::new(w - 20.0, 20.0));
         self.label_hint.set_bounds(Rect::new(
             10.0,
-            h - title_s.height - hint_s.height - 24.0,
+            -title_s.height - hint_s.height - 24.0,
             hint_s.width,
             hint_s.height,
         ));
 
-        Size::new(available.width, h)
+        Size::new(w, 0.0)
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+    fn paint(&mut self, _: &mut dyn DrawCtx) {}
+
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if !self.open.get() {
             return;
         }
+        ctx.save();
+        ctx.reset_clip();
         let v = ctx.visuals();
         let w = self.bounds.width;
-        let h = self.bounds.height;
+        let h = POPUP_H;
+        let panel_y = -h;
 
         ctx.set_fill_color(v.widget_bg);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 6.0);
+        ctx.rounded_rect(0.0, panel_y, w, h, 6.0);
         ctx.fill();
         ctx.set_stroke_color(v.widget_stroke);
         ctx.set_line_width(1.0);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 6.0);
+        ctx.rounded_rect(0.0, panel_y, w, h, 6.0);
         ctx.stroke();
 
         // Paint labels via backbuffered Label children.
@@ -525,25 +527,34 @@ impl Widget for InlinePopup {
         ctx.translate(hb.x, hb.y);
         paint_subtree(&mut self.label_hint, ctx);
         ctx.restore();
+        ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         if !self.open.get() {
             return EventResult::Ignored;
         }
-        // A simple "close" area: clicking anywhere in the bottom half dismisses.
         if let Event::MouseDown {
             pos,
             button: MouseButton::Left,
             ..
         } = event
         {
-            if pos.y <= self.bounds.height * 0.45 {
+            if self.hit_test(*pos) {
                 self.open.set(false);
+                agg_gui::animation::request_tick();
                 return EventResult::Consumed;
             }
         }
         EventResult::Ignored
+    }
+
+    fn hit_test(&self, local_pos: Point) -> bool {
+        self.open.get()
+            && local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= -POPUP_H
+            && local_pos.y <= 0.0
     }
 }
 
