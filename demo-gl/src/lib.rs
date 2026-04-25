@@ -40,10 +40,10 @@
 //! # Coordinate system
 //!
 //! All incoming coordinates are in **Y-up pixel space**: origin at the
-//! bottom-left of the viewport, positive Y upward.  The transform stack
-//! (save/translate/restore) maps widget-local → screen-space Y-up before
-//! any point is stored.  The vertex shader converts screen-space pixels →
-//! GL NDC with `ndc = (pos / resolution) * 2 - 1`.
+//! bottom-left of the viewport, positive Y upward.  Paths are stored in
+//! widget-local coordinates so AGG can expand fills and strokes before the
+//! transform stack maps them to screen-space Y-up.  The vertex shader converts
+//! screen-space pixels → GL NDC with `ndc = (pos / resolution) * 2 - 1`.
 
 pub mod frame;
 pub use frame::{begin_frame, render_app_frame};
@@ -67,6 +67,14 @@ use agg_gui::text::{shape_glyphs, Font, TextMetrics};
 use agg_gui::CompOp;
 use agg_gui::TransAffine;
 use agg_gui::{LineCap, LineJoin};
+use agg_rust::arc::Arc as AggArc;
+use agg_rust::basics::PATH_FLAGS_NONE;
+use agg_rust::conv_curve::ConvCurve;
+use agg_rust::conv_dash::ConvDash;
+use agg_rust::conv_stroke::ConvStroke;
+use agg_rust::conv_transform::ConvTransform;
+use agg_rust::path_storage::PathStorage;
+use agg_rust::rounded_rect::RoundedRect;
 use glow::HasContext;
 
 // ---------------------------------------------------------------------------
@@ -305,10 +313,9 @@ pub struct GlGfxCtx {
     // clip: GL scissor rect (x, y_down, w, h), or None = no scissor.
     state_stack: Vec<(TransAffine, Option<[i32; 4]>)>,
 
-    // Path builder — contours stored in screen-space Y-up pixels.
-    contours: Vec<Vec<[f32; 2]>>,
-    current_contour: Vec<[f32; 2]>,
-    pen: [f64; 2],
+    // Path builder — stored in local Y-up coordinates. Fill/stroke convert
+    // through AGG, then apply the current transform before tessellating.
+    path: PathStorage,
 
     // Font
     font: Option<Arc<Font>>,
@@ -464,9 +471,7 @@ impl GlGfxCtx {
             dash_offset: 0.0,
             global_alpha: 1.0,
             state_stack: vec![(TransAffine::new(), None)],
-            contours: Vec::new(),
-            current_contour: Vec::new(),
-            pen: [0.0; 2],
+            path: PathStorage::new(),
             font: None,
             font_size: 16.0,
             glyph_cache: GlyphCache::new(),
@@ -521,9 +526,7 @@ impl GlGfxCtx {
         self.dash_offset = 0.0;
         self.global_alpha = 1.0;
         self.state_stack = vec![(TransAffine::new(), None)];
-        self.contours.clear();
-        self.current_contour.clear();
-        self.pen = [0.0; 2];
+        self.path = PathStorage::new();
         self.font = None;
         self.font_size = 16.0;
         // Disable any lingering scissor from the previous frame.
@@ -991,146 +994,74 @@ impl GlGfxCtx {
         self.gl.bind_vertex_array(None);
     }
 
-    /// Tessellate all accumulated `contours` and draw as a fill with
-    /// analytic edge AA.
+    /// Tessellate the accumulated AGG path and draw as a fill with analytic
+    /// edge AA.
     ///
-    /// Contours are rebuilt into an AGG `PathStorage` and fed through
-    /// `tessellate_path_aa`, which uses tess2's edge-flag output to attach
-    /// a 1-pixel halo strip along every original polygon boundary.
+    /// The path is flattened and transformed through AGG before
+    /// `tessellate_path_aa` attaches a 1-pixel halo strip along every original
+    /// polygon boundary.
     unsafe fn do_fill(&mut self) {
         use agg_gui::gl_renderer::tessellate_path_aa;
-        use agg_rust::path_storage::PathStorage;
 
-        let contours = std::mem::take(&mut self.contours);
-        self.current_contour.clear();
-        if contours.is_empty() {
-            return;
-        }
+        let transform = *self.ctm();
+        let fill_rule = self.fill_rule;
+        let tess = {
+            let mut curves = ConvCurve::new(&mut self.path);
+            let mut transformed = ConvTransform::new(&mut curves, transform);
+            tessellate_path_aa(&mut transformed, 1.0, fill_rule)
+        };
 
-        let mut path = PathStorage::new();
-        for c in &contours {
-            if c.len() < 2 {
-                continue;
-            }
-            path.move_to(c[0][0] as f64, c[0][1] as f64);
-            for p in &c[1..] {
-                path.line_to(p[0] as f64, p[1] as f64);
-            }
-        }
-
-        if let Some((verts, idx)) = tessellate_path_aa(&mut path, 1.0, self.fill_rule) {
+        if let Some((verts, idx)) = tess {
             let color = self.fill_color;
             self.submit_aa_triangles(&verts, &idx, color);
         }
     }
 
-    /// Stroke the accumulated contours with analytic edge AA.
+    /// Stroke the accumulated AGG path with analytic edge AA.
     ///
     /// Single battle-tested pipeline:
-    ///   contours → AGG `PathStorage` → `ConvStroke` (proper miter/round/bevel
-    ///   joins + butt/round/square caps) → [`tessellate_path_aa`] (AGG
+    ///   AGG `PathStorage` → `ConvStroke` (proper miter/round/bevel joins +
+    ///   butt/round/square caps) → [`tessellate_path_aa`] (AGG
     ///   VertexSource → tess2 → interior triangles + edge-flag halo strips).
     unsafe fn do_stroke(&mut self) {
         use agg_gui::gl_renderer::tessellate_path_aa;
-        use agg_rust::conv_dash::ConvDash;
-        use agg_rust::conv_stroke::ConvStroke;
-        use agg_rust::path_storage::PathStorage;
 
-        let contours = std::mem::take(&mut self.contours);
-        self.current_contour.clear();
-        if contours.is_empty() {
-            return;
-        }
-
-        let mut path = PathStorage::new();
-        for contour in &contours {
-            if contour.len() < 2 {
-                continue;
+        let transform = *self.ctm();
+        let width = self.line_width;
+        let join = self.line_join;
+        let cap = self.line_cap;
+        let miter_limit = self.miter_limit;
+        let dashes = self.line_dash.clone();
+        let dash_offset = self.dash_offset;
+        let tess = {
+            let mut curves = ConvCurve::new(&mut self.path);
+            if dashes.is_empty() {
+                let mut stroke = ConvStroke::new(&mut curves);
+                stroke.set_width(width);
+                stroke.set_line_join(join);
+                stroke.set_line_cap(cap);
+                stroke.set_miter_limit(miter_limit);
+                let mut transformed = ConvTransform::new(&mut stroke, transform);
+                tessellate_path_aa(&mut transformed, 1.0, FillRule::NonZero)
+            } else {
+                let mut dash = ConvDash::new(&mut curves);
+                configure_dashes(&mut dash, &dashes, dash_offset);
+                let mut stroke = ConvStroke::new(dash);
+                stroke.set_width(width);
+                stroke.set_line_join(join);
+                stroke.set_line_cap(cap);
+                stroke.set_miter_limit(miter_limit);
+                let mut transformed = ConvTransform::new(&mut stroke, transform);
+                tessellate_path_aa(&mut transformed, 1.0, FillRule::NonZero)
             }
-            path.move_to(contour[0][0] as f64, contour[0][1] as f64);
-            for p in &contour[1..] {
-                path.line_to(p[0] as f64, p[1] as f64);
-            }
-        }
+        };
 
-        let mut materialized = PathStorage::new();
-        if self.line_dash.is_empty() {
-            let mut stroke = ConvStroke::new(path);
-            stroke.set_width(self.line_width);
-            stroke.set_line_join(self.line_join);
-            stroke.set_line_cap(self.line_cap);
-            stroke.set_miter_limit(self.miter_limit);
-            materialized.concat_path(&mut stroke, 0);
-        } else {
-            let mut dash = ConvDash::new(path);
-            configure_dashes(&mut dash, &self.line_dash, self.dash_offset);
-            let mut stroke = ConvStroke::new(dash);
-            stroke.set_width(self.line_width);
-            stroke.set_line_join(self.line_join);
-            stroke.set_line_cap(self.line_cap);
-            stroke.set_miter_limit(self.miter_limit);
-            materialized.concat_path(&mut stroke, 0);
-        }
-
-        if let Some((verts, idx)) = tessellate_path_aa(&mut materialized, 1.0, FillRule::NonZero) {
+        if let Some((verts, idx)) = tess {
             let color = self.stroke_color;
             self.submit_aa_triangles(&verts, &idx, color);
         }
     }
-
-    /// Flush the current contour into `contours`.
-    fn flush_contour(&mut self) {
-        if self.current_contour.len() >= 2 {
-            let c = std::mem::take(&mut self.current_contour);
-            self.contours.push(c);
-        } else {
-            self.current_contour.clear();
-        }
-    }
-
-    /// Apply CTM to a Y-up position and push into the current contour.
-    fn push_pt(&mut self, x: f64, y: f64) {
-        let pt = self.transform_pt(x, y);
-        self.current_contour.push(pt);
-        self.pen = [x, y];
-    }
-
-    // Bézier flatteners --------------------------------------------------
-
-    fn flatten_quad_to(&mut self, cx: f64, cy: f64, x: f64, y: f64) {
-        let p0 = [self.pen[0] as f32, self.pen[1] as f32];
-        let p1 = [cx as f32, cy as f32];
-        let p2 = [x as f32, y as f32];
-        subdivide_quad(p0, p1, p2, FLATNESS_SQ, &mut |px, py| {
-            let pt = self.transform_pt(px as f64, py as f64);
-            self.current_contour.push(pt);
-        });
-        let pt = self.transform_pt(x, y);
-        self.current_contour.push(pt);
-        self.pen = [x, y];
-    }
-
-    fn flatten_cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64) {
-        let ctm = *self.ctm();
-        let tfm = |lx: f64, ly: f64| -> [f32; 2] {
-            let (mut px, mut py) = (lx, ly);
-            ctm.transform(&mut px, &mut py);
-            [px as f32, py as f32]
-        };
-        let sp0 = tfm(self.pen[0], self.pen[1]);
-        let sp1 = tfm(cx1, cy1);
-        let sp2 = tfm(cx2, cy2);
-        let sp3 = tfm(x, y);
-        let contour = &mut self.current_contour;
-        subdivide_cubic_screen(sp0, sp1, sp2, sp3, FLATNESS_SQ, &mut |px, py| {
-            contour.push([px, py]);
-        });
-        contour.push(sp3);
-        self.pen = [x, y];
-    }
 }
-
-const FLATNESS_SQ: f64 = 0.25; // 0.5px flatness
 
 // ---------------------------------------------------------------------------
 // DrawCtx impl
@@ -1237,144 +1168,72 @@ impl DrawCtx for GlGfxCtx {
     // ── Path building ────────────────────────────────────────────────────────
 
     fn begin_path(&mut self) {
-        self.contours.clear();
-        self.current_contour.clear();
+        self.path = PathStorage::new();
     }
 
     fn move_to(&mut self, x: f64, y: f64) {
-        self.flush_contour();
-        self.push_pt(x, y);
+        self.path.move_to(x, y);
     }
 
     fn line_to(&mut self, x: f64, y: f64) {
-        self.push_pt(x, y);
+        self.path.line_to(x, y);
     }
 
     fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64) {
-        self.flatten_cubic_to(cx1, cy1, cx2, cy2, x, y);
+        self.path.curve4(cx1, cy1, cx2, cy2, x, y);
     }
 
     fn quad_to(&mut self, cx: f64, cy: f64, x: f64, y: f64) {
-        self.flatten_quad_to(cx, cy, x, y);
+        self.path.curve3(cx, cy, x, y);
     }
 
     fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool) {
-        let mut da = end_angle - start_angle;
-        if ccw && da > 0.0 {
-            da -= std::f64::consts::TAU;
-        }
-        if !ccw && da < 0.0 {
-            da += std::f64::consts::TAU;
-        }
-        let steps = ((da.abs() * r).abs().max(1.0) as usize).min(256).max(4);
-        let step = da / steps as f64;
-        for i in 0..=steps {
-            let a = start_angle + step * i as f64;
-            let px = cx + r * a.cos();
-            let py = cy + r * a.sin();
-            if i == 0 {
-                self.flush_contour();
-                self.push_pt(px, py);
-            } else {
-                self.push_pt(px, py);
-            }
-        }
+        let mut arc = AggArc::new(cx, cy, r, r, start_angle, end_angle, ccw);
+        self.path.concat_path(&mut arc, 0);
     }
 
     fn circle(&mut self, cx: f64, cy: f64, r: f64) {
-        let ctm = *self.ctm();
-        let scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt();
-        let segments = (std::f64::consts::TAU * r * scale).max(12.0).min(128.0) as usize;
-        let mut contour: Vec<[f32; 2]> = (0..segments)
-            .map(|i| {
-                let angle = i as f64 / segments as f64 * std::f64::consts::TAU;
-                let lx = cx + r * angle.cos();
-                let ly = cy + r * angle.sin();
-                self.transform_pt(lx, ly)
-            })
-            .collect();
-        if contour.len() >= 3 {
-            // Close the contour so do_stroke draws the segment that joins the
-            // last arc point back to the first (otherwise the circle has a gap).
-            let first = contour[0];
-            contour.push(first);
-            self.contours.push(contour);
-        }
+        self.arc_to(cx, cy, r, 0.0, std::f64::consts::TAU, true);
+        self.path.close_polygon(PATH_FLAGS_NONE);
     }
 
     fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
-        // 5-point closed contour (CTM-transformed corners + repeated first),
-        // CCW winding.  The closing point ensures do_stroke draws all four
-        // sides including the left edge (the tl→bl wrap-around segment).
-        let bl = self.transform_pt(x, y);
-        let br = self.transform_pt(x + w, y);
-        let tr = self.transform_pt(x + w, y + h);
-        let tl = self.transform_pt(x, y + h);
-        self.contours.push(vec![bl, br, tr, tl, bl]);
+        self.path.move_to(x, y);
+        self.path.line_to(x + w, y);
+        self.path.line_to(x + w, y + h);
+        self.path.line_to(x, y + h);
+        self.path.close_polygon(PATH_FLAGS_NONE);
     }
 
     fn rounded_rect(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
-        let r = r.min(w * 0.5).min(h * 0.5);
-        let seg = 8usize;
-        let mut contour: Vec<[f32; 2]> = Vec::with_capacity(seg * 4 + 5);
-        use std::f64::consts::FRAC_PI_2;
-        // Four corner arcs, CCW winding, starting from bottom-left corner.
-        let corners: [(f64, f64, f64, f64); 4] = [
-            (x + r, y + r, -FRAC_PI_2 * 2.0, -FRAC_PI_2), // bottom-left
-            (x + w - r, y + r, -FRAC_PI_2, 0.0),          // bottom-right
-            (x + w - r, y + h - r, 0.0, FRAC_PI_2),       // top-right
-            (x + r, y + h - r, FRAC_PI_2, FRAC_PI_2 * 2.0), // top-left
-        ];
-        for &(cx2, cy2, start, end) in &corners {
-            for i in 0..=seg {
-                let t = i as f64 / seg as f64;
-                let angle = start + t * (end - start);
-                let lx = cx2 + r * angle.cos();
-                let ly = cy2 + r * angle.sin();
-                contour.push(self.transform_pt(lx, ly));
-            }
-        }
-        if contour.len() >= 3 {
-            // Close the contour so do_stroke draws the left-side segment
-            // that joins the last arc point back to the starting point.
-            let first = contour[0];
-            contour.push(first);
-            self.contours.push(contour);
-        }
+        let r = r.min(w * 0.5).min(h * 0.5).max(0.0);
+        let mut rr = RoundedRect::new(x, y, x + w, y + h, r);
+        rr.normalize_radius();
+        self.path.concat_path(&mut rr, 0);
     }
 
     fn close_path(&mut self) {
-        // Close by adding the first point of the current contour.
-        if let Some(&first) = self.current_contour.first() {
-            self.current_contour.push(first);
-        }
-        self.flush_contour();
+        self.path.close_polygon(PATH_FLAGS_NONE);
     }
 
     // ── Path drawing ─────────────────────────────────────────────────────────
 
     fn fill(&mut self) {
-        self.flush_contour();
         unsafe {
             self.do_fill();
         }
     }
 
     fn stroke(&mut self) {
-        self.flush_contour();
         unsafe {
             self.do_stroke();
         }
     }
 
     fn fill_and_stroke(&mut self) {
-        self.flush_contour();
-        // Save contours for both operations.
-        let saved = self.contours.clone();
         unsafe {
             self.do_fill();
         }
-        self.contours = saved;
         unsafe {
             self.do_stroke();
         }
@@ -2072,67 +1931,6 @@ fn configure_dashes<VS: agg_rust::basics::VertexSource>(
     }
     dash.dash_start(dash_offset);
 }
-
-// ---------------------------------------------------------------------------
-// Bézier flattening helpers
-// ---------------------------------------------------------------------------
-
-fn subdivide_quad<F: FnMut(f32, f32)>(
-    p0: [f32; 2],
-    p1: [f32; 2],
-    p2: [f32; 2],
-    flatness_sq: f64,
-    emit: &mut F,
-) {
-    let mx = (p0[0] + 2.0 * p1[0] + p2[0]) * 0.25;
-    let my = (p0[1] + 2.0 * p1[1] + p2[1]) * 0.25;
-    let mid_x = (p0[0] + p2[0]) * 0.5;
-    let mid_y = (p0[1] + p2[1]) * 0.5;
-    let dx = (mx - mid_x) as f64;
-    let dy = (my - mid_y) as f64;
-    if dx * dx + dy * dy <= flatness_sq {
-        return;
-    }
-    let q0 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
-    let q1 = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
-    let mid = [(q0[0] + q1[0]) * 0.5, (q0[1] + q1[1]) * 0.5];
-    subdivide_quad(p0, q0, mid, flatness_sq, emit);
-    emit(mid[0], mid[1]);
-    subdivide_quad(mid, q1, p2, flatness_sq, emit);
-}
-
-/// Cubic subdivision in screen space (points already CTM-transformed).
-fn subdivide_cubic_screen<F: FnMut(f32, f32)>(
-    p0: [f32; 2],
-    p1: [f32; 2],
-    p2: [f32; 2],
-    p3: [f32; 2],
-    flatness_sq: f64,
-    emit: &mut F,
-) {
-    let ux = 3.0 * p1[0] - 2.0 * p0[0] - p3[0];
-    let uy = 3.0 * p1[1] - 2.0 * p0[1] - p3[1];
-    let vx = 3.0 * p2[0] - 2.0 * p3[0] - p0[0];
-    let vy = 3.0 * p2[1] - 2.0 * p3[1] - p0[1];
-    let u = ux * ux + uy * uy;
-    let v = vx * vx + vy * vy;
-    if (if u > v { u } else { v }) as f64 <= flatness_sq * 16.0 {
-        return;
-    }
-    let q0 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
-    let q1 = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
-    let q2 = [(p2[0] + p3[0]) * 0.5, (p2[1] + p3[1]) * 0.5];
-    let r0 = [(q0[0] + q1[0]) * 0.5, (q0[1] + q1[1]) * 0.5];
-    let r1 = [(q1[0] + q2[0]) * 0.5, (q1[1] + q2[1]) * 0.5];
-    let mid = [(r0[0] + r1[0]) * 0.5, (r0[1] + r1[1]) * 0.5];
-    subdivide_cubic_screen(p0, q0, r0, mid, flatness_sq, emit);
-    emit(mid[0], mid[1]);
-    subdivide_cubic_screen(mid, r1, q2, p3, flatness_sq, emit);
-}
-
-// ---------------------------------------------------------------------------
-// Glyph helper
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // GL helper
