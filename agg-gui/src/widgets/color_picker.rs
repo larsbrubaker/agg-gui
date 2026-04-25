@@ -33,34 +33,36 @@ use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::button::Button;
 use crate::widgets::checkbox::Checkbox;
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 
-const SWATCH_H:    f64 = 22.0;
-const SWATCH_MIN_W:f64 = 48.0;
+const SWATCH_H: f64 = 22.0;
+const SWATCH_MIN_W: f64 = 48.0;
 
-const PANEL_W:     f64 = 228.0;
-const PAD:         f64 = 8.0;
-const ROW_GAP:     f64 = 6.0;
+const PANEL_W: f64 = 228.0;
+const PAD: f64 = 8.0;
+const ROW_GAP: f64 = 6.0;
 
-const HUE_H:       f64 = 16.0;
-const SV_H:        f64 = 140.0;
-const ALPHA_H:     f64 = 16.0;
-const HEX_H:       f64 = 20.0;
-const CHECK_H:     f64 = 20.0;
-const BTN_H:       f64 = 26.0;
+const HUE_H: f64 = 16.0;
+const SV_H: f64 = 140.0;
+const ALPHA_H: f64 = 16.0;
+const HEX_H: f64 = 20.0;
+const CHECK_H: f64 = 20.0;
+const BTN_H: f64 = 26.0;
 
 /// Height of the expanded panel below the swatch (does NOT include the swatch).
 fn panel_body_h(allow_none: bool) -> f64 {
     let mut h = PAD;
     h += HUE_H + ROW_GAP;
-    h += SV_H  + ROW_GAP;
+    h += SV_H + ROW_GAP;
     h += ALPHA_H + ROW_GAP;
     h += HEX_H + ROW_GAP;
-    if allow_none { h += CHECK_H + ROW_GAP; }
+    if allow_none {
+        h += CHECK_H + ROW_GAP;
+    }
     h += BTN_H + PAD;
     h
 }
@@ -88,8 +90,8 @@ fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     let h6 = (h * 6.0) % 6.0;
-    let c  = v * s;
-    let x  = c * (1.0 - (h6 % 2.0 - 1.0).abs());
+    let c = v * s;
+    let x = c * (1.0 - (h6 % 2.0 - 1.0).abs());
     let (r1, g1, b1) = match h6 as i32 {
         0 => (c, x, 0.0),
         1 => (x, c, 0.0),
@@ -113,17 +115,22 @@ fn format_hex(c: Color) -> String {
 // ── Drag mode ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Drag { None, Hue, Sv, Alpha }
+enum Drag {
+    None,
+    Hue,
+    Sv,
+    Alpha,
+}
 
 // ── Widget ───────────────────────────────────────────────────────────────────
 
 /// Inline colour picker bound to a shared `Color` cell.
 pub struct ColorPicker {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>, // [no_color_check?, cancel, select]
-    base:     WidgetBase,
+    base: WidgetBase,
 
-    font:      Arc<Font>,
+    font: Arc<Font>,
     font_size: f64,
 
     /// Authoritative colour the caller observes.  Only written on Select (or
@@ -134,8 +141,11 @@ pub struct ColorPicker {
     saved: Color,
 
     /// Working state while the panel is open.
-    open:     bool,
-    h: f32, s: f32, v: f32, a: f32,
+    open: bool,
+    h: f32,
+    s: f32,
+    v: f32,
+    a: f32,
     /// True when "No Color (Pass Through)" is checked — working state; applied
     /// to the cell on Select as `Color::transparent()`.
     no_color: bool,
@@ -154,7 +164,7 @@ pub struct ColorPicker {
     /// Set during `build_children` so paint/layout can find them quickly.
     idx_cancel: usize,
     idx_select: usize,
-    idx_none:   Option<usize>,
+    idx_none: Option<usize>,
 
     /// Shared "no color" checkbox state.  Owned by `ColorPicker` so `on_event`
     /// can react to changes without going through a callback chain.
@@ -168,20 +178,22 @@ impl ColorPicker {
     pub fn new(color_cell: Rc<Cell<Color>>, font: Arc<Font>) -> Self {
         let initial = color_cell.get();
         let (h, s, v) = rgb_to_hsv(initial.r, initial.g, initial.b);
-        let none_cell   = Rc::new(Cell::new(false));
+        let none_cell = Rc::new(Cell::new(false));
         let cancel_flag = Rc::new(Cell::new(false));
         let select_flag = Rc::new(Cell::new(false));
 
         let mut me = Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            base:     WidgetBase::new(),
-            font:     Arc::clone(&font),
+            base: WidgetBase::new(),
+            font: Arc::clone(&font),
             font_size: 13.0,
             color_cell,
-            saved:    initial,
-            open:     false,
-            h, s, v,
+            saved: initial,
+            open: false,
+            h,
+            s,
+            v,
             a: initial.a,
             no_color: initial.a <= 0.0,
             allow_none: false,
@@ -190,7 +202,7 @@ impl ColorPicker {
             on_select: None,
             idx_cancel: 0,
             idx_select: 1,
-            idx_none:   None,
+            idx_none: None,
             none_cell,
             cancel_flag,
             select_flag,
@@ -199,7 +211,10 @@ impl ColorPicker {
         me
     }
 
-    pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
+    pub fn with_font_size(mut self, s: f64) -> Self {
+        self.font_size = s;
+        self
+    }
     pub fn with_allow_none(mut self, allow: bool) -> Self {
         self.allow_none = allow;
         self.build_children();
@@ -210,11 +225,26 @@ impl ColorPicker {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     fn build_children(&mut self) {
         self.children.clear();
@@ -222,10 +252,8 @@ impl ColorPicker {
         let cf = Rc::clone(&self.cancel_flag);
         let sf = Rc::clone(&self.select_flag);
 
-        let cancel = Button::new("Cancel", Arc::clone(&self.font))
-            .on_click(move || cf.set(true));
-        let select = Button::new("Select", Arc::clone(&self.font))
-            .on_click(move || sf.set(true));
+        let cancel = Button::new("Cancel", Arc::clone(&self.font)).on_click(move || cf.set(true));
+        let select = Button::new("Select", Arc::clone(&self.font)).on_click(move || sf.set(true));
 
         if self.allow_none {
             let none_check = Checkbox::new(
@@ -233,8 +261,8 @@ impl ColorPicker {
                 Arc::clone(&self.font),
                 self.no_color,
             )
-                .with_font_size(self.font_size)
-                .with_state_cell(Rc::clone(&self.none_cell));
+            .with_font_size(self.font_size)
+            .with_state_cell(Rc::clone(&self.none_cell));
             self.children.push(Box::new(none_check));
             self.idx_none = Some(0);
             self.idx_cancel = 1;
@@ -260,14 +288,18 @@ impl ColorPicker {
     fn commit(&mut self) {
         let c = self.sync_color_from_hsva();
         self.color_cell.set(c);
-        if let Some(cb) = self.on_select.as_mut() { cb(c); }
+        if let Some(cb) = self.on_select.as_mut() {
+            cb(c);
+        }
         self.open = false;
     }
 
     fn cancel(&mut self) {
         self.color_cell.set(self.saved);
         let (h, s, v) = rgb_to_hsv(self.saved.r, self.saved.g, self.saved.b);
-        self.h = h; self.s = s; self.v = v;
+        self.h = h;
+        self.s = s;
+        self.v = v;
         self.a = self.saved.a;
         self.no_color = self.saved.a <= 0.0;
         self.none_cell.set(self.no_color);
@@ -291,7 +323,7 @@ impl ColorPicker {
         y -= ROW_GAP;
 
         y -= SV_H;
-        let sv  = Rect::new(PAD, y, w - PAD * 2.0, SV_H);
+        let sv = Rect::new(PAD, y, w - PAD * 2.0, SV_H);
         y -= ROW_GAP;
 
         y -= ALPHA_H;
@@ -306,41 +338,72 @@ impl ColorPicker {
             y -= CHECK_H;
             let r = Rect::new(PAD, y, w - PAD * 2.0, CHECK_H);
             Some(r)
-        } else { None };
+        } else {
+            None
+        };
         let _ = y;
 
         let btns_y = PAD;
-        let btn_w  = (w - PAD * 3.0) * 0.5;
-        let cancel = Rect::new(PAD,                  btns_y, btn_w, BTN_H);
-        let select = Rect::new(PAD + btn_w + PAD,    btns_y, btn_w, BTN_H);
+        let btn_w = (w - PAD * 3.0) * 0.5;
+        let cancel = Rect::new(PAD, btns_y, btn_w, BTN_H);
+        let select = Rect::new(PAD + btn_w + PAD, btns_y, btn_w, BTN_H);
 
-        PanelRegions { swatch, hue, sv, alpha, hex, none, cancel, select }
+        PanelRegions {
+            swatch,
+            hue,
+            sv,
+            alpha,
+            hex,
+            none,
+            cancel,
+            select,
+        }
     }
 }
 
 struct PanelRegions {
     swatch: Rect,
-    hue:    Rect,
-    sv:     Rect,
-    alpha:  Rect,
-    hex:    Rect,
-    none:   Option<Rect>,
+    hue: Rect,
+    sv: Rect,
+    alpha: Rect,
+    hex: Rect,
+    none: Option<Rect>,
     cancel: Rect,
     select: Rect,
 }
 
 impl Widget for ColorPicker {
-    fn type_name(&self) -> &'static str { "ColorPicker" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ColorPicker"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Sync no_color from cell if someone else flipped it.
@@ -417,7 +480,9 @@ impl Widget for ColorPicker {
         ctx.rounded_rect(r.swatch.x, r.swatch.y, r.swatch.width, r.swatch.height, 4.0);
         ctx.stroke();
 
-        if !self.open { return; }
+        if !self.open {
+            return;
+        }
 
         // ── Hue slider ──────────────────────────────────────────────────────
         paint_hue_strip(ctx, r.hue);
@@ -458,7 +523,9 @@ impl Widget for ColorPicker {
         // ── Sub-widgets (No Color + Cancel/Select) ───────────────────────────
         for child in self.children.iter_mut() {
             let b = child.bounds();
-            if b.width <= 0.0 || b.height <= 0.0 { continue; }
+            if b.width <= 0.0 || b.height <= 0.0 {
+                continue;
+            }
             ctx.save();
             ctx.translate(b.x, b.y);
             paint_subtree(child.as_mut(), ctx);
@@ -475,20 +542,24 @@ impl Widget for ColorPicker {
         // (hue / sv / alpha), breaking colour picking.
         if self.open {
             let local_pt = match event {
-                Event::MouseMove { pos }  => Some(*pos),
+                Event::MouseMove { pos } => Some(*pos),
                 Event::MouseDown { pos, .. } => Some(*pos),
-                Event::MouseUp   { pos, .. } => Some(*pos),
+                Event::MouseUp { pos, .. } => Some(*pos),
                 _ => None,
             };
 
             for child in self.children.iter_mut() {
                 let b = child.bounds();
-                if b.width <= 0.0 || b.height <= 0.0 { continue; }
+                if b.width <= 0.0 || b.height <= 0.0 {
+                    continue;
+                }
                 // Only dispatch pointer events when the cursor is over the
                 // child.  Non-pointer events (focus, keys) we always route,
                 // since the framework already knows who should receive them.
                 if let Some(p) = local_pt {
-                    if !contains(&b, p) { continue; }
+                    if !contains(&b, p) {
+                        continue;
+                    }
                     let lp = Point::new(p.x - b.x, p.y - b.y);
                     let translated = translate_mouse_event(event, lp);
                     let res = child.on_event(&translated);
@@ -508,7 +579,11 @@ impl Widget for ColorPicker {
         }
 
         match event {
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 let r = self.regions();
                 if !self.open {
                     if contains(&r.swatch, *pos) {
@@ -516,7 +591,10 @@ impl Widget for ColorPicker {
                         self.open = true;
                         self.saved = self.color_cell.get();
                         let (h, s, v) = rgb_to_hsv(self.saved.r, self.saved.g, self.saved.b);
-                        self.h = h; self.s = s; self.v = v; self.a = self.saved.a;
+                        self.h = h;
+                        self.s = s;
+                        self.v = v;
+                        self.a = self.saved.a;
                         self.no_color = self.saved.a <= 0.0;
                         self.none_cell.set(self.no_color);
                         crate::animation::request_tick();
@@ -547,7 +625,9 @@ impl Widget for ColorPicker {
             }
             Event::MouseMove { pos } => {
                 self.hovered = self.hit_test(*pos);
-                if self.drag == Drag::None { return EventResult::Ignored; }
+                if self.drag == Drag::None {
+                    return EventResult::Ignored;
+                }
                 let r = self.regions();
                 match self.drag {
                     Drag::Hue => {
@@ -571,10 +651,17 @@ impl Widget for ColorPicker {
                 crate::animation::request_tick();
                 EventResult::Consumed
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 let was_dragging = self.drag != Drag::None;
                 self.drag = Drag::None;
-                if was_dragging { EventResult::Consumed } else { EventResult::Ignored }
+                if was_dragging {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             _ => EventResult::Ignored,
         }
@@ -617,10 +704,20 @@ fn contains(r: &Rect, p: Point) -> bool {
 fn translate_mouse_event(e: &Event, p: Point) -> Event {
     match e {
         Event::MouseMove { .. } => Event::MouseMove { pos: p },
-        Event::MouseDown { button, modifiers, .. } =>
-            Event::MouseDown { button: *button, pos: p, modifiers: *modifiers },
-        Event::MouseUp { button, modifiers, .. } =>
-            Event::MouseUp { button: *button, pos: p, modifiers: *modifiers },
+        Event::MouseDown {
+            button, modifiers, ..
+        } => Event::MouseDown {
+            button: *button,
+            pos: p,
+            modifiers: *modifiers,
+        },
+        Event::MouseUp {
+            button, modifiers, ..
+        } => Event::MouseUp {
+            button: *button,
+            pos: p,
+            modifiers: *modifiers,
+        },
         _ => e.clone(),
     }
 }

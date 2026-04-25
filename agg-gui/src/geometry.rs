@@ -26,13 +26,19 @@ pub struct Size {
 }
 
 impl Size {
-    pub const ZERO: Self = Self { width: 0.0, height: 0.0 };
+    pub const ZERO: Self = Self {
+        width: 0.0,
+        height: 0.0,
+    };
 
     /// A very large size used as the default `max_size` in [`WidgetBase`].
     ///
     /// Uses `f64::MAX / 2` rather than `f64::MAX` so that summing sizes with
     /// margins or gaps never overflows to infinity.
-    pub const MAX: Self = Self { width: f64::MAX / 2.0, height: f64::MAX / 2.0 };
+    pub const MAX: Self = Self {
+        width: f64::MAX / 2.0,
+        height: f64::MAX / 2.0,
+    };
 
     pub const fn new(width: f64, height: f64) -> Self {
         Self { width, height }
@@ -52,13 +58,26 @@ pub struct Rect {
 
 impl Rect {
     pub const fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
-    pub fn left(&self) -> f64 { self.x }
-    pub fn bottom(&self) -> f64 { self.y }
-    pub fn right(&self) -> f64 { self.x + self.width }
-    pub fn top(&self) -> f64 { self.y + self.height }
+    pub fn left(&self) -> f64 {
+        self.x
+    }
+    pub fn bottom(&self) -> f64 {
+        self.y
+    }
+    pub fn right(&self) -> f64 {
+        self.x + self.width
+    }
+    pub fn top(&self) -> f64 {
+        self.y + self.height
+    }
 
     pub fn center(&self) -> Point {
         Point::new(self.x + self.width * 0.5, self.y + self.height * 0.5)

@@ -19,7 +19,7 @@ pub mod glyph_cache;
 pub mod tess2_bridge;
 
 pub use glyph_cache::GlyphCache;
-pub use tess2_bridge::{agg_path_to_contours, CachedTess, expand_aa_halo,
-                       tessellate_circle, tessellate_fill, tessellate_interior,
-                       tessellate_path, tessellate_path_aa, tessellate_rect,
-                       tessellate_rounded_rect};
+pub use tess2_bridge::{
+    agg_path_to_contours, expand_aa_halo, tessellate_circle, tessellate_fill, tessellate_interior,
+    tessellate_path, tessellate_path_aa, tessellate_rect, tessellate_rounded_rect, CachedTess,
+};

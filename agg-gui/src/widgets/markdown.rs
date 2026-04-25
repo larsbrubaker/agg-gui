@@ -55,10 +55,10 @@ enum LineStyle {
 impl LineStyle {
     fn font_size(self, base: f64) -> f64 {
         match self {
-            LineStyle::H1   => base * 1.8,
-            LineStyle::H2   => base * 1.5,
-            LineStyle::H3   => base * 1.25,
-            LineStyle::H4   => base * 1.1,
+            LineStyle::H1 => base * 1.8,
+            LineStyle::H2 => base * 1.5,
+            LineStyle::H3 => base * 1.25,
+            LineStyle::H4 => base * 1.1,
             LineStyle::Body => base,
             LineStyle::Code => base * 0.9,
             LineStyle::Rule => base,
@@ -73,24 +73,24 @@ impl LineStyle {
 enum LayoutItem {
     /// A text row (including blank spacing rows and horizontal rules).
     Line {
-        text:   String,
-        style:  LineStyle,
+        text: String,
+        style: LineStyle,
         indent: f64,
-        y:      f64,
+        y: f64,
         height: f64,
     },
     /// An image row — draws cached pixel data or a placeholder box.
     Image {
         /// URL/path originally specified in the Markdown.
         #[allow(dead_code)]
-        url:    String,
-        alt:    String,
+        url: String,
+        alt: String,
         /// Index into `MarkdownView::image_cache`.
         cache_idx: usize,
         /// Displayed rect in local Y-up coordinates.
-        x:      f64,
-        y:      f64,
-        width:  f64,
+        x: f64,
+        y: f64,
+        width: f64,
         height: f64,
     },
 }
@@ -105,9 +105,9 @@ enum ParagraphItem {
 // ── Image cache entry ──────────────────────────────────────────────────────────
 
 struct ImageEntry {
-    url:    String,
+    url: String,
     /// `None` = provider returned nothing, `Some(...)` = decoded image.
-    data:   Option<(Vec<u8>, u32, u32)>,
+    data: Option<(Vec<u8>, u32, u32)>,
 }
 
 // ── MarkdownView widget ────────────────────────────────────────────────────────
@@ -115,14 +115,14 @@ struct ImageEntry {
 /// A widget that renders a Markdown string as formatted, word-wrapped text
 /// with optional image support.
 pub struct MarkdownView {
-    bounds:    Rect,
-    children:  Vec<Box<dyn Widget>>,
-    base:      WidgetBase,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
 
-    markdown:  String,
-    font:      Arc<Font>,
+    markdown: String,
+    font: Arc<Font>,
     font_size: f64,
-    padding:   f64,
+    padding: f64,
 
     /// Optional image decoder.  Receives a URL/path, returns RGBA8 pixel data
     /// (top-row first) + (width, height), or `None` if unavailable.
@@ -132,7 +132,7 @@ pub struct MarkdownView {
     image_cache: Vec<ImageEntry>,
 
     /// Laid-out items (populated by `layout()`).
-    items:     Vec<LayoutItem>,
+    items: Vec<LayoutItem>,
     /// Total content height from the last layout pass.
     content_h: f64,
 }
@@ -140,29 +140,34 @@ pub struct MarkdownView {
 impl MarkdownView {
     pub fn new(markdown: impl Into<String>, font: Arc<Font>) -> Self {
         Self {
-            bounds:         Rect::default(),
-            children:       Vec::new(),
-            base:           WidgetBase::new(),
-            markdown:       markdown.into(),
+            bounds: Rect::default(),
+            children: Vec::new(),
+            base: WidgetBase::new(),
+            markdown: markdown.into(),
             font,
-            font_size:      14.0,
-            padding:        8.0,
+            font_size: 14.0,
+            padding: 8.0,
             image_provider: None,
-            image_cache:    Vec::new(),
-            items:          Vec::new(),
-            content_h:      0.0,
+            image_cache: Vec::new(),
+            items: Vec::new(),
+            content_h: 0.0,
         }
     }
 
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
-    pub fn with_padding(mut self, p: f64) -> Self { self.padding = p; self }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self
+    }
+    pub fn with_padding(mut self, p: f64) -> Self {
+        self.padding = p;
+        self
+    }
 
     /// Currently-active font — honours the thread-local system-font override
     /// (`font_settings::current_system_font`) so system-font changes propagate
     /// live without rebuilding the markdown view.
     fn active_font(&self) -> Arc<Font> {
-        crate::font_settings::current_system_font()
-            .unwrap_or_else(|| Arc::clone(&self.font))
+        crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font))
     }
 
     /// Supply an image provider closure.
@@ -177,35 +182,44 @@ impl MarkdownView {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
 
     // ── Markdown → paragraph items ────────────────────────────────────────────
 
     fn parse_paragraphs(&self) -> Vec<ParagraphItem> {
         let mut out: Vec<ParagraphItem> = Vec::new();
 
-        let opts = Options::ENABLE_STRIKETHROUGH
-            | Options::ENABLE_TASKLISTS
-            | Options::ENABLE_TABLES;
+        let opts =
+            Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
         let parser = Parser::new_ext(&self.markdown, opts);
 
-        let mut cur_text   = String::new();
-        let mut cur_style  = LineStyle::Body;
+        let mut cur_text = String::new();
+        let mut cur_style = LineStyle::Body;
         let mut cur_indent = 0.0_f64;
         let mut list_depth = 0u32;
         let mut list_ordinal: Vec<u64> = Vec::new();
         // When inside an image tag, collect the alt text and suppress normal text.
         let mut in_image: Option<String> = None; // Some(url) while parsing image
 
-        let flush = |out: &mut Vec<ParagraphItem>, text: &mut String, style: LineStyle, indent: f64| {
-            let t = text.trim().to_string();
-            if !t.is_empty() {
-                out.push(ParagraphItem::Text(t, style, indent));
-            }
-            text.clear();
-        };
+        let flush =
+            |out: &mut Vec<ParagraphItem>, text: &mut String, style: LineStyle, indent: f64| {
+                let t = text.trim().to_string();
+                if !t.is_empty() {
+                    out.push(ParagraphItem::Text(t, style, indent));
+                }
+                text.clear();
+            };
 
         for ev in parser {
             match ev {
@@ -219,7 +233,8 @@ impl MarkdownView {
                         let alt = cur_text.trim().to_string();
                         cur_text.clear();
                         out.push(ParagraphItem::Image { url, alt });
-                        out.push(ParagraphItem::Text("".to_string(), LineStyle::Body, 0.0)); // spacing
+                        out.push(ParagraphItem::Text("".to_string(), LineStyle::Body, 0.0));
+                        // spacing
                     }
                 }
                 // While parsing an image, Text events are alt text — collect separately.
@@ -228,13 +243,18 @@ impl MarkdownView {
                 }
                 MdEvent::Start(Tag::Heading { level, .. }) => {
                     flush(&mut out, &mut cur_text, cur_style, cur_indent);
-                    cur_style  = match level as u8 { 1 => LineStyle::H1, 2 => LineStyle::H2, 3 => LineStyle::H3, _ => LineStyle::H4 };
+                    cur_style = match level as u8 {
+                        1 => LineStyle::H1,
+                        2 => LineStyle::H2,
+                        3 => LineStyle::H3,
+                        _ => LineStyle::H4,
+                    };
                     cur_indent = 0.0;
                 }
                 MdEvent::End(TagEnd::Heading(_)) => {
                     flush(&mut out, &mut cur_text, cur_style, cur_indent);
                     out.push(ParagraphItem::Text("".to_string(), LineStyle::Body, 0.0));
-                    cur_style  = LineStyle::Body;
+                    cur_style = LineStyle::Body;
                     cur_indent = 0.0;
                 }
                 MdEvent::Start(Tag::Paragraph) => {
@@ -284,18 +304,23 @@ impl MarkdownView {
                     out.push(ParagraphItem::Text("".to_string(), LineStyle::Rule, 0.0));
                 }
                 MdEvent::Text(t) => {
-                    if !cur_text.is_empty() && !cur_text.ends_with(' ') && !cur_text.ends_with('\n') {
+                    if !cur_text.is_empty() && !cur_text.ends_with(' ') && !cur_text.ends_with('\n')
+                    {
                         cur_text.push(' ');
                     }
                     cur_text.push_str(&t);
                 }
                 MdEvent::Code(t) => {
-                    if !cur_text.is_empty() && !cur_text.ends_with(' ') { cur_text.push(' '); }
+                    if !cur_text.is_empty() && !cur_text.ends_with(' ') {
+                        cur_text.push(' ');
+                    }
                     cur_text.push('`');
                     cur_text.push_str(&t);
                     cur_text.push('`');
                 }
-                MdEvent::SoftBreak | MdEvent::HardBreak => { cur_text.push(' '); }
+                MdEvent::SoftBreak | MdEvent::HardBreak => {
+                    cur_text.push(' ');
+                }
                 MdEvent::Start(Tag::Link { .. }) | MdEvent::End(TagEnd::Link) => {}
                 _ => {}
             }
@@ -306,17 +331,29 @@ impl MarkdownView {
 
     // ── Word-wrapping ─────────────────────────────────────────────────────────
 
-    fn wrap_paragraph(&self, text: &str, style: LineStyle, indent: f64, max_w: f64) -> Vec<(String, f64)> {
+    fn wrap_paragraph(
+        &self,
+        text: &str,
+        style: LineStyle,
+        indent: f64,
+        max_w: f64,
+    ) -> Vec<(String, f64)> {
         let font_size = style.font_size(self.font_size);
-        let avail     = (max_w - indent).max(1.0);
-        if text.is_empty() { return vec![("".to_string(), indent)]; }
+        let avail = (max_w - indent).max(1.0);
+        if text.is_empty() {
+            return vec![("".to_string(), indent)];
+        }
 
         let font = self.active_font();
         let mut lines: Vec<(String, f64)> = Vec::new();
         let mut current = String::new();
 
         for word in text.split_whitespace() {
-            let candidate = if current.is_empty() { word.to_string() } else { format!("{} {}", current, word) };
+            let candidate = if current.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", current, word)
+            };
             let w = measure_text_metrics(&font, &candidate, font_size).width;
             if w <= avail || current.is_empty() {
                 current = candidate;
@@ -325,7 +362,9 @@ impl MarkdownView {
                 current = word.to_string();
             }
         }
-        if !current.is_empty() { lines.push((current, indent)); }
+        if !current.is_empty() {
+            lines.push((current, indent));
+        }
         lines
     }
 
@@ -340,36 +379,55 @@ impl MarkdownView {
         // Load via provider.
         let data = self.image_provider.as_ref().and_then(|p| p(url));
         let idx = self.image_cache.len();
-        self.image_cache.push(ImageEntry { url: url.to_string(), data });
+        self.image_cache.push(ImageEntry {
+            url: url.to_string(),
+            data,
+        });
         idx
     }
 }
 
 impl Widget for MarkdownView {
-    fn type_name(&self) -> &'static str { "MarkdownView" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "MarkdownView"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
 
     fn layout(&mut self, available: Size) -> Size {
-        let pad   = self.padding;
+        let pad = self.padding;
         let max_w = (available.width - pad * 2.0).max(1.0);
 
         let paragraphs = self.parse_paragraphs();
 
         // Build intermediate list: (text/image, style, indent, line_h), top-to-bottom.
         struct RawItem {
-            text:    String,
-            style:   LineStyle,
-            indent:  f64,
-            height:  f64,
+            text: String,
+            style: LineStyle,
+            indent: f64,
+            height: f64,
             // Image-specific fields.
-            is_image:  bool,
+            is_image: bool,
             image_url: String,
             image_alt: String,
             cache_idx: usize,
@@ -382,41 +440,74 @@ impl Widget for MarkdownView {
             match item {
                 ParagraphItem::Text(text, style, indent) => {
                     if *style == LineStyle::Rule {
-                        raw.push(RawItem { text: String::new(), style: LineStyle::Rule, indent: 0.0,
-                            height: 8.0, is_image: false, image_url: String::new(), image_alt: String::new(),
-                            cache_idx: 0, img_disp_w: 0.0 });
+                        raw.push(RawItem {
+                            text: String::new(),
+                            style: LineStyle::Rule,
+                            indent: 0.0,
+                            height: 8.0,
+                            is_image: false,
+                            image_url: String::new(),
+                            image_alt: String::new(),
+                            cache_idx: 0,
+                            img_disp_w: 0.0,
+                        });
                         continue;
                     }
                     let font_size = style.font_size(self.font_size);
-                    let metrics   = measure_text_metrics(&self.active_font(), "", font_size);
-                    let line_h    = metrics.line_height * 1.3;
+                    let metrics = measure_text_metrics(&self.active_font(), "", font_size);
+                    let line_h = metrics.line_height * 1.3;
 
                     if text.is_empty() {
-                        raw.push(RawItem { text: String::new(), style: *style, indent: *indent,
-                            height: line_h * 0.5, is_image: false, image_url: String::new(),
-                            image_alt: String::new(), cache_idx: 0, img_disp_w: 0.0 });
+                        raw.push(RawItem {
+                            text: String::new(),
+                            style: *style,
+                            indent: *indent,
+                            height: line_h * 0.5,
+                            is_image: false,
+                            image_url: String::new(),
+                            image_alt: String::new(),
+                            cache_idx: 0,
+                            img_disp_w: 0.0,
+                        });
                         continue;
                     }
                     let wrapped = self.wrap_paragraph(text, *style, *indent, max_w);
                     for (wl, ind) in wrapped {
-                        raw.push(RawItem { text: wl, style: *style, indent: ind,
-                            height: line_h, is_image: false, image_url: String::new(),
-                            image_alt: String::new(), cache_idx: 0, img_disp_w: 0.0 });
+                        raw.push(RawItem {
+                            text: wl,
+                            style: *style,
+                            indent: ind,
+                            height: line_h,
+                            is_image: false,
+                            image_url: String::new(),
+                            image_alt: String::new(),
+                            cache_idx: 0,
+                            img_disp_w: 0.0,
+                        });
                     }
                 }
                 ParagraphItem::Image { url, alt } => {
                     let cache_idx = self.get_or_load_image(url);
-                    let (disp_w, disp_h) = if let Some((_, iw, ih)) = self.image_cache[cache_idx].data.as_ref() {
-                        // Scale to fit available width, preserve aspect.
-                        let scale = (max_w / *iw as f64).min(1.0); // never upscale beyond natural size
-                        (*iw as f64 * scale, *ih as f64 * scale)
-                    } else {
-                        // Placeholder: full-width × 60px box.
-                        (max_w, 60.0)
-                    };
-                    raw.push(RawItem { text: alt.clone(), style: LineStyle::Body, indent: 0.0,
-                        height: disp_h, is_image: true, image_url: url.clone(),
-                        image_alt: alt.clone(), cache_idx, img_disp_w: disp_w });
+                    let (disp_w, disp_h) =
+                        if let Some((_, iw, ih)) = self.image_cache[cache_idx].data.as_ref() {
+                            // Scale to fit available width, preserve aspect.
+                            let scale = (max_w / *iw as f64).min(1.0); // never upscale beyond natural size
+                            (*iw as f64 * scale, *ih as f64 * scale)
+                        } else {
+                            // Placeholder: full-width × 60px box.
+                            (max_w, 60.0)
+                        };
+                    raw.push(RawItem {
+                        text: alt.clone(),
+                        style: LineStyle::Body,
+                        indent: 0.0,
+                        height: disp_h,
+                        is_image: true,
+                        image_url: url.clone(),
+                        image_alt: alt.clone(),
+                        cache_idx,
+                        img_disp_w: disp_w,
+                    });
                 }
             }
         }
@@ -430,18 +521,18 @@ impl Widget for MarkdownView {
             y -= r.height;
             if r.is_image {
                 self.items.push(LayoutItem::Image {
-                    url:       r.image_url,
-                    alt:       r.image_alt,
+                    url: r.image_url,
+                    alt: r.image_alt,
                     cache_idx: r.cache_idx,
-                    x:         pad,
+                    x: pad,
                     y,
-                    width:     r.img_disp_w,
-                    height:    r.height,
+                    width: r.img_disp_w,
+                    height: r.height,
                 });
             } else {
                 self.items.push(LayoutItem::Line {
-                    text:   r.text,
-                    style:  r.style,
+                    text: r.text,
+                    style: r.style,
                     indent: r.indent,
                     y,
                     height: r.height,
@@ -455,22 +546,28 @@ impl Widget for MarkdownView {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v   = ctx.visuals();
+        let v = ctx.visuals();
         let pad = self.padding;
-        let w   = self.bounds.width;
+        let w = self.bounds.width;
         let font = self.active_font();
         ctx.set_font(Arc::clone(&font));
 
         for item in &self.items {
             match item {
-                LayoutItem::Line { text, style, indent, y, height } => {
+                LayoutItem::Line {
+                    text,
+                    style,
+                    indent,
+                    y,
+                    height,
+                } => {
                     let fs = style.font_size(self.font_size);
                     ctx.set_font_size(fs);
 
                     let tx = pad + indent;
                     let ty = y + height * 0.5;
                     let metrics = measure_text_metrics(&font, text.as_str(), fs);
-                    let text_y  = ty - (metrics.ascent - metrics.descent) * 0.5;
+                    let text_y = ty - (metrics.ascent - metrics.descent) * 0.5;
 
                     match style {
                         LineStyle::Rule => {
@@ -495,7 +592,15 @@ impl Widget for MarkdownView {
                         }
                     }
                 }
-                LayoutItem::Image { url: _, alt, cache_idx, x, y, width, height } => {
+                LayoutItem::Image {
+                    url: _,
+                    alt,
+                    cache_idx,
+                    x,
+                    y,
+                    width,
+                    height,
+                } => {
                     if let Some(entry) = self.image_cache.get(*cache_idx) {
                         if let Some((data, iw, ih)) = &entry.data {
                             ctx.draw_image_rgba(data.as_slice(), *iw, *ih, *x, *y, *width, *height);
@@ -516,5 +621,7 @@ impl Widget for MarkdownView {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }

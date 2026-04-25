@@ -25,7 +25,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::Label;
 
 // ── Button constants — kept in sync with `window.rs` so event hit-tests
@@ -33,28 +33,28 @@ use crate::widgets::label::Label;
 // truth across two files; owning them in Window and mirroring here is the
 // lesser evil.
 
-const CLOSE_R:   f64 = 6.0;
+const CLOSE_R: f64 = 6.0;
 const CLOSE_PAD: f64 = 10.0;
-const MAX_PAD:   f64 = CLOSE_PAD + CLOSE_R * 2.0 + 4.0;
+const MAX_PAD: f64 = CLOSE_PAD + CLOSE_R * 2.0 + 4.0;
 
 /// Display-state snapshot `Window` hands to the title bar each frame.
 pub(crate) struct TitleBarView {
-    pub bar_color:        Color,
-    pub title_color:      Color,
-    pub collapsed:        bool,
-    pub maximized:        bool,
-    pub close_hovered:    bool,
+    pub bar_color: Color,
+    pub title_color: Color,
+    pub collapsed: bool,
+    pub maximized: bool,
+    pub close_hovered: bool,
     pub maximize_hovered: bool,
 }
 
 impl TitleBarView {
     pub fn default_visuals() -> Self {
         Self {
-            bar_color:        Color::rgb(0.2, 0.2, 0.2),
-            title_color:      Color::rgb(1.0, 1.0, 1.0),
-            collapsed:        false,
-            maximized:        false,
-            close_hovered:    false,
+            bar_color: Color::rgb(0.2, 0.2, 0.2),
+            title_color: Color::rgb(1.0, 1.0, 1.0),
+            collapsed: false,
+            maximized: false,
+            close_hovered: false,
             maximize_hovered: false,
         }
     }
@@ -64,16 +64,15 @@ impl TitleBarView {
 /// chevron, title label, maximize button, close button, and a 1-px
 /// separator below (when the window is expanded).
 pub(crate) struct WindowTitleBar {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    label:    Label,
-    state:    Rc<RefCell<TitleBarView>>,
+    label: Label,
+    state: Rc<RefCell<TitleBarView>>,
 }
 
 impl WindowTitleBar {
     pub fn new(title: &str, font: Arc<Font>, state: Rc<RefCell<TitleBarView>>) -> Self {
-        let label = Label::new(title, Arc::clone(&font))
-            .with_font_size(13.0);
+        let label = Label::new(title, Arc::clone(&font)).with_font_size(13.0);
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -89,33 +88,48 @@ impl WindowTitleBar {
 }
 
 impl Widget for WindowTitleBar {
-    fn type_name(&self) -> &'static str { "WindowTitleBar" }
+    fn type_name(&self) -> &'static str {
+        "WindowTitleBar"
+    }
 
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
 
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     // Transparent to input — Window owns drag / double-click / button
     // hit-testing.  This keeps all pointer state in one place.
-    fn hit_test(&self, _: Point) -> bool { false }
+    fn hit_test(&self, _: Point) -> bool {
+        false
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Label::layout returns its intrinsic size but doesn't set its own
         // bounds — the caller must.  Without this set_bounds the title
         // label would report (0, 0, 0, 0) at paint time and render at
         // the origin of the title bar strip.
-        let s = self.label.layout(Size::new(available.width - 48.0, available.height));
-        self.label.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        let s = self
+            .label
+            .layout(Size::new(available.width - 48.0, available.height));
+        self.label
+            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         available
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let st = self.state.borrow();
-        let v  = ctx.visuals();
-        let w  = self.bounds.width;
-        let h  = self.bounds.height;
+        let v = ctx.visuals();
+        let w = self.bounds.width;
+        let h = self.bounds.height;
 
         // Title bar fill — full rect.  The parent Window has already
         // painted the rounded-rect body beneath; the clip on children
@@ -137,19 +151,19 @@ impl Widget for WindowTitleBar {
         }
 
         // Collapse / expand chevron on the left.
-        let chev_x  = 12.0;
+        let chev_x = 12.0;
         let chev_cy = h * 0.5;
         let chev_sz = 4.0;
         ctx.set_stroke_color(v.window_title_text);
         ctx.set_line_width(1.5);
         ctx.begin_path();
         if st.collapsed {
-            ctx.move_to(chev_x,           chev_cy - chev_sz);
+            ctx.move_to(chev_x, chev_cy - chev_sz);
             ctx.line_to(chev_x + chev_sz, chev_cy);
-            ctx.line_to(chev_x,           chev_cy + chev_sz);
+            ctx.line_to(chev_x, chev_cy + chev_sz);
         } else {
             ctx.move_to(chev_x - chev_sz, chev_cy - chev_sz * 0.5);
-            ctx.line_to(chev_x,           chev_cy + chev_sz * 0.5);
+            ctx.line_to(chev_x, chev_cy + chev_sz * 0.5);
             ctx.line_to(chev_x + chev_sz, chev_cy - chev_sz * 0.5);
         }
         ctx.stroke();
@@ -184,7 +198,7 @@ impl Widget for WindowTitleBar {
         let sz = 3.5_f64;
         if st.maximized {
             let off = 2.0_f64;
-            let sq  = sz * 2.0 - off;
+            let sq = sz * 2.0 - off;
             ctx.begin_path();
             ctx.rect(mc_x - sz + off, mc_y - sz + off, sq, sq);
             ctx.stroke();
@@ -227,5 +241,7 @@ impl Widget for WindowTitleBar {
         ctx.stroke();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }

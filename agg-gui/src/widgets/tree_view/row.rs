@@ -7,9 +7,9 @@
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -23,7 +23,7 @@ use super::node::NodeIcon;
 // ---------------------------------------------------------------------------
 
 pub const EXPAND_W: f64 = 18.0; // space reserved for expand arrow
-pub const ICON_W:   f64 = 14.0;
+pub const ICON_W: f64 = 14.0;
 pub const ICON_GAP: f64 = 4.0;
 
 // ---------------------------------------------------------------------------
@@ -33,8 +33,8 @@ pub const ICON_GAP: f64 = 4.0;
 /// Return the fill colour for a given node icon type.
 pub fn icon_color(icon: NodeIcon) -> Color {
     match icon {
-        NodeIcon::Folder  => Color::rgb(0.90, 0.72, 0.20),
-        NodeIcon::File    => Color::rgb(0.55, 0.78, 0.95),
+        NodeIcon::Folder => Color::rgb(0.90, 0.72, 0.20),
+        NodeIcon::File => Color::rgb(0.55, 0.78, 0.95),
         NodeIcon::Package => Color::rgb(0.70, 0.60, 0.88),
     }
 }
@@ -69,17 +69,37 @@ impl ExpandToggle {
 }
 
 impl Widget for ExpandToggle {
-    fn type_name(&self) -> &'static str { "ExpandToggle" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ExpandToggle"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         Size::new(EXPAND_W, available.height)
@@ -88,7 +108,9 @@ impl Widget for ExpandToggle {
     // The framework has already translated `ctx` to this widget's bottom-left origin.
     // All drawing coordinates are widget-local (0,0 = bottom-left of this widget).
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        if !self.has_children { return; }
+        if !self.has_children {
+            return;
+        }
 
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -113,7 +135,9 @@ impl Widget for ExpandToggle {
         ctx.fill();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,17 +165,37 @@ impl NodeIconWidget {
 }
 
 impl Widget for NodeIconWidget {
-    fn type_name(&self) -> &'static str { "NodeIconWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "NodeIconWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         Size::new(ICON_W + ICON_GAP, available.height)
@@ -176,7 +220,9 @@ impl Widget for NodeIconWidget {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,17 +286,37 @@ impl TreeRow {
 }
 
 impl Widget for TreeRow {
-    fn type_name(&self) -> &'static str { "TreeRow" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "TreeRow"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let h = available.height;
@@ -304,7 +370,10 @@ impl Widget for TreeRow {
             ctx.fill();
         } else if self.is_hovered {
             ctx.set_fill_color(Color::rgba(
-                v.text_color.r, v.text_color.g, v.text_color.b, 0.08,
+                v.text_color.r,
+                v.text_color.g,
+                v.text_color.b,
+                0.08,
             ));
             ctx.begin_path();
             ctx.rect(0.0, 0.0, w, h);
@@ -312,5 +381,7 @@ impl Widget for TreeRow {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }

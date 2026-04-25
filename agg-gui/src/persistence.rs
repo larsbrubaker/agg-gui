@@ -35,7 +35,9 @@ impl AutoSave {
     /// Create an empty auto-save tracker.  First `tick` call will always
     /// persist (because the last-saved blob is empty).
     pub const fn new() -> Self {
-        Self { last_saved: String::new() }
+        Self {
+            last_saved: String::new(),
+        }
     }
 
     /// Consider persisting the current state.
@@ -52,19 +54,18 @@ impl AutoSave {
     /// differs from the last persisted version.
     ///
     /// Returns `true` iff the persist closure was called.
-    pub fn tick<S, P>(
-        &mut self,
-        idle:          bool,
-        serialize_now: S,
-        persist:       P,
-    ) -> bool
+    pub fn tick<S, P>(&mut self, idle: bool, serialize_now: S, persist: P) -> bool
     where
         S: FnOnce() -> String,
         P: FnOnce(&str),
     {
-        if !idle { return false; }
+        if !idle {
+            return false;
+        }
         let blob = serialize_now();
-        if blob == self.last_saved { return false; }
+        if blob == self.last_saved {
+            return false;
+        }
         persist(&blob);
         self.last_saved = blob;
         true

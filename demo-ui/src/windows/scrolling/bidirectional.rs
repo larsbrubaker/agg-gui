@@ -6,7 +6,8 @@
 use std::sync::Arc;
 
 use agg_gui::{
-    DrawCtx, Event, EventResult, FlexColumn, Font, Rect, ScrollView, Separator, Size, Widget,
+    DrawCtx, Event, EventResult, FlexColumn, Font, Rect, ScrollBarVisibility, ScrollView,
+    Separator, Size, Widget,
 };
 
 use super::helpers::{wrapped_label, LOREM_IPSUM_LONG};
@@ -99,8 +100,65 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
     );
     col.push(Box::new(Separator::horizontal()), 0.0);
 
-    let scroll = ScrollView::new(Box::new(LoremCanvas::new(Arc::clone(&font)))).horizontal(true);
+    let scroll = ScrollView::new(Box::new(LoremCanvas::new(Arc::clone(&font))))
+        .horizontal(true)
+        .with_bar_visibility(ScrollBarVisibility::AlwaysVisible);
     col.push(Box::new(scroll), 1.0);
 
     Box::new(col)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use agg_gui::{find_widget_by_type, set_scroll_visibility, Font, ScrollBarVisibility, Size};
+
+    struct VisibilityGuard;
+
+    impl Drop for VisibilityGuard {
+        fn drop(&mut self) {
+            set_scroll_visibility(ScrollBarVisibility::VisibleWhenNeeded);
+        }
+    }
+
+    #[test]
+    fn bidirectional_scroll_area_keeps_both_scrollbars_visible() {
+        const BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+        let font = Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"));
+
+        let _guard = VisibilityGuard;
+        set_scroll_visibility(ScrollBarVisibility::AlwaysHidden);
+        let mut root = super::build(font);
+        root.layout(Size::new(360.0, 240.0));
+
+        let scroll = find_widget_by_type(root.as_ref(), "ScrollView")
+            .expect("bidirectional tab scroll view");
+        let props = scroll.properties();
+
+        assert_property(&props, "v_enabled", "true");
+        assert_property(&props, "h_enabled", "true");
+        assert_property(&props, "bar_visibility", "AlwaysVisible");
+        assert_positive_property(&props, "max_scroll");
+        assert_positive_property(&props, "h_max_scroll");
+    }
+
+    fn assert_property(props: &[(&'static str, String)], name: &str, expected: &str) {
+        let actual = props
+            .iter()
+            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
+            .unwrap_or_else(|| panic!("missing property {name}"));
+        assert_eq!(actual, expected);
+    }
+
+    fn assert_positive_property(props: &[(&'static str, String)], name: &str) {
+        let actual = props
+            .iter()
+            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
+            .unwrap_or_else(|| panic!("missing property {name}"));
+        let value = actual
+            .parse::<f64>()
+            .unwrap_or_else(|_| panic!("{name} should be a number, got {actual:?}"));
+        assert!(value > 0.0, "{name} should be positive, got {value}");
+    }
 }

@@ -15,21 +15,21 @@ use crate::event::Key;
 /// hosts can still inspect it.
 pub fn key(name: &str) -> Option<Key> {
     Some(match name {
-        "Backspace"  => Key::Backspace,
-        "Delete"     => Key::Delete,
-        "Insert"     => Key::Insert,
-        "ArrowLeft"  => Key::ArrowLeft,
+        "Backspace" => Key::Backspace,
+        "Delete" => Key::Delete,
+        "Insert" => Key::Insert,
+        "ArrowLeft" => Key::ArrowLeft,
         "ArrowRight" => Key::ArrowRight,
-        "ArrowUp"    => Key::ArrowUp,
-        "ArrowDown"  => Key::ArrowDown,
-        "Home"       => Key::Home,
-        "End"        => Key::End,
-        "Tab"        => Key::Tab,
-        "Enter"      => Key::Enter,
-        "Escape"     => Key::Escape,
-        " "          => Key::Char(' '),
+        "ArrowUp" => Key::ArrowUp,
+        "ArrowDown" => Key::ArrowDown,
+        "Home" => Key::Home,
+        "End" => Key::End,
+        "Tab" => Key::Tab,
+        "Enter" => Key::Enter,
+        "Escape" => Key::Escape,
+        " " => Key::Char(' '),
         s if s.chars().count() == 1 => Key::Char(s.chars().next()?),
-        s                           => Key::Other(s.to_string()),
+        s => Key::Other(s.to_string()),
     })
 }
 

@@ -1,3 +1,6 @@
 [submodule "egui-reference"]
 	path = egui-reference
 	url = https://github.com/emilk/egui.git
+[submodule "tests/resvg-test-suite"]
+	path = tests/resvg-test-suite
+	url = https://github.com/RazrFalcon/resvg-test-suite.git

@@ -4,9 +4,9 @@
 //! and GfxCtx layers. They run on every commit.
 
 use crate::{
-    App, Button, Color, CompOp, Container, FlexColumn, FlexRow, Framebuffer, GfxCtx,
-    Key, MouseButton, Modifiers, ScrollView, Size, SizedBox, Spacer, Splitter,
-    TabView, TextField, Widget,
+    App, Button, Color, CompOp, Container, FlexColumn, FlexRow, Framebuffer, GfxCtx, Key,
+    Modifiers, MouseButton, ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollView, Size,
+    SizedBox, Spacer, Splitter, TabView, TextField, Widget,
 };
 
 /// Sample RGBA at pixel (x, y) in a framebuffer.
@@ -51,10 +51,16 @@ fn test_y_up_point_at_bottom() {
 
     // Row 10 (from buffer start) = Y=10 = near the BOTTOM of the window.
     let center = sample(&fb, 50, 10);
-    assert!(is_white(center), "Y=10 should be near the bottom of the buffer (Y-up); got {center:?}");
+    assert!(
+        is_white(center),
+        "Y=10 should be near the bottom of the buffer (Y-up); got {center:?}"
+    );
 
     let top_center = sample(&fb, 50, 90);
-    assert!(is_dark(top_center), "Y=90 should be dark (nothing drawn there); got {top_center:?}");
+    assert!(
+        is_dark(top_center),
+        "Y=90 should be dark (nothing drawn there); got {top_center:?}"
+    );
 }
 
 /// A CCW rotation of +90° rotates a right-pointing vector to point upward.
@@ -78,10 +84,16 @@ fn test_rotation_ccw_positive() {
     drop(ctx);
 
     let above_center = sample(&fb, cx as u32, cy as u32 + 25);
-    assert!(is_white(above_center), "+90° CCW rotation should produce upward bar; pixel above center is {above_center:?}");
+    assert!(
+        is_white(above_center),
+        "+90° CCW rotation should produce upward bar; pixel above center is {above_center:?}"
+    );
 
     let right_of_center = sample(&fb, cx as u32 + 25, cy as u32);
-    assert!(is_dark(right_of_center), "After +90° rotation, horizontal should be gone; pixel to right is {right_of_center:?}");
+    assert!(
+        is_dark(right_of_center),
+        "After +90° rotation, horizontal should be gone; pixel to right is {right_of_center:?}"
+    );
 }
 
 /// A point drawn at (10, 10) in Y-up space is near the bottom-left corner.
@@ -98,10 +110,16 @@ fn test_bottom_left_origin() {
     drop(ctx);
 
     let center = sample(&fb, 10, 10);
-    assert!(is_red(center), "Bottom-left origin test: (10,10) should be red; got {center:?}");
+    assert!(
+        is_red(center),
+        "Bottom-left origin test: (10,10) should be red; got {center:?}"
+    );
 
     let top_right = sample(&fb, 190, 190);
-    assert!(is_dark(top_right), "Top-right should be empty; got {top_right:?}");
+    assert!(
+        is_dark(top_right),
+        "Top-right should be empty; got {top_right:?}"
+    );
 }
 
 /// `pixels_flipped()` should reverse the row order.
@@ -115,19 +133,33 @@ fn test_pixels_flipped_reversal() {
         let pixels = fb.pixels_mut();
         for x in 0..w as usize {
             let i = x * 4;
-            pixels[i] = 255; pixels[i+1] = 0; pixels[i+2] = 0; pixels[i+3] = 255;
+            pixels[i] = 255;
+            pixels[i + 1] = 0;
+            pixels[i + 2] = 0;
+            pixels[i + 3] = 255;
         }
         let base = 3 * w as usize * 4;
         for x in 0..w as usize {
             let i = base + x * 4;
-            pixels[i] = 0; pixels[i+1] = 0; pixels[i+2] = 255; pixels[i+3] = 255;
+            pixels[i] = 0;
+            pixels[i + 1] = 0;
+            pixels[i + 2] = 255;
+            pixels[i + 3] = 255;
         }
     }
 
     let flipped = fb.pixels_flipped();
-    assert_eq!(&flipped[0..4], &[0u8, 0, 255, 255], "Flipped[0] should be blue");
+    assert_eq!(
+        &flipped[0..4],
+        &[0u8, 0, 255, 255],
+        "Flipped[0] should be blue"
+    );
     let last = (h as usize - 1) * w as usize * 4;
-    assert_eq!(&flipped[last..last+4], &[255u8, 0, 0, 255], "Flipped last row should be red");
+    assert_eq!(
+        &flipped[last..last + 4],
+        &[255u8, 0, 0, 255],
+        "Flipped last row should be red"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -154,11 +186,17 @@ fn test_clip_rect_excludes_outside() {
 
     // Left half (x=10, y=50) must stay black — clipped out.
     let left = sample(&fb, 10, 50);
-    assert!(is_dark(left), "Left half should be clipped out; got {left:?}");
+    assert!(
+        is_dark(left),
+        "Left half should be clipped out; got {left:?}"
+    );
 
     // Right half (x=75, y=50) must be white — inside clip.
     let right = sample(&fb, 75, 50);
-    assert!(is_white(right), "Right half should be white (inside clip); got {right:?}");
+    assert!(
+        is_white(right),
+        "Right half should be white (inside clip); got {right:?}"
+    );
 }
 
 /// Restoring state also restores the clip, so drawing after restore is unclipped.
@@ -182,7 +220,10 @@ fn test_clip_rect_restores_with_state() {
 
     // Left side must now be white (no clip).
     let left = sample(&fb, 10, 50);
-    assert!(is_white(left), "After restore, clip should be gone; got {left:?}");
+    assert!(
+        is_white(left),
+        "After restore, clip should be gone; got {left:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +235,7 @@ fn test_clip_rect_restores_with_state() {
 fn test_rounded_rect_zero_radius() {
     let size = 100u32;
     let mut fb_rr = Framebuffer::new(size, size);
-    let mut fb_r  = Framebuffer::new(size, size);
+    let mut fb_r = Framebuffer::new(size, size);
 
     {
         let mut ctx = GfxCtx::new(&mut fb_rr);
@@ -214,8 +255,14 @@ fn test_rounded_rect_zero_radius() {
     }
 
     // Both should produce white at the center.
-    assert!(is_white(sample(&fb_rr, 50, 50)), "rounded_rect center should be white");
-    assert!(is_white(sample(&fb_r,  50, 50)), "rect center should be white");
+    assert!(
+        is_white(sample(&fb_rr, 50, 50)),
+        "rounded_rect center should be white"
+    );
+    assert!(
+        is_white(sample(&fb_r, 50, 50)),
+        "rect center should be white"
+    );
 }
 
 /// A rounded_rect with a large radius must clip its corners.
@@ -234,7 +281,10 @@ fn test_rounded_rect_corners_are_clipped() {
 
     // Exact corner at (20, 20) — inside the radius arc, should remain dark.
     let corner = sample(&fb, 20, 20);
-    assert!(is_dark(corner), "Corner should be clipped by radius; got {corner:?}");
+    assert!(
+        is_dark(corner),
+        "Corner should be clipped by radius; got {corner:?}"
+    );
 
     // Center must be white.
     let center = sample(&fb, 50, 50);
@@ -263,13 +313,15 @@ fn test_blend_mode_src_over_alpha() {
 
     let p = sample(&fb, 20, 20);
     // Should be roughly 50% gray (127 ± 5).
-    assert!(p[0] > 100 && p[0] < 160, "50% black over white should be mid-gray; got {p:?}");
+    assert!(
+        p[0] > 100 && p[0] < 160,
+        "50% black over white should be mid-gray; got {p:?}"
+    );
 }
 
 /// global_alpha multiplies into fill alpha.
 #[test]
 fn test_global_alpha() {
-
     let size = 40u32;
     let mut fb = Framebuffer::new(size, size);
     let mut ctx = GfxCtx::new(&mut fb);
@@ -286,7 +338,10 @@ fn test_global_alpha() {
     let p = sample(&fb, 20, 20);
     // Red channel should be high, green/blue non-zero (blended with white).
     assert!(p[0] > 200, "Red channel should be high; got {p:?}");
-    assert!(p[1] > 100, "Green channel should be non-zero (blended with white); got {p:?}");
+    assert!(
+        p[1] > 100,
+        "Green channel should be non-zero (blended with white); got {p:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -298,8 +353,8 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 /// `measure_text` returns a wider advance for a longer string.
 #[test]
 fn test_measure_text_longer_is_wider() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut fb = Framebuffer::new(400, 100);
@@ -307,7 +362,7 @@ fn test_measure_text_longer_is_wider() {
     ctx.set_font(font);
     ctx.set_font_size(20.0);
 
-    let short  = ctx.measure_text("Hi").unwrap();
+    let short = ctx.measure_text("Hi").unwrap();
     let longer = ctx.measure_text("Hello, World!").unwrap();
     assert!(
         longer.width > short.width,
@@ -321,8 +376,8 @@ fn test_measure_text_longer_is_wider() {
 /// on a white background.
 #[test]
 fn test_fill_text_paints_pixels() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut fb = Framebuffer::new(300, 60);
@@ -340,14 +395,17 @@ fn test_fill_text_paints_pixels() {
         .flat_map(|x| (0..60_u32).map(move |y| (x, y)))
         .filter(|&(x, y)| !is_white(sample(&fb, x, y)))
         .count();
-    assert!(dark_count > 10, "fill_text should paint dark pixels; got {dark_count}");
+    assert!(
+        dark_count > 10,
+        "fill_text should paint dark pixels; got {dark_count}"
+    );
 }
 
 /// `measure_text` returns positive ascent and line_height values.
 #[test]
 fn test_measure_text_metrics_positive() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut fb = Framebuffer::new(200, 60);
@@ -357,9 +415,17 @@ fn test_measure_text_metrics_positive() {
 
     let m = ctx.measure_text("Ag").unwrap();
     assert!(m.ascent > 0.0, "ascent must be positive; got {}", m.ascent);
-    assert!(m.descent > 0.0, "descent must be positive; got {}", m.descent);
-    assert!(m.line_height >= m.ascent + m.descent,
-        "line_height ({}) should be >= ascent + descent ({})", m.line_height, m.ascent + m.descent);
+    assert!(
+        m.descent > 0.0,
+        "descent must be positive; got {}",
+        m.descent
+    );
+    assert!(
+        m.line_height >= m.ascent + m.descent,
+        "line_height ({}) should be >= ascent + descent ({})",
+        m.line_height,
+        m.ascent + m.descent
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -369,8 +435,8 @@ fn test_measure_text_metrics_positive() {
 /// Y-down → Y-up flip: a point at screen y=10 in a 100px viewport becomes y=90.
 #[test]
 fn test_y_flip_at_ingestion() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut clicked = false;
@@ -400,17 +466,17 @@ fn test_y_flip_at_ingestion() {
 /// slider writes a new colour into the bound cell.
 #[test]
 fn test_color_picker_opens_and_updates_on_drag() {
+    use crate::text::Font;
+    use crate::ColorPicker;
     use std::cell::Cell;
     use std::rc::Rc;
     use std::sync::Arc;
-    use crate::text::Font;
-    use crate::ColorPicker;
 
-    let font  = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     // Non-gray start colour so hue changes actually shift the RGB values
     // (gray has saturation=0 → hue rotation is a no-op).
     let start = Color::rgba(1.0, 0.0, 0.0, 1.0);
-    let cell  = Rc::new(Cell::new(start));
+    let cell = Rc::new(Cell::new(start));
     let picker = ColorPicker::new(Rc::clone(&cell), Arc::clone(&font));
 
     let mut app = App::new(Box::new(picker));
@@ -421,8 +487,18 @@ fn test_color_picker_opens_and_updates_on_drag() {
     // Screen → Y-up: y_up = VP_H − screen_y.  A screen click at
     // y = VP_H − 10 maps to y_up = 10 (inside the swatch).
     let swatch_screen_y = VP_H - 10.0;
-    app.on_mouse_down(50.0, swatch_screen_y, MouseButton::Left, Modifiers::default());
-    app.on_mouse_up  (50.0, swatch_screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        50.0,
+        swatch_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        50.0,
+        swatch_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     // Re-layout so the expanded panel dimensions take effect.
     app.layout(Size::new(300.0, VP_H));
 
@@ -437,11 +513,12 @@ fn test_color_picker_opens_and_updates_on_drag() {
     // Click near right end of hue strip (high hue).
     app.on_mouse_down(220.0, hue_screen_y, MouseButton::Left, Modifiers::default());
     app.on_mouse_move(210.0, hue_screen_y);
-    app.on_mouse_up  (210.0, hue_screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(210.0, hue_screen_y, MouseButton::Left, Modifiers::default());
 
     let final_color = cell.get();
     assert_ne!(
-        (start.r, start.g, start.b), (final_color.r, final_color.g, final_color.b),
+        (start.r, start.g, start.b),
+        (final_color.r, final_color.g, final_color.b),
         "hue drag must have mutated the bound colour cell (got {:?})",
         final_color,
     );
@@ -450,8 +527,8 @@ fn test_color_picker_opens_and_updates_on_drag() {
 /// A click outside widget bounds must not trigger the callback.
 #[test]
 fn test_click_outside_bounds_ignored() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let clicked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -459,7 +536,9 @@ fn test_click_outside_bounds_ignored() {
 
     let button = Button::new("X", font)
         .with_font_size(14.0)
-        .on_click(move || { clicked2.store(true, std::sync::atomic::Ordering::Relaxed); });
+        .on_click(move || {
+            clicked2.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
 
     let mut app = App::new(Box::new(button));
     app.layout(Size::new(200.0, 100.0));
@@ -468,21 +547,27 @@ fn test_click_outside_bounds_ignored() {
     app.on_mouse_down(100.0, 200.0, MouseButton::Left, Modifiers::default());
     app.on_mouse_up(100.0, 200.0, MouseButton::Left, Modifiers::default());
 
-    assert!(!clicked.load(std::sync::atomic::Ordering::Relaxed),
-        "click outside button bounds must not fire callback");
+    assert!(
+        !clicked.load(std::sync::atomic::Ordering::Relaxed),
+        "click outside button bounds must not fire callback"
+    );
 }
 
 /// Tab key advances focus through focusable widgets.
 #[test]
 fn test_tab_focus_advance() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
 
     let mut root = Container::new().with_padding(4.0);
-    root.children_mut().push(Box::new(TextField::new(Arc::clone(&font)).with_font_size(14.0)));
-    root.children_mut().push(Box::new(TextField::new(Arc::clone(&font)).with_font_size(14.0)));
+    root.children_mut().push(Box::new(
+        TextField::new(Arc::clone(&font)).with_font_size(14.0),
+    ));
+    root.children_mut().push(Box::new(
+        TextField::new(Arc::clone(&font)).with_font_size(14.0),
+    ));
 
     let mut app = App::new(Box::new(root));
     app.layout(Size::new(200.0, 200.0));
@@ -509,7 +594,7 @@ fn test_flex_column_first_child_highest_y() {
     let mut col = FlexColumn::new()
         .with_gap(0.0)
         .with_padding(0.0)
-        .add(Box::new(SizedBox::new().with_height(40.0)))  // first = top
+        .add(Box::new(SizedBox::new().with_height(40.0))) // first = top
         .add(Box::new(SizedBox::new().with_height(60.0))); // second = below
 
     col.layout(Size::new(200.0, 200.0));
@@ -530,7 +615,7 @@ fn test_flex_row_distributes_space() {
     let mut row = FlexRow::new()
         .with_gap(0.0)
         .with_padding(0.0)
-        .add_flex(Box::new(SizedBox::new()), 1.0)  // left half
+        .add_flex(Box::new(SizedBox::new()), 1.0) // left half
         .add_flex(Box::new(SizedBox::new()), 1.0); // right half
 
     row.layout(Size::new(200.0, 40.0));
@@ -539,7 +624,10 @@ fn test_flex_row_distributes_space() {
     let x1 = row.children()[1].bounds().x;
     assert_eq!(x0, 0.0, "first flex child should start at x=0");
     assert!(x1 > x0, "second flex child should be to the right of first");
-    assert!((x1 - 100.0).abs() < 1.0, "second child should start at x≈100; got {x1}");
+    assert!(
+        (x1 - 100.0).abs() < 1.0,
+        "second child should start at x≈100; got {x1}"
+    );
 }
 
 /// ScrollView returns the available size from layout and positions its child
@@ -563,13 +651,27 @@ fn test_scroll_view_tall_content_child_y() {
     );
 }
 
+/// Default scroll details mirror egui's floating ScrollStyle defaults.
+#[test]
+fn test_scroll_bar_style_defaults_match_egui() {
+    let style = ScrollBarStyle::default();
+
+    assert_eq!(style.kind, ScrollBarKind::Floating);
+    assert_eq!(style.color, ScrollBarColor::Foreground);
+    assert_eq!(style.bar_width, 10.0);
+    assert_eq!(style.floating_width, 2.0);
+    assert_eq!(style.handle_min_length, 12.0);
+    assert_eq!(style.outer_margin, 0.0);
+    assert_eq!(style.inner_margin, 4.0);
+    assert_eq!(style.content_margin, 0.0);
+    assert_eq!(style.fade_strength, 0.5);
+    assert_eq!(style.fade_size, 20.0);
+}
+
 /// Splitter updates its ratio when dragged across the divider.
 #[test]
 fn test_splitter_drag_updates_ratio() {
-    let mut splitter = Splitter::new(
-        Box::new(SizedBox::new()),
-        Box::new(SizedBox::new()),
-    );
+    let mut splitter = Splitter::new(Box::new(SizedBox::new()), Box::new(SizedBox::new()));
     splitter.layout(Size::new(400.0, 200.0));
     splitter.set_bounds(crate::Rect::new(0.0, 0.0, 400.0, 200.0));
 
@@ -598,8 +700,8 @@ fn test_splitter_drag_updates_ratio() {
 /// TabView swaps its active child when the tab bar is clicked.
 #[test]
 fn test_tab_view_always_has_one_child() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
 
@@ -610,7 +712,11 @@ fn test_tab_view_always_has_one_child() {
     tv.layout(Size::new(400.0, 300.0));
     tv.set_bounds(crate::Rect::new(0.0, 0.0, 400.0, 300.0));
 
-    assert_eq!(tv.children().len(), 1, "TabView should always have exactly 1 active child");
+    assert_eq!(
+        tv.children().len(),
+        1,
+        "TabView should always have exactly 1 active child"
+    );
 
     // Tab bar: content_height = 300 - 36 = 264; bar is y in [264, 300].
     // Tab B is the second of two: x in [200, 400].
@@ -620,16 +726,20 @@ fn test_tab_view_always_has_one_child() {
         modifiers: Modifiers::default(),
     });
 
-    assert_eq!(tv.children().len(), 1, "TabView should still have exactly 1 active child after switch");
+    assert_eq!(
+        tv.children().len(),
+        1,
+        "TabView should still have exactly 1 active child after switch"
+    );
 }
 
 /// Closing a Window (visible = false) must prevent its content from being painted.
 #[test]
 fn test_window_close_hides_content() {
-    use std::sync::Arc;
     use crate::text::Font;
-    use crate::widgets::window::Window;
     use crate::widget::paint_subtree;
+    use crate::widgets::window::Window;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
 
@@ -660,16 +770,21 @@ fn test_window_close_hides_content() {
     }
 
     // The visible framebuffer should have non-black pixels (window chrome).
-    let visible_has_pixels = fb_visible.pixels()
+    let visible_has_pixels = fb_visible
+        .pixels()
         .chunks(4)
         .any(|p| p[0] > 50 || p[1] > 50 || p[2] > 50);
     assert!(visible_has_pixels, "visible window must paint something");
 
     // The hidden framebuffer must be completely black.
-    let hidden_all_black = fb_hidden.pixels()
+    let hidden_all_black = fb_hidden
+        .pixels()
         .chunks(4)
         .all(|p| p[0] < 10 && p[1] < 10 && p[2] < 10);
-    assert!(hidden_all_black, "hidden window must not paint anything; content child leaked");
+    assert!(
+        hidden_all_black,
+        "hidden window must not paint anything; content child leaked"
+    );
 }
 
 /// InspectorPanel must build the TreeView with the correct nodes:
@@ -679,44 +794,79 @@ fn test_window_close_hides_content() {
 /// - The TreeView bounds must sit inside the tree area (above split, below header).
 #[test]
 fn test_inspector_row0_at_top() {
-    use std::sync::Arc;
+    use crate::geometry::Rect;
+    use crate::text::Font;
+    use crate::widget::{InspectorNode, Widget};
+    use crate::widgets::inspector::InspectorPanel;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use crate::text::Font;
-    use crate::widgets::inspector::InspectorPanel;
-    use crate::widget::{InspectorNode, Widget};
-    use crate::geometry::Rect;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
     let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
-        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1, properties: vec![] },
+        InspectorNode {
+            type_name: "Root",
+            screen_bounds: Rect::new(0.0, 0.0, 100.0, 50.0),
+            depth: 0,
+            properties: vec![],
+        },
+        InspectorNode {
+            type_name: "Child",
+            screen_bounds: Rect::new(0.0, 0.0, 50.0, 20.0),
+            depth: 1,
+            properties: vec![],
+        },
     ]));
 
-    let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), Rc::clone(&hovered_bounds));
+    let mut panel = InspectorPanel::new(
+        Arc::clone(&font),
+        Rc::clone(&nodes),
+        Rc::clone(&hovered_bounds),
+    );
     panel.layout(crate::Size::new(200.0, 300.0));
     panel.set_bounds(Rect::new(0.0, 0.0, 200.0, 300.0));
 
     // InspectorPanel exposes one InternalPresenceNode child so it appears
     // expandable in the inspector (not a leaf node).
-    assert_eq!(panel.children().len(), 1, "InspectorPanel must have one presence child");
-    assert_eq!(panel.children()[0].type_name(), "TreeView",
-               "The presence child must report type_name 'TreeView'");
+    assert_eq!(
+        panel.children().len(),
+        1,
+        "InspectorPanel must have one presence child"
+    );
+    assert_eq!(
+        panel.children()[0].type_name(),
+        "TreeView",
+        "The presence child must report type_name 'TreeView'"
+    );
 
     // The TreeView should have exactly 2 nodes (one per InspectorNode).
-    assert_eq!(panel.tree_view.nodes.len(), 2, "tree_view must have 2 nodes");
+    assert_eq!(
+        panel.tree_view.nodes.len(),
+        2,
+        "tree_view must have 2 nodes"
+    );
 
     // Root node has no parent; Child node's parent is Root (index 0).
-    assert!(panel.tree_view.nodes[0].parent.is_none(), "Root must have no parent");
-    assert_eq!(panel.tree_view.nodes[1].parent, Some(0), "Child must have Root (0) as parent");
+    assert!(
+        panel.tree_view.nodes[0].parent.is_none(),
+        "Root must have no parent"
+    );
+    assert_eq!(
+        panel.tree_view.nodes[1].parent,
+        Some(0),
+        "Child must have Root (0) as parent"
+    );
 
     // The TreeView bounds must be positioned inside the tree area.
     // tree_area top = list_area_h = 300 - 30 = 270 (just below header).
     // tree_area bottom = split_y + 4; split_y ≥ MIN_PROPS_H = 60, so ≥ 64.
     let tv_bounds = panel.tree_view.bounds();
     assert!(tv_bounds.height > 0.0, "TreeView must have positive height");
-    assert!(tv_bounds.y >= 60.0, "TreeView bottom must be above split handle");
+    assert!(
+        tv_bounds.y >= 60.0,
+        "TreeView bottom must be above split handle"
+    );
     assert!(
         tv_bounds.y + tv_bounds.height <= 270.0 + 1.0,
         "TreeView top must not exceed list_area_h (270); got {}",
@@ -728,20 +878,35 @@ fn test_inspector_row0_at_top() {
 /// building a correct parent-child structure from the depth information.
 #[test]
 fn test_inspector_tree_populates_from_nodes() {
-    use std::sync::Arc;
+    use crate::geometry::Rect;
+    use crate::text::Font;
+    use crate::widget::{InspectorNode, Widget};
+    use crate::widgets::inspector::InspectorPanel;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use crate::text::Font;
-    use crate::widgets::inspector::InspectorPanel;
-    use crate::widget::{InspectorNode, Widget};
-    use crate::geometry::Rect;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
     let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root",    screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
-        InspectorNode { type_name: "Child",   screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1, properties: vec![] },
-        InspectorNode { type_name: "Sibling", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 0, properties: vec![] },
+        InspectorNode {
+            type_name: "Root",
+            screen_bounds: Rect::new(0.0, 0.0, 100.0, 50.0),
+            depth: 0,
+            properties: vec![],
+        },
+        InspectorNode {
+            type_name: "Child",
+            screen_bounds: Rect::new(0.0, 0.0, 50.0, 20.0),
+            depth: 1,
+            properties: vec![],
+        },
+        InspectorNode {
+            type_name: "Sibling",
+            screen_bounds: Rect::new(0.0, 0.0, 50.0, 20.0),
+            depth: 0,
+            properties: vec![],
+        },
     ]));
 
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
@@ -751,38 +916,64 @@ fn test_inspector_tree_populates_from_nodes() {
     assert_eq!(panel.tree_view.nodes.len(), 3, "must have 3 tree nodes");
 
     // Root is a root-level node (no parent).
-    assert!(panel.tree_view.nodes[0].parent.is_none(), "node 0 must be root-level");
+    assert!(
+        panel.tree_view.nodes[0].parent.is_none(),
+        "node 0 must be root-level"
+    );
 
     // Child has Root as parent.
-    assert_eq!(panel.tree_view.nodes[1].parent, Some(0), "node 1 must be child of node 0");
+    assert_eq!(
+        panel.tree_view.nodes[1].parent,
+        Some(0),
+        "node 1 must be child of node 0"
+    );
 
     // Sibling is another root-level node.
-    assert!(panel.tree_view.nodes[2].parent.is_none(), "node 2 must be root-level");
+    assert!(
+        panel.tree_view.nodes[2].parent.is_none(),
+        "node 2 must be root-level"
+    );
 
     // InspectorPanel.children() exposes one InternalPresenceNode so it is
     // non-leaf in the inspector tree; the proxy reports type_name "TreeView".
-    assert_eq!(panel.children().len(), 1,
-               "InspectorPanel must have one presence child");
-    assert_eq!(panel.children()[0].type_name(), "TreeView",
-               "Presence child must report type_name 'TreeView'");
+    assert_eq!(
+        panel.children().len(),
+        1,
+        "InspectorPanel must have one presence child"
+    );
+    assert_eq!(
+        panel.children()[0].type_name(),
+        "TreeView",
+        "Presence child must report type_name 'TreeView'"
+    );
 }
 
 /// All nodes must be expanded by default so the full tree is visible on first show.
 #[test]
 fn test_inspector_tree_default_expanded() {
-    use std::sync::Arc;
+    use crate::geometry::Rect;
+    use crate::text::Font;
+    use crate::widget::{InspectorNode, Widget};
+    use crate::widgets::inspector::InspectorPanel;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use crate::text::Font;
-    use crate::widgets::inspector::InspectorPanel;
-    use crate::widget::{InspectorNode, Widget};
-    use crate::geometry::Rect;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
     let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root",  screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
-        InspectorNode { type_name: "Child", screen_bounds: Rect::new(0.0,0.0,50.0,20.0),  depth: 1, properties: vec![] },
+        InspectorNode {
+            type_name: "Root",
+            screen_bounds: Rect::new(0.0, 0.0, 100.0, 50.0),
+            depth: 0,
+            properties: vec![],
+        },
+        InspectorNode {
+            type_name: "Child",
+            screen_bounds: Rect::new(0.0, 0.0, 50.0, 20.0),
+            depth: 1,
+            properties: vec![],
+        },
     ]));
 
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
@@ -796,31 +987,35 @@ fn test_inspector_tree_default_expanded() {
 /// Inspector's TreeView must have drag-and-drop disabled by default.
 #[test]
 fn test_inspector_tree_drag_disabled() {
-    use std::sync::Arc;
+    use crate::geometry::Rect;
+    use crate::text::Font;
+    use crate::widget::InspectorNode;
+    use crate::widgets::inspector::InspectorPanel;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use crate::text::Font;
-    use crate::widgets::inspector::InspectorPanel;
-    use crate::widget::{InspectorNode, Widget};
-    use crate::geometry::Rect;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let hovered_bounds = Rc::new(RefCell::new(None));
-    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode { type_name: "Root", screen_bounds: Rect::new(0.0,0.0,100.0,50.0), depth: 0, properties: vec![] },
-    ]));
+    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![InspectorNode {
+        type_name: "Root",
+        screen_bounds: Rect::new(0.0, 0.0, 100.0, 50.0),
+        depth: 0,
+        properties: vec![],
+    }]));
 
     let panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
-    assert!(!panel.tree_view.drag_enabled, "inspector TreeView must have drag disabled");
+    assert!(
+        !panel.tree_view.drag_enabled,
+        "inspector TreeView must have drag disabled"
+    );
 }
 
 /// ExpandToggle paints a filled triangle when has_children=true, nothing when false.
 #[test]
 fn test_expand_toggle_paints_arrow_only_when_has_children() {
-    use std::sync::Arc;
-    use crate::text::Font;
-    use crate::widgets::tree_view::row::ExpandToggle;
     use crate::widget::paint_subtree;
+    use crate::widgets::tree_view::row::ExpandToggle;
 
     let mut fb_with = Framebuffer::new(20, 20);
     let mut fb_without = Framebuffer::new(20, 20);
@@ -847,9 +1042,9 @@ fn test_expand_toggle_paints_arrow_only_when_has_children() {
 /// Typing into a TextField inserts characters at the cursor.
 #[test]
 fn test_text_field_typing() {
-    use std::sync::Arc;
     use crate::text::Font;
     use crate::widgets::text_field::TextField as TF;
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut field = TF::new(font).with_font_size(14.0);
@@ -860,22 +1055,31 @@ fn test_text_field_typing() {
     field.on_event(&crate::Event::FocusGained);
 
     // Type "Hi"
-    field.on_event(&crate::Event::KeyDown { key: Key::Char('H'), modifiers: Modifiers::default() });
-    field.on_event(&crate::Event::KeyDown { key: Key::Char('i'), modifiers: Modifiers::default() });
+    field.on_event(&crate::Event::KeyDown {
+        key: Key::Char('H'),
+        modifiers: Modifiers::default(),
+    });
+    field.on_event(&crate::Event::KeyDown {
+        key: Key::Char('i'),
+        modifiers: Modifiers::default(),
+    });
     assert_eq!(field.text(), "Hi", "typed characters should appear in text");
 
     // Backspace removes the last character.
-    field.on_event(&crate::Event::KeyDown { key: Key::Backspace, modifiers: Modifiers::default() });
+    field.on_event(&crate::Event::KeyDown {
+        key: Key::Backspace,
+        modifiers: Modifiers::default(),
+    });
     assert_eq!(field.text(), "H", "backspace should remove last character");
 }
 
 /// After layout(), TreeView children() returns one TreeRow per visible node.
 #[test]
 fn test_treeview_children_count_equals_visible_rows() {
-    use std::sync::Arc;
+    use crate::geometry::Size;
     use crate::text::Font;
     use crate::widgets::tree_view::{NodeIcon, TreeView};
-    use crate::geometry::Size;
+    use std::sync::Arc;
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut tv = TreeView::new(Arc::clone(&font));
     let root = tv.add_root("Root", NodeIcon::Folder);
@@ -884,16 +1088,20 @@ fn test_treeview_children_count_equals_visible_rows() {
     tv.nodes[root].is_expanded = true;
     tv.layout(Size::new(300.0, 200.0));
     // root + 2 children = 3 visible rows
-    assert_eq!(tv.children().len(), 3, "expected 3 children after expanding root with 2 children");
+    assert_eq!(
+        tv.children().len(),
+        3,
+        "expected 3 children after expanding root with 2 children"
+    );
 }
 
 /// Each TreeRow child has type_name "TreeRow".
 #[test]
 fn test_treeview_row_node_idx() {
-    use std::sync::Arc;
+    use crate::geometry::Size;
     use crate::text::Font;
     use crate::widgets::tree_view::{NodeIcon, TreeView};
-    use crate::geometry::Size;
+    use std::sync::Arc;
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut tv = TreeView::new(Arc::clone(&font));
     tv.add_root("Only Root", NodeIcon::Package);
@@ -906,23 +1114,21 @@ fn test_treeview_row_node_idx() {
 /// not in the middle of the tree area (verifies clip_rect + translate ordering).
 #[test]
 fn test_inspector_top_row_appears_at_top_of_tree_area() {
-    use std::sync::Arc;
+    use crate::geometry::{Rect, Size};
+    use crate::text::Font;
+    use crate::widget::{paint_subtree, InspectorNode, Widget};
+    use crate::widgets::inspector::InspectorPanel;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use crate::text::Font;
-    use crate::widgets::inspector::InspectorPanel;
-    use crate::widget::{InspectorNode, Widget, paint_subtree};
-    use crate::geometry::{Rect, Size};
+    use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
-    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![
-        InspectorNode {
-            type_name: "Window",
-            screen_bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            depth: 0,
-            properties: vec![],
-        },
-    ]));
+    let nodes: Rc<RefCell<Vec<InspectorNode>>> = Rc::new(RefCell::new(vec![InspectorNode {
+        type_name: "Window",
+        screen_bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+        depth: 0,
+        properties: vec![],
+    }]));
     let hovered = Rc::new(RefCell::new(None));
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), Rc::clone(&hovered));
 
@@ -969,10 +1175,10 @@ fn test_inspector_top_row_appears_at_top_of_tree_area() {
 /// (to avoid double-rendering behind the ghost).
 #[test]
 fn test_treeview_drag_node_excluded_from_row_widgets() {
-    use std::sync::Arc;
-    use crate::widgets::tree_view::{NodeIcon, TreeView};
-    use crate::geometry::{Point, Size};
     use crate::event::{Event, Modifiers, MouseButton};
+    use crate::geometry::{Point, Size};
+    use crate::widgets::tree_view::{NodeIcon, TreeView};
+    use std::sync::Arc;
     let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
     use crate::geometry::Rect;
     let mut tv = TreeView::new(Arc::clone(&font)).with_drag_enabled();
@@ -990,13 +1196,18 @@ fn test_treeview_drag_node_excluded_from_row_widgets() {
         modifiers: Modifiers::default(),
     });
     // Move far enough to exceed drag threshold (>4px)
-    tv.on_event(&Event::MouseMove { pos: Point::new(50.0, 78.0) });
+    tv.on_event(&Event::MouseMove {
+        pos: Point::new(50.0, 78.0),
+    });
 
     // Re-layout with live drag active
     tv.layout(Size::new(200.0, 100.0));
     // The dragged node should be excluded → only 1 row widget
-    assert_eq!(tv.children().len(), 1,
-        "dragged node must be excluded from row_widgets during live drag");
+    assert_eq!(
+        tv.children().len(),
+        1,
+        "dragged node must be excluded from row_widgets during live drag"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,58 +1217,80 @@ fn test_treeview_drag_node_excluded_from_row_widgets() {
 /// Button must have exactly one child widget of type "Label" after layout.
 #[test]
 fn test_button_has_label_child() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let mut btn = Button::new("Click me", font);
     btn.layout(Size::new(200.0, 40.0));
-    assert_eq!(btn.children().len(), 1, "Button must expose exactly one Label child");
-    assert_eq!(btn.children()[0].type_name(), "Label",
-               "Button's child must be a Label widget");
+    assert_eq!(
+        btn.children().len(),
+        1,
+        "Button must expose exactly one Label child"
+    );
+    assert_eq!(
+        btn.children()[0].type_name(),
+        "Label",
+        "Button's child must be a Label widget"
+    );
 }
 
 /// After layout(), the Label child must have tight text bounds and be centred
 /// within the button area.
 #[test]
 fn test_button_label_child_fills_button() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let mut btn = Button::new("Click me", font);
     let size = btn.layout(Size::new(300.0, 50.0));
     let label_bounds = btn.children()[0].bounds();
     // Tight bounds: label width must be less than button width.
-    assert!(label_bounds.width < size.width,
-            "Label width must be tight (less than button width); got label_w={} btn_w={}",
-            label_bounds.width, size.width);
+    assert!(
+        label_bounds.width < size.width,
+        "Label width must be tight (less than button width); got label_w={} btn_w={}",
+        label_bounds.width,
+        size.width
+    );
     assert!(label_bounds.width > 0.0, "Label width must be positive");
     assert!(label_bounds.height > 0.0, "Label height must be positive");
     // Label must be horizontally centred: x ≈ (button_w - label_w) / 2.
     let expected_x = (size.width - label_bounds.width) * 0.5;
-    assert!((label_bounds.x - expected_x).abs() < 1.0,
-            "Label must be horizontally centred; expected x≈{:.1}, got x={:.1}",
-            expected_x, label_bounds.x);
+    assert!(
+        (label_bounds.x - expected_x).abs() < 1.0,
+        "Label must be horizontally centred; expected x≈{:.1}, got x={:.1}",
+        expected_x,
+        label_bounds.x
+    );
     // Label must be vertically centred.
     let expected_y = (size.height - label_bounds.height) * 0.5;
-    assert!((label_bounds.y - expected_y).abs() < 1.0,
-            "Label must be vertically centred; expected y≈{:.1}, got y={:.1}",
-            expected_y, label_bounds.y);
+    assert!(
+        (label_bounds.y - expected_y).abs() < 1.0,
+        "Label must be vertically centred; expected y≈{:.1}, got y={:.1}",
+        expected_y,
+        label_bounds.y
+    );
 }
 
 /// Label::properties() must include text, font_size, and has_backbuffer.
 #[test]
 fn test_label_properties() {
+    use crate::{text::Font, Label};
     use std::sync::Arc;
-    use crate::{Label, text::Font};
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let label = Label::new("Hello", font).with_font_size(13.0);
     let props: std::collections::HashMap<_, _> = label.properties().into_iter().collect();
-    assert!(props.contains_key("text"), "Label must expose 'text' property");
+    assert!(
+        props.contains_key("text"),
+        "Label must expose 'text' property"
+    );
     assert_eq!(props["text"], "Hello");
-    assert!(props.contains_key("has_backbuffer"), "Label must expose 'has_backbuffer'");
+    assert!(
+        props.contains_key("has_backbuffer"),
+        "Label must expose 'has_backbuffer'"
+    );
     // Default `buffered = true` opts Label into the grayscale AGG
     // backbuffer path.  Runtime toggles off when LCD is enabled
     // globally (see `Label::backbuffer_cache_mut`), but the property
@@ -1068,21 +1301,28 @@ fn test_label_properties() {
 /// Button properties must include the label text.
 #[test]
 fn test_button_properties() {
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let btn = Button::new("Primary Action", font);
     let props: std::collections::HashMap<_, _> = btn.properties().into_iter().collect();
-    assert!(props.contains_key("label"), "Button must expose 'label' property");
+    assert!(
+        props.contains_key("label"),
+        "Button must expose 'label' property"
+    );
     assert_eq!(props["label"], "Primary Action");
 }
 
 /// collect_inspector_nodes must show Button at depth 0 and Label at depth 1.
 #[test]
 fn test_button_inspector_hierarchy() {
+    use crate::{
+        geometry::{Point, Rect},
+        text::Font,
+        widget::collect_inspector_nodes,
+    };
     use std::sync::Arc;
-    use crate::{text::Font, widget::collect_inspector_nodes, geometry::{Point, Rect}};
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let mut btn = Button::new("OK", font);
@@ -1103,27 +1343,43 @@ fn test_button_inspector_hierarchy() {
 /// the inspector just as it disappears from the rendered scene.
 #[test]
 fn test_invisible_widget_excluded_from_inspector() {
-    use crate::widget::{collect_inspector_nodes, Widget};
-    use crate::geometry::{Point, Rect, Size};
-    use crate::event::{Event, EventResult};
     use crate::draw_ctx::DrawCtx;
+    use crate::event::{Event, EventResult};
+    use crate::geometry::{Point, Rect, Size};
+    use crate::widget::{collect_inspector_nodes, Widget};
 
     /// Minimal widget whose visibility can be toggled.
     struct ToggleWidget {
-        bounds:   Rect,
-        visible:  bool,
+        bounds: Rect,
+        visible: bool,
         children: Vec<Box<dyn Widget>>,
     }
     impl Widget for ToggleWidget {
-        fn type_name(&self) -> &'static str { "ToggleWidget" }
-        fn is_visible(&self) -> bool { self.visible }
-        fn bounds(&self) -> Rect { self.bounds }
-        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-        fn layout(&mut self, available: Size) -> Size { available }
+        fn type_name(&self) -> &'static str {
+            "ToggleWidget"
+        }
+        fn is_visible(&self) -> bool {
+            self.visible
+        }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
         fn paint(&mut self, _: &mut dyn DrawCtx) {}
-        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
     }
 
     let visible = ToggleWidget {
@@ -1144,7 +1400,10 @@ fn test_invisible_widget_excluded_from_inspector() {
 
     nodes.clear();
     collect_inspector_nodes(&hidden, 0, Point::ORIGIN, &mut nodes);
-    assert!(nodes.is_empty(), "invisible widget produces no inspector nodes");
+    assert!(
+        nodes.is_empty(),
+        "invisible widget produces no inspector nodes"
+    );
 }
 
 /// `toggle_on_row_click = false` (the inspector's mode): clicking a row
@@ -1153,15 +1412,14 @@ fn test_invisible_widget_excluded_from_inspector() {
 /// the root node to inspect it.
 #[test]
 fn test_treeview_click_selects_without_collapsing_when_flag_off() {
-    use std::sync::Arc;
-    use crate::text::Font;
-    use crate::geometry::{Point, Size};
     use crate::event::Modifiers;
+    use crate::geometry::{Point, Size};
+    use crate::text::Font;
+    use std::sync::Arc;
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
 
-    let mut tv = crate::widgets::tree_view::TreeView::new(Arc::clone(&font))
-        .with_row_height(20.0);
+    let mut tv = crate::widgets::tree_view::TreeView::new(Arc::clone(&font)).with_row_height(20.0);
     // toggle_on_row_click defaults to false — inspector mode.
 
     let root = tv.add_root("Root", crate::widgets::tree_view::NodeIcon::Package);
@@ -1174,7 +1432,11 @@ fn test_treeview_click_selects_without_collapsing_when_flag_off() {
     tv.set_bounds(crate::geometry::Rect::new(0.0, 0.0, 300.0, 200.0));
 
     // 3 visible rows (Root expanded, 2 children).
-    assert_eq!(tv.children().len(), 3, "should have Root + 2 children visible");
+    assert_eq!(
+        tv.children().len(),
+        3,
+        "should have Root + 2 children visible"
+    );
 
     // Click on the ROOT row body — well past the expand icon (EXPAND_W=18,
     // ICON_W+GAP=18) so x=80 is clearly in the label area, not on the toggle.
@@ -1190,7 +1452,8 @@ fn test_treeview_click_selects_without_collapsing_when_flag_off() {
 
     // Root must still be expanded: children must still be visible.
     assert_eq!(
-        tv.children().len(), 3,
+        tv.children().len(),
+        3,
         "clicking root row must NOT collapse it when toggle_on_row_click = false"
     );
 }
@@ -1200,16 +1463,16 @@ fn test_treeview_click_selects_without_collapsing_when_flag_off() {
 /// Cursor file-tree behaviour.
 #[test]
 fn test_treeview_click_collapses_when_flag_on() {
-    use std::sync::Arc;
-    use crate::text::Font;
-    use crate::geometry::{Point, Size};
     use crate::event::Modifiers;
+    use crate::geometry::{Point, Size};
+    use crate::text::Font;
+    use std::sync::Arc;
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
 
     let mut tv = crate::widgets::tree_view::TreeView::new(Arc::clone(&font))
         .with_row_height(20.0)
-        .with_toggle_on_row_click();  // file-explorer mode
+        .with_toggle_on_row_click(); // file-explorer mode
 
     let root = tv.add_root("Root", crate::widgets::tree_view::NodeIcon::Package);
     tv.expand(root);
@@ -1232,7 +1495,8 @@ fn test_treeview_click_collapses_when_flag_on() {
     tv.layout(Size::new(300.0, 200.0));
 
     assert_eq!(
-        tv.children().len(), 1,
+        tv.children().len(),
+        1,
         "clicking root row body must collapse it when toggle_on_row_click = true"
     );
 }
@@ -1262,7 +1526,10 @@ fn test_push_pop_layer_solid_composites_correctly() {
     drop(ctx);
 
     let center = sample(&fb, 10, 10);
-    assert!(is_red(center), "After layer composite, centre must be red; got {center:?}");
+    assert!(
+        is_red(center),
+        "After layer composite, centre must be red; got {center:?}"
+    );
 }
 
 /// A layer with 50 % alpha blended onto a white background must produce a
@@ -1286,8 +1553,14 @@ fn test_push_pop_layer_alpha_blends_into_parent() {
     let [r, g, b, _] = sample(&fb, 10, 10);
     // Result should be pink: R high, G and B ~midway (not 0, not 255).
     assert!(r > 200, "Red channel must be high; got {r}");
-    assert!(g > 80 && g < 200, "Green channel must be mid-tone (pink); got {g}");
-    assert!(b > 80 && b < 200, "Blue channel must be mid-tone (pink); got {b}");
+    assert!(
+        g > 80 && g < 200,
+        "Green channel must be mid-tone (pink); got {g}"
+    );
+    assert!(
+        b > 80 && b < 200,
+        "Blue channel must be mid-tone (pink); got {b}"
+    );
 }
 
 /// DELETED — Label backbuffer tests
@@ -1303,7 +1576,6 @@ fn test_push_pop_layer_alpha_blends_into_parent() {
 /// LCD correctness tests live in `text_lcd::tests`.
 #[cfg(any())]
 fn _deleted_backbuffer_tests_marker() {}
-
 
 /// **Window layout NEVER mutates saved bounds.**
 ///
@@ -1322,10 +1594,10 @@ fn _deleted_backbuffer_tests_marker() {}
 /// exercised separately.
 #[test]
 fn test_window_layout_never_mutates_bounds() {
-    use std::sync::Arc;
     use crate::text::Font;
-    use crate::Label;
     use crate::widgets::window::Window;
+    use crate::Label;
+    use std::sync::Arc;
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
@@ -1336,24 +1608,22 @@ fn test_window_layout_never_mutates_bounds() {
     // canvas, "out of reach" under a small one — the scenario where a
     // buggy clamp would have triggered.
     let saved = crate::geometry::Rect::new(50.0, 800.0, 400.0, 200.0);
-    let mut win = Window::new("Test", Arc::clone(&font), content)
-        .with_bounds(saved);
+    let mut win = Window::new("Test", Arc::clone(&font), content).with_bounds(saved);
 
     // Each of these layout passes must leave `bounds` untouched.
     let sizes = [
-        (800.0,  600.0),   // transient startup frame
-        (1920.0, 1017.0),  // fullscreen
-        (800.0,  600.0),   // fullscreen-exit transient → would have
-                           //  corrupted state under the old clamp policy
-        (1920.0, 1017.0),  // stabilise
+        (800.0, 600.0),   // transient startup frame
+        (1920.0, 1017.0), // fullscreen
+        (800.0, 600.0),   // fullscreen-exit transient → would have
+        //  corrupted state under the old clamp policy
+        (1920.0, 1017.0), // stabilise
     ];
     for (w, h) in sizes {
-        let _ = <Window as crate::widget::Widget>::layout(
-            &mut win,
-            crate::geometry::Size::new(w, h),
-        );
+        let _ =
+            <Window as crate::widget::Widget>::layout(&mut win, crate::geometry::Size::new(w, h));
         assert_eq!(
-            win.bounds().y, 800.0,
+            win.bounds().y,
+            800.0,
             "layout({w}, {h}) mutated bounds.y to {} — auto-save would \
              now persist the mutated position, corrupting saved state",
             win.bounds().y,
@@ -1370,11 +1640,15 @@ fn test_window_layout_never_mutates_bounds() {
 /// child through the `dyn Widget` trait object.
 #[test]
 fn test_sidebar_toggle_reorders_stack_to_end() {
+    use crate::widgets::{primitives::Stack, window::Window};
+    use crate::{
+        geometry::{Rect, Size},
+        text::Font,
+        Label, Widget,
+    };
     use std::cell::Cell;
     use std::rc::Rc;
     use std::sync::Arc;
-    use crate::{geometry::{Rect, Size}, text::Font, Label, Widget};
-    use crate::widgets::{primitives::Stack, window::Window};
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
@@ -1387,10 +1661,13 @@ fn test_sidebar_toggle_reorders_stack_to_end() {
 
     let make = |x: f64, vis: Rc<Cell<bool>>| -> Box<dyn Widget> {
         Box::new(
-            Window::new("W", Arc::clone(&font),
-                Box::new(Label::new("x", Arc::clone(&font))))
-                .with_bounds(Rect::new(x, 0.0, 200.0, 120.0))
-                .with_visible_cell(vis)
+            Window::new(
+                "W",
+                Arc::clone(&font),
+                Box::new(Label::new("x", Arc::clone(&font))),
+            )
+            .with_bounds(Rect::new(x, 0.0, 200.0, 120.0))
+            .with_visible_cell(vis),
         )
     };
 
@@ -1398,7 +1675,7 @@ fn test_sidebar_toggle_reorders_stack_to_end() {
         Stack::new()
             .add(make(100.0, Rc::clone(&a_visible)))
             .add(make(200.0, Rc::clone(&b_visible)))
-            .add(make(300.0, Rc::clone(&c_visible)))
+            .add(make(300.0, Rc::clone(&c_visible))),
     );
 
     // Baseline layout — seeds each Window's `last_visible`.
@@ -1443,31 +1720,38 @@ fn test_sidebar_toggle_reorders_stack_to_end() {
 /// painted on top).
 #[test]
 fn test_raise_takes_effect_same_frame_as_visibility_toggle() {
+    use crate::widgets::{primitives::Stack, window::Window};
+    use crate::{
+        geometry::{Rect, Size},
+        text::Font,
+        Label, Widget,
+    };
     use std::cell::Cell;
     use std::rc::Rc;
     use std::sync::Arc;
-    use crate::{geometry::{Rect, Size}, text::Font, Label, Widget};
-    use crate::widgets::{primitives::Stack, window::Window};
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
 
     let a_visible = Rc::new(Cell::new(false)); // closed
-    let b_visible = Rc::new(Cell::new(true));  // open
+    let b_visible = Rc::new(Cell::new(true)); // open
 
     let make = |vis: Rc<Cell<bool>>| -> Box<dyn Widget> {
         Box::new(
-            Window::new("W", Arc::clone(&font),
-                Box::new(Label::new("x", Arc::clone(&font))))
-                .with_bounds(Rect::new(0.0, 0.0, 200.0, 120.0))
-                .with_visible_cell(vis)
+            Window::new(
+                "W",
+                Arc::clone(&font),
+                Box::new(Label::new("x", Arc::clone(&font))),
+            )
+            .with_bounds(Rect::new(0.0, 0.0, 200.0, 120.0))
+            .with_visible_cell(vis),
         )
     };
 
     let mut stack: Box<dyn Widget> = Box::new(
         Stack::new()
             .add(make(Rc::clone(&a_visible))) // index 0 (back)
-            .add(make(Rc::clone(&b_visible))) // index 1 (front)
+            .add(make(Rc::clone(&b_visible))), // index 1 (front)
     );
 
     // Frame 1 — establish baseline: A invisible, B visible.  Window.layout
@@ -1487,12 +1771,16 @@ fn test_raise_takes_effect_same_frame_as_visibility_toggle() {
     // we can assert that no child has a pending raise (proves Stack ran
     // the drain AFTER children.layout, catching the rising-edge raise that
     // was set during this same layout pass).
-    assert!(!stack.children_mut()[0].take_raise_request(),
+    assert!(
+        !stack.children_mut()[0].take_raise_request(),
         "child 0 still has a pending raise — Stack drain ran before \
          Window.layout set the flag; sidebar-opened windows will paint \
-         in the back for one frame");
-    assert!(!stack.children_mut()[1].take_raise_request(),
-        "child 1 still has a pending raise — same bug");
+         in the back for one frame"
+    );
+    assert!(
+        !stack.children_mut()[1].take_raise_request(),
+        "child 1 still has a pending raise — same bug"
+    );
 }
 
 /// **Raise-on-activation.**
@@ -1505,11 +1793,15 @@ fn test_raise_takes_effect_same_frame_as_visibility_toggle() {
 /// first; the first must end up last.
 #[test]
 fn test_window_raises_on_visibility_rising_edge() {
+    use crate::widgets::{primitives::Stack, window::Window};
+    use crate::{
+        geometry::{Rect, Size},
+        text::Font,
+        Label, Widget,
+    };
     use std::cell::Cell;
     use std::rc::Rc;
     use std::sync::Arc;
-    use crate::{geometry::{Rect, Size}, text::Font, Label, Widget};
-    use crate::widgets::{primitives::Stack, window::Window};
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
@@ -1521,17 +1813,20 @@ fn test_window_raises_on_visibility_rising_edge() {
 
     let make = |title: &str, vis: Rc<Cell<bool>>| -> Box<dyn Widget> {
         Box::new(
-            Window::new(title, Arc::clone(&font),
-                Box::new(Label::new("x", Arc::clone(&font))))
-                .with_bounds(Rect::new(0.0, 0.0, 200.0, 120.0))
-                .with_visible_cell(vis)
+            Window::new(
+                title,
+                Arc::clone(&font),
+                Box::new(Label::new("x", Arc::clone(&font))),
+            )
+            .with_bounds(Rect::new(0.0, 0.0, 200.0, 120.0))
+            .with_visible_cell(vis),
         )
     };
 
     let mut stack: Box<dyn Widget> = Box::new(
         Stack::new()
             .add(make("A", Rc::clone(&a_visible)))
-            .add(make("B", Rc::clone(&b_visible)))
+            .add(make("B", Rc::clone(&b_visible))),
     );
 
     // Frame 1 — both visible, both have visibility seeded true in
@@ -1545,11 +1840,11 @@ fn test_window_raises_on_visibility_rising_edge() {
     let _ = stack.layout(Size::new(1024.0, 768.0)); // A goes invisible
     a_visible.set(true);
     let _ = stack.layout(Size::new(1024.0, 768.0)); // A: false→true transition
-    // A's raise should have fired; the Stack should have moved A to the end.
-    // We can't easily peek at the Window's title through the trait boundary,
-    // so the best structural check is: only Windows are in the Stack, and
-    // the order reflects the raise.  Re-toggle B to confirm a second raise
-    // lands ABOVE the first.
+                                                    // A's raise should have fired; the Stack should have moved A to the end.
+                                                    // We can't easily peek at the Window's title through the trait boundary,
+                                                    // so the best structural check is: only Windows are in the Stack, and
+                                                    // the order reflects the raise.  Re-toggle B to confirm a second raise
+                                                    // lands ABOVE the first.
     b_visible.set(false);
     let _ = stack.layout(Size::new(1024.0, 768.0)); // B invisible
     b_visible.set(true);
@@ -1559,10 +1854,14 @@ fn test_window_raises_on_visibility_rising_edge() {
     // each child's raise flag by running `take_raise_request` — if the
     // mechanism actually fired, the raise flags are already cleared and
     // calling again returns false.
-    assert!(!stack.children_mut()[0].take_raise_request(),
-        "first child still has a pending raise — Stack didn't consume it");
-    assert!(!stack.children_mut()[1].take_raise_request(),
-        "second child still has a pending raise — Stack didn't consume it");
+    assert!(
+        !stack.children_mut()[0].take_raise_request(),
+        "first child still has a pending raise — Stack didn't consume it"
+    );
+    assert!(
+        !stack.children_mut()[1].take_raise_request(),
+        "second child still has a pending raise — Stack didn't consume it"
+    );
 
     // Re-toggle A and assert the NEXT layout puts A last.  We capture a
     // uniquely-identifiable marker on A via a probe child.
@@ -1614,40 +1913,54 @@ fn test_window_raises_on_visibility_rising_edge() {
 /// removes the `paint_subtree` entry snap again, this regresses.
 #[test]
 fn test_paint_subtree_snaps_ctm_for_manual_translate_entry() {
-    use std::cell::Cell;
-    use std::rc::Rc;
     use crate::draw_ctx::DrawCtx;
+    use crate::event::{Event, EventResult};
     use crate::geometry::Rect;
     use crate::widget::{paint_subtree, Widget};
-    use crate::event::{Event, EventResult};
     use agg_rust::trans_affine::TransAffine;
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     /// Widget that captures the CTM present at its `paint()` entry.
     struct CtmProbe {
-        bounds:   Rect,
+        bounds: Rect,
         children: Vec<Box<dyn Widget>>,
         captured: Rc<Cell<Option<TransAffine>>>,
     }
 
     impl Widget for CtmProbe {
-        fn type_name(&self) -> &'static str { "CtmProbe" }
-        fn bounds(&self) -> Rect { self.bounds }
-        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+        fn type_name(&self) -> &'static str {
+            "CtmProbe"
+        }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
         fn layout(&mut self, available: Size) -> Size {
-            Size::new(self.bounds.width.min(available.width),
-                      self.bounds.height.min(available.height))
+            Size::new(
+                self.bounds.width.min(available.width),
+                self.bounds.height.min(available.height),
+            )
         }
         fn paint(&mut self, ctx: &mut dyn DrawCtx) {
             self.captured.set(Some(ctx.transform()));
         }
-        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
     }
 
     let captured = Rc::new(Cell::new(None));
     let mut probe = CtmProbe {
-        bounds:   Rect::new(0.0, 0.0, 10.0, 10.0),
+        bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
         children: Vec::new(),
         captured: Rc::clone(&captured),
     };
@@ -1664,12 +1977,14 @@ fn test_paint_subtree_snaps_ctm_for_manual_translate_entry() {
 
     let ctm = captured.get().expect("probe must have been painted");
     assert_eq!(
-        ctm.tx.fract(), 0.0,
+        ctm.tx.fract(),
+        0.0,
         "tx still fractional at paint() entry: {} — paint_subtree snap regressed",
         ctm.tx,
     );
     assert_eq!(
-        ctm.ty.fract(), 0.0,
+        ctm.ty.fract(),
+        0.0,
         "ty still fractional at paint() entry: {} — paint_subtree snap regressed",
         ctm.ty,
     );
@@ -1684,39 +1999,55 @@ fn test_paint_subtree_snaps_ctm_for_manual_translate_entry() {
 /// zoomed canvases.
 #[test]
 fn test_paint_subtree_preserves_fractional_ctm_when_opted_out() {
-    use std::cell::Cell;
-    use std::rc::Rc;
     use crate::draw_ctx::DrawCtx;
+    use crate::event::{Event, EventResult};
     use crate::geometry::Rect;
     use crate::widget::{paint_subtree, Widget};
-    use crate::event::{Event, EventResult};
     use agg_rust::trans_affine::TransAffine;
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     struct SubpixelProbe {
-        bounds:   Rect,
+        bounds: Rect,
         children: Vec<Box<dyn Widget>>,
         captured: Rc<Cell<Option<TransAffine>>>,
     }
     impl Widget for SubpixelProbe {
-        fn type_name(&self) -> &'static str { "SubpixelProbe" }
-        fn bounds(&self) -> Rect { self.bounds }
-        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+        fn type_name(&self) -> &'static str {
+            "SubpixelProbe"
+        }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
         fn layout(&mut self, available: Size) -> Size {
-            Size::new(self.bounds.width.min(available.width),
-                      self.bounds.height.min(available.height))
+            Size::new(
+                self.bounds.width.min(available.width),
+                self.bounds.height.min(available.height),
+            )
         }
         fn paint(&mut self, ctx: &mut dyn DrawCtx) {
             self.captured.set(Some(ctx.transform()));
         }
-        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-        fn enforce_integer_bounds(&self) -> bool { false } // opt out
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+        fn enforce_integer_bounds(&self) -> bool {
+            false
+        } // opt out
     }
 
     let captured = Rc::new(Cell::new(None));
     let mut probe = SubpixelProbe {
-        bounds:   Rect::new(0.0, 0.0, 10.0, 10.0),
+        bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
         children: Vec::new(),
         captured: Rc::clone(&captured),
     };
@@ -1728,8 +2059,16 @@ fn test_paint_subtree_preserves_fractional_ctm_when_opted_out() {
 
     let ctm = captured.get().expect("probe must have been painted");
     // Opt-out honoured: CTM passes through untouched.
-    assert!((ctm.tx - 100.3).abs() < 1e-9, "opt-out widget had tx snapped: {}", ctm.tx);
-    assert!((ctm.ty - 50.7).abs() < 1e-9, "opt-out widget had ty snapped: {}", ctm.ty);
+    assert!(
+        (ctm.tx - 100.3).abs() < 1e-9,
+        "opt-out widget had tx snapped: {}",
+        ctm.tx
+    );
+    assert!(
+        (ctm.ty - 50.7).abs() < 1e-9,
+        "opt-out widget had ty snapped: {}",
+        ctm.ty
+    );
 }
 
 /// AGG's software rasterizer, given **integer-aligned** 1-px-wide fills at
@@ -1774,7 +2113,11 @@ fn test_agg_rasters_1px_stripes_with_zero_gray() {
             let off = y * row_bytes + x * 4;
             let px = &pixels[off..off + 4];
             let expected_white = x % 2 == 0;
-            let (er, eg, eb) = if expected_white { (255, 255, 255) } else { (0, 0, 0) };
+            let (er, eg, eb) = if expected_white {
+                (255, 255, 255)
+            } else {
+                (0, 0, 0)
+            };
             assert_eq!(
                 (px[0], px[1], px[2], px[3]),
                 (er, eg, eb, 255),
@@ -1848,11 +2191,11 @@ fn test_snap_to_pixel_zeros_fractional_translation() {
 /// This test reproduces the snap-to-zero bug and guards the mouse-capture fix.
 #[test]
 fn test_slider_drag_outside_bounds_tracks_cursor() {
-    use std::rc::Rc;
-    use std::cell::Cell;
-    use std::sync::Arc;
-    use crate::widgets::slider::Slider;
     use crate::text::Font;
+    use crate::widgets::slider::Slider;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::Arc;
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
@@ -1861,11 +2204,12 @@ fn test_slider_drag_outside_bounds_tracks_cursor() {
     let lv = Rc::clone(&last_val);
 
     // 200 × 36 px slider, value range [0, 1].
-    let slider = Slider::new(0.5, 0.0, 1.0, Arc::clone(&font))
-        .on_change(move |v| lv.set(v));
+    let slider = Slider::new(0.5, 0.0, 1.0, Arc::clone(&font)).on_change(move |v| lv.set(v));
 
     let mut app = App::new(Box::new(
-        SizedBox::new().with_width(200.0).with_height(36.0)
+        SizedBox::new()
+            .with_width(200.0)
+            .with_height(36.0)
             .with_child(Box::new(slider)),
     ));
     app.layout(Size::new(200.0, 36.0));
@@ -1876,14 +2220,16 @@ fn test_slider_drag_outside_bounds_tracks_cursor() {
     // Drag far to the right (outside slider bounds) — value must clamp to max.
     app.on_mouse_move(9999.0, 18.0);
     assert_eq!(
-        last_val.get(), 1.0,
+        last_val.get(),
+        1.0,
         "dragging outside right must clamp to max (1.0), not snap to 0.0"
     );
 
     // Drag far to the left — value must clamp to min.
     app.on_mouse_move(-9999.0, 18.0);
     assert_eq!(
-        last_val.get(), 0.0,
+        last_val.get(),
+        0.0,
         "dragging outside left must clamp to min (0.0)"
     );
 
@@ -1894,7 +2240,8 @@ fn test_slider_drag_outside_bounds_tracks_cursor() {
     last_val.set(999.0); // sentinel
     app.on_mouse_move(100.0, 18.0);
     assert_eq!(
-        last_val.get(), 999.0,
+        last_val.get(),
+        999.0,
         "after mouse-up the slider must stop tracking cursor movement"
     );
 }
@@ -1903,8 +2250,10 @@ fn test_slider_drag_outside_bounds_tracks_cursor() {
 // Phase 7 — Layout property system tests
 // ---------------------------------------------------------------------------
 
-use crate::{HAnchor, Insets, Padding, Separator, VAnchor, WidgetBase,
-            device_scale, set_device_scale, resolve_fit_or_stretch};
+use crate::{
+    device_scale, resolve_fit_or_stretch, set_device_scale, HAnchor, Insets, Padding, VAnchor,
+    WidgetBase,
+};
 
 // --- Insets arithmetic ------------------------------------------------------
 
@@ -1921,14 +2270,14 @@ fn test_insets_all() {
 fn test_insets_symmetric() {
     let i = Insets::symmetric(10.0, 4.0);
     assert_eq!(i.horizontal(), 20.0);
-    assert_eq!(i.vertical(),    8.0);
+    assert_eq!(i.vertical(), 8.0);
 }
 
 #[test]
 fn test_insets_scale() {
     let i = Insets::all(3.0).scale(2.0);
     assert_eq!(i.left, 6.0);
-    assert_eq!(i.top,  6.0);
+    assert_eq!(i.top, 6.0);
 }
 
 // --- HAnchor / VAnchor bitflag algebra --------------------------------------
@@ -1985,7 +2334,7 @@ fn test_widget_base_clamp_size() {
     base.max_size = Size::new(200.0, 100.0);
 
     let clamped = base.clamp_size(Size::new(10.0, 150.0));
-    assert_eq!(clamped.width,  50.0,  "below min should clamp to min_w");
+    assert_eq!(clamped.width, 50.0, "below min should clamp to min_w");
     assert_eq!(clamped.height, 100.0, "above max should clamp to max_h");
 }
 
@@ -2023,15 +2372,24 @@ fn test_padding_asymmetric_layout() {
     // Inner available: (100-10-20) × (80-5-15) = 70 × 60.
     // Spacer returns its full inner size, so content = 70 × 60.
     // Outer = 70+30 × 60+20 = 100 × 80.
-    assert_eq!(outer.width,  100.0, "outer width should equal available.width");
-    assert_eq!(outer.height,  80.0, "outer height should equal available.height");
+    assert_eq!(
+        outer.width, 100.0,
+        "outer width should equal available.width"
+    );
+    assert_eq!(
+        outer.height, 80.0,
+        "outer height should equal available.height"
+    );
 
     // Child bounds (in Padding-local Y-up coords): x=left=10, y=bottom=15.
     let cb = w.children()[0].bounds();
-    assert_eq!(cb.x,      10.0, "child x should be left inset");
-    assert_eq!(cb.y,      15.0, "child y should be bottom inset (Y-up)");
-    assert_eq!(cb.width,  70.0, "child width = available.width - h_insets");
-    assert_eq!(cb.height, 60.0, "child height = available.height - v_insets");
+    assert_eq!(cb.x, 10.0, "child x should be left inset");
+    assert_eq!(cb.y, 15.0, "child y should be bottom inset (Y-up)");
+    assert_eq!(cb.width, 70.0, "child width = available.width - h_insets");
+    assert_eq!(
+        cb.height, 60.0,
+        "child height = available.height - v_insets"
+    );
 }
 
 /// `Padding::uniform` is a convenience alias.
@@ -2039,7 +2397,7 @@ fn test_padding_asymmetric_layout() {
 fn test_padding_uniform_alias() {
     let mut w = Padding::uniform(8.0, Box::new(Spacer::new()));
     let outer = w.layout(Size::new(50.0, 40.0));
-    assert_eq!(outer.width,  50.0);
+    assert_eq!(outer.width, 50.0);
     assert_eq!(outer.height, 40.0);
     let cb = w.children()[0].bounds();
     assert_eq!(cb.x, 8.0);
@@ -2051,10 +2409,7 @@ fn test_padding_uniform_alias() {
 /// Child with `h_anchor = RIGHT` should be placed at the right edge of the box.
 #[test]
 fn test_sized_box_child_right_anchor() {
-    let child = Box::new(
-        SizedBox::fixed(30.0, 20.0)
-            .with_h_anchor(HAnchor::RIGHT),
-    );
+    let child = Box::new(SizedBox::fixed(30.0, 20.0).with_h_anchor(HAnchor::RIGHT));
     let mut outer = SizedBox::new()
         .with_width(100.0)
         .with_height(50.0)
@@ -2070,10 +2425,7 @@ fn test_sized_box_child_right_anchor() {
 /// Child with `v_anchor = TOP` should be placed at the top (high Y) of the box.
 #[test]
 fn test_sized_box_child_top_anchor() {
-    let child = Box::new(
-        SizedBox::fixed(20.0, 15.0)
-            .with_v_anchor(VAnchor::TOP),
-    );
+    let child = Box::new(SizedBox::fixed(20.0, 15.0).with_v_anchor(VAnchor::TOP));
     let mut outer = SizedBox::new()
         .with_width(50.0)
         .with_height(60.0)
@@ -2082,17 +2434,17 @@ fn test_sized_box_child_top_anchor() {
     outer.layout(Size::new(50.0, 60.0));
     let cb = outer.children()[0].bounds();
     // Top-aligned 15-tall child inside 60-tall box: y = 60 - 15 = 45.
-    assert_eq!(cb.y, 45.0, "top-anchor child y should be box_h - child_h (Y-up)");
+    assert_eq!(
+        cb.y, 45.0,
+        "top-anchor child y should be box_h - child_h (Y-up)"
+    );
     assert_eq!(cb.height, 15.0);
 }
 
 /// Child with `h_anchor = CENTER` should be horizontally centered.
 #[test]
 fn test_sized_box_child_center_h_anchor() {
-    let child = Box::new(
-        SizedBox::fixed(20.0, 10.0)
-            .with_h_anchor(HAnchor::CENTER),
-    );
+    let child = Box::new(SizedBox::fixed(20.0, 10.0).with_h_anchor(HAnchor::CENTER));
     let mut outer = SizedBox::new()
         .with_width(100.0)
         .with_height(50.0)
@@ -2101,16 +2453,16 @@ fn test_sized_box_child_center_h_anchor() {
     outer.layout(Size::new(100.0, 50.0));
     let cb = outer.children()[0].bounds();
     // Centered: x = (100 - 20) / 2 = 40.
-    assert_eq!(cb.x, 40.0, "center-h child x should be (box_w - child_w) / 2");
+    assert_eq!(
+        cb.x, 40.0,
+        "center-h child x should be (box_w - child_w) / 2"
+    );
 }
 
 /// Child with `h_anchor = STRETCH` should fill the box width.
 #[test]
 fn test_sized_box_child_stretch() {
-    let child = Box::new(
-        SizedBox::fixed(20.0, 10.0)
-            .with_h_anchor(HAnchor::STRETCH),
-    );
+    let child = Box::new(SizedBox::fixed(20.0, 10.0).with_h_anchor(HAnchor::STRETCH));
     let mut outer = SizedBox::new()
         .with_width(100.0)
         .with_height(50.0)
@@ -2118,7 +2470,7 @@ fn test_sized_box_child_stretch() {
 
     outer.layout(Size::new(100.0, 50.0));
     let cb = outer.children()[0].bounds();
-    assert_eq!(cb.x,     0.0,   "stretched child should start at x=0");
+    assert_eq!(cb.x, 0.0, "stretched child should start at x=0");
     assert_eq!(cb.width, 100.0, "stretched child should fill box width");
 }
 
@@ -2127,18 +2479,10 @@ fn test_sized_box_child_stretch() {
 /// Children with LEFT / CENTER / RIGHT h_anchor must be placed correctly.
 #[test]
 fn test_flex_column_cross_axis_anchors() {
-    let left_child = Box::new(
-        SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::LEFT),
-    );
-    let center_child = Box::new(
-        SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::CENTER),
-    );
-    let right_child = Box::new(
-        SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::RIGHT),
-    );
-    let stretch_child = Box::new(
-        SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::STRETCH),
-    );
+    let left_child = Box::new(SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::LEFT));
+    let center_child = Box::new(SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::CENTER));
+    let right_child = Box::new(SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::RIGHT));
+    let stretch_child = Box::new(SizedBox::fixed(30.0, 10.0).with_h_anchor(HAnchor::STRETCH));
 
     let mut col = FlexColumn::new()
         .with_gap(0.0)
@@ -2154,11 +2498,14 @@ fn test_flex_column_cross_axis_anchors() {
     assert_eq!(children[0].bounds().x, 0.0, "LEFT child x");
     // CENTER: x = (100 - 30) / 2 = 35
     let center_x = children[1].bounds().x;
-    assert!((center_x - 35.0).abs() < 0.5, "CENTER child x ≈ 35, got {center_x}");
+    assert!(
+        (center_x - 35.0).abs() < 0.5,
+        "CENTER child x ≈ 35, got {center_x}"
+    );
     // RIGHT: x = 100 - 30 = 70
     assert_eq!(children[2].bounds().x, 70.0, "RIGHT child x");
     // STRETCH: x = 0, width = 100
-    assert_eq!(children[3].bounds().x,     0.0,   "STRETCH child x");
+    assert_eq!(children[3].bounds().x, 0.0, "STRETCH child x");
     assert_eq!(children[3].bounds().width, 100.0, "STRETCH child width");
 }
 
@@ -2171,12 +2518,10 @@ fn test_flex_column_child_margin_spacing() {
     // Two 10-tall children; first has margin.bottom = 5, second has margin.top = 3.
     // Gap = 0.  Total spacing between them = 5 + 3 = 8.
     let top_child = Box::new(
-        SizedBox::fixed(50.0, 10.0)
-            .with_margin(Insets::from_sides(0.0, 0.0, 0.0, 5.0)), // bottom=5
+        SizedBox::fixed(50.0, 10.0).with_margin(Insets::from_sides(0.0, 0.0, 0.0, 5.0)), // bottom=5
     );
     let bot_child = Box::new(
-        SizedBox::fixed(50.0, 10.0)
-            .with_margin(Insets::from_sides(0.0, 0.0, 3.0, 0.0)), // top=3
+        SizedBox::fixed(50.0, 10.0).with_margin(Insets::from_sides(0.0, 0.0, 3.0, 0.0)), // top=3
     );
 
     let mut col = FlexColumn::new()
@@ -2205,15 +2550,9 @@ fn test_flex_column_child_margin_spacing() {
 /// FlexRow children with BOTTOM / CENTER / TOP v_anchor are placed correctly.
 #[test]
 fn test_flex_row_cross_axis_anchors() {
-    let bot_child = Box::new(
-        SizedBox::fixed(20.0, 15.0).with_v_anchor(VAnchor::BOTTOM),
-    );
-    let center_child = Box::new(
-        SizedBox::fixed(20.0, 15.0).with_v_anchor(VAnchor::CENTER),
-    );
-    let top_child = Box::new(
-        SizedBox::fixed(20.0, 15.0).with_v_anchor(VAnchor::TOP),
-    );
+    let bot_child = Box::new(SizedBox::fixed(20.0, 15.0).with_v_anchor(VAnchor::BOTTOM));
+    let center_child = Box::new(SizedBox::fixed(20.0, 15.0).with_v_anchor(VAnchor::CENTER));
+    let top_child = Box::new(SizedBox::fixed(20.0, 15.0).with_v_anchor(VAnchor::TOP));
 
     let mut row = FlexRow::new()
         .with_gap(0.0)
@@ -2239,25 +2578,27 @@ fn test_flex_row_cross_axis_anchors() {
 fn test_flex_column_respects_child_min_size() {
     // Child reports natural height 5, but min_size.height = 20.
     // The column must allocate at least 20 px.
-    let tiny = Box::new(
-        SizedBox::fixed(50.0, 5.0).with_min_size(Size::new(50.0, 20.0)),
-    );
+    let tiny = Box::new(SizedBox::fixed(50.0, 5.0).with_min_size(Size::new(50.0, 20.0)));
     let mut col = FlexColumn::new().add(tiny);
     col.layout(Size::new(100.0, 200.0));
-    assert_eq!(col.children()[0].bounds().height, 20.0,
-               "fixed child height must respect min_size");
+    assert_eq!(
+        col.children()[0].bounds().height,
+        20.0,
+        "fixed child height must respect min_size"
+    );
 }
 
 #[test]
 fn test_flex_column_respects_child_max_size() {
     // Child is flex(1) in a 200-tall column, but max_size.height = 30.
-    let big = Box::new(
-        SizedBox::fixed(50.0, 50.0).with_max_size(Size::new(50.0, 30.0)),
-    );
+    let big = Box::new(SizedBox::fixed(50.0, 50.0).with_max_size(Size::new(50.0, 30.0)));
     let mut col = FlexColumn::new().add_flex(big, 1.0);
     col.layout(Size::new(100.0, 200.0));
-    assert_eq!(col.children()[0].bounds().height, 30.0,
-               "flex child height must respect max_size");
+    assert_eq!(
+        col.children()[0].bounds().height,
+        30.0,
+        "flex child height must respect max_size"
+    );
 }
 
 // --- MIN_FIT_OR_STRETCH and MAX_FIT_OR_STRETCH in FlexColumn ----------------
@@ -2266,27 +2607,27 @@ fn test_flex_column_respects_child_max_size() {
 #[test]
 fn test_min_fit_or_stretch_uses_fit_when_smaller() {
     // Column is 100 wide, child natural width is 40 → min(40, 100) = 40.
-    let child = Box::new(
-        SizedBox::fixed(40.0, 10.0)
-            .with_h_anchor(HAnchor::MIN_FIT_OR_STRETCH),
-    );
+    let child = Box::new(SizedBox::fixed(40.0, 10.0).with_h_anchor(HAnchor::MIN_FIT_OR_STRETCH));
     let mut col = FlexColumn::new().add(child);
     col.layout(Size::new(100.0, 50.0));
-    assert_eq!(col.children()[0].bounds().width, 40.0,
-               "MIN_FIT_OR_STRETCH should use fit (40) when fit < stretch (100)");
+    assert_eq!(
+        col.children()[0].bounds().width,
+        40.0,
+        "MIN_FIT_OR_STRETCH should use fit (40) when fit < stretch (100)"
+    );
 }
 
 /// MAX_FIT_OR_STRETCH: child smaller than slot → use slot width (stretch wins).
 #[test]
 fn test_max_fit_or_stretch_uses_stretch_when_larger() {
-    let child = Box::new(
-        SizedBox::fixed(40.0, 10.0)
-            .with_h_anchor(HAnchor::MAX_FIT_OR_STRETCH),
-    );
+    let child = Box::new(SizedBox::fixed(40.0, 10.0).with_h_anchor(HAnchor::MAX_FIT_OR_STRETCH));
     let mut col = FlexColumn::new().add(child);
     col.layout(Size::new(100.0, 50.0));
-    assert_eq!(col.children()[0].bounds().width, 100.0,
-               "MAX_FIT_OR_STRETCH should use stretch (100) when stretch > fit (40)");
+    assert_eq!(
+        col.children()[0].bounds().width,
+        100.0,
+        "MAX_FIT_OR_STRETCH should use stretch (100) when stretch > fit (40)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2316,16 +2657,17 @@ fn test_lcd_mask_rounds_fractional_dst_to_pixel_grid() {
     // small so the test is trivial to reason about; positioning bugs
     // show up as one-pixel shifts in the composited output.
     let mask: Vec<u8> = vec![
-          0,   0,   0,    0,   0,   0,    0,   0,   0,
-          0,   0,   0,  255, 255, 255,    0,   0,   0,
-          0,   0,   0,    0,   0,   0,    0,   0,   0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
     let draw = |dst_x: f64, dst_y: f64| -> Framebuffer {
         let mut fb = Framebuffer::new(8, 8);
         // Fill white so the black mask is visible on composite.
         for p in fb.pixels_mut().chunks_exact_mut(4) {
-            p[0] = 255; p[1] = 255; p[2] = 255; p[3] = 255;
+            p[0] = 255;
+            p[1] = 255;
+            p[2] = 255;
+            p[3] = 255;
         }
         {
             let mut ctx = GfxCtx::new(&mut fb);
@@ -2334,19 +2676,28 @@ fn test_lcd_mask_rounds_fractional_dst_to_pixel_grid() {
         fb
     };
 
-    let integer     = draw(2.0, 2.0);
-    let fractional  = draw(2.4, 2.4);   // rounds to 2
-    let fractional2 = draw(1.6, 1.6);   // rounds to 2
-    assert_eq!(integer.pixels(), fractional.pixels(),
-        "LCD mask at fractional dst (2.4, 2.4) must round to integer grid");
-    assert_eq!(integer.pixels(), fractional2.pixels(),
-        "LCD mask at fractional dst (1.6, 1.6) must round to integer grid");
+    let integer = draw(2.0, 2.0);
+    let fractional = draw(2.4, 2.4); // rounds to 2
+    let fractional2 = draw(1.6, 1.6); // rounds to 2
+    assert_eq!(
+        integer.pixels(),
+        fractional.pixels(),
+        "LCD mask at fractional dst (2.4, 2.4) must round to integer grid"
+    );
+    assert_eq!(
+        integer.pixels(),
+        fractional2.pixels(),
+        "LCD mask at fractional dst (1.6, 1.6) must round to integer grid"
+    );
 
     // Cross-check the assertion is meaningful: shifting by a full pixel
     // (not just fractional noise) produces different output.
     let shifted = draw(3.0, 2.0);
-    assert_ne!(integer.pixels(), shifted.pixels(),
-        "integer-pixel shift should change output — otherwise the rounding test is vacuous");
+    assert_ne!(
+        integer.pixels(),
+        shifted.pixels(),
+        "integer-pixel shift should change output — otherwise the rounding test is vacuous"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2368,14 +2719,14 @@ fn test_lcd_mask_rounds_fractional_dst_to_pixel_grid() {
 /// LCD subpixel rendering.
 #[test]
 fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
-    use std::sync::Arc;
-    use crate::widget::{paint_subtree, BackbufferCache, BackbufferMode, Widget};
-    use crate::geometry::{Rect, Size};
-    use crate::event::{Event, EventResult};
     use crate::draw_ctx::DrawCtx;
+    use crate::event::{Event, EventResult};
     use crate::framebuffer::Framebuffer;
+    use crate::geometry::{Rect, Size};
     use crate::gfx_ctx::GfxCtx;
     use crate::text::Font;
+    use crate::widget::{paint_subtree, BackbufferCache, BackbufferMode, Widget};
+    use std::sync::Arc;
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
@@ -2384,18 +2735,30 @@ fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
     /// `paint_subtree` routes through `paint_subtree_backbuffered`.
     struct LcdTestWidget {
         bounds: Rect,
-        cache:  BackbufferCache,
-        font:   Arc<Font>,
+        cache: BackbufferCache,
+        font: Arc<Font>,
         children: Vec<Box<dyn Widget>>,
     }
 
     impl Widget for LcdTestWidget {
-        fn type_name(&self) -> &'static str { "LcdTestWidget" }
-        fn bounds(&self) -> Rect { self.bounds }
-        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-        fn layout(&mut self, available: Size) -> Size { available }
+        fn type_name(&self) -> &'static str {
+            "LcdTestWidget"
+        }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
         fn paint(&mut self, ctx: &mut dyn DrawCtx) {
             // Opaque bg covering full bounds — the LcdCoverage contract.
             ctx.set_fill_color(Color::white());
@@ -2408,18 +2771,22 @@ fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
             ctx.set_font_size(18.0);
             ctx.fill_text("abc", 4.0, 16.0);
         }
-        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
 
         fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
             Some(&mut self.cache)
         }
-        fn backbuffer_mode(&self) -> BackbufferMode { BackbufferMode::LcdCoverage }
+        fn backbuffer_mode(&self) -> BackbufferMode {
+            BackbufferMode::LcdCoverage
+        }
     }
 
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let mut widget = LcdTestWidget {
         bounds: Rect::new(0.0, 0.0, 60.0, 24.0),
-        cache:  BackbufferCache::default(),
+        cache: BackbufferCache::default(),
         font,
         children: Vec::new(),
     };
@@ -2437,9 +2804,15 @@ fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
     // `pixels` = premultiplied colour (3 B/px), `lcd_alpha` = per-channel
     // alpha (3 B/px).  Both must be present and correctly sized.
     let cache = widget.backbuffer_cache_mut().unwrap();
-    let color = cache.pixels.as_ref().expect("colour plane must be populated");
-    let alpha = cache.lcd_alpha.as_ref().expect("LcdCoverage mode must populate lcd_alpha");
-    assert_eq!(cache.width,  60);
+    let color = cache
+        .pixels
+        .as_ref()
+        .expect("colour plane must be populated");
+    let alpha = cache
+        .lcd_alpha
+        .as_ref()
+        .expect("LcdCoverage mode must populate lcd_alpha");
+    assert_eq!(cache.width, 60);
     assert_eq!(cache.height, 24);
     assert_eq!(color.len(), 60 * 24 * 3, "colour plane is 3 bytes/pixel");
     assert_eq!(alpha.len(), 60 * 24 * 3, "alpha plane is 3 bytes/pixel");
@@ -2467,12 +2840,16 @@ fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
     // Interior pixels satisfy this cleanly; buffer edges have the 5-tap
     // filter's reach issue and land a little less than 255, so we check
     // for "most pixels fully covered" rather than "every pixel".
-    let fully_covered = alpha.chunks_exact(3)
+    let fully_covered = alpha
+        .chunks_exact(3)
         .filter(|px| px[0] == 255 && px[1] == 255 && px[2] == 255)
         .count();
-    assert!(fully_covered > 60 * 24 / 2,
+    assert!(
+        fully_covered > 60 * 24 / 2,
         "more than half of cached pixels should have full per-channel alpha \
-         (opaque-bg widget); got {fully_covered} of {}", 60 * 24);
+         (opaque-bg widget); got {fully_covered} of {}",
+        60 * 24
+    );
 }
 
 /// `BackbufferMode::Rgba` (default) must keep using the existing
@@ -2481,47 +2858,63 @@ fn test_paint_subtree_backbuffered_lcd_coverage_routes_through_lcd_pipeline() {
 /// (no LCD chroma in the Rgba branch).
 #[test]
 fn test_paint_subtree_backbuffered_rgba_mode_unchanged() {
-    use std::sync::Arc;
-    use crate::widget::{paint_subtree, BackbufferCache, BackbufferMode, Widget};
-    use crate::geometry::{Rect, Size};
-    use crate::event::{Event, EventResult};
     use crate::draw_ctx::DrawCtx;
+    use crate::event::{Event, EventResult};
     use crate::framebuffer::Framebuffer;
+    use crate::geometry::{Rect, Size};
     use crate::gfx_ctx::GfxCtx;
     use crate::text::Font;
+    use crate::widget::{paint_subtree, BackbufferCache, BackbufferMode, Widget};
+    use std::sync::Arc;
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
     struct RgbaTestWidget {
         bounds: Rect,
-        cache:  BackbufferCache,
-        font:   Arc<Font>,
+        cache: BackbufferCache,
+        font: Arc<Font>,
         children: Vec<Box<dyn Widget>>,
     }
     impl Widget for RgbaTestWidget {
-        fn type_name(&self) -> &'static str { "RgbaTestWidget" }
-        fn bounds(&self) -> Rect { self.bounds }
-        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-        fn layout(&mut self, available: Size) -> Size { available }
+        fn type_name(&self) -> &'static str {
+            "RgbaTestWidget"
+        }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
         fn paint(&mut self, ctx: &mut dyn DrawCtx) {
             ctx.set_fill_color(Color::black());
             ctx.set_font(Arc::clone(&self.font));
             ctx.set_font_size(18.0);
             ctx.fill_text("abc", 4.0, 16.0);
         }
-        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
         fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
             Some(&mut self.cache)
         }
-        fn backbuffer_mode(&self) -> BackbufferMode { BackbufferMode::Rgba }
+        fn backbuffer_mode(&self) -> BackbufferMode {
+            BackbufferMode::Rgba
+        }
     }
 
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let mut widget = RgbaTestWidget {
         bounds: Rect::new(0.0, 0.0, 60.0, 24.0),
-        cache:  BackbufferCache::default(),
+        cache: BackbufferCache::default(),
         font,
         children: Vec::new(),
     };
@@ -2534,13 +2927,18 @@ fn test_paint_subtree_backbuffered_rgba_mode_unchanged() {
     }
 
     let cache = widget.backbuffer_cache_mut().unwrap();
-    let bmp = cache.pixels.as_ref().expect("backbuffer cache must be populated");
+    let bmp = cache
+        .pixels
+        .as_ref()
+        .expect("backbuffer cache must be populated");
     // Rgba path → text on transparent bg, no chroma signature.  Every
     // pixel must satisfy R == G == B (grayscale AA in straight alpha).
     for (i, px) in bmp.chunks_exact(4).enumerate() {
         let (r, g, b) = (px[0], px[1], px[2]);
-        assert!(r == g && g == b,
-            "Rgba mode must produce grayscale pixels (R==G==B); pixel {i} = ({r}, {g}, {b})");
+        assert!(
+            r == g && g == b,
+            "Rgba mode must produce grayscale pixels (R==G==B); pixel {i} = ({r}, {g}, {b})"
+        );
     }
 }
 
@@ -2557,8 +2955,8 @@ fn test_paint_subtree_backbuffered_rgba_mode_unchanged() {
 /// collapsing to grayscale.
 #[test]
 fn test_gfx_ctx_draw_lcd_backbuffer_arc_preserves_per_channel_chroma() {
-    use std::sync::Arc;
     use crate::draw_ctx::DrawCtx;
+    use std::sync::Arc;
 
     // 1×1 backbuffer: black premult colour (0 on all channels) with
     // distinct per-channel alphas.  Each subpixel "fades" the dst's
@@ -2585,15 +2983,26 @@ fn test_gfx_ctx_draw_lcd_backbuffer_arc_preserves_per_channel_chroma() {
     let r = fb.pixels()[0];
     let g = fb.pixels()[1];
     let b = fb.pixels()[2];
-    assert!((r as i32 - 205).abs() <= 1, "R should be ~205 (255-50), got {r}");
-    assert!((g as i32 - 155).abs() <= 1, "G should be ~155 (255-100), got {g}");
-    assert!((b as i32 -  55).abs() <= 1, "B should be ~55 (255-200), got {b}");
+    assert!(
+        (r as i32 - 205).abs() <= 1,
+        "R should be ~205 (255-50), got {r}"
+    );
+    assert!(
+        (g as i32 - 155).abs() <= 1,
+        "G should be ~155 (255-100), got {g}"
+    );
+    assert!(
+        (b as i32 - 55).abs() <= 1,
+        "B should be ~55 (255-200), got {b}"
+    );
     // Explicit chroma check — the three channels must differ by a lot
     // (the whole point of per-channel subpixel rendering).
     let mx = r.max(g).max(b);
     let mn = r.min(g).min(b);
-    assert!((mx - mn) > 100,
-        "per-channel blit must preserve chroma spread; got R={r} G={g} B={b}");
+    assert!(
+        (mx - mn) > 100,
+        "per-channel blit must preserve chroma spread; got R={r} G={g} B={b}"
+    );
 }
 
 /// **Full round-trip:** paint a widget that opts into `LcdCoverage`
@@ -2606,25 +3015,42 @@ fn test_gfx_ctx_draw_lcd_backbuffer_arc_preserves_per_channel_chroma() {
 /// AA) and this test would fail.
 #[test]
 fn test_paint_subtree_backbuffered_lcd_cache_preserves_chroma_at_destination() {
-    use std::sync::Arc;
-    use crate::widget::{paint_subtree, BackbufferCache, BackbufferMode, Widget};
-    use crate::geometry::{Rect, Size};
-    use crate::event::{Event, EventResult};
     use crate::draw_ctx::DrawCtx;
+    use crate::event::{Event, EventResult};
+    use crate::geometry::{Rect, Size};
     use crate::text::Font;
+    use crate::widget::{paint_subtree, BackbufferCache, BackbufferMode, Widget};
+    use std::sync::Arc;
 
     const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
     /// Same shape as the Step-3 widget: opaque white bg + black text,
     /// opts into LcdCoverage.
-    struct LcdW { bounds: Rect, cache: BackbufferCache, font: Arc<Font>, children: Vec<Box<dyn Widget>> }
+    struct LcdW {
+        bounds: Rect,
+        cache: BackbufferCache,
+        font: Arc<Font>,
+        children: Vec<Box<dyn Widget>>,
+    }
     impl Widget for LcdW {
-        fn type_name(&self) -> &'static str { "LcdW" }
-        fn bounds(&self) -> Rect { self.bounds }
-        fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-        fn layout(&mut self, available: Size) -> Size { available }
+        fn type_name(&self) -> &'static str {
+            "LcdW"
+        }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
         fn paint(&mut self, ctx: &mut dyn DrawCtx) {
             ctx.set_fill_color(Color::white());
             ctx.begin_path();
@@ -2635,17 +3061,21 @@ fn test_paint_subtree_backbuffered_lcd_cache_preserves_chroma_at_destination() {
             ctx.set_font_size(22.0);
             ctx.fill_text("Wing", 4.0, 20.0);
         }
-        fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
         fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
             Some(&mut self.cache)
         }
-        fn backbuffer_mode(&self) -> BackbufferMode { BackbufferMode::LcdCoverage }
+        fn backbuffer_mode(&self) -> BackbufferMode {
+            BackbufferMode::LcdCoverage
+        }
     }
 
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     let mut widget = LcdW {
         bounds: Rect::new(0.0, 0.0, 100.0, 30.0),
-        cache:  BackbufferCache::default(),
+        cache: BackbufferCache::default(),
         font,
         children: Vec::new(),
     };
@@ -2669,7 +3099,7 @@ fn test_paint_subtree_backbuffered_lcd_cache_preserves_chroma_at_destination() {
     for y in 0..h {
         for x in 0..w {
             let i = (y * w + x) * 4;
-            let r = fb.pixels()[i]     as i32;
+            let r = fb.pixels()[i] as i32;
             let g = fb.pixels()[i + 1] as i32;
             let b = fb.pixels()[i + 2] as i32;
             let mx = r.max(g).max(b);
@@ -2679,9 +3109,13 @@ fn test_paint_subtree_backbuffered_lcd_cache_preserves_chroma_at_destination() {
                 break;
             }
         }
-        if saw_chroma { break; }
+        if saw_chroma {
+            break;
+        }
     }
-    assert!(saw_chroma,
+    assert!(
+        saw_chroma,
         "LcdCoverage cache + draw_lcd_backbuffer_arc blit must land per-channel \
-         chroma in the destination framebuffer — proves chroma survived the cache");
+         chroma in the destination framebuffer — proves chroma survived the cache"
+    );
 }

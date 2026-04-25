@@ -16,26 +16,25 @@
 //! - Placeholder text, read-only mode, SelectAllOnFocus
 //! - Callbacks: on_change, on_enter, on_edit_complete
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 // web-time provides a WASM-compatible Instant (uses performance.now() in the
 // browser; falls back to Instant on native).
 use web_time::Instant;
 
+use super::text_field_core::{
+    byte_at_x, next_char_boundary, next_word_boundary, prev_char_boundary, prev_word_boundary,
+    word_range_at, TextEditCommand, TextEditState,
+};
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::{Font, measure_advance};
+use crate::text::{measure_advance, Font};
 use crate::undo::UndoBuffer;
 use crate::widget::{BackbufferCache, BackbufferMode, Widget};
-use super::text_field_core::{
-    TextEditCommand, TextEditState,
-    byte_at_x, next_char_boundary, next_word_boundary,
-    prev_char_boundary, prev_word_boundary, word_range_at,
-};
 
 // ---------------------------------------------------------------------------
 // Clipboard stubs
@@ -47,14 +46,20 @@ fn clipboard_get() -> Option<String> {
 }
 /// Native non-clipboard build: silently no-ops (clipboard disabled at compile time).
 #[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
-fn clipboard_get() -> Option<String> { None }
+fn clipboard_get() -> Option<String> {
+    None
+}
 /// WASM build: read from the in-process buffer bridged by the JS harness.
 #[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn clipboard_get() -> Option<String> { crate::wasm_clipboard::get() }
+fn clipboard_get() -> Option<String> {
+    crate::wasm_clipboard::get()
+}
 
 #[cfg(feature = "clipboard")]
 fn clipboard_set(text: &str) {
-    if let Ok(mut cb) = arboard::Clipboard::new() { let _ = cb.set_text(text.to_string()); }
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        let _ = cb.set_text(text.to_string());
+    }
 }
 /// Native non-clipboard build: silently no-ops.
 #[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
@@ -62,7 +67,9 @@ fn clipboard_set(_: &str) {}
 /// WASM build: write to the in-process buffer so the JS `copy`/`cut` handler
 /// can forward it to the browser's system clipboard.
 #[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn clipboard_set(text: &str) { crate::wasm_clipboard::set(text); }
+fn clipboard_set(text: &str) {
+    crate::wasm_clipboard::set(text);
+}
 
 // ---------------------------------------------------------------------------
 // TextField
@@ -70,9 +77,9 @@ fn clipboard_set(text: &str) { crate::wasm_clipboard::set(text); }
 
 /// Single-line editable text field.
 pub struct TextField {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    base:     WidgetBase,
+    base: WidgetBase,
 
     // All mutable editing state lives here — shared with undo commands.
     edit: Rc<RefCell<TextEditState>>,
@@ -87,21 +94,21 @@ pub struct TextField {
     text_on_focus: String,
 
     // Font
-    font:      Arc<Font>,
+    font: Arc<Font>,
     font_size: f64,
 
     // Editing options
-    pub read_only:           bool,
+    pub read_only: bool,
     pub select_all_on_focus: bool,
     /// When `true`, every character is displayed as '•' (U+2022).
     /// The actual text is stored and edited normally; only the render is masked.
-    pub password_mode:       bool,
+    pub password_mode: bool,
 
     // Interaction state
-    focused:    bool,
-    hovered:    bool,
+    focused: bool,
+    hovered: bool,
     mouse_down: bool,
-    scroll_x:   f64,
+    scroll_x: f64,
 
     // Cursor blink: set to Some(Instant::now()) on FocusGained.
     focus_time: Option<Instant>,
@@ -123,8 +130,8 @@ pub struct TextField {
     pub padding: f64,
 
     // Callbacks
-    on_change:        Option<Box<dyn FnMut(&str)>>,
-    on_enter:         Option<Box<dyn FnMut(&str)>>,
+    on_change: Option<Box<dyn FnMut(&str)>>,
+    on_enter: Option<Box<dyn FnMut(&str)>>,
     on_edit_complete: Option<Box<dyn FnMut(&str)>>,
 
     // ── Backbuffer cache ─────────────────────────────────────────────
@@ -133,59 +140,59 @@ pub struct TextField {
     // `paint_overlay` directly on the outer ctx AFTER the cache blit
     // so cursor-blink state flips (twice per second) don't invalidate
     // the cache.  Sig deliberately excludes `blink_visible`.
-    cache:    BackbufferCache,
+    cache: BackbufferCache,
     last_sig: Option<TextFieldSig>,
 }
 
 #[derive(Clone, PartialEq)]
 struct TextFieldSig {
-    text:          String,
-    cursor:        usize,
-    anchor:        usize,
-    focused:       bool,
-    hovered:       bool,
+    text: String,
+    cursor: usize,
+    anchor: usize,
+    focused: bool,
+    hovered: bool,
     scroll_x_bits: u64,
-    w_bits:        u64,
-    h_bits:        u64,
+    w_bits: u64,
+    h_bits: u64,
     // Font identity + size: the cached bitmap was rasterised with a specific
     // typeface at a specific point size, so any live swap in the System
     // window (which runs through `font_settings::set_system_font` /
     // `set_font_size_scale`) must invalidate — otherwise the stale bitmap
     // keeps blitting until some other field in the sig happens to change
     // (e.g. the user hovers the control, which flips `hovered`).
-    font_ptr:      usize,
+    font_ptr: usize,
     font_size_bits: u64,
 }
 
 impl TextField {
     pub fn new(font: Arc<Font>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            base:     WidgetBase::new(),
-            edit:     Rc::new(RefCell::new(TextEditState::default())),
-            undo:     UndoBuffer::new(),
+            base: WidgetBase::new(),
+            edit: Rc::new(RefCell::new(TextEditState::default())),
+            undo: UndoBuffer::new(),
             pending_insert: None,
-            text_on_focus:  String::new(),
+            text_on_focus: String::new(),
             font,
-            font_size:           14.0,
-            read_only:           false,
+            font_size: 14.0,
+            read_only: false,
             select_all_on_focus: false,
-            password_mode:       false,
-            focused:    false,
-            hovered:    false,
+            password_mode: false,
+            focused: false,
+            hovered: false,
             mouse_down: false,
-            scroll_x:   0.0,
-            focus_time:       None,
+            scroll_x: 0.0,
+            focus_time: None,
             blink_last_phase: std::cell::Cell::new(u64::MAX),
-            last_click_time:  None,
+            last_click_time: None,
             placeholder: String::new(),
             padding: 8.0,
-            on_change:        None,
-            on_enter:         None,
+            on_change: None,
+            on_enter: None,
             on_edit_complete: None,
-            cache:            BackbufferCache::default(),
-            last_sig:         None,
+            cache: BackbufferCache::default(),
+            last_sig: None,
         }
     }
 
@@ -194,24 +201,41 @@ impl TextField {
     /// propagate live without a widget-tree rebuild.  Falls back to the font
     /// passed at construction when no override is set.
     fn active_font(&self) -> Arc<Font> {
-        crate::font_settings::current_system_font()
-            .unwrap_or_else(|| Arc::clone(&self.font))
+        crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font))
     }
 
     // ── Builder / setter methods ─────────────────────────────────────────────
 
-    pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
-    pub fn with_padding(mut self, p: f64)   -> Self { self.padding   = p; self }
-    pub fn with_read_only(mut self, v: bool) -> Self { self.read_only = v; self }
-    pub fn with_select_all_on_focus(mut self, v: bool) -> Self { self.select_all_on_focus = v; self }
-    pub fn with_password_mode(mut self, v: bool) -> Self { self.password_mode = v; self }
+    pub fn with_font_size(mut self, s: f64) -> Self {
+        self.font_size = s;
+        self
+    }
+    pub fn with_padding(mut self, p: f64) -> Self {
+        self.padding = p;
+        self
+    }
+    pub fn with_read_only(mut self, v: bool) -> Self {
+        self.read_only = v;
+        self
+    }
+    pub fn with_select_all_on_focus(mut self, v: bool) -> Self {
+        self.select_all_on_focus = v;
+        self
+    }
+    pub fn with_password_mode(mut self, v: bool) -> Self {
+        self.password_mode = v;
+        self
+    }
 
-    pub fn with_placeholder(mut self, s: impl Into<String>) -> Self { self.placeholder = s.into(); self }
+    pub fn with_placeholder(mut self, s: impl Into<String>) -> Self {
+        self.placeholder = s.into();
+        self
+    }
     pub fn with_text(self, s: impl Into<String>) -> Self {
         let t = s.into();
         let len = t.len();
         let mut st = self.edit.borrow_mut();
-        st.text   = t;
+        st.text = t;
         st.cursor = len;
         st.anchor = len;
         drop(st);
@@ -219,25 +243,47 @@ impl TextField {
     }
 
     pub fn on_change(mut self, cb: impl FnMut(&str) + 'static) -> Self {
-        self.on_change = Some(Box::new(cb)); self
+        self.on_change = Some(Box::new(cb));
+        self
     }
     pub fn on_enter(mut self, cb: impl FnMut(&str) + 'static) -> Self {
-        self.on_enter = Some(Box::new(cb)); self
+        self.on_enter = Some(Box::new(cb));
+        self
     }
     pub fn on_edit_complete(mut self, cb: impl FnMut(&str) + 'static) -> Self {
-        self.on_edit_complete = Some(Box::new(cb)); self
+        self.on_edit_complete = Some(Box::new(cb));
+        self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     // ── Getters ──────────────────────────────────────────────────────────────
 
-    pub fn text(&self) -> String { self.edit.borrow().text.clone() }
-    pub fn cursor_pos(&self) -> usize { self.edit.borrow().cursor }
+    pub fn text(&self) -> String {
+        self.edit.borrow().text.clone()
+    }
+    pub fn cursor_pos(&self) -> usize {
+        self.edit.borrow().cursor
+    }
     pub fn selection(&self) -> String {
         let st = self.edit.borrow();
         let lo = st.cursor.min(st.anchor);
@@ -249,7 +295,7 @@ impl TextField {
         let t = s.into();
         let len = t.len();
         let mut st = self.edit.borrow_mut();
-        st.text   = t;
+        st.text = t;
         st.cursor = len;
         st.anchor = len;
         drop(st);
@@ -259,15 +305,28 @@ impl TextField {
 
     // ── Private state helpers ────────────────────────────────────────────────
 
-    fn snap(&self) -> TextEditState { self.edit.borrow().clone() }
+    fn snap(&self) -> TextEditState {
+        self.edit.borrow().clone()
+    }
     #[allow(dead_code)]
-    fn apply(&self, s: TextEditState) { *self.edit.borrow_mut() = s; }
+    fn apply(&self, s: TextEditState) {
+        *self.edit.borrow_mut() = s;
+    }
 
     #[allow(dead_code)]
-    fn sel_min(&self) -> usize { let s = self.edit.borrow(); s.cursor.min(s.anchor) }
+    fn sel_min(&self) -> usize {
+        let s = self.edit.borrow();
+        s.cursor.min(s.anchor)
+    }
     #[allow(dead_code)]
-    fn sel_max(&self) -> usize { let s = self.edit.borrow(); s.cursor.max(s.anchor) }
-    fn has_selection(&self) -> bool { let s = self.edit.borrow(); s.cursor != s.anchor }
+    fn sel_max(&self) -> usize {
+        let s = self.edit.borrow();
+        s.cursor.max(s.anchor)
+    }
+    fn has_selection(&self) -> bool {
+        let s = self.edit.borrow();
+        s.cursor != s.anchor
+    }
 
     /// Commit any pending coalesced insert command to the undo buffer.
     fn flush_pending(&mut self) {
@@ -283,12 +342,13 @@ impl TextField {
         if self.password_mode {
             const BULLET: char = '•';
             const BULLET_LEN: usize = 3;
-            let n      = real_text.chars().count();
+            let n = real_text.chars().count();
             let masked = BULLET.to_string().repeat(n);
-            let disp   = byte_at_x(&font, &masked, self.font_size, tx);
+            let disp = byte_at_x(&font, &masked, self.font_size, tx);
             // Map masked byte offset → char index → real byte offset.
             let char_idx = disp / BULLET_LEN;
-            real_text.char_indices()
+            real_text
+                .char_indices()
                 .nth(char_idx)
                 .map(|(i, _)| i)
                 .unwrap_or(real_text.len())
@@ -299,7 +359,9 @@ impl TextField {
 
     /// Scroll `scroll_x` so that the cursor stays visible.
     fn ensure_cursor_visible(&mut self) {
-        if self.bounds.width < 1.0 { return; }
+        if self.bounds.width < 1.0 {
+            return;
+        }
         let inner_w = (self.bounds.width - self.padding * 2.0).max(0.0);
         let font = self.active_font();
         let cx = {
@@ -308,15 +370,18 @@ impl TextField {
                 const BULLET: char = '•';
                 #[allow(dead_code)]
                 const BULLET_LEN: usize = 3;
-                let n      = st.text[..st.cursor].chars().count();
+                let n = st.text[..st.cursor].chars().count();
                 let masked = BULLET.to_string().repeat(n);
                 measure_advance(&font, &masked, self.font_size)
             } else {
                 measure_advance(&font, &st.text[..st.cursor], self.font_size)
             }
         };
-        if cx < self.scroll_x { self.scroll_x = cx; }
-        else if cx > self.scroll_x + inner_w { self.scroll_x = cx - inner_w; }
+        if cx < self.scroll_x {
+            self.scroll_x = cx;
+        } else if cx > self.scroll_x + inner_w {
+            self.scroll_x = cx - inner_w;
+        }
     }
 
     // ── Edit operations ──────────────────────────────────────────────────────
@@ -386,14 +451,22 @@ impl TextField {
                 st.anchor = lo;
             } else if forward {
                 let cursor = st.cursor;
-                let end = if word { next_word_boundary(&st.text, cursor) }
-                          else    { next_char_boundary(&st.text, cursor) };
-                if end > cursor { st.text.drain(cursor..end); }
+                let end = if word {
+                    next_word_boundary(&st.text, cursor)
+                } else {
+                    next_char_boundary(&st.text, cursor)
+                };
+                if end > cursor {
+                    st.text.drain(cursor..end);
+                }
                 st.anchor = st.cursor;
             } else {
                 let cursor = st.cursor;
-                let start = if word { prev_word_boundary(&st.text, cursor) }
-                            else    { prev_char_boundary(&st.text, cursor) };
+                let start = if word {
+                    prev_word_boundary(&st.text, cursor)
+                } else {
+                    prev_char_boundary(&st.text, cursor)
+                };
                 if start < cursor {
                     st.text.drain(start..cursor);
                     st.cursor = start;
@@ -403,7 +476,10 @@ impl TextField {
         }
         let after = self.snap();
         self.undo.add(Box::new(TextEditCommand {
-            name: "delete text", before, after, target: Rc::clone(&self.edit),
+            name: "delete text",
+            before,
+            after,
+            target: Rc::clone(&self.edit),
         }));
         self.ensure_cursor_visible();
         self.notify_change();
@@ -438,17 +514,23 @@ impl TextField {
 
     fn notify_change(&mut self) {
         if let Some(mut cb) = self.on_change.take() {
-            let t = self.text(); cb(&t); self.on_change = Some(cb);
+            let t = self.text();
+            cb(&t);
+            self.on_change = Some(cb);
         }
     }
     fn notify_enter(&mut self) {
         if let Some(mut cb) = self.on_enter.take() {
-            let t = self.text(); cb(&t); self.on_enter = Some(cb);
+            let t = self.text();
+            cb(&t);
+            self.on_enter = Some(cb);
         }
     }
     fn notify_edit_complete(&mut self) {
         if let Some(mut cb) = self.on_edit_complete.take() {
-            let t = self.text(); cb(&t); self.on_edit_complete = Some(cb);
+            let t = self.text();
+            cb(&t);
+            self.on_edit_complete = Some(cb);
         }
     }
 
@@ -475,11 +557,18 @@ impl TextField {
                         'a' | 'A' => {
                             let len = self.edit.borrow().text.len();
                             let mut st = self.edit.borrow_mut();
-                            st.anchor = 0; st.cursor = len;
+                            st.anchor = 0;
+                            st.cursor = len;
                             EventResult::Consumed
                         }
-                        'z' | 'Z' if !mods.shift => { self.do_undo(); EventResult::Consumed }
-                        'z' | 'Z' | 'y' | 'Y'   => { self.do_redo(); EventResult::Consumed }
+                        'z' | 'Z' if !mods.shift => {
+                            self.do_undo();
+                            EventResult::Consumed
+                        }
+                        'z' | 'Z' | 'y' | 'Y' => {
+                            self.do_redo();
+                            EventResult::Consumed
+                        }
                         'x' | 'X' => {
                             if self.has_selection() {
                                 clipboard_set(&self.selection());
@@ -488,17 +577,23 @@ impl TextField {
                             EventResult::Consumed
                         }
                         'c' | 'C' => {
-                            if self.has_selection() { clipboard_set(&self.selection()); }
+                            if self.has_selection() {
+                                clipboard_set(&self.selection());
+                            }
                             EventResult::Consumed
                         }
                         'v' | 'V' => {
-                            if let Some(clip) = clipboard_get() { self.do_insert(&clip, false); }
+                            if let Some(clip) = clipboard_get() {
+                                self.do_insert(&clip, false);
+                            }
                             EventResult::Consumed
                         }
                         _ => EventResult::Ignored,
                     };
                 }
-                if self.read_only { return EventResult::Ignored; }
+                if self.read_only {
+                    return EventResult::Ignored;
+                }
                 let mut buf = [0u8; 4];
                 let s = c.encode_utf8(&mut buf);
                 self.do_insert(s, true);
@@ -513,11 +608,15 @@ impl TextField {
             // don't model overwrite, so plain Insert is a no-op here.
             Key::Insert => {
                 if mods.shift && !self.read_only {
-                    if let Some(clip) = clipboard_get() { self.do_insert(&clip, false); }
+                    if let Some(clip) = clipboard_get() {
+                        self.do_insert(&clip, false);
+                    }
                     return EventResult::Consumed;
                 }
                 if cmd {
-                    if self.has_selection() { clipboard_set(&self.selection()); }
+                    if self.has_selection() {
+                        clipboard_set(&self.selection());
+                    }
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -533,7 +632,10 @@ impl TextField {
             Key::Delete if !self.read_only => {
                 if mods.shift {
                     // Shift+Delete = Cut
-                    if self.has_selection() { clipboard_set(&self.selection()); self.do_delete(false, false); }
+                    if self.has_selection() {
+                        clipboard_set(&self.selection());
+                        self.do_delete(false, false);
+                    }
                 } else {
                     self.do_delete(true, word);
                 }
@@ -551,9 +653,9 @@ impl TextField {
                     (st.cursor, st.anchor)
                 };
                 let new_cur = if mods.meta {
-                    0                                        // Mac: Cmd+Left = line start
+                    0 // Mac: Cmd+Left = line start
                 } else if !mods.shift && cur != anchor {
-                    cur.min(anchor)                          // collapse to left
+                    cur.min(anchor) // collapse to left
                 } else if word {
                     prev_word_boundary(&self.edit.borrow().text, cur)
                 } else {
@@ -561,9 +663,12 @@ impl TextField {
                 };
                 let new_anchor = if mods.shift { anchor } else { new_cur };
                 let mut st = self.edit.borrow_mut();
-                st.cursor = new_cur; st.anchor = new_anchor;
+                st.cursor = new_cur;
+                st.anchor = new_anchor;
                 drop(st);
-                if new_cur == 0 { self.scroll_x = 0.0; }
+                if new_cur == 0 {
+                    self.scroll_x = 0.0;
+                }
                 self.ensure_cursor_visible();
                 EventResult::Consumed
             }
@@ -578,9 +683,9 @@ impl TextField {
                     (st.cursor, st.anchor)
                 };
                 let new_cur = if mods.meta {
-                    text_len                                 // Mac: Cmd+Right = line end
+                    text_len // Mac: Cmd+Right = line end
                 } else if !mods.shift && cur != anchor {
-                    cur.max(anchor)                          // collapse to right
+                    cur.max(anchor) // collapse to right
                 } else if word {
                     next_word_boundary(&self.edit.borrow().text, cur)
                 } else if cur < text_len {
@@ -590,7 +695,8 @@ impl TextField {
                 };
                 let new_anchor = if mods.shift { anchor } else { new_cur };
                 let mut st = self.edit.borrow_mut();
-                st.cursor = new_cur; st.anchor = new_anchor;
+                st.cursor = new_cur;
+                st.anchor = new_anchor;
                 drop(st);
                 self.ensure_cursor_visible();
                 EventResult::Consumed
@@ -603,11 +709,15 @@ impl TextField {
             // can spin numeric-input-style steppers, etc.
             Key::ArrowUp if mods.meta => {
                 self.flush_pending();
-                let (_, anchor) = { let st = self.edit.borrow(); (st.cursor, st.anchor) };
+                let (_, anchor) = {
+                    let st = self.edit.borrow();
+                    (st.cursor, st.anchor)
+                };
                 let new_cur = 0;
                 let new_anchor = if mods.shift { anchor } else { new_cur };
                 let mut st = self.edit.borrow_mut();
-                st.cursor = new_cur; st.anchor = new_anchor;
+                st.cursor = new_cur;
+                st.anchor = new_anchor;
                 drop(st);
                 self.scroll_x = 0.0;
                 EventResult::Consumed
@@ -615,11 +725,15 @@ impl TextField {
             Key::ArrowDown if mods.meta => {
                 self.flush_pending();
                 let len = self.edit.borrow().text.len();
-                let (_, anchor) = { let st = self.edit.borrow(); (st.cursor, st.anchor) };
+                let (_, anchor) = {
+                    let st = self.edit.borrow();
+                    (st.cursor, st.anchor)
+                };
                 let new_cur = len;
                 let new_anchor = if mods.shift { anchor } else { new_cur };
                 let mut st = self.edit.borrow_mut();
-                st.cursor = new_cur; st.anchor = new_anchor;
+                st.cursor = new_cur;
+                st.anchor = new_anchor;
                 drop(st);
                 self.ensure_cursor_visible();
                 EventResult::Consumed
@@ -632,7 +746,9 @@ impl TextField {
                 self.flush_pending();
                 let mut st = self.edit.borrow_mut();
                 st.cursor = 0;
-                if !mods.shift { st.anchor = 0; }
+                if !mods.shift {
+                    st.anchor = 0;
+                }
                 drop(st);
                 self.scroll_x = 0.0;
                 EventResult::Consumed
@@ -645,7 +761,9 @@ impl TextField {
                 let len = self.edit.borrow().text.len();
                 let mut st = self.edit.borrow_mut();
                 st.cursor = len;
-                if !mods.shift { st.anchor = len; }
+                if !mods.shift {
+                    st.anchor = len;
+                }
                 drop(st);
                 self.ensure_cursor_visible();
                 EventResult::Consumed
@@ -673,7 +791,10 @@ impl TextField {
                 EventResult::Consumed
             }
 
-            _ => { let _ = anchor_before; EventResult::Ignored }
+            _ => {
+                let _ = anchor_before;
+                EventResult::Ignored
+            }
         }
     }
 }
@@ -683,12 +804,24 @@ impl TextField {
 // ---------------------------------------------------------------------------
 
 impl Widget for TextField {
-    fn type_name(&self)  -> &'static str { "TextField" }
-    fn bounds(&self)     -> Rect         { self.bounds }
-    fn set_bounds(&mut self, b: Rect)    { self.bounds = b; }
-    fn children(&self)   -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-    fn is_focusable(&self) -> bool { true }
+    fn type_name(&self) -> &'static str {
+        "TextField"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
     /// While focused, the cursor blinks at 500 ms half-period.  The field
     /// itself drives its own repaint cadence: [`needs_paint`] reports dirty
@@ -701,25 +834,41 @@ impl Widget for TextField {
     /// is closed / collapsed / tab not selected — so an invisible focused
     /// field does NOT keep the loop awake.
     fn needs_paint(&self) -> bool {
-        if !self.focused { return false; }
-        let Some(t) = self.focus_time else { return false; };
+        if !self.focused {
+            return false;
+        }
+        let Some(t) = self.focus_time else {
+            return false;
+        };
         let current_phase = (t.elapsed().as_millis() / 500) as u64;
         current_phase != self.blink_last_phase.get()
     }
 
     fn next_paint_deadline(&self) -> Option<web_time::Instant> {
-        if !self.focused { return None; }
+        if !self.focused {
+            return None;
+        }
         let t = self.focus_time?;
         let ms = t.elapsed().as_millis() as u64;
         let next_phase = (ms / 500) + 1;
         Some(t + std::time::Duration::from_millis(next_phase * 500))
     }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
         Some(&mut self.cache)
@@ -737,18 +886,18 @@ impl Widget for TextField {
         // Sig excludes cursor-blink phase.  Cursor paints in
         // `paint_overlay` after cache blit — no blink-driven
         // invalidation.
-        let st   = self.edit.borrow();
+        let st = self.edit.borrow();
         let font = self.active_font();
         let sig = TextFieldSig {
-            text:           st.text.clone(),
-            cursor:         st.cursor,
-            anchor:         st.anchor,
-            focused:        self.focused,
-            hovered:        self.hovered,
-            scroll_x_bits:  self.scroll_x.to_bits(),
-            w_bits:         self.bounds.width .to_bits(),
-            h_bits:         self.bounds.height.to_bits(),
-            font_ptr:       Arc::as_ptr(&font) as usize,
+            text: st.text.clone(),
+            cursor: st.cursor,
+            anchor: st.anchor,
+            focused: self.focused,
+            hovered: self.hovered,
+            scroll_x_bits: self.scroll_x.to_bits(),
+            w_bits: self.bounds.width.to_bits(),
+            h_bits: self.bounds.height.to_bits(),
+            font_ptr: Arc::as_ptr(&font) as usize,
             font_size_bits: self.font_size.to_bits(),
         };
         drop(st);
@@ -760,9 +909,9 @@ impl Widget for TextField {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let w   = self.bounds.width;
-        let h   = self.bounds.height;
-        let r   = 6.0;
+        let w = self.bounds.width;
+        let h = self.bounds.height;
+        let r = 6.0;
         let pad = self.padding;
         let (raw_text, raw_cursor, raw_anchor) = {
             let st = self.edit.borrow();
@@ -773,10 +922,10 @@ impl Widget for TextField {
         let (text, cursor, anchor) = if self.password_mode {
             const BULLET: char = '•';
             const BULLET_LEN: usize = 3; // '•' is 3 bytes in UTF-8
-            let n     = raw_text.chars().count();
+            let n = raw_text.chars().count();
             let masked = BULLET.to_string().repeat(n);
-            let cur   = raw_text[..raw_cursor].chars().count() * BULLET_LEN;
-            let anc   = raw_text[..raw_anchor].chars().count() * BULLET_LEN;
+            let cur = raw_text[..raw_cursor].chars().count() * BULLET_LEN;
+            let anc = raw_text[..raw_anchor].chars().count() * BULLET_LEN;
             (masked, cur, anc)
         } else {
             (raw_text, raw_cursor, raw_anchor)
@@ -797,9 +946,9 @@ impl Widget for TextField {
         ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
 
-        let m          = ctx.measure_text("Ag").unwrap_or_default();
+        let m = ctx.measure_text("Ag").unwrap_or_default();
         let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
-        let text_x     = pad - self.scroll_x;
+        let text_x = pad - self.scroll_x;
 
         // ── Selection highlight ───────────────────────────────────────────
         if cursor != anchor {
@@ -807,11 +956,11 @@ impl Widget for TextField {
             let hi = cursor.max(anchor);
             let lo_x = measure_advance(&font, &text[..lo], self.font_size);
             let hi_x = measure_advance(&font, &text[..hi], self.font_size);
-            let sx   = (text_x + lo_x).max(pad);
-            let sw   = (text_x + hi_x).min(w - pad) - sx;
+            let sx = (text_x + lo_x).max(pad);
+            let sw = (text_x + hi_x).min(w - pad) - sx;
             if sw > 0.0 {
                 let hl_bot = baseline_y - m.descent;
-                let hl_h   = (m.ascent + m.descent) * 1.2;
+                let hl_h = (m.ascent + m.descent) * 1.2;
                 ctx.set_fill_color(if self.focused {
                     v.selection_bg
                 } else {
@@ -838,9 +987,13 @@ impl Widget for TextField {
         ctx.reset_clip();
 
         // ── Border ────────────────────────────────────────────────────────
-        let border_color = if self.focused { v.accent }
-            else if self.hovered { v.widget_stroke_active }
-            else { v.widget_stroke };
+        let border_color = if self.focused {
+            v.accent
+        } else if self.hovered {
+            v.widget_stroke_active
+        } else {
+            v.widget_stroke
+        };
         ctx.set_stroke_color(border_color);
         ctx.set_line_width(if self.focused { 2.0 } else { 1.0 });
         ctx.begin_path();
@@ -864,14 +1017,18 @@ impl Widget for TextField {
             }
         }
 
-        let cursor_visible = self.focused && {
-            let st = self.edit.borrow();
-            st.cursor == st.anchor
-        } && match self.focus_time {
-            Some(t) => (t.elapsed().as_millis() / 500) % 2 == 0,
-            None    => false,
-        };
-        if !cursor_visible { return; }
+        let cursor_visible = self.focused
+            && {
+                let st = self.edit.borrow();
+                st.cursor == st.anchor
+            }
+            && match self.focus_time {
+                Some(t) => (t.elapsed().as_millis() / 500) % 2 == 0,
+                None => false,
+            };
+        if !cursor_visible {
+            return;
+        }
 
         let (text, cursor) = {
             let st = self.edit.borrow();
@@ -891,17 +1048,17 @@ impl Widget for TextField {
             (text, cursor)
         };
 
-        let h   = self.bounds.height;
+        let h = self.bounds.height;
         let pad = self.padding;
-        let v   = ctx.visuals();
+        let v = ctx.visuals();
 
         let font = self.active_font();
         ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
         let m = ctx.measure_text("Ag").unwrap_or_default();
         let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
-        let text_x     = pad - self.scroll_x;
-        let cx  = text_x + measure_advance(&font, &text[..cursor], self.font_size);
+        let text_x = pad - self.scroll_x;
+        let cx = text_x + measure_advance(&font, &text[..cursor], self.font_size);
         let top = baseline_y + m.ascent;
         let bot = baseline_y - m.descent;
 
@@ -930,18 +1087,25 @@ impl Widget for TextField {
                     self.edit.borrow_mut().cursor = new_cur;
                     crate::animation::request_tick();
                 }
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
 
-            Event::MouseDown { pos, button: MouseButton::Left, modifiers: mods } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                modifiers: mods,
+            } => {
                 self.mouse_down = true;
                 let tx = pos.x - self.padding + self.scroll_x;
                 let text = self.edit.borrow().text.clone();
                 let new_cur = self.click_to_cursor(&text, tx);
 
                 // Double-click: select word
-                let is_double = self.last_click_time
+                let is_double = self
+                    .last_click_time
                     .map(|t| t.elapsed().as_millis() < 350)
                     .unwrap_or(false);
                 self.last_click_time = Some(Instant::now());
@@ -962,15 +1126,18 @@ impl Widget for TextField {
                 EventResult::Consumed
             }
 
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 self.mouse_down = false;
                 EventResult::Ignored
             }
 
             Event::FocusGained => {
-                self.focused        = true;
-                self.focus_time     = Some(Instant::now());
-                self.text_on_focus  = self.text();
+                self.focused = true;
+                self.focus_time = Some(Instant::now());
+                self.text_on_focus = self.text();
                 if self.select_all_on_focus {
                     let len = self.edit.borrow().text.len();
                     self.edit.borrow_mut().anchor = 0;
@@ -982,12 +1149,16 @@ impl Widget for TextField {
 
             Event::FocusLost => {
                 let was_focused = self.focused;
-                self.focused    = false;
+                self.focused = false;
                 self.focus_time = None;
                 self.mouse_down = false;
                 self.flush_pending();
-                if self.text() != self.text_on_focus { self.notify_edit_complete(); }
-                if was_focused { crate::animation::request_tick(); }
+                if self.text() != self.text_on_focus {
+                    self.notify_edit_complete();
+                }
+                if was_focused {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
 

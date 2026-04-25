@@ -71,6 +71,19 @@ pub fn render_svg(data: &[u8], ctx: &mut dyn DrawCtx) -> Result<(), SvgRenderErr
     render_svg_tree(&tree, ctx)
 }
 
+/// Parse an SVG document and render it into `ctx` using an explicit output
+/// pixel size for the document viewport.
+pub fn render_svg_at_size(
+    data: &[u8],
+    ctx: &mut dyn DrawCtx,
+    width: u32,
+    height: u32,
+) -> Result<(), SvgRenderError> {
+    let options = usvg::Options::default();
+    let tree = usvg::Tree::from_data(data, &options)?;
+    render_svg_tree_at_size(&tree, ctx, width, height)
+}
+
 /// Parse an SVG document and render it into a newly allocated RGBA framebuffer.
 ///
 /// This is the library API the SVG regression tests and demo viewer should use
@@ -81,14 +94,41 @@ pub fn render_svg_to_framebuffer(data: &[u8]) -> Result<Framebuffer, SvgRenderEr
     render_svg_tree_to_framebuffer(&tree)
 }
 
+/// Parse an SVG document and render it into an RGBA framebuffer with an
+/// explicit pixel size.
+///
+/// The resvg test suite reference PNGs are not always the SVG document's
+/// intrinsic size, so regression tests and viewers should use this helper when
+/// they need render output to match a reference image one-to-one.
+pub fn render_svg_to_framebuffer_at_size(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<Framebuffer, SvgRenderError> {
+    let options = usvg::Options::default();
+    let tree = usvg::Tree::from_data(data, &options)?;
+    render_svg_tree_to_framebuffer_at_size(&tree, width, height)
+}
+
 /// Render a parsed SVG tree into a newly allocated RGBA framebuffer.
 pub fn render_svg_tree_to_framebuffer(tree: &usvg::Tree) -> Result<Framebuffer, SvgRenderError> {
     let width = tree.size().width().ceil().max(1.0) as u32;
     let height = tree.size().height().ceil().max(1.0) as u32;
+    render_svg_tree_to_framebuffer_at_size(tree, width, height)
+}
+
+/// Render a parsed SVG tree into an RGBA framebuffer with an explicit pixel size.
+pub fn render_svg_tree_to_framebuffer_at_size(
+    tree: &usvg::Tree,
+    width: u32,
+    height: u32,
+) -> Result<Framebuffer, SvgRenderError> {
+    let width = width.max(1);
+    let height = height.max(1);
     let mut fb = Framebuffer::new(width, height);
     {
         let mut ctx = GfxCtx::new(&mut fb);
-        render_svg_tree(tree, &mut ctx)?;
+        render_svg_tree_at_size(tree, &mut ctx, width, height)?;
     }
     Ok(fb)
 }
@@ -103,14 +143,37 @@ pub fn render_svg_to_lcd_buffer(data: &[u8]) -> Result<LcdBuffer, SvgRenderError
     render_svg_tree_to_lcd_buffer(&tree)
 }
 
+/// Parse an SVG document and render it into an LCD coverage buffer with an
+/// explicit pixel size.
+pub fn render_svg_to_lcd_buffer_at_size(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<LcdBuffer, SvgRenderError> {
+    let options = usvg::Options::default();
+    let tree = usvg::Tree::from_data(data, &options)?;
+    render_svg_tree_to_lcd_buffer_at_size(&tree, width, height)
+}
+
 /// Render a parsed SVG tree into a newly allocated LCD coverage buffer.
 pub fn render_svg_tree_to_lcd_buffer(tree: &usvg::Tree) -> Result<LcdBuffer, SvgRenderError> {
     let width = tree.size().width().ceil().max(1.0) as u32;
     let height = tree.size().height().ceil().max(1.0) as u32;
+    render_svg_tree_to_lcd_buffer_at_size(tree, width, height)
+}
+
+/// Render a parsed SVG tree into an LCD coverage buffer with an explicit pixel size.
+pub fn render_svg_tree_to_lcd_buffer_at_size(
+    tree: &usvg::Tree,
+    width: u32,
+    height: u32,
+) -> Result<LcdBuffer, SvgRenderError> {
+    let width = width.max(1);
+    let height = height.max(1);
     let mut buffer = LcdBuffer::new(width, height);
     {
         let mut ctx = LcdGfxCtx::new(&mut buffer);
-        render_svg_tree(tree, &mut ctx)?;
+        render_svg_tree_at_size(tree, &mut ctx, width, height)?;
     }
     Ok(buffer)
 }
@@ -121,9 +184,22 @@ pub fn render_svg_tree_to_lcd_buffer(tree: &usvg::Tree) -> Result<LcdBuffer, Svg
 /// a root transform that maps it into `agg-gui`'s Y-up convention before any
 /// node commands are emitted.
 pub fn render_svg_tree(tree: &usvg::Tree, ctx: &mut dyn DrawCtx) -> Result<(), SvgRenderError> {
+    let width = tree.size().width().ceil().max(1.0) as u32;
+    let height = tree.size().height().ceil().max(1.0) as u32;
+    render_svg_tree_at_size(tree, ctx, width, height)
+}
+
+/// Render a parsed `usvg::Tree` into `ctx`, fitting its document viewport into
+/// an explicit output pixel size.
+pub fn render_svg_tree_at_size(
+    tree: &usvg::Tree,
+    ctx: &mut dyn DrawCtx,
+    width: u32,
+    height: u32,
+) -> Result<(), SvgRenderError> {
     let saved_transform = ctx.transform();
     let mut svg_to_ctx = saved_transform;
-    svg_to_ctx.premultiply(&svg_y_down_to_ctx_y_up(tree));
+    svg_to_ctx.premultiply(&svg_y_down_to_ctx_y_up(tree, width, height));
 
     ctx.save();
     ctx.set_transform(svg_to_ctx);
@@ -132,15 +208,10 @@ pub fn render_svg_tree(tree: &usvg::Tree, ctx: &mut dyn DrawCtx) -> Result<(), S
     Ok(())
 }
 
-fn svg_y_down_to_ctx_y_up(tree: &usvg::Tree) -> TransAffine {
-    TransAffine::new_custom(
-        1.0,
-        0.0,
-        0.0,
-        -1.0,
-        0.0,
-        tree.size().height() as f64,
-    )
+fn svg_y_down_to_ctx_y_up(tree: &usvg::Tree, width: u32, height: u32) -> TransAffine {
+    let sx = width.max(1) as f64 / tree.size().width().max(1.0) as f64;
+    let sy = height.max(1) as f64 / tree.size().height().max(1.0) as f64;
+    TransAffine::new_custom(sx, 0.0, 0.0, -sy, 0.0, height.max(1) as f64)
 }
 
 fn render_group(
@@ -188,7 +259,9 @@ fn render_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
 }
 
 fn fill_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
-    let Some(fill) = path.fill() else { return; };
+    let Some(fill) = path.fill() else {
+        return;
+    };
     let Some(color) = solid_paint(fill.paint(), state.opacity * fill.opacity().get()) else {
         return;
     };
@@ -200,7 +273,9 @@ fn fill_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
 }
 
 fn stroke_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
-    let Some(stroke) = path.stroke() else { return; };
+    let Some(stroke) = path.stroke() else {
+        return;
+    };
     let Some(color) = solid_paint(stroke.paint(), state.opacity * stroke.opacity().get()) else {
         return;
     };
@@ -297,7 +372,9 @@ fn solid_paint(paint: &usvg::Paint, opacity: f32) -> Option<Color> {
             color.blue as f32 / 255.0,
             opacity,
         )),
-        usvg::Paint::LinearGradient(_) | usvg::Paint::RadialGradient(_) | usvg::Paint::Pattern(_) => None,
+        usvg::Paint::LinearGradient(_)
+        | usvg::Paint::RadialGradient(_)
+        | usvg::Paint::Pattern(_) => None,
     }
 }
 
@@ -358,9 +435,9 @@ fn map_fill_rule(rule: usvg::FillRule) -> FillRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine;
     use crate::framebuffer::Framebuffer;
     use crate::gfx_ctx::GfxCtx;
+    use base64::Engine;
 
     #[test]
     fn renders_solid_path_via_library_api() {
@@ -395,6 +472,28 @@ mod tests {
     }
 
     #[test]
+    fn renders_resvg_suite_case_at_reference_png_size() {
+        let svg = include_bytes!("../../tests/resvg-test-suite/tests/shapes/rect/simple-case.svg");
+        let png = include_bytes!("../../tests/resvg-test-suite/tests/shapes/rect/simple-case.png");
+        let reference = image::load_from_memory(png)
+            .expect("reference PNG should decode")
+            .to_rgba8();
+
+        let fb = render_svg_to_framebuffer_at_size(svg, reference.width(), reference.height())
+            .expect("SVG should render at reference size");
+
+        assert_eq!(fb.width(), reference.width());
+        assert_eq!(fb.height(), reference.height());
+
+        let center = ((250 * fb.width() + 250) * 4) as usize;
+        assert_eq!(
+            &fb.pixels()[center..center + 4],
+            &reference.as_raw()[center..center + 4],
+            "simple resvg-suite center pixel should match the reference PNG"
+        );
+    }
+
+    #[test]
     fn renders_to_lcd_buffer_via_library_target_helper() {
         let svg = br##"
             <svg xmlns="http://www.w3.org/2000/svg" width="2" height="2">
@@ -405,7 +504,10 @@ mod tests {
         let buffer = render_svg_to_lcd_buffer(svg).expect("SVG should render");
         assert_eq!(buffer.width(), 2);
         assert_eq!(buffer.height(), 2);
-        assert!(buffer.color_plane().chunks_exact(3).any(|px| px == [255, 0, 0]));
+        assert!(buffer
+            .color_plane()
+            .chunks_exact(3)
+            .any(|px| px == [255, 0, 0]));
         assert!(buffer.alpha_plane().iter().any(|&alpha| alpha > 0));
     }
 
@@ -453,7 +555,10 @@ mod tests {
         let mut png = Vec::new();
         let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 255, 0, 255]));
         image::DynamicImage::ImageRgba8(img)
-            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageOutputFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut png),
+                image::ImageOutputFormat::Png,
+            )
             .expect("test PNG should encode");
         let encoded = base64::engine::general_purpose::STANDARD.encode(png);
         let svg = format!(
@@ -494,6 +599,32 @@ mod tests {
 
         let translated = ((2 * fb.width() + 1) * 4) as usize;
         assert_eq!(&fb.pixels()[translated..translated + 4], &[0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn svg_coordinates_are_y_down_in_visual_space() {
+        let svg = br##"
+            <svg xmlns="http://www.w3.org/2000/svg" width="6" height="6">
+                <rect x="1" y="1" width="1" height="1" fill="#ff0000"/>
+                <rect x="4" y="4" width="1" height="1" fill="#0000ff"/>
+            </svg>
+        "##;
+
+        let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
+
+        let top_left_svg_pixel = ((4 * fb.width() + 1) * 4) as usize;
+        assert_eq!(
+            &fb.pixels()[top_left_svg_pixel..top_left_svg_pixel + 4],
+            &[255, 0, 0, 255],
+            "SVG y=1 should land one pixel below the visual top"
+        );
+
+        let bottom_right_svg_pixel = ((1 * fb.width() + 4) * 4) as usize;
+        assert_eq!(
+            &fb.pixels()[bottom_right_svg_pixel..bottom_right_svg_pixel + 4],
+            &[0, 0, 255, 255],
+            "SVG y=4 should land one pixel above the visual bottom"
+        );
     }
 
     #[test]

@@ -74,8 +74,7 @@ pub fn flatten_visible(nodes: &[TreeNode]) -> Vec<FlatRow> {
 
     let mut result = Vec::new();
     // Stack of (node_idx, depth); push in reverse so pop gives DFS order.
-    let mut stack: Vec<(usize, u32)> =
-        roots.into_iter().rev().map(|i| (i, 0)).collect();
+    let mut stack: Vec<(usize, u32)> = roots.into_iter().rev().map(|i| (i, 0)).collect();
 
     while let Some((node_idx, depth)) = stack.pop() {
         let mut children: Vec<usize> = nodes
@@ -87,7 +86,11 @@ pub fn flatten_visible(nodes: &[TreeNode]) -> Vec<FlatRow> {
         children.sort_by_key(|&i| nodes[i].order);
 
         let has_children = !children.is_empty();
-        result.push(FlatRow { node_idx, depth, has_children });
+        result.push(FlatRow {
+            node_idx,
+            depth,
+            has_children,
+        });
 
         if nodes[node_idx].is_expanded && has_children {
             for &child in children.iter().rev() {
@@ -117,9 +120,9 @@ pub fn is_descendant(nodes: &[TreeNode], ancestor_idx: usize, mut node_idx: usiz
 /// Drop position relative to a reference node (by node index).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DropPosition {
-    Before(usize),   // insert before this node_idx in the parent's child list
-    After(usize),    // insert after this node_idx in the parent's child list
-    AsChild(usize),  // make a child of this node_idx
+    Before(usize),  // insert before this node_idx in the parent's child list
+    After(usize),   // insert after this node_idx in the parent's child list
+    AsChild(usize), // make a child of this node_idx
 }
 
 /// Active drag-and-drop gesture.

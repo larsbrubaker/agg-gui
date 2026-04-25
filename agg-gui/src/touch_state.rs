@@ -123,32 +123,28 @@ pub struct TouchState {
 }
 
 impl TouchState {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    pub fn on_start(
-        &mut self,
-        device: TouchDeviceId,
-        id: TouchId,
-        pos: Point,
-        force: Option<f32>,
-    ) {
+    pub fn on_start(&mut self, device: TouchDeviceId, id: TouchId, pos: Point, force: Option<f32>) {
         self.active.insert(
             (device, id),
-            ActiveTouch { pos, prev_pos: pos, force: force.unwrap_or(0.0) },
+            ActiveTouch {
+                pos,
+                prev_pos: pos,
+                force: force.unwrap_or(0.0),
+            },
         );
         self.topology_changed = true;
     }
 
-    pub fn on_move(
-        &mut self,
-        device: TouchDeviceId,
-        id: TouchId,
-        pos: Point,
-        force: Option<f32>,
-    ) {
+    pub fn on_move(&mut self, device: TouchDeviceId, id: TouchId, pos: Point, force: Option<f32>) {
         if let Some(t) = self.active.get_mut(&(device, id)) {
             t.pos = pos;
-            if let Some(f) = force { t.force = f; }
+            if let Some(f) = force {
+                t.force = f;
+            }
         }
     }
 
@@ -169,8 +165,13 @@ impl TouchState {
         // is a single touchscreen, and cross-device gestures aren't a
         // useful abstraction.
         let device = self.active.keys().next().map(|(d, _)| *d);
-        let Some(device) = device else { self.last = None; return; };
-        let touches: Vec<ActiveTouch> = self.active.iter()
+        let Some(device) = device else {
+            self.last = None;
+            return;
+        };
+        let touches: Vec<ActiveTouch> = self
+            .active
+            .iter()
             .filter(|((d, _), _)| *d == device)
             .map(|(_, t)| *t)
             .collect();
@@ -181,33 +182,38 @@ impl TouchState {
 
         // Centroid (previous vs current) drives the translation delta.
         let n = touches.len() as f64;
-        let (mut cx, mut cy)   = (0.0, 0.0);
+        let (mut cx, mut cy) = (0.0, 0.0);
         let (mut pcx, mut pcy) = (0.0, 0.0);
         for t in &touches {
-            cx  += t.pos.x;      cy  += t.pos.y;
-            pcx += t.prev_pos.x; pcy += t.prev_pos.y;
+            cx += t.pos.x;
+            cy += t.pos.y;
+            pcx += t.prev_pos.x;
+            pcy += t.prev_pos.y;
         }
-        cx /= n; cy /= n; pcx /= n; pcy /= n;
+        cx /= n;
+        cy /= n;
+        pcx /= n;
+        pcy /= n;
 
         // Average pinch + rotation across pairs.  Using every
         // (touch, centroid) ray means the signal scales sensibly with
         // finger count; egui does the same.
-        let mut zoom_sum     = 0.0_f32;
+        let mut zoom_sum = 0.0_f32;
         let mut rotation_sum = 0.0_f32;
-        let mut force_sum    = 0.0_f32;
-        let mut zoom_count   = 0;
+        let mut force_sum = 0.0_f32;
+        let mut zoom_count = 0;
         for t in &touches {
             force_sum += t.force;
-            let dx  = (t.pos.x - cx) as f32;
-            let dy  = (t.pos.y - cy) as f32;
+            let dx = (t.pos.x - cx) as f32;
+            let dy = (t.pos.y - cy) as f32;
             let pdx = (t.prev_pos.x - pcx) as f32;
             let pdy = (t.prev_pos.y - pcy) as f32;
-            let r  = (dx  * dx  + dy  * dy ).sqrt();
+            let r = (dx * dx + dy * dy).sqrt();
             let pr = (pdx * pdx + pdy * pdy).sqrt();
             if pr > 1.0 && r > 1.0 {
-                zoom_sum     += r / pr;
+                zoom_sum += r / pr;
                 rotation_sum += dy.atan2(dx) - pdy.atan2(pdx);
-                zoom_count   += 1;
+                zoom_count += 1;
             }
         }
         // Skip producing a frame-delta when topology just changed —
@@ -222,8 +228,12 @@ impl TouchState {
             // ±pi seam doesn't flip sign of the delta.
             let mut rot = rotation_sum / zoom_count as f32;
             use std::f32::consts::PI;
-            while rot >  PI { rot -= 2.0 * PI; }
-            while rot < -PI { rot += 2.0 * PI; }
+            while rot > PI {
+                rot -= 2.0 * PI;
+            }
+            while rot < -PI {
+                rot += 2.0 * PI;
+            }
             (zoom_sum / zoom_count as f32, rot)
         };
 
@@ -234,13 +244,13 @@ impl TouchState {
         };
 
         self.last = Some(MultiTouchInfo {
-            device_id:         device,
-            num_touches:       touches.len(),
+            device_id: device,
+            num_touches: touches.len(),
             zoom_delta,
             rotation_delta,
             translation_delta,
-            force:             force_sum / n as f32,
-            center_pos:        Point::new(cx, cy),
+            force: force_sum / n as f32,
+            center_pos: Point::new(cx, cy),
         });
 
         // Latch current positions as the new baseline for the next
@@ -251,12 +261,16 @@ impl TouchState {
         self.topology_changed = false;
     }
 
-    pub fn current(&self) -> Option<MultiTouchInfo> { self.last }
+    pub fn current(&self) -> Option<MultiTouchInfo> {
+        self.last
+    }
 
     /// Total number of fingers currently down (across all devices).
     /// Useful as a lightweight "are we in a gesture?" probe when a
     /// widget doesn't care about the per-delta aggregate.
-    pub fn active_count(&self) -> usize { self.active.len() }
+    pub fn active_count(&self) -> usize {
+        self.active.len()
+    }
 }
 
 // ---------------------------------------------------------------------------

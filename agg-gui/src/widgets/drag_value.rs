@@ -141,11 +141,17 @@ impl DragValue {
 
     /// Set a snap step.  Values are rounded to the nearest multiple of `step`
     /// during dragging.  Pass `0.0` to disable snapping (the default).
-    pub fn with_step(mut self, step: f64) -> Self { self.step = step; self }
+    pub fn with_step(mut self, step: f64) -> Self {
+        self.step = step;
+        self
+    }
 
     /// Set the drag speed: how many value units change per logical pixel of
     /// horizontal drag movement.  Default is `1.0`.
-    pub fn with_speed(mut self, speed: f64) -> Self { self.speed = speed; self }
+    pub fn with_speed(mut self, speed: f64) -> Self {
+        self.speed = speed;
+        self
+    }
 
     /// Set the number of decimal places shown in the formatted text.
     pub fn with_decimals(mut self, d: usize) -> Self {
@@ -160,16 +166,33 @@ impl DragValue {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     // ── State accessor ─────────────────────────────────────────────────────
 
     /// Returns the current value.
-    pub fn value(&self) -> f64 { self.value }
+    pub fn value(&self) -> f64 {
+        self.value
+    }
 
     // ── Internal helpers ───────────────────────────────────────────────────
 
@@ -192,11 +215,13 @@ impl DragValue {
 
     fn update_from_drag(&mut self, current_x: f64) {
         let delta = (current_x - self.drag_start_x) * self.speed;
-        let raw   = self.drag_start_value + delta;
+        let raw = self.drag_start_value + delta;
         self.value = self.apply_step_and_clamp(raw);
         self.sync_label();
         let v = self.value;
-        if let Some(cb) = self.on_change.as_mut() { cb(v); }
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(v);
+        }
     }
 
     fn enter_edit_mode(&mut self) {
@@ -213,7 +238,9 @@ impl DragValue {
         // Always sync label back to actual value (parse success or failure).
         self.sync_label();
         let v = self.value;
-        if let Some(cb) = self.on_change.as_mut() { cb(v); }
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(v);
+        }
     }
 
     fn cancel_edit(&mut self) {
@@ -234,20 +261,42 @@ impl DragValue {
 // ── Widget impl ────────────────────────────────────────────────────────────
 
 impl Widget for DragValue {
-    fn type_name(&self) -> &'static str { "DragValue" }
+    fn type_name(&self) -> &'static str {
+        "DragValue"
+    }
 
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         Size::new(available.width, WIDGET_H)
@@ -278,9 +327,10 @@ impl Widget for DragValue {
             self.value_label.set_text(self.edit_text.clone());
             let avail_w = (w - 8.0).max(1.0);
             let lsz = self.value_label.layout(Size::new(avail_w, h));
-            let lx  = (w - lsz.width)  * 0.5;
-            let ly  = (h - lsz.height) * 0.5;
-            self.value_label.set_bounds(Rect::new(0.0, 0.0, lsz.width, lsz.height));
+            let lx = (w - lsz.width) * 0.5;
+            let ly = (h - lsz.height) * 0.5;
+            self.value_label
+                .set_bounds(Rect::new(0.0, 0.0, lsz.width, lsz.height));
             ctx.save();
             ctx.translate(lx, ly);
             paint_subtree(&mut self.value_label, ctx);
@@ -290,11 +340,22 @@ impl Widget for DragValue {
             let prefix: String = self.edit_text.chars().take(self.edit_cursor).collect();
             ctx.set_font(Arc::clone(&self.font));
             ctx.set_font_size(self.font_size);
-            let prefix_w  = ctx.measure_text(&prefix).map(|m| m.width).unwrap_or(0.0);
+            let prefix_w = ctx.measure_text(&prefix).map(|m| m.width).unwrap_or(0.0);
             // Cursor sits at the right edge of the prefix inside the label's x offset.
-            let text_x    = lx + (lsz.width - ctx.measure_text(&self.edit_text).map(|m| m.width).unwrap_or(lsz.width)) * 0.5;
-            let cursor_x  = text_x + prefix_w;
-            ctx.set_fill_color(Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.85));
+            let text_x = lx
+                + (lsz.width
+                    - ctx
+                        .measure_text(&self.edit_text)
+                        .map(|m| m.width)
+                        .unwrap_or(lsz.width))
+                    * 0.5;
+            let cursor_x = text_x + prefix_w;
+            ctx.set_fill_color(Color::rgba(
+                v.text_color.r,
+                v.text_color.g,
+                v.text_color.b,
+                0.85,
+            ));
             ctx.begin_path();
             ctx.rect(cursor_x, ly + 2.0, 1.5, lsz.height - 4.0);
             ctx.fill();
@@ -308,7 +369,7 @@ impl Widget for DragValue {
                 Color::rgba(a.r, a.g, a.b, 0.08)
             };
             let border = Color::rgba(a.r, a.g, a.b, 0.35);
-            let arrow  = Color::rgba(a.r, a.g, a.b, 0.45);
+            let arrow = Color::rgba(a.r, a.g, a.b, 0.45);
 
             ctx.set_fill_color(bg);
             ctx.begin_path();
@@ -322,9 +383,9 @@ impl Widget for DragValue {
             ctx.stroke();
 
             // Arrow triangles as drag affordances.
-            let mid      = h * 0.5;
+            let mid = h * 0.5;
             let tri_half = 4.0;
-            let tri_w    = 6.0;
+            let tri_w = 6.0;
             ctx.set_fill_color(arrow);
             ctx.begin_path();
             ctx.move_to(ARROW_MARGIN, mid);
@@ -341,9 +402,10 @@ impl Widget for DragValue {
 
             let avail_w = (w - (ARROW_MARGIN + tri_w + 4.0) * 2.0).max(1.0);
             let lsz = self.value_label.layout(Size::new(avail_w, h));
-            let lx = (w - lsz.width)  * 0.5;
+            let lx = (w - lsz.width) * 0.5;
             let ly = (h - lsz.height) * 0.5;
-            self.value_label.set_bounds(Rect::new(0.0, 0.0, lsz.width, lsz.height));
+            self.value_label
+                .set_bounds(Rect::new(0.0, 0.0, lsz.width, lsz.height));
             ctx.save();
             ctx.translate(lx, ly);
             paint_subtree(&mut self.value_label, ctx);
@@ -379,14 +441,22 @@ impl Widget for DragValue {
                         }
                     }
                     Key::ArrowLeft => {
-                        if self.edit_cursor > 0 { self.edit_cursor -= 1; }
+                        if self.edit_cursor > 0 {
+                            self.edit_cursor -= 1;
+                        }
                     }
                     Key::ArrowRight => {
                         let n = self.edit_text.chars().count();
-                        if self.edit_cursor < n { self.edit_cursor += 1; }
+                        if self.edit_cursor < n {
+                            self.edit_cursor += 1;
+                        }
                     }
-                    Key::Enter => { self.commit_edit(); }
-                    Key::Escape => { self.cancel_edit(); }
+                    Key::Enter => {
+                        self.commit_edit();
+                    }
+                    Key::Escape => {
+                        self.cancel_edit();
+                    }
                     _ => {}
                 }
                 crate::animation::request_tick();
@@ -401,8 +471,8 @@ impl Widget for DragValue {
                     let dx = (pos.x - self.press_x).abs();
                     if !self.dragging && dx >= DRAG_THRESHOLD {
                         // Confirm drag: anchor at original press so no dead-zone jump.
-                        self.dragging         = true;
-                        self.drag_start_x     = self.press_x;
+                        self.dragging = true;
+                        self.drag_start_x = self.press_x;
                         self.drag_start_value = self.value;
                     }
                     if self.dragging {
@@ -411,23 +481,32 @@ impl Widget for DragValue {
                         return EventResult::Consumed;
                     }
                 }
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if self.editing {
                     // Already in edit mode — consume to keep focus, don't start drag.
                     return EventResult::Consumed;
                 }
                 self.mouse_pressed = true;
-                self.dragging      = false;
-                self.press_x       = pos.x;
+                self.dragging = false;
+                self.press_x = pos.x;
                 EventResult::Consumed
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
-                let was_drag    = self.dragging;
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
+                let was_drag = self.dragging;
                 let was_pressed = self.mouse_pressed;
-                self.dragging      = false;
+                self.dragging = false;
                 self.mouse_pressed = false;
                 if was_pressed && !was_drag && !self.editing {
                     self.enter_edit_mode();
@@ -448,10 +527,14 @@ impl Widget for DragValue {
                 let was_focused = self.focused;
                 let was_editing = self.editing;
                 self.focused = false;
-                if self.editing { self.commit_edit(); }
-                self.dragging      = false;
+                if self.editing {
+                    self.commit_edit();
+                }
+                self.dragging = false;
                 self.mouse_pressed = false;
-                if was_focused || was_editing { crate::animation::request_tick(); }
+                if was_focused || was_editing {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
 

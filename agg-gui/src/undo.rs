@@ -51,17 +51,24 @@ pub trait UndoRedoCommand {
 pub struct UndoBuffer {
     undo_stack: Vec<Box<dyn UndoRedoCommand>>,
     redo_stack: Vec<Box<dyn UndoRedoCommand>>,
-    max_undos:  usize,
+    max_undos: usize,
 }
 
 impl UndoBuffer {
     /// Create a new buffer with a default history limit of 200 entries.
     pub fn new() -> Self {
-        Self { undo_stack: Vec::new(), redo_stack: Vec::new(), max_undos: 200 }
+        Self {
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_undos: 200,
+        }
     }
 
     /// Set the maximum number of undo steps retained.
-    pub fn with_max_undos(mut self, n: usize) -> Self { self.max_undos = n; self }
+    pub fn with_max_undos(mut self, n: usize) -> Self {
+        self.max_undos = n;
+        self
+    }
 
     /// Push `cmd` without executing it.
     ///
@@ -101,16 +108,24 @@ impl UndoBuffer {
     }
 
     /// Returns `true` if there is at least one operation that can be undone.
-    pub fn can_undo(&self) -> bool { !self.undo_stack.is_empty() }
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
 
     /// Returns `true` if there is at least one operation that can be redone.
-    pub fn can_redo(&self) -> bool { !self.redo_stack.is_empty() }
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
 
     /// Name of the operation that `undo()` would reverse, if any.
-    pub fn undo_name(&self) -> Option<&str> { self.undo_stack.last().map(|c| c.name()) }
+    pub fn undo_name(&self) -> Option<&str> {
+        self.undo_stack.last().map(|c| c.name())
+    }
 
     /// Name of the operation that `redo()` would re-apply, if any.
-    pub fn redo_name(&self) -> Option<&str> { self.redo_stack.last().map(|c| c.name()) }
+    pub fn redo_name(&self) -> Option<&str> {
+        self.redo_stack.last().map(|c| c.name())
+    }
 
     /// Discard all undo and redo history.
     pub fn clear_history(&mut self) {
@@ -119,7 +134,11 @@ impl UndoBuffer {
     }
 }
 
-impl Default for UndoBuffer { fn default() -> Self { Self::new() } }
+impl Default for UndoBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // DoUndoActions — closure-based command
@@ -134,8 +153,8 @@ impl Default for UndoBuffer { fn default() -> Self { Self::new() } }
 /// consider using `std::rc::Rc<std::cell::RefCell<T>>` to share mutable state
 /// between the owning widget and the undo command closures.
 pub struct DoUndoActions {
-    name:    String,
-    do_fn:   Box<dyn FnMut()>,
+    name: String,
+    do_fn: Box<dyn FnMut()>,
     undo_fn: Box<dyn FnMut()>,
 }
 
@@ -143,19 +162,25 @@ impl DoUndoActions {
     /// Create a command with the given `name`, `do_action`, and `undo_action`.
     pub fn new(
         name: impl Into<String>,
-        do_action:   impl FnMut() + 'static,
+        do_action: impl FnMut() + 'static,
         undo_action: impl FnMut() + 'static,
     ) -> Self {
         Self {
-            name:    name.into(),
-            do_fn:   Box::new(do_action),
+            name: name.into(),
+            do_fn: Box::new(do_action),
             undo_fn: Box::new(undo_action),
         }
     }
 }
 
 impl UndoRedoCommand for DoUndoActions {
-    fn name(&self)     -> &str { &self.name }
-    fn do_it(&mut self)   { (self.do_fn)() }
-    fn undo_it(&mut self) { (self.undo_fn)() }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn do_it(&mut self) {
+        (self.do_fn)()
+    }
+    fn undo_it(&mut self) {
+        (self.undo_fn)()
+    }
 }

@@ -34,10 +34,10 @@
 
 use crate::color::Color;
 use crate::device_scale::device_scale;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
-use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase, resolve_fit_or_stretch};
+use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 // ---------------------------------------------------------------------------
@@ -54,8 +54,8 @@ use crate::widget::Widget;
 /// - `min_w/max_w` — child's min/max width constraints.
 fn place_cross_h(
     anchor: HAnchor,
-    pad_l:    f64,
-    inner_w:  f64,
+    pad_l: f64,
+    inner_w: f64,
     margin_l: f64,
     margin_r: f64,
     natural_w: f64,
@@ -102,8 +102,8 @@ fn place_cross_h(
 /// - `min_h/max_h` — child's min/max height constraints.
 fn place_cross_v(
     anchor: VAnchor,
-    pad_b:    f64,
-    inner_h:  f64,
+    pad_b: f64,
+    inner_h: f64,
     margin_b: f64,
     margin_t: f64,
     natural_h: f64,
@@ -185,12 +185,27 @@ impl FlexColumn {
         }
     }
 
-    pub fn with_gap(mut self, gap: f64) -> Self { self.gap = gap; self }
-    pub fn with_padding(mut self, p: f64) -> Self { self.inner_padding = Insets::all(p); self }
-    pub fn with_inner_padding(mut self, p: Insets) -> Self { self.inner_padding = p; self }
-    pub fn with_background(mut self, c: Color) -> Self { self.background = c; self }
+    pub fn with_gap(mut self, gap: f64) -> Self {
+        self.gap = gap;
+        self
+    }
+    pub fn with_padding(mut self, p: f64) -> Self {
+        self.inner_padding = Insets::all(p);
+        self
+    }
+    pub fn with_inner_padding(mut self, p: Insets) -> Self {
+        self.inner_padding = p;
+        self
+    }
+    pub fn with_background(mut self, c: Color) -> Self {
+        self.background = c;
+        self
+    }
     /// Use `ctx.visuals().panel_fill` as background instead of the stored color.
-    pub fn with_panel_bg(mut self) -> Self { self.use_panel_bg = true; self }
+    pub fn with_panel_bg(mut self) -> Self {
+        self.use_panel_bg = true;
+        self
+    }
 
     /// Opt into content-fit width — `layout` reports the widest
     /// child's natural width (+ horizontal padding) instead of the
@@ -198,7 +213,10 @@ impl FlexColumn {
     /// content of an auto-sized `Window`; without it, wrapped Labels
     /// claim the full available width and the window grows to the
     /// canvas.  Matches egui's per-column shrink-to-content option.
-    pub fn with_fit_width(mut self, fit: bool) -> Self { self.fit_width = fit; self }
+    pub fn with_fit_width(mut self, fit: bool) -> Self {
+        self.fit_width = fit;
+        self
+    }
 
     /// Anchor children to the TOP of the inner area rather than the
     /// bottom of the natural content extent.  Default is bottom (the
@@ -209,13 +227,31 @@ impl FlexColumn {
     /// containers placed inside a `Resize` widget or other oversized
     /// slot where you want the visible content to start at the top
     /// of the frame and any extra space to appear below.
-    pub fn with_top_anchor(mut self, on: bool) -> Self { self.top_anchor = on; self }
+    pub fn with_top_anchor(mut self, on: bool) -> Self {
+        self.top_anchor = on;
+        self
+    }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     /// Add a fixed-size child (flex = 0).
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
@@ -238,20 +274,44 @@ impl FlexColumn {
     }
 }
 
-impl Default for FlexColumn { fn default() -> Self { Self::new() } }
+impl Default for FlexColumn {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Widget for FlexColumn {
-    fn type_name(&self) -> &'static str { "FlexColumn" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "FlexColumn"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn measure_min_height(&self, available_w: f64) -> f64 {
         // Sum each child's required height (recursing through any
@@ -265,8 +325,8 @@ impl Widget for FlexColumn {
         let pad_t = self.inner_padding.top;
         let pad_b = self.inner_padding.bottom;
         let inner_w = (available_w - pad_l - pad_r).max(0.0);
-        let scale   = device_scale();
-        let n       = self.children.len();
+        let scale = device_scale();
+        let n = self.children.len();
         let mut total = 0.0_f64;
         for child in self.children.iter() {
             let m = child.margin().scale(scale);
@@ -274,7 +334,9 @@ impl Widget for FlexColumn {
             total += child.measure_min_height(slot_w) + m.vertical();
         }
         total += pad_t + pad_b;
-        if n > 1 { total += self.gap * (n - 1) as f64; }
+        if n > 1 {
+            total += self.gap * (n - 1) as f64;
+        }
         total.max(self.base.min_size.height)
     }
 
@@ -283,16 +345,20 @@ impl Widget for FlexColumn {
         let pad_r = self.inner_padding.right;
         let pad_t = self.inner_padding.top;
         let pad_b = self.inner_padding.bottom;
-        let gap   = self.gap;
-        let n     = self.children.len();
-        if n == 0 { return available; }
+        let gap = self.gap;
+        let n = self.children.len();
+        if n == 0 {
+            return available;
+        }
 
-        let inner_w = (available.width  - pad_l - pad_r).max(0.0);
+        let inner_w = (available.width - pad_l - pad_r).max(0.0);
         let inner_h = (available.height - pad_t - pad_b).max(0.0);
 
         // Scaled margins for all children (physical units).
-        let scale    = device_scale();
-        let margins: Vec<Insets> = self.children.iter()
+        let scale = device_scale();
+        let margins: Vec<Insets> = self
+            .children
+            .iter()
             .map(|c| c.margin().scale(scale))
             .collect();
 
@@ -304,28 +370,28 @@ impl Widget for FlexColumn {
         // The slot for each fixed child = content_h + margin_top + margin_bottom.
         // Flex children contribute only their margins to the space budget.
         // -------------------------------------------------------------------
-        let mut content_heights         = vec![0.0f64; n];
+        let mut content_heights = vec![0.0f64; n];
         let mut total_fixed_with_margins = 0.0f64;
-        let mut total_flex               = 0.0f64;
-        let mut total_flex_margin_v      = 0.0f64;
-        let mut max_child_natural_w      = 0.0f64;
+        let mut total_flex = 0.0f64;
+        let mut total_flex_margin_v = 0.0f64;
+        let mut max_child_natural_w = 0.0f64;
 
         for i in 0..n {
-            let m     = &margins[i];
+            let m = &margins[i];
             let slot_w = (inner_w - m.left - m.right).max(0.0);
             if self.flex_factors[i] == 0.0 {
                 // Measure at natural height; pass inner_h as the available
                 // height so the child can self-report its natural size.
-                let desired    = self.children[i].layout(Size::new(slot_w, inner_h));
-                let clamped_h  = desired.height
-                    .clamp(self.children[i].min_size().height,
-                           self.children[i].max_size().height);
-                content_heights[i]       = clamped_h;
+                let desired = self.children[i].layout(Size::new(slot_w, inner_h));
+                let clamped_h = desired.height.clamp(
+                    self.children[i].min_size().height,
+                    self.children[i].max_size().height,
+                );
+                content_heights[i] = clamped_h;
                 total_fixed_with_margins += clamped_h + m.vertical();
-                max_child_natural_w = max_child_natural_w
-                    .max(desired.width + m.horizontal());
+                max_child_natural_w = max_child_natural_w.max(desired.width + m.horizontal());
             } else {
-                total_flex          += self.flex_factors[i];
+                total_flex += self.flex_factors[i];
                 total_flex_margin_v += m.vertical();
             }
         }
@@ -333,26 +399,32 @@ impl Widget for FlexColumn {
         // -------------------------------------------------------------------
         // Step 2: distribute remaining space to flex children.
         // -------------------------------------------------------------------
-        let remaining = (inner_h
-            - total_fixed_with_margins
-            - total_gap
-            - total_flex_margin_v)
-            .max(0.0);
-        let flex_unit = if total_flex > 0.0 { remaining / total_flex } else { 0.0 };
+        let remaining =
+            (inner_h - total_fixed_with_margins - total_gap - total_flex_margin_v).max(0.0);
+        let flex_unit = if total_flex > 0.0 {
+            remaining / total_flex
+        } else {
+            0.0
+        };
 
         for i in 0..n {
             if self.flex_factors[i] > 0.0 {
                 let raw = self.flex_factors[i] * flex_unit;
-                content_heights[i] = raw
-                    .clamp(self.children[i].min_size().height,
-                           self.children[i].max_size().height);
+                content_heights[i] = raw.clamp(
+                    self.children[i].min_size().height,
+                    self.children[i].max_size().height,
+                );
             }
         }
 
         // Natural content height (all-fixed case) determines the column's
         // reported size when there are no flex children.
         let natural_content_h = total_fixed_with_margins + total_gap;
-        let effective_h = if total_flex > 0.0 { inner_h } else { natural_content_h };
+        let effective_h = if total_flex > 0.0 {
+            inner_h
+        } else {
+            natural_content_h
+        };
 
         // -------------------------------------------------------------------
         // Step 3: place children top-to-bottom.
@@ -379,20 +451,20 @@ impl Widget for FlexColumn {
         };
 
         for i in 0..n {
-            let m          = &margins[i];
-            let slot_w     = (inner_w - m.left - m.right).max(0.0);
-            let content_h  = content_heights[i];
+            let m = &margins[i];
+            let slot_w = (inner_w - m.left - m.right).max(0.0);
+            let content_h = content_heights[i];
 
             // Subtract top margin first (moves cursor toward lower Y = downward).
             cursor_y -= m.top;
             let child_bottom = cursor_y - content_h;
 
             // Layout child to obtain its natural width for cross-axis placement.
-            let desired   = self.children[i].layout(Size::new(slot_w, content_h));
+            let desired = self.children[i].layout(Size::new(slot_w, content_h));
             let natural_w = desired.width;
-            let h_anchor  = self.children[i].h_anchor();
-            let min_w     = self.children[i].min_size().width;
-            let max_w     = self.children[i].max_size().width;
+            let h_anchor = self.children[i].h_anchor();
+            let min_w = self.children[i].min_size().width;
+            let max_w = self.children[i].max_size().width;
 
             let (child_x, child_w) = place_cross_h(
                 h_anchor, pad_l, inner_w, m.left, m.right, natural_w, min_w, max_w,
@@ -401,7 +473,10 @@ impl Widget for FlexColumn {
             // Round to integers so bitmap content (cached text, images) lands on
             // exact pixel boundaries and isn't sub-pixel sampled into blur.
             self.children[i].set_bounds(Rect::new(
-                child_x.round(), child_bottom.round(), child_w.round(), content_h.round(),
+                child_x.round(),
+                child_bottom.round(),
+                child_w.round(),
+                content_h.round(),
             ));
 
             // Advance cursor past bottom margin and inter-child gap.
@@ -447,7 +522,9 @@ impl Widget for FlexColumn {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -478,16 +555,43 @@ impl FlexRow {
         }
     }
 
-    pub fn with_gap(mut self, gap: f64) -> Self { self.gap = gap; self }
-    pub fn with_padding(mut self, p: f64) -> Self { self.inner_padding = Insets::all(p); self }
-    pub fn with_inner_padding(mut self, p: Insets) -> Self { self.inner_padding = p; self }
-    pub fn with_background(mut self, c: Color) -> Self { self.background = c; self }
+    pub fn with_gap(mut self, gap: f64) -> Self {
+        self.gap = gap;
+        self
+    }
+    pub fn with_padding(mut self, p: f64) -> Self {
+        self.inner_padding = Insets::all(p);
+        self
+    }
+    pub fn with_inner_padding(mut self, p: Insets) -> Self {
+        self.inner_padding = p;
+        self
+    }
+    pub fn with_background(mut self, c: Color) -> Self {
+        self.background = c;
+        self
+    }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
@@ -507,35 +611,63 @@ impl FlexRow {
     }
 }
 
-impl Default for FlexRow { fn default() -> Self { Self::new() } }
+impl Default for FlexRow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Widget for FlexRow {
-    fn type_name(&self) -> &'static str { "FlexRow" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "FlexRow"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let pad_l = self.inner_padding.left;
         let pad_r = self.inner_padding.right;
         let pad_t = self.inner_padding.top;
         let pad_b = self.inner_padding.bottom;
-        let gap   = self.gap;
-        let n     = self.children.len();
-        if n == 0 { return available; }
+        let gap = self.gap;
+        let n = self.children.len();
+        if n == 0 {
+            return available;
+        }
 
-        let inner_w = (available.width  - pad_l - pad_r).max(0.0);
+        let inner_w = (available.width - pad_l - pad_r).max(0.0);
         let inner_h = (available.height - pad_t - pad_b).max(0.0);
 
-        let scale   = device_scale();
-        let margins: Vec<Insets> = self.children.iter()
+        let scale = device_scale();
+        let margins: Vec<Insets> = self
+            .children
+            .iter()
             .map(|c| c.margin().scale(scale))
             .collect();
 
@@ -544,25 +676,26 @@ impl Widget for FlexRow {
         // -------------------------------------------------------------------
         // Step 1: measure fixed children on the main (horizontal) axis.
         // -------------------------------------------------------------------
-        let mut content_widths           = vec![0.0f64; n];
-        let mut total_fixed_with_margins  = 0.0f64;
-        let mut total_flex               = 0.0f64;
-        let mut total_flex_margin_h      = 0.0f64;
+        let mut content_widths = vec![0.0f64; n];
+        let mut total_fixed_with_margins = 0.0f64;
+        let mut total_flex = 0.0f64;
+        let mut total_flex_margin_h = 0.0f64;
 
         for i in 0..n {
-            let m      = &margins[i];
+            let m = &margins[i];
             let slot_h = (inner_h - m.bottom - m.top).max(0.0);
             if self.flex_factors[i] == 0.0 {
                 // Pass inner_w as available width so the child can report its
                 // natural width.
-                let desired   = self.children[i].layout(Size::new(inner_w, slot_h));
-                let clamped_w = desired.width
-                    .clamp(self.children[i].min_size().width,
-                           self.children[i].max_size().width);
-                content_widths[i]          = clamped_w;
-                total_fixed_with_margins   += clamped_w + m.horizontal();
+                let desired = self.children[i].layout(Size::new(inner_w, slot_h));
+                let clamped_w = desired.width.clamp(
+                    self.children[i].min_size().width,
+                    self.children[i].max_size().width,
+                );
+                content_widths[i] = clamped_w;
+                total_fixed_with_margins += clamped_w + m.horizontal();
             } else {
-                total_flex          += self.flex_factors[i];
+                total_flex += self.flex_factors[i];
                 total_flex_margin_h += m.horizontal();
             }
         }
@@ -570,42 +703,44 @@ impl Widget for FlexRow {
         // -------------------------------------------------------------------
         // Step 2: distribute remaining space to flex children.
         // -------------------------------------------------------------------
-        let remaining = (inner_w
-            - total_fixed_with_margins
-            - total_gap
-            - total_flex_margin_h)
-            .max(0.0);
-        let flex_unit = if total_flex > 0.0 { remaining / total_flex } else { 0.0 };
+        let remaining =
+            (inner_w - total_fixed_with_margins - total_gap - total_flex_margin_h).max(0.0);
+        let flex_unit = if total_flex > 0.0 {
+            remaining / total_flex
+        } else {
+            0.0
+        };
 
         for i in 0..n {
             if self.flex_factors[i] > 0.0 {
                 let raw = self.flex_factors[i] * flex_unit;
-                content_widths[i] = raw
-                    .clamp(self.children[i].min_size().width,
-                           self.children[i].max_size().width);
+                content_widths[i] = raw.clamp(
+                    self.children[i].min_size().width,
+                    self.children[i].max_size().width,
+                );
             }
         }
 
         // -------------------------------------------------------------------
         // Step 3: place children left-to-right with cross-axis anchoring.
         // -------------------------------------------------------------------
-        let mut cursor_x         = pad_l;
-        let mut max_slot_h       = 0.0f64; // tallest slot (content + margins)
+        let mut cursor_x = pad_l;
+        let mut max_slot_h = 0.0f64; // tallest slot (content + margins)
 
         for i in 0..n {
-            let m          = &margins[i];
-            let slot_h     = (inner_h - m.bottom - m.top).max(0.0);
-            let content_w  = content_widths[i];
+            let m = &margins[i];
+            let slot_h = (inner_h - m.bottom - m.top).max(0.0);
+            let content_w = content_widths[i];
 
             // Advance past left margin.
             cursor_x += m.left;
 
             // Layout child to get natural height for cross-axis placement.
-            let desired   = self.children[i].layout(Size::new(content_w, slot_h));
+            let desired = self.children[i].layout(Size::new(content_w, slot_h));
             let natural_h = desired.height;
-            let v_anchor  = self.children[i].v_anchor();
-            let min_h     = self.children[i].min_size().height;
-            let max_h     = self.children[i].max_size().height;
+            let v_anchor = self.children[i].v_anchor();
+            let min_h = self.children[i].min_size().height;
+            let max_h = self.children[i].max_size().height;
 
             let (child_y, child_h) = place_cross_v(
                 v_anchor, pad_b, inner_h, m.bottom, m.top, natural_h, min_h, max_h,
@@ -613,7 +748,10 @@ impl Widget for FlexRow {
 
             // Round to integers — same reason as FlexColumn (pixel-perfect blits).
             self.children[i].set_bounds(Rect::new(
-                cursor_x.round(), child_y.round(), content_w.round(), child_h.round(),
+                cursor_x.round(),
+                child_y.round(),
+                content_w.round(),
+                child_h.round(),
             ));
             max_slot_h = max_slot_h.max(child_h + m.vertical());
 
@@ -638,5 +776,7 @@ impl Widget for FlexRow {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }

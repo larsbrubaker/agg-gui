@@ -41,10 +41,10 @@
 
 use std::cell::Cell;
 
-use agg_gui::{GlPaint, Rect, Size};
-use agg_gui::event::{Event, EventResult};
 use agg_gui::draw_ctx::DrawCtx;
+use agg_gui::event::{Event, EventResult};
 use agg_gui::widget::Widget;
+use agg_gui::{GlPaint, Rect, Size};
 use glow::HasContext;
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ thread_local! {
 /// software path `gl_paint` is a no-op and only the theme-coloured
 /// placeholder rectangle is visible.
 pub struct GlCubeWidget {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     /// Created lazily on the first `gl_paint()` call so no GL context
     /// is needed at widget construction time.
@@ -77,30 +77,50 @@ pub struct GlCubeWidget {
 }
 
 impl Default for GlCubeWidget {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GlCubeWidget {
     pub fn new() -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), renderer: None }
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            renderer: None,
+        }
     }
 }
 
 impl Widget for GlCubeWidget {
-    fn type_name(&self) -> &'static str { "GlCubeWidget" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "GlCubeWidget"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn layout(&mut self, available: Size) -> Size { available }
+    fn layout(&mut self, available: Size) -> Size {
+        available
+    }
 
     /// 3-D cube is a continuous animation — every frame advances the sine
     /// field.  When the cube is visible (enclosing Window / tab /
     /// CollapsingHeader paints it) this keeps the host loop rendering;
     /// when it's hidden, the tree-walk visibility gate short-circuits
     /// before reaching here, so the loop goes idle.
-    fn needs_paint(&self) -> bool { true }
+    fn needs_paint(&self) -> bool {
+        true
+    }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let t = ctx.transform();
@@ -120,23 +140,25 @@ impl Widget for GlCubeWidget {
         ctx.gl_paint(screen_rect, self);
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 /// Lazy-init GL painter: creates the renderer on first call, then draws.
 impl GlPaint for GlCubeWidget {
     fn gl_paint(
         &mut self,
-        gl:          &dyn std::any::Any,
+        gl: &dyn std::any::Any,
         screen_rect: Rect,
-        full_w:      i32,
-        full_h:      i32,
+        full_w: i32,
+        full_h: i32,
         parent_clip: Option<[i32; 4]>,
     ) {
         if let Some(gl_ctx) = gl.downcast_ref::<glow::Context>() {
-            let renderer = self.renderer.get_or_insert_with(|| {
-                unsafe { BarGridGlRenderer::new(gl_ctx) }
-            });
+            let renderer = self
+                .renderer
+                .get_or_insert_with(|| unsafe { BarGridGlRenderer::new(gl_ctx) });
             unsafe { renderer.draw_gl(gl_ctx, screen_rect, full_w, full_h, parent_clip) };
         }
     }
@@ -152,7 +174,7 @@ const GRID_ROWS: u32 = 8;
 /// Bar geometry — unit-square box that rises from y=0 to y=1.  Origin
 /// at the **base** so the vertex shader's Y scaling grows the bar
 /// upward rather than expanding it from its centre.
-const BAR_HALF: f32 = 0.45;   // ⇒ 0.9 wide on a 1.0 grid pitch (gutter = 0.1)
+const BAR_HALF: f32 = 0.45; // ⇒ 0.9 wide on a 1.0 grid pitch (gutter = 0.1)
 
 const BAR_VERT: &str = r#"#version 300 es
 precision mediump float;
@@ -246,18 +268,30 @@ fn bar_box_verts() -> Vec<f32> {
         out
     };
     let mut v = Vec::with_capacity(24 * 6);
-    v.extend(face([[-h, 1.0, -h], [ h, 1.0, -h], [ h, 1.0,  h], [-h, 1.0,  h]],
-                  [0.0, 1.0, 0.0]));
-    v.extend(face([[-h, 0.0,  h], [ h, 0.0,  h], [ h, 0.0, -h], [-h, 0.0, -h]],
-                  [0.0,-1.0, 0.0]));
-    v.extend(face([[-h, 0.0,  h], [ h, 0.0,  h], [ h, 1.0,  h], [-h, 1.0,  h]],
-                  [0.0, 0.0, 1.0]));
-    v.extend(face([[ h, 0.0, -h], [-h, 0.0, -h], [-h, 1.0, -h], [ h, 1.0, -h]],
-                  [0.0, 0.0,-1.0]));
-    v.extend(face([[ h, 0.0,  h], [ h, 0.0, -h], [ h, 1.0, -h], [ h, 1.0,  h]],
-                  [1.0, 0.0, 0.0]));
-    v.extend(face([[-h, 0.0, -h], [-h, 0.0,  h], [-h, 1.0,  h], [-h, 1.0, -h]],
-                  [-1.0, 0.0, 0.0]));
+    v.extend(face(
+        [[-h, 1.0, -h], [h, 1.0, -h], [h, 1.0, h], [-h, 1.0, h]],
+        [0.0, 1.0, 0.0],
+    ));
+    v.extend(face(
+        [[-h, 0.0, h], [h, 0.0, h], [h, 0.0, -h], [-h, 0.0, -h]],
+        [0.0, -1.0, 0.0],
+    ));
+    v.extend(face(
+        [[-h, 0.0, h], [h, 0.0, h], [h, 1.0, h], [-h, 1.0, h]],
+        [0.0, 0.0, 1.0],
+    ));
+    v.extend(face(
+        [[h, 0.0, -h], [-h, 0.0, -h], [-h, 1.0, -h], [h, 1.0, -h]],
+        [0.0, 0.0, -1.0],
+    ));
+    v.extend(face(
+        [[h, 0.0, h], [h, 0.0, -h], [h, 1.0, -h], [h, 1.0, h]],
+        [1.0, 0.0, 0.0],
+    ));
+    v.extend(face(
+        [[-h, 0.0, -h], [-h, 0.0, h], [-h, 1.0, h], [-h, 1.0, -h]],
+        [-1.0, 0.0, 0.0],
+    ));
     v
 }
 
@@ -286,22 +320,22 @@ fn bar_instance_data() -> Vec<f32> {
 }
 
 pub struct BarGridGlRenderer {
-    program:        glow::Program,
-    vao:            glow::VertexArray,
-    _vbo:           glow::Buffer,
-    _ibo:           glow::Buffer,
-    _instance_vbo:  glow::Buffer,
-    vp_loc:         Option<glow::UniformLocation>,
-    time_loc:       Option<glow::UniformLocation>,
-    grid_size_loc:  Option<glow::UniformLocation>,
-    light_dir_loc:  Option<glow::UniformLocation>,
-    col_left_loc:   Option<glow::UniformLocation>,
-    col_right_loc:  Option<glow::UniformLocation>,
+    program: glow::Program,
+    vao: glow::VertexArray,
+    _vbo: glow::Buffer,
+    _ibo: glow::Buffer,
+    _instance_vbo: glow::Buffer,
+    vp_loc: Option<glow::UniformLocation>,
+    time_loc: Option<glow::UniformLocation>,
+    grid_size_loc: Option<glow::UniformLocation>,
+    light_dir_loc: Option<glow::UniformLocation>,
+    col_left_loc: Option<glow::UniformLocation>,
+    col_right_loc: Option<glow::UniformLocation>,
     col_accent_loc: Option<glow::UniformLocation>,
     peak_color_loc: Option<glow::UniformLocation>,
     /// `web_time::Instant` so this code compiles + runs on both native
     /// and `wasm32-unknown-unknown` from a single source.
-    start:          web_time::Instant,
+    start: web_time::Instant,
 }
 
 impl BarGridGlRenderer {
@@ -309,12 +343,12 @@ impl BarGridGlRenderer {
     pub unsafe fn new(gl: &glow::Context) -> Self {
         let program = compile_program(gl, BAR_VERT, BAR_FRAG);
 
-        let vp_loc         = gl.get_uniform_location(program, "u_view_proj");
-        let time_loc       = gl.get_uniform_location(program, "u_time");
-        let grid_size_loc  = gl.get_uniform_location(program, "u_grid_size");
-        let light_dir_loc  = gl.get_uniform_location(program, "u_light_dir");
-        let col_left_loc   = gl.get_uniform_location(program, "u_col_left");
-        let col_right_loc  = gl.get_uniform_location(program, "u_col_right");
+        let vp_loc = gl.get_uniform_location(program, "u_view_proj");
+        let time_loc = gl.get_uniform_location(program, "u_time");
+        let grid_size_loc = gl.get_uniform_location(program, "u_grid_size");
+        let light_dir_loc = gl.get_uniform_location(program, "u_light_dir");
+        let col_left_loc = gl.get_uniform_location(program, "u_col_left");
+        let col_right_loc = gl.get_uniform_location(program, "u_col_right");
         let col_accent_loc = gl.get_uniform_location(program, "u_col_accent");
         let peak_color_loc = gl.get_uniform_location(program, "u_peak_color");
 
@@ -344,7 +378,11 @@ impl BarGridGlRenderer {
         gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, vert_stride, 0);
         gl.enable_vertex_attrib_array(0);
         gl.vertex_attrib_pointer_f32(
-            1, 3, glow::FLOAT, false, vert_stride,
+            1,
+            3,
+            glow::FLOAT,
+            false,
+            vert_stride,
             (3 * std::mem::size_of::<f32>()) as i32,
         );
         gl.enable_vertex_attrib_array(1);
@@ -368,10 +406,19 @@ impl BarGridGlRenderer {
         gl.bind_vertex_array(None);
 
         Self {
-            program, vao,
-            _vbo: vbo, _ibo: ibo, _instance_vbo: instance_vbo,
-            vp_loc, time_loc, grid_size_loc, light_dir_loc,
-            col_left_loc, col_right_loc, col_accent_loc, peak_color_loc,
+            program,
+            vao,
+            _vbo: vbo,
+            _ibo: ibo,
+            _instance_vbo: instance_vbo,
+            vp_loc,
+            time_loc,
+            grid_size_loc,
+            light_dir_loc,
+            col_left_loc,
+            col_right_loc,
+            col_accent_loc,
+            peak_color_loc,
             start: web_time::Instant::now(),
         }
     }
@@ -381,17 +428,19 @@ impl BarGridGlRenderer {
     /// full viewport dimensions for restoring after.
     pub unsafe fn draw_gl(
         &mut self,
-        gl:          &glow::Context,
-        fb_rect:     Rect,
-        full_w:      i32,
-        full_h:      i32,
+        gl: &glow::Context,
+        fb_rect: Rect,
+        full_w: i32,
+        full_h: i32,
         parent_clip: Option<[i32; 4]>,
     ) {
-        if fb_rect.width < 1.0 || fb_rect.height < 1.0 { return; }
+        if fb_rect.width < 1.0 || fb_rect.height < 1.0 {
+            return;
+        }
 
         let gl_x = fb_rect.x as i32;
         let gl_y = fb_rect.y as i32;
-        let gl_w = fb_rect.width  as i32;
+        let gl_w = fb_rect.width as i32;
         let gl_h = fb_rect.height as i32;
 
         // Intersect widget scissor with the parent clip so collapsed
@@ -405,7 +454,9 @@ impl BarGridGlRenderer {
         } else {
             [gl_x, gl_y, gl_w, gl_h]
         };
-        if sw <= 0 || sh <= 0 { return; }
+        if sw <= 0 || sh <= 0 {
+            return;
+        }
 
         gl.viewport(gl_x, gl_y, gl_w, gl_h);
         gl.enable(glow::SCISSOR_TEST);
@@ -423,12 +474,8 @@ impl BarGridGlRenderer {
         // High angle, looking down at the grid centre, offset to −X so
         // the field reads as a perspective sweep rather than top-down.
         let aspect = gl_w as f32 / gl_h.max(1) as f32;
-        let proj   = perspective(35_f32.to_radians(), aspect, 0.5, 100.0);
-        let view   = look_at(
-            [-7.0, 8.5, 11.0],
-            [ 0.0, 0.5,  0.0],
-            [ 0.0, 1.0,  0.0],
-        );
+        let proj = perspective(35_f32.to_radians(), aspect, 0.5, 100.0);
+        let view = look_at([-7.0, 8.5, 11.0], [0.0, 0.5, 0.0], [0.0, 1.0, 0.0]);
         let view_proj = mat4_mul(proj, view);
 
         if let Some(loc) = self.vp_loc.as_ref() {
@@ -452,10 +499,20 @@ impl BarGridGlRenderer {
             gl.uniform_3_f32(Some(loc), palette.left[0], palette.left[1], palette.left[2]);
         }
         if let Some(loc) = self.col_right_loc.as_ref() {
-            gl.uniform_3_f32(Some(loc), palette.right[0], palette.right[1], palette.right[2]);
+            gl.uniform_3_f32(
+                Some(loc),
+                palette.right[0],
+                palette.right[1],
+                palette.right[2],
+            );
         }
         if let Some(loc) = self.col_accent_loc.as_ref() {
-            gl.uniform_3_f32(Some(loc), palette.accent[0], palette.accent[1], palette.accent[2]);
+            gl.uniform_3_f32(
+                Some(loc),
+                palette.accent[0],
+                palette.accent[1],
+                palette.accent[2],
+            );
         }
         if let Some(loc) = self.peak_color_loc.as_ref() {
             gl.uniform_3_f32(Some(loc), palette.peak[0], palette.peak[1], palette.peak[2]);
@@ -463,13 +520,7 @@ impl BarGridGlRenderer {
 
         // Single instanced draw call: 36 indices × 128 instances.
         let instance_count = (GRID_COLS * GRID_ROWS) as i32;
-        gl.draw_elements_instanced(
-            glow::TRIANGLES,
-            36,
-            glow::UNSIGNED_SHORT,
-            0,
-            instance_count,
-        );
+        gl.draw_elements_instanced(glow::TRIANGLES, 36, glow::UNSIGNED_SHORT, 0, instance_count);
 
         gl.disable(glow::SCISSOR_TEST);
         gl.disable(glow::DEPTH_TEST);
@@ -484,10 +535,10 @@ impl BarGridGlRenderer {
 impl GlPaint for BarGridGlRenderer {
     fn gl_paint(
         &mut self,
-        gl:          &dyn std::any::Any,
+        gl: &dyn std::any::Any,
         screen_rect: Rect,
-        full_w:      i32,
-        full_h:      i32,
+        full_w: i32,
+        full_h: i32,
         parent_clip: Option<[i32; 4]>,
     ) {
         if let Some(gl) = gl.downcast_ref::<glow::Context>() {
@@ -502,7 +553,10 @@ impl GlPaint for BarGridGlRenderer {
 
 unsafe fn compile_program(gl: &glow::Context, vert_src: &str, frag_src: &str) -> glow::Program {
     let program = gl.create_program().expect("create_program");
-    for (src, kind) in [(vert_src, glow::VERTEX_SHADER), (frag_src, glow::FRAGMENT_SHADER)] {
+    for (src, kind) in [
+        (vert_src, glow::VERTEX_SHADER),
+        (frag_src, glow::FRAGMENT_SHADER),
+    ] {
         let shader = gl.create_shader(kind).unwrap();
         gl.shader_source(shader, src);
         gl.compile_shader(shader);
@@ -528,10 +582,10 @@ unsafe fn compile_program(gl: &glow::Context, vert_src: &str, frag_src: &str) ->
 // ---------------------------------------------------------------------------
 
 struct BarPalette {
-    left:   [f32; 3],
-    right:  [f32; 3],
+    left: [f32; 3],
+    right: [f32; 3],
     accent: [f32; 3],
-    peak:   [f32; 3],
+    peak: [f32; 3],
 }
 
 /// Pick a gradient palette based on the active theme.  Two presets:
@@ -542,24 +596,24 @@ struct BarPalette {
 /// Detection by background-colour luminance — works for any future
 /// theme additions without an enum match.
 fn bar_palette_for_theme() -> BarPalette {
-    let v   = agg_gui::current_visuals();
-    let bg  = v.bg_color;
+    let v = agg_gui::current_visuals();
+    let bg = v.bg_color;
     let lum = 0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b;
     let dark = lum < 0.5;
 
     if dark {
         BarPalette {
-            left:   [0.18, 0.55, 0.95],
-            right:  [0.92, 0.32, 0.62],
+            left: [0.18, 0.55, 0.95],
+            right: [0.92, 0.32, 0.62],
             accent: [1.00, 0.78, 0.30],
-            peak:   [1.00, 1.00, 1.00],
+            peak: [1.00, 1.00, 1.00],
         }
     } else {
         BarPalette {
-            left:   [0.10, 0.42, 0.85],
-            right:  [0.78, 0.18, 0.45],
+            left: [0.10, 0.42, 0.85],
+            right: [0.78, 0.18, 0.45],
             accent: [0.95, 0.55, 0.10],
-            peak:   [v.text_color.r, v.text_color.g, v.text_color.b],
+            peak: [v.text_color.r, v.text_color.g, v.text_color.b],
         }
     }
 }
@@ -574,11 +628,10 @@ fn mat4_mul(a: Mat4, b: Mat4) -> Mat4 {
     let mut out = [0f32; 16];
     for row in 0..4 {
         for col in 0..4 {
-            out[col * 4 + row] =
-                a[row]            * b[col * 4]
-              + a[4 + row]        * b[col * 4 + 1]
-              + a[8 + row]        * b[col * 4 + 2]
-              + a[12 + row]       * b[col * 4 + 3];
+            out[col * 4 + row] = a[row] * b[col * 4]
+                + a[4 + row] * b[col * 4 + 1]
+                + a[8 + row] * b[col * 4 + 2]
+                + a[12 + row] * b[col * 4 + 3];
         }
     }
     out
@@ -588,10 +641,22 @@ fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> Mat4 {
     let f = 1.0 / (fov_y * 0.5).tan();
     let nf = 1.0 / (near - far);
     [
-        f / aspect, 0.0, 0.0,                   0.0,
-        0.0,        f,   0.0,                   0.0,
-        0.0,        0.0, (far + near) * nf,     -1.0,
-        0.0,        0.0, 2.0 * far * near * nf,  0.0,
+        f / aspect,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        f,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        (far + near) * nf,
+        -1.0,
+        0.0,
+        0.0,
+        2.0 * far * near * nf,
+        0.0,
     ]
 }
 
@@ -600,27 +665,43 @@ fn look_at(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Mat4 {
     let s = normalize3(cross3(f, up));
     let u = cross3(s, f);
     [
-         s[0],          u[0],         -f[0],         0.0,
-         s[1],          u[1],         -f[1],         0.0,
-         s[2],          u[2],         -f[2],         0.0,
-        -dot3(s, eye), -dot3(u, eye),  dot3(f, eye), 1.0,
+        s[0],
+        u[0],
+        -f[0],
+        0.0,
+        s[1],
+        u[1],
+        -f[1],
+        0.0,
+        s[2],
+        u[2],
+        -f[2],
+        0.0,
+        -dot3(s, eye),
+        -dot3(u, eye),
+        dot3(f, eye),
+        1.0,
     ]
 }
 
-#[inline] fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+#[inline]
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
-#[inline] fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+#[inline]
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
-#[inline] fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+#[inline]
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
 }
-#[inline] fn normalize3(v: [f32; 3]) -> [f32; 3] {
+#[inline]
+fn normalize3(v: [f32; 3]) -> [f32; 3] {
     let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-9);
     [v[0] / len, v[1] / len, v[2] / len]
 }

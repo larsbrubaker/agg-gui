@@ -22,9 +22,9 @@
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -139,7 +139,6 @@ pub struct Label {
     wrap_at_width: f64,
     /// Lines produced by the last word-wrap computation.
     wrapped_lines: Vec<String>,
-
 }
 
 impl Label {
@@ -183,17 +182,32 @@ impl Label {
 
     // ── builder methods ───────────────────────────────────────────────────────
 
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self
+    }
     /// Override the label colour.  Pass an explicit `Color` to always use that
     /// colour regardless of the active theme.  Omit this call to follow the
     /// theme's `text_color` automatically.
-    pub fn with_color(mut self, color: Color) -> Self { self.color = Some(color); self }
-    pub fn with_align(mut self, align: LabelAlign) -> Self { self.align = align; self }
-    pub fn with_has_backbuffer(mut self, v: bool) -> Self { self.buffered = v; self }
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+    pub fn with_align(mut self, align: LabelAlign) -> Self {
+        self.align = align;
+        self
+    }
+    pub fn with_has_backbuffer(mut self, v: bool) -> Self {
+        self.buffered = v;
+        self
+    }
     /// Enable or disable word-wrapping.  When `true`, long lines are broken at
     /// word boundaries to fit the available width; the label height expands to
     /// accommodate all lines.  Newlines in the text are always honoured.
-    pub fn with_wrap(mut self, wrap: bool) -> Self { self.wrap = wrap; self }
+    pub fn with_wrap(mut self, wrap: bool) -> Self {
+        self.wrap = wrap;
+        self
+    }
 
     /// Opt OUT of the system-wide font override for this Label.  The
     /// Label will render with `self.font` (passed to `Label::new`)
@@ -203,7 +217,8 @@ impl Label {
     /// Pin this label's LCD setting: `Some(true)` always LCD, `Some(false)`
     /// always grayscale, `None` (default) defers to the global toggle.
     pub fn with_lcd(mut self, pref: Option<bool>) -> Self {
-        self.lcd_pref = pref; self
+        self.lcd_pref = pref;
+        self
     }
 
     pub fn with_ignore_system_font(mut self, ignore: bool) -> Self {
@@ -211,16 +226,33 @@ impl Label {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     // ── getter methods ────────────────────────────────────────────────────────
 
     /// Return the current label text as a `&str`.
-    pub fn text_str(&self) -> &str { &self.text }
+    pub fn text_str(&self) -> &str {
+        &self.text
+    }
 
     /// Resolve the font used for THIS layout/paint.  Prefers the system-wide
     /// font override (set by the System window / `font_settings::set_system_font`)
@@ -230,8 +262,7 @@ impl Label {
         if self.ignore_system_font {
             Arc::clone(&self.font)
         } else {
-            crate::font_settings::current_system_font()
-                .unwrap_or_else(|| Arc::clone(&self.font))
+            crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font))
         }
     }
 
@@ -285,8 +316,12 @@ impl Label {
 }
 
 impl Widget for Label {
-    fn type_name(&self) -> &'static str { "Label" }
-    fn bounds(&self) -> Rect { self.bounds }
+    fn type_name(&self) -> &'static str {
+        "Label"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
     fn set_bounds(&mut self, b: Rect) {
         // Only invalidate on SIZE change — position doesn't affect
         // cached bitmap (painted at local origin, blitted at parent's
@@ -298,10 +333,16 @@ impl Widget for Label {
         }
         self.bounds = b;
     }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn lcd_preference(&self) -> Option<bool> { self.lcd_pref }
+    fn lcd_preference(&self) -> Option<bool> {
+        self.lcd_pref
+    }
 
     fn backbuffer_cache_mut(&mut self) -> Option<&mut crate::widget::BackbufferCache> {
         // Cache always when `buffered`.  Mode is chosen by
@@ -311,7 +352,11 @@ impl Widget for Label {
         // unchanged there, so no scroll-stale cache problem (that
         // was a dead end from the seed-from-parent approach we ripped
         // out).
-        if self.buffered { Some(&mut self.cache) } else { None }
+        if self.buffered {
+            Some(&mut self.cache)
+        } else {
+            None
+        }
     }
 
     fn backbuffer_mode(&self) -> crate::widget::BackbufferMode {
@@ -330,14 +375,16 @@ impl Widget for Label {
     /// Labels are never independently hittable.  This lets their interactive
     /// parent (e.g., Button) retain full hit-test and focus ownership even
     /// when the label fills the parent's entire bounds.
-    fn hit_test(&self, _: Point) -> bool { false }
+    fn hit_test(&self, _: Point) -> bool {
+        false
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Resolve the effective font + size ONCE per layout so this call
         // and the paint that follows agree on glyph metrics even if the
         // system scale is mid-transition.
-        let font   = self.active_font();
-        let size   = self.active_font_size();
+        let font = self.active_font();
+        let size = self.active_font_size();
         let line_h = size * 1.5;
 
         // Drop the pre-rasterized bitmap the moment we notice a font or size
@@ -357,28 +404,29 @@ impl Widget for Label {
         }
 
         if self.wrap && available.width > 0.0 {
-            let text_changed  = self.layout_text != self.text || size_changed;
+            let text_changed = self.layout_text != self.text || size_changed;
             let width_changed = (self.wrap_at_width - available.width).abs() > 1.0;
             if text_changed || width_changed || font_changed {
                 self.wrapped_lines = wrap_text(&font, &self.text, size, available.width);
-                self.wrap_at_width    = available.width;
-                self.layout_text      = self.text.clone();
+                self.wrap_at_width = available.width;
+                self.layout_text = self.text.clone();
                 self.layout_font_size = size;
-                self.layout_font_ptr  = Arc::as_ptr(&font);
+                self.layout_font_ptr = Arc::as_ptr(&font);
                 // Text changes also need a bitmap rebuild.
-                if text_changed { self.cache.invalidate(); }
+                if text_changed {
+                    self.cache.invalidate();
+                }
             }
             let total_h = self.wrapped_lines.len() as f64 * line_h;
             Size::new(available.width, total_h)
         } else {
             // Single-line path: tight bounds matching rendered text width.
             if self.layout_text != self.text || size_changed || font_changed {
-                let metrics =
-                    crate::text::measure_text_metrics(&font, &self.text, size);
-                self.layout_width     = metrics.width;
-                self.layout_text      = self.text.clone();
+                let metrics = crate::text::measure_text_metrics(&font, &self.text, size);
+                self.layout_width = metrics.width;
+                self.layout_text = self.text.clone();
                 self.layout_font_size = size;
-                self.layout_font_ptr  = Arc::as_ptr(&font);
+                self.layout_font_ptr = Arc::as_ptr(&font);
             }
             Size::new(self.layout_width.min(available.width), line_h)
         }
@@ -420,17 +468,19 @@ impl Widget for Label {
         // lives here.  Label is just a widget that draws text.
         ctx.set_fill_color(color);
         if is_wrapped {
-            let line_h  = size * 1.5;
+            let line_h = size * 1.5;
             let total_h = self.wrapped_lines.len() as f64 * line_h;
             for (i, line) in self.wrapped_lines.iter().enumerate() {
-                if line.is_empty() { continue; }
+                if line.is_empty() {
+                    continue;
+                }
                 if let Some(m) = ctx.measure_text(line) {
                     let line_center_y = total_h - (i as f64 + 0.5) * line_h;
                     let ty = line_center_y - (m.ascent - m.descent) * 0.5;
                     let tx = match self.align {
-                        LabelAlign::Left   => 0.0,
+                        LabelAlign::Left => 0.0,
                         LabelAlign::Center => (w - m.width) * 0.5,
-                        LabelAlign::Right  => w - m.width,
+                        LabelAlign::Right => w - m.width,
                     };
                     ctx.fill_text(line, tx, ty);
                 }
@@ -438,9 +488,9 @@ impl Widget for Label {
         } else if let Some(m) = ctx.measure_text(&self.text) {
             let ty = h * 0.5 - (m.ascent - m.descent) * 0.5;
             let tx = match self.align {
-                LabelAlign::Left   => 0.0,
+                LabelAlign::Left => 0.0,
                 LabelAlign::Center => (w - m.width) * 0.5,
-                LabelAlign::Right  => w - m.width,
+                LabelAlign::Right => w - m.width,
             };
             ctx.fill_text(&self.text, tx, ty);
         }
@@ -448,18 +498,28 @@ impl Widget for Label {
         ctx.restore();
     }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn measure_min_height(&self, available_w: f64) -> f64 {
         // Wrapped: count lines at the supplied width.  Non-wrapped:
         // a single line tall.  Used by ancestor `Window::tight_content_fit`
         // to compute a content-bound for height.
-        let font   = self.active_font();
-        let size   = self.active_font_size();
+        let font = self.active_font();
+        let size = self.active_font_size();
         let line_h = size * 1.5;
         if self.wrap && available_w > 0.0 {
             let lines = wrap_text(&font, &self.text, size, available_w);
@@ -469,14 +529,19 @@ impl Widget for Label {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 
     fn properties(&self) -> Vec<(&'static str, String)> {
         vec![
-            ("text",           self.text.clone()),
-            ("font_size",      format!("{:.1}", self.font_size)),
-            ("align",          format!("{:?}", self.align)),
-            ("has_backbuffer", if self.buffered { "true" } else { "false" }.to_string()),
+            ("text", self.text.clone()),
+            ("font_size", format!("{:.1}", self.font_size)),
+            ("align", format!("{:?}", self.align)),
+            (
+                "has_backbuffer",
+                if self.buffered { "true" } else { "false" }.to_string(),
+            ),
         ]
     }
 }

@@ -6,12 +6,11 @@
 
 use std::sync::Arc;
 
-
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::{Font, measure_text_metrics};
+use crate::text::{measure_text_metrics, Font};
 use crate::widget::Widget;
 
 // Colors are resolved from ctx.visuals() at paint time.
@@ -19,63 +18,104 @@ use crate::widget::Widget;
 /// A text label that looks like a hyperlink (blue, underlined) and fires a
 /// callback when clicked.
 pub struct Hyperlink {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    base:     WidgetBase,
+    base: WidgetBase,
 
-    text:      String,
-    font:      Arc<Font>,
+    text: String,
+    font: Arc<Font>,
     font_size: f64,
 
-    hovered:  bool,
+    hovered: bool,
     on_click: Option<Box<dyn FnMut()>>,
 
-    cache:    crate::widget::BackbufferCache,
-    last_sig: Option<(bool, u64, u64)>,  // (hovered, w_bits, h_bits)
+    cache: crate::widget::BackbufferCache,
+    last_sig: Option<(bool, u64, u64)>, // (hovered, w_bits, h_bits)
 }
 
 impl Hyperlink {
     pub fn new(text: impl Into<String>, font: Arc<Font>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            base:     WidgetBase::new(),
-            text:     text.into(),
+            base: WidgetBase::new(),
+            text: text.into(),
             font,
             font_size: 14.0,
-            hovered:  false,
+            hovered: false,
             on_click: None,
-            cache:    crate::widget::BackbufferCache::default(),
+            cache: crate::widget::BackbufferCache::default(),
             last_sig: None,
         }
     }
 
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self
+    }
     pub fn on_click(mut self, cb: impl FnMut() + 'static) -> Self {
-        self.on_click = Some(Box::new(cb)); self
+        self.on_click = Some(Box::new(cb));
+        self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
 impl Widget for Hyperlink {
-    fn type_name(&self) -> &'static str { "Hyperlink" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Hyperlink"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
     fn backbuffer_cache_mut(&mut self) -> Option<&mut crate::widget::BackbufferCache> {
         Some(&mut self.cache)
@@ -90,7 +130,11 @@ impl Widget for Hyperlink {
     }
 
     fn layout(&mut self, _available: Size) -> Size {
-        let sig = (self.hovered, self.bounds.width.to_bits(), self.bounds.height.to_bits());
+        let sig = (
+            self.hovered,
+            self.bounds.width.to_bits(),
+            self.bounds.height.to_bits(),
+        );
         if self.last_sig != Some(sig) {
             self.last_sig = Some(sig);
             self.cache.invalidate();
@@ -102,7 +146,11 @@ impl Widget for Hyperlink {
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let color = if self.hovered { v.text_link_hovered } else { v.text_link };
+        let color = if self.hovered {
+            v.text_link_hovered
+        } else {
+            v.text_link
+        };
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
         ctx.set_fill_color(color);
@@ -128,13 +176,24 @@ impl Widget for Hyperlink {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, .. } => EventResult::Consumed,
-            Event::MouseUp   { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                ..
+            } => EventResult::Consumed,
+            Event::MouseUp {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if self.hit_test(*pos) {
-                    if let Some(cb) = self.on_click.as_mut() { cb(); }
+                    if let Some(cb) = self.on_click.as_mut() {
+                        cb();
+                    }
                     // Click handler typically mutates app state.
                     crate::animation::request_tick();
                 }

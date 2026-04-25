@@ -3,9 +3,9 @@
 //! Phase 5: horizontal split only (left panel | right panel).
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
@@ -14,7 +14,7 @@ use crate::widget::Widget;
 /// `children[0]` = left panel, `children[1]` = right panel.
 pub struct Splitter {
     bounds: Rect,
-    children: Vec<Box<dyn Widget>>,  // exactly 2
+    children: Vec<Box<dyn Widget>>, // exactly 2
     base: WidgetBase,
     /// Split position as a fraction of total width. Clamped to [0.05, 0.95].
     pub ratio: f64,
@@ -48,11 +48,26 @@ impl Splitter {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     fn divider_x(&self) -> f64 {
         (self.bounds.width - self.divider_width) * self.ratio
@@ -60,24 +75,48 @@ impl Splitter {
 }
 
 impl Widget for Splitter {
-    fn type_name(&self) -> &'static str { "Splitter" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Splitter"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn hit_test(&self, local_pos: Point) -> bool {
         // Capture all events during drag, even if cursor leaves bounds.
-        if self.dragging { return true; }
+        if self.dragging {
+            return true;
+        }
         let b = self.bounds();
-        local_pos.x >= 0.0 && local_pos.x <= b.width
-            && local_pos.y >= 0.0 && local_pos.y <= b.height
+        local_pos.x >= 0.0
+            && local_pos.x <= b.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= b.height
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -149,11 +188,17 @@ impl Widget for Splitter {
                     crate::animation::request_tick();
                     EventResult::Consumed
                 } else {
-                    if was != self.hovered { crate::animation::request_tick(); }
+                    if was != self.hovered {
+                        crate::animation::request_tick();
+                    }
                     EventResult::Ignored
                 }
             }
-            Event::MouseDown { pos, button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
                 if pos.x >= div_x - 2.0 && pos.x <= div_end + 2.0 {
                     self.dragging = true;
                     // No tick: `dragging = true` produces no immediate
@@ -164,7 +209,10 @@ impl Widget for Splitter {
                     EventResult::Ignored
                 }
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 let was_dragging = self.dragging;
                 self.dragging = false;
                 if was_dragging {

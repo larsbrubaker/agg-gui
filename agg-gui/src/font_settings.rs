@@ -179,42 +179,54 @@ pub fn set_hinting_enabled(on: bool) {
 // is the source-of-truth for rendering, the cell is the source-of-truth
 // for UI widgets and disk persistence.
 
-pub fn current_gamma() -> f64 { GAMMA.with(|c| *c.borrow()) }
+pub fn current_gamma() -> f64 {
+    GAMMA.with(|c| *c.borrow())
+}
 pub fn set_gamma(v: f64) {
     let clamped = v.clamp(0.5, 2.5);
     GAMMA.with(|c| *c.borrow_mut() = clamped);
     bump_typography_epoch();
 }
 
-pub fn current_width() -> f64 { WIDTH.with(|c| *c.borrow()) }
+pub fn current_width() -> f64 {
+    WIDTH.with(|c| *c.borrow())
+}
 pub fn set_width(v: f64) {
     let clamped = v.clamp(0.75, 1.25);
     WIDTH.with(|c| *c.borrow_mut() = clamped);
     bump_typography_epoch();
 }
 
-pub fn current_interval() -> f64 { INTERVAL.with(|c| *c.borrow()) }
+pub fn current_interval() -> f64 {
+    INTERVAL.with(|c| *c.borrow())
+}
 pub fn set_interval(v: f64) {
     let clamped = v.clamp(-0.2, 0.2);
     INTERVAL.with(|c| *c.borrow_mut() = clamped);
     bump_typography_epoch();
 }
 
-pub fn current_faux_weight() -> f64 { FAUX_WEIGHT.with(|c| *c.borrow()) }
+pub fn current_faux_weight() -> f64 {
+    FAUX_WEIGHT.with(|c| *c.borrow())
+}
 pub fn set_faux_weight(v: f64) {
     let clamped = v.clamp(-1.0, 1.0);
     FAUX_WEIGHT.with(|c| *c.borrow_mut() = clamped);
     bump_typography_epoch();
 }
 
-pub fn current_faux_italic() -> f64 { FAUX_ITALIC.with(|c| *c.borrow()) }
+pub fn current_faux_italic() -> f64 {
+    FAUX_ITALIC.with(|c| *c.borrow())
+}
 pub fn set_faux_italic(v: f64) {
     let clamped = v.clamp(-1.0, 1.0);
     FAUX_ITALIC.with(|c| *c.borrow_mut() = clamped);
     bump_typography_epoch();
 }
 
-pub fn current_primary_weight() -> f64 { PRIMARY_WEIGHT.with(|c| *c.borrow()) }
+pub fn current_primary_weight() -> f64 {
+    PRIMARY_WEIGHT.with(|c| *c.borrow())
+}
 pub fn set_primary_weight(v: f64) {
     let clamped = v.clamp(0.0, 1.0);
     PRIMARY_WEIGHT.with(|c| *c.borrow_mut() = clamped);

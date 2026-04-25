@@ -4,12 +4,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::{Label, LabelAlign};
 
 const TRACK_H: f64 = 4.0;
@@ -21,7 +21,7 @@ const WIDGET_H: f64 = 22.0;
 /// Default pixel budget reserved on the right for the numeric value
 /// label.  Wide enough for 4-5 glyphs at the slider's default font
 /// size.  Set to `0.0` via [`Slider::with_show_value(false)`] to hide.
-const VALUE_W:  f64 = 44.0;
+const VALUE_W: f64 = 44.0;
 /// Gap between the track's right edge and the value label's left edge.
 const VALUE_GAP: f64 = 6.0;
 
@@ -91,7 +91,10 @@ impl Slider {
         }
     }
 
-    pub fn with_step(mut self, step: f64) -> Self { self.step = step; self }
+    pub fn with_step(mut self, step: f64) -> Self {
+        self.step = step;
+        self
+    }
 
     /// Bind this slider's value to an external `Rc<Cell<f64>>`.
     ///
@@ -104,49 +107,80 @@ impl Slider {
         self.value_cell = Some(cell);
         self
     }
-    pub fn with_show_value(mut self, show: bool) -> Self { self.show_value = show; self }
+    pub fn with_show_value(mut self, show: bool) -> Self {
+        self.show_value = show;
+        self
+    }
 
     /// Force a specific decimal count for the numeric value label.  When
     /// unset, the format falls back to a heuristic based on `step`.
     pub fn with_decimals(mut self, decimals: usize) -> Self {
-        self.decimals = Some(decimals); self
+        self.decimals = Some(decimals);
+        self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     pub fn on_change(mut self, cb: impl FnMut(f64) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
         self
     }
 
-    pub fn value(&self) -> f64 { self.value }
+    pub fn value(&self) -> f64 {
+        self.value
+    }
 
     pub fn set_value(&mut self, v: f64) {
         self.value = v.clamp(self.min, self.max);
-        if let Some(cell) = &self.value_cell { cell.set(self.value); }
+        if let Some(cell) = &self.value_cell {
+            cell.set(self.value);
+        }
     }
 
     fn fire(&mut self) {
         let v = self.value;
-        if let Some(cell) = &self.value_cell { cell.set(v); }
-        if let Some(cb) = self.on_change.as_mut() { cb(v); }
+        if let Some(cell) = &self.value_cell {
+            cell.set(v);
+        }
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(v);
+        }
     }
 
     /// Pixel X of the track's right edge.  The value label (when shown)
     /// lives in a reserved strip to the right of this, outside the track
     /// so a thumb at max doesn't overdraw the digits.
     fn track_right(&self) -> f64 {
-        let reserved = if self.show_value { VALUE_W + VALUE_GAP } else { 0.0 };
+        let reserved = if self.show_value {
+            VALUE_W + VALUE_GAP
+        } else {
+            0.0
+        };
         (self.bounds.width - reserved - THUMB_R).max(THUMB_R + 1.0)
     }
 
     /// Pixel X of the thumb center within the track area.
     fn thumb_x(&self) -> f64 {
-        let track_left  = THUMB_R;
+        let track_left = THUMB_R;
         let track_right = self.track_right();
         let t = if self.max > self.min {
             (self.value - self.min) / (self.max - self.min)
@@ -157,7 +191,7 @@ impl Slider {
     }
 
     fn value_from_x(&self, x: f64) -> f64 {
-        let track_left  = THUMB_R;
+        let track_left = THUMB_R;
         let track_right = self.track_right();
         let t = ((x - track_left) / (track_right - track_left)).clamp(0.0, 1.0);
         let raw = self.min + t * (self.max - self.min);
@@ -185,19 +219,41 @@ impl Slider {
 }
 
 impl Widget for Slider {
-    fn type_name(&self) -> &'static str { "Slider" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Slider"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Re-read external cell every frame — another widget (e.g. the
@@ -224,7 +280,8 @@ impl Widget for Slider {
             // anchors the digits to the widget's right edge.
             let lh = self.font_size * 1.5;
             let _ = self.value_label.layout(Size::new(VALUE_W, lh));
-            self.value_label.set_bounds(Rect::new(0.0, 0.0, VALUE_W, lh));
+            self.value_label
+                .set_bounds(Rect::new(0.0, 0.0, VALUE_W, lh));
         }
 
         Size::new(available.width, WIDGET_H)
@@ -237,7 +294,7 @@ impl Widget for Slider {
         let cy = h * 0.5;
 
         let track_right = self.track_right();
-        let track_w     = (track_right - THUMB_R).max(0.0);
+        let track_w = (track_right - THUMB_R).max(0.0);
 
         // Track (background)
         ctx.set_fill_color(v.track_bg);
@@ -250,7 +307,13 @@ impl Widget for Slider {
         if tx > THUMB_R {
             ctx.set_fill_color(v.accent);
             ctx.begin_path();
-            ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, tx - THUMB_R, TRACK_H, TRACK_H * 0.5);
+            ctx.rounded_rect(
+                THUMB_R,
+                cy - TRACK_H * 0.5,
+                tx - THUMB_R,
+                TRACK_H,
+                TRACK_H * 0.5,
+            );
             ctx.fill();
         }
 
@@ -290,7 +353,8 @@ impl Widget for Slider {
             let lb = self.value_label.bounds();
             let strip_left = track_right + VALUE_GAP;
             let ly = cy - lb.height * 0.5;
-            self.value_label.set_bounds(Rect::new(strip_left, ly, lb.width, lb.height));
+            self.value_label
+                .set_bounds(Rect::new(strip_left, ly, lb.width, lb.height));
             ctx.save();
             ctx.translate(strip_left, ly);
             paint_subtree(&mut self.value_label, ctx);
@@ -309,28 +373,51 @@ impl Widget for Slider {
                     crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 self.dragging = true;
                 self.value = self.value_from_x(pos.x);
                 self.fire();
                 crate::animation::request_tick();
                 EventResult::Consumed
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 let was = self.dragging;
                 self.dragging = false;
-                if was { crate::animation::request_tick(); }
+                if was {
+                    crate::animation::request_tick();
+                }
                 EventResult::Consumed
             }
             Event::KeyDown { key, .. } => {
                 let changed = match key {
-                    Key::ArrowLeft  => { self.value = (self.value - self.step).clamp(self.min, self.max); true }
-                    Key::ArrowRight => { self.value = (self.value + self.step).clamp(self.min, self.max); true }
-                    Key::ArrowDown  => { self.value = (self.value - self.step * 10.0).clamp(self.min, self.max); true }
-                    Key::ArrowUp    => { self.value = (self.value + self.step * 10.0).clamp(self.min, self.max); true }
+                    Key::ArrowLeft => {
+                        self.value = (self.value - self.step).clamp(self.min, self.max);
+                        true
+                    }
+                    Key::ArrowRight => {
+                        self.value = (self.value + self.step).clamp(self.min, self.max);
+                        true
+                    }
+                    Key::ArrowDown => {
+                        self.value = (self.value - self.step * 10.0).clamp(self.min, self.max);
+                        true
+                    }
+                    Key::ArrowUp => {
+                        self.value = (self.value + self.step * 10.0).clamp(self.min, self.max);
+                        true
+                    }
                     _ => false,
                 };
                 if changed {
@@ -346,7 +433,7 @@ impl Widget for Slider {
                 crate::animation::request_tick();
                 EventResult::Ignored
             }
-            Event::FocusLost   => {
+            Event::FocusLost => {
                 self.focused = false;
                 self.dragging = false;
                 crate::animation::request_tick();

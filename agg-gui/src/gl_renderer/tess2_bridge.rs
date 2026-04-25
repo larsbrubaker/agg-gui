@@ -23,9 +23,9 @@
 //! a coverage ramp (0 → alpha) is applied across the expansion quad. For now
 //! we implement non-AA fill tessellation; AA strokes are planned as Phase D ext.
 
-use tess2_rust::{ElementType, Tessellator, WindingRule};
-use agg_rust::basics::{is_end_poly, is_move_to, is_stop, VertexSource};
 use crate::draw_ctx::FillRule;
+use agg_rust::basics::{is_end_poly, is_move_to, is_stop, VertexSource};
+use tess2_rust::{ElementType, Tessellator, WindingRule};
 
 // ---------------------------------------------------------------------------
 // Universal AGG VertexSource → tess2 contours
@@ -83,8 +83,12 @@ fn push_contour(out: &mut Vec<Vec<[f32; 2]>>, mut contour: Vec<[f32; 2]>) {
     // closing duplicate (first == last) — tess2 panics on zero-length
     // edges and on redundant closing vertices.
     contour = deduplicate_contour_v(&contour);
-    if contour.len() < 3 { return; }
-    if signed_area_2x(&contour).abs() < 1.0 { return; }
+    if contour.len() < 3 {
+        return;
+    }
+    if signed_area_2x(&contour).abs() < 1.0 {
+        return;
+    }
     out.push(contour);
 }
 
@@ -94,7 +98,9 @@ fn push_contour(out: &mut Vec<Vec<[f32; 2]>>, mut contour: Vec<[f32; 2]>) {
 /// GPU triangles.
 pub fn tessellate_path<VS: VertexSource>(path: &mut VS) -> Option<(Vec<f32>, Vec<u32>)> {
     let contours = agg_path_to_contours(path);
-    if contours.is_empty() { return None; }
+    if contours.is_empty() {
+        return None;
+    }
     tessellate_fill(&contours)
 }
 
@@ -139,7 +145,7 @@ pub struct CachedTess {
     /// (flat `[x, y, x, y, …]`).
     pub vertices: Vec<f32>,
     /// Triangle vertex indices into `vertices` (each triple is one triangle).
-    pub indices:  Vec<u32>,
+    pub indices: Vec<u32>,
     /// Parallel to `indices`: `1` if the edge starting at this vertex
     /// (going CCW around the triangle) is an **original polygon boundary
     /// edge**, `0` if it's an interior edge added by the tessellation.
@@ -155,7 +161,9 @@ pub struct CachedTess {
 /// a degenerate shape tess2 can't handle).
 pub fn tessellate_interior<VS: VertexSource>(path: &mut VS) -> Option<CachedTess> {
     let contours = agg_path_to_contours(path);
-    if contours.is_empty() { return None; }
+    if contours.is_empty() {
+        return None;
+    }
 
     let mut tess = Tessellator::new();
     for c in &contours {
@@ -166,10 +174,12 @@ pub fn tessellate_interior<VS: VertexSource>(path: &mut VS) -> Option<CachedTess
         tess.add_contour(2, &flat);
     }
     let ok = tess.tessellate(WindingRule::Odd, ElementType::Polygons, 3, 2, None);
-    if !ok || tess.vertex_count() == 0 { return None; }
+    if !ok || tess.vertex_count() == 0 {
+        return None;
+    }
     Some(CachedTess {
-        vertices:   tess.vertices().iter().map(|&v| v as f32).collect(),
-        indices:    tess.elements().to_vec(),
+        vertices: tess.vertices().iter().map(|&v| v as f32).collect(),
+        indices: tess.elements().to_vec(),
         edge_flags: tess.edge_flags().to_vec(),
     })
 }
@@ -191,11 +201,13 @@ pub fn expand_aa_halo(
     halo_px: f32,
 ) -> Option<(Vec<[f32; 3]>, Vec<u32>)> {
     let n_interior = transformed_xy.len() / 2;
-    let n_indices  = cached.indices.len();
-    if n_indices == 0 { return None; }
+    let n_indices = cached.indices.len();
+    if n_indices == 0 {
+        return None;
+    }
 
     let mut out_verts: Vec<[f32; 3]> = Vec::with_capacity(n_interior + n_indices * 4);
-    let mut out_indices: Vec<u32>    = Vec::with_capacity(n_indices + n_indices * 2);
+    let mut out_indices: Vec<u32> = Vec::with_capacity(n_indices + n_indices * 2);
 
     for i in 0..n_interior {
         out_verts.push([transformed_xy[i * 2], transformed_xy[i * 2 + 1], 1.0]);
@@ -204,44 +216,57 @@ pub fn expand_aa_halo(
 
     let n_tris = n_indices / 3;
     for t in 0..n_tris {
-        let ia = cached.indices[t * 3    ] as usize;
+        let ia = cached.indices[t * 3] as usize;
         let ib = cached.indices[t * 3 + 1] as usize;
         let ic = cached.indices[t * 3 + 2] as usize;
-        if ia >= n_interior || ib >= n_interior || ic >= n_interior { continue; }
+        if ia >= n_interior || ib >= n_interior || ic >= n_interior {
+            continue;
+        }
         let p = [
             [transformed_xy[ia * 2], transformed_xy[ia * 2 + 1]],
             [transformed_xy[ib * 2], transformed_xy[ib * 2 + 1]],
             [transformed_xy[ic * 2], transformed_xy[ic * 2 + 1]],
         ];
         let flag = [
-            cached.edge_flags.get(t * 3    ).copied().unwrap_or(0),
+            cached.edge_flags.get(t * 3).copied().unwrap_or(0),
             cached.edge_flags.get(t * 3 + 1).copied().unwrap_or(0),
             cached.edge_flags.get(t * 3 + 2).copied().unwrap_or(0),
         ];
         for k in 0..3 {
-            if flag[k] == 0 { continue; }
+            if flag[k] == 0 {
+                continue;
+            }
             let a = p[k];
             let b = p[(k + 1) % 3];
             let c = p[(k + 2) % 3];
             let dx = b[0] - a[0];
             let dy = b[1] - a[1];
             let len = (dx * dx + dy * dy).sqrt();
-            if len < 1e-6 { continue; }
+            if len < 1e-6 {
+                continue;
+            }
             // Right-hand perpendicular, flipped if it points into the
             // triangle (toward `c`).  See `tessellate_path_aa` for the
             // full explanation.
-            let mut nx =  dy / len * halo_px;
+            let mut nx = dy / len * halo_px;
             let mut ny = -dx / len * halo_px;
             let dot_c = nx * (c[0] - a[0]) + ny * (c[1] - a[1]);
-            if dot_c > 0.0 { nx = -nx; ny = -ny; }
+            if dot_c > 0.0 {
+                nx = -nx;
+                ny = -ny;
+            }
             let base = out_verts.len() as u32;
-            out_verts.push([a[0],      a[1],      1.0]);
-            out_verts.push([b[0],      b[1],      1.0]);
+            out_verts.push([a[0], a[1], 1.0]);
+            out_verts.push([b[0], b[1], 1.0]);
             out_verts.push([a[0] + nx, a[1] + ny, 0.0]);
             out_verts.push([b[0] + nx, b[1] + ny, 0.0]);
             out_indices.extend_from_slice(&[
-                base, base + 1, base + 2,
-                base + 1, base + 3, base + 2,
+                base,
+                base + 1,
+                base + 2,
+                base + 1,
+                base + 3,
+                base + 2,
             ]);
         }
     }
@@ -255,13 +280,15 @@ pub fn tessellate_path_aa<VS: VertexSource>(
     fill_rule: FillRule,
 ) -> Option<(Vec<[f32; 3]>, Vec<u32>)> {
     let contours = agg_path_to_contours(path);
-    if contours.is_empty() { return None; }
+    if contours.is_empty() {
+        return None;
+    }
 
     struct TessOut {
-        verts:   Vec<f32>,
+        verts: Vec<f32>,
         indices: Vec<u32>,
-        flags:   Vec<u8>,
-        vcount:  usize,
+        flags: Vec<u8>,
+        vcount: usize,
     }
     let out = {
         let mut tess = Tessellator::new();
@@ -269,26 +296,36 @@ pub fn tessellate_path_aa<VS: VertexSource>(
             let flat: Vec<f64> = c.iter().flat_map(|v| [v[0] as f64, v[1] as f64]).collect();
             tess.add_contour(2, &flat);
         }
-        let ok = tess.tessellate(to_tess_winding_rule(fill_rule), ElementType::Polygons, 3, 2, None);
-        if !ok || tess.vertex_count() == 0 { return None; }
+        let ok = tess.tessellate(
+            to_tess_winding_rule(fill_rule),
+            ElementType::Polygons,
+            3,
+            2,
+            None,
+        );
+        if !ok || tess.vertex_count() == 0 {
+            return None;
+        }
         TessOut {
-            verts:   tess.vertices().iter().map(|&v| v as f32).collect(),
+            verts: tess.vertices().iter().map(|&v| v as f32).collect(),
             indices: tess.elements().to_vec(),
-            flags:   tess.edge_flags().to_vec(),
-            vcount:  tess.vertex_count(),
+            flags: tess.edge_flags().to_vec(),
+            vcount: tess.vertex_count(),
         }
     };
 
-    let in_verts:   &[f32] = &out.verts;   // flat [x, y, x, y, …]
+    let in_verts: &[f32] = &out.verts; // flat [x, y, x, y, …]
     let in_indices: &[u32] = &out.indices; // [i0, i1, i2, …]
-    let edge_flags: &[u8]  = &out.flags;   // parallel to in_indices
+    let edge_flags: &[u8] = &out.flags; // parallel to in_indices
 
     let n_interior = out.vcount;
-    let n_indices  = in_indices.len();
-    if n_indices == 0 { return None; }
+    let n_indices = in_indices.len();
+    if n_indices == 0 {
+        return None;
+    }
 
     let mut out_verts: Vec<[f32; 3]> = Vec::with_capacity(n_interior + n_indices * 4);
-    let mut out_indices: Vec<u32>    = Vec::with_capacity(n_indices + n_indices * 2);
+    let mut out_indices: Vec<u32> = Vec::with_capacity(n_indices + n_indices * 2);
 
     // Interior triangles — alpha 1.0 everywhere.
     for i in 0..n_interior {
@@ -308,32 +345,38 @@ pub fn tessellate_path_aa<VS: VertexSource>(
     // is what produced the jagged lion silhouette edges.
     let n_tris = n_indices / 3;
     for t in 0..n_tris {
-        let ia = in_indices[t * 3    ] as usize;
+        let ia = in_indices[t * 3] as usize;
         let ib = in_indices[t * 3 + 1] as usize;
         let ic = in_indices[t * 3 + 2] as usize;
-        if ia >= n_interior || ib >= n_interior || ic >= n_interior { continue; }
+        if ia >= n_interior || ib >= n_interior || ic >= n_interior {
+            continue;
+        }
         let p = [
             [in_verts[ia * 2], in_verts[ia * 2 + 1]],
             [in_verts[ib * 2], in_verts[ib * 2 + 1]],
             [in_verts[ic * 2], in_verts[ic * 2 + 1]],
         ];
         let flag = [
-            edge_flags.get(t * 3    ).copied().unwrap_or(0),
+            edge_flags.get(t * 3).copied().unwrap_or(0),
             edge_flags.get(t * 3 + 1).copied().unwrap_or(0),
             edge_flags.get(t * 3 + 2).copied().unwrap_or(0),
         ];
         for k in 0..3 {
-            if flag[k] == 0 { continue; }
+            if flag[k] == 0 {
+                continue;
+            }
             let a = p[k];
             let b = p[(k + 1) % 3];
             let c = p[(k + 2) % 3]; // third vertex — the "nonAaPoint"
             let dx = b[0] - a[0];
             let dy = b[1] - a[1];
             let len = (dx * dx + dy * dy).sqrt();
-            if len < 1e-6 { continue; }
+            if len < 1e-6 {
+                continue;
+            }
             // Right-hand perpendicular of (dx, dy).  Sign is flipped below
             // if it ends up pointing toward `c` (i.e. into the triangle).
-            let mut nx =  dy / len * halo_px;
+            let mut nx = dy / len * halo_px;
             let mut ny = -dx / len * halo_px;
             let dot_c = nx * (c[0] - a[0]) + ny * (c[1] - a[1]);
             if dot_c > 0.0 {
@@ -342,13 +385,17 @@ pub fn tessellate_path_aa<VS: VertexSource>(
             }
 
             let base = out_verts.len() as u32;
-            out_verts.push([a[0],      a[1],      1.0]); // 0: inner a
-            out_verts.push([b[0],      b[1],      1.0]); // 1: inner b
+            out_verts.push([a[0], a[1], 1.0]); // 0: inner a
+            out_verts.push([b[0], b[1], 1.0]); // 1: inner b
             out_verts.push([a[0] + nx, a[1] + ny, 0.0]); // 2: outer a
             out_verts.push([b[0] + nx, b[1] + ny, 0.0]); // 3: outer b
             out_indices.extend_from_slice(&[
-                base, base + 1, base + 2,
-                base + 1, base + 3, base + 2,
+                base,
+                base + 1,
+                base + 2,
+                base + 1,
+                base + 3,
+                base + 2,
             ]);
         }
     }
@@ -376,42 +423,57 @@ fn to_tess_winding_rule(fill_rule: FillRule) -> WindingRule {
 ///
 /// Returns `None` if tessellation fails or produces no output.
 pub fn tessellate_fill(contours: &[Vec<[f32; 2]>]) -> Option<(Vec<f32>, Vec<u32>)> {
-    if contours.is_empty() { return None; }
+    if contours.is_empty() {
+        return None;
+    }
 
     let mut tess = Tessellator::new();
     let mut n_added = 0;
 
     for contour in contours {
-        if contour.len() < 3 { continue; }
+        if contour.len() < 3 {
+            continue;
+        }
 
         // Remove consecutive duplicate vertices (tess2 can panic on zero-length edges).
         let cleaned = deduplicate_contour(contour);
-        if cleaned.len() < 3 { continue; }
+        if cleaned.len() < 3 {
+            continue;
+        }
 
         // Skip near-zero-area contours — tess2 panics on degenerate (collinear)
         // faces rather than returning an error.  Any polygon with area < 0.5 px²
         // is invisible anyway.
-        if signed_area_2x(&cleaned).abs() < 1.0 { continue; }
+        if signed_area_2x(&cleaned).abs() < 1.0 {
+            continue;
+        }
 
         // Flatten to [x0, y0, x1, y1, …] — promote to f64 at the tess2
         // boundary so the sweep's edge-sign predicates operate in double
         // precision (required for rotation-stable topology).
-        let flat: Vec<f64> = cleaned.iter().flat_map(|v| [v[0] as f64, v[1] as f64]).collect();
+        let flat: Vec<f64> = cleaned
+            .iter()
+            .flat_map(|v| [v[0] as f64, v[1] as f64])
+            .collect();
         tess.add_contour(2, &flat);
         n_added += 1;
     }
 
-    if n_added == 0 { return None; }
+    if n_added == 0 {
+        return None;
+    }
 
     let ok = tess.tessellate(
-        WindingRule::Odd,   // EvenOdd — NonZero panics in tess2-rust on some inputs
+        WindingRule::Odd, // EvenOdd — NonZero panics in tess2-rust on some inputs
         ElementType::Polygons,
-        3,   // triangles
-        2,   // 2-D vertices
+        3, // triangles
+        2, // 2-D vertices
         None,
     );
 
-    if !ok || tess.vertex_count() == 0 { return None; }
+    if !ok || tess.vertex_count() == 0 {
+        return None;
+    }
 
     // out_vertices: flat [x, y, x, y, …] — demote back to f32 for the GL
     // vertex buffer (which is f32 today).
@@ -465,19 +527,17 @@ fn deduplicate_contour_v(pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
 /// Convert an axis-aligned rectangle into a single contour and tessellate it.
 /// Useful for solid-colour fills without a full path builder.
 pub fn tessellate_rect(x: f32, y: f32, w: f32, h: f32) -> Option<(Vec<f32>, Vec<u32>)> {
-    let contour = vec![
-        [x,     y    ],
-        [x + w, y    ],
-        [x + w, y + h],
-        [x,     y + h],
-    ];
+    let contour = vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
     tessellate_fill(&[contour])
 }
 
 /// Convert a rounded rectangle into a contour (approximated as a polygon with
 /// `segments` points per quarter-circle arc) and tessellate.
 pub fn tessellate_rounded_rect(
-    x: f32, y: f32, w: f32, h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
     r: f32,
     segments: usize,
 ) -> Option<(Vec<f32>, Vec<u32>)> {
@@ -489,10 +549,10 @@ pub fn tessellate_rounded_rect(
 
     // Four arc centres (inner rect corners), CCW starting bottom-right.
     let corners = [
-        (x + w - r, y + r,     -PI * 0.5, 0.0),        // bottom-right
-        (x + w - r, y + h - r,  0.0,      PI * 0.5),   // top-right
-        (x + r,     y + h - r,  PI * 0.5, PI),          // top-left
-        (x + r,     y + r,      PI,       PI * 1.5),    // bottom-left
+        (x + w - r, y + r, -PI * 0.5, 0.0),    // bottom-right
+        (x + w - r, y + h - r, 0.0, PI * 0.5), // top-right
+        (x + r, y + h - r, PI * 0.5, PI),      // top-left
+        (x + r, y + r, PI, PI * 1.5),          // bottom-left
     ];
 
     for &(cx, cy, start, end) in &corners {
@@ -507,7 +567,12 @@ pub fn tessellate_rounded_rect(
 }
 
 /// Build a circle contour and tessellate it.
-pub fn tessellate_circle(cx: f32, cy: f32, r: f32, segments: usize) -> Option<(Vec<f32>, Vec<u32>)> {
+pub fn tessellate_circle(
+    cx: f32,
+    cy: f32,
+    r: f32,
+    segments: usize,
+) -> Option<(Vec<f32>, Vec<u32>)> {
     let seg = segments.max(8);
     use std::f32::consts::TAU;
     let contour: Vec<[f32; 2]> = (0..seg)

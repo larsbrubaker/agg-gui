@@ -2,10 +2,10 @@
 
 use crate::color::Color;
 use crate::device_scale::device_scale;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
-use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase, resolve_fit_or_stretch};
+use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 // ---------------------------------------------------------------------------
@@ -24,7 +24,11 @@ pub struct Stack {
 
 impl Stack {
     pub fn new() -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), base: WidgetBase::new() }
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            base: WidgetBase::new(),
+        }
     }
 
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
@@ -32,27 +36,66 @@ impl Stack {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
-impl Default for Stack { fn default() -> Self { Self::new() } }
+impl Default for Stack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Widget for Stack {
-    fn type_name(&self) -> &'static str { "Stack" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Stack"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         for child in &mut self.children {
@@ -97,7 +140,9 @@ impl Widget for Stack {
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +160,12 @@ pub struct Padding {
 impl Padding {
     /// Explicit per-side padding.
     pub fn new(insets: Insets, child: Box<dyn Widget>) -> Self {
-        Self { bounds: Rect::default(), children: vec![child], base: WidgetBase::new(), insets }
+        Self {
+            bounds: Rect::default(),
+            children: vec![child],
+            base: WidgetBase::new(),
+            insets,
+        }
     }
 
     /// Uniform padding on all four sides.
@@ -123,31 +173,66 @@ impl Padding {
         Self::new(Insets::all(amount), child)
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
 impl Widget for Padding {
-    fn type_name(&self) -> &'static str { "Padding" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Padding"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let p = &self.insets;
         let inner = Size::new(
-            (available.width  - p.left - p.right ).max(0.0),
-            (available.height - p.top  - p.bottom).max(0.0),
+            (available.width - p.left - p.right).max(0.0),
+            (available.height - p.top - p.bottom).max(0.0),
         );
         if let Some(child) = self.children.first_mut() {
             let desired = child.layout(inner);
@@ -162,7 +247,9 @@ impl Widget for Padding {
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -193,8 +280,14 @@ impl SizedBox {
         }
     }
 
-    pub fn with_width(mut self, w: f64) -> Self { self.width = Some(w); self }
-    pub fn with_height(mut self, h: f64) -> Self { self.height = Some(h); self }
+    pub fn with_width(mut self, w: f64) -> Self {
+        self.width = Some(w);
+        self
+    }
+    pub fn with_height(mut self, h: f64) -> Self {
+        self.height = Some(h);
+        self
+    }
 
     pub fn with_child(mut self, child: Box<dyn Widget>) -> Self {
         self.children.clear();
@@ -207,27 +300,66 @@ impl SizedBox {
         Self::new().with_width(width).with_height(height)
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
-impl Default for SizedBox { fn default() -> Self { Self::new() } }
+impl Default for SizedBox {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Widget for SizedBox {
-    fn type_name(&self) -> &'static str { "SizedBox" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "SizedBox"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Fall back to the available axis only for dimensions that haven't been
@@ -242,14 +374,18 @@ impl Widget for SizedBox {
         // screen.
         let w = self.width.unwrap_or(available.width);
         let mut h = self.height.unwrap_or_else(|| {
-            if self.children.is_empty() { 0.0 } else { available.height }
+            if self.children.is_empty() {
+                0.0
+            } else {
+                available.height
+            }
         });
 
         if let Some(child) = self.children.first_mut() {
-            let scale  = device_scale();
-            let m      = child.margin().scale(scale);
-            let slot_w = (w - m.left - m.right ).max(0.0);
-            let slot_h = (h - m.top  - m.bottom).max(0.0);
+            let scale = device_scale();
+            let m = child.margin().scale(scale);
+            let slot_w = (w - m.left - m.right).max(0.0);
+            let slot_h = (h - m.top - m.bottom).max(0.0);
 
             let desired = child.layout(Size::new(slot_w, slot_h));
 
@@ -262,9 +398,9 @@ impl Widget for SizedBox {
 
             // Horizontal placement within the box (margin already limits slot).
             let h_anchor = child.h_anchor();
-            let min_w    = child.min_size().width;
-            let max_w    = child.max_size().width;
-            let child_w  = if h_anchor.is_stretch() {
+            let min_w = child.min_size().width;
+            let max_w = child.max_size().width;
+            let child_w = if h_anchor.is_stretch() {
                 slot_w.clamp(min_w, max_w)
             } else if h_anchor == HAnchor::MAX_FIT_OR_STRETCH {
                 resolve_fit_or_stretch(desired.width, slot_w, true).clamp(min_w, max_w)
@@ -274,7 +410,8 @@ impl Widget for SizedBox {
                 desired.width.clamp(min_w, max_w)
             };
 
-            let child_x = if h_anchor.contains(HAnchor::RIGHT) && !h_anchor.contains(HAnchor::LEFT) {
+            let child_x = if h_anchor.contains(HAnchor::RIGHT) && !h_anchor.contains(HAnchor::LEFT)
+            {
                 (w - m.right - child_w).max(0.0)
             } else if h_anchor.contains(HAnchor::CENTER) && !h_anchor.is_stretch() {
                 m.left + (slot_w - child_w) * 0.5
@@ -284,9 +421,9 @@ impl Widget for SizedBox {
 
             // Vertical placement (Y-up: BOTTOM = low Y).
             let v_anchor = child.v_anchor();
-            let min_h    = child.min_size().height;
-            let max_h    = child.max_size().height;
-            let child_h  = if v_anchor.is_stretch() {
+            let min_h = child.min_size().height;
+            let max_h = child.max_size().height;
+            let child_h = if v_anchor.is_stretch() {
                 slot_h.clamp(min_h, max_h)
             } else if v_anchor == VAnchor::MAX_FIT_OR_STRETCH {
                 resolve_fit_or_stretch(desired.height, slot_h, true).clamp(min_h, max_h)
@@ -302,10 +439,19 @@ impl Widget for SizedBox {
             // outside the SizedBox and clips into siblings above it.  Widgets
             // re-read `self.bounds` during paint, so shrinking here propagates
             // cleanly.
-            let child_w = if self.width.is_some()  { child_w.min(slot_w) } else { child_w };
-            let child_h = if self.height.is_some() { child_h.min(slot_h) } else { child_h };
+            let child_w = if self.width.is_some() {
+                child_w.min(slot_w)
+            } else {
+                child_w
+            };
+            let child_h = if self.height.is_some() {
+                child_h.min(slot_h)
+            } else {
+                child_h
+            };
 
-            let child_y = if v_anchor.contains(VAnchor::TOP) && !v_anchor.contains(VAnchor::BOTTOM) {
+            let child_y = if v_anchor.contains(VAnchor::TOP) && !v_anchor.contains(VAnchor::BOTTOM)
+            {
                 (h - m.top - child_h).max(0.0)
             } else if v_anchor.contains(VAnchor::CENTER) && !v_anchor.is_stretch() {
                 m.bottom + (slot_h - child_h) * 0.5
@@ -321,7 +467,9 @@ impl Widget for SizedBox {
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -340,36 +488,83 @@ pub struct Spacer {
 
 impl Spacer {
     pub fn new() -> Self {
-        Self { bounds: Rect::default(), children: Vec::new(), base: WidgetBase::new() }
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            base: WidgetBase::new(),
+        }
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
-impl Default for Spacer { fn default() -> Self { Self::new() } }
+impl Default for Spacer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Widget for Spacer {
-    fn type_name(&self) -> &'static str { "Spacer" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Spacer"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
-    fn layout(&mut self, available: Size) -> Size { available }
+    fn layout(&mut self, available: Size) -> Size {
+        available
+    }
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -406,31 +601,75 @@ impl Separator {
 
     /// Create a vertical separator.
     pub fn vertical() -> Self {
-        Self { vertical: true, ..Self::horizontal() }
+        Self {
+            vertical: true,
+            ..Self::horizontal()
+        }
     }
 
-    pub fn with_line_inset(mut self, m: f64) -> Self { self.line_inset = m; self }
-    pub fn with_color(mut self, c: Color) -> Self { self.color = Some(c); self }
+    pub fn with_line_inset(mut self, m: f64) -> Self {
+        self.line_inset = m;
+        self
+    }
+    pub fn with_color(mut self, c: Color) -> Self {
+        self.color = Some(c);
+        self
+    }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
 impl Widget for Separator {
-    fn type_name(&self) -> &'static str { "Separator" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Separator"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         if self.vertical {
@@ -454,5 +693,7 @@ impl Widget for Separator {
         ctx.fill();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }

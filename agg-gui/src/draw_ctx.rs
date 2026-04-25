@@ -59,10 +59,10 @@ pub trait GlPaint {
     ///   collapsed window) correctly hide GPU-rendered content.
     fn gl_paint(
         &mut self,
-        gl:          &dyn std::any::Any,
+        gl: &dyn std::any::Any,
         screen_rect: Rect,
-        full_w:      i32,
-        full_h:      i32,
+        full_w: i32,
+        full_h: i32,
         parent_clip: Option<[i32; 4]>,
     );
 }
@@ -150,8 +150,8 @@ pub trait DrawCtx {
     fn draw_triangles_aa(
         &mut self,
         vertices: &[[f32; 3]],
-        indices:  &[u32],
-        color:    crate::color::Color,
+        indices: &[u32],
+        color: crate::color::Color,
     );
 
     // ── Text ──────────────────────────────────────────────────────────────────
@@ -276,13 +276,14 @@ pub trait DrawCtx {
     /// makes callers fall back to grayscale AA.
     fn draw_lcd_mask(
         &mut self,
-        _mask:      &[u8],
-        _mask_w:    u32,
-        _mask_h:    u32,
+        _mask: &[u8],
+        _mask_w: u32,
+        _mask_h: u32,
         _src_color: Color,
-        _dst_x:     f64,
-        _dst_y:     f64,
-    ) {}
+        _dst_x: f64,
+        _dst_y: f64,
+    ) {
+    }
 
     /// Arc-keyed variant so GL backends can cache the uploaded texture
     /// on the `Arc`'s pointer identity — one `glTexImage2D` per unique
@@ -290,12 +291,12 @@ pub trait DrawCtx {
     /// backends fall through to the slice path.
     fn draw_lcd_mask_arc(
         &mut self,
-        mask:      &std::sync::Arc<Vec<u8>>,
-        mask_w:    u32,
-        mask_h:    u32,
+        mask: &std::sync::Arc<Vec<u8>>,
+        mask_w: u32,
+        mask_h: u32,
         src_color: Color,
-        dst_x:     f64,
-        dst_y:     f64,
+        dst_x: f64,
+        dst_y: f64,
     ) {
         self.draw_lcd_mask(mask.as_slice(), mask_w, mask_h, src_color, dst_x, dst_y);
     }
@@ -304,7 +305,9 @@ pub trait DrawCtx {
     /// it can composite per-channel LCD coverage onto the active target.
     /// Label queries this to decide between the LCD and grayscale AA
     /// paths; a backend that returns `false` will never see LCD text.
-    fn has_lcd_mask_composite(&self) -> bool { false }
+    fn has_lcd_mask_composite(&self) -> bool {
+        false
+    }
 
     // ── Image blitting ────────────────────────────────────────────────────────
 
@@ -315,7 +318,9 @@ pub trait DrawCtx {
     /// (e.g. the GL path).
     ///
     /// Default: `false`.  Override to `true` in `GfxCtx`.
-    fn has_image_blit(&self) -> bool { false }
+    fn has_image_blit(&self) -> bool {
+        false
+    }
 
     /// Draw raw RGBA pixel data into `dst_rect` (Y-up local coordinates).
     ///
@@ -327,7 +332,7 @@ pub trait DrawCtx {
     /// implement blitting can leave this as a placeholder).
     fn draw_image_rgba(
         &mut self,
-        data:  &[u8],
+        data: &[u8],
         img_w: u32,
         img_h: u32,
         dst_x: f64,
@@ -352,7 +357,7 @@ pub trait DrawCtx {
     /// the default is usually fine; the GL backend overrides.
     fn draw_image_rgba_arc(
         &mut self,
-        data:  &std::sync::Arc<Vec<u8>>,
+        data: &std::sync::Arc<Vec<u8>>,
         img_w: u32,
         img_h: u32,
         dst_x: f64,
@@ -406,21 +411,25 @@ pub trait DrawCtx {
         // except applied to a top-down pair rather than a Y-up pair.
         let w_u = w as usize;
         let h_u = h as usize;
-        if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 { return; }
+        if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 {
+            return;
+        }
         let mut rgba = vec![0u8; w_u * h_u * 4];
         for i in 0..(w_u * h_u) {
             let ci = i * 3;
             let ra = alpha[ci];
             let ga = alpha[ci + 1];
             let ba = alpha[ci + 2];
-            let a  = ra.max(ga).max(ba);
-            if a == 0 { continue; }
+            let a = ra.max(ga).max(ba);
+            if a == 0 {
+                continue;
+            }
             let af = a as f32 / 255.0;
-            let rc = color[ci]     as f32 / 255.0;
+            let rc = color[ci] as f32 / 255.0;
             let gc = color[ci + 1] as f32 / 255.0;
             let bc = color[ci + 2] as f32 / 255.0;
             let di = i * 4;
-            rgba[di]     = ((rc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            rgba[di] = ((rc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             rgba[di + 1] = ((gc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             rgba[di + 2] = ((bc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             rgba[di + 3] = a;

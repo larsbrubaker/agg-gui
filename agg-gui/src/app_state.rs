@@ -36,13 +36,13 @@ use std::rc::Rc;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OsWindowState {
     /// Logical width in pixels.  `None` = no saved size (use app default).
-    pub width:      Option<u32>,
+    pub width: Option<u32>,
     /// Logical height in pixels.
-    pub height:     Option<u32>,
+    pub height: Option<u32>,
     /// Window was borderless-fullscreen.
     pub fullscreen: bool,
     /// Window was maximized (not fullscreen).
-    pub maximized:  bool,
+    pub maximized: bool,
 }
 
 impl OsWindowState {
@@ -50,10 +50,10 @@ impl OsWindowState {
     pub fn from_handle(h: &OsWindowHandle) -> Self {
         let (w, hgt) = h.size.get();
         Self {
-            width:      if w   > 0 { Some(w)   } else { None },
-            height:     if hgt > 0 { Some(hgt) } else { None },
+            width: if w > 0 { Some(w) } else { None },
+            height: if hgt > 0 { Some(hgt) } else { None },
             fullscreen: h.fullscreen.get(),
-            maximized:  h.maximized.get(),
+            maximized: h.maximized.get(),
         }
     }
 
@@ -65,7 +65,7 @@ impl OsWindowState {
             self.width.unwrap_or(0),
             self.height.unwrap_or(0),
             self.fullscreen as u8,
-            self.maximized  as u8,
+            self.maximized as u8,
         )
     }
 
@@ -75,15 +75,15 @@ impl OsWindowState {
     /// `maximized = false`.
     pub fn deserialize(s: &str) -> Option<Self> {
         let mut it = s.splitn(4, ',');
-        let w  : u32 = it.next()?.trim().parse().ok()?;
-        let h  : u32 = it.next()?.trim().parse().ok()?;
-        let fs : u8  = it.next()?.trim().parse().ok()?;
-        let mx : u8  = it.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        let w: u32 = it.next()?.trim().parse().ok()?;
+        let h: u32 = it.next()?.trim().parse().ok()?;
+        let fs: u8 = it.next()?.trim().parse().ok()?;
+        let mx: u8 = it.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
         Some(Self {
-            width:      if w > 0 { Some(w) } else { None },
-            height:     if h > 0 { Some(h) } else { None },
+            width: if w > 0 { Some(w) } else { None },
+            height: if h > 0 { Some(h) } else { None },
             fullscreen: fs != 0,
-            maximized:  mx != 0,
+            maximized: mx != 0,
         })
     }
 }
@@ -96,17 +96,17 @@ impl OsWindowState {
 /// current OS window state read the cells directly.
 #[derive(Clone)]
 pub struct OsWindowHandle {
-    pub size:       Rc<Cell<(u32, u32)>>,
+    pub size: Rc<Cell<(u32, u32)>>,
     pub fullscreen: Rc<Cell<bool>>,
-    pub maximized:  Rc<Cell<bool>>,
+    pub maximized: Rc<Cell<bool>>,
 }
 
 impl OsWindowHandle {
     pub fn new() -> Self {
         Self {
-            size:       Rc::new(Cell::new((0, 0))),
+            size: Rc::new(Cell::new((0, 0))),
             fullscreen: Rc::new(Cell::new(false)),
-            maximized:  Rc::new(Cell::new(false)),
+            maximized: Rc::new(Cell::new(false)),
         }
     }
 
@@ -122,5 +122,7 @@ impl OsWindowHandle {
 }
 
 impl Default for OsWindowHandle {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

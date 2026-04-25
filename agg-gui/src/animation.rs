@@ -55,11 +55,9 @@ pub fn clear_tick() {
 /// (each widget re-arms its own deadline on the next paint anyway).
 pub fn request_repaint_after(delay: Duration) {
     let when = Instant::now() + delay;
-    NEXT_REPAINT_AT.with(|c| {
-        match c.get() {
-            Some(existing) if existing <= when => {}
-            _                                  => c.set(Some(when)),
-        }
+    NEXT_REPAINT_AT.with(|c| match c.get() {
+        Some(existing) if existing <= when => {}
+        _ => c.set(Some(when)),
     });
 }
 
@@ -84,11 +82,11 @@ pub fn take_next_repaint() -> Option<Instant> {
 /// expansion and toggle-switch on/off slide.
 #[derive(Clone, Copy)]
 pub struct Tween {
-    current:     f64,
+    current: f64,
     start_value: f64,
-    target:      f64,
-    start_time:  Option<Instant>,
-    duration:    f64,
+    target: f64,
+    start_time: Option<Instant>,
+    duration: f64,
 }
 
 impl Tween {
@@ -96,11 +94,11 @@ impl Tween {
     /// (no animation in flight).
     pub const fn new(initial: f64, duration_secs: f64) -> Self {
         Self {
-            current:     initial,
+            current: initial,
             start_value: initial,
-            target:      initial,
-            start_time:  None,
-            duration:    duration_secs,
+            target: initial,
+            start_time: None,
+            duration: duration_secs,
         }
     }
 
@@ -109,8 +107,8 @@ impl Tween {
     pub fn set_target(&mut self, new_target: f64) {
         if (self.target - new_target).abs() > 1e-9 {
             self.start_value = self.current;
-            self.target      = new_target;
-            self.start_time  = Some(Instant::now());
+            self.target = new_target;
+            self.start_time = Some(Instant::now());
         }
     }
 
@@ -124,7 +122,7 @@ impl Tween {
             let eased = 1.0 - (1.0 - p).powi(3);
             self.current = self.start_value + (self.target - self.start_value) * eased;
             if p >= 1.0 {
-                self.current    = self.target;
+                self.current = self.target;
                 self.start_time = None;
             } else {
                 request_tick();
@@ -134,9 +132,13 @@ impl Tween {
     }
 
     /// Current interpolated value without advancing.
-    pub fn value(&self) -> f64 { self.current }
+    pub fn value(&self) -> f64 {
+        self.current
+    }
 }
 
 impl Default for Tween {
-    fn default() -> Self { Self::new(0.0, 0.12) }
+    fn default() -> Self {
+        Self::new(0.0, 0.12)
+    }
 }

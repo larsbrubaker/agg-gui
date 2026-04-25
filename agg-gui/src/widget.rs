@@ -22,10 +22,10 @@ use std::sync::Arc;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::framebuffer::Framebuffer;
-use crate::lcd_coverage::LcdBuffer;
 use crate::geometry::{Point, Rect, Size};
 use crate::gfx_ctx::GfxCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor};
+use crate::lcd_coverage::LcdBuffer;
 
 // ---------------------------------------------------------------------------
 // Widget backbuffer — CPU bitmap cache per widget, invalidated via a dirty flag.
@@ -98,13 +98,13 @@ pub struct BackbufferCache {
     /// per-channel subpixel information through to the destination —
     /// required for LCD chroma to survive the cache round-trip.
     pub lcd_alpha: Option<Arc<Vec<u8>>>,
-    pub width:  u32,
+    pub width: u32,
     pub height: u32,
     /// When true, the next paint will re-rasterise rather than reusing
     /// `pixels`.  Widgets set this from their mutation paths
     /// (`set_text`, `set_color`, focus/hover changes, etc.) and the
     /// framework clears it after a successful re-raster.
-    pub dirty:  bool,
+    pub dirty: bool,
     /// Visuals epoch (see [`crate::theme::current_visuals_epoch`]) recorded
     /// the last time this cache was populated.  `paint_subtree_backbuffered`
     /// compares it against the live epoch and forces a re-raster on mismatch,
@@ -124,18 +124,26 @@ pub struct BackbufferCache {
 impl BackbufferCache {
     pub fn new() -> Self {
         Self {
-            pixels: None, lcd_alpha: None,
-            width: 0, height: 0, dirty: true,
-            theme_epoch: 0, typography_epoch: 0,
+            pixels: None,
+            lcd_alpha: None,
+            width: 0,
+            height: 0,
+            dirty: true,
+            theme_epoch: 0,
+            typography_epoch: 0,
         }
     }
 
     /// Mark the cache dirty so the next paint re-rasterises.
-    pub fn invalidate(&mut self) { self.dirty = true; }
+    pub fn invalidate(&mut self) {
+        self.dirty = true;
+    }
 }
 
 impl Default for BackbufferCache {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -180,8 +188,10 @@ pub trait Widget {
     /// inside this widget's interactive area. Default: axis-aligned rect test.
     fn hit_test(&self, local_pos: Point) -> bool {
         let b = self.bounds();
-        local_pos.x >= 0.0 && local_pos.x <= b.width
-            && local_pos.y >= 0.0 && local_pos.y <= b.height
+        local_pos.x >= 0.0
+            && local_pos.x <= b.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= b.height
     }
 
     /// When `true`, `hit_test_subtree` stops recursing into this widget's
@@ -189,7 +199,9 @@ pub trait Widget {
     /// overlays (e.g. a scrollbar painted above its content) that must claim
     /// the pointer before children that happen to share the same pixels.
     /// Default: `false`.
-    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool { false }
+    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
+        false
+    }
 
     /// Handle an event. The event's positions are already in **local** Y-up
     /// coordinates. Return [`EventResult::Consumed`] to stop bubbling.
@@ -291,7 +303,9 @@ pub trait Widget {
     /// as layout-time watchers / tickers / invisible composers — they bloat
     /// the inspector tree without providing user-relevant information and,
     /// at scale, can make the inspector's per-frame tree rebuild expensive.
-    fn show_in_inspector(&self) -> bool { true }
+    fn show_in_inspector(&self) -> bool {
+        true
+    }
 
     /// Per-widget LCD subpixel preference for backbuffered text rendering.
     ///
@@ -303,7 +317,9 @@ pub trait Widget {
     /// this flag (today: `Label`).  Defaulting to `None` means every such
     /// widget follows the global toggle unless the instance explicitly
     /// opts in or out.
-    fn lcd_preference(&self) -> Option<bool> { None }
+    fn lcd_preference(&self) -> Option<bool> {
+        None
+    }
 
     /// Paint decorations that must appear **on top of all children**.
     ///
@@ -334,29 +350,39 @@ pub trait Widget {
     ///
     /// The parent layout reads this to compute spacing and position.
     /// Default: [`Insets::ZERO`].
-    fn margin(&self) -> Insets { Insets::ZERO }
+    fn margin(&self) -> Insets {
+        Insets::ZERO
+    }
 
     /// Horizontal anchor: how this widget sizes/positions itself horizontally
     /// within the slot the parent assigns.
     /// Default: [`HAnchor::FIT`] (take natural content width).
-    fn h_anchor(&self) -> HAnchor { HAnchor::FIT }
+    fn h_anchor(&self) -> HAnchor {
+        HAnchor::FIT
+    }
 
     /// Vertical anchor: how this widget sizes/positions itself vertically
     /// within the slot the parent assigns.
     /// Default: [`VAnchor::FIT`] (take natural content height).
-    fn v_anchor(&self) -> VAnchor { VAnchor::FIT }
+    fn v_anchor(&self) -> VAnchor {
+        VAnchor::FIT
+    }
 
     /// Minimum size constraint (logical units).
     ///
     /// The parent will never assign a slot smaller than this.
     /// Default: [`Size::ZERO`] (no minimum).
-    fn min_size(&self) -> Size { Size::ZERO }
+    fn min_size(&self) -> Size {
+        Size::ZERO
+    }
 
     /// Maximum size constraint (logical units).
     ///
     /// The parent will never assign a slot larger than this.
     /// Default: [`Size::MAX`] (no maximum).
-    fn max_size(&self) -> Size { Size::MAX }
+    fn max_size(&self) -> Size {
+        Size::MAX
+    }
 
     /// Whether [`paint_subtree`] should snap this widget's incoming
     /// translation to the physical pixel grid.
@@ -404,7 +430,9 @@ pub trait Widget {
     /// false→true visibility transition (see its `with_visible_cell`), so
     /// toggling a demo checkbox on in the sidebar automatically pops that
     /// window to the front.
-    fn take_raise_request(&mut self) -> bool { false }
+    fn take_raise_request(&mut self) -> bool {
+        false
+    }
 
     // -------------------------------------------------------------------------
     // Visibility-gated repaint propagation
@@ -428,7 +456,9 @@ pub trait Widget {
     /// The default walks visible children.  Widgets with their own pending
     /// state OR that state with the default walk — see `WidgetBase` helpers.
     fn needs_paint(&self) -> bool {
-        if !self.is_visible() { return false; }
+        if !self.is_visible() {
+            return false;
+        }
         self.children().iter().any(|c| c.needs_paint())
     }
 
@@ -440,11 +470,16 @@ pub trait Widget {
     /// Same visibility contract as [`needs_paint`]: hidden subtrees return
     /// `None` regardless of what the widget *would* ask for if shown.
     fn next_paint_deadline(&self) -> Option<web_time::Instant> {
-        if !self.is_visible() { return None; }
+        if !self.is_visible() {
+            return None;
+        }
         let mut best: Option<web_time::Instant> = None;
         for c in self.children() {
             if let Some(t) = c.next_paint_deadline() {
-                best = Some(match best { Some(b) if b <= t => b, _ => t });
+                best = Some(match best {
+                    Some(b) if b <= t => b,
+                    _ => t,
+                });
             }
         }
         best
@@ -466,7 +501,9 @@ pub trait Widget {
 /// `cache.dirty == false` skip the re-raster entirely and just blit the
 /// existing bitmap — identical fast path to MatterCAD's `DoubleBuffer`.
 pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
-    if !widget.is_visible() { return; }
+    if !widget.is_visible() {
+        return;
+    }
 
     // Snap CTM at paint_subtree ENTRY — see the commentary preserved
     // below inside `paint_subtree_direct` for the full rationale.  The
@@ -498,8 +535,8 @@ fn paint_subtree_direct_no_overlay(widget: &mut dyn Widget, ctx: &mut dyn DrawCt
 }
 
 fn paint_subtree_direct_inner(
-    widget:          &mut dyn Widget,
-    ctx:             &mut dyn DrawCtx,
+    widget: &mut dyn Widget,
+    ctx: &mut dyn DrawCtx,
     include_overlay: bool,
 ) {
     let snap_this = widget.enforce_integer_bounds();
@@ -511,14 +548,15 @@ fn paint_subtree_direct_inner(
     widget.paint(ctx);
 
     let b = widget.bounds();
-    let (cx, cy, cw, ch) = widget.clip_children_rect()
+    let (cx, cy, cw, ch) = widget
+        .clip_children_rect()
         .unwrap_or((0.0, 0.0, b.width, b.height));
     ctx.save();
     ctx.clip_rect(cx, cy, cw, ch);
 
     let n = widget.children().len();
     for i in 0..n {
-        let child_bounds  = widget.children()[i].bounds();
+        let child_bounds = widget.children()[i].bounds();
         let snap_to_pixel = widget.children()[i].enforce_integer_bounds();
         ctx.save();
         if snap_to_pixel {
@@ -565,10 +603,10 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     ctx.save();
     ctx.snap_to_pixel();
 
-    let b   = widget.bounds();
+    let b = widget.bounds();
     let dps = crate::device_scale::device_scale().max(1e-6);
     // Physical pixel dimensions of the offscreen render target.
-    let w_phys = (b.width  * dps).ceil().max(1.0) as u32;
+    let w_phys = (b.width * dps).ceil().max(1.0) as u32;
     let h_phys = (b.height * dps).ceil().max(1.0) as u32;
     // Logical dimensions used as the blit destination rect.  **Must** be
     // derived from `w_phys / dps` rather than `b.width` so the quad the
@@ -589,10 +627,11 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     // `cache.lcd_alpha`: `Some` means LCD cache, `None` means Rgba.
     let mode = widget.backbuffer_mode();
     let mode_is_lcd = matches!(mode, BackbufferMode::LcdCoverage);
-    let theme_epoch       = crate::theme::current_visuals_epoch();
-    let typography_epoch  = crate::font_settings::current_typography_epoch();
+    let theme_epoch = crate::theme::current_visuals_epoch();
+    let typography_epoch = crate::font_settings::current_typography_epoch();
     let (needs_raster, has_bitmap) = {
-        let cache = widget.backbuffer_cache_mut()
+        let cache = widget
+            .backbuffer_cache_mut()
             .expect("backbuffered widget must return Some from backbuffer_cache_mut");
         let cache_is_lcd = cache.lcd_alpha.is_some();
         let needs = cache.dirty
@@ -628,7 +667,7 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                 let mut fb = Framebuffer::new(w_phys, h_phys);
                 {
                     let mut sub = GfxCtx::new(&mut fb);
-                    sub.set_lcd_mode(false);   // RGBA mode never uses LCD text
+                    sub.set_lcd_mode(false); // RGBA mode never uses LCD text
                     if (dps - 1.0).abs() > 1e-6 {
                         // Widgets paint in logical coords — scale the sub ctx
                         // so their drawing lands on the physical pixel grid.
@@ -678,17 +717,17 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                 (buf.color_plane_flipped(), Some(buf.alpha_plane_flipped()))
             }
         };
-        let pixels     = Arc::new(pixels_bytes);
-        let lcd_alpha  = lcd_alpha_bytes.map(Arc::new);
+        let pixels = Arc::new(pixels_bytes);
+        let lcd_alpha = lcd_alpha_bytes.map(Arc::new);
 
         let cache = widget.backbuffer_cache_mut().unwrap();
-        cache.pixels    = Some(Arc::clone(&pixels));
+        cache.pixels = Some(Arc::clone(&pixels));
         cache.lcd_alpha = lcd_alpha.as_ref().map(Arc::clone);
-        cache.width             = w_phys;
-        cache.height            = h_phys;
-        cache.dirty             = false;
-        cache.theme_epoch       = theme_epoch;
-        cache.typography_epoch  = typography_epoch;
+        cache.width = w_phys;
+        cache.height = h_phys;
+        cache.dirty = false;
+        cache.theme_epoch = theme_epoch;
+        cache.typography_epoch = typography_epoch;
     }
 
     // Blit the cached bitmap onto the outer ctx.  Two paths:
@@ -711,10 +750,7 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     let img_h = cache.height;
     match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
         (Some(color), Some(alpha)) => {
-            ctx.draw_lcd_backbuffer_arc(
-                color, alpha, img_w, img_h,
-                0.0, 0.0, w_logical, h_logical,
-            );
+            ctx.draw_lcd_backbuffer_arc(color, alpha, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
         }
         (Some(bmp), None) => {
             ctx.draw_image_rgba_arc(bmp, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
@@ -792,7 +828,10 @@ pub fn dispatch_event(
         return root.on_event(event);
     }
     let child_bounds = root.children()[idx].bounds();
-    let child_pos = Point::new(pos_in_root.x - child_bounds.x, pos_in_root.y - child_bounds.y);
+    let child_pos = Point::new(
+        pos_in_root.x - child_bounds.x,
+        pos_in_root.y - child_bounds.y,
+    );
     let translated_event = translate_event(event, child_pos);
 
     let child_result = dispatch_event(
@@ -813,14 +852,26 @@ pub fn dispatch_event(
 fn translate_event(event: &Event, new_pos: Point) -> Event {
     match event {
         Event::MouseMove { .. } => Event::MouseMove { pos: new_pos },
-        Event::MouseDown { button, modifiers, .. } => Event::MouseDown {
-            pos: new_pos, button: *button, modifiers: *modifiers,
+        Event::MouseDown {
+            button, modifiers, ..
+        } => Event::MouseDown {
+            pos: new_pos,
+            button: *button,
+            modifiers: *modifiers,
         },
-        Event::MouseUp { button, modifiers, .. } => Event::MouseUp {
-            pos: new_pos, button: *button, modifiers: *modifiers,
+        Event::MouseUp {
+            button, modifiers, ..
+        } => Event::MouseUp {
+            pos: new_pos,
+            button: *button,
+            modifiers: *modifiers,
         },
-        Event::MouseWheel { delta_y, delta_x, .. } => Event::MouseWheel {
-            pos: new_pos, delta_y: *delta_y, delta_x: *delta_x,
+        Event::MouseWheel {
+            delta_y, delta_x, ..
+        } => Event::MouseWheel {
+            pos: new_pos,
+            delta_y: *delta_y,
+            delta_x: *delta_x,
         },
         other => other.clone(),
     }
@@ -870,7 +921,9 @@ pub fn current_mouse_world() -> Option<Point> {
 /// including `widget` itself.  Used primarily by tests to locate a
 /// specific `Window` by its title without knowing the tree shape.
 pub fn find_widget_by_id<'a>(widget: &'a dyn Widget, id: &str) -> Option<&'a dyn Widget> {
-    if widget.id() == Some(id) { return Some(widget); }
+    if widget.id() == Some(id) {
+        return Some(widget);
+    }
     for child in widget.children() {
         if let Some(found) = find_widget_by_id(child.as_ref(), id) {
             return Some(found);
@@ -886,7 +939,9 @@ pub fn find_widget_by_id_mut<'a>(
     widget: &'a mut dyn Widget,
     id: &str,
 ) -> Option<&'a mut dyn Widget> {
-    if widget.id() == Some(id) { return Some(widget); }
+    if widget.id() == Some(id) {
+        return Some(widget);
+    }
     for child in widget.children_mut().iter_mut() {
         if let Some(found) = find_widget_by_id_mut(child.as_mut(), id) {
             return Some(found);
@@ -900,7 +955,9 @@ pub fn find_widget_by_id_mut<'a>(
 /// a specific widget kind inside an opaque content subtree (e.g.
 /// "find the ScrollView inside this window").
 pub fn find_widget_by_type<'a>(widget: &'a dyn Widget, type_name: &str) -> Option<&'a dyn Widget> {
-    if widget.type_name() == type_name { return Some(widget); }
+    if widget.type_name() == type_name {
+        return Some(widget);
+    }
     for child in widget.children() {
         if let Some(found) = find_widget_by_type(child.as_ref(), type_name) {
             return Some(found);
@@ -921,9 +978,13 @@ pub fn collect_inspector_nodes(
 ) {
     // Invisible widgets (and their entire subtrees) are excluded from the
     // inspector — they are not part of the live rendered scene.
-    if !widget.is_visible() { return; }
+    if !widget.is_visible() {
+        return;
+    }
     // Utility widgets opt out of the inspector entirely.
-    if !widget.show_in_inspector() { return; }
+    if !widget.show_in_inspector() {
+        return;
+    }
 
     let b = widget.bounds();
     let abs = Rect::new(
@@ -935,13 +996,17 @@ pub fn collect_inspector_nodes(
     // Build the properties vec — include the universal `backbuffer` flag
     // first (so every widget shows it in a consistent location), then the
     // widget-specific properties.
-    let mut props = vec![
-        ("backbuffer", if widget.has_backbuffer() { "true".to_string() }
-                       else                        { "false".to_string() }),
-    ];
+    let mut props = vec![(
+        "backbuffer",
+        if widget.has_backbuffer() {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        },
+    )];
     props.extend(widget.properties());
     out.push(InspectorNode {
-        type_name:  widget.type_name(),
+        type_name: widget.type_name(),
         screen_bounds: abs,
         depth,
         properties: props,
@@ -951,7 +1016,9 @@ pub fn collect_inspector_nodes(
     // recursion to prevent the inspector from growing its own node list every
     // frame (exponential growth).  Their sub-trees are still visible in the
     // inspector on the next frame through the normal layout snapshot.
-    if !widget.contributes_children_to_inspector() { return; }
+    if !widget.contributes_children_to_inspector() {
+        return;
+    }
 
     let child_origin = Point::new(abs.x, abs.y);
     for child in widget.children() {
@@ -961,7 +1028,11 @@ pub fn collect_inspector_nodes(
 
 /// Collect all focusable widgets in paint order (DFS root → leaves).
 /// Returns their paths as `Vec<Vec<usize>>`.
-fn collect_focusable(widget: &dyn Widget, current_path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+fn collect_focusable(
+    widget: &dyn Widget,
+    current_path: &mut Vec<usize>,
+    out: &mut Vec<Vec<usize>>,
+) {
     if widget.is_focusable() {
         out.push(current_path.clone());
     }
@@ -1029,12 +1100,16 @@ impl App {
     /// introspect the laid-out tree without re-routing events through the
     /// full dispatch machinery.  Pair with [`find_widget_by_id`] to locate
     /// a specific widget by its `Widget::id()` (e.g. a Window's title).
-    pub fn root(&self) -> &dyn Widget { self.root.as_ref() }
+    pub fn root(&self) -> &dyn Widget {
+        self.root.as_ref()
+    }
 
     /// Mutable counterpart to [`root`].  Required when a test wants to
     /// drive a specific sub-widget directly (e.g. reading ScrollView
     /// scroll offset) after the App has routed an event.
-    pub fn root_mut(&mut self) -> &mut dyn Widget { self.root.as_mut() }
+    pub fn root_mut(&mut self) -> &mut dyn Widget {
+        self.root.as_mut()
+    }
 
     /// Register a global key handler invoked before the focused widget receives
     /// the key.  Return `true` to consume the event (suppress focused dispatch).
@@ -1049,7 +1124,10 @@ impl App {
     ///     false
     /// });
     /// ```
-    pub fn set_global_key_handler(&mut self, handler: impl FnMut(Key, Modifiers) -> bool + 'static) {
+    pub fn set_global_key_handler(
+        &mut self,
+        handler: impl FnMut(Key, Modifiers) -> bool + 'static,
+    ) {
         self.global_key_handler = Some(Box::new(handler));
     }
 
@@ -1062,7 +1140,8 @@ impl App {
         let scale = crate::device_scale::device_scale().max(1e-6);
         let logical = Size::new(viewport.width / scale, viewport.height / scale);
         self.viewport_height = logical.height;
-        self.root.set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
+        self.root
+            .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);
     }
 
@@ -1133,7 +1212,13 @@ impl App {
     }
 
     /// Mouse button pressed. `screen_y` is Y-down physical pixels.
-    pub fn on_mouse_down(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
+    pub fn on_mouse_down(
+        &mut self,
+        screen_x: f64,
+        screen_y: f64,
+        button: MouseButton,
+        mods: Modifiers,
+    ) {
         let pos = self.flip_y(screen_x, screen_y);
         set_current_mouse_world(pos);
         let hit = self.compute_hit(pos);
@@ -1150,7 +1235,11 @@ impl App {
             self.set_focus(None);
         }
 
-        let event = Event::MouseDown { pos, button, modifiers: mods };
+        let event = Event::MouseDown {
+            pos,
+            button,
+            modifiers: mods,
+        };
         if let Some(mut path) = hit {
             let result = dispatch_event(&mut self.root, &path, &event, pos);
             if result == EventResult::Consumed {
@@ -1166,10 +1255,20 @@ impl App {
     }
 
     /// Mouse button released. `screen_y` is Y-down.
-    pub fn on_mouse_up(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
+    pub fn on_mouse_up(
+        &mut self,
+        screen_x: f64,
+        screen_y: f64,
+        button: MouseButton,
+        mods: Modifiers,
+    ) {
         let pos = self.flip_y(screen_x, screen_y);
         set_current_mouse_world(pos);
-        let event = Event::MouseUp { pos, button, modifiers: mods };
+        let event = Event::MouseUp {
+            pos,
+            button,
+            modifiers: mods,
+        };
         // Deliver release to captured widget first (if any), then clear capture.
         if let Some(path) = self.captured.take() {
             dispatch_event(&mut self.root, &path, &event, pos);
@@ -1197,7 +1296,10 @@ impl App {
                 return;
             }
         }
-        let event = Event::KeyDown { key, modifiers: mods };
+        let event = Event::KeyDown {
+            key,
+            modifiers: mods,
+        };
         if let Some(path) = self.focus.clone() {
             dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
         }
@@ -1205,7 +1307,10 @@ impl App {
 
     /// Key released. Delivered to the focused widget.
     pub fn on_key_up(&mut self, key: Key, mods: Modifiers) {
-        let event = Event::KeyUp { key, modifiers: mods };
+        let event = Event::KeyUp {
+            key,
+            modifiers: mods,
+        };
         if let Some(path) = self.focus.clone() {
             dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
         }
@@ -1219,14 +1324,14 @@ impl App {
 
     /// Mouse wheel with an explicit horizontal component (trackpad pan,
     /// shift+wheel via the platform harness).
-    pub fn on_mouse_wheel_xy(
-        &mut self,
-        screen_x: f64, screen_y: f64,
-        delta_x: f64, delta_y: f64,
-    ) {
+    pub fn on_mouse_wheel_xy(&mut self, screen_x: f64, screen_y: f64, delta_x: f64, delta_y: f64) {
         let pos = self.flip_y(screen_x, screen_y);
         let hit = self.compute_hit(pos);
-        let event = Event::MouseWheel { pos, delta_y, delta_x };
+        let event = Event::MouseWheel {
+            pos,
+            delta_y,
+            delta_x,
+        };
         if let Some(path) = hit {
             dispatch_event(&mut self.root, &path, &event, pos);
         }
@@ -1248,7 +1353,9 @@ impl App {
         let nodes = self.collect_inspector_nodes();
         let mut s = String::from("[\n");
         for (i, n) in nodes.iter().enumerate() {
-            let props_json = n.properties.iter()
+            let props_json = n
+                .properties
+                .iter()
                 .map(|(k, v)| format!("{:?}: {:?}", k, v))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -1259,7 +1366,9 @@ impl App {
                 n.screen_bounds.width, n.screen_bounds.height,
                 props_json,
             ));
-            if i + 1 < nodes.len() { s.push(','); }
+            if i + 1 < nodes.len() {
+                s.push(',');
+            }
             s.push('\n');
         }
         s.push(']');
@@ -1268,7 +1377,9 @@ impl App {
 
     /// Returns `true` if any widget currently holds keyboard focus.
     /// Used by the render loop to schedule cursor-blink repaints.
-    pub fn has_focus(&self) -> bool { self.focus.is_some() }
+    pub fn has_focus(&self) -> bool {
+        self.focus.is_some()
+    }
 
     /// Call when the cursor leaves the window to clear hover state.
     pub fn on_mouse_leave(&mut self) {
@@ -1286,35 +1397,37 @@ impl App {
     // units the mouse entry points accept.
     pub fn on_touch_start(
         &mut self,
-        device:  crate::touch_state::TouchDeviceId,
-        id:      crate::touch_state::TouchId,
-        screen_x: f64, screen_y: f64,
-        force:    Option<f32>,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        screen_x: f64,
+        screen_y: f64,
+        force: Option<f32>,
     ) {
         let pos = self.flip_y(screen_x, screen_y);
         self.touch_state.on_start(device, id, pos, force);
     }
     pub fn on_touch_move(
         &mut self,
-        device:  crate::touch_state::TouchDeviceId,
-        id:      crate::touch_state::TouchId,
-        screen_x: f64, screen_y: f64,
-        force:    Option<f32>,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        screen_x: f64,
+        screen_y: f64,
+        force: Option<f32>,
     ) {
         let pos = self.flip_y(screen_x, screen_y);
         self.touch_state.on_move(device, id, pos, force);
     }
     pub fn on_touch_end(
         &mut self,
-        device:  crate::touch_state::TouchDeviceId,
-        id:      crate::touch_state::TouchId,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
     ) {
         self.touch_state.on_end_or_cancel(device, id);
     }
     pub fn on_touch_cancel(
         &mut self,
-        device:  crate::touch_state::TouchDeviceId,
-        id:      crate::touch_state::TouchId,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
     ) {
         self.touch_state.on_end_or_cancel(device, id);
     }
@@ -1341,7 +1454,9 @@ impl App {
         let mut window_info: Option<(Vec<usize>, usize)> = None; // (parent_path, win_idx)
         for (depth, &idx) in clicked_path.iter().enumerate() {
             let children = node.children();
-            if idx >= children.len() { break; }
+            if idx >= children.len() {
+                break;
+            }
             node = &*children[idx];
             if node.type_name() == "Window" {
                 // parent_path = clicked_path[..depth], win_idx = idx
@@ -1349,14 +1464,19 @@ impl App {
             }
         }
 
-        let (parent_path, win_idx) = match window_info { Some(x) => x, None => return };
+        let (parent_path, win_idx) = match window_info {
+            Some(x) => x,
+            None => return,
+        };
 
         // Check there's actually a sibling to leapfrog.
         let n = {
             let parent = widget_at_path(&mut self.root, &parent_path);
             parent.children().len()
         };
-        if win_idx >= n - 1 { return; } // already at front
+        if win_idx >= n - 1 {
+            return;
+        } // already at front
 
         // Move the window to the end of its parent's children (mutable pass).
         {
@@ -1380,9 +1500,15 @@ impl App {
             }
         }
         shift_path(clicked_path, depth, win_idx, new_idx);
-        if let Some(ref mut p) = self.focus    { shift_path(p, depth, win_idx, new_idx); }
-        if let Some(ref mut p) = self.hovered  { shift_path(p, depth, win_idx, new_idx); }
-        if let Some(ref mut p) = self.captured { shift_path(p, depth, win_idx, new_idx); }
+        if let Some(ref mut p) = self.focus {
+            shift_path(p, depth, win_idx, new_idx);
+        }
+        if let Some(ref mut p) = self.hovered {
+            shift_path(p, depth, win_idx, new_idx);
+        }
+        if let Some(ref mut p) = self.captured {
+            shift_path(p, depth, win_idx, new_idx);
+        }
     }
 
     #[inline]
@@ -1411,7 +1537,9 @@ impl App {
             if let Some(old_path) = self.hovered.take() {
                 let is_captured = self.captured.as_ref() == Some(&old_path);
                 if !is_captured {
-                    let clear = Event::MouseMove { pos: Point::new(-1.0, -1.0) };
+                    let clear = Event::MouseMove {
+                        pos: Point::new(-1.0, -1.0),
+                    };
                     dispatch_event(&mut self.root, &old_path, &clear, Point::new(-1.0, -1.0));
                 }
             }
@@ -1450,15 +1578,27 @@ impl App {
         if all.is_empty() {
             return;
         }
-        let current_idx = self.focus.as_ref()
+        let current_idx = self
+            .focus
+            .as_ref()
             .and_then(|f| all.iter().position(|p| p == f));
         let next_idx = match current_idx {
-            None => if forward { 0 } else { all.len() - 1 },
+            None => {
+                if forward {
+                    0
+                } else {
+                    all.len() - 1
+                }
+            }
             Some(i) => {
                 if forward {
                     (i + 1) % all.len()
                 } else {
-                    if i == 0 { all.len() - 1 } else { i - 1 }
+                    if i == 0 {
+                        all.len() - 1
+                    } else {
+                        i - 1
+                    }
                 }
             }
         };

@@ -18,7 +18,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::Label;
 
 const HEADER_H: f64 = 22.0;
@@ -28,13 +28,13 @@ const INDENT: f64 = 12.0;
 /// A collapsible section header.  When expanded, the child widget is visible
 /// below the header row.  When collapsed, only the header row is shown.
 pub struct CollapsingHeader {
-    bounds:    Rect,
-    children:  Vec<Box<dyn Widget>>,
-    label:     Label,
-    open:      bool,
-    hovered:   bool,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    label: Label,
+    open: bool,
+    hovered: bool,
     /// The content shown when expanded.
-    content:   Option<Box<dyn Widget>>,
+    content: Option<Box<dyn Widget>>,
 }
 
 impl CollapsingHeader {
@@ -43,12 +43,12 @@ impl CollapsingHeader {
     pub fn new(text: impl Into<String>, font: Arc<Font>) -> Self {
         let label = Label::new(text, Arc::clone(&font)).with_font_size(13.0);
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
             label,
-            open:     true,
-            hovered:  false,
-            content:  None,
+            open: true,
+            hovered: false,
+            content: None,
         }
     }
 
@@ -66,11 +66,21 @@ impl CollapsingHeader {
 }
 
 impl Widget for CollapsingHeader {
-    fn type_name(&self) -> &'static str { "CollapsingHeader" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "CollapsingHeader"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let w = available.width;
@@ -92,7 +102,12 @@ impl Widget for CollapsingHeader {
         let label_available = Size::new(w - INDENT - TRIANGLE_SIZE * 2.0, HEADER_H);
         let ls = self.label.layout(label_available);
         let ly = (HEADER_H - ls.height) * 0.5;
-        self.label.set_bounds(Rect::new(INDENT + TRIANGLE_SIZE * 2.0 + 4.0, ly, ls.width, ls.height));
+        self.label.set_bounds(Rect::new(
+            INDENT + TRIANGLE_SIZE * 2.0 + 4.0,
+            ly,
+            ls.width,
+            ls.height,
+        ));
 
         // Layout content if open — as a child so the framework paints and
         // dispatches events normally.  Content is inset from the left by
@@ -125,7 +140,10 @@ impl Widget for CollapsingHeader {
         // top divider line so the line remains crisp.
         let alpha = if self.hovered { 0.10 } else { 0.06 };
         ctx.set_fill_color(Color::rgba(
-            v.text_color.r, v.text_color.g, v.text_color.b, alpha,
+            v.text_color.r,
+            v.text_color.g,
+            v.text_color.b,
+            alpha,
         ));
         ctx.begin_path();
         ctx.rect(0.0, h - HEADER_H, w, HEADER_H - 1.0);
@@ -148,13 +166,13 @@ impl Widget for CollapsingHeader {
         ctx.begin_path();
         if self.open {
             // Pointing down (▼): triangle with point at bottom.
-            ctx.move_to(tx,          center_y + ts * 0.5);
+            ctx.move_to(tx, center_y + ts * 0.5);
             ctx.line_to(tx + ts * 2.0, center_y + ts * 0.5);
-            ctx.line_to(tx + ts,       center_y - ts * 0.8);
+            ctx.line_to(tx + ts, center_y - ts * 0.8);
         } else {
             // Pointing right (▶): triangle with point to the right.
-            ctx.move_to(tx,            center_y + ts);
-            ctx.line_to(tx,            center_y - ts);
+            ctx.move_to(tx, center_y + ts);
+            ctx.line_to(tx, center_y - ts);
             ctx.line_to(tx + ts * 1.6, center_y);
         }
         ctx.fill();
@@ -180,8 +198,10 @@ impl Widget for CollapsingHeader {
         match event {
             Event::MouseMove { pos } => {
                 // Header row: top portion in Y-up = y from (h - HEADER_H) to h.
-                let in_header = pos.x >= 0.0 && pos.x <= self.bounds.width
-                    && pos.y >= h - HEADER_H && pos.y <= h;
+                let in_header = pos.x >= 0.0
+                    && pos.x <= self.bounds.width
+                    && pos.y >= h - HEADER_H
+                    && pos.y <= h;
                 let was = self.hovered;
                 self.hovered = in_header;
                 if self.hovered != was {
@@ -190,9 +210,15 @@ impl Widget for CollapsingHeader {
                 }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
-                let in_header = pos.x >= 0.0 && pos.x <= self.bounds.width
-                    && pos.y >= h - HEADER_H && pos.y <= h;
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
+                let in_header = pos.x >= 0.0
+                    && pos.x <= self.bounds.width
+                    && pos.y >= h - HEADER_H
+                    && pos.y <= h;
                 if in_header {
                     self.open = !self.open;
                     crate::animation::request_tick();
@@ -205,7 +231,9 @@ impl Widget for CollapsingHeader {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 }

@@ -34,10 +34,10 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{App, Font, Modifiers, Rect};
 use agg_gui::winit_adapter;
+use agg_gui::{App, Font, Modifiers, Rect};
 
-use demo_gl::{GlGfxCtx, begin_frame, render_app_frame};
+use demo_gl::{begin_frame, render_app_frame, GlGfxCtx};
 
 use glow::HasContext;
 use glutin::config::ConfigTemplateBuilder;
@@ -53,8 +53,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{Fullscreen, WindowAttributes};
 
-const FONT_BYTES:  &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
-const FA_BYTES:    &[u8] = include_bytes!("../../demo/assets/fa.ttf");
+const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+const FA_BYTES: &[u8] = include_bytes!("../../demo/assets/fa.ttf");
 const EMOJI_BYTES: &[u8] = include_bytes!("../../demo/assets/NotoEmoji-Regular.ttf");
 
 // ---------------------------------------------------------------------------
@@ -78,10 +78,7 @@ fn load_saved_state() -> Option<demo_ui::SavedState> {
 /// last-known windowed size when the window is currently fullscreen or
 /// maximized (its inner_size is the monitor / maximized rect, which isn't
 /// what we want to restore on the next launch).
-fn serialize_state(
-    accessor: &demo_ui::StateAccessor,
-    last_windowed: (u32, u32),
-) -> String {
+fn serialize_state(accessor: &demo_ui::StateAccessor, last_windowed: (u32, u32)) -> String {
     let mut state = accessor.current_state();
     if state.window_fullscreen || state.window_maximized {
         state.window_w = Some(last_windowed.0);
@@ -107,17 +104,16 @@ fn main() {
     // reloaded later (once fonts + GL context exist).
     let initial_state = load_saved_state();
     let (start_w, start_h) = match initial_state.as_ref() {
-        Some(s) => (
-            s.window_w.unwrap_or(1280),
-            s.window_h.unwrap_or(720),
-        ),
+        Some(s) => (s.window_w.unwrap_or(1280), s.window_h.unwrap_or(720)),
         None => (1280, 720),
     };
-    let start_fullscreen = initial_state.as_ref()
+    let start_fullscreen = initial_state
+        .as_ref()
         .map(|s| s.window_fullscreen)
         .unwrap_or(false);
 
-    let start_maximized = initial_state.as_ref()
+    let start_maximized = initial_state
+        .as_ref()
         .map(|s| s.window_maximized)
         .unwrap_or(false);
 
@@ -132,8 +128,7 @@ fn main() {
         .with_maximized(start_maximized)
         .with_visible(false);
     if start_fullscreen {
-        window_attributes = window_attributes
-            .with_fullscreen(Some(Fullscreen::Borderless(None)));
+        window_attributes = window_attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
     }
 
     // MSAA sample count comes from the persisted Backend panel setting.
@@ -151,8 +146,7 @@ fn main() {
     if matches!(msaa_request, 2 | 4 | 8 | 16) {
         template = template.with_multisampling(msaa_request);
     }
-    let display_builder =
-        DisplayBuilder::new().with_window_attributes(Some(window_attributes));
+    let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
 
     let (window, gl_config) = display_builder
         .build(&event_loop, template, |configs| {
@@ -167,7 +161,11 @@ fn main() {
                 .reduce(|a, b| {
                     let a_err = (a.num_samples() as i32 - want as i32).abs();
                     let b_err = (b.num_samples() as i32 - want as i32).abs();
-                    if b_err < a_err { b } else { a }
+                    if b_err < a_err {
+                        b
+                    } else {
+                        a
+                    }
                 })
                 .expect("no suitable GL config")
         })
@@ -219,11 +217,13 @@ fn main() {
 
     // Fallback chain: CascadiaCode → Font Awesome 4 (PUA icons) → NotoEmoji (emoji)
     let emoji_font = Font::from_slice(EMOJI_BYTES).expect("parse NotoEmoji-Regular.ttf");
-    let fa_font    = Font::from_slice(FA_BYTES).expect("parse fa.ttf")
+    let fa_font = Font::from_slice(FA_BYTES)
+        .expect("parse fa.ttf")
         .with_fallback(Arc::new(emoji_font));
     let font = Arc::new(
-        Font::from_slice(FONT_BYTES).expect("parse CascadiaCode.ttf")
-            .with_fallback(Arc::new(fa_font))
+        Font::from_slice(FONT_BYTES)
+            .expect("parse CascadiaCode.ttf")
+            .with_fallback(Arc::new(fa_font)),
     );
 
     let init_w = size.width.max(1) as f32;
@@ -261,39 +261,49 @@ fn main() {
         initial_state,
         platform,
     );
-    let show_inspector     = Rc::clone(&handles.show_inspector);
-    let inspector_nodes    = Rc::clone(&handles.inspector_nodes);
-    let hovered_bounds     = Rc::clone(&handles.hovered_bounds);
+    let show_inspector = Rc::clone(&handles.show_inspector);
+    let inspector_nodes = Rc::clone(&handles.inspector_nodes);
+    let hovered_bounds = Rc::clone(&handles.hovered_bounds);
     // `cube_visible` used to drive the ControlFlow decision; now the 3-D
     // cube's `Widget::needs_paint` returns true whenever it's visited by
     // the tree walk, which automatically skips when its Window is closed.
-    let _cube_visible      = Rc::clone(&handles.cube_visible);
-    let screen_size        = Rc::clone(&handles.screen_size);
-    let frame_history      = Rc::clone(&handles.frame_history);
-    let window_fullscreen  = Rc::clone(&handles.window_fullscreen);
-    let window_maximized   = Rc::clone(&handles.window_maximized);
-    let screenshot_request      = Rc::clone(&handles.screenshot_request);
+    let _cube_visible = Rc::clone(&handles.cube_visible);
+    let screen_size = Rc::clone(&handles.screen_size);
+    let frame_history = Rc::clone(&handles.frame_history);
+    let window_fullscreen = Rc::clone(&handles.window_fullscreen);
+    let window_maximized = Rc::clone(&handles.window_maximized);
+    let screenshot_request = Rc::clone(&handles.screenshot_request);
     let handles_screenshot_image = Rc::clone(&handles.screenshot_image);
-    let screenshot_capturing    = Rc::clone(&handles.screenshot_capturing);
-    let state_accessor          = handles.state;
+    let screenshot_capturing = Rc::clone(&handles.screenshot_capturing);
+    let state_accessor = handles.state;
     #[allow(unused_assignments, unused_mut)]
     let mut screenshot_counter: u32 = 0;
+    let screenshot_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let auto_screenshot_trigger = screenshot_dir.join(".agg-gui-auto-screenshot");
+    let auto_screenshot_enabled = std::env::args().any(|arg| arg == "--auto-screenshot")
+        || std::env::var_os("AGG_GUI_AUTO_SCREENSHOT").is_some();
+    let mut auto_screenshot_at = auto_screenshot_enabled
+        .then(|| std::time::Instant::now() + std::time::Duration::from_secs(1));
+    let mut save_next_screenshot: Option<std::path::PathBuf> = None;
     // Auto-save machinery — every AboutToWait tick, hash the current state
     // and save when it differs AND no mouse button is held down (so we don't
     // thrash on disk mid-drag or mid-resize).
     let mut auto_save = agg_gui::persistence::AutoSave::new();
     let mut mouse_buttons_down: u32 = 0;
 
-    let mut cursor_x    = 0.0f64;
-    let mut cursor_y    = 0.0f64;
+    let mut cursor_x = 0.0f64;
+    let mut cursor_y = 0.0f64;
     // First-finger tracking for `WindowEvent::Touch` → mouse emulation.
     // Second+ fingers are dropped so the widget tree sees exactly one
     // pointer, matching the single-touch contract used by the web
     // harness.
     let mut primary_touch_id: Option<u64> = None;
     let mut last_frame_ms = 0.0f64;
-    let mut win_w       = size.width.max(1);
-    let mut win_h       = size.height.max(1);
+    let mut win_w = size.width.max(1);
+    let mut win_h = size.height.max(1);
     // Last size seen while the window was NOT fullscreen — what we persist
     // across restarts.  Seeded with the saved windowed size (or the default).
     let mut last_windowed_w: u32 = start_w;
@@ -336,8 +346,17 @@ fn main() {
     // removed from `Window::layout`, this is safe even if the reported size
     // hasn't yet caught up with the final maximize transition — saved
     // window positions aren't mutated during layout.
-    render_frame(&mut app, &mut gl_ctx, &gl, win_w, win_h, last_frame_ms,
-                 show_inspector.get(), &inspector_nodes, &hovered_bounds);
+    render_frame(
+        &mut app,
+        &mut gl_ctx,
+        &gl,
+        win_w,
+        win_h,
+        last_frame_ms,
+        show_inspector.get(),
+        &inspector_nodes,
+        &hovered_bounds,
+    );
     let _ = gl_surface.swap_buffers(&gl_context);
 
     // Finally, reveal the window — its first visible frame is our content.
@@ -347,14 +366,17 @@ fn main() {
     event_loop
         .run(|event, elwt| {
             match event {
-                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                    let s = serialize_state(&state_accessor,
-                        (last_windowed_w, last_windowed_h));
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => {
+                    let s = serialize_state(&state_accessor, (last_windowed_w, last_windowed_h));
                     save_state_to_disk(&s);
                     elwt.exit();
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::ScaleFactorChanged { scale_factor, .. }, ..
+                    event: WindowEvent::ScaleFactorChanged { scale_factor, .. },
+                    ..
                 } => {
                     // Window moved to a different-DPI monitor.  Update our
                     // scale factor so the next layout/paint/input pass uses
@@ -362,7 +384,8 @@ fn main() {
                     agg_gui::set_device_scale(scale_factor);
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::Resized(new_size), ..
+                    event: WindowEvent::Resized(new_size),
+                    ..
                 } => {
                     if new_size.width > 0 && new_size.height > 0 {
                         gl_surface.resize(
@@ -376,7 +399,7 @@ fn main() {
                         // Resize is the reliable signal for fullscreen AND
                         // maximize/restore transitions — update both flags.
                         let is_full = window.fullscreen().is_some();
-                        let is_max  = window.is_maximized();
+                        let is_max = window.is_maximized();
                         window_fullscreen.set(is_full);
                         window_maximized.set(is_max);
                         if !is_full && !is_max {
@@ -384,15 +407,23 @@ fn main() {
                             last_windowed_h = win_h;
                         }
                         // Render immediately so content tracks the drag handle.
-                        render_frame(&mut app, &mut gl_ctx, &gl,
-                                     win_w, win_h, last_frame_ms,
-                                     show_inspector.get(),
-                                     &inspector_nodes, &hovered_bounds);
+                        render_frame(
+                            &mut app,
+                            &mut gl_ctx,
+                            &gl,
+                            win_w,
+                            win_h,
+                            last_frame_ms,
+                            show_inspector.get(),
+                            &inspector_nodes,
+                            &hovered_bounds,
+                        );
                         gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
                     }
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::CursorMoved { position, .. }, ..
+                    event: WindowEvent::CursorMoved { position, .. },
+                    ..
                 } => {
                     cursor_x = position.x;
                     cursor_y = position.y;
@@ -400,21 +431,24 @@ fn main() {
                     winit_adapter::apply_cursor(&window, agg_gui::current_cursor_icon());
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::CursorLeft { .. }, ..
+                    event: WindowEvent::CursorLeft { .. },
+                    ..
                 } => {
                     app.on_mouse_leave();
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::ModifiersChanged(mods_state), ..
+                    event: WindowEvent::ModifiersChanged(mods_state),
+                    ..
                 } => {
                     current_mods = winit_adapter::modifiers(mods_state.state());
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::MouseInput { state, button, .. }, ..
+                    event: WindowEvent::MouseInput { state, button, .. },
+                    ..
                 } => {
                     let btn = winit_adapter::mouse_button(button);
                     match state {
-                        ElementState::Pressed  => {
+                        ElementState::Pressed => {
                             mouse_buttons_down = mouse_buttons_down.saturating_add(1);
                             app.on_mouse_down(cursor_x, cursor_y, btn, current_mods);
                         }
@@ -425,17 +459,18 @@ fn main() {
                     }
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::KeyboardInput { event: key_event, .. }, ..
+                    event:
+                        WindowEvent::KeyboardInput {
+                            event: key_event, ..
+                        },
+                    ..
                 } => {
                     if key_event.state == ElementState::Pressed {
                         // F11 toggles borderless fullscreen at the OS level.
                         // We also flip the tracked fullscreen cell eagerly so
                         // the saved-state snapshot is right even if the
                         // subsequent Resized event hasn't landed yet.
-                        if matches!(
-                            key_event.logical_key,
-                            WinitKey::Named(NamedKey::F11)
-                        ) {
+                        if matches!(key_event.logical_key, WinitKey::Named(NamedKey::F11)) {
                             let now_full = window.fullscreen().is_some();
                             if now_full {
                                 window.set_fullscreen(None);
@@ -446,32 +481,23 @@ fn main() {
                             }
                             return;
                         }
-                        // F9 — request a screenshot of the NEXT rendered
-                        // frame.  The main loop polls this cell and captures
-                        // after rendering.
-                        if matches!(
-                            key_event.logical_key,
-                            WinitKey::Named(NamedKey::F9)
-                        ) {
-                            screenshot_request.set(true);
-                            return;
-                        }
                         if let Some(key) = winit_adapter::key(&key_event.logical_key) {
                             app.on_key_down(key, current_mods);
                         }
                     }
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::MouseWheel { delta, .. }, ..
+                    event: WindowEvent::MouseWheel { delta, .. },
+                    ..
                 } => {
                     // Winit: LineDelta y > 0 = wheel up = scroll UP = negative delta.
                     // Treat shift+wheel as horizontal (common mouse-with-only-
                     // vertical-wheel convention).
                     let (mut dx, mut dy) = match delta {
-                        winit::event::MouseScrollDelta::LineDelta(x, y) =>
-                            (-(x as f64), -(y as f64)),
-                        winit::event::MouseScrollDelta::PixelDelta(d) =>
-                            (d.x / 40.0, d.y / 40.0),
+                        winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                            (-(x as f64), -(y as f64))
+                        }
+                        winit::event::MouseScrollDelta::PixelDelta(d) => (d.x / 40.0, d.y / 40.0),
                     };
                     if current_mods.shift && dx == 0.0 {
                         dx = dy;
@@ -480,7 +506,15 @@ fn main() {
                     app.on_mouse_wheel_xy(cursor_x, cursor_y, dx, dy);
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::Touch(Touch { phase, location, id, force, .. }), ..
+                    event:
+                        WindowEvent::Touch(Touch {
+                            phase,
+                            location,
+                            id,
+                            force,
+                            ..
+                        }),
+                    ..
                 } => {
                     // Touch handling: every finger is forwarded to the
                     // multi-touch aggregator so gestures can work; the
@@ -488,13 +522,16 @@ fn main() {
                     // emulation so widgets that only understand mouse
                     // input (most of the widget tree) still respond to
                     // single-finger taps / drags.
-                    let tx       = location.x;
-                    let ty       = location.y;
+                    let tx = location.x;
+                    let ty = location.y;
                     let touch_id = agg_gui::TouchId(id);
-                    let device   = agg_gui::TouchDeviceId(0);
+                    let device = agg_gui::TouchDeviceId(0);
                     let f = force.map(|force| match force {
-                        winit::event::Force::Calibrated { force, max_possible_force, .. } =>
-                            (force / max_possible_force) as f32,
+                        winit::event::Force::Calibrated {
+                            force,
+                            max_possible_force,
+                            ..
+                        } => (force / max_possible_force) as f32,
                         winit::event::Force::Normalized(v) => v as f32,
                     });
                     match phase {
@@ -506,12 +543,12 @@ fn main() {
                                 cursor_y = ty;
                                 app.on_mouse_move(cursor_x, cursor_y);
                                 app.on_mouse_down(
-                                    cursor_x, cursor_y,
+                                    cursor_x,
+                                    cursor_y,
                                     agg_gui::MouseButton::Left,
                                     current_mods,
                                 );
-                                mouse_buttons_down =
-                                    mouse_buttons_down.saturating_add(1);
+                                mouse_buttons_down = mouse_buttons_down.saturating_add(1);
                             }
                         }
                         TouchPhase::Moved => {
@@ -528,13 +565,13 @@ fn main() {
                                 cursor_x = tx;
                                 cursor_y = ty;
                                 app.on_mouse_up(
-                                    cursor_x, cursor_y,
+                                    cursor_x,
+                                    cursor_y,
                                     agg_gui::MouseButton::Left,
                                     current_mods,
                                 );
                                 app.on_mouse_leave();
-                                mouse_buttons_down =
-                                    mouse_buttons_down.saturating_sub(1);
+                                mouse_buttons_down = mouse_buttons_down.saturating_sub(1);
                                 primary_touch_id = None;
                             }
                         }
@@ -544,13 +581,13 @@ fn main() {
                                 cursor_x = tx;
                                 cursor_y = ty;
                                 app.on_mouse_up(
-                                    cursor_x, cursor_y,
+                                    cursor_x,
+                                    cursor_y,
                                     agg_gui::MouseButton::Left,
                                     current_mods,
                                 );
                                 app.on_mouse_leave();
-                                mouse_buttons_down =
-                                    mouse_buttons_down.saturating_sub(1);
+                                mouse_buttons_down = mouse_buttons_down.saturating_sub(1);
                                 primary_touch_id = None;
                             }
                         }
@@ -568,13 +605,27 @@ fn main() {
                     //     `needs_paint` — widgets like TextField (cursor
                     //     blink) compare their current phase to the one
                     //     last painted and report dirty when they diverge.
-                    //   - A screenshot was requested (button / F9).
+                    //   - A screenshot was requested (button / startup flag).
                     //
                     // Scheduled wakes (ControlFlow::WaitUntil below) just
                     // bring the loop back so `needs_paint` can be queried
                     // again; there is no host-side deadline bookkeeping.
-                    let want_render = app.wants_animation_tick()
-                        || screenshot_request.get();
+                    if auto_screenshot_at.is_none()
+                        && save_next_screenshot.is_none()
+                        && auto_screenshot_trigger.exists()
+                    {
+                        auto_screenshot_at =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+                    }
+                    if let Some(deadline) = auto_screenshot_at {
+                        if std::time::Instant::now() >= deadline {
+                            auto_screenshot_at = None;
+                            save_next_screenshot =
+                                Some(screenshot_dir.join("agg-gui-auto-screenshot.png"));
+                            screenshot_request.set(true);
+                        }
+                    }
+                    let want_render = app.wants_animation_tick() || screenshot_request.get();
 
                     if want_render {
                         let t0 = std::time::Instant::now();
@@ -591,10 +642,19 @@ fn main() {
                             &screenshot_capturing,
                             &handles_screenshot_image,
                             &mut gl_ctx,
-                            |gc| render_frame(&mut app, gc, &gl,
-                                              win_w, win_h, last_frame_ms,
-                                              show_insp, &inspector_nodes,
-                                              &hovered_bounds),
+                            |gc| {
+                                render_frame(
+                                    &mut app,
+                                    gc,
+                                    &gl,
+                                    win_w,
+                                    win_h,
+                                    last_frame_ms,
+                                    show_insp,
+                                    &inspector_nodes,
+                                    &hovered_bounds,
+                                )
+                            },
                             |gc| gc.read_screenshot(),
                         );
                         if screenshot_request.get() == false
@@ -604,6 +664,20 @@ fn main() {
                             // consumed a request — tracked for parity with
                             // pre-refactor behaviour.
                             screenshot_counter = screenshot_counter.wrapping_add(1);
+                            if let Some(path) = save_next_screenshot.take() {
+                                if let Some((pixels, w, h)) =
+                                    handles_screenshot_image.borrow().as_ref()
+                                {
+                                    if let Ok(png) = agg_gui::screenshot::encode_png_rgba(
+                                        pixels.as_slice(),
+                                        *w,
+                                        *h,
+                                    ) {
+                                        let _ = std::fs::write(&path, png);
+                                        let _ = std::fs::remove_file(&auto_screenshot_trigger);
+                                    }
+                                }
+                            }
                         }
 
                         gl_surface.swap_buffers(&gl_context).expect("swap_buffers");
@@ -620,10 +694,11 @@ fn main() {
                     // its enclosing window/tab/header is actually showing
                     // it.  With nothing dirty and no deadline, `Wait` means
                     // the loop idles until the next OS input event.
-                    let want_next = app.wants_animation_tick()
-                        || screenshot_request.get();
+                    let want_next = app.wants_animation_tick() || screenshot_request.get();
                     elwt.set_control_flow(if want_next {
                         ControlFlow::Poll
+                    } else if let Some(deadline) = auto_screenshot_at {
+                        ControlFlow::WaitUntil(deadline)
                     } else if let Some(t) = app.next_paint_deadline() {
                         ControlFlow::WaitUntil(t)
                     } else {
@@ -637,8 +712,7 @@ fn main() {
                     // is held (so drag / resize don't thrash disk).
                     auto_save.tick(
                         mouse_buttons_down == 0,
-                        || serialize_state(&state_accessor,
-                                           (last_windowed_w, last_windowed_h)),
+                        || serialize_state(&state_accessor, (last_windowed_w, last_windowed_h)),
                         |s| save_state_to_disk(s),
                     );
 
@@ -655,10 +729,8 @@ fn main() {
                     // and spawn a second child.
                     if relaunch_requested.get() {
                         relaunch_requested.set(false);
-                        let s = serialize_state(
-                            &state_accessor,
-                            (last_windowed_w, last_windowed_h),
-                        );
+                        let s =
+                            serialize_state(&state_accessor, (last_windowed_w, last_windowed_h));
                         save_state_to_disk(&s);
                         if let Ok(exe) = std::env::current_exe() {
                             let _ = std::process::Command::new(exe).spawn();
@@ -677,20 +749,28 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 fn render_frame(
-    app:             &mut App,
-    gl_ctx:          &mut GlGfxCtx,
-    gl:              &glow::Context,
-    w:               u32,
-    h:               u32,
-    frame_ms:        f64,
-    show_inspector:  bool,
+    app: &mut App,
+    gl_ctx: &mut GlGfxCtx,
+    gl: &glow::Context,
+    w: u32,
+    h: u32,
+    frame_ms: f64,
+    show_inspector: bool,
     inspector_nodes: &Rc<RefCell<Vec<agg_gui::InspectorNode>>>,
-    hovered_bounds:  &Rc<RefCell<Option<Rect>>>,
+    hovered_bounds: &Rc<RefCell<Option<Rect>>>,
 ) {
     begin_frame(gl, w, h);
     CUBE_SCREEN_RECT.with(|r| r.set(Rect::default()));
-    render_app_frame(gl_ctx, app, w, h, frame_ms,
-                     show_inspector, inspector_nodes, hovered_bounds);
+    render_app_frame(
+        gl_ctx,
+        app,
+        w,
+        h,
+        frame_ms,
+        show_inspector,
+        inspector_nodes,
+        hovered_bounds,
+    );
 }
 
 // All input (key/mouse-button/modifier) and cursor-icon mapping now

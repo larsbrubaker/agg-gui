@@ -27,7 +27,9 @@ pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
 
 use std::sync::Arc;
 
-use agg_rust::basics::{is_end_poly, is_move_to, is_stop, PATH_CMD_LINE_TO, PATH_FLAGS_NONE, VertexSource};
+use agg_rust::basics::{
+    is_end_poly, is_move_to, is_stop, VertexSource, PATH_CMD_LINE_TO, PATH_FLAGS_NONE,
+};
 use agg_rust::conv_contour::ConvContour;
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_transform::ConvTransform;
@@ -194,7 +196,7 @@ impl GlyphPathBuilder {
     /// (positive italic slants top-right, matching the AGG reference).
     #[allow(dead_code)]
     pub fn with_style(mut self, width: f64, italic: f64) -> Self {
-        self.width_scale  = width;
+        self.width_scale = width;
         self.italic_shear = italic;
         self
     }
@@ -208,11 +210,13 @@ impl GlyphPathBuilder {
     #[inline]
     fn x(&self, v: f32, y_raw: f32) -> f64 {
         let base_x = self.ox + v as f64 * self.scale * self.width_scale;
-        let shear  = y_raw as f64 * self.scale * self.italic_shear;
+        let shear = y_raw as f64 * self.scale * self.italic_shear;
         base_x + shear
     }
     #[inline]
-    fn y(&self, v: f32) -> f64 { self.oy + v as f64 * self.scale }
+    fn y(&self, v: f32) -> f64 {
+        self.oy + v as f64 * self.scale
+    }
 }
 
 impl ttf_parser::OutlineBuilder for GlyphPathBuilder {
@@ -224,13 +228,17 @@ impl ttf_parser::OutlineBuilder for GlyphPathBuilder {
         self.path.line_to(self.x(x, y), self.y(y));
     }
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.path.curve3(self.x(x1, y1), self.y(y1), self.x(x, y), self.y(y));
+        self.path
+            .curve3(self.x(x1, y1), self.y(y1), self.x(x, y), self.y(y));
     }
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         self.path.curve4(
-            self.x(x1, y1), self.y(y1),
-            self.x(x2, y2), self.y(y2),
-            self.x(x,  y),  self.y(y),
+            self.x(x1, y1),
+            self.y(y1),
+            self.x(x2, y2),
+            self.y(y2),
+            self.x(x, y),
+            self.y(y),
         );
     }
     fn close(&mut self) {
@@ -266,16 +274,18 @@ impl ttf_parser::OutlineBuilder for GlyphPathBuilder {
 /// `contour.set_width(-faux_weight * height / 15.0)` convention; pass
 /// the already-sign-flipped, already-scaled value.
 fn apply_faux_weight(path: PathStorage, weight_px: f64) -> PathStorage {
-    if weight_px.abs() < 1e-4 { return path; }
+    if weight_px.abs() < 1e-4 {
+        return path;
+    }
     let mut src = path;
-    let mut curves    = ConvCurve::new(&mut src);
-    let zoom_in       = TransAffine::new_scaling(1.0, 100.0);
+    let mut curves = ConvCurve::new(&mut src);
+    let zoom_in = TransAffine::new_scaling(1.0, 100.0);
     let mut zoomed_in = ConvTransform::new(&mut curves, zoom_in);
-    let mut contour   = ConvContour::new(&mut zoomed_in);
+    let mut contour = ConvContour::new(&mut zoomed_in);
     contour.set_auto_detect_orientation(false);
     contour.set_width(weight_px);
-    let zoom_out      = TransAffine::new_scaling(1.0, 1.0 / 100.0);
-    let mut out       = ConvTransform::new(&mut contour, zoom_out);
+    let zoom_out = TransAffine::new_scaling(1.0, 1.0 / 100.0);
+    let mut out = ConvTransform::new(&mut contour, zoom_out);
 
     // Flatten the VertexSource chain into a fresh PathStorage.  ConvCurve
     // has converted all Béziers to line-segments by the time we get here,
@@ -285,7 +295,9 @@ fn apply_faux_weight(path: PathStorage, weight_px: f64) -> PathStorage {
     loop {
         let (mut vx, mut vy) = (0.0_f64, 0.0_f64);
         let cmd = out.vertex(&mut vx, &mut vy);
-        if is_stop(cmd) { break; }
+        if is_stop(cmd) {
+            break;
+        }
         if is_move_to(cmd) {
             result.move_to(vx, vy);
         } else if cmd == PATH_CMD_LINE_TO {
@@ -318,18 +330,18 @@ pub(crate) fn shape_text(
     //                    (Y-axis-only hinting, matches `(y+0.5).floor()`)
     // - `interval_px`  → extra pen advance in pixels per glyph,
     //                    proportional to em size
-    let width_scale  = crate::font_settings::current_width();
+    let width_scale = crate::font_settings::current_width();
     let italic_shear = crate::font_settings::current_faux_italic() / 3.0;
-    let hint_y       = crate::font_settings::hinting_enabled();
-    let interval_em  = crate::font_settings::current_interval();
-    let interval_px  = interval_em * size;
+    let hint_y = crate::font_settings::hinting_enabled();
+    let interval_em = crate::font_settings::current_interval();
+    let interval_px = interval_em * size;
     // Faux weight — negative sign matches agg-rust: +faux_weight
     // thickens (contour width negative expands outward for a CCW
     // outline), -faux_weight thins.  The `/15.0` denominator reproduces
     // the reference demo's slider-to-pixels conversion.
-    let faux_weight  = crate::font_settings::current_faux_weight();
-    let weight_px    = if faux_weight.abs() < 0.05 {
-        0.0  // dead zone near 0, matches reference — avoids zero-width noise
+    let faux_weight = crate::font_settings::current_faux_weight();
+    let weight_px = if faux_weight.abs() < 0.05 {
+        0.0 // dead zone near 0, matches reference — avoids zero-width noise
     } else {
         -faux_weight * size / 15.0
     };
@@ -354,8 +366,8 @@ pub(crate) fn shape_text(
         let render_font = g.fallback_font.as_deref().unwrap_or(font);
         let scale = size / render_font.units_per_em() as f64;
 
-        let mut builder = GlyphPathBuilder::new(gx, gy, scale)
-            .with_style(width_scale, italic_shear);
+        let mut builder =
+            GlyphPathBuilder::new(gx, gy, scale).with_style(width_scale, italic_shear);
         let has_outline = render_font.with_ttf_face(|face| {
             face.outline_glyph(ttf_parser::GlyphId(g.glyph_id), &mut builder)
                 .is_some()
@@ -438,10 +450,10 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
                 .iter()
                 .zip(output.glyph_positions().iter())
                 .map(|(info, pos)| {
-                    let glyph_id  = info.glyph_id as u16;
+                    let glyph_id = info.glyph_id as u16;
                     let x_advance = pos.x_advance as f64 * scale;
-                    let x_offset  = pos.x_offset  as f64 * scale;
-                    let y_offset  = pos.y_offset  as f64 * scale;
+                    let x_offset = pos.x_offset as f64 * scale;
+                    let y_offset = pos.y_offset as f64 * scale;
 
                     // glyph_id == 0 means the primary font has no glyph for
                     // this code point.  Walk the fallback chain until a font
@@ -451,9 +463,8 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
                         if let Some(ch) = text.get(byte_off..).and_then(|s| s.chars().next()) {
                             let mut cur_fb = font.fallback.as_ref();
                             while let Some(fb) = cur_fb {
-                                let fb_id = fb.with_ttf_face(|f| {
-                                    f.glyph_index(ch).map(|g| g.0).unwrap_or(0)
-                                });
+                                let fb_id = fb
+                                    .with_ttf_face(|f| f.glyph_index(ch).map(|g| g.0).unwrap_or(0));
                                 if fb_id != 0 {
                                     let fb_scale = size / fb.units_per_em() as f64;
                                     let fb_adv = fb.with_ttf_face(|f| {
@@ -474,13 +485,20 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
                         }
                     }
 
-                    ShapedGlyph { glyph_id, x_advance, x_offset, y_offset,
-                                  fallback_font: None }
+                    ShapedGlyph {
+                        glyph_id,
+                        x_advance,
+                        x_offset,
+                        y_offset,
+                        fallback_font: None,
+                    }
                 })
                 .collect::<Vec<_>>()
         });
 
-        cache.borrow_mut().insert((font_key, text.to_owned(), size_key), glyphs.clone());
+        cache
+            .borrow_mut()
+            .insert((font_key, text.to_owned(), size_key), glyphs.clone());
         glyphs
     })
 }
@@ -496,9 +514,11 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
 /// the leftmost bearing is x=0 (approximately).  To place the glyph on screen
 /// at `(gx, gy)`, translate every vertex by that amount before tessellating or
 /// uploading to the GPU.
-pub fn flatten_glyph_at_origin(font: &Font, glyph_id: u16, size: f64)
-    -> Option<Vec<Vec<[f32; 2]>>>
-{
+pub fn flatten_glyph_at_origin(
+    font: &Font,
+    glyph_id: u16,
+    size: f64,
+) -> Option<Vec<Vec<[f32; 2]>>> {
     let scale = size / font.units_per_em() as f64;
     font.with_rb_face(|face| {
         let gid = ttf_parser::GlyphId(glyph_id);
@@ -512,12 +532,14 @@ pub fn flatten_glyph_at_origin(font: &Font, glyph_id: u16, size: f64)
         curves.rewind(0);
 
         let mut contours: Vec<Vec<[f32; 2]>> = Vec::new();
-        let mut current: Vec<[f32; 2]>       = Vec::new();
+        let mut current: Vec<[f32; 2]> = Vec::new();
 
         loop {
             let (mut cx, mut cy) = (0.0_f64, 0.0_f64);
             let cmd = curves.vertex(&mut cx, &mut cy);
-            if is_stop(cmd) { break; }
+            if is_stop(cmd) {
+                break;
+            }
             if is_move_to(cmd) {
                 if current.len() >= 3 {
                     contours.push(std::mem::take(&mut current));
@@ -539,7 +561,11 @@ pub fn flatten_glyph_at_origin(font: &Font, glyph_id: u16, size: f64)
             contours.push(current);
         }
 
-        if contours.is_empty() { None } else { Some(contours) }
+        if contours.is_empty() {
+            None
+        } else {
+            Some(contours)
+        }
     })
 }
 
@@ -549,9 +575,9 @@ pub fn flatten_glyph_at_origin(font: &Font, glyph_id: u16, size: f64)
 /// text metrics without the `GfxCtx` wrapper.
 pub fn measure_text_metrics(font: &Font, text: &str, size: f64) -> TextMetrics {
     TextMetrics {
-        width:       measure_advance(font, text, size),
-        ascent:      font.ascender_px(size),
-        descent:     font.descender_px(size),
+        width: measure_advance(font, text, size),
+        ascent: font.ascender_px(size),
+        descent: font.descender_px(size),
         line_height: font.line_height_px(size),
     }
 }
@@ -598,10 +624,8 @@ pub fn measure_advance(font: &Font, text: &str, size: f64) -> f64 {
 mod tests {
     use super::*;
 
-    const FONT_BYTES: &[u8] =
-        include_bytes!("../../demo/assets/CascadiaCode.ttf");
-    const FA_BYTES: &[u8] =
-        include_bytes!("../../demo/assets/fa.ttf");
+    const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+    const FA_BYTES: &[u8] = include_bytes!("../../demo/assets/fa.ttf");
 
     fn test_font() -> Arc<Font> {
         Arc::new(Font::from_slice(FONT_BYTES).expect("font ok"))
@@ -619,7 +643,8 @@ mod tests {
     fn test_shape_text_renders_fa_icon_via_fallback() {
         let fa = Font::from_slice(FA_BYTES).expect("parse fa.ttf");
         let font = Arc::new(
-            Font::from_slice(FONT_BYTES).expect("cc")
+            Font::from_slice(FONT_BYTES)
+                .expect("cc")
                 .with_fallback(Arc::new(fa)),
         );
 
@@ -645,12 +670,13 @@ mod tests {
     /// font's `.notdef`.  Compare flattened bounding boxes.
     #[test]
     fn test_shape_text_fa_outline_matches_fallback_font() {
-        use agg_rust::conv_curve::ConvCurve;
         use agg_rust::basics::{is_stop, VertexSource};
+        use agg_rust::conv_curve::ConvCurve;
 
         let fa_arc = Arc::new(Font::from_slice(FA_BYTES).expect("fa"));
         let font = Arc::new(
-            Font::from_slice(FONT_BYTES).expect("cc")
+            Font::from_slice(FONT_BYTES)
+                .expect("cc")
                 .with_fallback(Arc::clone(&fa_arc)),
         );
 
@@ -664,9 +690,15 @@ mod tests {
         loop {
             let (mut cx, mut cy) = (0.0, 0.0);
             let cmd = curves.vertex(&mut cx, &mut cy);
-            if is_stop(cmd) { break; }
-            if cx < xmin { xmin = cx; }
-            if cx > xmax { xmax = cx; }
+            if is_stop(cmd) {
+                break;
+            }
+            if cx < xmin {
+                xmin = cx;
+            }
+            if cx > xmax {
+                xmax = cx;
+            }
             let _ = cy;
         }
         let width = xmax - xmin;
@@ -702,8 +734,7 @@ mod tests {
 
         for &size in sizes {
             for &text in texts {
-                let contours =
-                    shape_and_flatten_text(&font, text, size, 0.0, 0.0, 0.5);
+                let contours = shape_and_flatten_text(&font, text, size, 0.0, 0.0, 0.5);
 
                 let total_pts: usize = contours.iter().map(|c| c.len()).sum();
                 let char_count = text.chars().count().max(1);
@@ -737,18 +768,26 @@ mod tests {
             eprintln!("{:?}: {} contours, {} pts", ch, contours.len(), total);
             // Print bounding box of each contour
             for (ci, c) in contours.iter().enumerate() {
-                if c.is_empty() { continue; }
+                if c.is_empty() {
+                    continue;
+                }
                 let xs: Vec<f32> = c.iter().map(|p| p[0]).collect();
                 let ys: Vec<f32> = c.iter().map(|p| p[1]).collect();
                 let xmin = xs.iter().cloned().fold(f32::INFINITY, f32::min);
                 let xmax = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
                 let ymin = ys.iter().cloned().fold(f32::INFINITY, f32::min);
                 let ymax = ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                eprintln!("  contour {ci}: {}/{} pts  x:[{xmin:.1},{xmax:.1}] y:[{ymin:.1},{ymax:.1}]",
-                    c.len(), c.len());
+                eprintln!(
+                    "  contour {ci}: {}/{} pts  x:[{xmin:.1},{xmax:.1}] y:[{ymin:.1},{ymax:.1}]",
+                    c.len(),
+                    c.len()
+                );
             }
             let result = tessellate_fill(&contours);
-            eprintln!("  tess: {:?}", result.as_ref().map(|(v,i)| (v.len()/2, i.len()/3)));
+            eprintln!(
+                "  tess: {:?}",
+                result.as_ref().map(|(v, i)| (v.len() / 2, i.len() / 3))
+            );
         }
     }
 
@@ -772,24 +811,24 @@ mod tests {
         //   button labels (Button), text field placeholders (TextField).
         let calls: &[(&str, f64)] = &[
             // tab bar labels (13 pt)
-            ("Basics",   13.0),
-            ("Widgets",  13.0),
-            ("Text",     13.0),
-            ("Layout",   13.0),
-            ("Tree",     13.0),
+            ("Basics", 13.0),
+            ("Widgets", 13.0),
+            ("Text", 13.0),
+            ("Layout", 13.0),
+            ("Tree", 13.0),
             // floating window
-            ("3D Demo",                  16.0),
-            ("WebGL2 — rotating cube",   11.0),
+            ("3D Demo", 16.0),
+            ("WebGL2 — rotating cube", 11.0),
             // Basics tab buttons
-            ("Primary Action",  14.0),
-            ("Secondary",       14.0),
-            ("Destructive",     14.0),
+            ("Primary Action", 14.0),
+            ("Secondary", 14.0),
+            ("Destructive", 14.0),
             // text field placeholders
-            ("Type something\u{2026}",  14.0),
-            ("Another field",           14.0),
+            ("Type something\u{2026}", 14.0),
+            ("Another field", 14.0),
         ];
 
-        let mut total_pts  = 0usize;
+        let mut total_pts = 0usize;
         let mut total_tris = 0usize;
 
         for &(text, size) in calls {
@@ -805,8 +844,8 @@ mod tests {
         let elapsed = t0.elapsed();
 
         // Sanity: we should have produced some geometry.
-        assert!(total_pts  > 0,  "no contour points produced");
-        assert!(total_tris > 0,  "no triangles tessellated");
+        assert!(total_pts > 0, "no contour points produced");
+        assert!(total_tris > 0, "no triangles tessellated");
 
         // Performance gate: must finish in under 200 ms natively.
         assert!(
@@ -837,13 +876,12 @@ mod tests {
     #[test]
     fn test_flatten_glyph_at_origin_local_coords() {
         let font = test_font();
-        let size  = 16.0_f64;
+        let size = 16.0_f64;
         let glyphs = shape_glyphs(&font, "H", size);
         assert!(!glyphs.is_empty());
         let gid = glyphs[0].glyph_id;
 
-        let contours = flatten_glyph_at_origin(&font, gid, size)
-            .expect("'H' must have an outline");
+        let contours = flatten_glyph_at_origin(&font, gid, size).expect("'H' must have an outline");
         assert!(!contours.is_empty(), "should produce at least one contour");
 
         for contour in &contours {
@@ -863,7 +901,7 @@ mod tests {
     /// Space has no outline; flatten_glyph_at_origin should return None.
     #[test]
     fn test_flatten_glyph_at_origin_space_returns_none() {
-        let font   = test_font();
+        let font = test_font();
         let glyphs = shape_glyphs(&font, " ", 14.0);
         assert_eq!(glyphs.len(), 1);
         let result = flatten_glyph_at_origin(&font, glyphs[0].glyph_id, 14.0);
@@ -880,8 +918,7 @@ mod tests {
     fn test_flatten_output_is_in_screen_space() {
         let font = test_font();
         // Place text at (100, 200) at size 16.
-        let contours =
-            shape_and_flatten_text(&font, "Hello", 16.0, 100.0, 200.0, 0.5);
+        let contours = shape_and_flatten_text(&font, "Hello", 16.0, 100.0, 200.0, 0.5);
 
         assert!(!contours.is_empty(), "should produce contours for 'Hello'");
 

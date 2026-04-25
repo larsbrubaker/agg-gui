@@ -21,9 +21,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
@@ -45,15 +45,22 @@ pub enum ScrollBarVisibility {
 }
 
 impl Default for ScrollBarVisibility {
-    fn default() -> Self { Self::VisibleWhenNeeded }
+    fn default() -> Self {
+        Self::VisibleWhenNeeded
+    }
 }
 
 /// Whether the bar reserves layout space (Solid) or floats over content (Floating).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ScrollBarKind { Solid, Floating }
+pub enum ScrollBarKind {
+    Solid,
+    Floating,
+}
 
 impl Default for ScrollBarKind {
-    fn default() -> Self { Self::Floating }
+    fn default() -> Self {
+        Self::Floating
+    }
 }
 
 /// Which pair of colours is used for the track vs thumb.
@@ -66,7 +73,9 @@ pub enum ScrollBarColor {
 }
 
 impl Default for ScrollBarColor {
-    fn default() -> Self { Self::Background }
+    fn default() -> Self {
+        Self::Background
+    }
 }
 
 /// Full scrollbar appearance configuration — mirrors egui's `style.spacing.scroll`.
@@ -74,32 +83,32 @@ impl Default for ScrollBarColor {
 pub struct ScrollBarStyle {
     /// Width of the full-size bar in pixels.  This is the bar width when the
     /// user is hovering or interacting with it.
-    pub bar_width:         f64,
+    pub bar_width: f64,
     /// Thin width shown when the bar is dormant (not hovered, not dragging).
     /// Matches egui's `floating_width`.  On hover the bar grows from this to
     /// [`Self::bar_width`].  Set equal to `bar_width` to disable the expand
     /// effect.  Only takes effect when smaller than `bar_width`.
-    pub floating_width:    f64,
+    pub floating_width: f64,
     /// Minimum length of the draggable thumb.
     pub handle_min_length: f64,
     /// Space between the bar and the panel's outer edge.
-    pub outer_margin:      f64,
+    pub outer_margin: f64,
     /// Space between the bar and the content area.
-    pub inner_margin:      f64,
+    pub inner_margin: f64,
     /// Space between sibling content and the bar area (applied when `kind = Solid`
     /// and as a decorative inset when `Floating`).
-    pub content_margin:    f64,
+    pub content_margin: f64,
     /// `true` = use one value for both axes; `false` = each axis may differ
     /// (we keep a single value here for brevity and apply it to both).
-    pub margin_same:       bool,
+    pub margin_same: bool,
     /// Bar kind — Solid reserves space in layout, Floating overlays content.
-    pub kind:              ScrollBarKind,
+    pub kind: ScrollBarKind,
     /// Which colour role the bar uses.
-    pub color:             ScrollBarColor,
+    pub color: ScrollBarColor,
     /// Alpha of the fade-out region along the scroll-axis edges, 0..1.
-    pub fade_strength:     f64,
+    pub fade_strength: f64,
     /// Length of the fade region in pixels at each end.
-    pub fade_size:         f64,
+    pub fade_size: f64,
 }
 
 impl ScrollBarStyle {
@@ -116,7 +125,7 @@ impl ScrollBarStyle {
             return self.bar_width;
         }
         let from = self.floating_width.min(self.bar_width);
-        let t    = t.clamp(0.0, 1.0);
+        let t = t.clamp(0.0, 1.0);
         from + (self.bar_width - from) * t
     }
 }
@@ -124,17 +133,17 @@ impl ScrollBarStyle {
 impl Default for ScrollBarStyle {
     fn default() -> Self {
         Self {
-            bar_width:         15.0,
-            floating_width:    15.0,
-            handle_min_length: 10.0,
-            outer_margin:       5.0,
-            inner_margin:       7.0,
-            content_margin:     5.0,
-            margin_same:        true,
-            kind:               ScrollBarKind::default(),
-            color:              ScrollBarColor::default(),
-            fade_strength:      1.0,
-            fade_size:         45.0,
+            bar_width: 10.0,
+            floating_width: 2.0,
+            handle_min_length: 12.0,
+            outer_margin: 0.0,
+            inner_margin: 4.0,
+            content_margin: 0.0,
+            margin_same: true,
+            kind: ScrollBarKind::default(),
+            color: ScrollBarColor::Foreground,
+            fade_strength: 0.5,
+            fade_size: 20.0,
         }
     }
 }
@@ -145,17 +154,17 @@ impl ScrollBarStyle {
     /// `floating_width` equals `bar_width`.
     pub fn solid() -> Self {
         Self {
-            bar_width:         8.0,
-            floating_width:    8.0,
+            bar_width: 6.0,
+            floating_width: 2.0,
             handle_min_length: 12.0,
-            outer_margin:      0.0,
-            inner_margin:      4.0,
-            content_margin:    0.0,
-            margin_same:       true,
-            kind:              ScrollBarKind::Solid,
-            color:             ScrollBarColor::Foreground,
-            fade_strength:     0.0,
-            fade_size:         0.0,
+            outer_margin: 0.0,
+            inner_margin: 4.0,
+            content_margin: 0.0,
+            margin_same: true,
+            kind: ScrollBarKind::Solid,
+            color: ScrollBarColor::Background,
+            fade_strength: 0.5,
+            fade_size: 20.0,
         }
     }
     /// Preset matching egui's `ScrollStyle::thin` — a narrow floating bar
@@ -166,17 +175,17 @@ impl ScrollBarStyle {
     /// preset button does this).
     pub fn thin() -> Self {
         Self {
-            bar_width:         10.0,
-            floating_width:    4.0,
+            bar_width: 10.0,
+            floating_width: 2.0,
             handle_min_length: 12.0,
-            outer_margin:      2.0,
-            inner_margin:      2.0,
-            content_margin:    0.0,
-            margin_same:       true,
-            kind:              ScrollBarKind::Floating,
-            color:             ScrollBarColor::Background,
-            fade_strength:     0.0,
-            fade_size:         0.0,
+            outer_margin: 0.0,
+            inner_margin: 4.0,
+            content_margin: 0.0,
+            margin_same: true,
+            kind: ScrollBarKind::Floating,
+            color: ScrollBarColor::Background,
+            fade_strength: 0.5,
+            fade_size: 20.0,
         }
     }
     /// Preset matching egui's `ScrollStyle::floating` — wide floating overlay
@@ -233,11 +242,11 @@ fn scale_alpha(c: Color, a: f64) -> Color {
 // ── Runtime constants ────────────────────────────────────────────────────────
 
 /// Pixels at the right edge reserved for the parent window's resize grip.
-const RIGHT_EDGE_GUARD:  f64 = 4.0;
+const RIGHT_EDGE_GUARD: f64 = 4.0;
 /// Pixels at the bottom edge reserved for the parent window's resize grip.
 const BOTTOM_EDGE_GUARD: f64 = 4.0;
 /// Extra hit-margin around the bar so it's easy to grab even when dormant.
-const GRAB_MARGIN:       f64 = 6.0;
+const GRAB_MARGIN: f64 = 6.0;
 
 // ── Per-axis state (vertical or horizontal) ──────────────────────────────────
 //
@@ -246,14 +255,14 @@ const GRAB_MARGIN:       f64 = 6.0;
 
 #[derive(Clone, Copy)]
 struct AxisState {
-    enabled:     bool,
-    offset:      f64,
-    content:     f64,
+    enabled: bool,
+    offset: f64,
+    content: f64,
     hovered_bar: bool,
     hovered_thumb: bool,
-    dragging:    bool,
+    dragging: bool,
     drag_thumb_offset: f64,
-    hover_anim:  crate::animation::Tween,
+    hover_anim: crate::animation::Tween,
     /// Alpha tween for the fade-in / fade-out animation when a
     /// `Floating + VisibleWhenNeeded` bar appears on hover.  For every
     /// other visibility/kind combination the bar is painted at full
@@ -264,8 +273,12 @@ struct AxisState {
 impl Default for AxisState {
     fn default() -> Self {
         Self {
-            enabled: false, offset: 0.0, content: 0.0,
-            hovered_bar: false, hovered_thumb: false, dragging: false,
+            enabled: false,
+            offset: 0.0,
+            content: 0.0,
+            hovered_bar: false,
+            hovered_thumb: false,
+            dragging: false,
             drag_thumb_offset: 0.0,
             hover_anim: crate::animation::Tween::new(0.0, 0.12),
             visibility_anim: crate::animation::Tween::new(0.0, 0.18),
@@ -285,9 +298,9 @@ impl AxisState {
 }
 
 pub struct ScrollView {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,  // always 0 or 1
-    base:     WidgetBase,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>, // always 0 or 1
+    base: WidgetBase,
 
     v: AxisState,
     h: AxisState,
@@ -295,7 +308,7 @@ pub struct ScrollView {
     /// Keep the scrollbar glued to the bottom as content grows (while the
     /// user hasn't scrolled away from the end).
     stick_to_bottom: bool,
-    was_at_bottom:   bool,
+    was_at_bottom: bool,
 
     /// How to render the scrollbar.
     bar_visibility: ScrollBarVisibility,
@@ -304,74 +317,88 @@ pub struct ScrollView {
     /// `visibility_cell` is unset, the global visibility from
     /// [`current_scroll_visibility`] is re-read each layout.
     visibility_explicit: bool,
-    style:          ScrollBarStyle,
+    style: ScrollBarStyle,
     /// `true` when the caller supplied an explicit per-instance style via
     /// [`ScrollView::with_style`].  When `false` and `style_cell` is unset,
     /// the global style from [`current_scroll_style`] is re-read each layout.
     style_explicit: bool,
 
     // ── External cell bindings ──
-    offset_cell:      Option<Rc<Cell<f64>>>,
-    max_scroll_cell:  Option<Rc<Cell<f64>>>,
-    visibility_cell:  Option<Rc<Cell<ScrollBarVisibility>>>,
-    style_cell:       Option<Rc<Cell<ScrollBarStyle>>>,
+    offset_cell: Option<Rc<Cell<f64>>>,
+    max_scroll_cell: Option<Rc<Cell<f64>>>,
+    visibility_cell: Option<Rc<Cell<ScrollBarVisibility>>>,
+    style_cell: Option<Rc<Cell<ScrollBarStyle>>>,
     /// Visible viewport rect in content-space Y-up coordinates, written each
     /// layout.  Children doing virtual rendering read this cell.
-    viewport_cell:    Option<Rc<Cell<Rect>>>,
+    viewport_cell: Option<Rc<Cell<Rect>>>,
 }
 
 impl ScrollView {
     pub fn new(content: Box<dyn Widget>) -> Self {
         Self {
-            bounds:            Rect::default(),
-            children:          vec![content],
-            base:              WidgetBase::new(),
-            v:                 AxisState { enabled: true, ..AxisState::default() },
-            h:                 AxisState::default(),
-            stick_to_bottom:   false,
-            was_at_bottom:     false,
-            bar_visibility:    current_scroll_visibility(),
+            bounds: Rect::default(),
+            children: vec![content],
+            base: WidgetBase::new(),
+            v: AxisState {
+                enabled: true,
+                ..AxisState::default()
+            },
+            h: AxisState::default(),
+            stick_to_bottom: false,
+            was_at_bottom: false,
+            bar_visibility: current_scroll_visibility(),
             visibility_explicit: false,
-            style:             current_scroll_style(),
-            style_explicit:    false,
-            offset_cell:       None,
-            max_scroll_cell:   None,
-            visibility_cell:   None,
-            style_cell:        None,
-            viewport_cell:     None,
+            style: current_scroll_style(),
+            style_explicit: false,
+            offset_cell: None,
+            max_scroll_cell: None,
+            visibility_cell: None,
+            style_cell: None,
+            viewport_cell: None,
         }
     }
 
     // ── Axis enable ───────────────────────────────────────────────────────────
 
     pub fn horizontal(mut self, enabled: bool) -> Self {
-        self.h.enabled = enabled; self
+        self.h.enabled = enabled;
+        self
     }
     pub fn vertical(mut self, enabled: bool) -> Self {
-        self.v.enabled = enabled; self
+        self.v.enabled = enabled;
+        self
     }
 
     // ── Scroll offset API (vertical for back-compat) ─────────────────────────
 
-    pub fn scroll_offset(&self) -> f64 { self.v.offset }
+    pub fn scroll_offset(&self) -> f64 {
+        self.v.offset
+    }
 
     pub fn set_scroll_offset(&mut self, offset: f64) {
         self.v.offset = offset;
-        if let Some(c) = &self.offset_cell { c.set(offset); }
+        if let Some(c) = &self.offset_cell {
+            c.set(offset);
+        }
     }
 
-    pub fn max_scroll_value(&self) -> f64 { self.v.max_scroll(self.bounds.height) }
+    pub fn max_scroll_value(&self) -> f64 {
+        self.v.max_scroll(self.bounds.height)
+    }
 
     pub fn with_offset_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
-        self.offset_cell = Some(cell); self
+        self.offset_cell = Some(cell);
+        self
     }
 
     pub fn with_max_scroll_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
-        self.max_scroll_cell = Some(cell); self
+        self.max_scroll_cell = Some(cell);
+        self
     }
 
     pub fn with_stick_to_bottom(mut self, stick: bool) -> Self {
-        self.stick_to_bottom = stick; self
+        self.stick_to_bottom = stick;
+        self
     }
 
     pub fn with_bar_visibility(mut self, v: ScrollBarVisibility) -> Self {
@@ -386,7 +413,8 @@ impl ScrollView {
     }
 
     pub fn with_bar_visibility_cell(mut self, cell: Rc<Cell<ScrollBarVisibility>>) -> Self {
-        self.visibility_cell = Some(cell); self
+        self.visibility_cell = Some(cell);
+        self
     }
 
     pub fn with_style(mut self, s: ScrollBarStyle) -> Self {
@@ -396,12 +424,14 @@ impl ScrollView {
     }
 
     pub fn with_style_cell(mut self, cell: Rc<Cell<ScrollBarStyle>>) -> Self {
-        self.style_cell = Some(cell); self
+        self.style_cell = Some(cell);
+        self
     }
 
     /// Bind a cell that receives the visible content-space viewport rect.
     pub fn with_viewport_cell(mut self, cell: Rc<Cell<Rect>>) -> Self {
-        self.viewport_cell = Some(cell); self
+        self.viewport_cell = Some(cell);
+        self
     }
 
     // ── Geometry helpers ──────────────────────────────────────────────────────
@@ -409,7 +439,7 @@ impl ScrollView {
     fn viewport(&self) -> (f64, f64) {
         // Viewport inside the widget AFTER reserving space for Solid bars.
         let (reserve_x, reserve_y) = self.bar_reserve();
-        let w = (self.bounds.width  - reserve_x).max(0.0);
+        let w = (self.bounds.width - reserve_x).max(0.0);
         let h = (self.bounds.height - reserve_y).max(0.0);
         (w, h)
     }
@@ -419,14 +449,16 @@ impl ScrollView {
         if self.style.kind != ScrollBarKind::Solid {
             return (0.0, 0.0);
         }
-        let span = self.style.bar_width
-            + self.style.outer_margin
-            + self.style.inner_margin;
-        let rx = if self.h.enabled && self.h.content > self.bounds.width  { 0.0 } else { 0.0 };
+        let span = self.style.bar_width + self.style.outer_margin + self.style.inner_margin;
+        let rx = if self.h.enabled && self.h.content > self.bounds.width {
+            0.0
+        } else {
+            0.0
+        };
         // We reserve vertical bar width on the right when vertical scrolling
         // is potentially active (has content overflow).
         let need_v = self.v.enabled && self.v.content > self.bounds.height - self.h_bar_thickness();
-        let need_h = self.h.enabled && self.h.content > self.bounds.width  - self.v_bar_thickness();
+        let need_h = self.h.enabled && self.h.content > self.bounds.width - self.v_bar_thickness();
         let rx = rx + if need_v { span } else { 0.0 };
         let ry = if need_h { span } else { 0.0 };
         (rx, ry)
@@ -470,64 +502,80 @@ impl ScrollView {
     /// Vertical thumb `(y_bottom, height)` in local Y-up or `None` if no overflow.
     fn v_thumb_metrics(&self) -> Option<(f64, f64)> {
         let (_, vh) = self.viewport();
-        if self.v.content <= vh { return None; }
+        if self.v.content <= vh {
+            return None;
+        }
         let (lo, hi) = self.v_track_range();
-        let track_h  = hi - lo;
-        let ratio    = vh / self.v.content;
-        let thumb_h  = (track_h * ratio).max(self.style.handle_min_length);
-        let travel   = (track_h - thumb_h).max(0.0);
-        let max_s    = self.v.max_scroll(vh);
-        let thumb_y  = if max_s > 0.0 {
+        let track_h = hi - lo;
+        let ratio = vh / self.v.content;
+        let thumb_h = (track_h * ratio).max(self.style.handle_min_length);
+        let travel = (track_h - thumb_h).max(0.0);
+        let max_s = self.v.max_scroll(vh);
+        let thumb_y = if max_s > 0.0 {
             lo + travel * (1.0 - self.v.offset / max_s)
-        } else { lo + travel };
+        } else {
+            lo + travel
+        };
         Some((thumb_y, thumb_h))
     }
 
     /// Horizontal thumb `(x_left, width)` in local X.
     fn h_thumb_metrics(&self) -> Option<(f64, f64)> {
         let (vw, _) = self.viewport();
-        if self.h.content <= vw { return None; }
+        if self.h.content <= vw {
+            return None;
+        }
         let (lo, hi) = self.h_track_range();
-        let track_w  = hi - lo;
-        let ratio    = vw / self.h.content;
-        let thumb_w  = (track_w * ratio).max(self.style.handle_min_length);
-        let travel   = (track_w - thumb_w).max(0.0);
-        let max_s    = self.h.max_scroll(vw);
-        let thumb_x  = if max_s > 0.0 {
+        let track_w = hi - lo;
+        let ratio = vw / self.h.content;
+        let thumb_w = (track_w * ratio).max(self.style.handle_min_length);
+        let travel = (track_w - thumb_w).max(0.0);
+        let max_s = self.h.max_scroll(vw);
+        let thumb_x = if max_s > 0.0 {
             lo + travel * (self.h.offset / max_s)
-        } else { lo };
+        } else {
+            lo
+        };
         Some((thumb_x, thumb_w))
     }
 
     fn pos_on_v_thumb(&self, pos: Point) -> bool {
         let bar_right = self.v_bar_right();
-        let bar_left  = bar_right - self.style.bar_width;
-        let hit_left  = bar_left - GRAB_MARGIN;
-        if pos.x < hit_left || pos.x >= bar_right { return false; }
+        let bar_left = bar_right - self.style.bar_width;
+        let hit_left = bar_left - GRAB_MARGIN;
+        if pos.x < hit_left || pos.x >= bar_right {
+            return false;
+        }
         if let Some((ty, th)) = self.v_thumb_metrics() {
             pos.y >= ty && pos.y <= ty + th
-        } else { false }
+        } else {
+            false
+        }
     }
 
     fn pos_on_h_thumb(&self, pos: Point) -> bool {
         let bar_bottom = self.h_bar_bottom();
-        let bar_top    = bar_bottom + self.style.bar_width;
-        let hit_top    = bar_top + GRAB_MARGIN;
-        if pos.y < bar_bottom || pos.y >= hit_top { return false; }
+        let bar_top = bar_bottom + self.style.bar_width;
+        let hit_top = bar_top + GRAB_MARGIN;
+        if pos.y < bar_bottom || pos.y >= hit_top {
+            return false;
+        }
         if let Some((tx, tw)) = self.h_thumb_metrics() {
             pos.x >= tx && pos.x <= tx + tw
-        } else { false }
+        } else {
+            false
+        }
     }
 
     fn pos_in_v_hover(&self, pos: Point) -> bool {
         let bar_right = self.v_bar_right();
-        let bar_left  = bar_right - self.style.bar_width - GRAB_MARGIN;
+        let bar_left = bar_right - self.style.bar_width - GRAB_MARGIN;
         pos.x >= bar_left && pos.x < bar_right
     }
 
     fn pos_in_h_hover(&self, pos: Point) -> bool {
         let bar_bottom = self.h_bar_bottom();
-        let bar_top    = bar_bottom + self.style.bar_width + GRAB_MARGIN;
+        let bar_top = bar_bottom + self.style.bar_width + GRAB_MARGIN;
         pos.y >= bar_bottom && pos.y < bar_top
     }
 
@@ -539,73 +587,126 @@ impl ScrollView {
 
     // ── Layout property forwarding ────────────────────────────────────────────
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     // ── Visibility helper ────────────────────────────────────────────────────
 
     fn should_paint_v(&self) -> bool {
         let (_, vh) = self.viewport();
-        if self.v.content <= vh { return false; }
+        if self.v.content <= vh {
+            return false;
+        }
         let floating = self.style.kind == ScrollBarKind::Floating;
         match self.bar_visibility {
-            ScrollBarVisibility::AlwaysHidden      => false,
-            ScrollBarVisibility::AlwaysVisible     => true,
+            ScrollBarVisibility::AlwaysHidden => false,
+            ScrollBarVisibility::AlwaysVisible => true,
             // With Floating kind, VisibleWhenNeeded hides until hover/drag —
             // matches egui's floating style.  Solid kind shows unconditionally
             // when content overflows.
-            ScrollBarVisibility::VisibleWhenNeeded =>
-                !floating || self.v.hovered_bar || self.v.dragging,
+            ScrollBarVisibility::VisibleWhenNeeded => {
+                !floating || self.v.hovered_bar || self.v.dragging
+            }
         }
     }
 
     fn should_paint_h(&self) -> bool {
         let (vw, _) = self.viewport();
-        if self.h.content <= vw { return false; }
+        if self.h.content <= vw {
+            return false;
+        }
         let floating = self.style.kind == ScrollBarKind::Floating;
         match self.bar_visibility {
-            ScrollBarVisibility::AlwaysHidden      => false,
-            ScrollBarVisibility::AlwaysVisible     => true,
-            ScrollBarVisibility::VisibleWhenNeeded =>
-                !floating || self.h.hovered_bar || self.h.dragging,
+            ScrollBarVisibility::AlwaysHidden => false,
+            ScrollBarVisibility::AlwaysVisible => true,
+            ScrollBarVisibility::VisibleWhenNeeded => {
+                !floating || self.h.hovered_bar || self.h.dragging
+            }
         }
     }
 }
 
 impl Widget for ScrollView {
-    fn type_name(&self) -> &'static str { "ScrollView" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ScrollView"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        if self.v.dragging || self.h.dragging { return true; }
+        if self.v.dragging || self.h.dragging {
+            return true;
+        }
         let b = self.bounds();
-        local_pos.x >= 0.0 && local_pos.x <= b.width
-            && local_pos.y >= 0.0 && local_pos.y <= b.height
+        local_pos.x >= 0.0
+            && local_pos.x <= b.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= b.height
     }
 
     fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
-        if self.v.dragging || self.h.dragging { return true; }
+        if self.v.dragging || self.h.dragging {
+            return true;
+        }
         let (vw, vh) = self.viewport();
-        if self.v.enabled && self.v.content > vh && self.pos_in_v_hover(local_pos) { return true; }
-        if self.h.enabled && self.h.content > vw && self.pos_in_h_hover(local_pos) { return true; }
+        if self.v.enabled && self.v.content > vh && self.pos_in_v_hover(local_pos) {
+            return true;
+        }
+        if self.h.enabled && self.h.content > vw && self.pos_in_h_hover(local_pos) {
+            return true;
+        }
         false
     }
 
     fn layout(&mut self, available: Size) -> Size {
         // Pull live state from external cells first.
-        if let Some(c) = &self.offset_cell     { self.v.offset = c.get(); }
+        if let Some(c) = &self.offset_cell {
+            self.v.offset = c.get();
+        }
         if let Some(c) = &self.visibility_cell {
             self.bar_visibility = c.get();
         } else if !self.visibility_explicit {
@@ -625,13 +726,21 @@ impl Widget for ScrollView {
         // may return a width larger than our viewport).  For vertical-only, we
         // pin child to the viewport width so wrapping widgets behave.
         let (vw_guess, _vh_guess) = self.viewport();
-        let child_in_w = if self.h.enabled { f64::MAX / 2.0 } else { vw_guess };
+        let child_in_w = if self.h.enabled {
+            f64::MAX / 2.0
+        } else {
+            vw_guess
+        };
         let child_in_h = f64::MAX / 2.0;
 
         if let Some(child) = self.children.first_mut() {
             let natural = child.layout(Size::new(child_in_w, child_in_h));
             self.v.content = natural.height;
-            self.h.content = if self.h.enabled { natural.width } else { vw_guess };
+            self.h.content = if self.h.enabled {
+                natural.width
+            } else {
+                vw_guess
+            };
         }
 
         // Re-query viewport now that content dimensions are known (Solid bars
@@ -645,8 +754,12 @@ impl Widget for ScrollView {
         self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
 
         // Publish offsets / max / viewport.
-        if let Some(c) = &self.offset_cell     { c.set(self.v.offset); }
-        if let Some(c) = &self.max_scroll_cell { c.set(self.v.max_scroll(vh)); }
+        if let Some(c) = &self.offset_cell {
+            c.set(self.v.offset);
+        }
+        if let Some(c) = &self.max_scroll_cell {
+            c.set(self.v.max_scroll(vh));
+        }
         if let Some(c) = &self.viewport_cell {
             // Content-space viewport rect in Y-UP content coords:
             //   x = h_offset  (left edge of visible region)
@@ -662,7 +775,8 @@ impl Widget for ScrollView {
             let child_y = vh - self.v.content + self.v.offset;
             let child_x = -self.h.offset;
             child.set_bounds(Rect::new(
-                child_x.round(), child_y.round(),
+                child_x.round(),
+                child_y.round(),
                 if self.h.enabled { self.h.content } else { vw },
                 self.v.content,
             ));
@@ -689,8 +803,12 @@ impl Widget for ScrollView {
         // `Floating + VisibleWhenNeeded` bar dissolves in instead of
         // snapping.  For non-animating combinations the target stays
         // pinned at its terminal value, so the tween is a no-op.
-        self.v.visibility_anim.set_target(if self.should_paint_v() { 1.0 } else { 0.0 });
-        self.h.visibility_anim.set_target(if self.should_paint_h() { 1.0 } else { 0.0 });
+        self.v
+            .visibility_anim
+            .set_target(if self.should_paint_v() { 1.0 } else { 0.0 });
+        self.h
+            .visibility_anim
+            .set_target(if self.should_paint_h() { 1.0 } else { 0.0 });
         let v_alpha = self.v.visibility_anim.tick();
         let h_alpha = self.h.visibility_anim.tick();
 
@@ -702,23 +820,32 @@ impl Widget for ScrollView {
 
         let track_color_base = match self.style.color {
             ScrollBarColor::Background => v.scroll_track,
-            ScrollBarColor::Foreground => Color::rgba(
-                v.accent.r, v.accent.g, v.accent.b, 0.08),
+            ScrollBarColor::Foreground => Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.08),
         };
         let thumb_idle = match self.style.color {
             ScrollBarColor::Background => v.scroll_thumb,
             ScrollBarColor::Foreground => v.accent,
         };
 
+        // ── Fade gradient under the scrollbars ──
+        //
+        // egui paints the fade after content but before the bars, so the
+        // fade hints clipped content without dimming the scrollbar itself.
+        if self.style.fade_strength > 0.001 && self.style.fade_size > 0.5 {
+            self.paint_fade(ctx);
+        }
+
         // ── Vertical bar ──
         if paint_v {
             if let Some((ty, th)) = self.v_thumb_metrics() {
                 let bar_right = self.v_bar_right();
-                self.v.hover_anim.set_target(if self.v.interact() { 1.0 } else { 0.0 });
-                let t         = self.v.hover_anim.tick();
-                let bar_w     = self.style.bar_width_at(t);
-                let bar_x     = bar_right - bar_w;
-                let r         = bar_w * 0.5;
+                self.v
+                    .hover_anim
+                    .set_target(if self.v.interact() { 1.0 } else { 0.0 });
+                let t = self.v.hover_anim.tick();
+                let bar_w = self.style.bar_width_at(t);
+                let bar_x = bar_right - bar_w;
+                let r = bar_w * 0.5;
 
                 let (lo, hi) = self.v_track_range();
                 ctx.set_fill_color(scale_alpha(track_color_base, v_alpha));
@@ -730,7 +857,9 @@ impl Widget for ScrollView {
                     v.scroll_thumb_dragging
                 } else if self.v.hovered_thumb {
                     v.scroll_thumb_hovered
-                } else { thumb_idle };
+                } else {
+                    thumb_idle
+                };
                 ctx.set_fill_color(scale_alpha(tc, v_alpha));
                 ctx.begin_path();
                 ctx.rounded_rect(bar_x, ty, bar_w, th, r);
@@ -742,10 +871,12 @@ impl Widget for ScrollView {
         if paint_h {
             if let Some((tx, tw)) = self.h_thumb_metrics() {
                 let bar_bottom = self.h_bar_bottom();
-                self.h.hover_anim.set_target(if self.h.interact() { 1.0 } else { 0.0 });
-                let t          = self.h.hover_anim.tick();
-                let bar_h      = self.style.bar_width_at(t);
-                let r          = bar_h * 0.5;
+                self.h
+                    .hover_anim
+                    .set_target(if self.h.interact() { 1.0 } else { 0.0 });
+                let t = self.h.hover_anim.tick();
+                let bar_h = self.style.bar_width_at(t);
+                let r = bar_h * 0.5;
 
                 let (lo, hi) = self.h_track_range();
                 ctx.set_fill_color(scale_alpha(track_color_base, h_alpha));
@@ -757,28 +888,23 @@ impl Widget for ScrollView {
                     v.scroll_thumb_dragging
                 } else if self.h.hovered_thumb {
                     v.scroll_thumb_hovered
-                } else { thumb_idle };
+                } else {
+                    thumb_idle
+                };
                 ctx.set_fill_color(scale_alpha(tc, h_alpha));
                 ctx.begin_path();
                 ctx.rounded_rect(tx, bar_bottom, tw, bar_h, r);
                 ctx.fill();
             }
         }
-
-        // ── Fade gradient overlay at the scroll-axis edges ──
-        //
-        // Approximation of egui's fade: draw a translucent stripe of the
-        // panel_fill colour at each edge where content is clipped.  Strength
-        // * 1.0 = fully opaque at the edge.
-        if self.style.fade_strength > 0.001 && self.style.fade_size > 0.5 {
-            self.paint_fade(ctx);
-        }
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             // ── Mouse wheel ───────────────────────────────────────────────────
-            Event::MouseWheel { delta_y, delta_x, .. } => {
+            Event::MouseWheel {
+                delta_y, delta_x, ..
+            } => {
                 let mut consumed = false;
                 if self.v.enabled {
                     self.v.offset = self.v.offset + delta_y * 40.0;
@@ -791,7 +917,9 @@ impl Widget for ScrollView {
                 self.clamp_offsets();
                 let (_, vh) = self.viewport();
                 self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
-                if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
+                if let Some(c) = &self.offset_cell {
+                    c.set(self.v.offset);
+                }
                 if consumed {
                     crate::animation::request_tick();
                     EventResult::Consumed
@@ -809,12 +937,14 @@ impl Widget for ScrollView {
                 let was_vt = self.v.hovered_thumb;
                 let was_hb = self.h.hovered_bar;
                 let was_ht = self.h.hovered_thumb;
-                self.v.hovered_bar   = v_scroll && self.pos_in_v_hover(*pos);
+                self.v.hovered_bar = v_scroll && self.pos_in_v_hover(*pos);
                 self.v.hovered_thumb = v_scroll && self.pos_on_v_thumb(*pos);
-                self.h.hovered_bar   = h_scroll && self.pos_in_h_hover(*pos);
+                self.h.hovered_bar = h_scroll && self.pos_in_h_hover(*pos);
                 self.h.hovered_thumb = h_scroll && self.pos_on_h_thumb(*pos);
-                if was_vb != self.v.hovered_bar || was_vt != self.v.hovered_thumb
-                    || was_hb != self.h.hovered_bar || was_ht != self.h.hovered_thumb
+                if was_vb != self.v.hovered_bar
+                    || was_vt != self.v.hovered_thumb
+                    || was_hb != self.h.hovered_bar
+                    || was_ht != self.h.hovered_thumb
                 {
                     crate::animation::request_tick();
                 }
@@ -823,14 +953,14 @@ impl Widget for ScrollView {
                     if let Some((_, th)) = self.v_thumb_metrics() {
                         let (lo, hi) = self.v_track_range();
                         let travel = (hi - lo - th).max(1.0);
-                        let new_ty = (pos.y - self.v.drag_thumb_offset)
-                            .clamp(lo, lo + travel);
+                        let new_ty = (pos.y - self.v.drag_thumb_offset).clamp(lo, lo + travel);
                         let frac = 1.0 - (new_ty - lo) / travel;
                         self.v.offset = (frac * self.v.max_scroll(vh)).max(0.0);
                         self.clamp_offsets();
-                        self.was_at_bottom =
-                            (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
-                        if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
+                        self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+                        if let Some(c) = &self.offset_cell {
+                            c.set(self.v.offset);
+                        }
                     }
                     crate::animation::request_tick();
                     return EventResult::Consumed;
@@ -839,8 +969,7 @@ impl Widget for ScrollView {
                     if let Some((_, tw)) = self.h_thumb_metrics() {
                         let (lo, hi) = self.h_track_range();
                         let travel = (hi - lo - tw).max(1.0);
-                        let new_tx = (pos.x - self.h.drag_thumb_offset)
-                            .clamp(lo, lo + travel);
+                        let new_tx = (pos.x - self.h.drag_thumb_offset).clamp(lo, lo + travel);
                         let frac = (new_tx - lo) / travel;
                         self.h.offset = (frac * self.h.max_scroll(vw)).max(0.0);
                         self.clamp_offsets();
@@ -852,7 +981,11 @@ impl Widget for ScrollView {
             }
 
             // ── Mouse down ────────────────────────────────────────────────────
-            Event::MouseDown { pos, button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
                 let (vw, vh) = self.viewport();
                 let v_scroll = self.v.enabled && self.v.content > vh;
                 let h_scroll = self.h.enabled && self.h.content > vw;
@@ -876,7 +1009,9 @@ impl Widget for ScrollView {
                             self.v.offset = (self.v.offset + page).min(self.v.max_scroll(vh));
                         }
                         self.clamp_offsets();
-                        if let Some(c) = &self.offset_cell { c.set(self.v.offset); }
+                        if let Some(c) = &self.offset_cell {
+                            c.set(self.v.offset);
+                        }
                         // Offset changed — visible scroll.
                         crate::animation::request_tick();
                     }
@@ -904,7 +1039,10 @@ impl Widget for ScrollView {
             }
 
             // ── Mouse up ──────────────────────────────────────────────────────
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 let was = self.v.dragging || self.h.dragging;
                 self.v.dragging = false;
                 self.h.dragging = false;
@@ -926,14 +1064,15 @@ impl Widget for ScrollView {
     fn properties(&self) -> Vec<(&'static str, String)> {
         let (vw, vh) = self.viewport();
         vec![
-            ("v_enabled",  self.v.enabled.to_string()),
-            ("h_enabled",  self.h.enabled.to_string()),
-            ("v_offset",   format!("{:.1}", self.v.offset)),
-            ("h_offset",   format!("{:.1}", self.h.offset)),
+            ("v_enabled", self.v.enabled.to_string()),
+            ("h_enabled", self.h.enabled.to_string()),
+            ("bar_visibility", format!("{:?}", self.bar_visibility)),
+            ("v_offset", format!("{:.1}", self.v.offset)),
+            ("h_offset", format!("{:.1}", self.h.offset)),
             ("max_scroll", format!("{:.1}", self.v.max_scroll(vh))),
             ("h_max_scroll", format!("{:.1}", self.h.max_scroll(vw))),
-            ("v_content",  format!("{:.1}", self.v.content)),
-            ("h_content",  format!("{:.1}", self.h.content)),
+            ("v_content", format!("{:.1}", self.v.content)),
+            ("h_content", format!("{:.1}", self.h.content)),
         ]
     }
 }
@@ -941,21 +1080,30 @@ impl Widget for ScrollView {
 impl ScrollView {
     /// Paint a gradient fade at the scroll-axis edges using thin horizontal or
     /// vertical strips with linearly interpolated alpha.  The strip closest to
-    /// the clip edge is fully opaque; the strip furthest inside the viewport is
-    /// fully transparent — giving a smooth dissolve into the background colour.
+    /// the clip edge is most opaque; the strip furthest inside the viewport is
+    /// transparent — giving a smooth dissolve into the surrounding background.
     fn paint_fade(&self, ctx: &mut dyn DrawCtx) {
-        let v        = ctx.visuals();
-        let c        = v.panel_fill;
+        let v = ctx.visuals();
+        let c = v.window_fill;
         let (vw, vh) = self.viewport();
         let strength = self.style.fade_strength.clamp(0.0, 1.0) as f32;
-        let size     = self.style.fade_size.max(0.0);
-        let max_a    = strength;
+        let size = self.style.fade_size.max(0.0);
+        let max_a = strength;
 
         // Fade appears only near edges where content is clipped.
         if self.v.enabled {
             if self.v.offset > 0.5 {
                 // Top edge (Y-up: high Y).  Gradient transparent→opaque going up.
-                Self::fill_v_gradient(ctx, c, max_a, 0.0, self.bounds.height - size, vw, size, false);
+                Self::fill_v_gradient(
+                    ctx,
+                    c,
+                    max_a,
+                    0.0,
+                    self.bounds.height - size,
+                    vw,
+                    size,
+                    false,
+                );
             }
             if (self.v.max_scroll(vh) - self.v.offset) > 0.5 {
                 // Bottom edge.  Gradient transparent→opaque going down.
@@ -970,7 +1118,16 @@ impl ScrollView {
             }
             if (self.h.max_scroll(vw) - self.h.offset) > 0.5 {
                 // Right edge.  Gradient transparent→opaque going right.
-                Self::fill_h_gradient(ctx, c, max_a, vw - size, self.bounds.height - vh, size, vh, false);
+                Self::fill_h_gradient(
+                    ctx,
+                    c,
+                    max_a,
+                    vw - size,
+                    self.bounds.height - vh,
+                    size,
+                    vh,
+                    false,
+                );
             }
         }
     }
@@ -981,13 +1138,13 @@ impl ScrollView {
     /// bottom-to-top (bottom edge fade); when `false` it runs
     /// transparent→opaque bottom-to-top (top edge fade).
     fn fill_v_gradient(
-        ctx:             &mut dyn DrawCtx,
-        c:               Color,
-        max_alpha:       f32,
-        x:               f64,
-        y:               f64,
-        w:               f64,
-        h:               f64,
+        ctx: &mut dyn DrawCtx,
+        c: Color,
+        max_alpha: f32,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
         opaque_at_bottom: bool,
     ) {
         const STEPS: usize = 64;
@@ -1009,13 +1166,13 @@ impl ScrollView {
     /// left-to-right (left edge fade); when `false` it runs
     /// transparent→opaque left-to-right (right edge fade).
     fn fill_h_gradient(
-        ctx:           &mut dyn DrawCtx,
-        c:             Color,
-        max_alpha:     f32,
-        x:             f64,
-        y:             f64,
-        w:             f64,
-        h:             f64,
+        ctx: &mut dyn DrawCtx,
+        c: Color,
+        max_alpha: f32,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
         opaque_at_left: bool,
     ) {
         const STEPS: usize = 64;

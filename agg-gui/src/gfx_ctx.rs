@@ -14,8 +14,9 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use agg_rust::arc::Arc as AggArc;
-use agg_rust::basics::PATH_FLAGS_NONE;
 use agg_rust::basics::FillingRule;
+use agg_rust::basics::VertexSource;
+use agg_rust::basics::PATH_FLAGS_NONE;
 use agg_rust::comp_op::{CompOp, PixfmtRgba32CompOp};
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
@@ -31,12 +32,11 @@ use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::rounded_rect::RoundedRect;
 use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::trans_affine::TransAffine;
-use agg_rust::basics::VertexSource;
 
 use crate::color::Color;
 use crate::draw_ctx::FillRule;
 use crate::framebuffer::Framebuffer;
-use crate::text::{shape_text, measure_advance, Font, TextMetrics};
+use crate::text::{measure_advance, shape_text, Font, TextMetrics};
 
 // ---------------------------------------------------------------------------
 // Layer stack entry
@@ -45,16 +45,16 @@ use crate::text::{shape_text, measure_advance, Font, TextMetrics};
 /// One entry on the `GfxCtx` layer stack, created by `push_layer`.
 struct LayerEntry {
     /// The offscreen framebuffer for this layer.
-    fb:             Framebuffer,
+    fb: Framebuffer,
     /// GfxState snapshot at the moment `push_layer` was called.
     /// Restored verbatim on `pop_layer`.
-    saved_state:    GfxState,
+    saved_state: GfxState,
     /// State-stack snapshot at the moment `push_layer` was called.
-    saved_stack:    Vec<GfxState>,
+    saved_stack: Vec<GfxState>,
     /// Screen-space X origin of this layer (= CTM tx at push time, Y-up).
-    origin_x:       f64,
+    origin_x: f64,
     /// Screen-space Y origin of this layer (= CTM ty at push time, Y-up).
-    origin_y:       f64,
+    origin_y: f64,
 }
 
 // Re-export so callers don't need to import agg_rust directly.
@@ -119,13 +119,13 @@ impl Default for GfxState {
 /// the previous target (which may itself be a layer or the base framebuffer).
 /// Layers nest; each `push` must be matched by exactly one `pop`.
 pub struct GfxCtx<'a> {
-    base_fb:     &'a mut Framebuffer,
+    base_fb: &'a mut Framebuffer,
     /// Offscreen layer stack.  Empty when rendering directly to `base_fb`.
     layer_stack: Vec<LayerEntry>,
-    state:       GfxState,
+    state: GfxState,
     state_stack: Vec<GfxState>,
     /// Accumulated path, reset by `begin_path()`.
-    path:        PathStorage,
+    path: PathStorage,
     /// When true, `fill_text` routes through the 3× horizontal LCD
     /// subpixel pipeline (see `lcd_coverage.rs`) and composites per-channel
     /// onto the active framebuffer.  Controlled by the backbuffer mode —
@@ -178,10 +178,12 @@ impl<'a> GfxCtx<'a> {
     /// SrcOver-composite the current layer into the previous render target, then
     /// restore the graphics state that was active at the matching `push_layer`.
     pub fn pop_layer(&mut self) {
-        let Some(layer) = self.layer_stack.pop() else { return; };
+        let Some(layer) = self.layer_stack.pop() else {
+            return;
+        };
         let ox = layer.origin_x as i32;
         let oy = layer.origin_y as i32;
-        self.state       = layer.saved_state;
+        self.state = layer.saved_state;
         self.state_stack = layer.saved_stack;
         // Composite: src = layer.fb, dst = now-active framebuffer.
         if let Some(top) = self.layer_stack.last_mut() {
@@ -211,45 +213,75 @@ impl<'a> GfxCtx<'a> {
 
     /// Append a translation. Uses pre-multiply (Cairo semantics).
     pub fn translate(&mut self, tx: f64, ty: f64) {
-        self.state.transform.premultiply(&TransAffine::new_translation(tx, ty));
+        self.state
+            .transform
+            .premultiply(&TransAffine::new_translation(tx, ty));
     }
 
     /// Append a CCW rotation in radians. Uses pre-multiply semantics.
     pub fn rotate(&mut self, radians: f64) {
-        self.state.transform.premultiply(&TransAffine::new_rotation(radians));
+        self.state
+            .transform
+            .premultiply(&TransAffine::new_rotation(radians));
     }
 
     /// Append a scale. Uses pre-multiply semantics.
     pub fn scale(&mut self, sx: f64, sy: f64) {
-        self.state.transform.premultiply(&TransAffine::new_scaling(sx, sy));
+        self.state
+            .transform
+            .premultiply(&TransAffine::new_scaling(sx, sy));
     }
 
-    pub fn set_transform(&mut self, m: TransAffine) { self.state.transform = m; }
-    pub fn reset_transform(&mut self) { self.state.transform = TransAffine::new(); }
+    pub fn set_transform(&mut self, m: TransAffine) {
+        self.state.transform = m;
+    }
+    pub fn reset_transform(&mut self) {
+        self.state.transform = TransAffine::new();
+    }
     /// Return the current accumulated transform (cumulative translation + scale
     /// from all parent `save/translate/restore` calls). The `tx`/`ty` fields
     /// give the widget's bottom-left corner in framebuffer (Y-up) coordinates.
-    pub fn transform(&self) -> TransAffine { self.state.transform }
+    pub fn transform(&self) -> TransAffine {
+        self.state.transform
+    }
 
     // -------------------------------------------------------------------------
     // Style
     // -------------------------------------------------------------------------
 
-    pub fn set_fill_color(&mut self, color: Color) { self.state.fill_color = color; }
-    pub fn set_stroke_color(&mut self, color: Color) { self.state.stroke_color = color; }
-    pub fn set_line_width(&mut self, w: f64) { self.state.line_width = w; }
-    pub fn set_line_join(&mut self, join: LineJoin) { self.state.line_join = join; }
-    pub fn set_line_cap(&mut self, cap: LineCap) { self.state.line_cap = cap; }
-    pub fn set_miter_limit(&mut self, limit: f64) { self.state.miter_limit = limit.max(1.0); }
+    pub fn set_fill_color(&mut self, color: Color) {
+        self.state.fill_color = color;
+    }
+    pub fn set_stroke_color(&mut self, color: Color) {
+        self.state.stroke_color = color;
+    }
+    pub fn set_line_width(&mut self, w: f64) {
+        self.state.line_width = w;
+    }
+    pub fn set_line_join(&mut self, join: LineJoin) {
+        self.state.line_join = join;
+    }
+    pub fn set_line_cap(&mut self, cap: LineCap) {
+        self.state.line_cap = cap;
+    }
+    pub fn set_miter_limit(&mut self, limit: f64) {
+        self.state.miter_limit = limit.max(1.0);
+    }
     pub fn set_line_dash(&mut self, dashes: &[f64], offset: f64) {
         self.state.line_dash.clear();
-        self.state.line_dash.extend(dashes.iter().copied().filter(|v| *v > 0.0));
+        self.state
+            .line_dash
+            .extend(dashes.iter().copied().filter(|v| *v > 0.0));
         self.state.dash_offset = offset;
     }
-    pub fn set_fill_rule(&mut self, rule: FillRule) { self.state.fill_rule = rule; }
+    pub fn set_fill_rule(&mut self, rule: FillRule) {
+        self.state.fill_rule = rule;
+    }
 
     /// Set the Porter-Duff compositing mode. Default: `SrcOver`.
-    pub fn set_blend_mode(&mut self, mode: CompOp) { self.state.blend_mode = mode; }
+    pub fn set_blend_mode(&mut self, mode: CompOp) {
+        self.state.blend_mode = mode;
+    }
 
     /// Global alpha multiplier (0.0–1.0) applied on top of each color's alpha.
     pub fn set_global_alpha(&mut self, alpha: f64) {
@@ -275,10 +307,14 @@ impl<'a> GfxCtx<'a> {
     /// grayscale AA.  Set by `paint_subtree_backbuffered` for
     /// `LcdCoverage` widget buffers, and by the main render loop for
     /// direct-to-screen text.
-    pub fn set_lcd_mode(&mut self, on: bool) { self.lcd_mode = on; }
+    pub fn set_lcd_mode(&mut self, on: bool) {
+        self.lcd_mode = on;
+    }
 
     /// Read the ctx's current LCD mode.
-    pub fn lcd_mode(&self) -> bool { self.lcd_mode }
+    pub fn lcd_mode(&self) -> bool {
+        self.lcd_mode
+    }
 
     // -------------------------------------------------------------------------
     // Clipping
@@ -306,10 +342,18 @@ impl<'a> GfxCtx<'a> {
             let mut sx = lx;
             let mut sy = ly;
             t.transform(&mut sx, &mut sy);
-            if sx < sx_min { sx_min = sx; }
-            if sx > sx_max { sx_max = sx; }
-            if sy < sy_min { sy_min = sy; }
-            if sy > sy_max { sy_max = sy; }
+            if sx < sx_min {
+                sx_min = sx;
+            }
+            if sx > sx_max {
+                sx_max = sx;
+            }
+            if sy < sy_min {
+                sy_min = sy;
+            }
+            if sy > sy_max {
+                sy_max = sy;
+            }
         }
         let sw = (sx_max - sx_min).max(0.0);
         let sh = (sy_max - sy_min).max(0.0);
@@ -324,7 +368,9 @@ impl<'a> GfxCtx<'a> {
         }
     }
 
-    pub fn reset_clip(&mut self) { self.state.clip = None; }
+    pub fn reset_clip(&mut self) {
+        self.state.clip = None;
+    }
 
     // -------------------------------------------------------------------------
     // Clear
@@ -333,7 +379,10 @@ impl<'a> GfxCtx<'a> {
     /// Fill the entire active framebuffer with `color`, ignoring transform and clip.
     pub fn clear(&mut self, color: Color) {
         let rgba = color.to_rgba8();
-        for chunk in active_fb(&mut self.base_fb, &mut self.layer_stack).pixels_mut().chunks_exact_mut(4) {
+        for chunk in active_fb(&mut self.base_fb, &mut self.layer_stack)
+            .pixels_mut()
+            .chunks_exact_mut(4)
+        {
             chunk[0] = rgba.r as u8;
             chunk[1] = rgba.g as u8;
             chunk[2] = rgba.b as u8;
@@ -345,10 +394,16 @@ impl<'a> GfxCtx<'a> {
     // Path construction
     // -------------------------------------------------------------------------
 
-    pub fn begin_path(&mut self) { self.path = PathStorage::new(); }
+    pub fn begin_path(&mut self) {
+        self.path = PathStorage::new();
+    }
 
-    pub fn move_to(&mut self, x: f64, y: f64) { self.path.move_to(x, y); }
-    pub fn line_to(&mut self, x: f64, y: f64) { self.path.line_to(x, y); }
+    pub fn move_to(&mut self, x: f64, y: f64) {
+        self.path.move_to(x, y);
+    }
+    pub fn line_to(&mut self, x: f64, y: f64) {
+        self.path.line_to(x, y);
+    }
 
     pub fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64) {
         self.path.curve4(cx1, cy1, cx2, cy2, x, y);
@@ -358,7 +413,15 @@ impl<'a> GfxCtx<'a> {
         self.path.curve3(cx, cy, x, y);
     }
 
-    pub fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool) {
+    pub fn arc_to(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        r: f64,
+        start_angle: f64,
+        end_angle: f64,
+        ccw: bool,
+    ) {
         let mut arc = AggArc::new(cx, cy, r, r, start_angle, end_angle, ccw);
         self.path.concat_path(&mut arc, 0);
     }
@@ -386,7 +449,9 @@ impl<'a> GfxCtx<'a> {
         self.path.concat_path(&mut rr, 0);
     }
 
-    pub fn close_path(&mut self) { self.path.close_polygon(PATH_FLAGS_NONE); }
+    pub fn close_path(&mut self) {
+        self.path.close_polygon(PATH_FLAGS_NONE);
+    }
 
     // -------------------------------------------------------------------------
     // Drawing
@@ -420,7 +485,20 @@ impl<'a> GfxCtx<'a> {
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        rasterize_stroke(fb, &mut self.path, &rgba, width, join, cap, miter_limit, &dashes, dash_offset, mode, clip, &transform);
+        rasterize_stroke(
+            fb,
+            &mut self.path,
+            &rgba,
+            width,
+            join,
+            cap,
+            miter_limit,
+            &dashes,
+            dash_offset,
+            mode,
+            clip,
+            &transform,
+        );
     }
 
     /// Fill then stroke the accumulated path in one call.
@@ -480,9 +558,7 @@ impl<'a> GfxCtx<'a> {
             let t = &self.state.transform;
             let ctm_scale = (t.sx * t.sx + t.shy * t.shy).sqrt().max(1e-6);
             let phys_size = font_size * ctm_scale;
-            let cached = crate::lcd_coverage::rasterize_text_lcd_cached(
-                &font, text, phys_size,
-            );
+            let cached = crate::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size);
             // `baseline_*_in_mask` is in physical mask pixels; divide by
             // `ctm_scale` so the offset stays in logical units that the
             // CTM then multiplies back to physical at blit time.
@@ -490,8 +566,12 @@ impl<'a> GfxCtx<'a> {
             let dst_y = y - cached.baseline_y_in_mask / ctm_scale;
             <Self as crate::DrawCtx>::draw_lcd_mask_arc(
                 self,
-                &cached.pixels, cached.width, cached.height,
-                color, dst_x, dst_y,
+                &cached.pixels,
+                cached.width,
+                cached.height,
+                color,
+                dst_x,
+                dst_y,
             );
             return;
         }
@@ -505,7 +585,15 @@ impl<'a> GfxCtx<'a> {
         let (glyph_paths, _) = shape_text(&font, text, font_size, x, y);
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
         for mut path in glyph_paths {
-            rasterize_fill(fb, &mut path, &rgba, mode, clip, FillRule::NonZero, &transform);
+            rasterize_fill(
+                fb,
+                &mut path,
+                &rgba,
+                mode,
+                clip,
+                FillRule::NonZero,
+                &transform,
+            );
         }
     }
 
@@ -577,7 +665,7 @@ impl<'a> GfxCtx<'a> {
 /// conflicts on `self`.
 #[inline]
 fn active_fb<'a>(
-    base_fb:     &'a mut Framebuffer,
+    base_fb: &'a mut Framebuffer,
     layer_stack: &'a mut Vec<LayerEntry>,
 ) -> &'a mut Framebuffer {
     if let Some(top) = layer_stack.last_mut() {
@@ -586,7 +674,6 @@ fn active_fb<'a>(
         base_fb
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // SrcOver layer compositing
@@ -618,14 +705,20 @@ fn composite_framebuffers(dst: &mut Framebuffer, src: &Framebuffer, dest_x: i32,
 
     for sy in 0..src_h {
         let dy = dest_y + sy;
-        if dy < 0 || dy >= dst_h { continue; }
+        if dy < 0 || dy >= dst_h {
+            continue;
+        }
         for sx in 0..src_w {
             let dx = dest_x + sx;
-            if dx < 0 || dx >= dst_w { continue; }
+            if dx < 0 || dx >= dst_w {
+                continue;
+            }
             let si = ((sy * src_w + sx) * 4) as usize;
             let di = ((dy * dst_w + dx) * 4) as usize;
             let sa = src_px[si + 3] as f32 / 255.0;
-            if sa < 1e-4 { continue; } // fully transparent source — skip
+            if sa < 1e-4 {
+                continue;
+            } // fully transparent source — skip
             let inv_sa = 1.0 - sa;
             // Premultiplied SrcOver — same formula for all four channels.
             for k in 0..4 {
@@ -694,12 +787,34 @@ pub(crate) fn rasterize_stroke(
     let mut curves = ConvCurve::new(path);
     if dashes.is_empty() {
         let stroke = ConvStroke::new(&mut curves);
-        rasterize_stroke_source(fb, stroke, color, width, join, cap, miter_limit, mode, clip, transform);
+        rasterize_stroke_source(
+            fb,
+            stroke,
+            color,
+            width,
+            join,
+            cap,
+            miter_limit,
+            mode,
+            clip,
+            transform,
+        );
     } else {
         let mut dash = ConvDash::new(&mut curves);
         configure_dashes(&mut dash, dashes, dash_offset);
         let stroke = ConvStroke::new(dash);
-        rasterize_stroke_source(fb, stroke, color, width, join, cap, miter_limit, mode, clip, transform);
+        rasterize_stroke_source(
+            fb,
+            stroke,
+            color,
+            width,
+            join,
+            cap,
+            miter_limit,
+            mode,
+            clip,
+            transform,
+        );
     }
 }
 
@@ -752,46 +867,96 @@ fn configure_dashes<VS: VertexSource>(dash: &mut ConvDash<VS>, dashes: &[f64], d
 // ---------------------------------------------------------------------------
 
 impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
-    fn set_fill_color(&mut self, c: crate::color::Color)     { self.set_fill_color(c) }
-    fn set_stroke_color(&mut self, c: crate::color::Color)   { self.set_stroke_color(c) }
-    fn set_line_width(&mut self, w: f64)                      { self.set_line_width(w) }
-    fn set_line_join(&mut self, j: agg_rust::math_stroke::LineJoin) { self.set_line_join(j) }
-    fn set_line_cap(&mut self, c: agg_rust::math_stroke::LineCap)   { self.set_line_cap(c) }
-    fn set_miter_limit(&mut self, limit: f64)                  { self.set_miter_limit(limit) }
-    fn set_line_dash(&mut self, dashes: &[f64], offset: f64)    { self.set_line_dash(dashes, offset) }
-    fn set_fill_rule(&mut self, rule: crate::draw_ctx::FillRule)     { self.set_fill_rule(rule) }
-    fn set_blend_mode(&mut self, m: agg_rust::comp_op::CompOp)      { self.set_blend_mode(m) }
-    fn set_global_alpha(&mut self, a: f64)                   { self.set_global_alpha(a) }
-    fn set_font(&mut self, f: Arc<crate::text::Font>)        { self.set_font(f) }
-    fn set_font_size(&mut self, s: f64)                      { self.set_font_size(s) }
-    fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) { self.clip_rect(x, y, w, h) }
-    fn reset_clip(&mut self)                                  { self.reset_clip() }
-    fn clear(&mut self, c: crate::color::Color)              { self.clear(c) }
-    fn begin_path(&mut self)                                  { self.begin_path() }
-    fn move_to(&mut self, x: f64, y: f64)                    { self.move_to(x, y) }
-    fn line_to(&mut self, x: f64, y: f64)                    { self.line_to(x, y) }
+    fn set_fill_color(&mut self, c: crate::color::Color) {
+        self.set_fill_color(c)
+    }
+    fn set_stroke_color(&mut self, c: crate::color::Color) {
+        self.set_stroke_color(c)
+    }
+    fn set_line_width(&mut self, w: f64) {
+        self.set_line_width(w)
+    }
+    fn set_line_join(&mut self, j: agg_rust::math_stroke::LineJoin) {
+        self.set_line_join(j)
+    }
+    fn set_line_cap(&mut self, c: agg_rust::math_stroke::LineCap) {
+        self.set_line_cap(c)
+    }
+    fn set_miter_limit(&mut self, limit: f64) {
+        self.set_miter_limit(limit)
+    }
+    fn set_line_dash(&mut self, dashes: &[f64], offset: f64) {
+        self.set_line_dash(dashes, offset)
+    }
+    fn set_fill_rule(&mut self, rule: crate::draw_ctx::FillRule) {
+        self.set_fill_rule(rule)
+    }
+    fn set_blend_mode(&mut self, m: agg_rust::comp_op::CompOp) {
+        self.set_blend_mode(m)
+    }
+    fn set_global_alpha(&mut self, a: f64) {
+        self.set_global_alpha(a)
+    }
+    fn set_font(&mut self, f: Arc<crate::text::Font>) {
+        self.set_font(f)
+    }
+    fn set_font_size(&mut self, s: f64) {
+        self.set_font_size(s)
+    }
+    fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.clip_rect(x, y, w, h)
+    }
+    fn reset_clip(&mut self) {
+        self.reset_clip()
+    }
+    fn clear(&mut self, c: crate::color::Color) {
+        self.clear(c)
+    }
+    fn begin_path(&mut self) {
+        self.begin_path()
+    }
+    fn move_to(&mut self, x: f64, y: f64) {
+        self.move_to(x, y)
+    }
+    fn line_to(&mut self, x: f64, y: f64) {
+        self.line_to(x, y)
+    }
     fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64) {
         self.cubic_to(cx1, cy1, cx2, cy2, x, y)
     }
-    fn quad_to(&mut self, cx: f64, cy: f64, x: f64, y: f64) { self.quad_to(cx, cy, x, y) }
+    fn quad_to(&mut self, cx: f64, cy: f64, x: f64, y: f64) {
+        self.quad_to(cx, cy, x, y)
+    }
     fn arc_to(&mut self, cx: f64, cy: f64, r: f64, a1: f64, a2: f64, ccw: bool) {
         self.arc_to(cx, cy, r, a1, a2, ccw)
     }
-    fn circle(&mut self, cx: f64, cy: f64, r: f64)          { self.circle(cx, cy, r) }
-    fn rect(&mut self, x: f64, y: f64, w: f64, h: f64)      { self.rect(x, y, w, h) }
+    fn circle(&mut self, cx: f64, cy: f64, r: f64) {
+        self.circle(cx, cy, r)
+    }
+    fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.rect(x, y, w, h)
+    }
     fn rounded_rect(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
         self.rounded_rect(x, y, w, h, r)
     }
-    fn close_path(&mut self)                                  { self.close_path() }
-    fn fill(&mut self)                                        { self.fill() }
-    fn stroke(&mut self)                                      { self.stroke() }
-    fn fill_and_stroke(&mut self)                             { self.fill_and_stroke() }
+    fn close_path(&mut self) {
+        self.close_path()
+    }
+    fn fill(&mut self) {
+        self.fill()
+    }
+    fn stroke(&mut self) {
+        self.stroke()
+    }
+    fn fill_and_stroke(&mut self) {
+        self.fill_and_stroke()
+    }
 
     fn draw_triangles_aa(
         &mut self,
         vertices: &[[f32; 3]],
-        indices:  &[u32],
-        color:    crate::color::Color,
+        indices: &[u32],
+        color: crate::color::Color,
     ) {
         // Software fallback: rasterise each triangle as a solid filled
         // polygon.  The per-vertex `alpha` is ignored (software already has
@@ -804,10 +969,12 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         self.set_fill_color(color);
         let n_tris = indices.len() / 3;
         for t in 0..n_tris {
-            let i0 = indices[t * 3    ] as usize;
+            let i0 = indices[t * 3] as usize;
             let i1 = indices[t * 3 + 1] as usize;
             let i2 = indices[t * 3 + 2] as usize;
-            if i0 >= vertices.len() || i1 >= vertices.len() || i2 >= vertices.len() { continue; }
+            if i0 >= vertices.len() || i1 >= vertices.len() || i2 >= vertices.len() {
+                continue;
+            }
             let v0 = vertices[i0];
             let v1 = vertices[i1];
             let v2 = vertices[i2];
@@ -820,25 +987,53 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         }
         self.set_fill_color(saved_fill);
     }
-    fn fill_text(&mut self, t: &str, x: f64, y: f64)        { self.fill_text(t, x, y) }
-    fn fill_text_gsv(&mut self, t: &str, x: f64, y: f64, s: f64) { self.fill_text_gsv(t, x, y, s) }
-    fn measure_text(&self, t: &str) -> Option<crate::text::TextMetrics> { self.measure_text(t) }
-    fn transform(&self) -> agg_rust::trans_affine::TransAffine { self.transform() }
-    fn save(&mut self)                                        { self.save() }
-    fn restore(&mut self)                                     { self.restore() }
-    fn translate(&mut self, tx: f64, ty: f64)                { self.translate(tx, ty) }
-    fn rotate(&mut self, r: f64)                             { self.rotate(r) }
-    fn scale(&mut self, sx: f64, sy: f64)                    { self.scale(sx, sy) }
-    fn set_transform(&mut self, m: agg_rust::trans_affine::TransAffine) { self.set_transform(m) }
-    fn reset_transform(&mut self)                             { self.reset_transform() }
-    fn push_layer(&mut self, w: f64, h: f64)                 { self.push_layer(w, h) }
-    fn pop_layer(&mut self)                                   { self.pop_layer() }
+    fn fill_text(&mut self, t: &str, x: f64, y: f64) {
+        self.fill_text(t, x, y)
+    }
+    fn fill_text_gsv(&mut self, t: &str, x: f64, y: f64, s: f64) {
+        self.fill_text_gsv(t, x, y, s)
+    }
+    fn measure_text(&self, t: &str) -> Option<crate::text::TextMetrics> {
+        self.measure_text(t)
+    }
+    fn transform(&self) -> agg_rust::trans_affine::TransAffine {
+        self.transform()
+    }
+    fn save(&mut self) {
+        self.save()
+    }
+    fn restore(&mut self) {
+        self.restore()
+    }
+    fn translate(&mut self, tx: f64, ty: f64) {
+        self.translate(tx, ty)
+    }
+    fn rotate(&mut self, r: f64) {
+        self.rotate(r)
+    }
+    fn scale(&mut self, sx: f64, sy: f64) {
+        self.scale(sx, sy)
+    }
+    fn set_transform(&mut self, m: agg_rust::trans_affine::TransAffine) {
+        self.set_transform(m)
+    }
+    fn reset_transform(&mut self) {
+        self.reset_transform()
+    }
+    fn push_layer(&mut self, w: f64, h: f64) {
+        self.push_layer(w, h)
+    }
+    fn pop_layer(&mut self) {
+        self.pop_layer()
+    }
 
-    fn has_image_blit(&self) -> bool { true }
+    fn has_image_blit(&self) -> bool {
+        true
+    }
 
     fn draw_image_rgba_arc(
         &mut self,
-        data:  &Arc<Vec<u8>>,
+        data: &Arc<Vec<u8>>,
         img_w: u32,
         img_h: u32,
         dst_x: f64,
@@ -870,16 +1065,20 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // Inputs are **top-row-first** (matches the cache layout); the
         // destination `Framebuffer` is Y-up with row 0 at the bottom, so
         // src row `sy` maps to dst row `origin_y + (h-1-sy)`.
-        if w == 0 || h == 0 { return; }
+        if w == 0 || h == 0 {
+            return;
+        }
         let w_u = w as usize;
         let h_u = h as usize;
-        if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 { return; }
+        if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 {
+            return;
+        }
 
         let t = &self.state.transform;
         let sx = (dst_x * t.sx + dst_y * t.shx + t.tx).round() as i32;
         let sy = (dst_x * t.shy + dst_y * t.sy + t.ty).round() as i32;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        let fw = fb.width()  as i32;
+        let fw = fb.width() as i32;
         let fh = fb.height() as i32;
         let fw_u = fw as usize;
         let pixels = fb.pixels_mut();
@@ -888,19 +1087,25 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
             // Top-row-first src → Y-up dst: src row 0 (visually top)
             // lands at dst_y + h - 1 (the visually-top dst row).
             let dy = sy + (h_u - 1 - src_y) as i32;
-            if dy < 0 || dy >= fh { continue; }
+            if dy < 0 || dy >= fh {
+                continue;
+            }
             let dy_u = dy as usize;
             for src_x in 0..w_u {
                 let dx = sx + src_x as i32;
-                if dx < 0 || dx >= fw { continue; }
+                if dx < 0 || dx >= fw {
+                    continue;
+                }
                 let ci = (src_y * w_u + src_x) * 3;
 
-                let sa_r = alpha[ci]     as f32 / 255.0;
+                let sa_r = alpha[ci] as f32 / 255.0;
                 let sa_g = alpha[ci + 1] as f32 / 255.0;
                 let sa_b = alpha[ci + 2] as f32 / 255.0;
-                if sa_r == 0.0 && sa_g == 0.0 && sa_b == 0.0 { continue; }
+                if sa_r == 0.0 && sa_g == 0.0 && sa_b == 0.0 {
+                    continue;
+                }
 
-                let sc_r = color[ci]     as f32 / 255.0;
+                let sc_r = color[ci] as f32 / 255.0;
                 let sc_g = color[ci + 1] as f32 / 255.0;
                 let sc_b = color[ci + 2] as f32 / 255.0;
 
@@ -911,10 +1116,10 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
                 // max-channel-alpha so the destination picks up full
                 // opacity wherever any subpixel was painted — matches
                 // "this pixel was drawn on" for subsequent SrcOver blits.
-                let dc_r = pixels[di]     as f32 / 255.0;
+                let dc_r = pixels[di] as f32 / 255.0;
                 let dc_g = pixels[di + 1] as f32 / 255.0;
                 let dc_b = pixels[di + 2] as f32 / 255.0;
-                let da   = pixels[di + 3] as f32 / 255.0;
+                let da = pixels[di + 3] as f32 / 255.0;
 
                 let rc_r = sc_r + dc_r * (1.0 - sa_r);
                 let rc_g = sc_g + dc_g * (1.0 - sa_g);
@@ -922,30 +1127,34 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
                 let src_a_max = sa_r.max(sa_g).max(sa_b);
                 let ra = src_a_max + da * (1.0 - src_a_max);
 
-                pixels[di]     = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di] = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
                 pixels[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
                 pixels[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                pixels[di + 3] = (ra   * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di + 3] = (ra * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             }
         }
     }
 
-    fn has_lcd_mask_composite(&self) -> bool { true }
+    fn has_lcd_mask_composite(&self) -> bool {
+        true
+    }
 
     fn draw_lcd_mask(
         &mut self,
-        mask:      &[u8],
-        mask_w:    u32,
-        mask_h:    u32,
+        mask: &[u8],
+        mask_w: u32,
+        mask_h: u32,
         src_color: Color,
-        dst_x:     f64,
-        dst_y:     f64,
+        dst_x: f64,
+        dst_y: f64,
     ) {
         // Resolve to the active target (base fb or topmost layer) with
         // the current CTM applied to the placement origin.  Both the
         // mask and the Framebuffer are Y-up (row 0 = bottom), so mask
         // row `my` maps directly to dst row `sy + my`.
-        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 { return; }
+        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 {
+            return;
+        }
         let t = &self.state.transform;
         let sx = dst_x * t.sx + dst_y * t.shx + t.tx;
         let sy = dst_x * t.shy + dst_y * t.sy + t.ty;
@@ -969,26 +1178,32 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
             // Mask row `my` (Y-up: 0 = bottom) → dst row `origin_y + my`
             // in the Y-up framebuffer.  No flip.
             let dy = origin_y + my;
-            if dy < 0 || dy >= fh_i { continue; }
+            if dy < 0 || dy >= fh_i {
+                continue;
+            }
             for mx in 0..mw_i {
                 let dx = origin_x + mx;
-                if dx < 0 || dx >= fw_i { continue; }
+                if dx < 0 || dx >= fw_i {
+                    continue;
+                }
                 let mi = ((my * mw_i + mx) * 3) as usize;
                 // Per-channel coverage × src alpha — partial-alpha src
                 // (e.g. `text_dim` placeholder colour) fades proportionally.
-                let cr = (mask[mi]     as f32 / 255.0) * sa;
+                let cr = (mask[mi] as f32 / 255.0) * sa;
                 let cg = (mask[mi + 1] as f32 / 255.0) * sa;
                 let cb = (mask[mi + 2] as f32 / 255.0) * sa;
-                if cr == 0.0 && cg == 0.0 && cb == 0.0 { continue; }
+                if cr == 0.0 && cg == 0.0 && cb == 0.0 {
+                    continue;
+                }
                 let di = ((dy * fw_i + dx) * 4) as usize;
-                let dr = pixels[di]     as f32 / 255.0;
+                let dr = pixels[di] as f32 / 255.0;
                 let dg = pixels[di + 1] as f32 / 255.0;
                 let db = pixels[di + 2] as f32 / 255.0;
-                let rr  = sr * cr + dr * (1.0 - cr);
-                let rg  = sg * cg + dg * (1.0 - cg);
+                let rr = sr * cr + dr * (1.0 - cr);
+                let rg = sg * cg + dg * (1.0 - cg);
                 let rbb = sb * cb + db * (1.0 - cb);
-                pixels[di]     = (rr  * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                pixels[di + 1] = (rg  * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di] = (rr * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+                pixels[di + 1] = (rg * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
                 pixels[di + 2] = (rbb * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
                 // Alpha unchanged — we're writing onto an existing opaque
                 // (or semi-transparent) surface without introducing new
@@ -999,7 +1214,7 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
 
     fn draw_image_rgba(
         &mut self,
-        data:  &[u8],
+        data: &[u8],
         img_w: u32,
         img_h: u32,
         dst_x: f64,
@@ -1009,7 +1224,9 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     ) {
         // Scale the source image into a temporary Framebuffer at dst size,
         // then composite it onto the current render target using the CTM origin.
-        if img_w == 0 || img_h == 0 || dst_w < 1.0 || dst_h < 1.0 { return; }
+        if img_w == 0 || img_h == 0 || dst_w < 1.0 || dst_h < 1.0 {
+            return;
+        }
 
         let out_w = dst_w.round() as u32;
         let out_h = dst_h.round() as u32;
@@ -1033,13 +1250,13 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
                 if si + 3 < data.len() && di + 3 < px.len() {
                     let a = data[si + 3] as u32;
                     if a == 255 {
-                        px[di]     = data[si];
+                        px[di] = data[si];
                         px[di + 1] = data[si + 1];
                         px[di + 2] = data[si + 2];
                         px[di + 3] = 255;
                     } else {
                         // Premultiply: (c * a + 127) / 255 (round-half-up).
-                        px[di]     = (((data[si]     as u32) * a + 127) / 255) as u8;
+                        px[di] = (((data[si] as u32) * a + 127) / 255) as u8;
                         px[di + 1] = (((data[si + 1] as u32) * a + 127) / 255) as u8;
                         px[di + 2] = (((data[si + 2] as u32) * a + 127) / 255) as u8;
                         px[di + 3] = a as u8;
@@ -1049,7 +1266,10 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         }
 
         // Apply CTM translation to get screen-space origin.
-        let (tx, ty) = { let t = self.transform(); (t.tx, t.ty) };
+        let (tx, ty) = {
+            let t = self.transform();
+            (t.tx, t.ty)
+        };
         let screen_x = (tx + dst_x).round() as i32;
         let screen_y = (ty + dst_y).round() as i32;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);

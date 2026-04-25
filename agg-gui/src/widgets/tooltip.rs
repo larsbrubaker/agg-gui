@@ -30,7 +30,7 @@ use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::Label;
 
 /// Number of consecutive hovered frames before the tooltip appears.
@@ -42,10 +42,10 @@ const HOVER_DELAY_FRAMES: u32 = 30;
 /// The tooltip panel is drawn above the child widget (Y-up: higher Y = visually above).
 /// The text is rendered through a backbuffered [`Label`] child.
 pub struct Tooltip {
-    bounds:   Rect,
+    bounds: Rect,
     /// The wrapped child widget is stored in `children[0]`.
     children: Vec<Box<dyn Widget>>,
-    base:     WidgetBase,
+    base: WidgetBase,
 
     /// Hover-frame counter: increments while cursor is over the child.
     hover_frames: u32,
@@ -62,19 +62,28 @@ impl Tooltip {
     /// Create a new `Tooltip` wrapping `child` with `text` as the tip message.
     pub fn new(child: Box<dyn Widget>, text: impl Into<String>, font: Arc<Font>) -> Self {
         Self {
-            bounds:       Rect::default(),
-            children:     vec![child],
-            base:         WidgetBase::new(),
+            bounds: Rect::default(),
+            children: vec![child],
+            base: WidgetBase::new(),
             hover_frames: 0,
-            hovered:      false,
-            cursor:       Point::ORIGIN,
-            tip_label:    Label::new(text, font).with_font_size(11.5),
+            hovered: false,
+            cursor: Point::ORIGIN,
+            tip_label: Label::new(text, font).with_font_size(11.5),
         }
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
 
     fn show_tip(&self) -> bool {
         self.hovered && self.hover_frames >= HOVER_DELAY_FRAMES
@@ -82,18 +91,37 @@ impl Tooltip {
 }
 
 impl Widget for Tooltip {
-    fn type_name(&self) -> &'static str { "Tooltip" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Tooltip"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
 
     fn is_focusable(&self) -> bool {
-        self.children.first().map(|c| c.is_focusable()).unwrap_or(false)
+        self.children
+            .first()
+            .map(|c| c.is_focusable())
+            .unwrap_or(false)
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -120,7 +148,9 @@ impl Widget for Tooltip {
         }
 
         // Draw tooltip panel if hovered long enough.
-        if !self.show_tip() { return; }
+        if !self.show_tip() {
+            return;
+        }
 
         let v = ctx.visuals();
         let pad_x = 8.0_f64;
@@ -130,13 +160,15 @@ impl Widget for Tooltip {
         let max_tip_w = self.bounds.width.max(120.0).min(260.0);
         let ls = self.tip_label.layout(Size::new(max_tip_w, 100.0));
 
-        let panel_w = ls.width  + pad_x * 2.0;
+        let panel_w = ls.width + pad_x * 2.0;
         let panel_h = ls.height + pad_y * 2.0;
 
         // Position panel above the cursor (Y-up: above = larger Y).
         let cursor_y = self.cursor.y;
         let cursor_x = self.cursor.x;
-        let panel_x = (cursor_x - panel_w * 0.5).max(0.0).min(self.bounds.width - panel_w);
+        let panel_x = (cursor_x - panel_w * 0.5)
+            .max(0.0)
+            .min(self.bounds.width - panel_w);
         let panel_y = cursor_y + 10.0; // 10px above cursor in Y-up space
 
         // Draw tooltip shadow.
@@ -160,7 +192,8 @@ impl Widget for Tooltip {
 
         // Paint the label.
         self.tip_label.set_color(v.text_color);
-        self.tip_label.set_bounds(Rect::new(0.0, 0.0, ls.width, ls.height));
+        self.tip_label
+            .set_bounds(Rect::new(0.0, 0.0, ls.width, ls.height));
         let lx = panel_x + pad_x;
         let ly = panel_y + pad_y;
         ctx.save();
@@ -188,7 +221,9 @@ impl Widget for Tooltip {
                 if self.hovered != was {
                     crate::animation::request_tick();
                     EventResult::Consumed
-                } else { result }
+                } else {
+                    result
+                }
             }
             _ => {
                 if let Some(child) = self.children.first_mut() {
@@ -201,7 +236,9 @@ impl Widget for Tooltip {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 }

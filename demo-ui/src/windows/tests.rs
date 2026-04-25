@@ -10,10 +10,10 @@ use agg_gui::framebuffer::unpremultiply_rgba_inplace;
 use agg_gui::lcd_coverage::LcdBuffer;
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    render_svg, render_svg_to_framebuffer, render_svg_to_lcd_buffer, set_cursor_icon, Color,
-    Container, CursorIcon, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink,
-    Label, Point, Rect, Resize, ScrollView, Separator, Size, SizedBox, TextArea, TextField,
-    Visuals, Widget,
+    render_svg_at_size, render_svg_to_framebuffer_at_size, render_svg_to_lcd_buffer_at_size,
+    set_cursor_icon, Color, Container, CursorIcon, DrawCtx, Event, EventResult, FlexColumn,
+    FlexRow, Font, Hyperlink, Label, Point, Rect, Resize, ScrollBarVisibility, ScrollView,
+    Separator, Size, SizedBox, TextArea, TextField, Visuals, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -911,28 +911,67 @@ pub fn manual_layout_test(font: Arc<Font>) -> Box<dyn Widget> {
 
 /// Build the SVG Test — live progress viewer for the library SVG renderer.
 pub fn svg_test(font: Arc<Font>) -> Box<dyn Widget> {
-    Box::new(SvgProgressViewer::new(font))
+    let samples = Arc::new(
+        SVG_SAMPLES
+            .iter()
+            .map(SvgSampleRender::new)
+            .collect::<Vec<_>>(),
+    );
+
+    let mut root = FlexColumn::new()
+        .with_gap(0.0)
+        .with_padding(0.0)
+        .with_panel_bg();
+    root.push(
+        Box::new(SvgProgressHeader::new(
+            Arc::clone(&font),
+            Arc::clone(&samples),
+        )),
+        0.0,
+    );
+    root.push(
+        Box::new(
+            ScrollView::new(Box::new(SvgProgressBody::new(Arc::clone(&samples))))
+                .horizontal(true)
+                .with_bar_visibility(ScrollBarVisibility::AlwaysVisible),
+        ),
+        1.0,
+    );
+
+    Box::new(root)
 }
 
-struct SvgProgressViewer {
+const SVG_HEADER_H: f64 = 82.0;
+const SVG_TITLE_H: f64 = 50.0;
+const SVG_COLUMN_HEADER_H: f64 = 32.0;
+const SVG_PAD: f64 = 8.0;
+const SVG_GAP: f64 = 8.0;
+
+struct SvgProgressHeader {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     font: Arc<Font>,
-    samples: Vec<SvgSampleRender>,
+    samples: Arc<Vec<SvgSampleRender>>,
+}
+
+struct SvgProgressBody {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    samples: Arc<Vec<SvgSampleRender>>,
 }
 
 struct SvgSampleRender {
     name: &'static str,
-    svg: &'static str,
+    svg: &'static [u8],
     width: u32,
     height: u32,
+    reference: Result<Arc<Vec<u8>>, String>,
     rgba: Result<Arc<Vec<u8>>, String>,
     lcd: Result<Arc<Vec<u8>>, String>,
 }
 
-impl SvgProgressViewer {
-    fn new(font: Arc<Font>) -> Self {
-        let samples = SVG_SAMPLES.iter().map(SvgSampleRender::new).collect();
+impl SvgProgressHeader {
+    fn new(font: Arc<Font>, samples: Arc<Vec<SvgSampleRender>>) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -942,9 +981,25 @@ impl SvgProgressViewer {
     }
 }
 
+impl SvgProgressBody {
+    fn new(samples: Arc<Vec<SvgSampleRender>>) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            samples,
+        }
+    }
+}
+
 impl SvgSampleRender {
     fn new(sample: &SvgSample) -> Self {
-        let rgba = render_svg_to_framebuffer(sample.svg.as_bytes())
+        let reference = decode_png_rgba(sample.reference_png);
+        let (width, height) = reference
+            .as_ref()
+            .map(|(_, w, h)| (*w, *h))
+            .unwrap_or((1, 1));
+
+        let rgba = render_svg_to_framebuffer_at_size(sample.svg, width, height)
             .map(|fb| {
                 let mut pixels = fb.pixels_flipped();
                 unpremultiply_rgba_inplace(&mut pixels);
@@ -952,24 +1007,25 @@ impl SvgSampleRender {
             })
             .map_err(|e| e.to_string());
 
-        let lcd = render_svg_to_lcd_buffer(sample.svg.as_bytes())
+        let lcd = render_svg_to_lcd_buffer_at_size(sample.svg, width, height)
             .map(|buffer| Arc::new(lcd_buffer_to_preview_rgba(&buffer)))
             .map_err(|e| e.to_string());
 
         Self {
             name: sample.name,
             svg: sample.svg,
-            width: sample.width,
-            height: sample.height,
+            width,
+            height,
+            reference: reference.map(|(pixels, _, _)| Arc::new(pixels)),
             rgba,
             lcd,
         }
     }
 }
 
-impl Widget for SvgProgressViewer {
+impl Widget for SvgProgressHeader {
     fn type_name(&self) -> &'static str {
-        "SvgProgressViewer"
+        "SvgProgressHeader"
     }
     fn bounds(&self) -> Rect {
         self.bounds
@@ -985,27 +1041,16 @@ impl Widget for SvgProgressViewer {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(
-            0.0,
-            0.0,
-            available.width.max(760.0),
-            available.height.max(360.0),
-        );
-        Size::new(self.bounds.width, self.bounds.height)
+        self.bounds = Rect::new(0.0, 0.0, available.width, SVG_HEADER_H);
+        Size::new(available.width, SVG_HEADER_H)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
         ctx.set_font(Arc::clone(&self.font));
-        let w = self.bounds.width.max(760.0);
-        let h = self.bounds.height.max(360.0);
-        let pad = 8.0;
-        let gap = 8.0;
-        let title_h = 50.0;
-        let header_h = 32.0;
-        let row_h =
-            ((h - title_h - header_h - pad * 2.0) / self.samples.len() as f64).clamp(118.0, 170.0);
-        let col_w = ((w - pad * 2.0 - gap * 3.0) / 4.0).max(120.0);
+        let w = self.bounds.width;
+        let h = self.bounds.height.max(self.min_content_height());
+        let col_w = column_width(&self.samples, w);
         let titles = [
             "reference.png / control",
             "agg-rgba-bitmap render",
@@ -1015,54 +1060,110 @@ impl Widget for SvgProgressViewer {
 
         ctx.set_fill_color(v.widget_bg);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 6.0);
+        ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
 
         let title_y = h - 22.0;
         draw_small_text(
             ctx,
             "SVG renderer progress viewer",
-            pad + 2.0,
+            SVG_PAD + 2.0,
             title_y,
             13.0,
             v.text_color,
         );
         draw_small_text(
             ctx,
-            "Headers are fixed; each row compares the direct control image with library RGBA, LCD, and live hardware DrawCtx output.",
-            pad + 2.0,
+            "Headers are fixed; reference.png is from resvg-test-suite and every output is rendered/displayed at that native pixel size.",
+            SVG_PAD + 2.0,
             title_y - 18.0,
             10.5,
             v.text_dim,
         );
 
-        let header_y = h - title_h - 22.0;
+        let header_y = h - SVG_TITLE_H - 22.0;
         ctx.set_fill_color(v.window_title_fill);
         ctx.begin_path();
-        ctx.rect(0.0, h - title_h - header_h, w, header_h);
+        ctx.rect(
+            0.0,
+            h - SVG_TITLE_H - SVG_COLUMN_HEADER_H,
+            w,
+            SVG_COLUMN_HEADER_H,
+        );
         ctx.fill();
         for (i, title) in titles.iter().enumerate() {
-            let x = pad + i as f64 * (col_w + gap);
+            let x = SVG_PAD + i as f64 * (col_w + SVG_GAP);
             draw_small_text(ctx, title, x + 6.0, header_y, 10.5, v.text_color);
         }
+    }
+
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
+impl Widget for SvgProgressBody {
+    fn type_name(&self) -> &'static str {
+        "SvgProgressBody"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+
+    fn layout(&mut self, _: Size) -> Size {
+        let size = Size::new(self.min_content_width(), self.min_content_height());
+        self.bounds = Rect::new(0.0, 0.0, size.width, size.height);
+        size
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        let w = self.bounds.width.max(self.min_content_width());
+        let h = self.bounds.height.max(self.min_content_height());
+        let row_h = self.row_height();
+        let col_w = column_width(&self.samples, w);
+
+        ctx.set_fill_color(v.widget_bg);
+        ctx.begin_path();
+        ctx.rect(0.0, 0.0, w, h);
+        ctx.fill();
 
         for (row, sample) in self.samples.iter().enumerate() {
-            let row_top = h - title_h - header_h - row as f64 * row_h;
+            let row_top = h - SVG_PAD - row as f64 * row_h;
             let y = row_top - row_h + 6.0;
             draw_small_text(
                 ctx,
                 sample.name,
-                pad + 6.0,
+                SVG_PAD + 6.0,
                 row_top - 17.0,
                 10.0,
                 v.text_dim,
             );
 
             for col in 0..4 {
-                let x = pad + col as f64 * (col_w + gap);
+                let x = SVG_PAD + col as f64 * (col_w + SVG_GAP);
                 draw_panel(ctx, x, y, col_w, row_h - 26.0, &v);
                 match col {
-                    0 => draw_reference_control(ctx, row, x, y, col_w, row_h - 26.0, &v),
+                    0 => draw_raster_column(
+                        ctx,
+                        &sample.reference,
+                        sample.width,
+                        sample.height,
+                        x,
+                        y,
+                        col_w,
+                        row_h - 26.0,
+                        &v,
+                    ),
                     1 => draw_raster_column(
                         ctx,
                         &sample.rgba,
@@ -1097,43 +1198,124 @@ impl Widget for SvgProgressViewer {
     }
 }
 
+impl SvgProgressHeader {
+    fn min_content_height(&self) -> f64 {
+        SVG_HEADER_H
+    }
+}
+
+impl SvgProgressBody {
+    fn row_height(&self) -> f64 {
+        self.samples
+            .iter()
+            .map(|sample| sample.height as f64)
+            .fold(90.0, f64::max)
+            + 26.0
+    }
+
+    fn min_content_width(&self) -> f64 {
+        svg_content_width(&self.samples)
+    }
+
+    fn min_content_height(&self) -> f64 {
+        SVG_PAD * 2.0 + self.row_height() * self.samples.len().max(1) as f64
+    }
+}
+
+fn svg_content_width(samples: &[SvgSampleRender]) -> f64 {
+    let max_sample_w = samples
+        .iter()
+        .map(|sample| sample.width as f64)
+        .fold(120.0, f64::max);
+    SVG_PAD * 2.0 + (max_sample_w + 16.0) * 4.0 + SVG_GAP * 3.0
+}
+
+fn column_width(samples: &[SvgSampleRender], available_width: f64) -> f64 {
+    let max_sample_w = samples
+        .iter()
+        .map(|sample| sample.width as f64)
+        .fold(120.0, f64::max);
+    ((available_width - SVG_PAD * 2.0 - SVG_GAP * 3.0) / 4.0).max(max_sample_w + 16.0)
+}
+
+#[cfg(test)]
+mod svg_tests {
+    use std::sync::Arc;
+
+    use agg_gui::{find_widget_by_type, Font, Size};
+
+    #[test]
+    fn svg_test_keeps_header_fixed_above_bidirectional_scroll_area() {
+        const BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+        let font = Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"));
+        let mut root = super::svg_test(font);
+
+        root.layout(Size::new(520.0, 260.0));
+
+        let children = root.children();
+        assert_eq!(children[0].type_name(), "SvgProgressHeader");
+        assert_eq!(children[1].type_name(), "ScrollView");
+        assert_eq!(children[0].bounds().height, super::SVG_HEADER_H);
+
+        let scroll =
+            find_widget_by_type(root.as_ref(), "ScrollView").expect("SVG Test scroll view");
+        let props = scroll.properties();
+        assert_property(&props, "v_enabled", "true");
+        assert_property(&props, "h_enabled", "true");
+        assert_property(&props, "bar_visibility", "AlwaysVisible");
+        assert_positive_property(&props, "max_scroll");
+        assert_positive_property(&props, "h_max_scroll");
+    }
+
+    fn assert_property(props: &[(&'static str, String)], name: &str, expected: &str) {
+        let actual = props
+            .iter()
+            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
+            .unwrap_or_else(|| panic!("missing property {name}"));
+        assert_eq!(actual, expected);
+    }
+
+    fn assert_positive_property(props: &[(&'static str, String)], name: &str) {
+        let actual = props
+            .iter()
+            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
+            .unwrap_or_else(|| panic!("missing property {name}"));
+        let value = actual
+            .parse::<f64>()
+            .unwrap_or_else(|_| panic!("{name} should be a number, got {actual:?}"));
+        assert!(value > 0.0, "{name} should be positive, got {value}");
+    }
+}
+
 struct SvgSample {
     name: &'static str,
-    svg: &'static str,
-    width: u32,
-    height: u32,
+    svg: &'static [u8],
+    reference_png: &'static [u8],
 }
 
 const SVG_SAMPLES: &[SvgSample] = &[
     SvgSample {
-        name: "Solid fill + stroke",
-        width: 120,
-        height: 90,
-        svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90">
-            <rect x="8" y="8" width="104" height="74" rx="10" fill="#3b82f6" stroke="#111827" stroke-width="4"/>
-            <circle cx="38" cy="45" r="18" fill="#f97316"/>
-        </svg>"##,
+        name: "shapes/rect/simple-case.svg",
+        svg: include_bytes!("../../../tests/resvg-test-suite/tests/shapes/rect/simple-case.svg"),
+        reference_png: include_bytes!(
+            "../../../tests/resvg-test-suite/tests/shapes/rect/simple-case.png"
+        ),
     },
     SvgSample {
-        name: "Even-odd fill rule",
-        width: 120,
-        height: 90,
-        svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90">
-            <path fill="#22c55e" fill-rule="evenodd"
-                  d="M10 10 H110 V80 H10 Z M35 30 H85 V60 H35 Z"/>
-            <path d="M18 72 L102 18" stroke="#0f172a" stroke-width="4" stroke-dasharray="8 6"/>
-        </svg>"##,
+        name: "shapes/path/M-L-L-Z.svg",
+        svg: include_bytes!("../../../tests/resvg-test-suite/tests/shapes/path/M-L-L-Z.svg"),
+        reference_png: include_bytes!(
+            "../../../tests/resvg-test-suite/tests/shapes/path/M-L-L-Z.png"
+        ),
     },
     SvgSample {
-        name: "Transforms + curves",
-        width: 120,
-        height: 90,
-        svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90">
-            <g transform="translate(60 45) rotate(20)">
-                <path d="M-38 -18 C-20 -42 28 -35 38 -6 C48 23 8 38 -32 24 Z" fill="#a855f7"/>
-                <path d="M-30 0 C-10 20 12 20 30 0" fill="none" stroke="#f8fafc" stroke-width="5" stroke-linecap="round"/>
-            </g>
-        </svg>"##,
+        name: "painting/stroke/line-as-curve-1.svg",
+        svg: include_bytes!(
+            "../../../tests/resvg-test-suite/tests/painting/stroke/line-as-curve-1.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../tests/resvg-test-suite/tests/painting/stroke/line-as-curve-1.png"
+        ),
     },
 ];
 
@@ -1154,73 +1336,6 @@ fn draw_panel(ctx: &mut dyn DrawCtx, x: f64, y: f64, w: f64, h: f64, v: &Visuals
     ctx.stroke();
 }
 
-fn draw_reference_control(
-    ctx: &mut dyn DrawCtx,
-    row: usize,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    v: &Visuals,
-) {
-    let (dx, dy, dw, dh) = fit_rect(120.0, 90.0, x, y, w, h);
-    ctx.save();
-    ctx.translate(dx, dy);
-    ctx.scale(dw / 120.0, dh / 90.0);
-    match row {
-        0 => {
-            ctx.set_fill_color(Color::rgb(0.23, 0.51, 0.96));
-            ctx.begin_path();
-            ctx.rounded_rect(8.0, 8.0, 104.0, 74.0, 10.0);
-            ctx.fill();
-            ctx.set_stroke_color(Color::rgb(0.07, 0.09, 0.15));
-            ctx.set_line_width(4.0);
-            ctx.begin_path();
-            ctx.rounded_rect(8.0, 8.0, 104.0, 74.0, 10.0);
-            ctx.stroke();
-            ctx.set_fill_color(Color::rgb(0.98, 0.45, 0.09));
-            ctx.begin_path();
-            ctx.circle(38.0, 45.0, 18.0);
-            ctx.fill();
-        }
-        1 => {
-            ctx.set_fill_color(Color::rgb(0.13, 0.77, 0.37));
-            ctx.begin_path();
-            ctx.rect(10.0, 10.0, 100.0, 70.0);
-            ctx.fill();
-            ctx.set_fill_color(v.panel_fill);
-            ctx.begin_path();
-            ctx.rect(35.0, 30.0, 50.0, 30.0);
-            ctx.fill();
-            ctx.set_stroke_color(Color::rgb(0.06, 0.09, 0.16));
-            ctx.set_line_width(4.0);
-            ctx.begin_path();
-            ctx.move_to(18.0, 18.0);
-            ctx.line_to(102.0, 72.0);
-            ctx.stroke();
-        }
-        _ => {
-            ctx.translate(60.0, 45.0);
-            ctx.rotate(20.0_f64.to_radians());
-            ctx.set_fill_color(Color::rgb(0.66, 0.33, 0.97));
-            ctx.begin_path();
-            ctx.move_to(-38.0, -18.0);
-            ctx.cubic_to(-20.0, -42.0, 28.0, -35.0, 38.0, -6.0);
-            ctx.cubic_to(48.0, 23.0, 8.0, 38.0, -32.0, 24.0);
-            ctx.close_path();
-            ctx.fill();
-            ctx.set_stroke_color(Color::rgb(0.97, 0.98, 0.99));
-            ctx.set_line_width(5.0);
-            ctx.begin_path();
-            ctx.move_to(-30.0, 0.0);
-            ctx.cubic_to(-10.0, 20.0, 12.0, 20.0, 30.0, 0.0);
-            ctx.stroke();
-        }
-    }
-    ctx.restore();
-    draw_small_text(ctx, "direct control", x + 8.0, y + 14.0, 9.0, v.text_dim);
-}
-
 fn draw_raster_column(
     ctx: &mut dyn DrawCtx,
     pixels: &Result<Arc<Vec<u8>>, String>,
@@ -1234,7 +1349,7 @@ fn draw_raster_column(
 ) {
     match pixels {
         Ok(pixels) => {
-            let (dx, dy, dw, dh) = fit_rect(img_w as f64, img_h as f64, x, y, w, h);
+            let (dx, dy, dw, dh) = native_rect(img_w as f64, img_h as f64, x, y, w, h);
             ctx.draw_image_rgba_arc(pixels, img_w, img_h, dx, dy, dw, dh);
         }
         Err(err) => draw_small_text(ctx, err, x + 8.0, y + h * 0.5, 9.0, v.text_dim),
@@ -1250,12 +1365,10 @@ fn draw_hardware_column(
     h: f64,
     v: &Visuals,
 ) {
-    let (dx, dy, dw, dh) = fit_rect(sample.width as f64, sample.height as f64, x, y, w, h);
-    let scale = (dw / sample.width as f64).min(dh / sample.height as f64);
+    let (dx, dy, _, _) = native_rect(sample.width as f64, sample.height as f64, x, y, w, h);
     ctx.save();
     ctx.translate(dx, dy);
-    ctx.scale(scale, scale);
-    if let Err(err) = render_svg(sample.svg.as_bytes(), ctx) {
+    if let Err(err) = render_svg_at_size(sample.svg, ctx, sample.width, sample.height) {
         ctx.restore();
         draw_small_text(ctx, &err.to_string(), x + 8.0, y + h * 0.5, 9.0, v.text_dim);
         return;
@@ -1263,17 +1376,51 @@ fn draw_hardware_column(
     ctx.restore();
 }
 
-fn fit_rect(src_w: f64, src_h: f64, x: f64, y: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {
-    let scale = ((w - 16.0) / src_w).min((h - 16.0) / src_h).max(0.01);
-    let dw = src_w * scale;
-    let dh = src_h * scale;
-    (x + (w - dw) * 0.5, y + (h - dh) * 0.5, dw, dh)
+fn native_rect(src_w: f64, src_h: f64, x: f64, y: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {
+    (x + (w - src_w) * 0.5, y + (h - src_h) * 0.5, src_w, src_h)
 }
 
 fn draw_small_text(ctx: &mut dyn DrawCtx, text: &str, x: f64, y: f64, size: f64, color: Color) {
     ctx.set_font_size(size);
     ctx.set_fill_color(color);
     ctx.fill_text(text, x, y);
+}
+
+fn decode_png_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(data));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
+    let mut buf = vec![0_u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
+    let src = &buf[..info.buffer_size()];
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => src.to_vec(),
+        png::ColorType::Rgb => {
+            let mut out = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+            for chunk in src.chunks_exact(3) {
+                out.extend_from_slice(chunk);
+                out.push(255);
+            }
+            out
+        }
+        png::ColorType::Grayscale => {
+            let mut out = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+            for &v in src {
+                out.extend_from_slice(&[v, v, v, 255]);
+            }
+            out
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let mut out = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+            for chunk in src.chunks_exact(2) {
+                out.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
+            }
+            out
+        }
+        other => return Err(format!("unsupported PNG color type: {other:?}")),
+    };
+
+    Ok((rgba, info.width, info.height))
 }
 
 fn lcd_buffer_to_preview_rgba(buffer: &LcdBuffer) -> Vec<u8> {

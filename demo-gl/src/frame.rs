@@ -19,8 +19,8 @@ use std::rc::Rc;
 
 use glow::HasContext;
 
+use crate::{draw_hover_overlay, GlGfxCtx};
 use agg_gui::{App, InspectorNode, Rect, Size};
-use crate::{GlGfxCtx, draw_hover_overlay};
 
 /// Clear the GL framebuffer and configure blend state for a new frame.
 ///
@@ -51,8 +51,10 @@ pub fn begin_frame(gl: &glow::Context, width: u32, height: u32) {
         // RGB: standard alpha compositing.
         // Alpha: keep framebuffer alpha at 1.0 (no change from destination).
         gl.blend_func_separate(
-            glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA,  // RGB factors
-            glow::ZERO,      glow::ONE,                   // alpha factors
+            glow::SRC_ALPHA,
+            glow::ONE_MINUS_SRC_ALPHA, // RGB factors
+            glow::ZERO,
+            glow::ONE, // alpha factors
         );
         gl.disable(glow::DEPTH_TEST);
         gl.disable(glow::SCISSOR_TEST);
@@ -73,14 +75,14 @@ pub fn begin_frame(gl: &glow::Context, width: u32, height: u32) {
 /// `frame_ms` is the render time of the **previous** frame, available to the
 /// backend panel display.
 pub fn render_app_frame(
-    ctx:             &mut GlGfxCtx,
-    app:             &mut App,
-    width:           u32,
-    height:          u32,
-    _frame_ms:       f64,
-    show_inspector:  bool,
+    ctx: &mut GlGfxCtx,
+    app: &mut App,
+    width: u32,
+    height: u32,
+    _frame_ms: f64,
+    show_inspector: bool,
     inspector_nodes: &Rc<RefCell<Vec<InspectorNode>>>,
-    hovered_bounds:  &Rc<RefCell<Option<Rect>>>,
+    hovered_bounds: &Rc<RefCell<Option<Rect>>>,
 ) {
     // Inspector snapshot sync: refresh the tree snapshot when the
     // inspector is shown, or clear the hover highlight when it's hidden

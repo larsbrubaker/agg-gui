@@ -50,7 +50,7 @@ const RING_MAX_R: f64 = CIRCLE_R * 2.4;
 /// Peak alpha of the press-ring at full expansion.
 const RING_PEAK_ALPHA: f32 = 0.20;
 /// Duration of the press-ring expand / retract animation in seconds.
-const RING_ANIM_SECS:  f64 = 0.22;
+const RING_ANIM_SECS: f64 = 0.22;
 
 // Colors are resolved from ctx.visuals() at paint time.
 
@@ -72,7 +72,7 @@ pub struct ToggleSwitch {
     hovered: bool,
     /// Interpolates between 0.0 (off) and 1.0 (on) for smooth colour/circle
     /// position transitions; driven by `animation::Tween`.
-    anim:      crate::animation::Tween,
+    anim: crate::animation::Tween,
     /// Interpolates 0.0 → 1.0 while the mouse is pressed (ring expand) and
     /// back to 0.0 on release (ring fade).  Mirrors MatterCAD's
     /// `RoundedToggleSwitch` ripple overlay.
@@ -115,18 +115,37 @@ impl ToggleSwitch {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     // ── State accessors ────────────────────────────────────────────────────
 
     /// Returns the authoritative on/off state: the cell value if bound,
     /// otherwise the internal `on` field.
     pub fn is_on(&self) -> bool {
-        if let Some(ref cell) = self.state_cell { cell.get() } else { self.on }
+        if let Some(ref cell) = self.state_cell {
+            cell.get()
+        } else {
+            self.on
+        }
     }
 
     // ── Internal helpers ───────────────────────────────────────────────────
@@ -134,8 +153,12 @@ impl ToggleSwitch {
     fn toggle(&mut self) {
         let new_val = !self.is_on();
         self.on = new_val;
-        if let Some(ref cell) = self.state_cell { cell.set(new_val); }
-        if let Some(cb) = self.on_change.as_mut() { cb(new_val); }
+        if let Some(ref cell) = self.state_cell {
+            cell.set(new_val);
+        }
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(new_val);
+        }
     }
 
     /// X-center of the sliding circle given an interpolated position `t`
@@ -144,7 +167,7 @@ impl ToggleSwitch {
     /// about it.
     fn circle_cx_at(t: f64) -> f64 {
         let x_off = PILL_HALO + CIRCLE_MARGIN + CIRCLE_R;
-        let x_on  = PILL_HALO + PILL_W - CIRCLE_MARGIN - CIRCLE_R;
+        let x_on = PILL_HALO + PILL_W - CIRCLE_MARGIN - CIRCLE_R;
         x_off + (x_on - x_off) * t.clamp(0.0, 1.0)
     }
 }
@@ -163,20 +186,42 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 // ── Widget impl ────────────────────────────────────────────────────────────
 
 impl Widget for ToggleSwitch {
-    fn type_name(&self) -> &'static str { "ToggleSwitch" }
+    fn type_name(&self) -> &'static str {
+        "ToggleSwitch"
+    }
 
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     /// Always returns the fixed pill size (plus a 1 px halo margin on
     /// every side); the available space is ignored.  See [`PILL_HALO`]
@@ -204,11 +249,11 @@ impl Widget for ToggleSwitch {
         // Interpolate between the off colour (gray) and the on colour (accent);
         // a separate hover tint is applied as a multiplicative brighten.
         let off_color = v.widget_stroke;
-        let on_color  = v.accent;
+        let on_color = v.accent;
         let mut bg = lerp_color(off_color, on_color, t as f32);
         if self.hovered {
             let hover_off = v.widget_bg_hovered;
-            let hover_on  = v.accent_hovered;
+            let hover_on = v.accent_hovered;
             bg = lerp_color(hover_off, hover_on, t as f32);
         }
         ctx.set_fill_color(bg);
@@ -238,18 +283,28 @@ impl Widget for ToggleSwitch {
         // `reset_clip` so the ring can render the full ripple geometry (then
         // `restore` puts the saved clip state back before returning).
         let ring_t = self.press_anim.tick();
-        if ring_t <= 0.001 { return; }
+        if ring_t <= 0.001 {
+            return;
+        }
 
-        let v  = ctx.visuals();
+        let v = ctx.visuals();
         let cx = Self::circle_cx_at(self.anim.value());
         let cy = PILL_HALO + PILL_H * 0.5;
-        let toggle_color = if self.is_on() { v.accent } else { v.widget_stroke };
-        let alpha        = RING_PEAK_ALPHA * (ring_t as f32);
+        let toggle_color = if self.is_on() {
+            v.accent
+        } else {
+            v.widget_stroke
+        };
+        let alpha = RING_PEAK_ALPHA * (ring_t as f32);
 
         ctx.save();
         ctx.reset_clip();
         ctx.set_fill_color(Color::rgba(
-            toggle_color.r, toggle_color.g, toggle_color.b, alpha));
+            toggle_color.r,
+            toggle_color.g,
+            toggle_color.b,
+            alpha,
+        ));
         ctx.begin_path();
         ctx.circle(cx, cy, RING_MAX_R * ring_t);
         ctx.fill();
@@ -261,25 +316,41 @@ impl Widget for ToggleSwitch {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                ..
+            } => {
                 // Consume on down so the widget "captures" the gesture, and
                 // start the press-ring expand animation.
                 self.press_anim.set_target(1.0);
                 crate::animation::request_tick();
                 EventResult::Consumed
             }
-            Event::MouseUp { button: MouseButton::Left, pos, .. } => {
-                if self.hit_test(*pos) { self.toggle(); }
+            Event::MouseUp {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
+                if self.hit_test(*pos) {
+                    self.toggle();
+                }
                 // Ring fades back out whether or not the release landed on us.
                 self.press_anim.set_target(0.0);
                 crate::animation::request_tick();
                 EventResult::Consumed
             }
-            Event::KeyDown { key: Key::Char(' '), .. }
-            | Event::KeyDown { key: Key::Enter, .. } => {
+            Event::KeyDown {
+                key: Key::Char(' '),
+                ..
+            }
+            | Event::KeyDown {
+                key: Key::Enter, ..
+            } => {
                 self.toggle();
                 crate::animation::request_tick();
                 EventResult::Consumed
@@ -292,7 +363,9 @@ impl Widget for ToggleSwitch {
     /// The halo margin is excluded so the ~1 px ring around the pill
     /// doesn't register as pointer-over.
     fn hit_test(&self, local_pos: crate::geometry::Point) -> bool {
-        local_pos.x >= PILL_HALO && local_pos.x <= PILL_HALO + PILL_W
-            && local_pos.y >= PILL_HALO && local_pos.y <= PILL_HALO + PILL_H
+        local_pos.x >= PILL_HALO
+            && local_pos.x <= PILL_HALO + PILL_W
+            && local_pos.y >= PILL_HALO
+            && local_pos.y <= PILL_HALO + PILL_H
     }
 }

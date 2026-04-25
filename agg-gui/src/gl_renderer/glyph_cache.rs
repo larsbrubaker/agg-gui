@@ -32,8 +32,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::text::{Font, flatten_glyph_at_origin};
 use crate::gl_renderer::tessellate_fill;
+use crate::text::{flatten_glyph_at_origin, Font};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -64,21 +64,18 @@ pub struct GlyphCache {
 impl GlyphCache {
     /// Create an empty cache.
     pub fn new() -> Self {
-        GlyphCache { entries: HashMap::new() }
+        GlyphCache {
+            entries: HashMap::new(),
+        }
     }
 
     /// Return the cached tessellation for `(font, glyph_id, size)`, tessellating
     /// on first access.
     ///
     /// Returns `None` for glyphs with no visible outline (space, tab, etc.).
-    pub fn get_or_insert(
-        &mut self,
-        font:     &Font,
-        glyph_id: u16,
-        size:     f64,
-    ) -> Option<&CachedGlyph> {
+    pub fn get_or_insert(&mut self, font: &Font, glyph_id: u16, size: f64) -> Option<&CachedGlyph> {
         let key = GlyphKey {
-            font_ptr:  Arc::as_ptr(&font.data) as usize,
+            font_ptr: Arc::as_ptr(&font.data) as usize,
             glyph_id,
             size_bits: size.to_bits(),
         };
@@ -107,7 +104,9 @@ impl GlyphCache {
 }
 
 impl Default for GlyphCache {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +137,7 @@ fn tessellate_glyph(font: &Font, glyph_id: u16, size: f64) -> Option<CachedGlyph
     } else {
         // All-CW strokes (e.g. 'T', 'E', 'N'): tessellate each contour
         // independently to avoid spurious EvenOdd holes at stroke overlaps.
-        let mut all_vf: Vec<f32>  = Vec::new();
+        let mut all_vf: Vec<f32> = Vec::new();
         let mut all_idx: Vec<u32> = Vec::new();
         for contour in &contours {
             if let Some((vf, idx)) = tessellate_fill(&[contour.clone()]) {
@@ -147,14 +146,13 @@ fn tessellate_glyph(font: &Font, glyph_id: u16, size: f64) -> Option<CachedGlyph
                 all_idx.extend(idx.iter().map(|&i| i + base));
             }
         }
-        if all_vf.is_empty() { return None; }
+        if all_vf.is_empty() {
+            return None;
+        }
         (all_vf, all_idx)
     };
 
-    let verts: Vec<[f32; 2]> = verts_flat
-        .chunks_exact(2)
-        .map(|c| [c[0], c[1]])
-        .collect();
+    let verts: Vec<[f32; 2]> = verts_flat.chunks_exact(2).map(|c| [c[0], c[1]]).collect();
 
     Some(CachedGlyph { verts, indices })
 }
@@ -164,7 +162,9 @@ fn tessellate_glyph(font: &Font, glyph_id: u16, size: f64) -> Option<CachedGlyph
 /// wind opposite to the outer boundary.
 fn contour_is_ccw(pts: &[[f32; 2]]) -> bool {
     let n = pts.len();
-    if n < 3 { return false; }
+    if n < 3 {
+        return false;
+    }
     let mut area = 0.0f32;
     for i in 0..n {
         let j = (i + 1) % n;
@@ -180,11 +180,10 @@ fn contour_is_ccw(pts: &[[f32; 2]]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::text::Font;
+    use std::sync::Arc;
 
-    const FONT_BYTES: &[u8] =
-        include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+    const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
 
     fn test_font() -> Arc<Font> {
         Arc::new(Font::from_slice(FONT_BYTES).expect("font ok"))
@@ -194,7 +193,7 @@ mod tests {
     #[test]
     fn test_cache_hit_on_second_access() {
         use crate::text::shape_glyphs;
-        let font  = test_font();
+        let font = test_font();
         let mut cache = GlyphCache::new();
 
         let glyphs = shape_glyphs(&font, "H", 14.0);
@@ -215,7 +214,7 @@ mod tests {
     #[test]
     fn test_cache_none_for_space() {
         use crate::text::shape_glyphs;
-        let font  = test_font();
+        let font = test_font();
         let mut cache = GlyphCache::new();
 
         let glyphs = shape_glyphs(&font, " ", 14.0);
@@ -223,14 +222,18 @@ mod tests {
 
         let result = cache.get_or_insert(&font, gid, 14.0);
         assert!(result.is_none(), "space glyph has no outline");
-        assert_eq!(cache.len(), 1, "None is cached to avoid re-entering the shaper");
+        assert_eq!(
+            cache.len(),
+            1,
+            "None is cached to avoid re-entering the shaper"
+        );
     }
 
     /// Different sizes must produce separate cache entries.
     #[test]
     fn test_different_sizes_are_separate_entries() {
         use crate::text::shape_glyphs;
-        let font  = test_font();
+        let font = test_font();
         let mut cache = GlyphCache::new();
 
         let gid = shape_glyphs(&font, "H", 14.0)[0].glyph_id;
@@ -244,12 +247,14 @@ mod tests {
     #[test]
     fn test_cached_verts_are_in_pixel_range() {
         use crate::text::shape_glyphs;
-        let font  = test_font();
+        let font = test_font();
         let mut cache = GlyphCache::new();
         let size = 14.0_f64;
 
         let gid = shape_glyphs(&font, "H", size)[0].glyph_id;
-        let cached = cache.get_or_insert(&font, gid, size).expect("H has outline");
+        let cached = cache
+            .get_or_insert(&font, gid, size)
+            .expect("H has outline");
 
         for &[x, y] in &cached.verts {
             assert!(

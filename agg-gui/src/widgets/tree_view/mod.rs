@@ -6,22 +6,23 @@
 //! returns, so the `clip_rect` set at the end of `paint()` is active during
 //! child painting.
 
-mod node;
 mod drag;
+mod node;
 pub mod row;
 
+use drag::{
+    apply_drop, compute_drop_target, paint_drop_child_highlight, paint_drop_line, paint_ghost,
+};
+use node::{flatten_visible, DragState, DropPosition, FlatRow};
 pub use node::{NodeIcon, TreeNode};
+use row::{icon_color, EXPAND_W};
 pub use row::{ExpandToggle, NodeIconWidget, TreeRow};
-use node::{DragState, DropPosition, FlatRow, flatten_visible};
-use drag::{apply_drop, compute_drop_target, paint_drop_child_highlight,
-           paint_drop_line, paint_ghost};
-use row::{EXPAND_W, icon_color};
 
 use std::sync::Arc;
 
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -125,17 +126,47 @@ impl TreeView {
         }
     }
 
-    pub fn with_row_height(mut self, h: f64) -> Self { self.row_height = h; self }
-    pub fn with_indent_width(mut self, w: f64) -> Self { self.indent_width = w; self }
-    pub fn with_font_size(mut self, s: f64) -> Self { self.font_size = s; self }
-    pub fn with_drag_enabled(mut self) -> Self { self.drag_enabled = true; self }
-    pub fn with_toggle_on_row_click(mut self) -> Self { self.toggle_on_row_click = true; self }
+    pub fn with_row_height(mut self, h: f64) -> Self {
+        self.row_height = h;
+        self
+    }
+    pub fn with_indent_width(mut self, w: f64) -> Self {
+        self.indent_width = w;
+        self
+    }
+    pub fn with_font_size(mut self, s: f64) -> Self {
+        self.font_size = s;
+        self
+    }
+    pub fn with_drag_enabled(mut self) -> Self {
+        self.drag_enabled = true;
+        self
+    }
+    pub fn with_toggle_on_row_click(mut self) -> Self {
+        self.toggle_on_row_click = true;
+        self
+    }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     /// Add a root-level node; returns its index.
     pub fn add_root(&mut self, label: impl Into<String>, icon: NodeIcon) -> usize {
@@ -152,18 +183,22 @@ impl TreeView {
         label: impl Into<String>,
         icon: NodeIcon,
     ) -> usize {
-        let order = self.nodes
+        let order = self
+            .nodes
             .iter()
             .filter(|n| n.parent == Some(parent_idx))
             .count() as u32;
         let idx = self.nodes.len();
-        self.nodes.push(TreeNode::new(label, icon, Some(parent_idx), order));
+        self.nodes
+            .push(TreeNode::new(label, icon, Some(parent_idx), order));
         idx
     }
 
     /// Expand the node at `idx`.
     pub fn expand(&mut self, idx: usize) {
-        if idx < self.nodes.len() { self.nodes[idx].is_expanded = true; }
+        if idx < self.nodes.len() {
+            self.nodes[idx].is_expanded = true;
+        }
     }
 }
 
@@ -172,7 +207,9 @@ impl TreeView {
 // ---------------------------------------------------------------------------
 
 impl TreeView {
-    fn scrollbar_x(&self) -> f64 { self.bounds.width - SCROLLBAR_W }
+    fn scrollbar_x(&self) -> f64 {
+        self.bounds.width - SCROLLBAR_W
+    }
 
     fn max_scroll(&self) -> f64 {
         (self.content_height - self.bounds.height).max(0.0)
@@ -180,7 +217,9 @@ impl TreeView {
 
     fn thumb_metrics(&self) -> Option<(f64, f64)> {
         let h = self.bounds.height;
-        if self.content_height <= h { return None; }
+        if self.content_height <= h {
+            return None;
+        }
         let ratio = h / self.content_height;
         let thumb_h = (h * ratio).max(20.0);
         let track_h = h - thumb_h;
@@ -218,7 +257,9 @@ impl TreeView {
 
 impl TreeView {
     fn select_single(&mut self, node_idx: usize) {
-        for n in &mut self.nodes { n.is_selected = false; }
+        for n in &mut self.nodes {
+            n.is_selected = false;
+        }
         self.nodes[node_idx].is_selected = true;
         self.cursor_node = Some(node_idx);
     }
@@ -233,7 +274,9 @@ impl TreeView {
         let b = rows.iter().position(|r| r.node_idx == target_node);
         if let (Some(a), Some(b)) = (a, b) {
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-            for n in &mut self.nodes { n.is_selected = false; }
+            for n in &mut self.nodes {
+                n.is_selected = false;
+            }
             for r in &rows[lo..=hi] {
                 self.nodes[r.node_idx].is_selected = true;
             }
@@ -242,12 +285,14 @@ impl TreeView {
     }
 
     fn move_cursor(&mut self, delta: i32, rows: &[FlatRow]) {
-        if rows.is_empty() { return; }
-        let cur_flat = self.cursor_node
+        if rows.is_empty() {
+            return;
+        }
+        let cur_flat = self
+            .cursor_node
             .and_then(|ni| rows.iter().position(|r| r.node_idx == ni))
             .unwrap_or(0);
-        let new_flat = (cur_flat as i32 + delta)
-            .clamp(0, rows.len() as i32 - 1) as usize;
+        let new_flat = (cur_flat as i32 + delta).clamp(0, rows.len() as i32 - 1) as usize;
         let ni = rows[new_flat].node_idx;
         self.select_single(ni);
         // Scroll to keep the new row visible.
@@ -256,7 +301,8 @@ impl TreeView {
 
     /// Returns the node index currently under the cursor, or `None`.
     pub fn hovered_node_idx(&self) -> Option<usize> {
-        self.hovered_row.and_then(|ri| self.row_metas.get(ri).map(|m| m.node_idx))
+        self.hovered_row
+            .and_then(|ri| self.row_metas.get(ri).map(|m| m.node_idx))
     }
 
     fn scroll_to_row(&mut self, flat_idx: usize) {
@@ -264,9 +310,8 @@ impl TreeView {
         // The framework calls `layout()` every frame before rendering, so `scroll_offset`
         // changes here will be reflected before the next mouse hit-test.
         // Y-up coordinates: y_bottom is the lower edge (smaller Y) and y_top is the upper edge (larger Y).
-        let y_bottom = self.bounds.height
-            - (flat_idx as f64 + 1.0) * self.row_height
-            + self.scroll_offset;
+        let y_bottom =
+            self.bounds.height - (flat_idx as f64 + 1.0) * self.row_height + self.scroll_offset;
         let y_top = y_bottom + self.row_height;
         if y_bottom < 0.0 {
             self.scroll_offset = (self.scroll_offset - y_bottom).min(self.max_scroll());
@@ -281,25 +326,51 @@ impl TreeView {
 // ---------------------------------------------------------------------------
 
 impl Widget for TreeView {
-    fn type_name(&self) -> &'static str { "TreeView" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.row_widgets }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.row_widgets }
-    fn is_focusable(&self) -> bool { true }
+    fn type_name(&self) -> &'static str {
+        "TreeView"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.row_widgets
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.row_widgets
+    }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn hit_test(&self, local_pos: Point) -> bool {
         // Capture all events during drags even if cursor leaves bounds.
-        if self.drag.is_some() || self.dragging_scrollbar { return true; }
+        if self.drag.is_some() || self.dragging_scrollbar {
+            return true;
+        }
         let b = self.bounds();
-        local_pos.x >= 0.0 && local_pos.x <= b.width
-            && local_pos.y >= 0.0 && local_pos.y <= b.height
+        local_pos.x >= 0.0
+            && local_pos.x <= b.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= b.height
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -307,10 +378,10 @@ impl Widget for TreeView {
         self.content_height = rows.len() as f64 * self.row_height;
         self.scroll_offset = self.scroll_offset.clamp(0.0, self.max_scroll());
 
-        let h         = available.height;
-        let w         = available.width - SCROLLBAR_W;
-        let rh        = self.row_height;
-        let ind       = self.indent_width;
+        let h = available.height;
+        let w = available.width - SCROLLBAR_W;
+        let rh = self.row_height;
+        let ind = self.indent_width;
         let font_size = self.font_size;
 
         self.row_widgets.clear();
@@ -318,7 +389,11 @@ impl Widget for TreeView {
 
         for (i, flat) in rows.iter().enumerate() {
             // Skip the node being dragged — its ghost is painted at the cursor instead.
-            if self.drag.as_ref().map_or(false, |d| d.live && d.node_idx == flat.node_idx) {
+            if self
+                .drag
+                .as_ref()
+                .map_or(false, |d| d.live && d.node_idx == flat.node_idx)
+            {
                 continue;
             }
 
@@ -354,7 +429,10 @@ impl Widget for TreeView {
                 None
             };
 
-            self.row_metas.push(RowMeta { node_idx: flat.node_idx, toggle_rect });
+            self.row_metas.push(RowMeta {
+                node_idx: flat.node_idx,
+                toggle_rect,
+            });
             self.row_widgets.push(Box::new(tree_row));
         }
 
@@ -403,19 +481,27 @@ impl Widget for TreeView {
         let rows = flatten_visible(&self.nodes);
         if let Some(drop_target) = self.drop_target {
             if self.drag.as_ref().map_or(false, |d| d.live) {
-                let rh  = self.row_height;
+                let rh = self.row_height;
                 let off = self.scroll_offset;
                 let ind = self.indent_width;
                 let ref_node = match drop_target {
-                    DropPosition::Before(ni) | DropPosition::After(ni) | DropPosition::AsChild(ni) => ni,
+                    DropPosition::Before(ni)
+                    | DropPosition::After(ni)
+                    | DropPosition::AsChild(ni) => ni,
                 };
                 if let Some(ri) = rows.iter().position(|r| r.node_idx == ref_node) {
                     let y_bot = h - (ri as f64 + 1.0) * rh + off;
                     let indent = rows[ri].depth as f64 * ind + EXPAND_W;
                     match drop_target {
-                        DropPosition::Before(_) => paint_drop_line(ctx, indent, y_bot + rh, content_w - indent),
-                        DropPosition::After(_)  => paint_drop_line(ctx, indent, y_bot, content_w - indent),
-                        DropPosition::AsChild(_) => paint_drop_child_highlight(ctx, y_bot, content_w, rh),
+                        DropPosition::Before(_) => {
+                            paint_drop_line(ctx, indent, y_bot + rh, content_w - indent)
+                        }
+                        DropPosition::After(_) => {
+                            paint_drop_line(ctx, indent, y_bot, content_w - indent)
+                        }
+                        DropPosition::AsChild(_) => {
+                            paint_drop_child_highlight(ctx, y_bot, content_w, rh)
+                        }
                     }
                 }
             }
@@ -423,11 +509,11 @@ impl Widget for TreeView {
         if let Some(drag) = &self.drag {
             if drag.live {
                 let label = self.nodes[drag.node_idx].label.clone();
-                let ic    = icon_color(self.nodes[drag.node_idx].icon);
-                let pos   = drag.current_pos;
-                let rh    = self.row_height;
-                let font  = Arc::clone(&self.font);
-                let fs    = self.font_size;
+                let ic = icon_color(self.nodes[drag.node_idx].icon);
+                let pos = drag.current_pos;
+                let rh = self.row_height;
+                let font = Arc::clone(&self.font);
+                let fs = self.font_size;
                 paint_ghost(ctx, &label, pos, content_w, rh, &font, fs, ic);
             }
         }
@@ -440,8 +526,14 @@ impl Widget for TreeView {
         // request.  Events that bubble away as `Ignored` do NOT tick,
         // honouring the "only repaint on real change" contract.
         let result = match event {
-            Event::FocusGained => { self.focused = true;  EventResult::Consumed }
-            Event::FocusLost   => { self.focused = false; EventResult::Consumed }
+            Event::FocusGained => {
+                self.focused = true;
+                EventResult::Consumed
+            }
+            Event::FocusLost => {
+                self.focused = false;
+                EventResult::Consumed
+            }
 
             Event::MouseWheel { delta_y, .. } => {
                 // Convention: delta_y > 0 = user scrolled DOWN (wants to see content below).
@@ -453,12 +545,16 @@ impl Widget for TreeView {
             }
 
             Event::MouseMove { pos } => self.handle_mouse_move(*pos),
-            Event::MouseDown { pos, button: MouseButton::Left, modifiers } => {
-                self.handle_mouse_down(*pos, *modifiers)
-            }
-            Event::MouseUp { button: MouseButton::Left, pos, .. } => {
-                self.handle_mouse_up(*pos)
-            }
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                modifiers,
+            } => self.handle_mouse_down(*pos, *modifiers),
+            Event::MouseUp {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => self.handle_mouse_up(*pos),
             Event::KeyDown { key, modifiers } => self.handle_key_down(key, *modifiers),
             _ => EventResult::Ignored,
         };
@@ -500,9 +596,13 @@ impl TreeView {
                 let node_idx = drag.node_idx;
                 let rows = flatten_visible(&self.nodes);
                 self.drop_target = compute_drop_target(
-                    pos, &rows, &self.nodes,
-                    self.bounds.height, self.row_height,
-                    self.scroll_offset, self.drag.as_ref().unwrap(),
+                    pos,
+                    &rows,
+                    &self.nodes,
+                    self.bounds.height,
+                    self.row_height,
+                    self.scroll_offset,
+                    self.drag.as_ref().unwrap(),
                 );
                 let _ = node_idx;
             }
@@ -524,7 +624,7 @@ impl TreeView {
         let Some(flat_i) = self.row_index_at(pos) else {
             return EventResult::Ignored;
         };
-        let meta     = &self.row_metas[flat_i];
+        let meta = &self.row_metas[flat_i];
         let node_idx = meta.node_idx;
 
         // Expand/collapse: any click on a row with children toggles it when
@@ -537,8 +637,7 @@ impl TreeView {
                 self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
             }
         } else if let Some(tr) = meta.toggle_rect {
-            if pos.x >= tr.x && pos.x < tr.x + tr.width
-                && pos.y >= tr.y && pos.y < tr.y + tr.height
+            if pos.x >= tr.x && pos.x < tr.x + tr.width && pos.y >= tr.y && pos.y < tr.y + tr.height
             {
                 self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
             }
@@ -598,8 +697,14 @@ impl TreeView {
     fn handle_key_down(&mut self, key: &Key, mods: Modifiers) -> EventResult {
         let rows = flatten_visible(&self.nodes);
         match key {
-            Key::ArrowDown => { self.move_cursor(1, &rows);  EventResult::Consumed }
-            Key::ArrowUp   => { self.move_cursor(-1, &rows); EventResult::Consumed }
+            Key::ArrowDown => {
+                self.move_cursor(1, &rows);
+                EventResult::Consumed
+            }
+            Key::ArrowUp => {
+                self.move_cursor(-1, &rows);
+                EventResult::Consumed
+            }
             Key::ArrowRight => {
                 if let Some(ni) = self.cursor_node {
                     if !self.nodes[ni].is_expanded

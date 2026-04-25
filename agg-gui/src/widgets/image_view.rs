@@ -13,76 +13,116 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
 pub struct ImageView {
-    bounds:   Rect,
-    children: Vec<Box<dyn Widget>>,   // always empty
-    base:     WidgetBase,
-    font:     Arc<Font>,
-    source:   Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>, // always empty
+    base: WidgetBase,
+    font: Arc<Font>,
+    source: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
     /// Text shown when `source` is `None`.
-    placeholder:   String,
+    placeholder: String,
     /// Height floor; the widget expands to available height but never below.
-    min_height:    f64,
+    min_height: f64,
     /// When `true` (default), paints a 1-px outline around the image.
-    outline:       bool,
+    outline: bool,
     /// When `true` (default), fills the widget's rounded rect with
     /// `visuals().bg_color` before drawing the image.
     fill_background: bool,
 }
 
 impl ImageView {
-    pub fn new(
-        font:   Arc<Font>,
-        source: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
-    ) -> Self {
+    pub fn new(font: Arc<Font>, source: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            base:     WidgetBase::new(),
+            base: WidgetBase::new(),
             font,
             source,
-            placeholder:     "No image yet.".into(),
-            min_height:      120.0,
-            outline:         true,
+            placeholder: "No image yet.".into(),
+            min_height: 120.0,
+            outline: true,
             fill_background: true,
         }
     }
 
     pub fn with_placeholder(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into(); self
+        self.placeholder = text.into();
+        self
     }
-    pub fn with_min_height(mut self, h: f64) -> Self { self.min_height = h; self }
-    pub fn with_outline(mut self, on: bool) -> Self { self.outline = on; self }
+    pub fn with_min_height(mut self, h: f64) -> Self {
+        self.min_height = h;
+        self
+    }
+    pub fn with_outline(mut self, on: bool) -> Self {
+        self.outline = on;
+        self
+    }
     pub fn with_fill_background(mut self, on: bool) -> Self {
-        self.fill_background = on; self
+        self.fill_background = on;
+        self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
 impl Widget for ImageView {
-    fn type_name(&self) -> &'static str { "ImageView" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ImageView"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let h = available.height.max(self.min_height);
@@ -135,5 +175,7 @@ impl Widget for ImageView {
         let _ = Color::white();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
 }

@@ -22,10 +22,10 @@
 //! common situation inside a `FlexColumn`, where stacking widgets
 //! push later siblings down when earlier ones grow.
 
-use std::rc::Rc;
 use std::cell::Cell;
+use std::rc::Rc;
 
-use crate::cursor::{CursorIcon, set_cursor_icon};
+use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
@@ -44,8 +44,8 @@ pub struct Resize {
     /// Current size the user has dragged to.  `None` before the first
     /// drag → layout uses `default_size` clamped against available.
     current_size: Option<Size>,
-    min_size:     Size,
-    max_size:     Size,
+    min_size: Size,
+    max_size: Size,
     default_size: Size,
 
     /// Optional external cell that mirrors `current_size` for
@@ -53,8 +53,8 @@ pub struct Resize {
     size_cell: Option<Rc<Cell<Size>>>,
 
     // ── drag state ────────────────────────────────────────────────
-    dragging:        bool,
-    hover_handle:    bool,
+    dragging: bool,
+    hover_handle: bool,
     /// Mouse position in APP-LEVEL world coords at drag start.  Using
     /// world (not widget-local or parent-relative) coords is required
     /// because a nested `Resize` inside an auto-sized `Window` has
@@ -62,7 +62,7 @@ pub struct Resize {
     /// widget-local event positions shift even when the user's cursor
     /// is stationary.  World coords are the only invariant reference.
     drag_start_world: Point,
-    drag_start_size:  Size,
+    drag_start_size: Size,
 }
 
 impl Resize {
@@ -72,28 +72,37 @@ impl Resize {
     /// demo-friendly" values; match egui's `Resize::default().show(...)`.
     pub fn new(child: Box<dyn Widget>) -> Self {
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: vec![child],
-            base:     WidgetBase::new(),
+            base: WidgetBase::new(),
             current_size: None,
-            min_size:     Size::new(80.0,  40.0),
+            min_size: Size::new(80.0, 40.0),
             // Generous default max — we want `Resize` to be able to
             // grow up to whatever the surrounding layout allows.
             // Override via `with_max_size_hint` to impose a tighter
             // cap; this value is way beyond any realistic screen.
-            max_size:     Size::new(8000.0, 6000.0),
+            max_size: Size::new(8000.0, 6000.0),
             default_size: Size::new(200.0, 150.0),
-            size_cell:    None,
-            dragging:          false,
-            hover_handle:      false,
-            drag_start_world:  Point::ORIGIN,
-            drag_start_size:   Size::new(0.0, 0.0),
+            size_cell: None,
+            dragging: false,
+            hover_handle: false,
+            drag_start_world: Point::ORIGIN,
+            drag_start_size: Size::new(0.0, 0.0),
         }
     }
 
-    pub fn with_default_size(mut self, s: Size) -> Self { self.default_size = s; self }
-    pub fn with_min_size_hint(mut self, s: Size) -> Self { self.min_size     = s; self }
-    pub fn with_max_size_hint(mut self, s: Size) -> Self { self.max_size     = s; self }
+    pub fn with_default_size(mut self, s: Size) -> Self {
+        self.default_size = s;
+        self
+    }
+    pub fn with_min_size_hint(mut self, s: Size) -> Self {
+        self.min_size = s;
+        self
+    }
+    pub fn with_max_size_hint(mut self, s: Size) -> Self {
+        self.max_size = s;
+        self
+    }
 
     /// Bind the current size to a shared `Cell<Size>`.  Reads during
     /// layout (so callers can programmatically drive size), writes
@@ -105,9 +114,18 @@ impl Resize {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
 
     /// Public accessor for tests and inspector integrations.
     pub fn current_size(&self) -> Size {
@@ -126,28 +144,47 @@ impl Resize {
 
     fn in_handle(&self, p: Point) -> bool {
         let h = self.handle_rect();
-        p.x >= h.x && p.x <= h.x + h.width
-            && p.y >= h.y && p.y <= h.y + h.height
+        p.x >= h.x && p.x <= h.x + h.width && p.y >= h.y && p.y <= h.y + h.height
     }
 }
 
 impl Widget for Resize {
-    fn type_name(&self) -> &'static str { "Resize" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "Resize"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.min_size }
-    fn max_size(&self) -> Size    { self.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let _ = available; // Intentionally ignored — see below.
-        // Pick up the latest cell value each frame so external writes
-        // (e.g. persistence restore) propagate into layout.
+                           // Pick up the latest cell value each frame so external writes
+                           // (e.g. persistence restore) propagate into layout.
         if let Some(c) = &self.size_cell {
             self.current_size = Some(c.get());
         }
@@ -160,8 +197,10 @@ impl Widget for Resize {
         // to fit on the next layout pass.  Matches egui, where the
         // surrounding Window expands when the inner Resize demands
         // more width or height.
-        let w_target = target.width .clamp(self.min_size.width,  self.max_size.width);
-        let h_target = target.height.clamp(self.min_size.height, self.max_size.height);
+        let w_target = target.width.clamp(self.min_size.width, self.max_size.width);
+        let h_target = target
+            .height
+            .clamp(self.min_size.height, self.max_size.height);
 
         // Content-bound floor: measure the child at the requested
         // target, and if its natural size is larger (e.g. wrapped
@@ -219,7 +258,7 @@ impl Widget for Resize {
             let off = i as f64 * 4.0 + m;
             ctx.begin_path();
             ctx.move_to(w - off, m);
-            ctx.line_to(w - m,   off);
+            ctx.line_to(w - m, off);
             ctx.stroke();
         }
         // `h` used only by the stroke above; mark silenced for any
@@ -240,22 +279,23 @@ impl Widget for Resize {
                     // come from `App` via a thread-local set by the
                     // same entry point that dispatched this event, so
                     // they're stable against ancestor reshuffling.
-                    let world = crate::widget::current_mouse_world()
-                        .unwrap_or_else(|| Point::new(
-                            pos.x + self.bounds.x, pos.y + self.bounds.y,
-                        ));
+                    let world = crate::widget::current_mouse_world().unwrap_or_else(|| {
+                        Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y)
+                    });
                     let dx = world.x - self.drag_start_world.x;
                     let dy = world.y - self.drag_start_world.y;
                     // SE handle semantics:
                     //   cursor right  → width  grows  (+dx)
                     //   cursor down   → height grows  (in Y-up, down = dy<0 → -dy)
                     let new_w = (self.drag_start_size.width + dx)
-                        .clamp(self.min_size.width,  self.max_size.width);
+                        .clamp(self.min_size.width, self.max_size.width);
                     let new_h = (self.drag_start_size.height - dy)
                         .clamp(self.min_size.height, self.max_size.height);
                     let new_sz = Size::new(new_w, new_h);
                     self.current_size = Some(new_sz);
-                    if let Some(c) = &self.size_cell { c.set(new_sz); }
+                    if let Some(c) = &self.size_cell {
+                        c.set(new_sz);
+                    }
                     set_cursor_icon(CursorIcon::ResizeNwSe);
                     crate::animation::request_tick();
                     return EventResult::Consumed;
@@ -270,9 +310,11 @@ impl Widget for Resize {
                 }
                 EventResult::Ignored
             }
-            Event::MouseDown { pos, button: MouseButton::Left, .. }
-                if self.in_handle(*pos) =>
-            {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } if self.in_handle(*pos) => {
                 self.dragging = true;
                 // Snapshot the world cursor pos at drag start.  If
                 // unavailable (a unit test dispatching events directly
@@ -280,9 +322,7 @@ impl Widget for Resize {
                 // relative — widget-local drag semantics work when no
                 // ancestor layout ripple is happening.
                 self.drag_start_world = crate::widget::current_mouse_world()
-                    .unwrap_or_else(|| Point::new(
-                        pos.x + self.bounds.x, pos.y + self.bounds.y,
-                    ));
+                    .unwrap_or_else(|| Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y));
                 self.drag_start_size = Size::new(self.bounds.width, self.bounds.height);
                 set_cursor_icon(CursorIcon::ResizeNwSe);
                 crate::animation::request_tick();
@@ -298,8 +338,10 @@ impl Widget for Resize {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 
     fn properties(&self) -> Vec<(&'static str, String)> {
@@ -307,9 +349,9 @@ impl Widget for Resize {
         vec![
             ("current_w", format!("{:.1}", s.width)),
             ("current_h", format!("{:.1}", s.height)),
-            ("min_w",     format!("{:.1}", self.min_size.width)),
-            ("max_w",     format!("{:.1}", self.max_size.width)),
-            ("dragging",  self.dragging.to_string()),
+            ("min_w", format!("{:.1}", self.min_size.width)),
+            ("max_w", format!("{:.1}", self.max_size.width)),
+            ("dragging", self.dragging.to_string()),
         ]
     }
 }

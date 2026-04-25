@@ -28,31 +28,33 @@
 
 mod gl_resources;
 
-use demo_gl::{GlGfxCtx, begin_frame, render_app_frame};
+use demo_gl::{begin_frame, render_app_frame, GlGfxCtx};
 use gl_resources::{GlCubeWidget, GlState, CUBE_SCREEN_RECT};
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use agg_gui::{App, Font, InspectorNode, Key, Modifiers, MouseButton, Rect, Size};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use agg_gui::{App, Font, InspectorNode, Key, Modifiers, MouseButton, Rect, Size};
 
 // Embed the font family at compile time.  The primary font is CascadiaCode;
 // Font Awesome 4 supplies the sidebar/button icons (private-use codepoints);
 // NotoEmoji fills in true emoji.  Same fallback chain as the native harness.
-const FONT_BYTES:  &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
-const FA_BYTES:    &[u8] = include_bytes!("../../demo/assets/fa.ttf");
+const FONT_BYTES: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+const FA_BYTES: &[u8] = include_bytes!("../../demo/assets/fa.ttf");
 const EMOJI_BYTES: &[u8] = include_bytes!("../../demo/assets/NotoEmoji-Regular.ttf");
 
 fn make_font() -> Arc<Font> {
     let emoji = Font::from_slice(EMOJI_BYTES).expect("parse NotoEmoji-Regular.ttf");
-    let fa    = Font::from_slice(FA_BYTES).expect("parse fa.ttf")
+    let fa = Font::from_slice(FA_BYTES)
+        .expect("parse fa.ttf")
         .with_fallback(Arc::new(emoji));
     Arc::new(
-        Font::from_slice(FONT_BYTES).expect("parse CascadiaCode.ttf")
-            .with_fallback(Arc::new(fa))
+        Font::from_slice(FONT_BYTES)
+            .expect("parse CascadiaCode.ttf")
+            .with_fallback(Arc::new(fa)),
     )
 }
 
@@ -124,9 +126,7 @@ fn load_state_wasm() -> Option<demo_ui::SavedState> {
 /// to the diff-based auto-save in `render()`.
 #[allow(dead_code)]
 fn save_state_wasm(accessor: &demo_ui::StateAccessor) {
-    if let Some(storage) = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-    {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let state = accessor.current_state();
         let _ = storage.set_item("agg-gui-demo-state", &state.serialize());
     }
@@ -147,8 +147,10 @@ fn ensure_demo_app() {
             // (runs later in the same tick) will hand to the browser:
             // `> 0` = antialias on.  Browsers don't expose the actual
             // sample count they chose, so we report a nominal `4` when on.
-            let running_msaa_on = initial_state.as_ref()
-                .map(|s| s.msaa_samples > 0).unwrap_or(false);
+            let running_msaa_on = initial_state
+                .as_ref()
+                .map(|s| s.msaa_samples > 0)
+                .unwrap_or(false);
             let running_msaa: u8 = if running_msaa_on { 4 } else { 0 };
             let platform = demo_ui::PlatformHooks::web(running_msaa, || {
                 if let Some(win) = web_sys::window() {
@@ -168,9 +170,11 @@ fn ensure_demo_app() {
             HOVERED_BOUNDS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.hovered_bounds)));
             SCREEN_SIZE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screen_size)));
             FRAME_HISTORY.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.frame_history)));
-            SCREENSHOT_REQUEST.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_request)));
+            SCREENSHOT_REQUEST
+                .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_request)));
             SCREENSHOT_IMAGE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_image)));
-            SCREENSHOT_CAPTURING.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_capturing)));
+            SCREENSHOT_CAPTURING
+                .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_capturing)));
             CUBE_VISIBLE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.cube_visible)));
             STATE_ACCESSOR.with(|c| *c.borrow_mut() = Some(handles.state));
             *cell.borrow_mut() = Some(app);
@@ -190,9 +194,7 @@ fn ensure_gl_state() {
 /// Ensure the persistent `GlGfxCtx` is created (uses `GL_STATE`'s context).
 fn ensure_gl_ctx(width: f32, height: f32) {
     // Get the Rc<glow::Context> from GL_STATE without keeping GL_STATE borrowed.
-    let gl_rc = GL_STATE.with(|cell| {
-        cell.borrow().as_ref().map(|s| s.gl_rc())
-    });
+    let gl_rc = GL_STATE.with(|cell| cell.borrow().as_ref().map(|s| s.gl_rc()));
     let gl_rc = gl_rc.expect("GL_STATE must be initialised before ensure_gl_ctx");
 
     GL_CTX.with(|cell| {
@@ -272,23 +274,29 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
     // then paints the widget tree via `render_app_frame` (which also
     // syncs the inspector snapshot internally).
     CUBE_SCREEN_RECT.with(|r| r.set(agg_gui::Rect::default()));
-    let show_inspector = SHOW_INSPECTOR.with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
-    let screenshot_request_rc   = SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let show_inspector =
+        SHOW_INSPECTOR.with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
+    let screenshot_request_rc = SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(Rc::clone));
     let screenshot_capturing_rc = SCREENSHOT_CAPTURING.with(|c| c.borrow().as_ref().map(Rc::clone));
-    let screenshot_image_rc     = SCREENSHOT_IMAGE.with(|c| c.borrow().as_ref().map(Rc::clone));
-    let inspector_nodes_rc      = INSPECTOR_NODES.with(|c| c.borrow().as_ref().map(Rc::clone));
-    let hovered_bounds_rc       = HOVERED_BOUNDS.with(|c| c.borrow().as_ref().map(Rc::clone));
-    let gl_rc_for_clear         = GL_STATE.with(|gl_cell| gl_cell.borrow().as_ref().map(|s| s.gl_rc()));
-    if let (Some(req), Some(cap), Some(img),
-            Some(nodes), Some(hb), Some(gl_rc)) = (
-        screenshot_request_rc, screenshot_capturing_rc, screenshot_image_rc,
-        inspector_nodes_rc, hovered_bounds_rc, gl_rc_for_clear,
+    let screenshot_image_rc = SCREENSHOT_IMAGE.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let inspector_nodes_rc = INSPECTOR_NODES.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let hovered_bounds_rc = HOVERED_BOUNDS.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let gl_rc_for_clear = GL_STATE.with(|gl_cell| gl_cell.borrow().as_ref().map(|s| s.gl_rc()));
+    if let (Some(req), Some(cap), Some(img), Some(nodes), Some(hb), Some(gl_rc)) = (
+        screenshot_request_rc,
+        screenshot_capturing_rc,
+        screenshot_image_rc,
+        inspector_nodes_rc,
+        hovered_bounds_rc,
+        gl_rc_for_clear,
     ) {
         GL_CTX.with(|ctx_cell| {
             let mut ctx_borrow = ctx_cell.borrow_mut();
             if let Some(gl_ctx) = ctx_borrow.as_mut() {
                 agg_gui::screenshot::run_frame_with_capture(
-                    &req, &cap, &img,
+                    &req,
+                    &cap,
+                    &img,
                     gl_ctx,
                     |gc| {
                         // Each pass clears the back buffer and then paints.
@@ -296,8 +304,16 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                         DEMO_APP.with(|app_cell| {
                             let mut app_borrow = app_cell.borrow_mut();
                             if let Some(app) = app_borrow.as_mut() {
-                                render_app_frame(gc, app, width, height, frame_ms,
-                                                 show_inspector, &nodes, &hb);
+                                render_app_frame(
+                                    gc,
+                                    app,
+                                    width,
+                                    height,
+                                    frame_ms,
+                                    show_inspector,
+                                    &nodes,
+                                    &hb,
+                                );
                             }
                         });
                     },
@@ -331,8 +347,8 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                     idle,
                     || acc.current_state().serialize(),
                     |s| {
-                        if let Some(storage) = web_sys::window()
-                            .and_then(|w| w.local_storage().ok().flatten())
+                        if let Some(storage) =
+                            web_sys::window().and_then(|w| w.local_storage().ok().flatten())
                         {
                             let _ = storage.set_item("agg-gui-demo-state", s);
                         }
@@ -403,8 +419,8 @@ pub fn render_text_software(width: u32, height: u32) -> Vec<u8> {
 /// and drawing the resulting triangles with the AGG software rasterizer.
 #[wasm_bindgen]
 pub fn render_text_tess_agg_pixels(width: u32, height: u32) -> Vec<u8> {
-    use agg_gui::{Color, Framebuffer, GfxCtx};
     use agg_gui::text::shape_and_flatten_text_via_agg;
+    use agg_gui::{Color, Framebuffer, GfxCtx};
 
     let mut fb = Framebuffer::new(width, height);
     let font = make_font();
@@ -413,17 +429,21 @@ pub fn render_text_tess_agg_pixels(width: u32, height: u32) -> Vec<u8> {
         ctx.clear(Color::rgba(1.0, 1.0, 1.0, 1.0));
         ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 1.0));
 
-        let glyphs = shape_and_flatten_text_via_agg(
-            &font, "TESTING FONT RENDERING", 24.0, 20.0, 40.0,
-        );
+        let glyphs =
+            shape_and_flatten_text_via_agg(&font, "TESTING FONT RENDERING", 24.0, 20.0, 40.0);
 
         for glyph_contours in &glyphs {
             ctx.begin_path();
             for contour in glyph_contours {
-                if contour.len() < 2 { continue; }
+                if contour.len() < 2 {
+                    continue;
+                }
                 for (i, &[x, y]) in contour.iter().enumerate() {
-                    if i == 0 { ctx.move_to(x as f64, y as f64); }
-                    else { ctx.line_to(x as f64, y as f64); }
+                    if i == 0 {
+                        ctx.move_to(x as f64, y as f64);
+                    } else {
+                        ctx.line_to(x as f64, y as f64);
+                    }
                 }
             }
             ctx.fill();
@@ -463,7 +483,10 @@ pub fn render_text_gl_pixels(width: u32, height: u32) -> Vec<u8> {
             unsafe {
                 use glow::HasContext;
                 gl.read_pixels(
-                    0, 0, width as i32, height as i32,
+                    0,
+                    0,
+                    width as i32,
+                    height as i32,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
                     glow::PixelPackData::Slice(&mut raw),
@@ -541,8 +564,7 @@ pub fn on_mouse_move(x: f64, y: f64) {
     if let Some(window) = web_sys::window() {
         if let Some(doc) = window.document() {
             if let Some(el) = doc.get_element_by_id("canvas") {
-                let style = agg_gui::web_adapter::cursor_style(
-                    agg_gui::current_cursor_icon());
+                let style = agg_gui::web_adapter::cursor_style(agg_gui::current_cursor_icon());
                 let _ = el.set_attribute("style", &style);
             }
         }
@@ -553,7 +575,9 @@ pub fn on_mouse_move(x: f64, y: f64) {
 pub fn on_mouse_down(x: f64, y: f64, button: u8) {
     MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_add(1));
     let btn = match button {
-        0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
+        0 => MouseButton::Left,
+        1 => MouseButton::Middle,
+        2 => MouseButton::Right,
         n => MouseButton::Other(n),
     };
     DEMO_APP.with(|cell| {
@@ -567,7 +591,9 @@ pub fn on_mouse_down(x: f64, y: f64, button: u8) {
 pub fn on_mouse_up(x: f64, y: f64, button: u8) {
     MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_sub(1));
     let btn = match button {
-        0 => MouseButton::Left, 1 => MouseButton::Middle, 2 => MouseButton::Right,
+        0 => MouseButton::Left,
+        1 => MouseButton::Middle,
+        2 => MouseButton::Right,
         n => MouseButton::Other(n),
     };
     DEMO_APP.with(|cell| {
@@ -607,11 +633,17 @@ pub fn on_mouse_leave() {
 pub fn on_touch_start(id: u32, x: f64, y: f64, force: f64) {
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
-            let f = if force > 0.0 { Some(force as f32) } else { None };
+            let f = if force > 0.0 {
+                Some(force as f32)
+            } else {
+                None
+            };
             app.on_touch_start(
                 agg_gui::TouchDeviceId(0),
                 agg_gui::TouchId(id as u64),
-                x, y, f,
+                x,
+                y,
+                f,
             );
         }
     });
@@ -622,11 +654,17 @@ pub fn on_touch_start(id: u32, x: f64, y: f64, force: f64) {
 pub fn on_touch_move(id: u32, x: f64, y: f64, force: f64) {
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
-            let f = if force > 0.0 { Some(force as f32) } else { None };
+            let f = if force > 0.0 {
+                Some(force as f32)
+            } else {
+                None
+            };
             app.on_touch_move(
                 agg_gui::TouchDeviceId(0),
                 agg_gui::TouchId(id as u64),
-                x, y, f,
+                x,
+                y,
+                f,
             );
         }
     });
@@ -637,10 +675,7 @@ pub fn on_touch_move(id: u32, x: f64, y: f64, force: f64) {
 pub fn on_touch_end(id: u32) {
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
-            app.on_touch_end(
-                agg_gui::TouchDeviceId(0),
-                agg_gui::TouchId(id as u64),
-            );
+            app.on_touch_end(agg_gui::TouchDeviceId(0), agg_gui::TouchId(id as u64));
         }
     });
     mark_dirty();
@@ -650,10 +685,7 @@ pub fn on_touch_end(id: u32) {
 pub fn on_touch_cancel(id: u32) {
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
-            app.on_touch_cancel(
-                agg_gui::TouchDeviceId(0),
-                agg_gui::TouchId(id as u64),
-            );
+            app.on_touch_cancel(agg_gui::TouchDeviceId(0), agg_gui::TouchId(id as u64));
         }
     });
     mark_dirty();
@@ -662,7 +694,12 @@ pub fn on_touch_cancel(id: u32) {
 #[wasm_bindgen]
 pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool, meta: bool) {
     if let Some(key) = parse_js_key(key_str) {
-        let mods = Modifiers { shift, ctrl, alt, meta };
+        let mods = Modifiers {
+            shift,
+            ctrl,
+            alt,
+            meta,
+        };
         DEMO_APP.with(|cell| {
             if let Some(app) = cell.borrow_mut().as_mut() {
                 app.on_key_down(key, mods);
@@ -677,10 +714,15 @@ pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool, meta: bool
 /// focus (cursor blink), or a screenshot has been requested.
 #[wasm_bindgen]
 pub fn needs_repaint() -> bool {
-    if NEEDS_REPAINT.with(|c| c.get()) { return true; }
+    if NEEDS_REPAINT.with(|c| c.get()) {
+        return true;
+    }
     // Pending capture (button click) — harness will consume on render.
-    let ss_req = SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
-    if ss_req { return true; }
+    let ss_req =
+        SCREENSHOT_REQUEST.with(|c| c.borrow().as_ref().map(|rc| rc.get()).unwrap_or(false));
+    if ss_req {
+        return true;
+    }
     // Visibility-gated tree walk — a widget with in-flight animation,
     // pending hover transition, or scheduled cursor blink reports true
     // ONLY when it's actually visible on screen (hidden windows, closed
@@ -689,12 +731,21 @@ pub fn needs_repaint() -> bool {
     // Includes the legacy thread-local `wants_tick` as a transitional
     // fallback for widgets that still call `crate::animation::request_tick`
     // instead of overriding `Widget::needs_paint`.
-    let want = DEMO_APP.with(|c| c.borrow().as_ref().map(|a| a.wants_animation_tick()).unwrap_or(false));
-    if want { return true; }
+    let want = DEMO_APP.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|a| a.wants_animation_tick())
+            .unwrap_or(false)
+    });
+    if want {
+        return true;
+    }
     false
 }
 
-fn mark_dirty() { NEEDS_REPAINT.with(|c| c.set(true)); }
+fn mark_dirty() {
+    NEEDS_REPAINT.with(|c| c.set(true));
+}
 
 // ---------------------------------------------------------------------------
 // Key parsing

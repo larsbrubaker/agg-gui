@@ -46,6 +46,9 @@ pub fn device_scale() -> f64 {
 ///
 /// Panics in debug builds if `scale` is not positive.
 pub fn set_device_scale(scale: f64) {
-    debug_assert!(scale > 0.0, "DeviceScale must be a positive value, got {scale}");
+    debug_assert!(
+        scale > 0.0,
+        "DeviceScale must be a positive value, got {scale}"
+    );
     DEVICE_SCALE.with(|s| s.set(scale));
 }

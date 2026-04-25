@@ -39,55 +39,98 @@ use crate::widgets::tree_view::{NodeIcon, TreeNode, TreeView};
 ///
 /// Bounds are kept in sync with the real `TreeView` by `InspectorPanel::layout`.
 struct InternalPresenceNode {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    base:     WidgetBase,
-    name:     &'static str,
+    base: WidgetBase,
+    name: &'static str,
 }
 
 impl Widget for InternalPresenceNode {
-    fn type_name(&self) -> &'static str { self.name }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
-    fn layout(&mut self, _: Size) -> Size { Size::new(self.bounds.width, self.bounds.height) }
+    fn type_name(&self) -> &'static str {
+        self.name
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
+    fn layout(&mut self, _: Size) -> Size {
+        Size::new(self.bounds.width, self.bounds.height)
+    }
     fn paint(&mut self, _: &mut dyn DrawCtx) {}
-    fn hit_test(&self, _: Point) -> bool { false }
-    fn on_event(&mut self, _: &Event) -> EventResult { EventResult::Ignored }
-    fn contributes_children_to_inspector(&self) -> bool { false }
+    fn hit_test(&self, _: Point) -> bool {
+        false
+    }
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+    fn contributes_children_to_inspector(&self) -> bool {
+        false
+    }
 }
 
 // ── geometry constants ────────────────────────────────────────────────────────
 const DEFAULT_PROPS_H: f64 = 180.0;
-const FONT_SIZE:       f64 = 12.0;
-const HEADER_H:        f64 = 30.0;
-const SPLIT_HIT:       f64 = 5.0;
-const MIN_PROPS_H:     f64 = 60.0;
-const MIN_TREE_H:      f64 = 60.0;
+const FONT_SIZE: f64 = 12.0;
+const HEADER_H: f64 = 30.0;
+const SPLIT_HIT: f64 = 5.0;
+const MIN_PROPS_H: f64 = 60.0;
+const MIN_TREE_H: f64 = 60.0;
 
 // ── light theme colors ────────────────────────────────────────────────────────
 // Theme-aware colour helpers — all derive from the active `Visuals` so the
 // inspector follows light / dark mode changes without a restart.
-fn c_panel_bg (v: &crate::theme::Visuals) -> Color { v.panel_fill }
+fn c_panel_bg(v: &crate::theme::Visuals) -> Color {
+    v.panel_fill
+}
 fn c_header_bg(v: &crate::theme::Visuals) -> Color {
     // Slightly darker than the panel fill.
     let f = if is_dark(v) { 0.80 } else { 0.94 };
-    Color::rgba(v.panel_fill.r * f, v.panel_fill.g * f, v.panel_fill.b * f, 1.0)
+    Color::rgba(
+        v.panel_fill.r * f,
+        v.panel_fill.g * f,
+        v.panel_fill.b * f,
+        1.0,
+    )
 }
-fn c_props_bg (v: &crate::theme::Visuals) -> Color { v.window_fill }
-fn c_split_bg (v: &crate::theme::Visuals) -> Color {
+fn c_props_bg(v: &crate::theme::Visuals) -> Color {
+    v.window_fill
+}
+fn c_split_bg(v: &crate::theme::Visuals) -> Color {
     let t = if is_dark(v) { 1.0 } else { 0.0 };
     Color::rgba(t, t, t, 0.10)
 }
-fn c_border   (v: &crate::theme::Visuals) -> Color { v.separator }
-fn c_text     (v: &crate::theme::Visuals) -> Color { v.text_color }
-fn c_dim_text (v: &crate::theme::Visuals) -> Color { v.text_dim }
+fn c_border(v: &crate::theme::Visuals) -> Color {
+    v.separator
+}
+fn c_text(v: &crate::theme::Visuals) -> Color {
+    v.text_color
+}
+fn c_dim_text(v: &crate::theme::Visuals) -> Color {
+    v.text_dim
+}
 
 fn is_dark(v: &crate::theme::Visuals) -> bool {
     // Panel fill luminance — below 0.5 means we're in a dark palette.
@@ -101,7 +144,11 @@ fn is_dark(v: &crate::theme::Visuals) -> bool {
 /// X is unchanged. Non-mouse events pass through unchanged.
 fn translate_event(event: &Event, offset_y: f64) -> Event {
     match event {
-        Event::MouseDown { pos, button, modifiers } => Event::MouseDown {
+        Event::MouseDown {
+            pos,
+            button,
+            modifiers,
+        } => Event::MouseDown {
             pos: Point::new(pos.x, pos.y - offset_y),
             button: *button,
             modifiers: *modifiers,
@@ -109,12 +156,20 @@ fn translate_event(event: &Event, offset_y: f64) -> Event {
         Event::MouseMove { pos } => Event::MouseMove {
             pos: Point::new(pos.x, pos.y - offset_y),
         },
-        Event::MouseUp { pos, button, modifiers } => Event::MouseUp {
+        Event::MouseUp {
+            pos,
+            button,
+            modifiers,
+        } => Event::MouseUp {
             pos: Point::new(pos.x, pos.y - offset_y),
             button: *button,
             modifiers: *modifiers,
         },
-        Event::MouseWheel { pos, delta_y, delta_x } => Event::MouseWheel {
+        Event::MouseWheel {
+            pos,
+            delta_y,
+            delta_x,
+        } => Event::MouseWheel {
             pos: Point::new(pos.x, pos.y - offset_y),
             delta_y: *delta_y,
             delta_x: *delta_x,
@@ -126,17 +181,17 @@ fn translate_event(event: &Event, offset_y: f64) -> Event {
 // ── InspectorPanel ────────────────────────────────────────────────────────────
 
 pub struct InspectorPanel {
-    bounds:         Rect,
+    bounds: Rect,
     /// Contains exactly one `InternalPresenceNode` (a transparent proxy for the
     /// internal `TreeView`).  This makes InspectorPanel non-leaf in the inspector
     /// so the user can see it has internal structure.
-    _children:      Vec<Box<dyn Widget>>,
-    base:           WidgetBase,
-    font:           Arc<Font>,
-    nodes:          Rc<RefCell<Vec<InspectorNode>>>,
+    _children: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
+    font: Arc<Font>,
+    nodes: Rc<RefCell<Vec<InspectorNode>>>,
     /// Selected: original node index; synced from TreeView selection.
-    selected:       Option<usize>,
-    props_h:        f64,
+    selected: Option<usize>,
+    props_h: f64,
     split_dragging: bool,
     /// Written by layout(); read by the render loop to draw an overlay.
     pub hovered_bounds: Rc<RefCell<Option<Rect>>>,
@@ -158,13 +213,13 @@ pub struct InspectorPanel {
 pub struct InspectorSavedState {
     pub expanded: Vec<bool>,
     pub selected: Option<usize>,
-    pub props_h:  f64,
+    pub props_h: f64,
 }
 
 impl InspectorPanel {
     pub fn new(
-        font:           Arc<Font>,
-        nodes:          Rc<RefCell<Vec<InspectorNode>>>,
+        font: Arc<Font>,
+        nodes: Rc<RefCell<Vec<InspectorNode>>>,
         hovered_bounds: Rc<RefCell<Option<Rect>>>,
     ) -> Self {
         let tree_view = TreeView::new(Arc::clone(&font))
@@ -174,10 +229,10 @@ impl InspectorPanel {
         Self {
             bounds: Rect::default(),
             _children: vec![Box::new(InternalPresenceNode {
-                bounds:   Rect::default(),
+                bounds: Rect::default(),
                 children: Vec::new(),
-                base:     WidgetBase::new(),
-                name:     "TreeView",
+                base: WidgetBase::new(),
+                name: "TreeView",
             })],
             base: WidgetBase::new(),
             font,
@@ -196,10 +251,7 @@ impl InspectorPanel {
     /// Bind an output cell that the inspector updates every layout with
     /// the current [`InspectorSavedState`] — use the cell from a harness
     /// that persists app state.
-    pub fn with_snapshot_cell(
-        mut self,
-        cell: Rc<RefCell<Option<InspectorSavedState>>>,
-    ) -> Self {
+    pub fn with_snapshot_cell(mut self, cell: Rc<RefCell<Option<InspectorSavedState>>>) -> Self {
         self.snapshot_out = Some(cell);
         self
     }
@@ -218,7 +270,7 @@ impl InspectorPanel {
         InspectorSavedState {
             expanded: self.tree_view.nodes.iter().map(|n| n.is_expanded).collect(),
             selected: self.tree_view.nodes.iter().position(|n| n.is_selected),
-            props_h:  self.props_h,
+            props_h: self.props_h,
         }
     }
 
@@ -235,7 +287,9 @@ impl InspectorPanel {
     // ── geometry helpers ──────────────────────────────────────────────────────
 
     /// Height of the area below the header (tree + props).
-    fn list_area_h(&self) -> f64 { (self.bounds.height - HEADER_H).max(0.0) }
+    fn list_area_h(&self) -> f64 {
+        (self.bounds.height - HEADER_H).max(0.0)
+    }
 
     /// Y position of the tree/props split line (from panel bottom).
     fn split_y(&self) -> f64 {
@@ -246,7 +300,9 @@ impl InspectorPanel {
     }
 
     /// Bottom Y of the tree area (just above the split handle).
-    fn tree_origin_y(&self) -> f64 { self.split_y() + 4.0 }
+    fn tree_origin_y(&self) -> f64 {
+        self.split_y() + 4.0
+    }
 
     fn on_split_handle(&self, pos: Point) -> bool {
         let sy = self.split_y();
@@ -273,28 +329,63 @@ impl InspectorPanel {
 // ── Widget impl ───────────────────────────────────────────────────────────────
 
 impl InspectorPanel {
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 }
 
 impl Widget for InspectorPanel {
-    fn type_name(&self) -> &'static str { "InspectorPanel" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self._children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self._children }
+    fn type_name(&self) -> &'static str {
+        "InspectorPanel"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self._children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self._children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
-        self.bounds.width  = available.width;
+        self.bounds.width = available.width;
         self.bounds.height = available.height;
 
         let nodes = self.nodes.borrow();
@@ -303,17 +394,19 @@ impl Widget for InspectorPanel {
         // On the very first layout after startup `pending_expanded` /
         // `pending_selected` (set by `apply_saved_state`) seed the vectors
         // so restored state takes effect without an extra click.
-        let mut old_expanded: Vec<bool> = self.tree_view.nodes.iter()
-            .map(|n| n.is_expanded).collect();
-        let mut old_selected: Vec<bool> = self.tree_view.nodes.iter()
-            .map(|n| n.is_selected).collect();
+        let mut old_expanded: Vec<bool> =
+            self.tree_view.nodes.iter().map(|n| n.is_expanded).collect();
+        let mut old_selected: Vec<bool> =
+            self.tree_view.nodes.iter().map(|n| n.is_selected).collect();
         if let Some(pe) = self.pending_expanded.take() {
             old_expanded = pe;
         }
         if let Some(ps) = self.pending_selected.take() {
             old_selected = vec![false; old_expanded.len().max(ps.map(|i| i + 1).unwrap_or(0))];
             if let Some(i) = ps {
-                if i < old_selected.len() { old_selected[i] = true; }
+                if i < old_selected.len() {
+                    old_selected[i] = true;
+                }
             }
         }
 
@@ -345,7 +438,9 @@ impl Widget for InspectorPanel {
             let label = format!("{}  {:.0}×{:.0}", node.type_name, b.width, b.height);
 
             let tv_idx = self.tree_view.nodes.len();
-            self.tree_view.nodes.push(TreeNode::new(label, NodeIcon::Package, parent, order));
+            self.tree_view
+                .nodes
+                .push(TreeNode::new(label, NodeIcon::Package, parent, order));
 
             // Restore or default expansion (default: expanded so tree is open).
             self.tree_view.nodes[tv_idx].is_expanded =
@@ -364,16 +459,19 @@ impl Widget for InspectorPanel {
         self.selected = self.tree_view.nodes.iter().position(|n| n.is_selected);
 
         // Update hovered_bounds for the render-loop overlay.
-        *self.hovered_bounds.borrow_mut() = self.tree_view.hovered_node_idx()
+        *self.hovered_bounds.borrow_mut() = self
+            .tree_view
+            .hovered_node_idx()
             .and_then(|i| nodes.get(i))
             .map(|n| n.screen_bounds);
 
         // Layout the TreeView inside the tree area.
-        let tree_w   = available.width;
+        let tree_w = available.width;
         let tree_bot = self.tree_origin_y();
         let tree_top = self.list_area_h();
-        let tree_h   = (tree_top - tree_bot).max(0.0);
-        self.tree_view.set_bounds(Rect::new(0.0, tree_bot, tree_w, tree_h));
+        let tree_h = (tree_top - tree_bot).max(0.0);
+        self.tree_view
+            .set_bounds(Rect::new(0.0, tree_bot, tree_w, tree_h));
         self.tree_view.layout(Size::new(tree_w, tree_h));
 
         // Keep the presence node's bounds in sync with the real TreeView so the
@@ -389,11 +487,11 @@ impl Widget for InspectorPanel {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let w     = self.bounds.width;
-        let h     = self.bounds.height;
-        let sy    = self.split_y();
+        let w = self.bounds.width;
+        let h = self.bounds.height;
+        let sy = self.split_y();
         let hdr_y = h - HEADER_H;
-        let v     = ctx.visuals().clone();
+        let v = ctx.visuals().clone();
 
         // ── panel background ─────────────────────────────────────────────────
         ctx.set_fill_color(c_panel_bg(&v));
@@ -467,7 +565,7 @@ impl Widget for InspectorPanel {
         // ── tree area: clip then paint TreeView ──────────────────────────────
         let tree_bot = self.tree_origin_y();
         let tree_top = self.list_area_h();
-        let tree_h   = (tree_top - tree_bot).max(0.0);
+        let tree_h = (tree_top - tree_bot).max(0.0);
         if tree_h > 0.0 {
             ctx.save();
             ctx.translate(0.0, tree_bot);
@@ -483,7 +581,11 @@ impl Widget for InspectorPanel {
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
-            Event::MouseDown { pos, button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
                 if self.on_split_handle(*pos) {
                     self.split_dragging = true;
                     // No tick: grabbing the split handle produces no visual
@@ -510,7 +612,11 @@ impl Widget for InspectorPanel {
                 }
                 EventResult::Ignored
             }
-            Event::MouseUp { button: MouseButton::Left, pos, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if self.split_dragging {
                     self.split_dragging = false;
                     crate::animation::request_tick();
@@ -533,7 +639,9 @@ impl Widget for InspectorPanel {
 
 impl InspectorPanel {
     fn paint_properties(&self, ctx: &mut dyn DrawCtx, available_h: f64) {
-        if available_h < 4.0 { return; }
+        if available_h < 4.0 {
+            return;
+        }
         let w = self.bounds.width;
         let v = ctx.visuals().clone();
 
@@ -557,7 +665,9 @@ impl InspectorPanel {
         };
 
         let nodes = self.nodes.borrow();
-        let Some(node) = nodes.get(sel_idx) else { return; };
+        let Some(node) = nodes.get(sel_idx) else {
+            return;
+        };
 
         ctx.set_font_size(14.0);
         ctx.set_fill_color(c_text(&v));
@@ -565,18 +675,20 @@ impl InspectorPanel {
 
         let b = &node.screen_bounds;
         let rows: &[(&str, String)] = &[
-            ("x",      format!("{:.1}", b.x)),
-            ("y",      format!("{:.1}", b.y)),
-            ("width",  format!("{:.1}", b.width)),
+            ("x", format!("{:.1}", b.x)),
+            ("y", format!("{:.1}", b.y)),
+            ("width", format!("{:.1}", b.width)),
             ("height", format!("{:.1}", b.height)),
-            ("depth",  format!("{}", node.depth)),
+            ("depth", format!("{}", node.depth)),
         ];
 
         ctx.set_font_size(FONT_SIZE);
         let row_start_y = available_h - 56.0;
         for (i, (label, value)) in rows.iter().enumerate() {
             let ry = row_start_y - i as f64 * 18.0;
-            if ry < 4.0 { break; }
+            if ry < 4.0 {
+                break;
+            }
             ctx.set_fill_color(c_dim_text(&v));
             ctx.fill_text(label, 12.0, ry);
             ctx.set_fill_color(c_text(&v));
@@ -595,7 +707,9 @@ impl InspectorPanel {
         let prop_start_y = row_start_y - rows.len() as f64 * 18.0 - 4.0;
         for (j, (prop_label, prop_value)) in node.properties.iter().enumerate() {
             let ry = prop_start_y - j as f64 * 18.0;
-            if ry < 4.0 { break; }
+            if ry < 4.0 {
+                break;
+            }
             ctx.set_fill_color(c_dim_text(&v));
             ctx.fill_text(prop_label, 12.0, ry);
             // Bool properties: green=true, red=false; others use normal text color.
@@ -626,12 +740,16 @@ impl InspectorPanel {
         let diag_h = (row_start_y - total_rows as f64 * 18.0 - 12.0).min(80.0);
         if diag_h > 30.0 {
             let diag_y_top = diag_h - 4.0;
-            let diag_w     = w - 20.0;
-            let aspect     = if b.height > 0.0 { b.width / b.height } else { 1.0 };
-            let box_h      = (diag_h * 0.6).min(50.0);
-            let box_w      = (box_h * aspect).min(diag_w * 0.8);
-            let box_x      = 10.0 + (diag_w - box_w) * 0.5;
-            let box_y      = diag_y_top - (diag_h + box_h) * 0.5;
+            let diag_w = w - 20.0;
+            let aspect = if b.height > 0.0 {
+                b.width / b.height
+            } else {
+                1.0
+            };
+            let box_h = (diag_h * 0.6).min(50.0);
+            let box_w = (box_h * aspect).min(diag_w * 0.8);
+            let box_x = 10.0 + (diag_w - box_w) * 0.5;
+            let box_y = diag_y_top - (diag_h + box_h) * 0.5;
 
             ctx.set_fill_color(Color::rgba(0.10, 0.50, 1.0, 0.10));
             ctx.begin_path();

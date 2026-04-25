@@ -65,9 +65,17 @@ pub enum Event {
     /// clear hover state).
     MouseMove { pos: Point },
     /// A mouse button was pressed at `pos`.
-    MouseDown { pos: Point, button: MouseButton, modifiers: Modifiers },
+    MouseDown {
+        pos: Point,
+        button: MouseButton,
+        modifiers: Modifiers,
+    },
     /// A mouse button was released at `pos`.
-    MouseUp   { pos: Point, button: MouseButton, modifiers: Modifiers },
+    MouseUp {
+        pos: Point,
+        button: MouseButton,
+        modifiers: Modifiers,
+    },
     /// A key was pressed while this widget (or a descendant) had focus.
     KeyDown { key: Key, modifiers: Modifiers },
     /// A key was released.
@@ -81,7 +89,11 @@ pub enum Event {
     /// `delta_x` is horizontal wheel / trackpad input in the same units;
     /// positive = content moves right.  `pos` is the cursor location at the
     /// time of the scroll.
-    MouseWheel { pos: Point, delta_y: f64, delta_x: f64 },
+    MouseWheel {
+        pos: Point,
+        delta_y: f64,
+        delta_x: f64,
+    },
 }
 
 /// What a widget returns from [`crate::widget::Widget::on_event`].

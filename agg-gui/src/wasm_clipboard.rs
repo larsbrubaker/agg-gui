@@ -25,7 +25,11 @@ thread_local! {
 pub fn get() -> Option<String> {
     BUFFER.with(|b| {
         let s = b.borrow();
-        if s.is_empty() { None } else { Some(s.clone()) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.clone())
+        }
     })
 }
 

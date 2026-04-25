@@ -15,18 +15,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::Label;
 
 const CLOSED_H: f64 = 28.0;
-const ITEM_H:   f64 = 24.0;
-const PAD_X:    f64 = 8.0;
-const ARROW_W:  f64 = 20.0;
+const ITEM_H: f64 = 24.0;
+const PAD_X: f64 = 8.0;
+const ARROW_W: f64 = 20.0;
 const CORNER_R: f64 = 4.0;
 
 /// A single-selection dropdown.
@@ -37,17 +37,17 @@ const CORNER_R: f64 = 4.0;
 ///     .on_change(|idx| println!("selected {idx}"))
 /// ```
 pub struct ComboBox {
-    bounds:   Rect,
+    bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty — labels stored separately
-    base:     WidgetBase,
+    base: WidgetBase,
 
-    options:  Vec<String>,
+    options: Vec<String>,
     selected: usize,
-    open:     bool,
+    open: bool,
     /// Index of the item the cursor is currently over (only meaningful when open).
     hovered_item: Option<usize>,
 
-    font:      Arc<Font>,
+    font: Arc<Font>,
     font_size: f64,
 
     on_change: Option<Box<dyn FnMut(usize)>>,
@@ -61,13 +61,13 @@ pub struct ComboBox {
     /// Label for the currently selected option (shown in the closed button area).
     selected_label: Label,
     /// One label per option, used when the dropdown is open.
-    item_labels:    Vec<Label>,
+    item_labels: Vec<Label>,
     /// Optional per-item font overrides, set via [`with_item_fonts`].
     /// `None` means every entry (and the selected label) uses `self.font`
     /// — the default.  `Some(vec)` means each entry uses `vec[i]` and
     /// the selected label uses `vec[selected]`, ignoring the system
     /// font override so font-preview UI stays stable.
-    item_fonts:     Option<Vec<Arc<Font>>>,
+    item_fonts: Option<Vec<Arc<Font>>>,
 }
 
 impl ComboBox {
@@ -85,17 +85,18 @@ impl ComboBox {
             font_size,
             Arc::clone(&font),
         );
-        let item_labels = opts.iter().map(|t| {
-            Self::make_label(t, font_size, Arc::clone(&font))
-        }).collect();
+        let item_labels = opts
+            .iter()
+            .map(|t| Self::make_label(t, font_size, Arc::clone(&font)))
+            .collect();
 
         Self {
-            bounds:   Rect::default(),
+            bounds: Rect::default(),
             children: Vec::new(),
-            base:     WidgetBase::new(),
-            options:  opts,
+            base: WidgetBase::new(),
+            options: opts,
             selected: sel,
-            open:     false,
+            open: false,
             hovered_item: None,
             font,
             font_size,
@@ -126,8 +127,7 @@ impl ComboBox {
     }
 
     fn make_label(text: &str, font_size: f64, font: Arc<Font>) -> Label {
-        Label::new(text, font)
-            .with_font_size(font_size)
+        Label::new(text, font).with_font_size(font_size)
     }
 
     // ── Builder ──────────────────────────────────────────────────────────────
@@ -135,21 +135,41 @@ impl ComboBox {
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.font_size = size;
         self.selected_label = Self::make_label(
-            self.options.get(self.selected).map(|s| s.as_str()).unwrap_or(""),
+            self.options
+                .get(self.selected)
+                .map(|s| s.as_str())
+                .unwrap_or(""),
             size,
             Arc::clone(&self.font),
         );
-        self.item_labels = self.options.iter().map(|t| {
-            Self::make_label(t, size, Arc::clone(&self.font))
-        }).collect();
+        self.item_labels = self
+            .options
+            .iter()
+            .map(|t| Self::make_label(t, size, Arc::clone(&self.font)))
+            .collect();
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     /// Set the callback called when the user selects a new option.
     pub fn on_change(mut self, cb: impl FnMut(usize) + 'static) -> Self {
@@ -172,28 +192,40 @@ impl ComboBox {
     pub fn with_item_fonts(mut self, fonts: Vec<Arc<Font>>) -> Self {
         self.item_fonts = Some(fonts.clone());
         let size = self.font_size;
-        self.item_labels = self.options.iter().enumerate().map(|(i, t)| {
-            let f = fonts.get(i).cloned()
-                .unwrap_or_else(|| Arc::clone(&self.font));
-            Label::new(t, f)
-                .with_font_size(size)
-                .with_ignore_system_font(true)
-        }).collect();
+        self.item_labels = self
+            .options
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let f = fonts
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::clone(&self.font));
+                Label::new(t, f)
+                    .with_font_size(size)
+                    .with_ignore_system_font(true)
+            })
+            .collect();
         // Rebuild the selected label with its matching font too.
         if let Some(sel_font) = fonts.get(self.selected).cloned() {
             self.selected_label = Label::new(
-                self.options.get(self.selected).map(|s| s.as_str()).unwrap_or(""),
+                self.options
+                    .get(self.selected)
+                    .map(|s| s.as_str())
+                    .unwrap_or(""),
                 sel_font,
             )
-                .with_font_size(size)
-                .with_ignore_system_font(true);
+            .with_font_size(size)
+            .with_ignore_system_font(true);
         }
         self
     }
 
     // ── Accessors ────────────────────────────────────────────────────────────
 
-    pub fn selected(&self) -> usize { self.selected }
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
 
     pub fn set_selected(&mut self, idx: usize) {
         if idx < self.options.len() {
@@ -204,9 +236,7 @@ impl ComboBox {
             // label.
             if let Some(ref fonts) = self.item_fonts {
                 if let Some(f) = fonts.get(idx).cloned() {
-                    self.selected_label = Label::new(
-                        self.options[idx].as_str(), f,
-                    )
+                    self.selected_label = Label::new(self.options[idx].as_str(), f)
                         .with_font_size(self.font_size)
                         .with_ignore_system_font(true);
                     return;
@@ -220,8 +250,12 @@ impl ComboBox {
 
     fn fire(&mut self) {
         let idx = self.selected;
-        if let Some(cell) = &self.selected_cell { cell.set(idx); }
-        if let Some(cb) = self.on_change.as_mut() { cb(idx); }
+        if let Some(cell) = &self.selected_cell {
+            cell.set(idx);
+        }
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(idx);
+        }
     }
 
     /// Height returned by `layout()` — varies with open/closed state.
@@ -246,19 +280,19 @@ impl ComboBox {
     }
 
     fn item_rect(&self, i: usize) -> Rect {
-        let w  = self.bounds.width;
+        let w = self.bounds.width;
         let ty = self.item_top_y(i);
         Rect::new(0.0, ty - ITEM_H, w, ITEM_H)
     }
 
     /// Which dropdown item (if any) contains local point `p`.
     fn item_for_pos(&self, p: Point) -> Option<usize> {
-        if !self.open { return None; }
+        if !self.open {
+            return None;
+        }
         for i in 0..self.options.len() {
             let r = self.item_rect(i);
-            if p.x >= r.x && p.x <= r.x + r.width
-                && p.y >= r.y && p.y <= r.y + r.height
-            {
+            if p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height {
                 return Some(i);
             }
         }
@@ -268,25 +302,46 @@ impl ComboBox {
     /// Whether `p` is inside the closed button area (top 28px of the widget).
     fn in_button(&self, p: Point) -> bool {
         let button_y = self.total_h() - CLOSED_H;
-        p.x >= 0.0 && p.x <= self.bounds.width
-            && p.y >= button_y && p.y <= self.total_h()
+        p.x >= 0.0 && p.x <= self.bounds.width && p.y >= button_y && p.y <= self.total_h()
     }
 }
 
 impl Widget for ComboBox {
-    fn type_name(&self) -> &'static str { "ComboBox" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "ComboBox"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Pick up external-cell writes — e.g. a sibling combo bound to
@@ -314,7 +369,8 @@ impl Widget for ComboBox {
         // Layout selected label.
         let sl = self.selected_label.layout(Size::new(inner_w, CLOSED_H));
         let sl_y = (self.total_h() - CLOSED_H) + (CLOSED_H - sl.height) * 0.5;
-        self.selected_label.set_bounds(Rect::new(PAD_X, sl_y, sl.width, sl.height));
+        self.selected_label
+            .set_bounds(Rect::new(PAD_X, sl_y, sl.width, sl.height));
 
         // Layout item labels — compute ty before borrowing item_labels.
         let dropdown_h = self.total_h() - CLOSED_H;
@@ -329,9 +385,9 @@ impl Widget for ComboBox {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v   = ctx.visuals();
-        let w   = self.bounds.width;
-        let h   = self.total_h();
+        let v = ctx.visuals();
+        let w = self.bounds.width;
+        let h = self.total_h();
         // Button area (top section, Y-up).
         let btn_y = h - CLOSED_H;
 
@@ -356,7 +412,7 @@ impl Widget for ComboBox {
         // Small downward triangle.
         ctx.move_to(arrow_x - arrow_sz, arrow_cy + arrow_sz * 0.5);
         ctx.line_to(arrow_x + arrow_sz, arrow_cy + arrow_sz * 0.5);
-        ctx.line_to(arrow_x,            arrow_cy - arrow_sz * 0.5);
+        ctx.line_to(arrow_x, arrow_cy - arrow_sz * 0.5);
         ctx.close_path();
         ctx.fill();
 
@@ -390,10 +446,14 @@ impl Widget for ComboBox {
                 let ir = self.item_rect(i);
 
                 // Hover / selected highlight.
-                let is_hovered  = self.hovered_item == Some(i);
+                let is_hovered = self.hovered_item == Some(i);
                 let is_selected = i == self.selected;
                 if is_selected || is_hovered {
-                    let bg = if is_selected { v.accent } else { v.widget_bg_hovered };
+                    let bg = if is_selected {
+                        v.accent
+                    } else {
+                        v.widget_bg_hovered
+                    };
                     ctx.set_fill_color(bg);
                     ctx.begin_path();
                     ctx.rounded_rect(2.0, ir.y + 1.0, w - 4.0, ir.height - 2.0, 3.0);
@@ -401,7 +461,11 @@ impl Widget for ComboBox {
                 }
 
                 // Label.
-                let text_color = if is_selected { Color::white() } else { v.text_color };
+                let text_color = if is_selected {
+                    Color::white()
+                } else {
+                    v.text_color
+                };
                 self.item_labels[i].set_color(text_color);
                 let lb = self.item_labels[i].bounds();
 
@@ -415,7 +479,11 @@ impl Widget for ComboBox {
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if self.in_button(*pos) {
                     self.open = !self.open;
                     self.hovered_item = None;
@@ -472,7 +540,8 @@ impl Widget for ComboBox {
                     Key::ArrowDown => {
                         if self.selected + 1 < n {
                             self.selected += 1;
-                            self.selected_label.set_text(self.options[self.selected].as_str());
+                            self.selected_label
+                                .set_text(self.options[self.selected].as_str());
                             self.fire();
                             crate::animation::request_tick();
                         }
@@ -481,7 +550,8 @@ impl Widget for ComboBox {
                     Key::ArrowUp => {
                         if self.selected > 0 {
                             self.selected -= 1;
-                            self.selected_label.set_text(self.options[self.selected].as_str());
+                            self.selected_label
+                                .set_text(self.options[self.selected].as_str());
                             self.fire();
                             crate::animation::request_tick();
                         }
@@ -494,7 +564,9 @@ impl Widget for ComboBox {
                 let was_open = self.open;
                 self.open = false;
                 self.hovered_item = None;
-                if was_open { crate::animation::request_tick(); }
+                if was_open {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
             _ => EventResult::Ignored,
@@ -504,8 +576,8 @@ impl Widget for ComboBox {
     fn properties(&self) -> Vec<(&'static str, String)> {
         vec![
             ("selected", self.selected.to_string()),
-            ("open",     self.open.to_string()),
-            ("options",  self.options.len().to_string()),
+            ("open", self.open.to_string()),
+            ("options", self.options.len().to_string()),
         ]
     }
 }

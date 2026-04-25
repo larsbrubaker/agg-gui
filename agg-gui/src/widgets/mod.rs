@@ -1,7 +1,7 @@
 pub mod button;
 pub mod checkbox;
-pub mod color_picker;
 pub mod collapsing_header;
+pub mod color_picker;
 pub mod combo_box;
 pub mod container;
 pub mod drag_value;
@@ -30,8 +30,8 @@ pub mod window_title_bar;
 
 pub use button::Button;
 pub use checkbox::Checkbox;
-pub use color_picker::ColorPicker;
 pub use collapsing_header::CollapsingHeader;
+pub use color_picker::ColorPicker;
 pub use combo_box::ComboBox;
 pub use container::Container;
 pub use drag_value::DragValue;
@@ -46,9 +46,8 @@ pub use progress_bar::ProgressBar;
 pub use radio_group::RadioGroup;
 pub use resize::Resize;
 pub use scroll_view::{
+    current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
     ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
-    current_scroll_style, current_scroll_visibility,
-    set_scroll_style, set_scroll_visibility,
 };
 pub use slider::Slider;
 pub use splitter::Splitter;

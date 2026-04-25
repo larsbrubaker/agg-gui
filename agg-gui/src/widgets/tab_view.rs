@@ -9,16 +9,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::primitives::Spacer;
 
-const ACTION_BTN_W:  f64 = 100.0;
-const DIVIDER_W:     f64 = 6.0;
+const ACTION_BTN_W: f64 = 100.0;
+const DIVIDER_W: f64 = 6.0;
 const MIN_SIDEBAR_W: f64 = 160.0;
 
 /// A tabbed panel container.
@@ -26,29 +26,29 @@ const MIN_SIDEBAR_W: f64 = 160.0;
 /// `children[0]` = active tab content.
 /// `children[1]` = sidebar widget (optional, always stored even when hidden).
 pub struct TabView {
-    bounds:           Rect,
+    bounds: Rect,
     /// children[0]=active content, children[1]=sidebar (if any)
-    children:         Vec<Box<dyn Widget>>,
-    base:             WidgetBase,
-    tab_contents:     Vec<Box<dyn Widget>>,
-    tab_labels:       Vec<String>,
-    active_tab:       usize,
-    tab_bar_height:   f64,
-    font:             Arc<Font>,
-    font_size:        f64,
-    hovered_tab:      Option<usize>,
-    action_label:     Option<String>,
-    action_hovered:   bool,
-    on_action:        Option<Box<dyn Fn()>>,
-    action_active:    bool,
+    children: Vec<Box<dyn Widget>>,
+    base: WidgetBase,
+    tab_contents: Vec<Box<dyn Widget>>,
+    tab_labels: Vec<String>,
+    active_tab: usize,
+    tab_bar_height: f64,
+    font: Arc<Font>,
+    font_size: f64,
+    hovered_tab: Option<usize>,
+    action_label: Option<String>,
+    action_hovered: bool,
+    on_action: Option<Box<dyn Fn()>>,
+    action_active: bool,
     // Sidebar state
-    show_sidebar:     Option<Rc<Cell<bool>>>,
-    sidebar_w:        f64,
+    show_sidebar: Option<Rc<Cell<bool>>>,
+    sidebar_w: f64,
     sidebar_dragging: bool,
     /// When set, writes `active_tab` on every tab switch AND is re-read
     /// each layout so external code (state persistence) can drive the
     /// selection too.  Pattern mirrors ScrollView / ToggleSwitch cells.
-    active_tab_cell:  Option<Rc<Cell<usize>>>,
+    active_tab_cell: Option<Rc<Cell<usize>>>,
 }
 
 impl TabView {
@@ -75,8 +75,14 @@ impl TabView {
         }
     }
 
-    pub fn with_tab_bar_height(mut self, h: f64) -> Self { self.tab_bar_height = h; self }
-    pub fn with_font_size(mut self, size: f64) -> Self { self.font_size = size; self }
+    pub fn with_tab_bar_height(mut self, h: f64) -> Self {
+        self.tab_bar_height = h;
+        self
+    }
+    pub fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self
+    }
 
     /// Bind the active tab index to a shared cell.  The cell's current
     /// value seeds the initial selection on the next layout (so a
@@ -87,11 +93,26 @@ impl TabView {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     /// Add an action button at the right end of the tab bar.
     pub fn with_action_button(
@@ -105,7 +126,9 @@ impl TabView {
     }
 
     /// Update the visual active (pressed/on) state of the action button.
-    pub fn set_action_active(&mut self, active: bool) { self.action_active = active; }
+    pub fn set_action_active(&mut self, active: bool) {
+        self.action_active = active;
+    }
 
     /// Add a tab with a label and its content widget.
     pub fn add_tab(mut self, label: impl Into<String>, content: Box<dyn Widget>) -> Self {
@@ -124,11 +147,7 @@ impl TabView {
     /// Attach a sidebar widget shown to the right of the content area when
     /// `show.get()` is true.  The divider between content and sidebar is
     /// user-draggable.  Call this AFTER all `add_tab` calls.
-    pub fn with_sidebar(
-        mut self,
-        widget: Box<dyn Widget>,
-        show: Rc<Cell<bool>>,
-    ) -> Self {
+    pub fn with_sidebar(mut self, widget: Box<dyn Widget>, show: Rc<Cell<bool>>) -> Self {
         self.show_sidebar = Some(show);
         self.children.push(widget); // sidebar always at children[1]
         self
@@ -158,32 +177,46 @@ impl TabView {
     }
 
     fn tab_index_at(&self, pos: Point) -> Option<usize> {
-        if pos.y < self.content_height() { return None; }
-        if pos.x >= self.tabs_width() { return None; }
+        if pos.y < self.content_height() {
+            return None;
+        }
+        if pos.x >= self.tabs_width() {
+            return None;
+        }
         let n = self.tab_labels.len().max(1);
         let tab_w = self.tabs_width() / n as f64;
         let i = (pos.x / tab_w) as usize;
-        if i < self.tab_labels.len() { Some(i) } else { None }
+        if i < self.tab_labels.len() {
+            Some(i)
+        } else {
+            None
+        }
     }
 
     fn action_btn_hit(&self, pos: Point) -> bool {
-        self.action_label.is_some()
-            && pos.y >= self.content_height()
-            && pos.x >= self.tabs_width()
+        self.action_label.is_some() && pos.y >= self.content_height() && pos.x >= self.tabs_width()
     }
 
     fn switch_to(&mut self, new_idx: usize) {
-        if new_idx == self.active_tab || new_idx >= self.tab_labels.len() { return; }
+        if new_idx == self.active_tab || new_idx >= self.tab_labels.len() {
+            return;
+        }
         // children layout: [content, sidebar?]
         // Pop sidebar first (index 1), then pop content (index 0).
-        let old_sidebar = if self.children.len() > 1 { self.children.pop() } else { None };
+        let old_sidebar = if self.children.len() > 1 {
+            self.children.pop()
+        } else {
+            None
+        };
         if let Some(current) = self.children.pop() {
             self.tab_contents[self.active_tab] = current;
         }
         let placeholder: Box<dyn Widget> = Box::new(Spacer::new());
         let new_child = std::mem::replace(&mut self.tab_contents[new_idx], placeholder);
-        self.children.push(new_child);                    // content at index 0
-        if let Some(s) = old_sidebar { self.children.push(s); } // sidebar at index 1
+        self.children.push(new_child); // content at index 0
+        if let Some(s) = old_sidebar {
+            self.children.push(s);
+        } // sidebar at index 1
         self.active_tab = new_idx;
         if let Some(cell) = &self.active_tab_cell {
             cell.set(new_idx);
@@ -192,17 +225,37 @@ impl TabView {
 }
 
 impl Widget for TabView {
-    fn type_name(&self) -> &'static str { "TabView" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "TabView"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Honour a persisted tab selection.  Done here (rather than in
@@ -275,15 +328,15 @@ impl Widget for TabView {
 
         // Honour the thread-local system-font override so changes in the
         // System window re-style tab titles live.
-        let font = crate::font_settings::current_system_font()
-            .unwrap_or_else(|| Arc::clone(&self.font));
+        let font =
+            crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font));
         ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
 
         // Tab labels
         for (i, label) in self.tab_labels.iter().enumerate() {
             let tx = i as f64 * tab_w;
-            let is_active  = i == self.active_tab;
+            let is_active = i == self.active_tab;
             let is_hovered = self.hovered_tab == Some(i);
 
             if is_hovered && !is_active {
@@ -336,7 +389,11 @@ impl Widget for TabView {
             ctx.line_to(bx, h - 6.0);
             ctx.stroke();
 
-            let lc = if self.action_active { v.accent } else { v.text_dim };
+            let lc = if self.action_active {
+                v.accent
+            } else {
+                v.text_dim
+            };
             ctx.set_fill_color(lc);
             if let Some(m) = ctx.measure_text(label) {
                 let lx = bx + (ACTION_BTN_W - m.width) * 0.5;
@@ -379,17 +436,21 @@ impl Widget for TabView {
 
     fn hit_test(&self, local_pos: Point) -> bool {
         // Capture all mouse events during sidebar drag, even if cursor leaves bounds.
-        if self.sidebar_dragging { return true; }
-        local_pos.x >= 0.0 && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0 && local_pos.y <= self.bounds.height
+        if self.sidebar_dragging {
+            return true;
+        }
+        local_pos.x >= 0.0
+            && local_pos.x <= self.bounds.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= self.bounds.height
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
-                let was_tab   = self.hovered_tab;
-                let was_act   = self.action_hovered;
-                self.hovered_tab    = self.tab_index_at(*pos);
+                let was_tab = self.hovered_tab;
+                let was_act = self.action_hovered;
+                self.hovered_tab = self.tab_index_at(*pos);
                 self.action_hovered = self.action_btn_hit(*pos);
                 if self.sidebar_dragging {
                     // Resize: sidebar_w = window_width - cursor_x - divider
@@ -403,10 +464,16 @@ impl Widget for TabView {
                 }
                 EventResult::Ignored
             }
-            Event::MouseDown { pos, button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
                 if self.action_btn_hit(*pos) {
                     self.action_active = !self.action_active;
-                    if let Some(ref cb) = self.on_action { cb(); }
+                    if let Some(ref cb) = self.on_action {
+                        cb();
+                    }
                     crate::animation::request_tick();
                     return EventResult::Consumed;
                 }
@@ -426,7 +493,10 @@ impl Widget for TabView {
                 }
                 EventResult::Ignored
             }
-            Event::MouseUp { button: MouseButton::Left, .. } => {
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 if self.sidebar_dragging {
                     self.sidebar_dragging = false;
                     crate::animation::request_tick();

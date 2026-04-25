@@ -54,19 +54,19 @@ pub use frame::{begin_frame, render_app_frame};
 /// `GlCubeWidget` and `CUBE_SCREEN_RECT` from here so there is exactly
 /// one compiled implementation of the demo's GL widget.
 pub mod bar_grid;
-pub use bar_grid::{GlCubeWidget, BarGridGlRenderer, CUBE_SCREEN_RECT};
+pub use bar_grid::{BarGridGlRenderer, GlCubeWidget, CUBE_SCREEN_RECT};
 
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::{DrawCtx, FillRule};
-use agg_gui::gl_renderer::GlyphCache;
 use agg_gui::geometry::Rect;
-use agg_gui::text::{Font, TextMetrics, shape_glyphs};
+use agg_gui::gl_renderer::GlyphCache;
+use agg_gui::text::{shape_glyphs, Font, TextMetrics};
 use agg_gui::CompOp;
-use agg_gui::{LineCap, LineJoin};
 use agg_gui::TransAffine;
+use agg_gui::{LineCap, LineJoin};
 use glow::HasContext;
 
 // ---------------------------------------------------------------------------
@@ -81,7 +81,8 @@ const SOLID_VERT: &str = "#version 330 core\nlayout(location=0)in vec2 a_pos;uni
 #[cfg(target_arch = "wasm32")]
 const SOLID_FRAG: &str = "#version 300 es\nprecision mediump float;\nuniform vec4 u_color;out vec4 frag_color;void main(){frag_color=u_color;}";
 #[cfg(not(target_arch = "wasm32"))]
-const SOLID_FRAG: &str = "#version 330 core\nuniform vec4 u_color;out vec4 frag_color;void main(){frag_color=u_color;}";
+const SOLID_FRAG: &str =
+    "#version 330 core\nuniform vec4 u_color;out vec4 frag_color;void main(){frag_color=u_color;}";
 
 // ── AA solid-colour pipeline (tess2 edge-flag halo strips) ──────────────────
 //
@@ -199,10 +200,10 @@ const LCB_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_colo
 /// been dropped (typically because the L1 pixel cache evicted its entry),
 /// `weak.upgrade()` returns `None` and the next sweep deletes the texture.
 struct ArcTextureEntry {
-    weak:    Weak<Vec<u8>>,
+    weak: Weak<Vec<u8>>,
     texture: glow::Texture,
-    w:       u32,
-    h:       u32,
+    w: u32,
+    h: u32,
 }
 
 /// A [`DrawCtx`] that renders via `glow` (WebGL2 or native GL).
@@ -218,37 +219,37 @@ pub struct GlGfxCtx {
 
     // GL resources for the solid-colour pipeline (created once, reused every frame)
     prog: glow::Program,
-    vao:  glow::VertexArray,
-    vbo:  glow::Buffer,
-    ibo:  glow::Buffer,     // persistent index buffer — no per-draw alloc
-    res_loc:   Option<glow::UniformLocation>,
+    vao: glow::VertexArray,
+    vbo: glow::Buffer,
+    ibo: glow::Buffer, // persistent index buffer — no per-draw alloc
+    res_loc: Option<glow::UniformLocation>,
     color_loc: Option<glow::UniformLocation>,
 
     // AA solid-colour pipeline — identical to `prog` but with an extra
     // per-vertex `a_alpha` attribute for analytic edge AA (tess2 edge-flag
     // halo strips).  Fills and strokes with AA use this program.
     aa_prog: glow::Program,
-    aa_vao:  glow::VertexArray,
-    aa_vbo:  glow::Buffer,
-    aa_ibo:  glow::Buffer,
-    aa_res_loc:   Option<glow::UniformLocation>,
+    aa_vao: glow::VertexArray,
+    aa_vbo: glow::Buffer,
+    aa_ibo: glow::Buffer,
+    aa_res_loc: Option<glow::UniformLocation>,
     aa_color_loc: Option<glow::UniformLocation>,
 
     // Textured-quad pipeline (draw_image_rgba — markdown images, screenshots,
     // AGG-rasterised Label backbuffers).
     tex_prog: glow::Program,
-    tex_vao:  glow::VertexArray,
-    tex_vbo:  glow::Buffer,
+    tex_vao: glow::VertexArray,
+    tex_vbo: glow::Buffer,
     tex_res_loc: Option<glow::UniformLocation>,
     tex_sampler_loc: Option<glow::UniformLocation>,
 
     // LCD subpixel compositing pipeline (see `LCD_VERT` / `LCD_FRAG`).
     lcd_prog: glow::Program,
-    lcd_vao:  glow::VertexArray,
-    lcd_vbo:  glow::Buffer,
-    lcd_res_loc:     Option<glow::UniformLocation>,
+    lcd_vao: glow::VertexArray,
+    lcd_vbo: glow::Buffer,
+    lcd_res_loc: Option<glow::UniformLocation>,
     lcd_sampler_loc: Option<glow::UniformLocation>,
-    lcd_color_loc:   Option<glow::UniformLocation>,
+    lcd_color_loc: Option<glow::UniformLocation>,
     /// WASM-only: per-channel selector uniform for the 3-pass
     /// color-masked fallback.  Ignored on desktop (its shader uses
     /// dual-source blend instead).
@@ -265,17 +266,17 @@ pub struct GlGfxCtx {
     // blit of a two-plane `LcdCoverage` cache onto the destination.
     // Reuses `LCD_VERT` because the vertex work is identical.
     lcb_prog: glow::Program,
-    lcb_res_loc:         Option<glow::UniformLocation>,
-    lcb_color_sampler:   Option<glow::UniformLocation>,
-    lcb_alpha_sampler:   Option<glow::UniformLocation>,
+    lcb_res_loc: Option<glow::UniformLocation>,
+    lcb_color_sampler: Option<glow::UniformLocation>,
+    lcb_alpha_sampler: Option<glow::UniformLocation>,
     /// WASM-only (mirrors `lcd_channel_loc`).
     #[allow(dead_code)]
-    lcb_channel_loc:     Option<glow::UniformLocation>,
+    lcb_channel_loc: Option<glow::UniformLocation>,
 
     // Texture cache keyed on (ptr, len, w, h, head/tail byte hash).  Used by
     // the generic `draw_image_rgba(&[u8], …)` path (markdown images, screenshot
     // display, image widgets).  LRU eviction keeps memory bounded.
-    texture_cache:       std::collections::HashMap<u64, (glow::Texture, u32, u32)>,
+    texture_cache: std::collections::HashMap<u64, (glow::Texture, u32, u32)>,
     texture_cache_order: std::collections::VecDeque<u64>,
 
     // Arc-pointer-keyed texture cache for `draw_image_rgba_arc` — the hot path
@@ -288,15 +289,15 @@ pub struct GlGfxCtx {
     arc_texture_cache: std::collections::HashMap<usize, ArcTextureEntry>,
 
     // Drawing state
-    fill_color:   Color,
+    fill_color: Color,
     stroke_color: Color,
-    line_width:   f64,
-    line_join:    LineJoin,
-    line_cap:     LineCap,
-    fill_rule:    FillRule,
-    miter_limit:  f64,
-    line_dash:    Vec<f64>,
-    dash_offset:  f64,
+    line_width: f64,
+    line_join: LineJoin,
+    line_cap: LineCap,
+    fill_rule: FillRule,
+    miter_limit: f64,
+    line_dash: Vec<f64>,
+    dash_offset: f64,
     global_alpha: f64,
 
     // State stack: each entry holds a saved (transform, clip) pair.
@@ -305,12 +306,12 @@ pub struct GlGfxCtx {
     state_stack: Vec<(TransAffine, Option<[i32; 4]>)>,
 
     // Path builder — contours stored in screen-space Y-up pixels.
-    contours:        Vec<Vec<[f32; 2]>>,
+    contours: Vec<Vec<[f32; 2]>>,
     current_contour: Vec<[f32; 2]>,
-    pen:             [f64; 2],
+    pen: [f64; 2],
 
     // Font
-    font:      Option<Arc<Font>>,
+    font: Option<Arc<Font>>,
     font_size: f64,
 
     // Glyph vertex cache — survives frame resets, populated on first use.
@@ -335,7 +336,7 @@ impl GlGfxCtx {
                 panic!("GlGfxCtx shader compile/link failed");
             }
         };
-        let res_loc   = gl.get_uniform_location(prog, "u_resolution");
+        let res_loc = gl.get_uniform_location(prog, "u_resolution");
         let color_loc = gl.get_uniform_location(prog, "u_color");
 
         let vao = gl.create_vertex_array().expect("create VAO");
@@ -353,9 +354,8 @@ impl GlGfxCtx {
         gl.bind_vertex_array(None);
 
         // ── AA solid pipeline (halo-strip alpha) ───────────────────────────
-        let aa_prog = compile_program(&gl, AA_VERT, AA_FRAG)
-            .expect("aa shader compile/link");
-        let aa_res_loc   = gl.get_uniform_location(aa_prog, "u_resolution");
+        let aa_prog = compile_program(&gl, AA_VERT, AA_FRAG).expect("aa shader compile/link");
+        let aa_res_loc = gl.get_uniform_location(aa_prog, "u_resolution");
         let aa_color_loc = gl.get_uniform_location(aa_prog, "u_color");
         let aa_vao = gl.create_vertex_array().expect("create AA VAO");
         let aa_vbo = gl.create_buffer().expect("create AA VBO");
@@ -371,9 +371,8 @@ impl GlGfxCtx {
         gl.bind_vertex_array(None);
 
         // ── Textured-quad pipeline ─────────────────────────────────────────
-        let tex_prog = compile_program(&gl, TEX_VERT, TEX_FRAG)
-            .expect("tex shader compile/link");
-        let tex_res_loc     = gl.get_uniform_location(tex_prog, "u_resolution");
+        let tex_prog = compile_program(&gl, TEX_VERT, TEX_FRAG).expect("tex shader compile/link");
+        let tex_res_loc = gl.get_uniform_location(tex_prog, "u_resolution");
         let tex_sampler_loc = gl.get_uniform_location(tex_prog, "u_tex");
 
         let tex_vao = gl.create_vertex_array().expect("create tex VAO");
@@ -388,11 +387,10 @@ impl GlGfxCtx {
         gl.bind_vertex_array(None);
 
         // ── LCD subpixel pipeline ──────────────────────────────────────────
-        let lcd_prog = compile_program(&gl, LCD_VERT, LCD_FRAG)
-            .expect("lcd shader compile/link");
-        let lcd_res_loc     = gl.get_uniform_location(lcd_prog, "u_resolution");
+        let lcd_prog = compile_program(&gl, LCD_VERT, LCD_FRAG).expect("lcd shader compile/link");
+        let lcd_res_loc = gl.get_uniform_location(lcd_prog, "u_resolution");
         let lcd_sampler_loc = gl.get_uniform_location(lcd_prog, "u_mask");
-        let lcd_color_loc   = gl.get_uniform_location(lcd_prog, "u_color");
+        let lcd_color_loc = gl.get_uniform_location(lcd_prog, "u_color");
         // WASM-only uniform; desktop shader doesn't declare it.  On a
         // desktop build this returns `None` which is harmless — the
         // desktop draw path doesn't call `uniform_1_i32` on it.
@@ -412,51 +410,67 @@ impl GlGfxCtx {
         // Reuses `lcd_vao` / `lcd_vbo` for vertex data (same layout: vec2
         // pos + vec2 uv) — the only difference from the text LCD shader is
         // the fragment stage and the second sampler uniform.
-        let lcb_prog = compile_program(&gl, LCD_VERT, LCB_FRAG)
-            .expect("lcd backbuffer shader compile/link");
-        let lcb_res_loc       = gl.get_uniform_location(lcb_prog, "u_resolution");
+        let lcb_prog =
+            compile_program(&gl, LCD_VERT, LCB_FRAG).expect("lcd backbuffer shader compile/link");
+        let lcb_res_loc = gl.get_uniform_location(lcb_prog, "u_resolution");
         let lcb_color_sampler = gl.get_uniform_location(lcb_prog, "u_color");
         let lcb_alpha_sampler = gl.get_uniform_location(lcb_prog, "u_alpha");
-        let lcb_channel_loc   = gl.get_uniform_location(lcb_prog, "u_channel");
+        let lcb_channel_loc = gl.get_uniform_location(lcb_prog, "u_channel");
 
         Self {
             gl,
             viewport: (width, height),
-            prog, vao, vbo, ibo,
-            res_loc, color_loc,
-            aa_prog, aa_vao, aa_vbo, aa_ibo,
-            aa_res_loc, aa_color_loc,
-            tex_prog, tex_vao, tex_vbo,
-            tex_res_loc, tex_sampler_loc,
-            lcd_prog, lcd_vao, lcd_vbo,
-            lcd_res_loc, lcd_sampler_loc, lcd_color_loc, lcd_channel_loc,
-            texture_cache:       std::collections::HashMap::new(),
+            prog,
+            vao,
+            vbo,
+            ibo,
+            res_loc,
+            color_loc,
+            aa_prog,
+            aa_vao,
+            aa_vbo,
+            aa_ibo,
+            aa_res_loc,
+            aa_color_loc,
+            tex_prog,
+            tex_vao,
+            tex_vbo,
+            tex_res_loc,
+            tex_sampler_loc,
+            lcd_prog,
+            lcd_vao,
+            lcd_vbo,
+            lcd_res_loc,
+            lcd_sampler_loc,
+            lcd_color_loc,
+            lcd_channel_loc,
+            texture_cache: std::collections::HashMap::new(),
             texture_cache_order: std::collections::VecDeque::new(),
-            arc_texture_cache:   std::collections::HashMap::new(),
+            arc_texture_cache: std::collections::HashMap::new(),
             lcd_arc_texture_cache: std::collections::HashMap::new(),
             lcb_prog,
             lcb_res_loc,
             lcb_color_sampler,
             lcb_alpha_sampler,
             lcb_channel_loc,
-            fill_color:   Color::rgba(0.0, 0.0, 0.0, 1.0),
+            fill_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
-            line_width:   1.0,
-            line_join:    LineJoin::Miter,
-            line_cap:     LineCap::Butt,
-            fill_rule:    FillRule::NonZero,
-            miter_limit:  4.0,
-            line_dash:    Vec::new(),
-            dash_offset:  0.0,
+            line_width: 1.0,
+            line_join: LineJoin::Miter,
+            line_cap: LineCap::Butt,
+            fill_rule: FillRule::NonZero,
+            miter_limit: 4.0,
+            line_dash: Vec::new(),
+            dash_offset: 0.0,
             global_alpha: 1.0,
-            state_stack:  vec![(TransAffine::new(), None)],
-            contours:     Vec::new(),
+            state_stack: vec![(TransAffine::new(), None)],
+            contours: Vec::new(),
             current_contour: Vec::new(),
-            pen:          [0.0; 2],
-            font:         None,
-            font_size:    16.0,
-            glyph_cache:  GlyphCache::new(),
-            lcd_mode:     false,
+            pen: [0.0; 2],
+            font: None,
+            font_size: 16.0,
+            glyph_cache: GlyphCache::new(),
+            lcd_mode: false,
         }
     }
 
@@ -475,7 +489,12 @@ impl GlGfxCtx {
         unsafe {
             self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
             self.gl.read_pixels(
-                0, 0, w, h, glow::RGBA, glow::UNSIGNED_BYTE,
+                0,
+                0,
+                w,
+                h,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
                 glow::PixelPackData::Slice(&mut buf),
             );
         }
@@ -485,8 +504,7 @@ impl GlGfxCtx {
         for y in 0..(h as usize) {
             let src_off = y * stride;
             let dst_off = (h as usize - 1 - y) * stride;
-            flipped[dst_off..dst_off + stride]
-                .copy_from_slice(&buf[src_off..src_off + stride]);
+            flipped[dst_off..dst_off + stride].copy_from_slice(&buf[src_off..src_off + stride]);
         }
         (flipped, w as u32, h as u32)
     }
@@ -494,28 +512,32 @@ impl GlGfxCtx {
     /// Reset drawing state for a new frame.  Does NOT recreate GL resources.
     pub fn reset(&mut self, width: f32, height: f32) {
         self.viewport = (width, height);
-        self.fill_color   = Color::rgba(0.0, 0.0, 0.0, 1.0);
+        self.fill_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
         self.stroke_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
-        self.line_width   = 1.0;
-        self.fill_rule    = FillRule::NonZero;
-        self.miter_limit  = 4.0;
+        self.line_width = 1.0;
+        self.fill_rule = FillRule::NonZero;
+        self.miter_limit = 4.0;
         self.line_dash.clear();
-        self.dash_offset  = 0.0;
+        self.dash_offset = 0.0;
         self.global_alpha = 1.0;
-        self.state_stack  = vec![(TransAffine::new(), None)];
+        self.state_stack = vec![(TransAffine::new(), None)];
         self.contours.clear();
         self.current_contour.clear();
-        self.pen          = [0.0; 2];
-        self.font         = None;
-        self.font_size    = 16.0;
+        self.pen = [0.0; 2];
+        self.font = None;
+        self.font_size = 16.0;
         // Disable any lingering scissor from the previous frame.
-        unsafe { self.gl.disable(glow::SCISSOR_TEST); }
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
     }
 
     /// Set the LCD mode for this ctx.  Demo main loops call this each
     /// frame with `font_settings::lcd_enabled()` so direct-to-screen
     /// text picks up the global toggle.
-    pub fn set_lcd_mode(&mut self, on: bool) { self.lcd_mode = on; }
+    pub fn set_lcd_mode(&mut self, on: bool) {
+        self.lcd_mode = on;
+    }
 
     // ---- internal helpers --------------------------------------------------
 
@@ -553,15 +575,37 @@ impl GlGfxCtx {
     unsafe fn upload_lcd_texture(&self, tex: glow::Texture, w: u32, h: u32, data: &[u8]) {
         let gl = &*self.gl;
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::NEAREST as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::NEAREST as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
         gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
         gl.tex_image_2d(
-            glow::TEXTURE_2D, 0, glow::RGB as i32,
-            w as i32, h as i32, 0,
-            glow::RGB, glow::UNSIGNED_BYTE, Some(data),
+            glow::TEXTURE_2D,
+            0,
+            glow::RGB as i32,
+            w as i32,
+            h as i32,
+            0,
+            glow::RGB,
+            glow::UNSIGNED_BYTE,
+            Some(data),
         );
     }
 
@@ -572,12 +616,12 @@ impl GlGfxCtx {
     /// to the bottom of the quad.
     unsafe fn draw_lcd_quad(
         &self,
-        tex:       glow::Texture,
-        mask_w:    u32,
-        mask_h:    u32,
+        tex: glow::Texture,
+        mask_w: u32,
+        mask_h: u32,
         src_color: agg_gui::Color,
-        dst_x:     f64,
-        dst_y:     f64,
+        dst_x: f64,
+        dst_y: f64,
     ) {
         let gl = &*self.gl;
         let ctm = *self.ctm();
@@ -595,10 +639,22 @@ impl GlGfxCtx {
         let tr_y = bl_y + mask_h as f64;
 
         let verts: [f32; 16] = [
-            bl_x as f32, bl_y as f32, 0.0, 0.0,
-            tr_x as f32, bl_y as f32, 1.0, 0.0,
-            tr_x as f32, tr_y as f32, 1.0, 1.0,
-            bl_x as f32, tr_y as f32, 0.0, 1.0,
+            bl_x as f32,
+            bl_y as f32,
+            0.0,
+            0.0,
+            tr_x as f32,
+            bl_y as f32,
+            1.0,
+            0.0,
+            tr_x as f32,
+            tr_y as f32,
+            1.0,
+            1.0,
+            bl_x as f32,
+            tr_y as f32,
+            0.0,
+            1.0,
         ];
         let idx: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
@@ -608,7 +664,10 @@ impl GlGfxCtx {
         let a = (src_color.a as f64 * self.global_alpha) as f32;
         gl.uniform_4_f32(
             self.lcd_color_loc.as_ref(),
-            src_color.r, src_color.g, src_color.b, a,
+            src_color.r,
+            src_color.g,
+            src_color.b,
+            a,
         );
         gl.active_texture(glow::TEXTURE0);
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
@@ -618,8 +677,10 @@ impl GlGfxCtx {
         // stays at 1 (matches `begin_frame`).
         #[cfg(not(target_arch = "wasm32"))]
         gl.blend_func_separate(
-            glow::SRC1_COLOR, glow::ONE_MINUS_SRC1_COLOR,
-            glow::ZERO,       glow::ONE,
+            glow::SRC1_COLOR,
+            glow::ONE_MINUS_SRC1_COLOR,
+            glow::ZERO,
+            glow::ONE,
         );
 
         gl.bind_vertex_array(Some(self.lcd_vao));
@@ -659,8 +720,10 @@ impl GlGfxCtx {
 
         // Restore standard alpha blend state.
         gl.blend_func_separate(
-            glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA,
-            glow::ZERO,      glow::ONE,
+            glow::SRC_ALPHA,
+            glow::ONE_MINUS_SRC_ALPHA,
+            glow::ZERO,
+            glow::ONE,
         );
     }
 
@@ -671,8 +734,8 @@ impl GlGfxCtx {
     unsafe fn lcd_plane_get_or_upload(
         &mut self,
         data: &std::sync::Arc<Vec<u8>>,
-        w:    u32,
-        h:    u32,
+        w: u32,
+        h: u32,
     ) -> glow::Texture {
         let key = std::sync::Arc::as_ptr(data) as usize;
         if let Some(entry) = self.lcd_arc_texture_cache.get(&key) {
@@ -680,17 +743,26 @@ impl GlGfxCtx {
                 return entry.texture;
             }
         }
-        let tex = self.gl.create_texture().expect("create lcd backbuffer texture");
+        let tex = self
+            .gl
+            .create_texture()
+            .expect("create lcd backbuffer texture");
         self.upload_lcd_texture(tex, w, h, data.as_slice());
-        if let Some(old) = self.lcd_arc_texture_cache.insert(key, ArcTextureEntry {
-            weak:    std::sync::Arc::downgrade(data),
-            texture: tex,
-            w, h,
-        }) {
+        if let Some(old) = self.lcd_arc_texture_cache.insert(
+            key,
+            ArcTextureEntry {
+                weak: std::sync::Arc::downgrade(data),
+                texture: tex,
+                w,
+                h,
+            },
+        ) {
             self.gl.delete_texture(old.texture);
         }
         self.lcd_arc_texture_cache.retain(|_, e| {
-            if e.weak.upgrade().is_some() { true } else {
+            if e.weak.upgrade().is_some() {
+                true
+            } else {
                 self.gl.delete_texture(e.texture);
                 false
             }
@@ -706,12 +778,12 @@ impl GlGfxCtx {
         &self,
         color_tex: glow::Texture,
         alpha_tex: glow::Texture,
-        w:         u32,
-        h:         u32,
-        dst_x:     f64,
-        dst_y:     f64,
-        dst_w:     f64,
-        dst_h:     f64,
+        w: u32,
+        h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
     ) {
         let gl = &*self.gl;
         let ctm = *self.ctm();
@@ -722,7 +794,8 @@ impl GlGfxCtx {
         let bl_y = (dst_x * ctm.shy + dst_y * ctm.sy + ctm.ty).round();
         let tr_x = bl_x + dst_w;
         let tr_y = bl_y + dst_h;
-        let _ = w; let _ = h;
+        let _ = w;
+        let _ = h;
 
         // Cached planes are TOP-ROW-FIRST (the cache layout), so UV v=0
         // corresponds to the visually-top row of the image.  Our Y-up
@@ -730,10 +803,22 @@ impl GlGfxCtx {
         // which the UV v=1 maps to in GL texture space) at bl and `v=0`
         // at tr.  Matches `draw_image_rgba_arc`'s convention.
         let verts: [f32; 16] = [
-            bl_x as f32, bl_y as f32, 0.0, 1.0,
-            tr_x as f32, bl_y as f32, 1.0, 1.0,
-            tr_x as f32, tr_y as f32, 1.0, 0.0,
-            bl_x as f32, tr_y as f32, 0.0, 0.0,
+            bl_x as f32,
+            bl_y as f32,
+            0.0,
+            1.0,
+            tr_x as f32,
+            bl_y as f32,
+            1.0,
+            1.0,
+            tr_x as f32,
+            tr_y as f32,
+            1.0,
+            0.0,
+            bl_x as f32,
+            tr_y as f32,
+            0.0,
+            0.0,
         ];
         let idx: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
@@ -755,8 +840,10 @@ impl GlGfxCtx {
         // out_coverage.a) so the fb's alpha accumulates correctly.
         #[cfg(not(target_arch = "wasm32"))]
         gl.blend_func_separate(
-            glow::ONE, glow::ONE_MINUS_SRC1_COLOR,
-            glow::ONE, glow::ONE_MINUS_SRC1_ALPHA,
+            glow::ONE,
+            glow::ONE_MINUS_SRC1_COLOR,
+            glow::ONE,
+            glow::ONE_MINUS_SRC1_ALPHA,
         );
         // WebGL 2 path: no dual-source → 3-pass color-masked.  Each
         // pass uses standard `ONE, ONE_MINUS_SRC_ALPHA` blend (premult
@@ -764,8 +851,10 @@ impl GlGfxCtx {
         // tells the shader which channel to emit.
         #[cfg(target_arch = "wasm32")]
         gl.blend_func_separate(
-            glow::ONE, glow::ONE_MINUS_SRC_ALPHA,
-            glow::ONE, glow::ONE_MINUS_SRC_ALPHA,
+            glow::ONE,
+            glow::ONE_MINUS_SRC_ALPHA,
+            glow::ONE,
+            glow::ONE_MINUS_SRC_ALPHA,
         );
 
         gl.bind_vertex_array(Some(self.lcd_vao));
@@ -803,8 +892,10 @@ impl GlGfxCtx {
 
         // Restore standard alpha blend state.
         gl.blend_func_separate(
-            glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA,
-            glow::ZERO,      glow::ONE,
+            glow::SRC_ALPHA,
+            glow::ONE_MINUS_SRC_ALPHA,
+            glow::ZERO,
+            glow::ONE,
         );
     }
 
@@ -813,16 +904,20 @@ impl GlGfxCtx {
     /// `verts` is a slice of screen-space [f32;2] XY pairs.
     /// `indices` is a list of triangle vertex indices into `verts`.
     unsafe fn draw_triangles(&self, verts: &[[f32; 2]], indices: &[u32], color: Color) {
-        if verts.is_empty() || indices.is_empty() { return; }
+        if verts.is_empty() || indices.is_empty() {
+            return;
+        }
 
         let a = (color.a * self.global_alpha as f32).clamp(0.0, 1.0);
 
         self.gl.use_program(Some(self.prog));
         if let Some(ref loc) = self.res_loc {
-            self.gl.uniform_2_f32(Some(loc), self.viewport.0, self.viewport.1);
+            self.gl
+                .uniform_2_f32(Some(loc), self.viewport.0, self.viewport.1);
         }
         if let Some(ref loc) = self.color_loc {
-            self.gl.uniform_4_f32(Some(loc), color.r, color.g, color.b, a);
+            self.gl
+                .uniform_4_f32(Some(loc), color.r, color.g, color.b, a);
         }
 
         // Bind VAO (restores attribute pointer, VBO association, and IBO binding).
@@ -837,15 +932,16 @@ impl GlGfxCtx {
         );
 
         // Upload index data to the persistent IBO (already bound in the VAO).
-        self.gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ibo));
+        self.gl
+            .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ibo));
         self.gl.buffer_data_u8_slice(
             glow::ELEMENT_ARRAY_BUFFER,
             bytemuck::cast_slice(indices),
             glow::STREAM_DRAW,
         );
 
-        self.gl.draw_elements(glow::TRIANGLES, indices.len() as i32,
-                              glow::UNSIGNED_INT, 0);
+        self.gl
+            .draw_elements(glow::TRIANGLES, indices.len() as i32, glow::UNSIGNED_INT, 0);
 
         self.gl.bind_vertex_array(None);
     }
@@ -857,15 +953,19 @@ impl GlGfxCtx {
     /// primitive, so halo quads with inner=1.0 / outer=0.0 produce an
     /// analytic edge-coverage ramp one pixel wide.
     unsafe fn submit_aa_triangles(&self, verts: &[[f32; 3]], indices: &[u32], color: Color) {
-        if verts.is_empty() || indices.is_empty() { return; }
+        if verts.is_empty() || indices.is_empty() {
+            return;
+        }
         let a = (color.a * self.global_alpha as f32).clamp(0.0, 1.0);
 
         self.gl.use_program(Some(self.aa_prog));
         if let Some(ref loc) = self.aa_res_loc {
-            self.gl.uniform_2_f32(Some(loc), self.viewport.0, self.viewport.1);
+            self.gl
+                .uniform_2_f32(Some(loc), self.viewport.0, self.viewport.1);
         }
         if let Some(ref loc) = self.aa_color_loc {
-            self.gl.uniform_4_f32(Some(loc), color.r, color.g, color.b, a);
+            self.gl
+                .uniform_4_f32(Some(loc), color.r, color.g, color.b, a);
         }
 
         self.gl.bind_vertex_array(Some(self.aa_vao));
@@ -877,15 +977,16 @@ impl GlGfxCtx {
             glow::STREAM_DRAW,
         );
 
-        self.gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.aa_ibo));
+        self.gl
+            .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.aa_ibo));
         self.gl.buffer_data_u8_slice(
             glow::ELEMENT_ARRAY_BUFFER,
             bytemuck::cast_slice(indices),
             glow::STREAM_DRAW,
         );
 
-        self.gl.draw_elements(glow::TRIANGLES, indices.len() as i32,
-                              glow::UNSIGNED_INT, 0);
+        self.gl
+            .draw_elements(glow::TRIANGLES, indices.len() as i32, glow::UNSIGNED_INT, 0);
 
         self.gl.bind_vertex_array(None);
     }
@@ -897,16 +998,20 @@ impl GlGfxCtx {
     /// `tessellate_path_aa`, which uses tess2's edge-flag output to attach
     /// a 1-pixel halo strip along every original polygon boundary.
     unsafe fn do_fill(&mut self) {
-        use agg_rust::path_storage::PathStorage;
         use agg_gui::gl_renderer::tessellate_path_aa;
+        use agg_rust::path_storage::PathStorage;
 
         let contours = std::mem::take(&mut self.contours);
         self.current_contour.clear();
-        if contours.is_empty() { return; }
+        if contours.is_empty() {
+            return;
+        }
 
         let mut path = PathStorage::new();
         for c in &contours {
-            if c.len() < 2 { continue; }
+            if c.len() < 2 {
+                continue;
+            }
             path.move_to(c[0][0] as f64, c[0][1] as f64);
             for p in &c[1..] {
                 path.line_to(p[0] as f64, p[1] as f64);
@@ -926,18 +1031,22 @@ impl GlGfxCtx {
     ///   joins + butt/round/square caps) → [`tessellate_path_aa`] (AGG
     ///   VertexSource → tess2 → interior triangles + edge-flag halo strips).
     unsafe fn do_stroke(&mut self) {
+        use agg_gui::gl_renderer::tessellate_path_aa;
         use agg_rust::conv_dash::ConvDash;
         use agg_rust::conv_stroke::ConvStroke;
         use agg_rust::path_storage::PathStorage;
-        use agg_gui::gl_renderer::tessellate_path_aa;
 
         let contours = std::mem::take(&mut self.contours);
         self.current_contour.clear();
-        if contours.is_empty() { return; }
+        if contours.is_empty() {
+            return;
+        }
 
         let mut path = PathStorage::new();
         for contour in &contours {
-            if contour.len() < 2 { continue; }
+            if contour.len() < 2 {
+                continue;
+            }
             path.move_to(contour[0][0] as f64, contour[0][1] as f64);
             for p in &contour[1..] {
                 path.line_to(p[0] as f64, p[1] as f64);
@@ -1030,25 +1139,46 @@ const FLATNESS_SQ: f64 = 0.25; // 0.5px flatness
 impl DrawCtx for GlGfxCtx {
     // ── State ────────────────────────────────────────────────────────────────
 
-    fn set_fill_color(&mut self, c: Color) { self.fill_color = c; }
-    fn set_stroke_color(&mut self, c: Color) { self.stroke_color = c; }
-    fn set_line_width(&mut self, w: f64) { self.line_width = w; }
-    fn set_line_join(&mut self, j: LineJoin) { self.line_join = j; }
-    fn set_line_cap(&mut self, c: LineCap) { self.line_cap = c; }
-    fn set_miter_limit(&mut self, limit: f64) { self.miter_limit = limit.max(1.0); }
+    fn set_fill_color(&mut self, c: Color) {
+        self.fill_color = c;
+    }
+    fn set_stroke_color(&mut self, c: Color) {
+        self.stroke_color = c;
+    }
+    fn set_line_width(&mut self, w: f64) {
+        self.line_width = w;
+    }
+    fn set_line_join(&mut self, j: LineJoin) {
+        self.line_join = j;
+    }
+    fn set_line_cap(&mut self, c: LineCap) {
+        self.line_cap = c;
+    }
+    fn set_miter_limit(&mut self, limit: f64) {
+        self.miter_limit = limit.max(1.0);
+    }
     fn set_line_dash(&mut self, dashes: &[f64], offset: f64) {
         self.line_dash.clear();
-        self.line_dash.extend(dashes.iter().copied().filter(|v| *v > 0.0));
+        self.line_dash
+            .extend(dashes.iter().copied().filter(|v| *v > 0.0));
         self.dash_offset = offset;
     }
     fn set_blend_mode(&mut self, _: CompOp) {}
-    fn set_global_alpha(&mut self, a: f64) { self.global_alpha = a; }
-    fn set_fill_rule(&mut self, rule: FillRule) { self.fill_rule = rule; }
+    fn set_global_alpha(&mut self, a: f64) {
+        self.global_alpha = a;
+    }
+    fn set_fill_rule(&mut self, rule: FillRule) {
+        self.fill_rule = rule;
+    }
 
     // ── Font ─────────────────────────────────────────────────────────────────
 
-    fn set_font(&mut self, font: Arc<Font>) { self.font = Some(font); }
-    fn set_font_size(&mut self, size: f64) { self.font_size = size; }
+    fn set_font(&mut self, font: Arc<Font>) {
+        self.font = Some(font);
+    }
+    fn set_font_size(&mut self, size: f64) {
+        self.font_size = size;
+    }
 
     // ── Clipping ─────────────────────────────────────────────────────────────
 
@@ -1069,7 +1199,12 @@ impl DrawCtx for GlGfxCtx {
             let ny1 = gl_y.max(ey);
             let nx2 = gl_x.saturating_add(gl_w).min(ex.saturating_add(ew));
             let ny2 = gl_y.saturating_add(gl_h).min(ey.saturating_add(eh));
-            [nx1, ny1, nx2.saturating_sub(nx1).max(0), ny2.saturating_sub(ny1).max(0)]
+            [
+                nx1,
+                ny1,
+                nx2.saturating_sub(nx1).max(0),
+                ny2.saturating_sub(ny1).max(0),
+            ]
         } else {
             [gl_x, gl_y, gl_w, gl_h]
         };
@@ -1083,7 +1218,9 @@ impl DrawCtx for GlGfxCtx {
 
     fn reset_clip(&mut self) {
         self.state_stack.last_mut().unwrap().1 = None;
-        unsafe { self.gl.disable(glow::SCISSOR_TEST); }
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
     }
 
     // ── Clear ─────────────────────────────────────────────────────────────────
@@ -1092,7 +1229,8 @@ impl DrawCtx for GlGfxCtx {
         unsafe {
             // Color fields are already [0, 1] f32 — no conversion needed.
             self.gl.clear_color(color.r, color.g, color.b, color.a);
-            self.gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+            self.gl
+                .clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
     }
 
@@ -1122,16 +1260,24 @@ impl DrawCtx for GlGfxCtx {
 
     fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool) {
         let mut da = end_angle - start_angle;
-        if ccw && da > 0.0 { da -= std::f64::consts::TAU; }
-        if !ccw && da < 0.0 { da += std::f64::consts::TAU; }
+        if ccw && da > 0.0 {
+            da -= std::f64::consts::TAU;
+        }
+        if !ccw && da < 0.0 {
+            da += std::f64::consts::TAU;
+        }
         let steps = ((da.abs() * r).abs().max(1.0) as usize).min(256).max(4);
         let step = da / steps as f64;
         for i in 0..=steps {
             let a = start_angle + step * i as f64;
             let px = cx + r * a.cos();
             let py = cy + r * a.sin();
-            if i == 0 { self.flush_contour(); self.push_pt(px, py); }
-            else { self.push_pt(px, py); }
+            if i == 0 {
+                self.flush_contour();
+                self.push_pt(px, py);
+            } else {
+                self.push_pt(px, py);
+            }
         }
     }
 
@@ -1139,12 +1285,14 @@ impl DrawCtx for GlGfxCtx {
         let ctm = *self.ctm();
         let scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt();
         let segments = (std::f64::consts::TAU * r * scale).max(12.0).min(128.0) as usize;
-        let mut contour: Vec<[f32; 2]> = (0..segments).map(|i| {
-            let angle = i as f64 / segments as f64 * std::f64::consts::TAU;
-            let lx = cx + r * angle.cos();
-            let ly = cy + r * angle.sin();
-            self.transform_pt(lx, ly)
-        }).collect();
+        let mut contour: Vec<[f32; 2]> = (0..segments)
+            .map(|i| {
+                let angle = i as f64 / segments as f64 * std::f64::consts::TAU;
+                let lx = cx + r * angle.cos();
+                let ly = cy + r * angle.sin();
+                self.transform_pt(lx, ly)
+            })
+            .collect();
         if contour.len() >= 3 {
             // Close the contour so do_stroke draws the segment that joins the
             // last arc point back to the first (otherwise the circle has a gap).
@@ -1158,10 +1306,10 @@ impl DrawCtx for GlGfxCtx {
         // 5-point closed contour (CTM-transformed corners + repeated first),
         // CCW winding.  The closing point ensures do_stroke draws all four
         // sides including the left edge (the tl→bl wrap-around segment).
-        let bl = self.transform_pt(x,     y);
+        let bl = self.transform_pt(x, y);
         let br = self.transform_pt(x + w, y);
         let tr = self.transform_pt(x + w, y + h);
-        let tl = self.transform_pt(x,     y + h);
+        let tl = self.transform_pt(x, y + h);
         self.contours.push(vec![bl, br, tr, tl, bl]);
     }
 
@@ -1172,10 +1320,10 @@ impl DrawCtx for GlGfxCtx {
         use std::f64::consts::FRAC_PI_2;
         // Four corner arcs, CCW winding, starting from bottom-left corner.
         let corners: [(f64, f64, f64, f64); 4] = [
-            (x + r,     y + r,      -FRAC_PI_2*2.0, -FRAC_PI_2),   // bottom-left
-            (x + w - r, y + r,      -FRAC_PI_2,      0.0),          // bottom-right
-            (x + w - r, y + h - r,   0.0,             FRAC_PI_2),   // top-right
-            (x + r,     y + h - r,   FRAC_PI_2,       FRAC_PI_2*2.0),// top-left
+            (x + r, y + r, -FRAC_PI_2 * 2.0, -FRAC_PI_2), // bottom-left
+            (x + w - r, y + r, -FRAC_PI_2, 0.0),          // bottom-right
+            (x + w - r, y + h - r, 0.0, FRAC_PI_2),       // top-right
+            (x + r, y + h - r, FRAC_PI_2, FRAC_PI_2 * 2.0), // top-left
         ];
         for &(cx2, cy2, start, end) in &corners {
             for i in 0..=seg {
@@ -1207,41 +1355,51 @@ impl DrawCtx for GlGfxCtx {
 
     fn fill(&mut self) {
         self.flush_contour();
-        unsafe { self.do_fill(); }
+        unsafe {
+            self.do_fill();
+        }
     }
 
     fn stroke(&mut self) {
         self.flush_contour();
-        unsafe { self.do_stroke(); }
+        unsafe {
+            self.do_stroke();
+        }
     }
 
     fn fill_and_stroke(&mut self) {
         self.flush_contour();
         // Save contours for both operations.
         let saved = self.contours.clone();
-        unsafe { self.do_fill(); }
+        unsafe {
+            self.do_fill();
+        }
         self.contours = saved;
-        unsafe { self.do_stroke(); }
+        unsafe {
+            self.do_stroke();
+        }
     }
 
-    fn draw_triangles_aa(
-        &mut self,
-        vertices: &[[f32; 3]],
-        indices:  &[u32],
-        color:    Color,
-    ) {
+    fn draw_triangles_aa(&mut self, vertices: &[[f32; 3]], indices: &[u32], color: Color) {
         // The Lion demo and other callers tessellate once at load time and
         // submit the cached triangles + halo every frame — route straight
         // into the existing AA-solid GL pipeline.  Apply the current CTM
         // to each vertex's XY; alpha passes through unchanged.
-        if vertices.is_empty() || indices.is_empty() { return; }
+        if vertices.is_empty() || indices.is_empty() {
+            return;
+        }
         let ctm = *self.ctm();
-        let transformed: Vec<[f32; 3]> = vertices.iter().map(|v| {
-            let (mut x, mut y) = (v[0] as f64, v[1] as f64);
-            ctm.transform(&mut x, &mut y);
-            [x as f32, y as f32, v[2]]
-        }).collect();
-        unsafe { self.submit_aa_triangles(&transformed, indices, color); }
+        let transformed: Vec<[f32; 3]> = vertices
+            .iter()
+            .map(|v| {
+                let (mut x, mut y) = (v[0] as f64, v[1] as f64);
+                ctm.transform(&mut x, &mut y);
+                [x as f32, y as f32, v[2]]
+            })
+            .collect();
+        unsafe {
+            self.submit_aa_triangles(&transformed, indices, color);
+        }
     }
 
     // ── Text ─────────────────────────────────────────────────────────────────
@@ -1276,13 +1434,9 @@ impl DrawCtx for GlGfxCtx {
         //
         // HiDPI: rasterise at physical size so the mask composites 1:1 at
         // the right pixel count instead of being half-sized on 2×/3× screens.
-        if <Self as agg_gui::DrawCtx>::has_lcd_mask_composite(self)
-            && self.lcd_mode
-        {
+        if <Self as agg_gui::DrawCtx>::has_lcd_mask_composite(self) && self.lcd_mode {
             let phys_size = self.font_size * ctm_scale;
-            let cached = agg_gui::lcd_coverage::rasterize_text_lcd_cached(
-                &font, text, phys_size,
-            );
+            let cached = agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size);
             let mut col = self.fill_color;
             col.a *= self.global_alpha as f32;
             // `baseline_*_in_mask` is in physical mask pixels; divide by
@@ -1292,15 +1446,19 @@ impl DrawCtx for GlGfxCtx {
             let dst_y = y - cached.baseline_y_in_mask / ctm_scale;
             <Self as agg_gui::DrawCtx>::draw_lcd_mask_arc(
                 self,
-                &cached.pixels, cached.width, cached.height,
-                col, dst_x, dst_y,
+                &cached.pixels,
+                cached.width,
+                cached.height,
+                col,
+                dst_x,
+                dst_y,
             );
             return;
         }
 
         // Shape the text string to get per-glyph IDs and advances.
         // Rustybuzz shaping is cheap relative to tessellation.
-        let shaped    = shape_glyphs(&font, text, self.font_size);
+        let shaped = shape_glyphs(&font, text, self.font_size);
         let font_size = self.font_size;
 
         // Typography-style globals consulted per-frame (scrollbar-style
@@ -1308,10 +1466,10 @@ impl DrawCtx for GlGfxCtx {
         // — the cache stores native-shape outlines at origin; width /
         // italic are applied vertex-by-vertex below, hinting snaps the
         // Y origin, and interval pads the pen advance.
-        let width_scale  = agg_gui::font_settings::current_width();
+        let width_scale = agg_gui::font_settings::current_width();
         let italic_shear = agg_gui::font_settings::current_faux_italic() / 3.0;
-        let hint_y       = agg_gui::font_settings::hinting_enabled();
-        let interval_px  = agg_gui::font_settings::current_interval() * font_size;
+        let hint_y = agg_gui::font_settings::hinting_enabled();
+        let interval_px = agg_gui::font_settings::current_interval() * font_size;
         // HiDPI: cache glyph tessellations at the **physical** size so the
         // Bezier flattening resolves more segments on 2×/3× displays.  We
         // then divide each vertex by `ctm_scale` before adding the glyph
@@ -1323,7 +1481,7 @@ impl DrawCtx for GlGfxCtx {
         let inv_scale = 1.0 / ctm_scale;
 
         let mut all_verts: Vec<[f32; 2]> = Vec::new();
-        let mut all_idx:   Vec<u32>      = Vec::new();
+        let mut all_idx: Vec<u32> = Vec::new();
         let mut pen_x = x;
 
         for glyph in &shaped {
@@ -1333,13 +1491,20 @@ impl DrawCtx for GlGfxCtx {
             // Y-axis hinting: snap baseline to the pixel grid.  The X
             // coordinate keeps its subpixel precision, which matters
             // for LCD positioning and smooth scrolling.
-            let gy = if hint_y { (gy_raw + 0.5).floor() } else { gy_raw };
+            let gy = if hint_y {
+                (gy_raw + 0.5).floor()
+            } else {
+                gy_raw
+            };
 
             // Use the fallback font for outline lookup when the glyph was
             // resolved from it — glyph_id is an index into that font's table.
             let render_font = glyph.fallback_font.as_deref().unwrap_or(&font);
 
-            if let Some(cached) = self.glyph_cache.get_or_insert(render_font, glyph.glyph_id, tess_size) {
+            if let Some(cached) =
+                self.glyph_cache
+                    .get_or_insert(render_font, glyph.glyph_id, tess_size)
+            {
                 // Vertices are in physical pixel space at `tess_size`.  Scale
                 // to logical via `inv_scale`, offset by the glyph's logical
                 // pen position, then apply the CTM to reach physical pixels.
@@ -1369,7 +1534,9 @@ impl DrawCtx for GlGfxCtx {
 
         if !all_verts.is_empty() {
             let color = self.fill_color;
-            unsafe { self.draw_triangles(&all_verts, &all_idx, color); }
+            unsafe {
+                self.draw_triangles(&all_verts, &all_idx, color);
+            }
         }
     }
 
@@ -1387,7 +1554,9 @@ impl DrawCtx for GlGfxCtx {
     // at `TEX_CACHE_MAX` entries.  Widgets that rebuild their Label every
     // layout (e.g. inspector `TreeRow`) pay one re-raster + re-upload per
     // layout — acceptable since those labels remain small and few.
-    fn has_image_blit(&self) -> bool { true }
+    fn has_image_blit(&self) -> bool {
+        true
+    }
 
     #[cfg(target_arch = "wasm32")]
     fn has_lcd_mask_composite(&self) -> bool {
@@ -1412,23 +1581,29 @@ impl DrawCtx for GlGfxCtx {
         true
     }
     #[cfg(not(target_arch = "wasm32"))]
-    fn has_lcd_mask_composite(&self) -> bool { true }
+    fn has_lcd_mask_composite(&self) -> bool {
+        true
+    }
 
     fn draw_lcd_mask(
         &mut self,
-        mask:      &[u8],
-        mask_w:    u32,
-        mask_h:    u32,
+        mask: &[u8],
+        mask_w: u32,
+        mask_h: u32,
         src_color: agg_gui::Color,
-        dst_x:     f64,
-        dst_y:     f64,
+        dst_x: f64,
+        dst_y: f64,
     ) {
         // Slice path — upload a throwaway texture.  Used only by code
         // that doesn't have an `Arc` to key a cache on.  Label's hot
         // path goes through `draw_lcd_mask_arc` below, which reuses
         // the uploaded GL texture across frames.
-        if mask.is_empty() || mask_w == 0 || mask_h == 0 { return; }
-        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 { return; }
+        if mask.is_empty() || mask_w == 0 || mask_h == 0 {
+            return;
+        }
+        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 {
+            return;
+        }
         unsafe {
             let tex = self.gl.create_texture().expect("create LCD texture");
             self.upload_lcd_texture(tex, mask_w, mask_h, mask);
@@ -1439,15 +1614,19 @@ impl DrawCtx for GlGfxCtx {
 
     fn draw_lcd_mask_arc(
         &mut self,
-        mask:      &std::sync::Arc<Vec<u8>>,
-        mask_w:    u32,
-        mask_h:    u32,
+        mask: &std::sync::Arc<Vec<u8>>,
+        mask_w: u32,
+        mask_h: u32,
         src_color: agg_gui::Color,
-        dst_x:     f64,
-        dst_y:     f64,
+        dst_x: f64,
+        dst_y: f64,
     ) {
-        if mask.is_empty() || mask_w == 0 || mask_h == 0 { return; }
-        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 { return; }
+        if mask.is_empty() || mask_w == 0 || mask_h == 0 {
+            return;
+        }
+        if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 {
+            return;
+        }
         let key = std::sync::Arc::as_ptr(mask) as usize;
 
         // Sweep expired entries opportunistically — each miss walks the
@@ -1459,17 +1638,22 @@ impl DrawCtx for GlGfxCtx {
                 let tex = self.gl.create_texture().expect("create LCD texture");
                 self.upload_lcd_texture(tex, mask_w, mask_h, mask.as_slice());
                 // Insert fresh entry, dropping any stale one for this key.
-                if let Some(old) = self.lcd_arc_texture_cache.insert(key, ArcTextureEntry {
-                    weak:    std::sync::Arc::downgrade(mask),
-                    texture: tex,
-                    w:       mask_w,
-                    h:       mask_h,
-                }) {
+                if let Some(old) = self.lcd_arc_texture_cache.insert(
+                    key,
+                    ArcTextureEntry {
+                        weak: std::sync::Arc::downgrade(mask),
+                        texture: tex,
+                        w: mask_w,
+                        h: mask_h,
+                    },
+                ) {
                     self.gl.delete_texture(old.texture);
                 }
                 // Cheap periodic sweep of dropped Arcs.
                 self.lcd_arc_texture_cache.retain(|_, e| {
-                    if e.weak.upgrade().is_some() { true } else {
+                    if e.weak.upgrade().is_some() {
+                        true
+                    } else {
                         self.gl.delete_texture(e.texture);
                         false
                     }
@@ -1477,7 +1661,9 @@ impl DrawCtx for GlGfxCtx {
                 tex
             },
         };
-        unsafe { self.draw_lcd_quad(tex, mask_w, mask_h, src_color, dst_x, dst_y); }
+        unsafe {
+            self.draw_lcd_quad(tex, mask_w, mask_h, src_color, dst_x, dst_y);
+        }
     }
 
     fn draw_lcd_backbuffer_arc(
@@ -1491,9 +1677,13 @@ impl DrawCtx for GlGfxCtx {
         dst_w: f64,
         dst_h: f64,
     ) {
-        if w == 0 || h == 0 || color.is_empty() || alpha.is_empty() { return; }
+        if w == 0 || h == 0 || color.is_empty() || alpha.is_empty() {
+            return;
+        }
         let needed = (w as usize) * (h as usize) * 3;
-        if color.len() < needed || alpha.len() < needed { return; }
+        if color.len() < needed || alpha.len() < needed {
+            return;
+        }
 
         // Get-or-upload each plane independently; both share the
         // lcd_arc_texture_cache so GPU memory is released as soon as the
@@ -1504,15 +1694,13 @@ impl DrawCtx for GlGfxCtx {
         let alpha_tex = unsafe { self.lcd_plane_get_or_upload(alpha, w, h) };
 
         unsafe {
-            self.draw_lcd_backbuffer_quad(
-                color_tex, alpha_tex, w, h, dst_x, dst_y, dst_w, dst_h,
-            );
+            self.draw_lcd_backbuffer_quad(color_tex, alpha_tex, w, h, dst_x, dst_y, dst_w, dst_h);
         }
     }
 
     fn draw_image_rgba(
         &mut self,
-        data:  &[u8],
+        data: &[u8],
         img_w: u32,
         img_h: u32,
         dst_x: f64,
@@ -1520,24 +1708,24 @@ impl DrawCtx for GlGfxCtx {
         dst_w: f64,
         dst_h: f64,
     ) {
-        if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 { return; }
-        if data.len() < (img_w as usize) * (img_h as usize) * 4 { return; }
+        if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 {
+            return;
+        }
+        if data.len() < (img_w as usize) * (img_h as usize) * 4 {
+            return;
+        }
 
         // Honour whatever CTM the caller has set — sub-pixel positions are
         // legitimate (smooth scrolling, animation).  Callers that need
         // pixel-perfect 1:1 blits (e.g. `Label` backbuffers, the pixel-
         // alignment test) must explicitly call `ctx.snap_to_pixel()` first.
-        let bl = self.transform_pt(dst_x,         dst_y);
+        let bl = self.transform_pt(dst_x, dst_y);
         let br = self.transform_pt(dst_x + dst_w, dst_y);
         let tr = self.transform_pt(dst_x + dst_w, dst_y + dst_h);
-        let tl = self.transform_pt(dst_x,         dst_y + dst_h);
+        let tl = self.transform_pt(dst_x, dst_y + dst_h);
         let verts: [f32; 24] = [
-            bl[0], bl[1], 0.0, 1.0,
-            br[0], br[1], 1.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            bl[0], bl[1], 0.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            tl[0], tl[1], 0.0, 0.0,
+            bl[0], bl[1], 0.0, 1.0, br[0], br[1], 1.0, 1.0, tr[0], tr[1], 1.0, 0.0, bl[0], bl[1],
+            0.0, 1.0, tr[0], tr[1], 1.0, 0.0, tl[0], tl[1], 0.0, 0.0,
         ];
 
         // Cache key blends pointer, length, dimensions, and the first+last
@@ -1553,9 +1741,7 @@ impl DrawCtx for GlGfxCtx {
             let tex = match existing {
                 Some(t) => {
                     // LRU touch — move key to back.
-                    if let Some(pos) = self.texture_cache_order.iter()
-                        .position(|&k| k == key)
-                    {
+                    if let Some(pos) = self.texture_cache_order.iter().position(|&k| k == key) {
                         self.texture_cache_order.remove(pos);
                     }
                     self.texture_cache_order.push_back(key);
@@ -1565,15 +1751,37 @@ impl DrawCtx for GlGfxCtx {
                     let tex = gl.create_texture().expect("create texture");
                     gl.active_texture(glow::TEXTURE0);
                     gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MIN_FILTER,
+                        glow::LINEAR as i32,
+                    );
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MAG_FILTER,
+                        glow::LINEAR as i32,
+                    );
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_S,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_T,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
                     gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
                     gl.tex_image_2d(
-                        glow::TEXTURE_2D, 0, glow::RGBA as i32,
-                        img_w as i32, img_h as i32, 0,
-                        glow::RGBA, glow::UNSIGNED_BYTE, Some(data),
+                        glow::TEXTURE_2D,
+                        0,
+                        glow::RGBA as i32,
+                        img_w as i32,
+                        img_h as i32,
+                        0,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        Some(data),
                     );
                     self.texture_cache.insert(key, (tex, img_w, img_h));
                     self.texture_cache_order.push_back(key);
@@ -1584,7 +1792,9 @@ impl DrawCtx for GlGfxCtx {
                             if let Some((old_tex, _, _)) = self.texture_cache.remove(&old) {
                                 gl.delete_texture(old_tex);
                             }
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
                     tex
                 }
@@ -1593,10 +1803,7 @@ impl DrawCtx for GlGfxCtx {
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(tex));
             gl.use_program(Some(self.tex_prog));
-            gl.uniform_2_f32(
-                self.tex_res_loc.as_ref(),
-                self.viewport.0, self.viewport.1,
-            );
+            gl.uniform_2_f32(self.tex_res_loc.as_ref(), self.viewport.0, self.viewport.1);
             gl.uniform_1_i32(self.tex_sampler_loc.as_ref(), 0);
             gl.bind_vertex_array(Some(self.tex_vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.tex_vbo));
@@ -1620,7 +1827,7 @@ impl DrawCtx for GlGfxCtx {
     /// upgrade fails) are swept and their textures batch-deleted each call.
     fn draw_image_rgba_arc(
         &mut self,
-        data:  &Arc<Vec<u8>>,
+        data: &Arc<Vec<u8>>,
         img_w: u32,
         img_h: u32,
         dst_x: f64,
@@ -1628,22 +1835,22 @@ impl DrawCtx for GlGfxCtx {
         dst_w: f64,
         dst_h: f64,
     ) {
-        if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 { return; }
-        if data.len() < (img_w as usize) * (img_h as usize) * 4 { return; }
+        if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 {
+            return;
+        }
+        if data.len() < (img_w as usize) * (img_h as usize) * 4 {
+            return;
+        }
 
         // Honour the caller's CTM — no implicit snapping.  Callers that need
         // pixel-perfect 1:1 blits call `ctx.snap_to_pixel()` before the draw.
-        let bl = self.transform_pt(dst_x,         dst_y);
+        let bl = self.transform_pt(dst_x, dst_y);
         let br = self.transform_pt(dst_x + dst_w, dst_y);
         let tr = self.transform_pt(dst_x + dst_w, dst_y + dst_h);
-        let tl = self.transform_pt(dst_x,         dst_y + dst_h);
+        let tl = self.transform_pt(dst_x, dst_y + dst_h);
         let verts: [f32; 24] = [
-            bl[0], bl[1], 0.0, 1.0,
-            br[0], br[1], 1.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            bl[0], bl[1], 0.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            tl[0], tl[1], 0.0, 0.0,
+            bl[0], bl[1], 0.0, 1.0, br[0], br[1], 1.0, 1.0, tr[0], tr[1], 1.0, 0.0, bl[0], bl[1],
+            0.0, 1.0, tr[0], tr[1], 1.0, 0.0, tl[0], tl[1], 0.0, 0.0,
         ];
 
         let key = Arc::as_ptr(data) as *const u8 as usize;
@@ -1655,7 +1862,9 @@ impl DrawCtx for GlGfxCtx {
             // cache is bounded by the L1 LRU cap, and we only remove; no
             // heavy work.  Batching all GL deletes in one frame keeps GL
             // driver chatter low.
-            let dead_keys: Vec<usize> = self.arc_texture_cache.iter()
+            let dead_keys: Vec<usize> = self
+                .arc_texture_cache
+                .iter()
                 .filter(|(_, e)| e.weak.strong_count() == 0)
                 .map(|(k, _)| *k)
                 .collect();
@@ -1668,13 +1877,15 @@ impl DrawCtx for GlGfxCtx {
             // Look up by pointer — also verify via Weak::upgrade to guard
             // against pointer recycling (old entry died, new Arc happened to
             // allocate at the same address).
-            let existing = self.arc_texture_cache.get(&key).and_then(|e| {
-                match e.weak.upgrade() {
-                    Some(a) if Arc::ptr_eq(&a, data) && e.w == img_w && e.h == img_h
-                        => Some(e.texture),
-                    _   => None,
-                }
-            });
+            let existing = self
+                .arc_texture_cache
+                .get(&key)
+                .and_then(|e| match e.weak.upgrade() {
+                    Some(a) if Arc::ptr_eq(&a, data) && e.w == img_w && e.h == img_h => {
+                        Some(e.texture)
+                    }
+                    _ => None,
+                });
 
             let tex = match existing {
                 Some(t) => t,
@@ -1698,22 +1909,47 @@ impl DrawCtx for GlGfxCtx {
                     // rounding.  Callers who genuinely want smooth interp
                     // (scaled markdown images, screenshot zoom) should go
                     // through the `&[u8]` path which stays LINEAR.
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-                    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MIN_FILTER,
+                        glow::NEAREST as i32,
+                    );
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MAG_FILTER,
+                        glow::NEAREST as i32,
+                    );
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_S,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
+                    gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_T,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
                     gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
                     gl.tex_image_2d(
-                        glow::TEXTURE_2D, 0, glow::RGBA as i32,
-                        img_w as i32, img_h as i32, 0,
-                        glow::RGBA, glow::UNSIGNED_BYTE, Some(data.as_slice()),
+                        glow::TEXTURE_2D,
+                        0,
+                        glow::RGBA as i32,
+                        img_w as i32,
+                        img_h as i32,
+                        0,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        Some(data.as_slice()),
                     );
-                    self.arc_texture_cache.insert(key, ArcTextureEntry {
-                        weak:    Arc::downgrade(data),
-                        texture: tex,
-                        w:       img_w,
-                        h:       img_h,
-                    });
+                    self.arc_texture_cache.insert(
+                        key,
+                        ArcTextureEntry {
+                            weak: Arc::downgrade(data),
+                            texture: tex,
+                            w: img_w,
+                            h: img_h,
+                        },
+                    );
                     tex
                 }
             };
@@ -1740,7 +1976,11 @@ impl DrawCtx for GlGfxCtx {
     fn measure_text(&self, text: &str) -> Option<TextMetrics> {
         let font = self.font.as_ref()?;
         // Delegate to the same measurement used in GfxCtx.
-        Some(agg_gui::text::measure_text_metrics(font, text, self.font_size))
+        Some(agg_gui::text::measure_text_metrics(
+            font,
+            text,
+            self.font_size,
+        ))
     }
 
     // ── Transform ────────────────────────────────────────────────────────────
@@ -1763,17 +2003,26 @@ impl DrawCtx for GlGfxCtx {
     }
 
     fn translate(&mut self, tx: f64, ty: f64) {
-        self.state_stack.last_mut().unwrap().0
+        self.state_stack
+            .last_mut()
+            .unwrap()
+            .0
             .premultiply(&TransAffine::new_translation(tx, ty));
     }
 
     fn rotate(&mut self, radians: f64) {
-        self.state_stack.last_mut().unwrap().0
+        self.state_stack
+            .last_mut()
+            .unwrap()
+            .0
             .premultiply(&TransAffine::new_rotation(radians));
     }
 
     fn scale(&mut self, sx: f64, sy: f64) {
-        self.state_stack.last_mut().unwrap().0
+        self.state_stack
+            .last_mut()
+            .unwrap()
+            .0
             .premultiply(&TransAffine::new_scaling(sx, sy));
     }
 
@@ -1829,7 +2078,9 @@ fn configure_dashes<VS: agg_rust::basics::VertexSource>(
 // ---------------------------------------------------------------------------
 
 fn subdivide_quad<F: FnMut(f32, f32)>(
-    p0: [f32; 2], p1: [f32; 2], p2: [f32; 2],
+    p0: [f32; 2],
+    p1: [f32; 2],
+    p2: [f32; 2],
     flatness_sq: f64,
     emit: &mut F,
 ) {
@@ -1839,10 +2090,12 @@ fn subdivide_quad<F: FnMut(f32, f32)>(
     let mid_y = (p0[1] + p2[1]) * 0.5;
     let dx = (mx - mid_x) as f64;
     let dy = (my - mid_y) as f64;
-    if dx * dx + dy * dy <= flatness_sq { return; }
-    let q0 = [(p0[0]+p1[0])*0.5, (p0[1]+p1[1])*0.5];
-    let q1 = [(p1[0]+p2[0])*0.5, (p1[1]+p2[1])*0.5];
-    let mid = [(q0[0]+q1[0])*0.5, (q0[1]+q1[1])*0.5];
+    if dx * dx + dy * dy <= flatness_sq {
+        return;
+    }
+    let q0 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
+    let q1 = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
+    let mid = [(q0[0] + q1[0]) * 0.5, (q0[1] + q1[1]) * 0.5];
     subdivide_quad(p0, q0, mid, flatness_sq, emit);
     emit(mid[0], mid[1]);
     subdivide_quad(mid, q1, p2, flatness_sq, emit);
@@ -1850,23 +2103,28 @@ fn subdivide_quad<F: FnMut(f32, f32)>(
 
 /// Cubic subdivision in screen space (points already CTM-transformed).
 fn subdivide_cubic_screen<F: FnMut(f32, f32)>(
-    p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], p3: [f32; 2],
+    p0: [f32; 2],
+    p1: [f32; 2],
+    p2: [f32; 2],
+    p3: [f32; 2],
     flatness_sq: f64,
     emit: &mut F,
 ) {
-    let ux = 3.0*p1[0] - 2.0*p0[0] - p3[0];
-    let uy = 3.0*p1[1] - 2.0*p0[1] - p3[1];
-    let vx = 3.0*p2[0] - 2.0*p3[0] - p0[0];
-    let vy = 3.0*p2[1] - 2.0*p3[1] - p0[1];
-    let u  = ux*ux + uy*uy;
-    let v  = vx*vx + vy*vy;
-    if (if u>v{u}else{v}) as f64 <= flatness_sq * 16.0 { return; }
-    let q0 = [(p0[0]+p1[0])*0.5, (p0[1]+p1[1])*0.5];
-    let q1 = [(p1[0]+p2[0])*0.5, (p1[1]+p2[1])*0.5];
-    let q2 = [(p2[0]+p3[0])*0.5, (p2[1]+p3[1])*0.5];
-    let r0 = [(q0[0]+q1[0])*0.5, (q0[1]+q1[1])*0.5];
-    let r1 = [(q1[0]+q2[0])*0.5, (q1[1]+q2[1])*0.5];
-    let mid = [(r0[0]+r1[0])*0.5, (r0[1]+r1[1])*0.5];
+    let ux = 3.0 * p1[0] - 2.0 * p0[0] - p3[0];
+    let uy = 3.0 * p1[1] - 2.0 * p0[1] - p3[1];
+    let vx = 3.0 * p2[0] - 2.0 * p3[0] - p0[0];
+    let vy = 3.0 * p2[1] - 2.0 * p3[1] - p0[1];
+    let u = ux * ux + uy * uy;
+    let v = vx * vx + vy * vy;
+    if (if u > v { u } else { v }) as f64 <= flatness_sq * 16.0 {
+        return;
+    }
+    let q0 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
+    let q1 = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
+    let q2 = [(p2[0] + p3[0]) * 0.5, (p2[1] + p3[1]) * 0.5];
+    let r0 = [(q0[0] + q1[0]) * 0.5, (q0[1] + q1[1]) * 0.5];
+    let r1 = [(q1[0] + q2[0]) * 0.5, (q1[1] + q2[1]) * 0.5];
+    let mid = [(r0[0] + r1[0]) * 0.5, (r0[1] + r1[1]) * 0.5];
     subdivide_cubic_screen(p0, q0, r0, mid, flatness_sq, emit);
     emit(mid[0], mid[1]);
     subdivide_cubic_screen(mid, r1, q2, p3, flatness_sq, emit);
@@ -1885,9 +2143,16 @@ unsafe fn compile_program(
     vert_src: &str,
     frag_src: &str,
 ) -> Result<glow::Program, String> {
-    let prog = gl.create_program().map_err(|e| format!("create_program: {e}"))?;
-    for (src, kind) in [(vert_src, glow::VERTEX_SHADER), (frag_src, glow::FRAGMENT_SHADER)] {
-        let sh = gl.create_shader(kind).map_err(|e| format!("create_shader: {e}"))?;
+    let prog = gl
+        .create_program()
+        .map_err(|e| format!("create_program: {e}"))?;
+    for (src, kind) in [
+        (vert_src, glow::VERTEX_SHADER),
+        (frag_src, glow::FRAGMENT_SHADER),
+    ] {
+        let sh = gl
+            .create_shader(kind)
+            .map_err(|e| format!("create_shader: {e}"))?;
         gl.shader_source(sh, src);
         gl.compile_shader(sh);
         if !gl.get_shader_compile_status(sh) {
@@ -1917,18 +2182,22 @@ unsafe fn compile_program(
 /// fresh content produces a different key.  Cheap: no full-buffer hash.
 fn texture_key(data: &[u8], w: u32, h: u32) -> u64 {
     let mut k: u64 = 0xcbf29ce484222325;
-    let mix = |acc: u64, v: u64| -> u64 {
-        acc.wrapping_mul(0x100000001b3).wrapping_add(v)
-    };
+    let mix = |acc: u64, v: u64| -> u64 { acc.wrapping_mul(0x100000001b3).wrapping_add(v) };
     k = mix(k, data.as_ptr() as usize as u64);
     k = mix(k, data.len() as u64);
     k = mix(k, w as u64);
     k = mix(k, h as u64);
     if data.len() >= 16 {
-        for &b in &data[..8]                    { k = mix(k, b as u64); }
-        for &b in &data[data.len() - 8..]       { k = mix(k, b as u64); }
+        for &b in &data[..8] {
+            k = mix(k, b as u64);
+        }
+        for &b in &data[data.len() - 8..] {
+            k = mix(k, b as u64);
+        }
     } else {
-        for &b in data                          { k = mix(k, b as u64); }
+        for &b in data {
+            k = mix(k, b as u64);
+        }
     }
     k
 }
@@ -1938,8 +2207,10 @@ fn texture_key(data: &[u8], w: u32, h: u32) -> u64 {
 /// Called after every `App::paint` on both native and WASM so the Chrome-style
 /// widget highlight is identical on both platforms.
 pub fn draw_hover_overlay(ctx: &mut GlGfxCtx, rect: Rect) {
-    if rect.width < 1.0 || rect.height < 1.0 { return; }
-    let sw   = 1.5_f64;
+    if rect.width < 1.0 || rect.height < 1.0 {
+        return;
+    }
+    let sw = 1.5_f64;
     let half = sw * 0.5;
     // Teal fill — full widget bounds.
     ctx.set_fill_color(Color::rgba(0.05, 0.65, 0.85, 0.18));
@@ -1954,7 +2225,7 @@ pub fn draw_hover_overlay(ctx: &mut GlGfxCtx, rect: Rect) {
     ctx.rect(
         rect.x + half,
         rect.y + half,
-        (rect.width  - sw).max(0.0),
+        (rect.width - sw).max(0.0),
         (rect.height - sw).max(0.0),
     );
     ctx.stroke();
@@ -1969,13 +2240,7 @@ pub fn draw_hover_overlay(ctx: &mut GlGfxCtx, rect: Rect) {
 /// `frame_ms` is the render time of the *previous* frame (so the display does
 /// not include its own drawing cost).  Both native and WASM use this function
 /// to keep the status overlay visually identical.
-pub fn draw_status_overlay(
-    ctx:      &mut GlGfxCtx,
-    font:     Arc<Font>,
-    w:        u32,
-    h:        u32,
-    frame_ms: f64,
-) {
+pub fn draw_status_overlay(ctx: &mut GlGfxCtx, font: Arc<Font>, w: u32, h: u32, frame_ms: f64) {
     let status = format!("{}×{}   {:.1}ms", w, h, frame_ms);
     ctx.set_font(font);
     ctx.set_font_size(11.0);
@@ -1994,15 +2259,14 @@ pub fn draw_status_overlay(
 /// tess2 for proper joined outlines.  Retained so the regression tests below
 /// keep documenting the behaviour this was replacing.
 #[cfg(test)]
-fn build_stroke_quads(
-    contours: &[Vec<[f32; 2]>],
-    hw: f32,
-) -> (Vec<[f32; 2]>, Vec<u32>) {
+fn build_stroke_quads(contours: &[Vec<[f32; 2]>], hw: f32) -> (Vec<[f32; 2]>, Vec<u32>) {
     let mut verts: Vec<[f32; 2]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
     for contour in contours {
-        if contour.len() < 2 { continue; }
+        if contour.len() < 2 {
+            continue;
+        }
         let n = contour.len();
         for i in 0..n {
             let a = contour[i];
@@ -2014,16 +2278,18 @@ fn build_stroke_quads(
             let dx = b[0] - a[0];
             let dy = b[1] - a[1];
             let len = (dx * dx + dy * dy).sqrt();
-            if len < 1e-6 { continue; }
+            if len < 1e-6 {
+                continue;
+            }
             let nx = -dy / len * hw;
-            let ny =  dx / len * hw;
+            let ny = dx / len * hw;
 
             let base = verts.len() as u32;
             verts.push([a[0] + nx, a[1] + ny]);
             verts.push([a[0] - nx, a[1] - ny]);
             verts.push([b[0] + nx, b[1] + ny]);
             verts.push([b[0] - nx, b[1] - ny]);
-            indices.extend_from_slice(&[base, base+1, base+2, base+1, base+3, base+2]);
+            indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
         }
     }
 
@@ -2069,14 +2335,17 @@ mod tests {
     fn test_stroke_open_rect_missing_left_side() {
         // 4-point open rect: first != last → wrap-around (left side) is skipped.
         let contour = vec![
-            [0.0f32,  0.0f32],   // bl
-            [10.0,    0.0],       // br
-            [10.0,    10.0],      // tr
-            [0.0,     10.0],      // tl — tl→bl (left side) will be skipped!
+            [0.0f32, 0.0f32], // bl
+            [10.0, 0.0],      // br
+            [10.0, 10.0],     // tr
+            [0.0, 10.0],      // tl — tl→bl (left side) will be skipped!
         ];
         let (verts, _) = build_stroke_quads(&[contour], 0.5);
         let segments = verts.len() / 4;
-        assert_eq!(segments, 3, "open rect produces only 3 segments (left side missing)");
+        assert_eq!(
+            segments, 3,
+            "open rect produces only 3 segments (left side missing)"
+        );
     }
 
     /// After closing the contour (first == last), all four sides are drawn.
@@ -2084,15 +2353,18 @@ mod tests {
     fn test_stroke_closed_rect_has_all_four_sides() {
         // 5-point closed rect: last point repeats first → wrap-around runs.
         let contour = vec![
-            [0.0f32,  0.0f32],   // bl
-            [10.0,    0.0],       // br
-            [10.0,    10.0],      // tr
-            [0.0,     10.0],      // tl
-            [0.0,     0.0],       // bl repeated — closes the path
+            [0.0f32, 0.0f32], // bl
+            [10.0, 0.0],      // br
+            [10.0, 10.0],     // tr
+            [0.0, 10.0],      // tl
+            [0.0, 0.0],       // bl repeated — closes the path
         ];
         let (verts, _) = build_stroke_quads(&[contour], 0.5);
         let segments = verts.len() / 4;
-        assert_eq!(segments, 4, "closed rect must produce 4 segments (all sides)");
+        assert_eq!(
+            segments, 4,
+            "closed rect must produce 4 segments (all sides)"
+        );
     }
 
     /// The inspector tree area spans Y-up [184, 650] in a 720-tall viewport.
@@ -2104,7 +2376,10 @@ mod tests {
     fn test_scissor_y_uses_y_up_bottom_not_y_down_top() {
         // Clip rect [184, 650] in screen Y-up (inspector tree area, 720-px viewport).
         let [_gl_x, gl_y, _gl_w, gl_h] = compute_gl_scissor(0.0, 184.0, 320.0, 650.0);
-        assert_eq!(gl_y, 184, "gl_y must equal the Y-up bottom of the clip, not viewport_h − top");
+        assert_eq!(
+            gl_y, 184,
+            "gl_y must equal the Y-up bottom of the clip, not viewport_h − top"
+        );
         assert_eq!(gl_h, 466);
     }
 

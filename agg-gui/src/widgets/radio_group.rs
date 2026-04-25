@@ -7,15 +7,15 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
-use crate::draw_ctx::DrawCtx;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{Widget, paint_subtree};
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::Label;
 
-const DOT_R: f64 = 8.0;   // outer circle radius
+const DOT_R: f64 = 8.0; // outer circle radius
 const GAP: f64 = 8.0;
 const ROW_H: f64 = 28.0;
 
@@ -45,10 +45,10 @@ impl RadioGroup {
     pub fn new(options: Vec<impl Into<String>>, selected: usize, font: Arc<Font>) -> Self {
         let font_size = 14.0;
         let opts: Vec<String> = options.into_iter().map(|s| s.into()).collect();
-        let label_widgets = opts.iter().map(|text| {
-            Label::new(text.as_str(), Arc::clone(&font))
-                .with_font_size(font_size)
-        }).collect();
+        let label_widgets = opts
+            .iter()
+            .map(|text| Label::new(text.as_str(), Arc::clone(&font)).with_font_size(font_size))
+            .collect();
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -71,7 +71,9 @@ impl RadioGroup {
     pub fn with_selected_cell(mut self, cell: Rc<Cell<usize>>) -> Self {
         let n = self.options.len();
         let v = cell.get();
-        if n > 0 { self.selected = v.min(n - 1); }
+        if n > 0 {
+            self.selected = v.min(n - 1);
+        }
         self.selected_cell = Some(cell);
         self
     }
@@ -79,43 +81,69 @@ impl RadioGroup {
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.font_size = size;
         // Rebuild label widgets with new font size.
-        self.label_widgets = self.options.iter().map(|text| {
-            Label::new(text.as_str(), Arc::clone(&self.font))
-                .with_font_size(size)
-        }).collect();
+        self.label_widgets = self
+            .options
+            .iter()
+            .map(|text| Label::new(text.as_str(), Arc::clone(&self.font)).with_font_size(size))
+            .collect();
         self
     }
 
-    pub fn with_margin(mut self, m: Insets)    -> Self { self.base.margin   = m; self }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self { self.base.h_anchor = h; self }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self { self.base.v_anchor = v; self }
-    pub fn with_min_size(mut self, s: Size)    -> Self { self.base.min_size = s; self }
-    pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
+    pub fn with_min_size(mut self, s: Size) -> Self {
+        self.base.min_size = s;
+        self
+    }
+    pub fn with_max_size(mut self, s: Size) -> Self {
+        self.base.max_size = s;
+        self
+    }
 
     pub fn on_change(mut self, cb: impl FnMut(usize) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
         self
     }
 
-    pub fn selected(&self) -> usize { self.selected }
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
 
     pub fn set_selected(&mut self, idx: usize) {
         if idx < self.options.len() {
             self.selected = idx;
-            if let Some(cell) = &self.selected_cell { cell.set(idx); }
+            if let Some(cell) = &self.selected_cell {
+                cell.set(idx);
+            }
         }
     }
 
     fn fire(&mut self) {
         let idx = self.selected;
-        if let Some(cell) = &self.selected_cell { cell.set(idx); }
-        if let Some(cb) = self.on_change.as_mut() { cb(idx); }
+        if let Some(cell) = &self.selected_cell {
+            cell.set(idx);
+        }
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(idx);
+        }
     }
 
     /// Y coordinate (bottom-left) of the center of row `i` in Y-up space.
     fn row_center_y(&self, i: usize, total_h: f64) -> f64 {
         let n = self.options.len();
-        if n == 0 { return total_h * 0.5; }
+        if n == 0 {
+            return total_h * 0.5;
+        }
         // rows are stacked top-to-bottom, so row 0 is at the top.
         // In Y-up, top row has the largest Y.
         let row_top_y = total_h - (i as f64) * ROW_H;
@@ -135,19 +163,41 @@ impl RadioGroup {
 }
 
 impl Widget for RadioGroup {
-    fn type_name(&self) -> &'static str { "RadioGroup" }
-    fn bounds(&self) -> Rect { self.bounds }
-    fn set_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+    fn type_name(&self) -> &'static str {
+        "RadioGroup"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
 
-    fn is_focusable(&self) -> bool { true }
+    fn is_focusable(&self) -> bool {
+        true
+    }
 
-    fn margin(&self)   -> Insets  { self.base.margin }
-    fn h_anchor(&self) -> HAnchor { self.base.h_anchor }
-    fn v_anchor(&self) -> VAnchor { self.base.v_anchor }
-    fn min_size(&self) -> Size    { self.base.min_size }
-    fn max_size(&self) -> Size    { self.base.max_size }
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn h_anchor(&self) -> HAnchor {
+        self.base.h_anchor
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
+    fn min_size(&self) -> Size {
+        self.base.min_size
+    }
+    fn max_size(&self) -> Size {
+        self.base.max_size
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         // Pick up external-cell writes every frame (e.g. the System
@@ -188,9 +238,13 @@ impl Widget for RadioGroup {
             let hovered = self.hovered == Some(i);
 
             // Outer circle.
-            let border = if checked { v.accent }
-                         else if hovered { v.widget_bg_hovered }
-                         else { v.widget_stroke };
+            let border = if checked {
+                v.accent
+            } else if hovered {
+                v.widget_bg_hovered
+            } else {
+                v.widget_stroke
+            };
             let bg = if checked { v.accent } else { v.widget_bg };
 
             ctx.set_fill_color(bg);
@@ -233,15 +287,23 @@ impl Widget for RadioGroup {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
                 self.hovered = self.row_for_y(pos.y);
-                if was != self.hovered { crate::animation::request_tick(); }
+                if was != self.hovered {
+                    crate::animation::request_tick();
+                }
                 EventResult::Ignored
             }
-            Event::MouseDown { button: MouseButton::Left, pos, .. } => {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                pos,
+                ..
+            } => {
                 if let Some(i) = self.row_for_y(pos.y) {
                     let was = self.selected;
                     self.selected = i;
                     self.fire();
-                    if was != i { crate::animation::request_tick(); }
+                    if was != i {
+                        crate::animation::request_tick();
+                    }
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -250,10 +312,20 @@ impl Widget for RadioGroup {
                 let n = self.options.len();
                 let changed = match key {
                     Key::ArrowUp | Key::ArrowLeft => {
-                        if self.selected > 0 { self.selected -= 1; true } else { false }
+                        if self.selected > 0 {
+                            self.selected -= 1;
+                            true
+                        } else {
+                            false
+                        }
                     }
                     Key::ArrowDown | Key::ArrowRight => {
-                        if self.selected + 1 < n { self.selected += 1; true } else { false }
+                        if self.selected + 1 < n {
+                            self.selected += 1;
+                            true
+                        } else {
+                            false
+                        }
                     }
                     _ => false,
                 };
@@ -270,7 +342,7 @@ impl Widget for RadioGroup {
                 crate::animation::request_tick();
                 EventResult::Ignored
             }
-            Event::FocusLost   => {
+            Event::FocusLost => {
                 self.focused = false;
                 crate::animation::request_tick();
                 EventResult::Ignored

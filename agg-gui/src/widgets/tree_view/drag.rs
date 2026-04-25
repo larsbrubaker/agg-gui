@@ -4,13 +4,11 @@
 use std::sync::Arc;
 
 use crate::color::Color;
-use crate::geometry::Point;
 use crate::draw_ctx::DrawCtx;
+use crate::geometry::Point;
 use crate::text::Font;
 
-use super::node::{
-    DropPosition, DragState, FlatRow, TreeNode, is_descendant,
-};
+use super::node::{is_descendant, DragState, DropPosition, FlatRow, TreeNode};
 
 // ---------------------------------------------------------------------------
 // Drop-target computation
@@ -44,9 +42,7 @@ pub fn compute_drop_target(
     let target_node = rows[row_i].node_idx;
 
     // Can't drop onto self or own descendants.
-    if target_node == drag.node_idx
-        || is_descendant(nodes, drag.node_idx, target_node)
-    {
+    if target_node == drag.node_idx || is_descendant(nodes, drag.node_idx, target_node) {
         return None;
     }
 
@@ -62,11 +58,13 @@ pub fn compute_drop_target(
         DropPosition::Before(target_node)
     } else {
         // Middle zone → AsChild if it's a folder, else After
-        if rows[row_i].has_children || matches!(
-            nodes[target_node].icon,
-            crate::widgets::tree_view::node::NodeIcon::Folder
-                | crate::widgets::tree_view::node::NodeIcon::Package,
-        ) {
+        if rows[row_i].has_children
+            || matches!(
+                nodes[target_node].icon,
+                crate::widgets::tree_view::node::NodeIcon::Folder
+                    | crate::widgets::tree_view::node::NodeIcon::Package,
+            )
+        {
             DropPosition::AsChild(target_node)
         } else {
             DropPosition::After(target_node)
@@ -198,6 +196,3 @@ pub fn paint_ghost(
 
     ctx.set_global_alpha(1.0);
 }
-
-
-
