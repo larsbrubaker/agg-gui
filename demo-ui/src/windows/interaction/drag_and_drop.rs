@@ -1,11 +1,8 @@
-#![allow(unused_imports)]
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Color, DrawCtx, Event, EventResult, FlexColumn, Font, Label, MouseButton, Point, Rect, Size,
-    Widget,
+    set_cursor_icon, Color, CursorIcon, DrawCtx, Event, EventResult, FlexColumn, Font, Label,
+    MouseButton, Point, Rect, Size, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -140,15 +137,25 @@ impl DragAndDropWidget {
     fn find_drop_target(&self, pos: Point) -> Option<(usize, usize)> {
         let w = self.bounds.width;
         let h = self.bounds.height;
-        for (c, col) in self.columns.iter().enumerate() {
+        for c in 0..self.columns.len() {
             let cr = self.col_rect(c, w, h);
             if pos.x >= cr.x && pos.x <= cr.x + cr.width {
                 let local_y = pos.y;
-                let row = dnd_find_insert_row(local_y, h, col.len());
+                let visible_len = self.visible_len(c);
+                let row = dnd_find_insert_row(local_y, h, visible_len);
                 return Some((c, row));
             }
         }
         None
+    }
+
+    fn visible_len(&self, col: usize) -> usize {
+        let len = self.columns[col].len();
+        if self.drag_active && self.drag_source.map(|(c, _)| c) == Some(col) {
+            len.saturating_sub(1)
+        } else {
+            len
+        }
     }
 
     /// Execute the pending drop: move `drag_source` item to `drop_target`.
@@ -165,10 +172,6 @@ impl DragAndDropWidget {
             return;
         }
         let item = self.columns[sc].remove(sr);
-        // Adjust insertion index if moving within the same column and shifting left.
-        if sc == tc && sr < tr {
-            tr -= 1;
-        }
         let col = &mut self.columns[tc];
         tr = tr.min(col.len());
         col.insert(tr, item);
@@ -219,12 +222,14 @@ impl DragAndDropWidget {
             .unwrap_or((usize::MAX, None));
 
         ctx.set_font_size(12.5);
+        let mut visual_i = 0_usize;
         for (i, item) in self.columns[c].iter().enumerate() {
             // Skip the item being dragged (show as ghost at cursor instead).
             if self.drag_active && c == drag_src_col && Some(i) == drag_src_row {
                 continue;
             }
-            let yb = dnd_item_y_bottom(h, i);
+            let yb = dnd_item_y_bottom(h, visual_i);
+            visual_i += 1;
             if yb + DND_ITEM_H < 0.0 {
                 continue;
             }
@@ -249,13 +254,7 @@ impl DragAndDropWidget {
         if self.drag_active {
             if let Some((tc, tr)) = self.drop_target {
                 if tc == c {
-                    let n = self.columns[c].len();
-                    // Account for the missing dragged item in this column.
-                    let effective_n = if c == drag_src_col && drag_src_row.is_some() {
-                        n.saturating_sub(1)
-                    } else {
-                        n
-                    };
+                    let effective_n = self.visible_len(c);
 
                     let line_y = if tr == 0 {
                         // Above all items.
@@ -355,6 +354,11 @@ impl Widget for DragAndDropWidget {
                 self.cursor = *pos;
 
                 if self.drag_source.is_some() {
+                    set_cursor_icon(if self.drag_active {
+                        CursorIcon::Grabbing
+                    } else {
+                        CursorIcon::Grab
+                    });
                     let dx = pos.x - self.press_pos.x;
                     let dy = pos.y - self.press_pos.y;
                     if !self.drag_active && (dx * dx + dy * dy).sqrt() >= DND_DRAG_THRESHOLD {
@@ -363,13 +367,18 @@ impl Widget for DragAndDropWidget {
                     if self.drag_active {
                         self.drop_target = self.find_drop_target(*pos);
                     }
+                    agg_gui::animation::request_tick();
                     return EventResult::Consumed;
                 }
 
                 // Not dragging — update hover.
                 let prev = self.hovered;
                 self.hovered = self.col_row_at(*pos);
+                if self.hovered.is_some() {
+                    set_cursor_icon(CursorIcon::Grab);
+                }
                 if self.hovered != prev {
+                    agg_gui::animation::request_tick();
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -387,6 +396,9 @@ impl Widget for DragAndDropWidget {
                 // Find which item was pressed.
                 if let Some((c, r)) = self.col_row_at(*pos) {
                     self.drag_source = Some((c, r));
+                    self.drop_target = Some((c, r));
+                    set_cursor_icon(CursorIcon::Grabbing);
+                    agg_gui::animation::request_tick();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -402,9 +414,13 @@ impl Widget for DragAndDropWidget {
                     self.drop_target = self.find_drop_target(*pos);
                     self.commit_drop();
                 }
+                let had_drag_state = self.drag_active || self.drag_source.is_some();
                 self.drag_active = false;
                 self.drag_source = None;
                 self.drop_target = None;
+                if had_drag_state {
+                    agg_gui::animation::request_tick();
+                }
                 EventResult::Consumed
             }
 
