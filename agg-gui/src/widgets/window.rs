@@ -41,7 +41,7 @@ use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{paint_subtree, Widget};
+use crate::widget::{paint_subtree, CompositingLayer, Widget};
 use crate::widgets::window_title_bar::{TitleBarView, WindowTitleBar};
 
 /// Round all four components of a Rect to the nearest integer so widgets
@@ -60,6 +60,7 @@ const SHADOW_DX: f64 = 2.0;
 const SHADOW_DY: f64 = 6.0;
 /// Number of stacked layers approximating a Gaussian blur falloff.
 const SHADOW_STEPS: usize = 10;
+const VISIBILITY_FADE_SECS: f64 = 0.18;
 const CLOSE_R: f64 = 6.0;
 const CLOSE_PAD: f64 = 10.0;
 /// Horizontal distance from the right edge to the maximize button centre.
@@ -105,6 +106,8 @@ pub struct Window {
 
     visible: bool,
     visible_cell: Option<Rc<Cell<bool>>>,
+    visibility_anim: crate::animation::Tween,
+    fade_out_active: Cell<bool>,
     reset_to: Option<Rc<Cell<Option<Rect>>>>,
     position_cell: Option<Rc<Cell<Rect>>>,
 
@@ -220,6 +223,8 @@ impl Window {
             font_size,
             visible: true,
             visible_cell: None,
+            visibility_anim: crate::animation::Tween::new(1.0, VISIBILITY_FADE_SECS),
+            fade_out_active: Cell::new(false),
             reset_to: None,
             position_cell: None,
             // Seed `last_visible` to `true` (matches `visible` above) so a
@@ -288,6 +293,11 @@ impl Window {
     }
 
     pub fn with_visible_cell(mut self, cell: Rc<Cell<bool>>) -> Self {
+        let visible = cell.get();
+        self.last_visible.set(visible);
+        self.fade_out_active.set(false);
+        self.visibility_anim =
+            crate::animation::Tween::new(if visible { 1.0 } else { 0.0 }, VISIBILITY_FADE_SECS);
         self.visible_cell = Some(cell);
         self
     }
@@ -405,6 +415,22 @@ impl Window {
         self
     }
 
+    fn requested_visible(&self) -> bool {
+        if let Some(ref cell) = self.visible_cell {
+            cell.get()
+        } else {
+            self.visible
+        }
+    }
+
+    fn layer_outsets() -> (f64, f64, f64, f64) {
+        let left = (SHADOW_BLUR - SHADOW_DX).max(0.0).ceil();
+        let bottom = (SHADOW_BLUR + SHADOW_DY).ceil();
+        let right = (SHADOW_BLUR + SHADOW_DX).ceil();
+        let top = (SHADOW_BLUR - SHADOW_DY).max(0.0).ceil();
+        (left, bottom, right, top)
+    }
+
     fn clamp_to_canvas(&mut self) {
         if !self.constrain {
             return;
@@ -435,12 +461,21 @@ impl Window {
 
     pub fn show(&mut self) {
         self.visible = true;
+        self.fade_out_active.set(false);
+        self.visibility_anim.set_target(1.0);
+        crate::animation::request_tick();
     }
     pub fn hide(&mut self) {
         self.visible = false;
+        self.visibility_anim.set_target(0.0);
+        crate::animation::request_tick();
     }
     pub fn toggle(&mut self) {
-        self.visible = !self.visible;
+        if self.visible {
+            self.hide();
+        } else {
+            self.show();
+        }
     }
     /// Current visibility — honours an optional shared `visible_cell` when
     /// wired (sidebar toggles, programmatic show/hide).  The inherent
@@ -448,11 +483,7 @@ impl Window {
     /// a cell.  Must match the Widget-trait impl below so rising-edge
     /// detection in `layout()` observes sidebar toggles.
     pub fn is_visible(&self) -> bool {
-        if let Some(ref cell) = self.visible_cell {
-            cell.get()
-        } else {
-            self.visible
-        }
+        self.requested_visible() || self.fade_out_active.get()
     }
 
     fn title_bar_bottom(&self) -> f64 {

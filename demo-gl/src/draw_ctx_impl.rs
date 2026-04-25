@@ -715,6 +715,34 @@ impl DrawCtx for GlGfxCtx {
         self.state_stack.last_mut().unwrap().0 = TransAffine::new();
     }
 
+    fn supports_compositing_layers(&self) -> bool {
+        true
+    }
+
+    fn push_layer(&mut self, width: f64, height: f64) {
+        unsafe {
+            self.push_gl_layer(width, height, 1.0);
+        }
+    }
+
+    fn push_layer_with_alpha(&mut self, width: f64, height: f64, alpha: f64) {
+        unsafe {
+            self.push_gl_layer(width, height, alpha);
+        }
+    }
+
+    fn set_layer_rounded_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        unsafe {
+            self.set_rounded_layer_clip(x, y, w, h, r);
+        }
+    }
+
+    fn pop_layer(&mut self) {
+        unsafe {
+            self.pop_gl_layer();
+        }
+    }
+
     /// Execute GPU content inline at the correct painter-order depth.
     ///
     /// Passes `&*self.gl` as `&dyn Any` — the caller downcasts to

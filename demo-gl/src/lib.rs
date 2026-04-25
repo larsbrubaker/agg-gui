@@ -101,6 +101,39 @@ struct ArcTextureEntry {
     h: u32,
 }
 
+#[derive(Clone)]
+struct SavedGlDrawState {
+    viewport: (f32, f32),
+    fill_color: Color,
+    stroke_color: Color,
+    line_width: f64,
+    line_join: LineJoin,
+    line_cap: LineCap,
+    fill_rule: FillRule,
+    miter_limit: f64,
+    line_dash: Vec<f64>,
+    dash_offset: f64,
+    global_alpha: f64,
+    state_stack: Vec<(TransAffine, Option<[i32; 4]>)>,
+    font: Option<Arc<Font>>,
+    font_size: f64,
+    lcd_mode: bool,
+}
+
+/// One transient GL compositing layer.
+struct GlLayerEntry {
+    fbo: glow::Framebuffer,
+    texture: glow::Texture,
+    stencil: glow::Renderbuffer,
+    width: i32,
+    height: i32,
+    origin_x: f64,
+    origin_y: f64,
+    alpha: f64,
+    parent_fbo: Option<glow::Framebuffer>,
+    saved: SavedGlDrawState,
+}
+
 /// A [`DrawCtx`] that renders via `glow` (WebGL2 or native GL).
 ///
 /// Create once per frame (or share via mutable reference) and pass to
@@ -137,6 +170,12 @@ pub struct GlGfxCtx {
     tex_vbo: glow::Buffer,
     tex_res_loc: Option<glow::UniformLocation>,
     tex_sampler_loc: Option<glow::UniformLocation>,
+
+    // Premultiplied layer texture compositor.
+    layer_prog: glow::Program,
+    layer_res_loc: Option<glow::UniformLocation>,
+    layer_sampler_loc: Option<glow::UniformLocation>,
+    layer_alpha_loc: Option<glow::UniformLocation>,
 
     // LCD subpixel compositing pipeline (see `LCD_VERT` / `LCD_FRAG`).
     lcd_prog: glow::Program,
@@ -182,6 +221,10 @@ pub struct GlGfxCtx {
     // Rust equivalent of MatterCAD's `ConditionalWeakTable<byte[], ImageTexturePlugin>`
     // finalizer → deferred-delete pattern.
     arc_texture_cache: std::collections::HashMap<usize, ArcTextureEntry>,
+
+    // Transient FBO layer stack used for windows and other whole-subtree effects.
+    layer_stack: Vec<GlLayerEntry>,
+    current_fbo: Option<glow::Framebuffer>,
 
     // Drawing state
     fill_color: Color,

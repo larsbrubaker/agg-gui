@@ -43,6 +43,11 @@ pub(crate) const TEX_FRAG: &str = "#version 300 es\nprecision mediump float;\nin
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const TEX_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;out vec4 frag_color;void main(){frag_color=texture(u_tex,v_uv);}";
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) const LAYER_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_tex;uniform float u_alpha;out vec4 frag_color;void main(){vec4 c=texture(u_tex,v_uv);frag_color=vec4(c.rgb*u_alpha,c.a*u_alpha);}";
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const LAYER_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;uniform float u_alpha;out vec4 frag_color;void main(){vec4 c=texture(u_tex,v_uv);frag_color=vec4(c.rgb*u_alpha,c.a*u_alpha);}";
+
 // ---------------------------------------------------------------------------
 // LCD subpixel compositing pipeline
 // ---------------------------------------------------------------------------

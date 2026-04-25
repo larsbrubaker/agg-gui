@@ -10,11 +10,7 @@ impl Widget for Window {
     }
 
     fn is_visible(&self) -> bool {
-        if let Some(ref cell) = self.visible_cell {
-            cell.get()
-        } else {
-            self.visible
-        }
+        self.requested_visible() || self.fade_out_active.get()
     }
 
     /// A collapsed window paints only its title bar — nothing inside the
@@ -97,6 +93,35 @@ impl Widget for Window {
         &mut self.children
     }
 
+    fn compositing_layer(&mut self) -> Option<CompositingLayer> {
+        if !self.is_visible() {
+            let alpha = self.visibility_anim.value();
+            if self.requested_visible() || alpha <= 0.001 {
+                return None;
+            }
+        }
+
+        let requested_visible = self.requested_visible();
+        self.visibility_anim
+            .set_target(if requested_visible { 1.0 } else { 0.0 });
+        let alpha = self.visibility_anim.tick();
+        if !requested_visible && alpha > 0.001 {
+            self.fade_out_active.set(true);
+        }
+        if !requested_visible && alpha <= 0.001 {
+            self.fade_out_active.set(false);
+        }
+
+        let (outset_left, outset_bottom, outset_right, outset_top) = Self::layer_outsets();
+        Some(CompositingLayer::new(
+            outset_left,
+            outset_bottom,
+            outset_right,
+            outset_top,
+            alpha,
+        ))
+    }
+
     /// Clip child painting to the content area (below the title bar).
     /// When collapsed bounds.height == TITLE_H so the content rect has zero height,
     /// preventing any child from drawing outside the visible title-bar strip.
@@ -111,7 +136,7 @@ impl Widget for Window {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        if !self.is_visible() {
+        if !self.requested_visible() {
             return false;
         }
         if self.drag_mode != DragMode::None {
@@ -129,7 +154,7 @@ impl Widget for Window {
         // sidebar toggles `visible_cell`; we observe the transition here
         // and set `raise_request`, which the parent `Stack` drains on its
         // next layout (one-frame delay, invisible to the user).
-        let now_visible = self.is_visible();
+        let now_visible = self.requested_visible();
         if now_visible && !self.last_visible.get() {
             self.raise_request.set(true);
             if let Some(cb) = self.on_raised.as_mut() {
@@ -145,9 +170,18 @@ impl Widget for Window {
                 self.maximized = false;
             }
         }
+        if now_visible {
+            self.fade_out_active.set(false);
+            self.visibility_anim.set_target(1.0);
+        } else {
+            self.visibility_anim.set_target(0.0);
+            if self.visibility_anim.tick() <= 0.001 {
+                self.fade_out_active.set(false);
+            }
+        }
         self.last_visible.set(now_visible);
 
-        if !now_visible {
+        if !self.is_visible() {
             return Size::new(self.bounds.width, self.bounds.height);
         }
 
@@ -325,6 +359,8 @@ impl Widget for Window {
             ctx.fill();
         }
 
+        ctx.set_layer_rounded_clip(0.0, 0.0, w, h, CORNER_R);
+
         // Window body.
         ctx.set_fill_color(v.window_fill);
         ctx.begin_path();
@@ -466,7 +502,7 @@ impl Widget for Window {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        if !self.is_visible() {
+        if !self.requested_visible() {
             return EventResult::Ignored;
         }
 
@@ -539,6 +575,7 @@ impl Widget for Window {
                 // Close button — highest priority.
                 if self.in_close_button(*pos) {
                     self.visible = false;
+                    self.visibility_anim.set_target(0.0);
                     if let Some(ref cell) = self.visible_cell {
                         cell.set(false);
                     }

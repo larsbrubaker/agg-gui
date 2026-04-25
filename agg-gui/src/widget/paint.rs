@@ -16,6 +16,11 @@ use super::*;
 /// existing bitmap — identical fast path to MatterCAD's `DoubleBuffer`.
 pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if !widget.is_visible() {
+        if ctx.supports_compositing_layers() {
+            if let Some(layer) = widget.compositing_layer() {
+                paint_subtree_layer(widget, ctx, true, layer);
+            }
+        }
         return;
     }
 
@@ -28,6 +33,25 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     } else {
         paint_subtree_direct(widget, ctx);
     }
+}
+
+fn paint_subtree_layer(
+    widget: &mut dyn Widget,
+    ctx: &mut dyn DrawCtx,
+    include_overlay: bool,
+    layer: crate::widget::CompositingLayer,
+) {
+    let b = widget.bounds();
+    let layer_w = (b.width + layer.outset_left + layer.outset_right).max(1.0);
+    let layer_h = (b.height + layer.outset_bottom + layer.outset_top).max(1.0);
+
+    ctx.save();
+    ctx.translate(-layer.outset_left, -layer.outset_bottom);
+    ctx.push_layer_with_alpha(layer_w, layer_h, layer.alpha);
+    ctx.translate(layer.outset_left, layer.outset_bottom);
+    paint_subtree_direct_inner(widget, ctx, include_overlay, false);
+    ctx.pop_layer();
+    ctx.restore();
 }
 
 /// Paint app-level overlays after the whole tree has rendered.
@@ -51,7 +75,7 @@ pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 /// at the current CTM.  This is the default path for widgets that don't
 /// opt into backbuffer caching via `Widget::backbuffer_cache_mut`.
 fn paint_subtree_direct(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
-    paint_subtree_direct_inner(widget, ctx, true);
+    paint_subtree_direct_inner(widget, ctx, true, true);
 }
 
 /// Cache-building variant: paints body + children into the given ctx
@@ -62,14 +86,22 @@ fn paint_subtree_direct(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 /// two cursors.  Overlay runs only on the outer ctx in
 /// `paint_subtree_backbuffered` after the cache blit.
 fn paint_subtree_direct_no_overlay(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
-    paint_subtree_direct_inner(widget, ctx, false);
+    paint_subtree_direct_inner(widget, ctx, false, true);
 }
 
 fn paint_subtree_direct_inner(
     widget: &mut dyn Widget,
     ctx: &mut dyn DrawCtx,
     include_overlay: bool,
+    allow_compositing_layer: bool,
 ) {
+    if allow_compositing_layer && ctx.supports_compositing_layers() {
+        if let Some(layer) = widget.compositing_layer() {
+            paint_subtree_layer(widget, ctx, include_overlay, layer);
+            return;
+        }
+    }
+
     let snap_this = widget.enforce_integer_bounds();
     if snap_this {
         ctx.save();

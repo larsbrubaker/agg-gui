@@ -226,6 +226,28 @@ pub trait DrawCtx {
     /// this as a no-op — the widget renders pass-through into the parent target.
     fn push_layer(&mut self, _width: f64, _height: f64) {}
 
+    /// Whether this backend implements real offscreen compositing layers.
+    ///
+    /// The default is `false` so widgets can opt into layer-based rendering
+    /// without forcing every backend to pay for, or emulate, that feature.
+    fn supports_compositing_layers(&self) -> bool {
+        false
+    }
+
+    /// Begin a new transparent compositing layer that will be multiplied by
+    /// `alpha` when composited back into the parent target.
+    ///
+    /// Backends that do not support layer alpha can fall back to `push_layer`;
+    /// callers gate this through [`supports_compositing_layers`].
+    fn push_layer_with_alpha(&mut self, width: f64, height: f64, _alpha: f64) {
+        self.push_layer(width, height);
+    }
+
+    /// Constrain subsequent drawing in the current layer to a rounded-rect
+    /// mask. Used by window layers after shadows are drawn so chrome/content
+    /// cannot write into rounded transparent corners.
+    fn set_layer_rounded_clip(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _r: f64) {}
+
     /// Composite the current layer back into the previous render target using
     /// SrcOver alpha blending, then discard the layer.
     ///

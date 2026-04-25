@@ -690,3 +690,39 @@ fn test_collapsed_window_title_bar_rounds_bottom_corners() {
         "collapsed title bar should leave the bottom-left corner rounded; corner={bottom_left_corner:?}, interior={title_bar_interior:?}"
     );
 }
+
+#[test]
+fn test_window_compositing_layer_covers_shadow_and_fade_out() {
+    use crate::text::Font;
+    use crate::widget::Widget;
+    use crate::widgets::window::Window;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let content = Button::new("Content", Arc::clone(&font)).with_font_size(14.0);
+    let mut win = Window::new("Layered", Arc::clone(&font), Box::new(content))
+        .with_bounds(crate::Rect::new(0.0, 0.0, 200.0, 120.0));
+
+    let visible_layer = win
+        .compositing_layer()
+        .expect("visible windows should request a compositing layer");
+    assert!(visible_layer.alpha > 0.99);
+    assert!(visible_layer.outset_left > 0.0);
+    assert!(visible_layer.outset_bottom > 0.0);
+    assert!(visible_layer.outset_right > 0.0);
+    assert!(visible_layer.outset_top > 0.0);
+
+    win.hide();
+    assert!(
+        !win.is_visible(),
+        "non-layer renderers should still see hide() as immediate"
+    );
+    let fading_layer = win
+        .compositing_layer()
+        .expect("GL layer traversal should still get a fade-out layer");
+    assert!(
+        fading_layer.alpha > 0.001 && fading_layer.alpha <= 1.0,
+        "fade-out layer alpha should be visible and bounded, got {}",
+        fading_layer.alpha
+    );
+}

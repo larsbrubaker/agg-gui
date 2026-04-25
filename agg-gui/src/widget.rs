@@ -146,6 +146,40 @@ impl Default for BackbufferCache {
     }
 }
 
+/// Offscreen compositing layer requested by a widget for itself and its
+/// descendants.
+#[derive(Clone, Copy, Debug)]
+pub struct CompositingLayer {
+    /// Extra transparent pixels to the left of the widget bounds.
+    pub outset_left: f64,
+    /// Extra transparent pixels below the widget bounds.
+    pub outset_bottom: f64,
+    /// Extra transparent pixels to the right of the widget bounds.
+    pub outset_right: f64,
+    /// Extra transparent pixels above the widget bounds.
+    pub outset_top: f64,
+    /// Whole-layer opacity applied while compositing back to the parent.
+    pub alpha: f64,
+}
+
+impl CompositingLayer {
+    pub const fn new(
+        outset_left: f64,
+        outset_bottom: f64,
+        outset_right: f64,
+        outset_top: f64,
+        alpha: f64,
+    ) -> Self {
+        Self {
+            outset_left,
+            outset_bottom,
+            outset_right,
+            outset_top,
+            alpha,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Widget trait
 // ---------------------------------------------------------------------------
@@ -264,6 +298,16 @@ pub trait Widget {
     /// Default: `false` (pass-through rendering).
     fn has_backbuffer(&self) -> bool {
         false
+    }
+
+    /// Request that this widget subtree be painted into a transient
+    /// transparent compositing layer before being blended into its parent.
+    ///
+    /// Renderers that do not implement real layers ignore this hook. The
+    /// method is mutable so widgets can advance visibility tweens at the
+    /// point where the traversal knows the layer will be painted.
+    fn compositing_layer(&mut self) -> Option<CompositingLayer> {
+        None
     }
 
     /// Opt into per-widget CPU bitmap caching with a dirty flag.
