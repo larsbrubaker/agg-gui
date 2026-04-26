@@ -1,12 +1,25 @@
 use super::*;
 
+fn layer_scale_from_transform(t: &TransAffine) -> (f64, f64) {
+    let sx = (t.sx * t.sx + t.shy * t.shy).sqrt().max(1e-6);
+    let sy = (t.shx * t.shx + t.sy * t.sy).sqrt().max(1e-6);
+    (sx, sy)
+}
+
+fn scaled_layer_size(width: f64, height: f64, sx: f64, sy: f64) -> (i32, i32) {
+    (
+        (width * sx).ceil().max(1.0) as i32,
+        (height * sy).ceil().max(1.0) as i32,
+    )
+}
+
 impl GlGfxCtx {
     pub(crate) unsafe fn push_gl_layer(&mut self, width: f64, height: f64, alpha: f64) {
-        let width = width.ceil().max(1.0) as i32;
-        let height = height.ceil().max(1.0) as i32;
         let saved = self.capture_draw_state();
         let origin_x = self.ctm().tx;
         let origin_y = self.ctm().ty;
+        let (scale_x, scale_y) = layer_scale_from_transform(self.ctm());
+        let (width, height) = scaled_layer_size(width, height, scale_x, scale_y);
         let parent_fbo = self.current_fbo;
 
         let gl = &*self.gl;
@@ -87,7 +100,7 @@ impl GlGfxCtx {
         });
         self.current_fbo = Some(fbo);
         self.viewport = (width as f32, height as f32);
-        self.state_stack = vec![(TransAffine::new(), None)];
+        self.state_stack = vec![(TransAffine::new_scaling(scale_x, scale_y), None)];
         self.path = PathStorage::new();
 
         gl.viewport(0, 0, width, height);
@@ -140,8 +153,8 @@ impl GlGfxCtx {
         height: f64,
         alpha: f64,
     ) {
-        let width = width.ceil().max(1.0) as i32;
-        let height = height.ceil().max(1.0) as i32;
+        let (scale_x, scale_y) = layer_scale_from_transform(self.ctm());
+        let (width, height) = scaled_layer_size(width, height, scale_x, scale_y);
         self.ensure_retained_layer(key, width, height);
 
         let retained = self
@@ -172,7 +185,7 @@ impl GlGfxCtx {
         });
         self.current_fbo = Some(fbo);
         self.viewport = (width as f32, height as f32);
-        self.state_stack = vec![(TransAffine::new(), None)];
+        self.state_stack = vec![(TransAffine::new_scaling(scale_x, scale_y), None)];
         self.path = PathStorage::new();
 
         self.gl.viewport(0, 0, width, height);
@@ -204,9 +217,9 @@ impl GlGfxCtx {
         let Some(retained) = self.retained_layers.get(&key) else {
             return false;
         };
-        if retained.width != width.ceil().max(1.0) as i32
-            || retained.height != height.ceil().max(1.0) as i32
-        {
+        let (scale_x, scale_y) = layer_scale_from_transform(self.ctm());
+        let (width, height) = scaled_layer_size(width, height, scale_x, scale_y);
+        if retained.width != width || retained.height != height {
             return false;
         }
         let layer = GlLayerEntry {
@@ -398,5 +411,27 @@ impl GlGfxCtx {
             glow::ZERO,
             glow::ONE,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{layer_scale_from_transform, scaled_layer_size};
+    use agg_gui::TransAffine;
+
+    #[test]
+    fn scaled_layer_size_uses_physical_pixels_for_hidpi() {
+        let t = TransAffine::new_scaling(2.0, 2.0);
+        let (sx, sy) = layer_scale_from_transform(&t);
+
+        assert_eq!(scaled_layer_size(100.0, 50.0, sx, sy), (200, 100));
+    }
+
+    #[test]
+    fn scaled_layer_size_ceilings_fractional_physical_extent() {
+        let t = TransAffine::new_scaling(1.5, 1.5);
+        let (sx, sy) = layer_scale_from_transform(&t);
+
+        assert_eq!(scaled_layer_size(11.0, 7.0, sx, sy), (17, 11));
     }
 }
