@@ -249,7 +249,8 @@ impl App {
             let result = dispatch_event(&mut self.root, &path, &event, pos);
             if result == EventResult::Consumed {
                 self.maybe_bring_to_front(&mut path);
-                self.captured = Some(path);
+                let capture_path = self.compute_hit(pos).unwrap_or(path);
+                self.captured = Some(capture_path);
             }
         }
         // NO blanket request_draw.  Mouse-down on an inert area must not

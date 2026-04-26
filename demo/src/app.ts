@@ -175,13 +175,10 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // --- Touch support ---
 //
-// Single-touch is forwarded as mouse button 0 (down / move / up) so
-// every existing widget works on mobile with zero changes.  Two-finger
-// pinch becomes `on_mouse_wheel` at the pinch midpoint, matching the
-// wheel-zoom behaviour already wired for desktop.  Anything beyond two
-// fingers is intentionally ignored — real multi-touch (egui's
-// "Multi Touch" demo) would need a new Event::Touch variant and
-// widget-level handling.
+// Single-touch taps are forwarded as mouse button 0 on release.  Once the
+// finger moves far enough to count as scrolling, we synthesize a middle-button
+// drag instead of wheel ticks so ScrollView captures the gesture and pans by
+// the exact finger delta on both axes.
 //
 // `touch-action: none` on the canvas (index.html) prevents the browser
 // from stealing these events for scrolling or pinch-to-zoom.
@@ -215,9 +212,8 @@ canvas.addEventListener("touchstart", (e) => {
     const [x, y] = touchPos(t);
     (wasmModule["on_touch_start"] as TouchFn)(t.identifier, x, y, t.force ?? 0);
   }
-  // ALSO map the first finger to a mouse button-0 press so widgets
-  // that only understand mouse input still respond to single-finger
-  // taps.  Once a primary is established, later touches skip this.
+  // Track the first finger for tap/scroll mouse emulation.  Once a
+  // primary is established, later touches skip this.
   if (primaryTouchId === null && e.touches.length >= 1) {
     const t = e.touches[0];
     primaryTouchId = t.identifier;
@@ -242,13 +238,13 @@ canvas.addEventListener("touchmove", (e) => {
         const dy = y - primaryTouchStart[1];
         if (!primaryTouchScrolling && Math.hypot(dx, dy) >= TOUCH_SCROLL_THRESHOLD) {
           primaryTouchScrolling = true;
+          (wasmModule["on_mouse_down"] as MouseXYBFn)(
+            primaryTouchStart[0],
+            primaryTouchStart[1],
+            1,
+          );
         }
-        if (primaryTouchScrolling) {
-          const stepY = y - primaryTouchLast[1];
-          (wasmModule["on_mouse_wheel"] as WheelFn)(x, y, -stepY / 40.0);
-        } else {
-          (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
-        }
+        (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
         primaryTouchLast = [x, y];
       }
     }
@@ -265,6 +261,8 @@ canvas.addEventListener("touchend", (e) => {
       if (!primaryTouchScrolling) {
         (wasmModule["on_mouse_down"] as MouseXYBFn)(x, y, 0);
         (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 0);
+      } else {
+        (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 1);
       }
       (wasmModule["on_mouse_leave"] as VoidFn)();
       primaryTouchId = null;
@@ -277,10 +275,14 @@ canvas.addEventListener("touchend", (e) => {
 
 canvas.addEventListener("touchcancel", (e) => {
   if (!wasmModule) return;
+  e.preventDefault();
   for (const t of Array.from(e.changedTouches)) {
     (wasmModule["on_touch_cancel"] as TouchEndFn)(t.identifier);
     if (t.identifier === primaryTouchId) {
       const [x, y] = touchPos(t);
+      if (primaryTouchScrolling) {
+        (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 1);
+      }
       (wasmModule["on_mouse_leave"] as VoidFn)();
       primaryTouchId = null;
       primaryTouchStart = null;

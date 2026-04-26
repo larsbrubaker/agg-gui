@@ -41,5 +41,6 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 mod drawing;
 mod inspector_tree;
 mod layout_lcd;
+mod touch_scroll;
 mod widgets;
 mod windowing;
