@@ -80,7 +80,6 @@ fn paint_subtree_gl_backbuffer(
     let layer_w = (b.width + spec.outsets.left + spec.outsets.right).max(1.0);
     let layer_h = (b.height + spec.outsets.bottom + spec.outsets.top).max(1.0);
     let subtree_needs_draw = widget.needs_draw();
-    let invalidation_epoch = crate::animation::invalidation_epoch();
     let (key, needs_draw) = {
         let Some(state) = widget.backbuffer_state_mut() else {
             paint_subtree_direct(widget, ctx);
@@ -89,8 +88,7 @@ fn paint_subtree_gl_backbuffer(
         let w = layer_w.ceil().max(1.0) as u32;
         let h = layer_h.ceil().max(1.0) as u32;
         let changed = state.width != w || state.height != h || state.spec_kind != spec.kind;
-        let stale = state.last_invalidation_epoch != invalidation_epoch;
-        let needs = !spec.cached || state.dirty || changed || stale || subtree_needs_draw;
+        let needs = !spec.cached || state.dirty || changed || subtree_needs_draw;
         if changed {
             state.width = w;
             state.height = h;
@@ -126,7 +124,6 @@ fn paint_subtree_gl_backbuffer(
 
     if let Some(state) = widget.backbuffer_state_mut() {
         state.dirty = false;
-        state.last_invalidation_epoch = invalidation_epoch;
         state.repaint_count = state.repaint_count.saturating_add(1);
         state.composite_count = state.composite_count.saturating_add(1);
     }
@@ -287,7 +284,6 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     // `cache.lcd_alpha`: `Some` means LCD cache, `None` means Rgba.
     let mode = widget.backbuffer_mode();
     let mode_is_lcd = matches!(mode, BackbufferMode::LcdCoverage);
-    let invalidation_epoch = crate::animation::invalidation_epoch();
     let theme_epoch = crate::theme::current_visuals_epoch();
     let typography_epoch = crate::font_settings::current_typography_epoch();
     let (needs_raster, has_bitmap) = {
@@ -300,7 +296,6 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
             || cache.width != w_phys
             || cache.height != h_phys
             || cache_is_lcd != mode_is_lcd
-            || cache.last_invalidation_epoch != invalidation_epoch
             || cache.theme_epoch != theme_epoch
             || cache.typography_epoch != typography_epoch;
         (needs, cache.pixels.is_some())
@@ -388,7 +383,6 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         cache.width = w_phys;
         cache.height = h_phys;
         cache.dirty = false;
-        cache.last_invalidation_epoch = invalidation_epoch;
         cache.theme_epoch = theme_epoch;
         cache.typography_epoch = typography_epoch;
     }

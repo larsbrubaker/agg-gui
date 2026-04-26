@@ -730,12 +730,7 @@ pub fn needs_draw() -> bool {
     //
     // Includes immediate draw requests from visual invalidation, plus
     // visibility-gated scheduled draw needs from the widget tree.
-    let want = DEMO_APP.with(|c| {
-        c.borrow()
-            .as_ref()
-            .map(|a| a.wants_draw())
-            .unwrap_or(false)
-    });
+    let want = DEMO_APP.with(|c| c.borrow().as_ref().map(|a| a.wants_draw()).unwrap_or(false));
     if want {
         return true;
     }

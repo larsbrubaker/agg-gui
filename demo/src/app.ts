@@ -194,6 +194,10 @@ type TouchEndFn = (id: number) => void;
 /// finger arriving (or the first being replaced) never promotes itself
 /// to mouse, matching the "drag starts with one finger" contract.
 let primaryTouchId: number | null = null;
+let primaryTouchStart: [number, number] | null = null;
+let primaryTouchLast: [number, number] | null = null;
+let primaryTouchScrolling = false;
+const TOUCH_SCROLL_THRESHOLD = 8;
 
 function touchPos(t: Touch): [number, number] {
   const rect = canvas.getBoundingClientRect();
@@ -218,8 +222,10 @@ canvas.addEventListener("touchstart", (e) => {
     const t = e.touches[0];
     primaryTouchId = t.identifier;
     const [x, y] = touchPos(t);
+    primaryTouchStart = [x, y];
+    primaryTouchLast = [x, y];
+    primaryTouchScrolling = false;
     (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
-    (wasmModule["on_mouse_down"] as MouseXYBFn)(x, y, 0);
   }
 }, { passive: false });
 
@@ -231,7 +237,20 @@ canvas.addEventListener("touchmove", (e) => {
     (wasmModule["on_touch_move"] as TouchFn)(t.identifier, x, y, t.force ?? 0);
     // Primary finger also drives the mouse cursor.
     if (t.identifier === primaryTouchId) {
-      (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
+      if (primaryTouchStart && primaryTouchLast) {
+        const dx = x - primaryTouchStart[0];
+        const dy = y - primaryTouchStart[1];
+        if (!primaryTouchScrolling && Math.hypot(dx, dy) >= TOUCH_SCROLL_THRESHOLD) {
+          primaryTouchScrolling = true;
+        }
+        if (primaryTouchScrolling) {
+          const stepY = y - primaryTouchLast[1];
+          (wasmModule["on_mouse_wheel"] as WheelFn)(x, y, -stepY / 40.0);
+        } else {
+          (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
+        }
+        primaryTouchLast = [x, y];
+      }
     }
   }
 }, { passive: false });
@@ -243,9 +262,15 @@ canvas.addEventListener("touchend", (e) => {
     (wasmModule["on_touch_end"] as TouchEndFn)(t.identifier);
     if (t.identifier === primaryTouchId) {
       const [x, y] = touchPos(t);
-      (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 0);
+      if (!primaryTouchScrolling) {
+        (wasmModule["on_mouse_down"] as MouseXYBFn)(x, y, 0);
+        (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 0);
+      }
       (wasmModule["on_mouse_leave"] as VoidFn)();
       primaryTouchId = null;
+      primaryTouchStart = null;
+      primaryTouchLast = null;
+      primaryTouchScrolling = false;
     }
   }
 }, { passive: false });
@@ -256,9 +281,11 @@ canvas.addEventListener("touchcancel", (e) => {
     (wasmModule["on_touch_cancel"] as TouchEndFn)(t.identifier);
     if (t.identifier === primaryTouchId) {
       const [x, y] = touchPos(t);
-      (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 0);
       (wasmModule["on_mouse_leave"] as VoidFn)();
       primaryTouchId = null;
+      primaryTouchStart = null;
+      primaryTouchLast = null;
+      primaryTouchScrolling = false;
     }
   }
 });

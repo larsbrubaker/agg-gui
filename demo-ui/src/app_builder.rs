@@ -63,6 +63,7 @@ pub fn build_demo_ui(
         .unwrap_or(false);
     let show_backend = Rc::new(Cell::new(backend_initially_open));
     let run_mode = Rc::new(Cell::new(RunMode::Reactive));
+    let mobile_menu_open = Rc::new(Cell::new(false));
     let frame_history = Rc::new(RefCell::new(FrameHistory::new()));
     let about_initially_open = initial_state
         .as_ref()
@@ -298,7 +299,7 @@ pub fn build_demo_ui(
         &sidebar_groups,
         on_organize,
     );
-    let sidebar_panel = SidebarPane::new(sidebar_widget);
+    let sidebar_panel = SidebarPane::new(sidebar_widget, Rc::clone(&mobile_menu_open));
     let mut canvas = Stack::new().add(Box::new(CanvasBg::new()));
     for (i, spec) in DEMOS.iter().enumerate() {
         let open_cell = Rc::clone(&demo_entries[i].open);
@@ -580,6 +581,7 @@ pub fn build_demo_ui(
     let top_bar_inner = build_top_bar_inner(
         Arc::clone(&font),
         Rc::clone(&show_backend),
+        Rc::clone(&mobile_menu_open),
         Rc::clone(&theme_pref),
     );
     let root = FlexColumn::new()

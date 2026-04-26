@@ -207,6 +207,7 @@ impl Widget for Window {
                 self.bounds = self.pre_maximize_bounds;
                 self.maximized = false;
             }
+            self.fit_fully_to_canvas(available);
         }
         if now_visible {
             self.fade_out_active.set(false);

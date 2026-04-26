@@ -189,15 +189,24 @@ impl Widget for BackendPane {
 pub(crate) struct SidebarPane {
     pub(crate) bounds: Rect,
     pub(crate) children: Vec<Box<dyn Widget>>,
+    pub(crate) mobile_menu_open: Rc<Cell<bool>>,
 }
 
 impl SidebarPane {
     const PANEL_W: f64 = 220.0;
-    pub(crate) fn new(inner: Box<dyn Widget>) -> Self {
+    const MOBILE_BREAKPOINT: f64 = 720.0;
+    const MOBILE_PANEL_W: f64 = 300.0;
+
+    pub(crate) fn new(inner: Box<dyn Widget>, mobile_menu_open: Rc<Cell<bool>>) -> Self {
         Self {
             bounds: Rect::default(),
             children: vec![inner],
+            mobile_menu_open,
         }
+    }
+
+    fn mobile_mode(available: Size) -> bool {
+        available.width < Self::MOBILE_BREAKPOINT
     }
 }
 
@@ -219,7 +228,17 @@ impl Widget for SidebarPane {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let w = Self::PANEL_W.min(available.width);
+        let mobile = Self::mobile_mode(available);
+        if mobile && !self.mobile_menu_open.get() {
+            self.bounds = Rect::new(0.0, 0.0, 0.0, available.height);
+            return Size::new(0.0, available.height);
+        }
+        let target_w = if mobile {
+            Self::MOBILE_PANEL_W
+        } else {
+            Self::PANEL_W
+        };
+        let w = target_w.min(available.width);
         self.bounds = Rect::new(0.0, 0.0, w, available.height);
         if let Some(child) = self.children.first_mut() {
             // Inner content starts 1 px in so the separator sits at x=0.
@@ -232,6 +251,9 @@ impl Widget for SidebarPane {
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if self.bounds.width <= 0.5 {
+            return;
+        }
         // Uses `separator` to match the `Separator` widget tone used by
         // horizontal splits elsewhere.  Drawn in `paint_overlay` so the
         // sidebar's panel_bg fill can't cover it.

@@ -63,8 +63,9 @@ pub fn dispatch_event(
     pos_in_root: Point,
 ) -> EventResult {
     if path.is_empty() {
+        let before = crate::animation::invalidation_epoch();
         let result = root.on_event(event);
-        if result == EventResult::Consumed {
+        if result == EventResult::Consumed || before != crate::animation::invalidation_epoch() {
             root.mark_dirty();
         }
         return result;
@@ -84,6 +85,7 @@ pub fn dispatch_event(
     );
     let translated_event = translate_event(event, child_pos);
 
+    let before_child = crate::animation::invalidation_epoch();
     let child_result = dispatch_event(
         &mut root.children_mut()[idx],
         &path[1..],
@@ -94,9 +96,13 @@ pub fn dispatch_event(
         root.mark_dirty();
         return EventResult::Consumed;
     }
+    if before_child != crate::animation::invalidation_epoch() {
+        root.mark_dirty();
+    }
     // Bubble: deliver to this widget too (with original pos_in_root coords).
+    let before_self = crate::animation::invalidation_epoch();
     let result = root.on_event(event);
-    if result == EventResult::Consumed {
+    if result == EventResult::Consumed || before_self != crate::animation::invalidation_epoch() {
         root.mark_dirty();
     }
     result

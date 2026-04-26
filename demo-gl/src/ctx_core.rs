@@ -281,7 +281,6 @@ impl GlGfxCtx {
         self.lcd_mode = saved.lcd_mode;
         self.path = PathStorage::new();
     }
-
 }
 
 mod layers;

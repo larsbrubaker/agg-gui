@@ -103,10 +103,10 @@ fn test_ignored_event_request_draw_advances_invalidation_epoch() {
         dispatch_event(&mut root, &[0], &event, Point::new(10.0, 10.0)),
         EventResult::Ignored
     );
-    assert!(!root.backbuffer_state_mut().unwrap().dirty);
+    assert!(root.backbuffer_state_mut().unwrap().dirty);
     assert!(
         crate::animation::invalidation_epoch() != before,
-        "request_draw should invalidate retained drawing even when the event bubbles as ignored"
+        "request_draw should advance the dispatch-observed invalidation epoch"
     );
 }
 
@@ -123,7 +123,7 @@ fn test_tween_tick_requests_draw_via_invalidation_epoch() {
 }
 
 #[test]
-fn test_request_draw_invalidates_software_backbuffer_cache() {
+fn test_request_draw_alone_does_not_invalidate_software_backbuffer_cache() {
     use crate::widget::{paint_subtree, BackbufferCache};
     use crate::{DrawCtx, Event, EventResult, Rect};
     use std::cell::Cell;
@@ -199,8 +199,8 @@ fn test_request_draw_invalidates_software_backbuffer_cache() {
     }
     assert_eq!(
         paints.get(),
-        2,
-        "request_draw should invalidate software backbuffer caches via the epoch"
+        1,
+        "request_draw should schedule a frame, not globally reraster every software cache"
     );
 }
 

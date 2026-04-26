@@ -2,11 +2,11 @@
 //!
 //! Two independent channels feed the host's event loop:
 //!
-//! 1. **Immediate invalidation** — [`request_draw`] / [`wants_draw`].  Any
+//! 1. **Immediate draw request** — [`request_draw`] / [`wants_draw`].  Any
 //!    widget whose visual output just changed calls `request_draw()`; the next
 //!    iteration of the host loop draws a frame and clears the flag.  The same
-//!    call advances [`invalidation_epoch`], so retained layers can tell that
-//!    their cached pixels predate a visual state change somewhere below them.
+//!    call advances [`invalidation_epoch`], letting event dispatch dirty the
+//!    affected retained ancestor path even when the event bubbles as ignored.
 //!
 //! 2. **Scheduled draw** — [`request_draw_after`] /
 //!    [`take_next_draw_deadline`].  A
@@ -31,9 +31,9 @@ std::thread_local! {
 
 /// Request that the host schedule another draw as soon as possible.
 ///
-/// This is also the canonical visual invalidation hook: retained backbuffers
-/// compare their recorded epoch against [`invalidation_epoch`] to decide
-/// whether cached pixels are stale.
+/// This is also the canonical visual invalidation hook: event dispatch compares
+/// [`invalidation_epoch`] before/after delivery and dirties the affected
+/// retained ancestor path when a widget requested a draw.
 pub fn request_draw() {
     NEEDS_DRAW.with(|c| c.set(true));
     INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
@@ -45,7 +45,7 @@ pub fn wants_draw() -> bool {
     NEEDS_DRAW.with(|c| c.get())
 }
 
-/// Current visual invalidation epoch for retained drawing.
+/// Monotonic draw-request epoch used to detect visual changes during dispatch.
 pub fn invalidation_epoch() -> u64 {
     INVALIDATION_EPOCH.with(|c| c.get())
 }

@@ -471,6 +471,30 @@ impl Window {
         self.bounds.y = self.bounds.y.clamp(min_y, max_y).round();
     }
 
+    fn fit_fully_to_canvas(&mut self, available: Size) {
+        if !self.constrain || available.width <= 1.0 || available.height <= 1.0 {
+            return;
+        }
+        let max_w = available.width.max(MIN_W);
+        let max_h = available.height.max(TITLE_H);
+        self.bounds.width = self.bounds.width.clamp(MIN_W.min(max_w), max_w).round();
+        self.bounds.height = self.bounds.height.clamp(TITLE_H, max_h).round();
+        self.bounds.x = self
+            .bounds
+            .x
+            .clamp(0.0, (available.width - self.bounds.width).max(0.0))
+            .round();
+        self.bounds.y = self
+            .bounds
+            .y
+            .clamp(0.0, (available.height - self.bounds.height).max(0.0))
+            .round();
+        self.pre_collapse_h = self.bounds.height;
+        if self.maximized {
+            self.pre_maximize_bounds = self.bounds;
+        }
+    }
+
     pub fn show(&mut self) {
         self.visible = true;
         self.fade_out_active.set(false);

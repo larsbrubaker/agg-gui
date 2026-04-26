@@ -122,9 +122,8 @@ impl Default for BackbufferSpec {
 
 /// A CPU bitmap owned by a widget that opts into backbuffer caching.
 ///
-/// The framework re-rasterises when the cache's explicit dirty flag is set,
-/// when global styling epochs change, or when the draw invalidation epoch has
-/// advanced since this cache was last populated.
+/// The framework re-rasterises when the cache's explicit dirty flag is set or
+/// when global styling epochs change.
 pub struct BackbufferCache {
     /// In **Rgba** mode: top-row-first RGBA8 pixels, straight alpha.
     /// Blitted via [`DrawCtx::draw_image_rgba_arc`].
@@ -149,8 +148,6 @@ pub struct BackbufferCache {
     /// (`set_text`, `set_color`, focus/hover changes, etc.) and the
     /// framework clears it after a successful re-raster.
     pub dirty: bool,
-    /// Last global visual invalidation epoch included in this CPU cache.
-    pub last_invalidation_epoch: u64,
     /// Visuals epoch (see [`crate::theme::current_visuals_epoch`]) recorded
     /// the last time this cache was populated.  `paint_subtree_backbuffered`
     /// compares it against the live epoch and forces a re-raster on mismatch,
@@ -175,7 +172,6 @@ impl BackbufferCache {
             width: 0,
             height: 0,
             dirty: true,
-            last_invalidation_epoch: 0,
             theme_epoch: 0,
             typography_epoch: 0,
         }
@@ -200,8 +196,6 @@ pub struct BackbufferState {
     id: u64,
     pub cache: BackbufferCache,
     pub dirty: bool,
-    /// Last global visual invalidation epoch included in this retained layer.
-    pub last_invalidation_epoch: u64,
     pub width: u32,
     pub height: u32,
     pub spec_kind: BackbufferKind,
@@ -215,7 +209,6 @@ impl BackbufferState {
             id: NEXT_BACKBUFFER_ID.fetch_add(1, Ordering::Relaxed),
             cache: BackbufferCache::new(),
             dirty: true,
-            last_invalidation_epoch: 0,
             width: 0,
             height: 0,
             spec_kind: BackbufferKind::None,

@@ -172,5 +172,4 @@ impl GlGfxCtx {
             glow::ONE,
         );
     }
-
 }

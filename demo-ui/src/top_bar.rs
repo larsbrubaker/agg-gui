@@ -334,6 +334,125 @@ impl Widget for BackendButton {
     }
 }
 
+struct MenuButton {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    open: Rc<Cell<bool>>,
+    hovered: bool,
+    visible: bool,
+    label: Label,
+}
+
+impl MenuButton {
+    const W: f64 = 92.0;
+    const H: f64 = 24.0;
+    const MOBILE_BREAKPOINT: f64 = 720.0;
+
+    fn new(font: Arc<Font>, open: Rc<Cell<bool>>) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            open,
+            hovered: false,
+            visible: false,
+            label: Label::new("\u{F0C9} Demos", font).with_font_size(12.0),
+        }
+    }
+
+    fn btn_rect(&self) -> Rect {
+        Rect::new(4.0, (self.bounds.height - Self::H) * 0.5, Self::W, Self::H)
+    }
+}
+
+impl Widget for MenuButton {
+    fn type_name(&self) -> &'static str {
+        "MenuButton"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, available: Size) -> Size {
+        self.visible = available.width < Self::MOBILE_BREAKPOINT;
+        if !self.visible {
+            self.bounds = Rect::new(0.0, 0.0, 0.0, available.height);
+            return Size::new(0.0, available.height);
+        }
+        self.bounds = Rect::new(0.0, 0.0, Self::W + 8.0, available.height);
+        let s = self.label.layout(Size::new(Self::W, Self::H));
+        self.label
+            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        Size::new(Self::W + 8.0, available.height)
+    }
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if !self.visible {
+            return;
+        }
+        let v = ctx.visuals();
+        let r = self.btn_rect();
+        let active = self.open.get();
+        let bg = if active {
+            v.accent
+        } else if self.hovered {
+            v.widget_bg_hovered
+        } else {
+            v.widget_bg
+        };
+        ctx.set_fill_color(bg);
+        ctx.begin_path();
+        ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
+        ctx.fill();
+        self.label
+            .set_color(if active { Color::white() } else { v.text_color });
+        let lw = self.label.bounds().width;
+        let lh = self.label.bounds().height;
+        let lx = r.x + (r.width - lw) * 0.5;
+        let ly = r.y + (r.height - lh) * 0.5;
+        self.label.set_bounds(Rect::new(lx, ly, lw, lh));
+        ctx.save();
+        ctx.translate(lx, ly);
+        paint_subtree(&mut self.label, ctx);
+        ctx.restore();
+    }
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        if !self.visible {
+            return EventResult::Ignored;
+        }
+        let r = self.btn_rect();
+        let hit = |p: agg_gui::Point| {
+            p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
+        };
+        match event {
+            Event::MouseMove { pos } => {
+                let was = self.hovered;
+                self.hovered = hit(*pos);
+                if was != self.hovered {
+                    agg_gui::animation::request_draw();
+                }
+                EventResult::Ignored
+            }
+            Event::MouseDown {
+                button: agg_gui::MouseButton::Left,
+                pos,
+                ..
+            } if hit(*pos) => {
+                self.open.set(!self.open.get());
+                agg_gui::animation::request_draw();
+                EventResult::Consumed
+            }
+            _ => EventResult::Ignored,
+        }
+    }
+}
+
 // ── Factory ───────────────────────────────────────────────────────────────────
 
 /// URL of the project on GitHub — opened by the "View on GitHub" link.
@@ -350,6 +469,7 @@ const GITHUB_URL: &str = "https://github.com/larsbrubaker/agg-gui";
 pub fn build_top_bar_inner(
     font: Arc<Font>,
     show_backend: Rc<Cell<bool>>,
+    mobile_menu_open: Rc<Cell<bool>>,
     theme_pref: Rc<Cell<ThemePreference>>,
 ) -> Box<dyn Widget> {
     let github_link = Hyperlink::new("View on GitHub", Arc::clone(&font))
@@ -379,6 +499,10 @@ pub fn build_top_bar_inner(
     Box::new(
         FlexRow::new()
             .with_gap(0.0)
+            .add(Box::new(MenuButton::new(
+                Arc::clone(&font),
+                mobile_menu_open,
+            )))
             .add(Box::new(BackendButton::new(
                 Arc::clone(&font),
                 show_backend,
