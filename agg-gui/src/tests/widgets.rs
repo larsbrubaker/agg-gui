@@ -741,6 +741,48 @@ fn test_window_can_opt_out_of_gl_backbuffer() {
 }
 
 #[test]
+fn test_scroll_view_reports_overlay_animation_draw_need() {
+    use crate::widget::paint_subtree;
+
+    let mut scroll = ScrollView::new(Box::new(SizedBox::fixed(50.0, 300.0)))
+        .with_style(ScrollBarStyle::thin())
+        .with_bar_visibility(crate::ScrollBarVisibility::AlwaysVisible);
+    scroll.layout(Size::new(100.0, 100.0));
+
+    let mut fb = Framebuffer::new(100, 100);
+    let mut ctx = GfxCtx::new(&mut fb);
+    paint_subtree(&mut scroll, &mut ctx);
+
+    assert!(
+        scroll.needs_draw(),
+        "scrollbar fade/width tweens must keep retained parents repainting"
+    );
+}
+
+#[test]
+fn test_scroll_view_reports_global_style_epoch_change() {
+    use crate::widget::paint_subtree;
+
+    let mut scroll = ScrollView::new(Box::new(SizedBox::fixed(20.0, 20.0)));
+    scroll.layout(Size::new(100.0, 100.0));
+
+    let mut fb = Framebuffer::new(100, 100);
+    let mut ctx = GfxCtx::new(&mut fb);
+    paint_subtree(&mut scroll, &mut ctx);
+    assert!(
+        !scroll.needs_draw(),
+        "clean scroll view without active scrollbar animation should be idle"
+    );
+
+    crate::set_scroll_style(ScrollBarStyle::solid());
+
+    assert!(
+        scroll.needs_draw(),
+        "global scrollbar style changes must invalidate clean retained parents"
+    );
+}
+
+#[test]
 fn test_consumed_event_marks_widget_backbuffer_dirty() {
     use crate::widget::{dispatch_event, BackbufferState, Widget};
     use crate::{DrawCtx, Event, EventResult, Modifiers, MouseButton, Point, Rect, Size};

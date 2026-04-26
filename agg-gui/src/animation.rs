@@ -144,6 +144,11 @@ impl Tween {
     pub fn value(&self) -> f64 {
         self.current
     }
+
+    /// Whether the tween still needs frames to reach its target.
+    pub fn is_animating(&self) -> bool {
+        self.start_time.is_some()
+    }
 }
 
 impl Default for Tween {

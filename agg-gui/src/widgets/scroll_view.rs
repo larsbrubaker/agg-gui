@@ -205,6 +205,7 @@ impl ScrollBarStyle {
 std::thread_local! {
     static CURRENT_SCROLL_STYLE:      Cell<ScrollBarStyle>      = Cell::new(ScrollBarStyle::default());
     static CURRENT_SCROLL_VISIBILITY: Cell<ScrollBarVisibility> = Cell::new(ScrollBarVisibility::VisibleWhenNeeded);
+    static SCROLL_STYLE_EPOCH:        Cell<u64>                 = Cell::new(1);
 }
 
 /// Read the current global scroll-bar style.
@@ -216,6 +217,8 @@ pub fn current_scroll_style() -> ScrollBarStyle {
 /// that don't have an explicit override pick this up.
 pub fn set_scroll_style(s: ScrollBarStyle) {
     CURRENT_SCROLL_STYLE.with(|c| c.set(s));
+    SCROLL_STYLE_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+    crate::animation::request_draw();
 }
 
 /// Read the current global scroll-bar visibility policy.
@@ -228,6 +231,12 @@ pub fn current_scroll_visibility() -> ScrollBarVisibility {
 /// `with_bar_visibility(...)` reads this value on each layout.
 pub fn set_scroll_visibility(v: ScrollBarVisibility) {
     CURRENT_SCROLL_VISIBILITY.with(|c| c.set(v));
+    SCROLL_STYLE_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+    crate::animation::request_draw();
+}
+
+fn current_scroll_style_epoch() -> u64 {
+    SCROLL_STYLE_EPOCH.with(|c| c.get())
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -333,6 +342,7 @@ pub struct ScrollView {
     /// Visible viewport rect in content-space Y-up coordinates, written each
     /// layout.  Children doing virtual rendering read this cell.
     viewport_cell: Option<Rc<Cell<Rect>>>,
+    painted_style_epoch: Cell<u64>,
 
     middle_dragging: bool,
     middle_last_pos: Point,
@@ -362,6 +372,7 @@ impl ScrollView {
             visibility_cell: None,
             style_cell: None,
             viewport_cell: None,
+            painted_style_epoch: Cell::new(0),
             middle_dragging: false,
             middle_last_pos: Point::ORIGIN,
         }
@@ -669,6 +680,13 @@ impl ScrollView {
                 !floating || self.h.hovered_bar || self.h.dragging
             }
         }
+    }
+
+    fn scrollbar_animation_active(&self) -> bool {
+        self.v.hover_anim.is_animating()
+            || self.v.visibility_anim.is_animating()
+            || self.h.hover_anim.is_animating()
+            || self.h.visibility_anim.is_animating()
     }
 }
 

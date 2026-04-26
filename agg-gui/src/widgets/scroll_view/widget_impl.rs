@@ -17,6 +17,15 @@ impl Widget for ScrollView {
         &mut self.children
     }
 
+    fn needs_draw(&self) -> bool {
+        if !self.is_visible() {
+            return false;
+        }
+        self.scrollbar_animation_active()
+            || self.painted_style_epoch.get() != current_scroll_style_epoch()
+            || self.children().iter().any(|c| c.needs_draw())
+    }
+
     fn margin(&self) -> Insets {
         self.base.margin
     }
@@ -161,6 +170,7 @@ impl Widget for ScrollView {
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
+        self.painted_style_epoch.set(current_scroll_style_epoch());
 
         // Drive the fade-in / fade-out alpha animation.  `should_paint_*`
         // returns true exactly when the bar would be shown in the old
@@ -184,12 +194,7 @@ impl Widget for ScrollView {
         let paint_h = self.h.enabled && self.h.content > self.viewport().0 && h_alpha > 0.001;
 
         let track_color_base = match self.style.color {
-            ScrollBarColor::Background => v.scroll_track,
-            ScrollBarColor::Foreground => Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.08),
-        };
-        let thumb_idle = match self.style.color {
-            ScrollBarColor::Background => v.scroll_thumb,
-            ScrollBarColor::Foreground => v.accent,
+            ScrollBarColor::Background | ScrollBarColor::Foreground => v.scroll_track,
         };
 
         // ── Fade gradient under the scrollbars ──
@@ -218,12 +223,13 @@ impl Widget for ScrollView {
                 ctx.rounded_rect(bar_x, lo, bar_w, hi - lo, r);
                 ctx.fill();
 
-                let tc = if self.v.dragging {
-                    v.scroll_thumb_dragging
-                } else if self.v.hovered_thumb {
-                    v.scroll_thumb_hovered
-                } else {
-                    thumb_idle
+                let tc = match self.style.color {
+                    ScrollBarColor::Background if self.v.dragging => v.scroll_thumb_dragging,
+                    ScrollBarColor::Background if self.v.hovered_thumb => v.scroll_thumb_hovered,
+                    ScrollBarColor::Background => v.scroll_thumb,
+                    ScrollBarColor::Foreground if self.v.dragging => v.accent_pressed,
+                    ScrollBarColor::Foreground if self.v.hovered_thumb => v.accent_hovered,
+                    ScrollBarColor::Foreground => v.scroll_thumb,
                 };
                 ctx.set_fill_color(scale_alpha(tc, v_alpha));
                 ctx.begin_path();
@@ -249,12 +255,13 @@ impl Widget for ScrollView {
                 ctx.rounded_rect(lo, bar_bottom, hi - lo, bar_h, r);
                 ctx.fill();
 
-                let tc = if self.h.dragging {
-                    v.scroll_thumb_dragging
-                } else if self.h.hovered_thumb {
-                    v.scroll_thumb_hovered
-                } else {
-                    thumb_idle
+                let tc = match self.style.color {
+                    ScrollBarColor::Background if self.h.dragging => v.scroll_thumb_dragging,
+                    ScrollBarColor::Background if self.h.hovered_thumb => v.scroll_thumb_hovered,
+                    ScrollBarColor::Background => v.scroll_thumb,
+                    ScrollBarColor::Foreground if self.h.dragging => v.accent_pressed,
+                    ScrollBarColor::Foreground if self.h.hovered_thumb => v.accent_hovered,
+                    ScrollBarColor::Foreground => v.scroll_thumb,
                 };
                 ctx.set_fill_color(scale_alpha(tc, h_alpha));
                 ctx.begin_path();
