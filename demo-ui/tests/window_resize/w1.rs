@@ -165,6 +165,41 @@ fn resize_widget_se_drag_grows_both_dimensions() {
 }
 
 #[test]
+fn resize_widget_middle_drag_grows_both_dimensions_for_touch_scroll_bridge() {
+    // Mobile touch scrolling is bridged through a synthetic middle-button drag.
+    // Resize handles should treat that the same as a left-button drag.
+    let font = font();
+    let child = Box::new(
+        FlexColumn::new()
+            .with_panel_bg()
+            .add(Box::new(agg_gui::Label::new("x", Arc::clone(&font)))),
+    );
+    let mut r = Resize::new(child)
+        .with_default_size(Size::new(200.0, 150.0))
+        .with_min_size_hint(Size::new(50.0, 30.0))
+        .with_max_size_hint(Size::new(600.0, 400.0));
+    r.layout(Size::new(1000.0, 1000.0));
+
+    let handle_local = Point::new(200.0 - 3.0, 3.0);
+    r.on_event(&Event::MouseDown {
+        pos: handle_local,
+        button: MouseButton::Middle,
+        modifiers: Modifiers::default(),
+    });
+    let moved = Point::new(handle_local.x + 50.0, handle_local.y - 40.0);
+    r.on_event(&Event::MouseMove { pos: moved });
+    r.on_event(&Event::MouseUp {
+        pos: moved,
+        button: MouseButton::Middle,
+        modifiers: Modifiers::default(),
+    });
+
+    let s = r.current_size();
+    assert!((s.width - 250.0).abs() < 0.5, "got width {}", s.width);
+    assert!((s.height - 190.0).abs() < 0.5, "got height {}", s.height);
+}
+
+#[test]
 fn resize_widget_drag_clamps_to_min_and_max() {
     // Over-drag in both directions: width past max, height below min,
     // should stop at the configured limits.

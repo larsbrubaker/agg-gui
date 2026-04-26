@@ -313,7 +313,7 @@ impl Widget for Resize {
             }
             Event::MouseDown {
                 pos,
-                button: MouseButton::Left,
+                button: MouseButton::Left | MouseButton::Middle,
                 ..
             } if self.in_handle(*pos) => {
                 self.dragging = true;

@@ -55,6 +55,45 @@ fn test_window_layout_never_mutates_bounds() {
     }
 }
 
+#[test]
+fn test_window_middle_drag_title_moves_for_touch_scroll_bridge() {
+    use crate::text::Font;
+    use crate::widgets::{primitives::Stack, window::Window};
+    use crate::{App, Label, Modifiers, MouseButton};
+    use std::sync::Arc;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+    let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+    let win = Window::new(
+        "Touch Movable",
+        Arc::clone(&font),
+        Box::new(Label::new("content", Arc::clone(&font))),
+    )
+    .with_bounds(crate::geometry::Rect::new(100.0, 100.0, 240.0, 140.0));
+    let mut app = App::new(Box::new(Stack::new().add(Box::new(win))));
+    let viewport = crate::geometry::Size::new(640.0, 480.0);
+    app.layout(viewport);
+
+    let start_x = 140.0;
+    let start_y_up = 100.0 + 140.0 - 12.0;
+    let start_y_down = viewport.height - start_y_up;
+    app.on_mouse_down(start_x, start_y_down, MouseButton::Middle, Modifiers::default());
+    app.on_mouse_move(start_x + 30.0, start_y_down - 20.0);
+    app.on_mouse_up(
+        start_x + 30.0,
+        start_y_down - 20.0,
+        MouseButton::Middle,
+        Modifiers::default(),
+    );
+    app.layout(viewport);
+
+    let moved = crate::find_widget_by_id(app.root(), "Touch Movable")
+        .expect("window remains in tree")
+        .bounds();
+    assert_eq!(moved.x, 130.0);
+    assert_eq!(moved.y, 120.0);
+}
+
 /// **End-to-end: sidebar-toggle raise actually reorders the Stack.**
 ///
 /// Not just "flags get drained" — asserts the child that was raised ends

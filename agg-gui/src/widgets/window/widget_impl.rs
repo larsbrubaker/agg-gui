@@ -592,11 +592,12 @@ impl Widget for Window {
             }
 
             Event::MouseDown {
-                button: MouseButton::Left,
+                button,
                 pos,
                 ..
-            } => {
-                // Click-to-raise — any left click that reaches this Window
+            } if matches!(*button, MouseButton::Left | MouseButton::Middle) => {
+                let is_left_click = *button == MouseButton::Left;
+                // Press-to-raise — any direct press that reaches this Window
                 // (hit-test routed it here in reverse paint order, so we
                 // ARE the topmost widget under the cursor in the stack
                 // sense) requests a raise.  Classic window-manager
@@ -612,7 +613,7 @@ impl Widget for Window {
                 }
 
                 // Close button — highest priority.
-                if self.in_close_button(*pos) {
+                if is_left_click && self.in_close_button(*pos) {
                     self.visible = false;
                     self.visibility_anim.set_target(0.0);
                     if let Some(ref cell) = self.visible_cell {
@@ -626,14 +627,14 @@ impl Widget for Window {
                 }
 
                 // Maximize / Restore button.
-                if self.in_maximize_button(*pos) {
+                if is_left_click && self.in_maximize_button(*pos) {
                     self.toggle_maximize();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
 
                 // Collapse / expand chevron.
-                if self.in_chevron_button(*pos) {
+                if is_left_click && self.in_chevron_button(*pos) {
                     self.toggle_collapse();
                     // Null out the double-click timer so clicking the
                     // chevron then quickly clicking the bar doesn't
@@ -657,11 +658,14 @@ impl Widget for Window {
                 // Title bar drag + double-click maximize.
                 if self.in_title_bar(*pos) {
                     // Double-click detection.
-                    let now = Instant::now();
-                    let is_double = self
-                        .last_title_click
-                        .map(|t| now.duration_since(t).as_millis() < DBL_CLICK_MS)
-                        .unwrap_or(false);
+                    let is_double = if is_left_click {
+                        let now = Instant::now();
+                        self.last_title_click
+                            .map(|t| now.duration_since(t).as_millis() < DBL_CLICK_MS)
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
 
                     if is_double {
                         // Windows convention: double-click title bar toggles
@@ -671,7 +675,9 @@ impl Widget for Window {
                         self.last_title_click = None;
                         crate::animation::request_draw();
                     } else {
-                        self.last_title_click = Some(now);
+                        if is_left_click {
+                            self.last_title_click = Some(Instant::now());
+                        }
                         let world = Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y);
                         self.drag_mode = DragMode::Move;
                         self.drag_start_world = world;
@@ -681,7 +687,7 @@ impl Widget for Window {
                 }
 
                 // Click on content area: consume so it doesn't fall through.
-                if !self.collapsed {
+                if is_left_click && !self.collapsed {
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -689,7 +695,7 @@ impl Widget for Window {
             }
 
             Event::MouseUp {
-                button: MouseButton::Left,
+                button: MouseButton::Left | MouseButton::Middle,
                 ..
             } => {
                 let was_dragging = self.drag_mode != DragMode::None;
