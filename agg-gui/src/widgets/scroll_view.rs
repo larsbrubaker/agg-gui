@@ -27,6 +27,11 @@ use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
+use super::scrollbar::{
+    paint_prepared_scrollbar, ScrollbarAxis, ScrollbarGeometry, ScrollbarOrientation,
+    DEFAULT_GRAB_MARGIN,
+};
+
 /// How the scrollbar is shown.  Matches egui's `ScrollBarVisibility`.
 ///
 /// Hover-only behaviour is controlled by [`ScrollBarKind::Floating`] on the
@@ -241,78 +246,25 @@ fn current_scroll_style_epoch() -> u64 {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Multiply the alpha channel of `c` by `a`.  Used to fade the track /
-/// thumb during the hover fade-in / fade-out animation — the colour stays
-/// its palette-defined hue and only transparency changes.
-fn scale_alpha(c: Color, a: f64) -> Color {
-    Color::rgba(c.r, c.g, c.b, c.a * (a as f32).clamp(0.0, 1.0))
-}
-
 // ── Runtime constants ────────────────────────────────────────────────────────
 
 /// Pixels at the right edge reserved for the parent window's resize grip.
 const RIGHT_EDGE_GUARD: f64 = 4.0;
 /// Pixels at the bottom edge reserved for the parent window's resize grip.
 const BOTTOM_EDGE_GUARD: f64 = 4.0;
-/// Extra hit-margin around the bar so it's easy to grab even when dormant.
-const GRAB_MARGIN: f64 = 6.0;
 
 // ── Per-axis state (vertical or horizontal) ──────────────────────────────────
 //
 // The vertical and horizontal scroll axes share the same computation — we
 // factor the state so both reuse `clamp_offset` / `thumb_metrics` logic.
 
-#[derive(Clone, Copy)]
-struct AxisState {
-    enabled: bool,
-    offset: f64,
-    content: f64,
-    hovered_bar: bool,
-    hovered_thumb: bool,
-    dragging: bool,
-    drag_thumb_offset: f64,
-    hover_anim: crate::animation::Tween,
-    /// Alpha tween for the fade-in / fade-out animation when a
-    /// `Floating + VisibleWhenNeeded` bar appears on hover.  For every
-    /// other visibility/kind combination the bar is painted at full
-    /// opacity, so this tween stays at 1.0 and does nothing.
-    visibility_anim: crate::animation::Tween,
-}
-
-impl Default for AxisState {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            offset: 0.0,
-            content: 0.0,
-            hovered_bar: false,
-            hovered_thumb: false,
-            dragging: false,
-            drag_thumb_offset: 0.0,
-            hover_anim: crate::animation::Tween::new(0.0, 0.12),
-            visibility_anim: crate::animation::Tween::new(0.0, 0.18),
-        }
-    }
-}
-
-impl AxisState {
-    fn max_scroll(&self, viewport: f64) -> f64 {
-        (self.content - viewport).max(0.0)
-    }
-
-    /// Returns `true` when the bar is in the "expanded" interaction state.
-    fn interact(&self) -> bool {
-        self.hovered_bar || self.hovered_thumb || self.dragging
-    }
-}
-
 pub struct ScrollView {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always 0 or 1
     base: WidgetBase,
 
-    v: AxisState,
-    h: AxisState,
+    v: ScrollbarAxis,
+    h: ScrollbarAxis,
 
     /// Keep the scrollbar glued to the bottom as content grows (while the
     /// user hasn't scrolled away from the end).
@@ -354,11 +306,11 @@ impl ScrollView {
             bounds: Rect::default(),
             children: vec![content],
             base: WidgetBase::new(),
-            v: AxisState {
+            v: ScrollbarAxis {
                 enabled: true,
-                ..AxisState::default()
+                ..ScrollbarAxis::default()
             },
-            h: AxisState::default(),
+            h: ScrollbarAxis::default(),
             stick_to_bottom: false,
             was_at_bottom: false,
             bar_visibility: current_scroll_visibility(),
@@ -529,90 +481,42 @@ impl ScrollView {
         (lo, hi)
     }
 
-    /// Vertical thumb `(y_bottom, height)` in local Y-up or `None` if no overflow.
-    fn v_thumb_metrics(&self) -> Option<(f64, f64)> {
-        let (_, vh) = self.viewport();
-        if self.v.content <= vh {
-            return None;
-        }
+    fn v_scrollbar_geometry(&self) -> ScrollbarGeometry {
         let (lo, hi) = self.v_track_range();
-        let track_h = hi - lo;
-        let ratio = vh / self.v.content;
-        let thumb_h = (track_h * ratio).max(self.style.handle_min_length);
-        let travel = (track_h - thumb_h).max(0.0);
-        let max_s = self.v.max_scroll(vh);
-        let thumb_y = if max_s > 0.0 {
-            lo + travel * (1.0 - self.v.offset / max_s)
-        } else {
-            lo + travel
-        };
-        Some((thumb_y, thumb_h))
+        ScrollbarGeometry {
+            orientation: ScrollbarOrientation::Vertical,
+            track_start: lo,
+            track_end: hi,
+            cross_end: self.v_bar_right(),
+            hit_margin: DEFAULT_GRAB_MARGIN,
+        }
     }
 
-    /// Horizontal thumb `(x_left, width)` in local X.
-    fn h_thumb_metrics(&self) -> Option<(f64, f64)> {
-        let (vw, _) = self.viewport();
-        if self.h.content <= vw {
-            return None;
-        }
+    fn h_scrollbar_geometry(&self) -> ScrollbarGeometry {
         let (lo, hi) = self.h_track_range();
-        let track_w = hi - lo;
-        let ratio = vw / self.h.content;
-        let thumb_w = (track_w * ratio).max(self.style.handle_min_length);
-        let travel = (track_w - thumb_w).max(0.0);
-        let max_s = self.h.max_scroll(vw);
-        let thumb_x = if max_s > 0.0 {
-            lo + travel * (self.h.offset / max_s)
-        } else {
-            lo
-        };
-        Some((thumb_x, thumb_w))
-    }
-
-    fn pos_on_v_thumb(&self, pos: Point) -> bool {
-        let bar_right = self.v_bar_right();
-        let bar_left = bar_right - self.style.bar_width;
-        let hit_left = bar_left - GRAB_MARGIN;
-        if pos.x < hit_left || pos.x >= bar_right {
-            return false;
-        }
-        if let Some((ty, th)) = self.v_thumb_metrics() {
-            pos.y >= ty && pos.y <= ty + th
-        } else {
-            false
-        }
-    }
-
-    fn pos_on_h_thumb(&self, pos: Point) -> bool {
-        let bar_bottom = self.h_bar_bottom();
-        let bar_top = bar_bottom + self.style.bar_width;
-        let hit_top = bar_top + GRAB_MARGIN;
-        if pos.y < bar_bottom || pos.y >= hit_top {
-            return false;
-        }
-        if let Some((tx, tw)) = self.h_thumb_metrics() {
-            pos.x >= tx && pos.x <= tx + tw
-        } else {
-            false
+        ScrollbarGeometry {
+            orientation: ScrollbarOrientation::Horizontal,
+            track_start: lo,
+            track_end: hi,
+            cross_end: self.h_bar_bottom(),
+            hit_margin: DEFAULT_GRAB_MARGIN,
         }
     }
 
     fn pos_in_v_hover(&self, pos: Point) -> bool {
-        let bar_right = self.v_bar_right();
-        let bar_left = bar_right - self.style.bar_width - GRAB_MARGIN;
-        pos.x >= bar_left && pos.x < bar_right
+        self.v
+            .pos_in_hover(pos, self.style, self.v_scrollbar_geometry())
     }
 
     fn pos_in_h_hover(&self, pos: Point) -> bool {
-        let bar_bottom = self.h_bar_bottom();
-        let bar_top = bar_bottom + self.style.bar_width + GRAB_MARGIN;
-        pos.y >= bar_bottom && pos.y < bar_top
+        self.h
+            .pos_in_hover(pos, self.style, self.h_scrollbar_geometry())
     }
 
     fn clamp_offsets(&mut self) {
         let (vw, vh) = self.viewport();
-        self.v.offset = self.v.offset.clamp(0.0, self.v.max_scroll(vh)).round();
-        self.h.offset = self.h.offset.clamp(0.0, self.h.max_scroll(vw)).round();
+        self.v.clamp_offset(vh);
+        self.h.clamp_offset(vw);
     }
 
     fn publish_offsets(&self) {
@@ -649,44 +553,8 @@ impl ScrollView {
 
     // ── Visibility helper ────────────────────────────────────────────────────
 
-    fn should_paint_v(&self) -> bool {
-        let (_, vh) = self.viewport();
-        if self.v.content <= vh {
-            return false;
-        }
-        let floating = self.style.kind == ScrollBarKind::Floating;
-        match self.bar_visibility {
-            ScrollBarVisibility::AlwaysHidden => false,
-            ScrollBarVisibility::AlwaysVisible => true,
-            // With Floating kind, VisibleWhenNeeded hides until hover/drag —
-            // matches egui's floating style.  Solid kind shows unconditionally
-            // when content overflows.
-            ScrollBarVisibility::VisibleWhenNeeded => {
-                !floating || self.v.hovered_bar || self.v.dragging
-            }
-        }
-    }
-
-    fn should_paint_h(&self) -> bool {
-        let (vw, _) = self.viewport();
-        if self.h.content <= vw {
-            return false;
-        }
-        let floating = self.style.kind == ScrollBarKind::Floating;
-        match self.bar_visibility {
-            ScrollBarVisibility::AlwaysHidden => false,
-            ScrollBarVisibility::AlwaysVisible => true,
-            ScrollBarVisibility::VisibleWhenNeeded => {
-                !floating || self.h.hovered_bar || self.h.dragging
-            }
-        }
-    }
-
     fn scrollbar_animation_active(&self) -> bool {
-        self.v.hover_anim.is_animating()
-            || self.v.visibility_anim.is_animating()
-            || self.h.hover_anim.is_animating()
-            || self.h.visibility_anim.is_animating()
+        self.v.animation_active() || self.h.animation_active()
     }
 }
 

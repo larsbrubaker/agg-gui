@@ -150,9 +150,9 @@ fn paint_subtree_layer(
 
 /// Paint app-level overlays after the whole tree has rendered.
 ///
-/// Traverses children first so deeper/modal content wins, then lets each widget
-/// draw any global overlay it owns. No parent-local translation is applied:
-/// implementors paint in app-level logical coordinates.
+/// Traverses in paint order while preserving each widget's normal local
+/// transform. Implementors can use `ctx.root_transform()` to submit app-level
+/// overlay geometry without forcing retained parents to repaint.
 pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if !widget.is_visible() {
         return;
@@ -160,7 +160,11 @@ pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     let n = widget.children().len();
     for i in 0..n {
         let child = &mut widget.children_mut()[i];
+        let b = child.bounds();
+        ctx.save();
+        ctx.translate(b.x, b.y);
         paint_global_overlays(child.as_mut(), ctx);
+        ctx.restore();
     }
     widget.paint_global_overlay(ctx);
 }

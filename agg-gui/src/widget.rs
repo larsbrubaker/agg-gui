@@ -324,6 +324,13 @@ pub trait Widget {
         false
     }
 
+    /// Return true when `local_pos` hits an app-level overlay owned by this
+    /// widget. Unlike normal hit testing, ancestors may be missed because the
+    /// overlay is painted outside their bounds.
+    fn hit_test_global_overlay(&self, _local_pos: Point) -> bool {
+        false
+    }
+
     /// Whether this widget currently owns an app-modal interaction layer.
     ///
     /// When true anywhere in the tree, [`App`](crate::App) routes pointer and
@@ -503,8 +510,10 @@ pub trait Widget {
 
     /// Paint app-level overlays after the entire widget tree has been painted.
     ///
-    /// This is for overlays whose visual stacking is global, not parent-local
-    /// (e.g. modal backdrops). Normal widgets should use [`paint_overlay`].
+    /// The traversal preserves this widget's local transform but skips ancestor
+    /// clips and retained parent redraw requirements. Use this for portal-style
+    /// UI that draws outside normal bounds while still participating in the
+    /// widget tree's Z order.
     fn paint_global_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
 
     /// Return a clip rectangle (in local coordinates) that constrains all child
@@ -669,5 +678,6 @@ pub use paint::{paint_global_overlays, paint_subtree};
 pub use tree::{
     active_modal_path, collect_inspector_nodes, current_mouse_world, current_viewport,
     dispatch_event, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type,
-    hit_test_subtree, set_current_mouse_world, set_current_viewport, InspectorNode,
+    global_overlay_hit_path, hit_test_subtree, set_current_mouse_world, set_current_viewport,
+    InspectorNode,
 };

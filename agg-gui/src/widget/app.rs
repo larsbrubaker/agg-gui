@@ -550,7 +550,8 @@ impl App {
     }
 
     fn compute_hit(&self, pos: Point) -> Option<Vec<usize>> {
-        hit_test_subtree(self.root.as_ref(), pos)
+        global_overlay_hit_path(self.root.as_ref(), pos)
+            .or_else(|| hit_test_subtree(self.root.as_ref(), pos))
     }
 
     fn dispatch_mouse_move(&mut self, pos: Point) {

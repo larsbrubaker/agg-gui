@@ -236,7 +236,7 @@ impl Widget for Tooltip {
         } else {
             let mut x = self.bounds.width * 0.5;
             let mut y = self.bounds.height;
-            ctx.transform().transform(&mut x, &mut y);
+            ctx.root_transform().transform(&mut x, &mut y);
             Point::new(x, y)
         };
         if self.at_pointer {

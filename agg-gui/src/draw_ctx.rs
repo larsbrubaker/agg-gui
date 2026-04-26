@@ -320,6 +320,13 @@ pub trait DrawCtx {
     /// Current accumulated transform (CTM).
     fn transform(&self) -> TransAffine;
 
+    /// Current transform expressed in the root render target's coordinate
+    /// space, even when drawing inside an offscreen layer whose local CTM was
+    /// reset to identity. Global overlays use this to submit app-level bounds.
+    fn root_transform(&self) -> TransAffine {
+        self.transform()
+    }
+
     fn save(&mut self);
     fn restore(&mut self);
     fn translate(&mut self, tx: f64, ty: f64);

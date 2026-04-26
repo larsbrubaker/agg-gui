@@ -51,6 +51,32 @@ pub fn active_modal_path(widget: &dyn Widget) -> Option<Vec<usize>> {
     }
 }
 
+/// Return the topmost widget whose app-level overlay contains `local_pos`.
+///
+/// This intentionally ignores ancestor `hit_test` bounds while descending:
+/// global overlays such as ComboBox popups are painted outside their normal
+/// parent clip/bounds, so their event routing must escape those bounds too.
+pub fn global_overlay_hit_path(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usize>> {
+    if !widget.is_visible() {
+        return None;
+    }
+    for (i, child) in widget.children().iter().enumerate().rev() {
+        let child_local = Point::new(
+            local_pos.x - child.bounds().x,
+            local_pos.y - child.bounds().y,
+        );
+        if let Some(mut sub_path) = global_overlay_hit_path(child.as_ref(), child_local) {
+            sub_path.insert(0, i);
+            return Some(sub_path);
+        }
+    }
+    if widget.hit_test_global_overlay(local_pos) {
+        Some(vec![])
+    } else {
+        None
+    }
+}
+
 /// Dispatch `event` through a path (list of child indices from the root).
 /// The event bubbles leaf → root; returns `Consumed` if any widget consumed it.
 ///

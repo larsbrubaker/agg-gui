@@ -169,33 +169,7 @@ impl Widget for ScrollView {
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
         self.painted_style_epoch.set(current_scroll_style_epoch());
-
-        // Drive the fade-in / fade-out alpha animation.  `should_paint_*`
-        // returns true exactly when the bar would be shown in the old
-        // pop-in behaviour; the tween now smooths that transition so a
-        // `Floating + VisibleWhenNeeded` bar dissolves in instead of
-        // snapping.  For non-animating combinations the target stays
-        // pinned at its terminal value, so the tween is a no-op.
-        self.v
-            .visibility_anim
-            .set_target(if self.should_paint_v() { 1.0 } else { 0.0 });
-        self.h
-            .visibility_anim
-            .set_target(if self.should_paint_h() { 1.0 } else { 0.0 });
-        let v_alpha = self.v.visibility_anim.tick();
-        let h_alpha = self.h.visibility_anim.tick();
-
-        // Paint whenever alpha is visible — including the tail of a
-        // fade-out after the cursor leaves, so the bar smoothly dissolves
-        // instead of vanishing.
-        let paint_v = self.v.enabled && self.v.content > self.viewport().1 && v_alpha > 0.001;
-        let paint_h = self.h.enabled && self.h.content > self.viewport().0 && h_alpha > 0.001;
-
-        let track_color_base = match self.style.color {
-            ScrollBarColor::Background | ScrollBarColor::Foreground => v.scroll_track,
-        };
 
         // ── Fade gradient under the scrollbars ──
         //
@@ -206,68 +180,23 @@ impl Widget for ScrollView {
         }
 
         // ── Vertical bar ──
-        if paint_v {
-            if let Some((ty, th)) = self.v_thumb_metrics() {
-                let bar_right = self.v_bar_right();
-                self.v
-                    .hover_anim
-                    .set_target(if self.v.interact() { 1.0 } else { 0.0 });
-                let t = self.v.hover_anim.tick();
-                let bar_w = self.style.bar_width_at(t);
-                let bar_x = bar_right - bar_w;
-                let r = bar_w * 0.5;
-
-                let (lo, hi) = self.v_track_range();
-                ctx.set_fill_color(scale_alpha(track_color_base, v_alpha));
-                ctx.begin_path();
-                ctx.rounded_rect(bar_x, lo, bar_w, hi - lo, r);
-                ctx.fill();
-
-                let tc = match self.style.color {
-                    ScrollBarColor::Background if self.v.dragging => v.scroll_thumb_dragging,
-                    ScrollBarColor::Background if self.v.hovered_thumb => v.scroll_thumb_hovered,
-                    ScrollBarColor::Background => v.scroll_thumb,
-                    ScrollBarColor::Foreground if self.v.dragging => v.accent_pressed,
-                    ScrollBarColor::Foreground if self.v.hovered_thumb => v.accent_hovered,
-                    ScrollBarColor::Foreground => v.scroll_thumb,
-                };
-                ctx.set_fill_color(scale_alpha(tc, v_alpha));
-                ctx.begin_path();
-                ctx.rounded_rect(bar_x, ty, bar_w, th, r);
-                ctx.fill();
-            }
+        let (_, vh) = self.viewport();
+        let v_geom = self.v_scrollbar_geometry();
+        if let Some(bar) = self
+            .v
+            .prepare_paint(vh, self.style, self.bar_visibility, v_geom)
+        {
+            paint_prepared_scrollbar(ctx, bar);
         }
 
         // ── Horizontal bar ──
-        if paint_h {
-            if let Some((tx, tw)) = self.h_thumb_metrics() {
-                let bar_bottom = self.h_bar_bottom();
-                self.h
-                    .hover_anim
-                    .set_target(if self.h.interact() { 1.0 } else { 0.0 });
-                let t = self.h.hover_anim.tick();
-                let bar_h = self.style.bar_width_at(t);
-                let r = bar_h * 0.5;
-
-                let (lo, hi) = self.h_track_range();
-                ctx.set_fill_color(scale_alpha(track_color_base, h_alpha));
-                ctx.begin_path();
-                ctx.rounded_rect(lo, bar_bottom, hi - lo, bar_h, r);
-                ctx.fill();
-
-                let tc = match self.style.color {
-                    ScrollBarColor::Background if self.h.dragging => v.scroll_thumb_dragging,
-                    ScrollBarColor::Background if self.h.hovered_thumb => v.scroll_thumb_hovered,
-                    ScrollBarColor::Background => v.scroll_thumb,
-                    ScrollBarColor::Foreground if self.h.dragging => v.accent_pressed,
-                    ScrollBarColor::Foreground if self.h.hovered_thumb => v.accent_hovered,
-                    ScrollBarColor::Foreground => v.scroll_thumb,
-                };
-                ctx.set_fill_color(scale_alpha(tc, h_alpha));
-                ctx.begin_path();
-                ctx.rounded_rect(tx, bar_bottom, tw, bar_h, r);
-                ctx.fill();
-            }
+        let (vw, _) = self.viewport();
+        let h_geom = self.h_scrollbar_geometry();
+        if let Some(bar) = self
+            .h
+            .prepare_paint(vw, self.style, self.bar_visibility, h_geom)
+        {
+            paint_prepared_scrollbar(ctx, bar);
         }
     }
 
@@ -326,51 +255,39 @@ impl Widget for ScrollView {
                 let (vw, vh) = self.viewport();
                 let v_scroll = self.v.enabled && self.v.content > vh;
                 let h_scroll = self.h.enabled && self.h.content > vw;
-                let was_vb = self.v.hovered_bar;
-                let was_vt = self.v.hovered_thumb;
-                let was_hb = self.h.hovered_bar;
-                let was_ht = self.h.hovered_thumb;
-                self.v.hovered_bar = v_scroll && self.pos_in_v_hover(*pos);
-                self.v.hovered_thumb = v_scroll && self.pos_on_v_thumb(*pos);
-                self.h.hovered_bar = h_scroll && self.pos_in_h_hover(*pos);
-                self.h.hovered_thumb = h_scroll && self.pos_on_h_thumb(*pos);
-                if was_vb != self.v.hovered_bar
-                    || was_vt != self.v.hovered_thumb
-                    || was_hb != self.h.hovered_bar
-                    || was_ht != self.h.hovered_thumb
-                {
+                let v_hover_changed =
+                    self.v
+                        .update_hover(*pos, vh, self.style, self.v_scrollbar_geometry());
+                let h_hover_changed =
+                    self.h
+                        .update_hover(*pos, vw, self.style, self.h_scrollbar_geometry());
+                if (v_scroll && v_hover_changed) || (h_scroll && h_hover_changed) {
                     crate::animation::request_draw();
                 }
 
                 if self.v.dragging {
-                    if let Some((_, th)) = self.v_thumb_metrics() {
-                        let (lo, hi) = self.v_track_range();
-                        let travel = (hi - lo - th).max(1.0);
-                        let new_ty = (pos.y - self.v.drag_thumb_offset).clamp(lo, lo + travel);
-                        let frac = 1.0 - (new_ty - lo) / travel;
-                        self.v.offset = (frac * self.v.max_scroll(vh)).max(0.0);
-                        self.clamp_offsets();
+                    if self
+                        .v
+                        .drag_to(*pos, vh, self.style, self.v_scrollbar_geometry())
+                    {
                         self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
                         if let Some(c) = &self.offset_cell {
                             c.set(self.v.offset);
                         }
+                        crate::animation::request_draw();
                     }
-                    crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
                 if self.h.dragging {
-                    if let Some((_, tw)) = self.h_thumb_metrics() {
-                        let (lo, hi) = self.h_track_range();
-                        let travel = (hi - lo - tw).max(1.0);
-                        let new_tx = (pos.x - self.h.drag_thumb_offset).clamp(lo, lo + travel);
-                        let frac = (new_tx - lo) / travel;
-                        self.h.offset = (frac * self.h.max_scroll(vw)).max(0.0);
-                        self.clamp_offsets();
+                    if self
+                        .h
+                        .drag_to(*pos, vw, self.style, self.h_scrollbar_geometry())
+                    {
                         if let Some(c) = &self.h_offset_cell {
                             c.set(self.h.offset);
                         }
+                        crate::animation::request_draw();
                     }
-                    crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -404,24 +321,16 @@ impl Widget for ScrollView {
                 let h_scroll = self.h.enabled && self.h.content > vw;
 
                 if v_scroll && self.pos_in_v_hover(*pos) {
-                    if self.pos_on_v_thumb(*pos) {
-                        let ty = self.v_thumb_metrics().map(|(y, _)| y).unwrap_or(0.0);
-                        self.v.dragging = true;
-                        self.v.drag_thumb_offset = pos.y - ty;
+                    if self
+                        .v
+                        .begin_drag(*pos, vh, self.style, self.v_scrollbar_geometry())
+                    {
                         // No tick: thumb grab has no visible effect until
                         // the cursor actually moves.
-                    } else if let Some((ty, th)) = self.v_thumb_metrics() {
-                        // Page step on track click (matches Windows / macOS).
-                        // Y-up: cursor ABOVE thumb (higher y) → scroll UP,
-                        // cursor BELOW thumb → scroll DOWN.  Step by one
-                        // viewport minus a small overlap for continuity.
-                        let page = (vh - 16.0).max(20.0);
-                        if pos.y > ty + th {
-                            self.v.offset = (self.v.offset - page).max(0.0);
-                        } else if pos.y < ty {
-                            self.v.offset = (self.v.offset + page).min(self.v.max_scroll(vh));
-                        }
-                        self.clamp_offsets();
+                    } else if self
+                        .v
+                        .page_at(*pos, vh, self.style, self.v_scrollbar_geometry())
+                    {
                         if let Some(c) = &self.offset_cell {
                             c.set(self.v.offset);
                         }
@@ -431,19 +340,15 @@ impl Widget for ScrollView {
                     return EventResult::Consumed;
                 }
                 if h_scroll && self.pos_in_h_hover(*pos) {
-                    if self.pos_on_h_thumb(*pos) {
-                        let tx = self.h_thumb_metrics().map(|(x, _)| x).unwrap_or(0.0);
-                        self.h.dragging = true;
-                        self.h.drag_thumb_offset = pos.x - tx;
+                    if self
+                        .h
+                        .begin_drag(*pos, vw, self.style, self.h_scrollbar_geometry())
+                    {
                         // No tick — see v-axis thumb grab comment above.
-                    } else if let Some((tx, tw)) = self.h_thumb_metrics() {
-                        let page = (vw - 16.0).max(20.0);
-                        if pos.x < tx {
-                            self.h.offset = (self.h.offset - page).max(0.0);
-                        } else if pos.x > tx + tw {
-                            self.h.offset = (self.h.offset + page).min(self.h.max_scroll(vw));
-                        }
-                        self.clamp_offsets();
+                    } else if self
+                        .h
+                        .page_at(*pos, vw, self.style, self.h_scrollbar_geometry())
+                    {
                         if let Some(c) = &self.h_offset_cell {
                             c.set(self.h.offset);
                         }

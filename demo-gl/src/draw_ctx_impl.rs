@@ -686,6 +686,17 @@ impl DrawCtx for GlGfxCtx {
         *self.ctm()
     }
 
+    fn root_transform(&self) -> TransAffine {
+        let mut t = *self.ctm();
+        for layer in self.layer_stack.iter().rev() {
+            t.premultiply(&TransAffine::new_translation(
+                layer.origin_x,
+                layer.origin_y,
+            ));
+        }
+        t
+    }
+
     fn save(&mut self) {
         let top = *self.state_stack.last().unwrap();
         self.state_stack.push(top);

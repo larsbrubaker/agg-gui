@@ -472,6 +472,16 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn transform(&self) -> agg_rust::trans_affine::TransAffine {
         self.transform()
     }
+    fn root_transform(&self) -> agg_rust::trans_affine::TransAffine {
+        let mut t = self.transform();
+        for layer in self.layer_stack.iter().rev() {
+            t.premultiply(&agg_rust::trans_affine::TransAffine::new_translation(
+                layer.origin_x,
+                layer.origin_y,
+            ));
+        }
+        t
+    }
     fn save(&mut self) {
         self.save()
     }

@@ -16,6 +16,7 @@ pub mod progress_bar;
 pub mod radio_group;
 pub mod resize;
 pub mod scroll_view;
+pub(crate) mod scrollbar;
 pub mod slider;
 pub mod splitter;
 pub mod tab_view;

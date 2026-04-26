@@ -22,6 +22,12 @@ use crate::text::Font;
 use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::Label;
 
+use super::scroll_view::{current_scroll_style, current_scroll_visibility, ScrollBarStyle};
+use super::scrollbar::{
+    paint_prepared_scrollbar, PreparedScrollbar, ScrollbarAxis, ScrollbarGeometry,
+    ScrollbarOrientation, DEFAULT_GRAB_MARGIN,
+};
+
 const CLOSED_H: f64 = 24.0;
 const ITEM_H: f64 = 22.0;
 const PAD_X: f64 = 8.0;
@@ -42,6 +48,7 @@ struct ComboPopupRequest {
     visible_count: usize,
     selected: usize,
     hovered_item: Option<usize>,
+    scrollbar: Option<PreparedScrollbar>,
     options: Vec<String>,
     font: Arc<Font>,
     font_size: f64,
@@ -96,6 +103,9 @@ pub struct ComboBox {
     popup_opens_up: bool,
     popup_visible_count: usize,
     scroll_offset: usize,
+    scrollbar: ScrollbarAxis,
+    middle_dragging: bool,
+    middle_last_pos: Point,
 }
 
 impl ComboBox {
@@ -136,6 +146,12 @@ impl ComboBox {
             popup_opens_up: false,
             popup_visible_count: DEFAULT_VISIBLE_ITEMS,
             scroll_offset: 0,
+            scrollbar: ScrollbarAxis {
+                enabled: true,
+                ..ScrollbarAxis::default()
+            },
+            middle_dragging: false,
+            middle_last_pos: Point::ORIGIN,
         }
     }
 
@@ -323,6 +339,9 @@ impl ComboBox {
         if !self.open {
             return None;
         }
+        if self.pos_in_scrollbar(p) {
+            return None;
+        }
         if p.x < 0.0
             || p.x > self.bounds.width
             || p.y < self.popup_bottom()
@@ -352,18 +371,65 @@ impl ComboBox {
             self.scroll_offset = self.selected + 1 - visible;
         }
         self.scroll_offset = self.scroll_offset.min(n.saturating_sub(visible));
+        self.sync_scrollbar_from_rows();
     }
 
-    fn scroll_items(&mut self, delta_rows: isize) {
+    fn popup_scroll_viewport(&self) -> f64 {
+        self.popup_h()
+    }
+
+    fn popup_scroll_style(&self) -> ScrollBarStyle {
+        current_scroll_style()
+    }
+
+    fn sync_scrollbar_from_rows(&mut self) {
+        self.scrollbar.enabled = true;
+        self.scrollbar.content = self.options.len() as f64 * ITEM_H;
+        self.scrollbar.offset = self.scroll_offset as f64 * ITEM_H;
+        self.scrollbar.clamp_offset(self.popup_scroll_viewport());
+    }
+
+    fn sync_rows_from_scrollbar(&mut self) {
         let n = self.options.len();
         let visible = self.popup_visible_count.max(1).min(n);
         let max_scroll = n.saturating_sub(visible);
-        let next = if delta_rows < 0 {
-            self.scroll_offset.saturating_sub(delta_rows.unsigned_abs())
-        } else {
-            self.scroll_offset.saturating_add(delta_rows as usize)
-        };
-        self.scroll_offset = next.min(max_scroll);
+        self.scroll_offset = ((self.scrollbar.offset / ITEM_H).round() as usize).min(max_scroll);
+        self.scrollbar.offset = self.scroll_offset as f64 * ITEM_H;
+    }
+
+    fn scrollbar_geometry(&self, style: ScrollBarStyle) -> ScrollbarGeometry {
+        ScrollbarGeometry {
+            orientation: ScrollbarOrientation::Vertical,
+            track_start: self.popup_bottom() + style.inner_margin,
+            track_end: self.popup_top() - style.inner_margin,
+            cross_end: self.bounds.width - style.outer_margin,
+            hit_margin: DEFAULT_GRAB_MARGIN,
+        }
+    }
+
+    fn pos_on_scroll_thumb(&self, p: Point) -> bool {
+        let style = self.popup_scroll_style();
+        self.scrollbar.pos_on_thumb(
+            p,
+            self.popup_scroll_viewport(),
+            style,
+            self.scrollbar_geometry(style),
+        )
+    }
+
+    fn pos_in_scrollbar(&self, p: Point) -> bool {
+        let style = self.popup_scroll_style();
+        self.scrollbar
+            .pos_in_hover(p, style, self.scrollbar_geometry(style))
+            && self.scrollbar.can_scroll(self.popup_scroll_viewport())
+    }
+
+    fn pos_in_popup(&self, p: Point) -> bool {
+        self.open
+            && p.x >= 0.0
+            && p.x <= self.bounds.width
+            && p.y >= self.popup_bottom()
+            && p.y <= self.popup_top()
     }
 
     fn configure_popup_geometry(&mut self, origin_y: f64, viewport_h: f64) {
@@ -383,6 +449,7 @@ impl ComboBox {
         let fit_count = (available_h / ITEM_H).floor().max(1.0) as usize;
         self.popup_visible_count = fit_count.clamp(MIN_VISIBLE_ITEMS.min(n), n);
         self.ensure_selected_visible();
+        self.sync_scrollbar_from_rows();
     }
 }
 
@@ -407,13 +474,16 @@ impl Widget for ComboBox {
         true
     }
 
+    fn needs_draw(&self) -> bool {
+        self.scrollbar.animation_active()
+    }
+
     fn hit_test(&self, local_pos: Point) -> bool {
-        self.in_button(local_pos)
-            || (self.open
-                && local_pos.x >= 0.0
-                && local_pos.x <= self.bounds.width
-                && local_pos.y >= self.popup_bottom()
-                && local_pos.y <= self.popup_top())
+        self.in_button(local_pos) || self.pos_in_popup(local_pos)
+    }
+
+    fn hit_test_global_overlay(&self, local_pos: Point) -> bool {
+        self.pos_in_popup(local_pos)
     }
 
     fn margin(&self) -> Insets {
@@ -511,16 +581,26 @@ impl Widget for ComboBox {
         ctx.restore();
     }
 
-    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+    fn paint_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
+
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if self.open {
             let mut x = 0.0;
             let mut y = 0.0;
-            let t = ctx.transform();
+            let t = ctx.root_transform();
             t.transform(&mut x, &mut y);
             let viewport_h = crate::widgets::combo_box::current_combo_viewport()
                 .map(|s| s.height)
                 .unwrap_or(f64::MAX / 4.0);
             self.configure_popup_geometry(y, viewport_h);
+            let style = self.popup_scroll_style();
+            let visibility = current_scroll_visibility();
+            let viewport = self.popup_scroll_viewport();
+            let geom = self.scrollbar_geometry(style);
+            let scrollbar = self
+                .scrollbar
+                .prepare_paint(viewport, style, visibility, geom)
+                .map(|bar| bar.translated(x, y));
             submit_combo_popup(ComboPopupRequest {
                 x,
                 y,
@@ -531,6 +611,7 @@ impl Widget for ComboBox {
                 visible_count: self.popup_visible_count,
                 selected: self.selected,
                 hovered_item: self.hovered_item,
+                scrollbar,
                 options: self.options.clone(),
                 font: Arc::clone(&self.font),
                 font_size: self.font_size,
@@ -542,6 +623,20 @@ impl Widget for ComboBox {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseDown {
+                button: MouseButton::Middle,
+                pos,
+                ..
+            } => {
+                if self.pos_in_popup(*pos) {
+                    self.middle_dragging = true;
+                    self.middle_last_pos = *pos;
+                    self.hovered_item = None;
+                    crate::animation::request_draw();
+                    return EventResult::Consumed;
+                }
+                EventResult::Ignored
+            }
+            Event::MouseDown {
                 button: MouseButton::Left,
                 pos,
                 ..
@@ -549,6 +644,10 @@ impl Widget for ComboBox {
                 if self.in_button(*pos) {
                     self.open = !self.open;
                     self.hovered_item = None;
+                    self.scrollbar.hovered_bar = false;
+                    self.scrollbar.hovered_thumb = false;
+                    self.scrollbar.dragging = false;
+                    self.middle_dragging = false;
                     if self.open {
                         self.ensure_selected_visible();
                     }
@@ -556,6 +655,21 @@ impl Widget for ComboBox {
                     return EventResult::Consumed;
                 }
                 if self.open {
+                    if self.pos_in_scrollbar(*pos) {
+                        let style = self.popup_scroll_style();
+                        let viewport = self.popup_scroll_viewport();
+                        let geom = self.scrollbar_geometry(style);
+                        self.sync_scrollbar_from_rows();
+                        if self.scrollbar.begin_drag(*pos, viewport, style, geom) {
+                            // No visible effect until the cursor moves.
+                        } else if self.scrollbar.page_at(*pos, viewport, style, geom) {
+                            self.sync_rows_from_scrollbar();
+                        }
+                        self.hovered_item = None;
+                        self.scrollbar.hovered_thumb = self.pos_on_scroll_thumb(*pos);
+                        crate::animation::request_draw();
+                        return EventResult::Consumed;
+                    }
                     if let Some(i) = self.item_for_pos(*pos) {
                         // Route through `set_selected` so the closed
                         // combo's preview label is rebuilt with the
@@ -569,6 +683,10 @@ impl Widget for ComboBox {
                         self.set_selected(i);
                         self.open = false;
                         self.hovered_item = None;
+                        self.scrollbar.hovered_bar = false;
+                        self.scrollbar.hovered_thumb = false;
+                        self.scrollbar.dragging = false;
+                        self.middle_dragging = false;
                         self.fire();
                         crate::animation::request_draw();
                         return EventResult::Consumed;
@@ -576,26 +694,60 @@ impl Widget for ComboBox {
                     // Click outside the dropdown — close it.
                     self.open = false;
                     self.hovered_item = None;
+                    self.scrollbar.hovered_bar = false;
+                    self.scrollbar.hovered_thumb = false;
+                    self.scrollbar.dragging = false;
+                    self.middle_dragging = false;
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
             }
             Event::MouseMove { pos } => {
-                self.hovered_item = self.item_for_pos(*pos);
+                if self.middle_dragging {
+                    let dy = pos.y - self.middle_last_pos.y;
+                    self.middle_last_pos = *pos;
+                    self.sync_scrollbar_from_rows();
+                    if self.scrollbar.scroll_by(dy, self.popup_scroll_viewport()) {
+                        self.sync_rows_from_scrollbar();
+                        self.hovered_item = None;
+                        crate::animation::request_draw();
+                    }
+                    return EventResult::Consumed;
+                }
+                if self.scrollbar.dragging {
+                    let style = self.popup_scroll_style();
+                    let viewport = self.popup_scroll_viewport();
+                    let geom = self.scrollbar_geometry(style);
+                    if self.scrollbar.drag_to(*pos, viewport, style, geom) {
+                        self.sync_rows_from_scrollbar();
+                        self.hovered_item = None;
+                        crate::animation::request_draw();
+                    }
+                    return EventResult::Consumed;
+                }
+                let hovered_item = self.item_for_pos(*pos);
+                let style = self.popup_scroll_style();
+                let viewport = self.popup_scroll_viewport();
+                let geom = self.scrollbar_geometry(style);
+                let scroll_hover_changed = self.scrollbar.update_hover(*pos, viewport, style, geom);
+                if hovered_item != self.hovered_item || scroll_hover_changed {
+                    self.hovered_item = hovered_item;
+                    crate::animation::request_draw();
+                }
                 EventResult::Ignored
             }
             Event::MouseWheel { delta_y, .. } => {
                 if self.open && self.options.len() > self.popup_visible_count {
-                    let rows = (*delta_y / ITEM_H).round() as isize;
-                    let rows = if rows == 0 {
-                        delta_y.signum() as isize
-                    } else {
-                        rows
-                    };
-                    self.scroll_items(rows);
-                    self.hovered_item = None;
-                    crate::animation::request_draw();
+                    self.sync_scrollbar_from_rows();
+                    if self
+                        .scrollbar
+                        .scroll_by(delta_y * 40.0, self.popup_scroll_viewport())
+                    {
+                        self.sync_rows_from_scrollbar();
+                        self.hovered_item = None;
+                        crate::animation::request_draw();
+                    }
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -606,6 +758,10 @@ impl Widget for ComboBox {
                 match key {
                     Key::Enter | Key::Char(' ') => {
                         self.open = !self.open;
+                        self.scrollbar.hovered_bar = false;
+                        self.scrollbar.hovered_thumb = false;
+                        self.scrollbar.dragging = false;
+                        self.middle_dragging = false;
                         if self.open {
                             self.ensure_selected_visible();
                         }
@@ -615,6 +771,10 @@ impl Widget for ComboBox {
                     Key::Escape => {
                         if self.open {
                             self.open = false;
+                            self.scrollbar.hovered_bar = false;
+                            self.scrollbar.hovered_thumb = false;
+                            self.scrollbar.dragging = false;
+                            self.middle_dragging = false;
                             crate::animation::request_draw();
                             EventResult::Consumed
                         } else {
@@ -646,10 +806,27 @@ impl Widget for ComboBox {
                 let was_open = self.open;
                 self.open = false;
                 self.hovered_item = None;
+                self.scrollbar.hovered_bar = false;
+                self.scrollbar.hovered_thumb = false;
+                self.scrollbar.dragging = false;
+                self.middle_dragging = false;
                 if was_open {
                     crate::animation::request_draw();
                 }
                 EventResult::Ignored
+            }
+            Event::MouseUp { button, .. } => {
+                if *button == MouseButton::Left && self.scrollbar.dragging {
+                    self.scrollbar.dragging = false;
+                    crate::animation::request_draw();
+                    EventResult::Consumed
+                } else if *button == MouseButton::Middle && self.middle_dragging {
+                    self.middle_dragging = false;
+                    crate::animation::request_draw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             _ => EventResult::Ignored,
         }
@@ -764,27 +941,8 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
         ctx.fill_text(text, request.x + PAD_X, baseline);
     }
 
-    if has_scroll {
-        let track_x = request.x + request.width - SCROLLBAR_W - 2.0;
-        let track_y = popup_y + 3.0;
-        let track_h = (request.popup_h - 6.0).max(1.0);
-        ctx.set_fill_color(v.scroll_track);
-        ctx.begin_path();
-        ctx.rounded_rect(track_x, track_y, SCROLLBAR_W, track_h, SCROLLBAR_W * 0.5);
-        ctx.fill();
-
-        let total = request.options.len();
-        let visible = request.visible_count.max(1);
-        let thumb_h = (track_h * visible as f64 / total as f64)
-            .max(12.0)
-            .min(track_h);
-        let max_scroll = total.saturating_sub(visible).max(1);
-        let travel = (track_h - thumb_h).max(0.0);
-        let thumb_y = track_y + travel * (1.0 - request.first_item as f64 / max_scroll as f64);
-        ctx.set_fill_color(v.scroll_thumb);
-        ctx.begin_path();
-        ctx.rounded_rect(track_x, thumb_y, SCROLLBAR_W, thumb_h, SCROLLBAR_W * 0.5);
-        ctx.fill();
+    if let Some(scrollbar) = request.scrollbar {
+        paint_prepared_scrollbar(ctx, scrollbar);
     }
 
     ctx.set_stroke_color(v.widget_stroke);

@@ -543,6 +543,16 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     fn transform(&self) -> TransAffine {
         self.state.transform
     }
+    fn root_transform(&self) -> TransAffine {
+        let mut t = self.state.transform;
+        for layer in self.layer_stack.iter().rev() {
+            t.premultiply(&TransAffine::new_translation(
+                layer.origin_x,
+                layer.origin_y,
+            ));
+        }
+        t
+    }
     fn save(&mut self) {
         self.state_stack.push(self.state.clone());
     }
