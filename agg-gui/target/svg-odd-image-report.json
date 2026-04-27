@@ -1,0 +1,14 @@
+{
+  "total": 1,
+  "passed": 0,
+  "known": 0,
+  "failed": 1,
+  "groups": {
+    "structure/image": { "failed": 1 }
+  },
+  "known_failures": [
+  ],
+  "failures": [
+    { "case": "structure/image/raster-image-and-size-with-odd-numbers.svg", "group": "structure/image", "reason": "pixel diff exceeded tolerance", "known_reason": null, "mismatch_ratio": 0.27940800, "max_delta": 255 }
+  ]
+}

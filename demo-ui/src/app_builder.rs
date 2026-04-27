@@ -213,10 +213,42 @@ pub fn build_demo_ui(
     let demo_pos_cells: Vec<Rc<Cell<Rect>>> = (0..DEMOS.len())
         .map(|_| Rc::new(Cell::new(Rect::default())))
         .collect();
+    let demo_max_cells: Vec<Rc<Cell<bool>>> = DEMOS
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            Rc::new(Cell::new(
+                initial_state
+                    .as_ref()
+                    .and_then(|st| st.demos.get(i))
+                    .map(|ws| ws.maximized)
+                    .unwrap_or(false),
+            ))
+        })
+        .collect();
     let test_pos_cells: Vec<Rc<Cell<Rect>>> = (0..TESTS.len())
         .map(|_| Rc::new(Cell::new(Rect::default())))
         .collect();
+    let test_max_cells: Vec<Rc<Cell<bool>>> = TESTS
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            Rc::new(Cell::new(
+                initial_state
+                    .as_ref()
+                    .and_then(|st| st.tests.get(i))
+                    .map(|ws| ws.maximized)
+                    .unwrap_or(false),
+            ))
+        })
+        .collect();
     let about_pos_cell: Rc<Cell<Rect>> = Rc::new(Cell::new(Rect::default()));
+    let about_max_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
+        initial_state
+            .as_ref()
+            .map(|st| st.about.maximized)
+            .unwrap_or(false),
+    ));
     let default_canvas_h = 720.0_f64;
     let rc_for_cb: Vec<_> = reset_cells.iter().map(Rc::clone).collect();
     let rc_for_key: Vec<_> = reset_cells.iter().map(Rc::clone).collect();
@@ -337,6 +369,7 @@ pub fn build_demo_ui(
             .with_visible_cell(open_cell)
             .with_reset_cell(reset_cell)
             .with_position_cell(Rc::clone(&demo_pos_cells[i]))
+            .with_maximized_cell(Rc::clone(&demo_max_cells[i]))
             .with_auto_size(auto_size)
             .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(win));
@@ -362,6 +395,7 @@ pub fn build_demo_ui(
             .with_visible_cell(open_cell)
             .with_reset_cell(reset_cell)
             .with_position_cell(Rc::clone(&demo_pos_cells[cube_idx]))
+            .with_maximized_cell(Rc::clone(&demo_max_cells[cube_idx]))
             .on_raised(make_on_raised());
         canvas.children_mut()[1 + cube_idx] = Box::new(win);
     }
@@ -391,6 +425,7 @@ pub fn build_demo_ui(
                 .with_visible_cell(open_cell)
                 .with_reset_cell(reset_cell)
                 .with_position_cell(Rc::clone(&test_pos_cells[i]))
+                .with_maximized_cell(Rc::clone(&test_max_cells[i]))
                 .on_raised(make_on_raised());
             if sub.vscroll {
                 win = win.with_vscroll(true);
@@ -434,6 +469,7 @@ pub fn build_demo_ui(
             .with_visible_cell(open_cell)
             .with_reset_cell(reset_cell)
             .with_position_cell(Rc::clone(&test_pos_cells[i]))
+            .with_maximized_cell(Rc::clone(&test_max_cells[i]))
             .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(win));
     }
@@ -452,6 +488,7 @@ pub fn build_demo_ui(
         .with_bounds(about_initial)
         .with_visible_cell(Rc::clone(&about_open))
         .with_position_cell(Rc::clone(&about_pos_cell))
+        .with_maximized_cell(Rc::clone(&about_max_cell))
         .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(about_win));
     }
@@ -634,10 +671,13 @@ pub fn build_demo_ui(
     let state_accessor = StateAccessor {
         demo_open: demo_entries.iter().map(|e| Rc::clone(&e.open)).collect(),
         demo_pos: demo_pos_cells,
+        demo_maximized: demo_max_cells,
         test_open: test_entries.iter().map(|e| Rc::clone(&e.open)).collect(),
         test_pos: test_pos_cells,
+        test_maximized: test_max_cells,
         about_open: Rc::clone(&about_open),
         about_pos: about_pos_cell,
+        about_maximized: about_max_cell,
         backend_open: Rc::clone(&show_backend),
         theme_pref: Rc::clone(&theme_pref),
         accent_color: Rc::clone(&accent_color),

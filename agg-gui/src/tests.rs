@@ -45,4 +45,5 @@ mod retained_layers;
 mod touch_scroll;
 mod tree_view;
 mod widgets;
+mod window_maximize;
 mod windowing;

@@ -110,6 +110,7 @@ Done, briefly:
 - Implemented solid fills, fill rules, transforms, cubic/quadratic paths, strokes, line caps/joins, miter limits, dashes, opacity, embedded raster images, and explicit reference-size rendering.
 - Started bridge-level linear/radial gradient fills and gradient strokes for RGBA, LCD, and hardware targets. The hardware path uses native shader ramps so the same SVG paint model reaches every active backend.
 - Added bridge-level sampled pattern fills/strokes for RGBA and LCD targets; pattern corpus cases now smoke-render, while pixel-exact pattern tiling/viewBox/object-bounding-box work remains.
+- Added resource-aware SVG helpers for test-suite-relative external images and fixed embedded SVG images to use the same image placement path as raster images.
 - Added `resvg-test-suite` as the reference corpus and use its paired PNGs in tests and demos.
 - Added an opt-in data-driven SVG regression harness that discovers paired SVG/PNG cases, supports filters/shards/limits, and writes grouped JSON reports.
 - Added render-only corpus mode (`AGG_GUI_SVG_RENDER_ONLY=1`): current smoke coverage is `1676 / 1679` cases rendering successfully; the 3 remaining render failures are invalid-size/invalid-encoding SVG inputs.
@@ -149,7 +150,7 @@ Tasks:
 1. **Linear gradients:** Filled-path and stroked-path support is in place for RGBA, LCD, and hardware via bridge gradient paint. Remaining work: object-bounding-box regression cases and deeper gradient transform coverage against the reference suite.
 2. **Radial gradients:** Filled-path and stroked-path support is in place for RGBA, LCD, and hardware via bridge radial/focal gradient paint. Remaining work: deeper reference-suite diff coverage.
 3. **Spread modes:** Pad / Reflect / Repeat — represent these at the bridge paint level and implement them per target.
-4. **Patterns:** Basic sampled pattern paint is in place for RGBA/LCD. Remaining work: exact `viewBox`, `patternUnits`, `patternContentUnits`, object-bounding-box sizing, and hardware texture-pattern support.
+4. **Patterns:** Basic sampled pattern paint and object-bounding-box tile sizing are in place for RGBA/LCD. Remaining work: exact `viewBox`, `patternUnits`, `patternContentUnits`, and hardware texture-pattern support.
 
 Acceptance: representative `resvg-test-suite/tests/paint-servers/linearGradient`, `radialGradient`, and `pattern` cases pass through RGBA/LCD/hardware targets.
 

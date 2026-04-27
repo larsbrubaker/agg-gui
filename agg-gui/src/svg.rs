@@ -6,13 +6,13 @@
 //! hardware targets all share one render path.
 
 use std::fmt;
-use std::sync::Arc;
+use std::path::Path;
 
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
 use usvg::tiny_skia_path::PathSegment;
 
-use crate::draw_ctx::{DrawCtx, FillRule, PatternPaint};
+use crate::draw_ctx::{DrawCtx, FillRule};
 use crate::framebuffer::{unpremultiply_rgba_inplace, Framebuffer};
 use crate::gfx_ctx::GfxCtx;
 use crate::lcd_coverage::LcdBuffer;
@@ -61,13 +61,18 @@ impl From<image::ImageError> for SvgRenderError {
     }
 }
 
+fn parse_svg_tree(data: &[u8], resources_dir: Option<&Path>) -> Result<usvg::Tree, SvgRenderError> {
+    let mut options = usvg::Options::default();
+    options.resources_dir = resources_dir.map(Path::to_path_buf);
+    Ok(usvg::Tree::from_data(data, &options)?)
+}
+
 /// Parse an SVG document and render it into `ctx`.
 ///
 /// This is a convenience wrapper around [`render_svg_tree`].  Callers that
 /// already cache a `usvg::Tree` should use [`render_svg_tree`] directly.
 pub fn render_svg(data: &[u8], ctx: &mut dyn DrawCtx) -> Result<(), SvgRenderError> {
-    let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(data, &options)?;
+    let tree = parse_svg_tree(data, None)?;
     render_svg_tree(&tree, ctx)
 }
 
@@ -79,8 +84,18 @@ pub fn render_svg_at_size(
     width: u32,
     height: u32,
 ) -> Result<(), SvgRenderError> {
-    let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(data, &options)?;
+    let tree = parse_svg_tree(data, None)?;
+    render_svg_tree_at_size(&tree, ctx, width, height)
+}
+
+pub fn render_svg_at_size_with_resources(
+    data: &[u8],
+    ctx: &mut dyn DrawCtx,
+    width: u32,
+    height: u32,
+    resources_dir: &Path,
+) -> Result<(), SvgRenderError> {
+    let tree = parse_svg_tree(data, Some(resources_dir))?;
     render_svg_tree_at_size(&tree, ctx, width, height)
 }
 
@@ -89,8 +104,7 @@ pub fn render_svg_at_size(
 /// This is the library API the SVG regression tests and demo viewer should use
 /// for the `agg-rgba-bitmap render` column.
 pub fn render_svg_to_framebuffer(data: &[u8]) -> Result<Framebuffer, SvgRenderError> {
-    let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(data, &options)?;
+    let tree = parse_svg_tree(data, None)?;
     render_svg_tree_to_framebuffer(&tree)
 }
 
@@ -105,8 +119,17 @@ pub fn render_svg_to_framebuffer_at_size(
     width: u32,
     height: u32,
 ) -> Result<Framebuffer, SvgRenderError> {
-    let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(data, &options)?;
+    let tree = parse_svg_tree(data, None)?;
+    render_svg_tree_to_framebuffer_at_size(&tree, width, height)
+}
+
+pub fn render_svg_to_framebuffer_at_size_with_resources(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    resources_dir: &Path,
+) -> Result<Framebuffer, SvgRenderError> {
+    let tree = parse_svg_tree(data, Some(resources_dir))?;
     render_svg_tree_to_framebuffer_at_size(&tree, width, height)
 }
 
@@ -138,8 +161,7 @@ pub fn render_svg_tree_to_framebuffer_at_size(
 /// This is the library API the SVG regression tests and demo viewer should use
 /// for the `agg-lcd-bitmap render` column.
 pub fn render_svg_to_lcd_buffer(data: &[u8]) -> Result<LcdBuffer, SvgRenderError> {
-    let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(data, &options)?;
+    let tree = parse_svg_tree(data, None)?;
     render_svg_tree_to_lcd_buffer(&tree)
 }
 
@@ -150,8 +172,17 @@ pub fn render_svg_to_lcd_buffer_at_size(
     width: u32,
     height: u32,
 ) -> Result<LcdBuffer, SvgRenderError> {
-    let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(data, &options)?;
+    let tree = parse_svg_tree(data, None)?;
+    render_svg_tree_to_lcd_buffer_at_size(&tree, width, height)
+}
+
+pub fn render_svg_to_lcd_buffer_at_size_with_resources(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    resources_dir: &Path,
+) -> Result<LcdBuffer, SvgRenderError> {
+    let tree = parse_svg_tree(data, Some(resources_dir))?;
     render_svg_tree_to_lcd_buffer_at_size(&tree, width, height)
 }
 
@@ -264,7 +295,12 @@ fn fill_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
     };
 
     emit_path(path, ctx);
-    if !apply_fill_paint(ctx, fill.paint(), state.opacity * fill.opacity().get()) {
+    if !apply_fill_paint(
+        ctx,
+        fill.paint(),
+        state.opacity * fill.opacity().get(),
+        Some(path.bounding_box()),
+    ) {
         return;
     }
     ctx.set_fill_rule(map_fill_rule(fill.rule()));
@@ -275,7 +311,12 @@ fn stroke_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
     let Some(stroke) = path.stroke() else {
         return;
     };
-    if !apply_stroke_paint(ctx, stroke.paint(), state.opacity * stroke.opacity().get()) {
+    if !apply_stroke_paint(
+        ctx,
+        stroke.paint(),
+        state.opacity * stroke.opacity().get(),
+        Some(path.stroke_bounding_box()),
+    ) {
         return;
     }
 
@@ -292,12 +333,17 @@ fn stroke_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
     ctx.stroke();
 }
 
-fn apply_fill_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) -> bool {
+fn apply_fill_paint(
+    ctx: &mut dyn DrawCtx,
+    paint: &usvg::Paint,
+    opacity: f32,
+    object_bbox: Option<usvg::Rect>,
+) -> bool {
     if let usvg::Paint::Pattern(pattern) = paint {
         if !ctx.supports_fill_pattern() {
             return false;
         }
-        if let Some(pattern) = render_pattern_paint(pattern, opacity) {
+        if let Some(pattern) = pattern::render_pattern_paint(pattern, opacity, object_bbox) {
             ctx.set_fill_pattern(pattern);
             return true;
         }
@@ -307,12 +353,17 @@ fn apply_fill_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) ->
     paint::apply_fill_paint(ctx, paint, opacity)
 }
 
-fn apply_stroke_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) -> bool {
+fn apply_stroke_paint(
+    ctx: &mut dyn DrawCtx,
+    paint: &usvg::Paint,
+    opacity: f32,
+    object_bbox: Option<usvg::Rect>,
+) -> bool {
     if let usvg::Paint::Pattern(pattern) = paint {
         if !ctx.supports_stroke_pattern() {
             return false;
         }
-        if let Some(pattern) = render_pattern_paint(pattern, opacity) {
+        if let Some(pattern) = pattern::render_pattern_paint(pattern, opacity, object_bbox) {
             ctx.set_stroke_pattern(pattern);
             return true;
         }
@@ -360,53 +411,22 @@ fn render_image(
             ctx.restore();
         }
         usvg::ImageKind::SVG(tree) => {
+            let fb = render_svg_tree_to_framebuffer(tree)?;
+            let mut pixels = fb.pixels_flipped();
+            unpremultiply_rgba_inplace(&mut pixels);
+            let size = image.size();
             ctx.save();
             apply_transform(ctx, image.abs_transform());
-            render_svg_tree(tree, ctx)?;
+            let t = ctx.transform();
+            let (dst_x, dst_y, dst_w, dst_h) =
+                transformed_rect(&t, size.width() as f64, size.height() as f64);
+            ctx.reset_transform();
+            ctx.draw_image_rgba(&pixels, fb.width(), fb.height(), dst_x, dst_y, dst_w, dst_h);
             ctx.restore();
         }
     }
 
     Ok(())
-}
-
-fn render_pattern_paint(pattern: &Arc<usvg::Pattern>, opacity: f32) -> Option<PatternPaint> {
-    let rect = pattern.rect();
-    let width = rect.width() as f64;
-    let height = rect.height() as f64;
-    if width <= f64::EPSILON || height <= f64::EPSILON {
-        return None;
-    }
-
-    let pixel_width = width.ceil().clamp(1.0, 4096.0) as u32;
-    let pixel_height = height.ceil().clamp(1.0, 4096.0) as u32;
-    let mut tile = Framebuffer::new(pixel_width, pixel_height);
-    {
-        let mut ctx = GfxCtx::new(&mut tile);
-        let transform = TransAffine::new_custom(
-            pixel_width as f64 / width,
-            0.0,
-            0.0,
-            -(pixel_height as f64 / height),
-            -(rect.x() as f64) * pixel_width as f64 / width,
-            (rect.y() as f64 + height) * pixel_height as f64 / height,
-        );
-        ctx.set_transform(transform);
-        render_group(pattern.root(), &mut ctx, SvgRenderState { opacity }).ok()?;
-    }
-
-    let mut pixels = tile.into_pixels();
-    unpremultiply_rgba_inplace(&mut pixels);
-    Some(PatternPaint {
-        x: rect.x() as f64,
-        y: rect.y() as f64,
-        width,
-        height,
-        transform: to_trans_affine(pattern.transform()),
-        pixels: Arc::new(pixels),
-        pixel_width,
-        pixel_height,
-    })
 }
 
 fn emit_path(path: &usvg::Path, ctx: &mut dyn DrawCtx) {
@@ -491,8 +511,11 @@ fn map_fill_rule(rule: usvg::FillRule) -> FillRule {
 
 #[cfg(test)]
 mod gradient_tests;
+#[cfg(test)]
+mod image_tests;
 
 mod paint;
+mod pattern;
 
 #[cfg(test)]
 mod tests {

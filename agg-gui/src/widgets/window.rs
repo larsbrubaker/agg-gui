@@ -112,6 +112,7 @@ pub struct Window {
     use_gl_backbuffer: bool,
     reset_to: Option<Rc<Cell<Option<Rect>>>>,
     position_cell: Option<Rc<Cell<Rect>>>,
+    maximized_cell: Option<Rc<Cell<bool>>>,
 
     /// Snapshot of `is_visible()` from the previous `layout()` call.  Used
     /// to detect the false→true transition (demo toggled on in the
@@ -231,6 +232,7 @@ impl Window {
             use_gl_backbuffer: true,
             reset_to: None,
             position_cell: None,
+            maximized_cell: None,
             // Seed `last_visible` to `true` (matches `visible` above) so a
             // window that's open on first frame doesn't spuriously request
             // a raise before the user has interacted with it.
@@ -289,6 +291,9 @@ impl Window {
     pub fn with_bounds(mut self, b: Rect) -> Self {
         self.pre_collapse_h = b.height;
         self.bounds = b;
+        if self.maximized {
+            self.pre_maximize_bounds = b;
+        }
         self
     }
     pub fn with_font_size(mut self, size: f64) -> Self {
@@ -313,6 +318,19 @@ impl Window {
 
     pub fn with_position_cell(mut self, cell: Rc<Cell<Rect>>) -> Self {
         self.position_cell = Some(cell);
+        self
+    }
+
+    /// Wire the window's canvas-maximized state into external persistence.
+    ///
+    /// Call after [`with_bounds`] when restoring saved state so the current
+    /// bounds become the pre-maximize bounds used by the first layout pass.
+    pub fn with_maximized_cell(mut self, cell: Rc<Cell<bool>>) -> Self {
+        self.maximized = cell.get();
+        if self.maximized {
+            self.pre_maximize_bounds = self.bounds;
+        }
+        self.maximized_cell = Some(cell);
         self
     }
 
@@ -604,6 +622,9 @@ impl Window {
                 self.canvas_size.height,
             ));
             self.maximized = true;
+        }
+        if let Some(ref cell) = self.maximized_cell {
+            cell.set(self.maximized);
         }
     }
 

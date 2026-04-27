@@ -320,15 +320,20 @@ fn run_case(case: &Case, cfg: &Config) -> CaseResult {
         Ok(svg) => svg,
         Err(err) => return fail(case, format!("read svg: {err}"), None, None),
     };
-    let rendered =
-        match agg_gui::render_svg_to_framebuffer_at_size(&svg, reference.width, reference.height) {
-            Ok(fb) => {
-                let mut pixels = fb.pixels_flipped();
-                unpremultiply_rgba_inplace(&mut pixels);
-                pixels
-            }
-            Err(err) => return fail(case, format!("render: {err}"), None, None),
-        };
+    let resources_dir = case.svg_path.parent().unwrap_or(&cfg.suite_root);
+    let rendered = match agg_gui::render_svg_to_framebuffer_at_size_with_resources(
+        &svg,
+        reference.width,
+        reference.height,
+        resources_dir,
+    ) {
+        Ok(fb) => {
+            let mut pixels = fb.pixels_flipped();
+            unpremultiply_rgba_inplace(&mut pixels);
+            pixels
+        }
+        Err(err) => return fail(case, format!("render: {err}"), None, None),
+    };
     if cfg.render_only {
         return CaseResult::Pass;
     }

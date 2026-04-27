@@ -224,6 +224,11 @@ impl Widget for Window {
             return Size::new(self.bounds.width, self.bounds.height);
         }
 
+        if self.maximized && available.width > 0.0 && available.height > 0.0 {
+            self.bounds = snap(Rect::new(0.0, 0.0, available.width, available.height));
+            self.pre_collapse_h = self.bounds.height;
+        }
+
         // Auto-size: measure the child's preferred size, then adopt it as the
         // new window size (pinning the top edge — Y-up → adjust `bounds.y` so
         // the title bar stays put when the height changes).  Skip while
@@ -352,16 +357,18 @@ impl Widget for Window {
         self.canvas_size = available;
         if let Some(ref cell) = self.position_cell {
             // When maximised, persist the UNDERLYING pre-maximise bounds,
-            // not the stretched-to-canvas ones.  Maximise is an interaction
-            // state, not a saved size: we want cold reloads to come up at
-            // the user's last chosen "real" size, then let them re-maximise
-            // if they want.  Matches native window-manager behaviour.
+            // not the stretched-to-canvas ones.  The maximized flag itself is
+            // persisted separately so reloads restore the interaction state
+            // without losing the user's last normal-size bounds.
             let save_bounds = if self.maximized {
                 self.pre_maximize_bounds
             } else {
                 self.bounds
             };
             cell.set(save_bounds);
+        }
+        if let Some(ref cell) = self.maximized_cell {
+            cell.set(self.maximized);
         }
 
         Size::new(self.bounds.width, self.bounds.height)

@@ -1,15 +1,17 @@
 #![allow(unused_imports)]
 use std::cell::Cell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::framebuffer::unpremultiply_rgba_inplace;
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    render_svg_at_size, render_svg_to_framebuffer_at_size, render_svg_to_lcd_buffer_at_size,
-    set_cursor_icon, Color, Container, CursorIcon, DrawCtx, Event, EventResult, FlexColumn,
-    FlexRow, Font, Hyperlink, Label, MouseButton, Point, Rect, Resize, ScrollBarVisibility,
-    ScrollView, Separator, Size, SizedBox, TextArea, TextField, Visuals, Widget,
+    render_svg_at_size, render_svg_to_framebuffer_at_size_with_resources,
+    render_svg_to_lcd_buffer_at_size_with_resources, set_cursor_icon, Color, Container, CursorIcon,
+    DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink, Label, MouseButton, Point,
+    Rect, Resize, ScrollBarVisibility, ScrollView, Separator, Size, SizedBox, TextArea, TextField,
+    Visuals, Widget,
 };
 
 mod drawing;
@@ -253,21 +255,32 @@ impl SvgSampleRender {
             .as_ref()
             .map(|(_, w, h)| (*w, *h))
             .unwrap_or((1, 1));
+        let resources_dir = svg_sample_resource_dir(sample.name);
 
-        let rgba = render_svg_to_framebuffer_at_size(sample.svg, width, height)
-            .map(|fb| {
-                let mut pixels = fb.pixels_flipped();
-                unpremultiply_rgba_inplace(&mut pixels);
-                Arc::new(pixels)
-            })
-            .map_err(|e| e.to_string());
+        let rgba = render_svg_to_framebuffer_at_size_with_resources(
+            sample.svg,
+            width,
+            height,
+            &resources_dir,
+        )
+        .map(|fb| {
+            let mut pixels = fb.pixels_flipped();
+            unpremultiply_rgba_inplace(&mut pixels);
+            Arc::new(pixels)
+        })
+        .map_err(|e| e.to_string());
 
-        let lcd = render_svg_to_lcd_buffer_at_size(sample.svg, width, height)
-            .map(|buffer| SvgLcdPreview {
-                color: Arc::new(buffer.color_plane_flipped()),
-                alpha: Arc::new(buffer.alpha_plane_flipped()),
-            })
-            .map_err(|e| e.to_string());
+        let lcd = render_svg_to_lcd_buffer_at_size_with_resources(
+            sample.svg,
+            width,
+            height,
+            &resources_dir,
+        )
+        .map(|buffer| SvgLcdPreview {
+            color: Arc::new(buffer.color_plane_flipped()),
+            alpha: Arc::new(buffer.alpha_plane_flipped()),
+        })
+        .map_err(|e| e.to_string());
 
         Self {
             name: sample.name,
@@ -278,6 +291,17 @@ impl SvgSampleRender {
             rgba,
             lcd,
         }
+    }
+}
+
+fn svg_sample_resource_dir(name: &str) -> PathBuf {
+    let suite_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("demo-ui should live under workspace root")
+        .join("tests/resvg-test-suite/tests");
+    match Path::new(name).parent() {
+        Some(parent) => suite_root.join(parent),
+        None => suite_root,
     }
 }
 

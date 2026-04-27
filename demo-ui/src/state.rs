@@ -5,9 +5,9 @@
 //!   version=1
 //!   demos=<count>
 //!   tests=<count>
-//!   d<i>=<open>,<x>,<y>,<w>,<h>
-//!   t<i>=<open>,<x>,<y>,<w>,<h>
-//!   about=<open>,<x>,<y>,<w>,<h>
+//!   d<i>=<open>,<x>,<y>,<w>,<h>,<maximized>
+//!   t<i>=<open>,<x>,<y>,<w>,<h>,<maximized>
+//!   about=<open>,<x>,<y>,<w>,<h>,<maximized>
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -23,6 +23,8 @@ pub struct WindowState {
     pub y: f64,
     pub w: f64,
     pub h: f64,
+    /// Whether this floating demo window was maximized within the canvas.
+    pub maximized: bool,
 }
 
 impl WindowState {
@@ -132,19 +134,24 @@ impl SavedState {
         out.push_str(&format!("tests={}\n", self.tests.len()));
         for (i, w) in self.demos.iter().enumerate() {
             out.push_str(&format!(
-                "d{}={},{},{},{},{}\n",
-                i, w.open as u8, w.x, w.y, w.w, w.h
+                "d{}={},{},{},{},{},{}\n",
+                i, w.open as u8, w.x, w.y, w.w, w.h, w.maximized as u8
             ));
         }
         for (i, w) in self.tests.iter().enumerate() {
             out.push_str(&format!(
-                "t{}={},{},{},{},{}\n",
-                i, w.open as u8, w.x, w.y, w.w, w.h
+                "t{}={},{},{},{},{},{}\n",
+                i, w.open as u8, w.x, w.y, w.w, w.h, w.maximized as u8
             ));
         }
         out.push_str(&format!(
-            "about={},{},{},{},{}\n",
-            self.about.open as u8, self.about.x, self.about.y, self.about.w, self.about.h
+            "about={},{},{},{},{},{}\n",
+            self.about.open as u8,
+            self.about.x,
+            self.about.y,
+            self.about.w,
+            self.about.h,
+            self.about.maximized as u8
         ));
         out.push_str(&format!("backend={}\n", self.backend_open as u8));
         out.push_str(&format!("theme={}\n", self.theme_pref.key()));
@@ -388,18 +395,20 @@ impl SavedState {
 }
 
 fn parse_window_state(s: &str) -> Option<WindowState> {
-    let mut it = s.splitn(5, ',');
+    let mut it = s.splitn(6, ',');
     let open: u8 = it.next()?.parse().ok()?;
     let x: f64 = it.next()?.parse().ok()?;
     let y: f64 = it.next()?.parse().ok()?;
     let w: f64 = it.next()?.parse().ok()?;
     let h: f64 = it.next()?.parse().ok()?;
+    let maximized: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     Some(WindowState {
         open: open != 0,
         x,
         y,
         w,
         h,
+        maximized: maximized != 0,
     })
 }
 
@@ -412,10 +421,13 @@ fn parse_window_state(s: &str) -> Option<WindowState> {
 pub struct StateAccessor {
     pub demo_open: Vec<Rc<Cell<bool>>>,
     pub demo_pos: Vec<Rc<Cell<Rect>>>,
+    pub demo_maximized: Vec<Rc<Cell<bool>>>,
     pub test_open: Vec<Rc<Cell<bool>>>,
     pub test_pos: Vec<Rc<Cell<Rect>>>,
+    pub test_maximized: Vec<Rc<Cell<bool>>>,
     pub about_open: Rc<Cell<bool>>,
     pub about_pos: Rc<Cell<Rect>>,
+    pub about_maximized: Rc<Cell<bool>>,
     pub backend_open: Rc<Cell<bool>>,
     /// Top-bar theme selection.
     pub theme_pref: Rc<Cell<ThemePreference>>,
@@ -481,7 +493,8 @@ impl StateAccessor {
             .demo_open
             .iter()
             .zip(&self.demo_pos)
-            .map(|(o, p)| {
+            .zip(&self.demo_maximized)
+            .map(|((o, p), m)| {
                 let r = p.get();
                 WindowState {
                     open: o.get(),
@@ -489,6 +502,7 @@ impl StateAccessor {
                     y: r.y,
                     w: r.width,
                     h: r.height,
+                    maximized: m.get(),
                 }
             })
             .collect();
@@ -496,7 +510,8 @@ impl StateAccessor {
             .test_open
             .iter()
             .zip(&self.test_pos)
-            .map(|(o, p)| {
+            .zip(&self.test_maximized)
+            .map(|((o, p), m)| {
                 let r = p.get();
                 WindowState {
                     open: o.get(),
@@ -504,6 +519,7 @@ impl StateAccessor {
                     y: r.y,
                     w: r.width,
                     h: r.height,
+                    maximized: m.get(),
                 }
             })
             .collect();
@@ -514,6 +530,7 @@ impl StateAccessor {
             y: r.y,
             w: r.width,
             h: r.height,
+            maximized: self.about_maximized.get(),
         };
         let (ww, wh) = self.window_size.get();
         SavedState {
@@ -573,6 +590,7 @@ mod tests {
             y: 0.0,
             w: 0.0,
             h: 0.0,
+            maximized: false,
         };
         assert!(
             !never_laid_out.has_valid_bounds(),
@@ -585,6 +603,7 @@ mod tests {
             y: 60.0,
             w: 360.0,
             h: 280.0,
+            maximized: false,
         };
         assert!(real.has_valid_bounds());
     }
@@ -604,6 +623,7 @@ mod tests {
                     y: 60.0,
                     w: 360.0,
                     h: 280.0,
+                    maximized: true,
                 },
                 WindowState {
                     open: false,
@@ -611,6 +631,7 @@ mod tests {
                     y: 0.0,
                     w: 0.0,
                     h: 0.0,
+                    maximized: false,
                 },
             ],
             tests: vec![],
@@ -620,6 +641,7 @@ mod tests {
                 y: 80.0,
                 w: 440.0,
                 h: 500.0,
+                maximized: false,
             },
             backend_open: false,
             theme_pref: ThemePreference::Dark,
@@ -655,6 +677,10 @@ mod tests {
         assert!(
             !back.demos[1].has_valid_bounds(),
             "never-opened demo must remain flagged as invalid"
+        );
+        assert!(
+            back.demos[0].maximized,
+            "per-window maximized state must survive round-trip"
         );
     }
 }

@@ -1,0 +1,14 @@
+{
+  "total": 1,
+  "passed": 0,
+  "known": 0,
+  "failed": 1,
+  "groups": {
+    "paint-servers/pattern": { "failed": 1 }
+  },
+  "known_failures": [
+  ],
+  "failures": [
+    { "case": "paint-servers/pattern/patternContentUnits-with-viewBox.svg", "group": "paint-servers/pattern", "reason": "pixel diff exceeded tolerance", "known_reason": null, "mismatch_ratio": 0.17846400, "max_delta": 255 }
+  ]
+}
