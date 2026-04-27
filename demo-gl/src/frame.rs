@@ -14,13 +14,18 @@
 //!                  show_inspector, inspector_nodes, hovered_bounds)
 //! ```
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use glow::HasContext;
 
 use crate::{draw_hover_overlay, GlGfxCtx};
 use agg_gui::{App, InspectorNode, Rect, Size};
+
+thread_local! {
+    static INSPECTOR_SNAPSHOT_EPOCH: Cell<Option<u64>> = const { Cell::new(None) };
+    static LAYOUT_FRAME_KEY: Cell<Option<(u32, u32, u64)>> = const { Cell::new(None) };
+}
 
 /// Clear the GL framebuffer and configure blend state for a new frame.
 ///
@@ -88,15 +93,28 @@ pub fn render_app_frame(
     // inspector is shown, or clear the hover highlight when it's hidden
     // so the overlay vanishes without waiting for the next mouse event.
     if show_inspector {
-        *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
+        let epoch = agg_gui::animation::invalidation_epoch();
+        let nodes_empty = inspector_nodes.borrow().is_empty();
+        let should_refresh =
+            nodes_empty || INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.get() != Some(epoch));
+        if should_refresh {
+            *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
+            INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.set(Some(epoch)));
+        }
     } else {
         *hovered_bounds.borrow_mut() = None;
+        INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.set(None));
     }
 
     ctx.reset(width as f32, height as f32);
     ctx.set_lcd_mode(agg_gui::font_settings::lcd_enabled());
 
-    app.layout(Size::new(width as f64, height as f64));
+    let layout_key = (width, height, agg_gui::animation::invalidation_epoch());
+    let needs_layout = LAYOUT_FRAME_KEY.with(|last| last.get() != Some(layout_key));
+    if needs_layout {
+        app.layout(Size::new(width as f64, height as f64));
+        LAYOUT_FRAME_KEY.with(|last| last.set(Some(layout_key)));
+    }
     app.paint(ctx);
 
     let hovered = *hovered_bounds.borrow();

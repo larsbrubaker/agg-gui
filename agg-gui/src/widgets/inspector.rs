@@ -227,7 +227,8 @@ impl InspectorPanel {
         let tree_view = TreeView::new(Arc::clone(&font))
             .with_row_height(20.0)
             .with_font_size(12.0)
-            .with_indent_width(14.0);
+            .with_indent_width(14.0)
+            .with_hover_repaint(false);
         Self {
             bounds: Rect::default(),
             _children: vec![Box::new(InternalPresenceNode {
@@ -325,6 +326,20 @@ impl InspectorPanel {
         let offset_y = self.tree_view.bounds().y;
         let translated = translate_event(event, offset_y);
         self.tree_view.on_event(&translated)
+    }
+
+    fn update_hovered_bounds_from_tree(&self) {
+        let nodes = self.nodes.borrow();
+        let next = self
+            .tree_view
+            .hovered_node_idx()
+            .and_then(|i| nodes.get(i))
+            .map(|n| n.screen_bounds);
+        let mut hovered = self.hovered_bounds.borrow_mut();
+        if *hovered != next {
+            *hovered = next;
+            crate::animation::request_draw_without_invalidation();
+        }
     }
 }
 
@@ -611,6 +626,10 @@ impl Widget for InspectorPanel {
                 }
                 if self.pos_in_tree_area(*pos) {
                     let _ = self.forward_to_tree(event);
+                    self.update_hovered_bounds_from_tree();
+                } else if self.hovered_bounds.borrow().is_some() {
+                    *self.hovered_bounds.borrow_mut() = None;
+                    crate::animation::request_draw_without_invalidation();
                 }
                 EventResult::Ignored
             }

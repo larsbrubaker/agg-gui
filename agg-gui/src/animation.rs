@@ -39,6 +39,16 @@ pub fn request_draw() {
     INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
 }
 
+/// Request a frame without dirtying retained widget backbuffers.
+///
+/// Use this for app-level overlays whose source state changed outside a
+/// retained subtree. The inspector hover rectangle is the canonical case:
+/// it must redraw, but the inspected/inspector windows do not need their FBOs
+/// rebuilt just because the overlay target moved.
+pub fn request_draw_without_invalidation() {
+    NEEDS_DRAW.with(|c| c.set(true));
+}
+
 /// Non-destructive read.  Hosts call this after drawing to decide control-flow
 /// for the next loop iteration.
 pub fn wants_draw() -> bool {

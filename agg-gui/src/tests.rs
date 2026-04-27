@@ -42,5 +42,6 @@ mod drawing;
 mod inspector_tree;
 mod layout_lcd;
 mod touch_scroll;
+mod tree_view;
 mod widgets;
 mod windowing;

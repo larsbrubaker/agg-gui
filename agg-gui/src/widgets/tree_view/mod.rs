@@ -77,6 +77,7 @@ pub struct TreeView {
     /// Leave `false` for the inspector tree, where clicking selects without
     /// accidentally collapsing an expanded branch.
     pub toggle_on_row_click: bool,
+    hover_repaint: bool,
     focused: bool,
     /// Flat-row index of the row under the cursor.
     hovered_row: Option<usize>,
@@ -114,6 +115,7 @@ impl TreeView {
             font_size: 13.0,
             drag_enabled: false,
             toggle_on_row_click: false,
+            hover_repaint: true,
             focused: false,
             hovered_row: None,
             cursor_node: None,
@@ -144,6 +146,10 @@ impl TreeView {
     }
     pub fn with_toggle_on_row_click(mut self) -> Self {
         self.toggle_on_row_click = true;
+        self
+    }
+    pub fn with_hover_repaint(mut self, repaint: bool) -> Self {
+        self.hover_repaint = repaint;
         self
     }
 
@@ -571,6 +577,8 @@ impl Widget for TreeView {
 
 impl TreeView {
     fn handle_mouse_move(&mut self, pos: Point) -> EventResult {
+        let old_hovered_scrollbar = self.hovered_scrollbar;
+        let old_hovered_row = self.hovered_row;
         self.hovered_scrollbar = self.in_scrollbar(pos);
 
         if self.dragging_scrollbar {
@@ -610,7 +618,14 @@ impl TreeView {
         }
 
         self.hovered_row = self.row_index_at(pos);
-        EventResult::Ignored
+        if self.hover_repaint
+            && (self.hovered_scrollbar != old_hovered_scrollbar
+                || self.hovered_row != old_hovered_row)
+        {
+            EventResult::Consumed
+        } else {
+            EventResult::Ignored
+        }
     }
 
     fn handle_mouse_down(&mut self, pos: Point, mods: Modifiers) -> EventResult {
