@@ -3,12 +3,10 @@
 //! `GfxCtx` is modeled after Cairo's `cairo_t`. All drawing goes through this
 //! type. It owns a stateful transform + style stack and writes pixels into a
 //! [`Framebuffer`] via AGG.
-//!
 //! # Coordinate system
 //!
 //! All coordinates are **first-quadrant (Y-up)**. Origin is the bottom-left
 //! corner of the framebuffer. Positive X goes right, positive Y goes up.
-//! Positive angles rotate counter-clockwise (mathematically standard).
 
 use std::f64::consts::PI;
 use std::sync::Arc;
@@ -80,13 +78,9 @@ struct GfxState {
     line_dash: Vec<f64>,
     dash_offset: f64,
     blend_mode: CompOp,
-    /// Scissor clip in Y-up screen space: `(x, y, width, height)`.
     clip: Option<(f64, f64, f64, f64)>,
-    /// Global alpha multiplier applied to fill and stroke at draw time.
     global_alpha: f64,
-    /// Current font (shared).
     font: Option<Arc<Font>>,
-    /// Font size in pixels (height from baseline to top of cap height).
     font_size: f64,
 }
 
@@ -513,7 +507,7 @@ impl<'a> GfxCtx<'a> {
         let transform = self.state.transform.clone();
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
         if let Some(gradient) = self.state.fill_linear_gradient.clone() {
-            draw_impl::rasterize_linear_gradient_fill(
+            sampled::rasterize_linear_gradient_fill(
                 fb,
                 &mut self.path,
                 &gradient,
@@ -524,7 +518,7 @@ impl<'a> GfxCtx<'a> {
                 &transform,
             );
         } else if let Some(gradient) = self.state.fill_radial_gradient.clone() {
-            draw_impl::rasterize_radial_gradient_fill(
+            sampled::rasterize_radial_gradient_fill(
                 fb,
                 &mut self.path,
                 &gradient,
@@ -535,7 +529,7 @@ impl<'a> GfxCtx<'a> {
                 &transform,
             );
         } else if let Some(pattern) = self.state.fill_pattern.clone() {
-            draw_impl::rasterize_pattern_fill(
+            sampled::rasterize_pattern_fill(
                 fb,
                 &mut self.path,
                 &pattern,
@@ -578,7 +572,7 @@ impl<'a> GfxCtx<'a> {
                 &dashes,
                 dash_offset,
             );
-            draw_impl::rasterize_linear_gradient_fill(
+            sampled::rasterize_linear_gradient_fill(
                 fb,
                 &mut outline,
                 &gradient,
@@ -598,7 +592,7 @@ impl<'a> GfxCtx<'a> {
                 &dashes,
                 dash_offset,
             );
-            draw_impl::rasterize_radial_gradient_fill(
+            sampled::rasterize_radial_gradient_fill(
                 fb,
                 &mut outline,
                 &gradient,
@@ -618,7 +612,7 @@ impl<'a> GfxCtx<'a> {
                 &dashes,
                 dash_offset,
             );
-            draw_impl::rasterize_pattern_fill(
+            sampled::rasterize_pattern_fill(
                 fb,
                 &mut outline,
                 &pattern,
@@ -798,6 +792,7 @@ impl<'a> GfxCtx<'a> {
 }
 
 mod draw_impl;
+mod sampled;
 mod stroke;
 
 use draw_impl::{active_fb, composite_framebuffers};
