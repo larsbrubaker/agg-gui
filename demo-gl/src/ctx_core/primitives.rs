@@ -167,8 +167,14 @@ impl GlGfxCtx {
         };
 
         if let Some((verts, idx)) = tess {
-            let color = self.stroke_color;
-            self.submit_aa_triangles(&verts, &idx, color);
+            if let Some(gradient) = self.stroke_linear_gradient.clone() {
+                self.submit_linear_gradient_triangles(&verts, &idx, &gradient, &transform);
+            } else if let Some(gradient) = self.stroke_radial_gradient.clone() {
+                self.submit_radial_gradient_triangles(&verts, &idx, &gradient, &transform);
+            } else {
+                let color = self.stroke_color;
+                self.submit_aa_triangles(&verts, &idx, color);
+            }
         }
     }
 }

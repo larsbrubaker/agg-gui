@@ -65,6 +65,65 @@ fn renders_linear_gradient_fill_via_lcd_target() {
 }
 
 #[test]
+fn renders_linear_gradient_stroke_via_rgba_target() {
+    let svg = br##"
+        <svg xmlns="http://www.w3.org/2000/svg" width="8" height="4">
+            <defs>
+                <linearGradient id="g" gradientUnits="userSpaceOnUse"
+                                x1="0" y1="0" x2="8" y2="0">
+                    <stop offset="0" stop-color="#ff0000"/>
+                    <stop offset="1" stop-color="#0000ff"/>
+                </linearGradient>
+            </defs>
+            <path d="M1 2 L7 2" fill="none" stroke="url(#g)" stroke-width="2"/>
+        </svg>
+    "##;
+
+    let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
+    let left = ((2 * fb.width() + 1) * 4) as usize;
+    let right = ((2 * fb.width() + 6) * 4) as usize;
+
+    assert!(
+        fb.pixels()[left] > fb.pixels()[left + 2],
+        "left side of stroke should be more red than blue"
+    );
+    assert!(
+        fb.pixels()[right + 2] > fb.pixels()[right],
+        "right side of stroke should be more blue than red"
+    );
+}
+
+#[test]
+fn renders_linear_gradient_stroke_via_lcd_target() {
+    let svg = br##"
+        <svg xmlns="http://www.w3.org/2000/svg" width="8" height="4">
+            <defs>
+                <linearGradient id="g" gradientUnits="userSpaceOnUse"
+                                x1="0" y1="0" x2="8" y2="0">
+                    <stop offset="0" stop-color="#ff0000"/>
+                    <stop offset="1" stop-color="#0000ff"/>
+                </linearGradient>
+            </defs>
+            <path d="M1 2 L7 2" fill="none" stroke="url(#g)" stroke-width="2"/>
+        </svg>
+    "##;
+
+    let buffer = render_svg_to_lcd_buffer(svg).expect("SVG should render");
+    let row = buffer.width() as usize;
+    let left = (2 * row + 1) * 3;
+    let right = (2 * row + 6) * 3;
+
+    assert!(
+        buffer.color_plane()[left] > buffer.color_plane()[left + 2],
+        "left side of stroke should be more red than blue"
+    );
+    assert!(
+        buffer.color_plane()[right + 2] > buffer.color_plane()[right],
+        "right side of stroke should be more blue than red"
+    );
+}
+
+#[test]
 fn renders_radial_gradient_fill_via_rgba_target() {
     let svg = br##"
         <svg xmlns="http://www.w3.org/2000/svg" width="5" height="5">

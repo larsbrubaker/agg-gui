@@ -220,10 +220,18 @@ pub trait DrawCtx {
     fn set_stroke_color(&mut self, color: Color);
     fn set_fill_linear_gradient(&mut self, _gradient: LinearGradientPaint) {}
     fn set_fill_radial_gradient(&mut self, _gradient: RadialGradientPaint) {}
+    fn set_stroke_linear_gradient(&mut self, _gradient: LinearGradientPaint) {}
+    fn set_stroke_radial_gradient(&mut self, _gradient: RadialGradientPaint) {}
     fn supports_fill_linear_gradient(&self) -> bool {
         false
     }
     fn supports_fill_radial_gradient(&self) -> bool {
+        false
+    }
+    fn supports_stroke_linear_gradient(&self) -> bool {
+        false
+    }
+    fn supports_stroke_radial_gradient(&self) -> bool {
         false
     }
     fn set_line_width(&mut self, w: f64);

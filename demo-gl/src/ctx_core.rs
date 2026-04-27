@@ -152,6 +152,8 @@ impl GlGfxCtx {
             fill_linear_gradient: None,
             fill_radial_gradient: None,
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
+            stroke_linear_gradient: None,
+            stroke_radial_gradient: None,
             line_width: 1.0,
             line_join: LineJoin::Miter,
             line_cap: LineCap::Butt,
@@ -212,6 +214,8 @@ impl GlGfxCtx {
         self.fill_linear_gradient = None;
         self.fill_radial_gradient = None;
         self.stroke_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
+        self.stroke_linear_gradient = None;
+        self.stroke_radial_gradient = None;
         self.line_width = 1.0;
         self.fill_rule = FillRule::NonZero;
         self.miter_limit = 4.0;
@@ -246,6 +250,8 @@ impl GlGfxCtx {
             fill_linear_gradient: self.fill_linear_gradient.clone(),
             fill_radial_gradient: self.fill_radial_gradient.clone(),
             stroke_color: self.stroke_color,
+            stroke_linear_gradient: self.stroke_linear_gradient.clone(),
+            stroke_radial_gradient: self.stroke_radial_gradient.clone(),
             line_width: self.line_width,
             line_join: self.line_join,
             line_cap: self.line_cap,
@@ -267,6 +273,8 @@ impl GlGfxCtx {
         self.fill_linear_gradient = saved.fill_linear_gradient;
         self.fill_radial_gradient = saved.fill_radial_gradient;
         self.stroke_color = saved.stroke_color;
+        self.stroke_linear_gradient = saved.stroke_linear_gradient;
+        self.stroke_radial_gradient = saved.stroke_radial_gradient;
         self.line_width = saved.line_width;
         self.line_join = saved.line_join;
         self.line_cap = saved.line_cap;

@@ -108,8 +108,9 @@ Done, briefly:
 - Library-owned SVG walker lives in `agg-gui` and renders only through `DrawCtx`.
 - RGBA, LCD coverage, and hardware demo targets share the same SVG render path.
 - Implemented solid fills, fill rules, transforms, cubic/quadratic paths, strokes, line caps/joins, miter limits, dashes, opacity, embedded raster images, and explicit reference-size rendering.
-- Started bridge-level linear gradient fills for RGBA, LCD, and hardware targets. The hardware path uses a native shader ramp so the same SVG paint model reaches every active backend.
+- Started bridge-level linear/radial gradient fills and gradient strokes for RGBA, LCD, and hardware targets. The hardware path uses native shader ramps so the same SVG paint model reaches every active backend.
 - Added `resvg-test-suite` as the reference corpus and use its paired PNGs in tests and demos.
+- Added an opt-in data-driven SVG regression harness that discovers paired SVG/PNG cases, supports filters/shards/limits, and writes grouped JSON reports.
 - SVG Test shows four fixed columns: `reference.png`, `agg-rgba-bitmap render`, `agg-lcd-bitmap render`, and `hardware render`.
 - SVG Test supports fixed headers, bidirectional scrolling, default 50% zoom, 50%/100%/Custom zoom controls, and Ctrl+wheel zoom around the mouse position.
 - LCD demo display now preserves and blits the LCD color/alpha planes instead of collapsing them to RGBA.
@@ -125,6 +126,7 @@ Current SVG Test rows are intentionally sparse and represent broad capability bo
 - `paint-servers/linearGradient/spreadMethod=reflect.svg` — reflected linear-gradient spread mode.
 - `paint-servers/linearGradient/spreadMethod=repeat.svg` — repeated linear-gradient spread mode.
 - `paint-servers/linearGradient/many-stops.svg` — multi-stop gradient interpolation.
+- `paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg` — stroke paint servers and stop opacity.
 - `paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg` — basic user-space radial gradient fill.
 - `paint-servers/radialGradient/gradientTransform.svg` — radial gradient transform handling.
 - `paint-servers/radialGradient/focal-point-correction.svg` — focal radial-gradient handling.
@@ -154,8 +156,8 @@ Keep covered by tests; do not add more demo rows unless they show a visually dis
 
 Tasks:
 
-1. **Linear gradients:** Initial filled-path support is in place for RGBA, LCD, and hardware via a bridge gradient paint. Remaining work: stroke gradients, object-bounding-box regression cases, and gradient transforms against the reference suite.
-2. **Radial gradients:** Initial filled-path support is in place for RGBA, LCD, and hardware via a bridge radial/focal gradient paint. Remaining work: stroke gradients and deeper reference-suite diff coverage.
+1. **Linear gradients:** Filled-path and stroked-path support is in place for RGBA, LCD, and hardware via bridge gradient paint. Remaining work: object-bounding-box regression cases and deeper gradient transform coverage against the reference suite.
+2. **Radial gradients:** Filled-path and stroked-path support is in place for RGBA, LCD, and hardware via bridge radial/focal gradient paint. Remaining work: deeper reference-suite diff coverage.
 3. **Spread modes:** Pad / Reflect / Repeat — represent these at the bridge paint level and implement them per target.
 4. **Patterns:** Render the pattern's content tree into an offscreen target through the same bridge, then feed the resulting pattern source back through a bridge pattern primitive. Pattern transforms apply on top.
 
@@ -282,32 +284,40 @@ resvg-test-suite/
 
 ### 7.2 Integration tests (CI)
 
-**Location:** `tests/svg_regression.rs`
+**Location:** `agg-gui/tests/svg_regression.rs`
 
-**Mechanism:** A single parameterized integration test that walks `tests/resvg-test-suite/tests/`, imports the SVG renderer from the `agg-gui` library crate, renders each SVG through that shared library API into each available target (`agg_rgb`, `agg_lcd`, and headless/recorded `agg_hardware` where CI supports it), and diffs against the paired PNG next to the SVG.
+**Mechanism:** A single opt-in integration test walks `tests/resvg-test-suite/tests/`, imports the SVG renderer from the `agg-gui` library crate, renders each SVG through that shared library API into available targets, and diffs against the paired PNG next to the SVG. The first landed harness covers RGBA report generation; LCD and headless/recorded hardware reporting should be layered in after the report format stabilizes.
+
+The harness is environment-driven so normal `cargo test` stays fast:
+
+- `AGG_GUI_SVG_REGRESSION=1` enables the suite.
+- `AGG_GUI_SVG_FILTER=<substring>` runs a feature/path subset.
+- `AGG_GUI_SVG_LIMIT=<n>` caps the number of cases for smoke runs.
+- `AGG_GUI_SVG_SHARD=<index>/<count>` splits the suite across jobs/agents.
+- `AGG_GUI_SVG_STRICT=1` makes failures fail the test; omit it for report-only triage.
+- `AGG_GUI_SVG_REPORT=<path>` overrides the JSON report path.
 
 ```rust
-// tests/svg_regression.rs
+// agg-gui/tests/svg_regression.rs
 use std::path::PathBuf;
 
 #[test]
 fn resvg_test_suite() {
     let suite_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/resvg-test-suite");
-    let svg_dir = suite_root.join("svg");
-    let png_dir = suite_root.join("png");
+    let tests_dir = suite_root.join("tests");
 
     let mut failures = Vec::new();
     let mut total = 0;
 
-    for entry in walkdir::WalkDir::new(&svg_dir).into_iter().filter_map(Result::ok) {
+    for entry in walk_svg_files(&tests_dir) {
         if entry.path().extension().and_then(|e| e.to_str()) != Some("svg") {
             continue;
         }
         total += 1;
 
-        let rel = entry.path().strip_prefix(&svg_dir).unwrap();
-        let expected_png = png_dir.join(rel).with_extension("png");
+        let rel = entry.path().strip_prefix(&tests_dir).unwrap();
+        let expected_png = entry.path().with_extension("png");
         if !expected_png.exists() {
             continue; // some SVGs in the suite have no reference; skip
         }

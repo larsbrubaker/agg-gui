@@ -55,6 +55,7 @@ use crate::text::{measure_text_metrics, Font, TextMetrics};
 
 mod gradient;
 mod image;
+mod stroke;
 
 // ── State ──────────────────────────────────────────────────────────────────
 //
@@ -70,6 +71,8 @@ struct LcdState {
     fill_linear_gradient: Option<LinearGradientPaint>,
     fill_radial_gradient: Option<RadialGradientPaint>,
     stroke_color: Color,
+    stroke_linear_gradient: Option<LinearGradientPaint>,
+    stroke_radial_gradient: Option<RadialGradientPaint>,
     fill_rule: FillRule,
     line_width: f64,
     line_join: LineJoin,
@@ -95,6 +98,8 @@ impl Default for LcdState {
             fill_linear_gradient: None,
             fill_radial_gradient: None,
             stroke_color: Color::black(),
+            stroke_linear_gradient: None,
+            stroke_radial_gradient: None,
             fill_rule: FillRule::NonZero,
             line_width: 1.0,
             line_join: LineJoin::Round,
@@ -214,6 +219,22 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     }
     fn set_stroke_color(&mut self, color: Color) {
         self.state.stroke_color = color;
+        self.state.stroke_linear_gradient = None;
+        self.state.stroke_radial_gradient = None;
+    }
+    fn set_stroke_linear_gradient(&mut self, gradient: LinearGradientPaint) {
+        self.state.stroke_linear_gradient = Some(gradient);
+        self.state.stroke_radial_gradient = None;
+    }
+    fn supports_stroke_linear_gradient(&self) -> bool {
+        true
+    }
+    fn set_stroke_radial_gradient(&mut self, gradient: RadialGradientPaint) {
+        self.state.stroke_linear_gradient = None;
+        self.state.stroke_radial_gradient = Some(gradient);
+    }
+    fn supports_stroke_radial_gradient(&self) -> bool {
+        true
     }
     fn set_line_width(&mut self, w: f64) {
         self.state.line_width = w;
@@ -387,49 +408,7 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         self.path = path;
     }
     fn stroke(&mut self) {
-        // Materialize the stroked outline as a flat polygon, then route it
-        // through the same `fill_path` LCD pipeline as a regular fill.
-        // This is one indirection more than `GfxCtx::stroke` (which feeds
-        // `ConvStroke` straight to AGG) — we accept the extra `concat_path`
-        // because it avoids duplicating the gray-buffer scaffolding here
-        // and keeps `LcdBuffer::fill_path` the single inner primitive.
-        //
-        // Stroke width is in user coordinates (matches `GfxCtx`): the CTM
-        // applied inside `fill_path` scales it just like any other geometry,
-        // so a 1-px stroke at scale=2 paints 2 pixels wide.
-        let mut color = self.state.stroke_color;
-        color.a *= self.state.global_alpha as f32;
-        let mut materialized = PathStorage::new();
-        {
-            let mut curves = ConvCurve::new(&mut self.path);
-            if self.state.line_dash.is_empty() {
-                let mut stroke = ConvStroke::new(&mut curves);
-                configure_stroke(
-                    &mut stroke,
-                    self.state.line_width,
-                    self.state.line_join,
-                    self.state.line_cap,
-                    self.state.miter_limit,
-                );
-                materialized.concat_path(&mut stroke, 0);
-            } else {
-                let mut dash = ConvDash::new(&mut curves);
-                configure_dashes(&mut dash, &self.state.line_dash, self.state.dash_offset);
-                let mut stroke = ConvStroke::new(dash);
-                configure_stroke(
-                    &mut stroke,
-                    self.state.line_width,
-                    self.state.line_join,
-                    self.state.line_cap,
-                    self.state.miter_limit,
-                );
-                materialized.concat_path(&mut stroke, 0);
-            }
-        }
-        let xform = self.state.transform;
-        let clip = self.state.clip;
-        self.active_buffer()
-            .fill_path(&mut materialized, color, &xform, clip, FillRule::NonZero);
+        stroke::stroke(self);
     }
     fn fill_and_stroke(&mut self) {
         self.fill();

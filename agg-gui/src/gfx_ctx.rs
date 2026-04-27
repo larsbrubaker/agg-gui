@@ -68,6 +68,8 @@ struct GfxState {
     fill_linear_gradient: Option<LinearGradientPaint>,
     fill_radial_gradient: Option<RadialGradientPaint>,
     stroke_color: Color,
+    stroke_linear_gradient: Option<LinearGradientPaint>,
+    stroke_radial_gradient: Option<RadialGradientPaint>,
     fill_rule: FillRule,
     line_width: f64,
     line_join: LineJoin,
@@ -94,6 +96,8 @@ impl Default for GfxState {
             fill_linear_gradient: None,
             fill_radial_gradient: None,
             stroke_color: Color::black(),
+            stroke_linear_gradient: None,
+            stroke_radial_gradient: None,
             fill_rule: FillRule::NonZero,
             line_width: 1.0,
             line_join: LineJoin::Round,
@@ -268,6 +272,16 @@ impl<'a> GfxCtx<'a> {
     }
     pub fn set_stroke_color(&mut self, color: Color) {
         self.state.stroke_color = color;
+        self.state.stroke_linear_gradient = None;
+        self.state.stroke_radial_gradient = None;
+    }
+    pub fn set_stroke_linear_gradient(&mut self, gradient: LinearGradientPaint) {
+        self.state.stroke_linear_gradient = Some(gradient);
+        self.state.stroke_radial_gradient = None;
+    }
+    pub fn set_stroke_radial_gradient(&mut self, gradient: RadialGradientPaint) {
+        self.state.stroke_linear_gradient = None;
+        self.state.stroke_radial_gradient = Some(gradient);
     }
     pub fn set_line_width(&mut self, w: f64) {
         self.state.line_width = w;
@@ -523,20 +537,62 @@ impl<'a> GfxCtx<'a> {
         let clip = self.state.clip;
         let transform = self.state.transform.clone();
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        rasterize_stroke(
-            fb,
-            &mut self.path,
-            &rgba,
-            width,
-            join,
-            cap,
-            miter_limit,
-            &dashes,
-            dash_offset,
-            mode,
-            clip,
-            &transform,
-        );
+        if let Some(gradient) = self.state.stroke_linear_gradient.clone() {
+            let mut outline = stroke::materialize_stroke_outline(
+                &mut self.path,
+                width,
+                join,
+                cap,
+                miter_limit,
+                &dashes,
+                dash_offset,
+            );
+            draw_impl::rasterize_linear_gradient_fill(
+                fb,
+                &mut outline,
+                &gradient,
+                self.state.global_alpha as f32,
+                mode,
+                clip,
+                FillRule::NonZero,
+                &transform,
+            );
+        } else if let Some(gradient) = self.state.stroke_radial_gradient.clone() {
+            let mut outline = stroke::materialize_stroke_outline(
+                &mut self.path,
+                width,
+                join,
+                cap,
+                miter_limit,
+                &dashes,
+                dash_offset,
+            );
+            draw_impl::rasterize_radial_gradient_fill(
+                fb,
+                &mut outline,
+                &gradient,
+                self.state.global_alpha as f32,
+                mode,
+                clip,
+                FillRule::NonZero,
+                &transform,
+            );
+        } else {
+            rasterize_stroke(
+                fb,
+                &mut self.path,
+                &rgba,
+                width,
+                join,
+                cap,
+                miter_limit,
+                &dashes,
+                dash_offset,
+                mode,
+                clip,
+                &transform,
+            );
+        }
     }
 
     /// Fill then stroke the accumulated path in one call.
@@ -691,6 +747,7 @@ impl<'a> GfxCtx<'a> {
 }
 
 mod draw_impl;
+mod stroke;
 
 use draw_impl::{active_fb, composite_framebuffers};
 pub(crate) use draw_impl::{apply_clip, rasterize_fill, rasterize_stroke};

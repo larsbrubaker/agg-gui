@@ -85,6 +85,7 @@ fn svg_test_includes_current_paint_server_capability_rows() {
         "paint-servers/linearGradient/spreadMethod=reflect.svg",
         "paint-servers/linearGradient/spreadMethod=repeat.svg",
         "paint-servers/linearGradient/many-stops.svg",
+        "paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg",
         "paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg",
         "paint-servers/radialGradient/gradientTransform.svg",
         "paint-servers/radialGradient/focal-point-correction.svg",

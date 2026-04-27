@@ -29,6 +29,22 @@ impl DrawCtx for GlGfxCtx {
     }
     fn set_stroke_color(&mut self, c: Color) {
         self.stroke_color = c;
+        self.stroke_linear_gradient = None;
+        self.stroke_radial_gradient = None;
+    }
+    fn set_stroke_linear_gradient(&mut self, gradient: LinearGradientPaint) {
+        self.stroke_linear_gradient = Some(gradient);
+        self.stroke_radial_gradient = None;
+    }
+    fn supports_stroke_linear_gradient(&self) -> bool {
+        true
+    }
+    fn set_stroke_radial_gradient(&mut self, gradient: RadialGradientPaint) {
+        self.stroke_linear_gradient = None;
+        self.stroke_radial_gradient = Some(gradient);
+    }
+    fn supports_stroke_radial_gradient(&self) -> bool {
+        true
     }
     fn set_line_width(&mut self, w: f64) {
         self.line_width = w;

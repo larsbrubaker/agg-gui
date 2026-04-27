@@ -346,6 +346,18 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn set_stroke_color(&mut self, c: crate::color::Color) {
         self.set_stroke_color(c)
     }
+    fn set_stroke_linear_gradient(&mut self, gradient: crate::draw_ctx::LinearGradientPaint) {
+        self.set_stroke_linear_gradient(gradient)
+    }
+    fn set_stroke_radial_gradient(&mut self, gradient: crate::draw_ctx::RadialGradientPaint) {
+        self.set_stroke_radial_gradient(gradient)
+    }
+    fn supports_stroke_linear_gradient(&self) -> bool {
+        true
+    }
+    fn supports_stroke_radial_gradient(&self) -> bool {
+        true
+    }
     fn set_line_width(&mut self, w: f64) {
         self.set_line_width(w)
     }

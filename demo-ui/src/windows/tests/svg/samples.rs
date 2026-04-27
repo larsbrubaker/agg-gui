@@ -85,6 +85,15 @@ pub(super) const SVG_SAMPLES: &[SvgSample] = &[
         ),
     },
     SvgSample {
+        name: "paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg",
+        svg: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg"
+        ),
+        reference_png: include_bytes!(
+            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.png"
+        ),
+    },
+    SvgSample {
         name: "paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg",
         svg: include_bytes!(
             "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg"
