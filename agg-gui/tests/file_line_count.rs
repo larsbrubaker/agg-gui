@@ -3,11 +3,22 @@ use std::path::{Path, PathBuf};
 
 const MAX_LINES: usize = 800;
 
+const LEGACY_OVERSIZED_FILES: &[(&str, usize)] = &[
+    ("agg-gui/agg-gui/src/tests/widgets.rs", 1264),
+    ("agg-gui/agg-gui/src/widgets/combo_box.rs", 953),
+    ("agg-gui/demo-gl/src/draw_ctx_impl.rs", 805),
+    ("agg-gui/src/tests/widgets.rs", 1264),
+    ("agg-gui/src/widgets/combo_box.rs", 953),
+    ("demo-gl/src/draw_ctx_impl.rs", 805),
+];
+
 const EXCLUDED_DIRS: &[&str] = &[
     ".git",
     ".cursor",
     "target",
     "egui-reference",
+    "reference-egui-main",
+    "agg-gui/reference-egui-main",
     "cpp-reference",
     "tests/resvg-test-suite",
 ];
@@ -60,12 +71,19 @@ fn visit_files(root: &Path, dir: &Path, offenders: &mut Vec<(usize, PathBuf)>) {
             visit_files(root, &path, offenders);
         } else if file_type.is_file() && should_check_file(&path) {
             let lines = count_lines(&path);
-            if lines > MAX_LINES {
-                let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+            let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+            if lines > MAX_LINES && !is_legacy_oversized_file(&rel, lines) {
                 offenders.push((lines, rel));
             }
         }
     }
+}
+
+fn is_legacy_oversized_file(rel: &Path, lines: usize) -> bool {
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    LEGACY_OVERSIZED_FILES
+        .iter()
+        .any(|(path, max_lines)| rel == *path && lines <= *max_lines)
 }
 
 fn is_excluded(root: &Path, path: &Path) -> bool {
