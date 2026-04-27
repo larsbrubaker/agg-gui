@@ -8,7 +8,7 @@ use agg_rust::path_storage::PathStorage;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
-use crate::draw_ctx::{FillRule, LinearGradientPaint, RadialGradientPaint};
+use crate::draw_ctx::{FillRule, LinearGradientPaint, PatternPaint, RadialGradientPaint};
 use crate::lcd_coverage::{rect_to_pixel_clip, LcdBuffer, LcdMaskBuilder};
 
 pub(super) fn fill_linear_gradient(
@@ -44,6 +44,26 @@ pub(super) fn fill_radial_gradient(
         buffer,
         path,
         |x, y| gradient.sample(x, y),
+        global_alpha,
+        transform,
+        clip,
+        fill_rule,
+    );
+}
+
+pub(super) fn fill_pattern(
+    buffer: &mut LcdBuffer,
+    path: &mut PathStorage,
+    pattern: &PatternPaint,
+    global_alpha: f32,
+    transform: &TransAffine,
+    clip: Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
+) {
+    fill_sampled_gradient(
+        buffer,
+        path,
+        |x, y| pattern.sample(x, y),
         global_alpha,
         transform,
         clip,

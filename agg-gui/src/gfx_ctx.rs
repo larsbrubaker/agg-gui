@@ -34,7 +34,7 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
-use crate::draw_ctx::{FillRule, LinearGradientPaint, RadialGradientPaint};
+use crate::draw_ctx::{FillRule, LinearGradientPaint, PatternPaint, RadialGradientPaint};
 use crate::framebuffer::Framebuffer;
 use crate::text::{measure_advance, shape_text, Font, TextMetrics};
 
@@ -67,9 +67,11 @@ struct GfxState {
     fill_color: Color,
     fill_linear_gradient: Option<LinearGradientPaint>,
     fill_radial_gradient: Option<RadialGradientPaint>,
+    fill_pattern: Option<PatternPaint>,
     stroke_color: Color,
     stroke_linear_gradient: Option<LinearGradientPaint>,
     stroke_radial_gradient: Option<RadialGradientPaint>,
+    stroke_pattern: Option<PatternPaint>,
     fill_rule: FillRule,
     line_width: f64,
     line_join: LineJoin,
@@ -95,9 +97,11 @@ impl Default for GfxState {
             fill_color: Color::black(),
             fill_linear_gradient: None,
             fill_radial_gradient: None,
+            fill_pattern: None,
             stroke_color: Color::black(),
             stroke_linear_gradient: None,
             stroke_radial_gradient: None,
+            stroke_pattern: None,
             fill_rule: FillRule::NonZero,
             line_width: 1.0,
             line_join: LineJoin::Round,
@@ -261,27 +265,43 @@ impl<'a> GfxCtx<'a> {
         self.state.fill_color = color;
         self.state.fill_linear_gradient = None;
         self.state.fill_radial_gradient = None;
+        self.state.fill_pattern = None;
     }
     pub fn set_fill_linear_gradient(&mut self, gradient: LinearGradientPaint) {
         self.state.fill_linear_gradient = Some(gradient);
         self.state.fill_radial_gradient = None;
+        self.state.fill_pattern = None;
     }
     pub fn set_fill_radial_gradient(&mut self, gradient: RadialGradientPaint) {
         self.state.fill_linear_gradient = None;
         self.state.fill_radial_gradient = Some(gradient);
+        self.state.fill_pattern = None;
+    }
+    pub fn set_fill_pattern(&mut self, pattern: PatternPaint) {
+        self.state.fill_linear_gradient = None;
+        self.state.fill_radial_gradient = None;
+        self.state.fill_pattern = Some(pattern);
     }
     pub fn set_stroke_color(&mut self, color: Color) {
         self.state.stroke_color = color;
         self.state.stroke_linear_gradient = None;
         self.state.stroke_radial_gradient = None;
+        self.state.stroke_pattern = None;
     }
     pub fn set_stroke_linear_gradient(&mut self, gradient: LinearGradientPaint) {
         self.state.stroke_linear_gradient = Some(gradient);
         self.state.stroke_radial_gradient = None;
+        self.state.stroke_pattern = None;
     }
     pub fn set_stroke_radial_gradient(&mut self, gradient: RadialGradientPaint) {
         self.state.stroke_linear_gradient = None;
         self.state.stroke_radial_gradient = Some(gradient);
+        self.state.stroke_pattern = None;
+    }
+    pub fn set_stroke_pattern(&mut self, pattern: PatternPaint) {
+        self.state.stroke_linear_gradient = None;
+        self.state.stroke_radial_gradient = None;
+        self.state.stroke_pattern = Some(pattern);
     }
     pub fn set_line_width(&mut self, w: f64) {
         self.state.line_width = w;
@@ -514,6 +534,17 @@ impl<'a> GfxCtx<'a> {
                 fill_rule,
                 &transform,
             );
+        } else if let Some(pattern) = self.state.fill_pattern.clone() {
+            draw_impl::rasterize_pattern_fill(
+                fb,
+                &mut self.path,
+                &pattern,
+                self.state.global_alpha as f32,
+                mode,
+                clip,
+                fill_rule,
+                &transform,
+            );
         } else {
             let mut color = self.state.fill_color;
             color.a *= self.state.global_alpha as f32;
@@ -571,6 +602,26 @@ impl<'a> GfxCtx<'a> {
                 fb,
                 &mut outline,
                 &gradient,
+                self.state.global_alpha as f32,
+                mode,
+                clip,
+                FillRule::NonZero,
+                &transform,
+            );
+        } else if let Some(pattern) = self.state.stroke_pattern.clone() {
+            let mut outline = stroke::materialize_stroke_outline(
+                &mut self.path,
+                width,
+                join,
+                cap,
+                miter_limit,
+                &dashes,
+                dash_offset,
+            );
+            draw_impl::rasterize_pattern_fill(
+                fb,
+                &mut outline,
+                &pattern,
                 self.state.global_alpha as f32,
                 mode,
                 clip,

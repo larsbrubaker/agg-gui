@@ -181,3 +181,72 @@ fn renders_radial_gradient_fill_via_lcd_target() {
         "corner should be more blue than red"
     );
 }
+
+#[test]
+fn renders_pattern_fill_via_rgba_target() {
+    let svg = br##"
+        <svg xmlns="http://www.w3.org/2000/svg" width="4" height="2">
+            <defs>
+                <pattern id="p" patternUnits="userSpaceOnUse"
+                         x="0" y="0" width="2" height="2">
+                    <rect x="0" y="0" width="1" height="2" fill="#00ff00"/>
+                    <rect x="1" y="0" width="1" height="2" fill="#0000ff"/>
+                </pattern>
+            </defs>
+            <rect width="4" height="2" fill="url(#p)"/>
+        </svg>
+    "##;
+
+    let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
+    let green = ((fb.width() + 0) * 4) as usize;
+    let blue = ((fb.width() + 1) * 4) as usize;
+    let repeated_green = ((fb.width() + 2) * 4) as usize;
+
+    assert!(
+        fb.pixels()[green + 1] > fb.pixels()[green + 2],
+        "first pattern column should be green"
+    );
+    assert!(
+        fb.pixels()[blue + 2] > fb.pixels()[blue + 1],
+        "second pattern column should be blue"
+    );
+    assert!(
+        fb.pixels()[repeated_green + 1] > fb.pixels()[repeated_green + 2],
+        "pattern should repeat horizontally"
+    );
+}
+
+#[test]
+fn renders_pattern_fill_via_lcd_target() {
+    let svg = br##"
+        <svg xmlns="http://www.w3.org/2000/svg" width="4" height="2">
+            <defs>
+                <pattern id="p" patternUnits="userSpaceOnUse"
+                         x="0" y="0" width="2" height="2">
+                    <rect x="0" y="0" width="1" height="2" fill="#00ff00"/>
+                    <rect x="1" y="0" width="1" height="2" fill="#0000ff"/>
+                </pattern>
+            </defs>
+            <rect width="4" height="2" fill="url(#p)"/>
+        </svg>
+    "##;
+
+    let buffer = render_svg_to_lcd_buffer(svg).expect("SVG should render");
+    let row = buffer.width() as usize;
+    let green = (row + 0) * 3;
+    let blue = (row + 1) * 3;
+    let repeated_green = (row + 2) * 3;
+
+    assert!(
+        buffer.color_plane()[green + 1] > buffer.color_plane()[green + 2],
+        "first pattern column should be green"
+    );
+    assert!(
+        buffer.color_plane()[blue + 2] > buffer.color_plane()[blue + 1],
+        "second pattern column should be blue"
+    );
+    assert!(
+        buffer.color_plane()[repeated_green + 1] > buffer.color_plane()[repeated_green + 2],
+        "pattern should repeat horizontally"
+    );
+}

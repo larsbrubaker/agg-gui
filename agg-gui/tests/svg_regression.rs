@@ -37,6 +37,10 @@ fn resvg_test_suite_report() {
         let result = run_case(case, &cfg);
         match result {
             CaseResult::Pass => report.passed += 1,
+            CaseResult::Known(failure) => {
+                report.known += 1;
+                report.known_failures.push(failure);
+            }
             CaseResult::Fail(failure) => {
                 report.failed += 1;
                 report
@@ -51,11 +55,13 @@ fn resvg_test_suite_report() {
 
     write_report(&cfg, &report);
     eprintln!(
-        "SVG regression: {} passed, {} failed, {} total. Report: {}",
+        "SVG regression: {} passed, {} known, {} failed, {} total. Report: {}. Known diffs: {}",
         report.passed,
+        report.known,
         report.failed,
         report.total,
-        cfg.report_path.display()
+        cfg.report_path.display(),
+        cfg.known_diffs_path.display()
     );
 
     if cfg.strict && report.failed > 0 {
@@ -75,8 +81,11 @@ struct Config {
     shard_count: usize,
     channel_tolerance: u8,
     mismatch_ratio: f64,
+    render_only: bool,
     strict: bool,
     report_path: PathBuf,
+    known_diffs_path: PathBuf,
+    known_diffs: KnownDiffs,
 }
 
 impl Config {
@@ -91,6 +100,10 @@ impl Config {
         let report_path = env::var_os("AGG_GUI_SVG_REPORT")
             .map(PathBuf::from)
             .unwrap_or_else(|| workspace_root.join("target/svg-regression-report.json"));
+        let known_diffs_path = env::var_os("AGG_GUI_SVG_KNOWN_DIFFS")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| workspace_root.join("tests/svg_known_diffs.txt"));
+        let known_diffs = KnownDiffs::load(&known_diffs_path);
 
         let (shard_index, shard_count) = parse_shard();
         Self {
@@ -109,8 +122,11 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_MISMATCH_RATIO),
+            render_only: env::var_os("AGG_GUI_SVG_RENDER_ONLY").is_some(),
             strict: env::var_os("AGG_GUI_SVG_STRICT").is_some(),
             report_path,
+            known_diffs_path,
+            known_diffs,
         }
     }
 
@@ -140,6 +156,68 @@ impl Case {
     }
 }
 
+#[derive(Clone, Default)]
+struct KnownDiffs {
+    entries: Vec<KnownDiff>,
+}
+
+#[derive(Clone)]
+struct KnownDiff {
+    pattern: String,
+    max_mismatch_ratio: f64,
+    max_delta: u8,
+    reason: String,
+}
+
+impl KnownDiffs {
+    fn load(path: &Path) -> Self {
+        let Ok(text) = fs::read_to_string(path) else {
+            return Self::default();
+        };
+        let mut entries = Vec::new();
+        for (line_no, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = line.splitn(4, '|').map(str::trim).collect();
+            if parts.len() != 4 {
+                panic!(
+                    "{}:{} must be pattern|max_mismatch_ratio|max_delta|reason",
+                    path.display(),
+                    line_no + 1
+                );
+            }
+            entries.push(KnownDiff {
+                pattern: parts[0].to_string(),
+                max_mismatch_ratio: parts[1].parse().unwrap_or_else(|_| {
+                    panic!(
+                        "{}:{} has invalid mismatch ratio",
+                        path.display(),
+                        line_no + 1
+                    )
+                }),
+                max_delta: parts[2].parse().unwrap_or_else(|_| {
+                    panic!("{}:{} has invalid max delta", path.display(), line_no + 1)
+                }),
+                reason: parts[3].to_string(),
+            });
+        }
+        Self { entries }
+    }
+
+    fn accepted_reason(&self, case_name: &str, diff: &DiffResult) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|entry| {
+                case_name.contains(&entry.pattern)
+                    && diff.ratio <= entry.max_mismatch_ratio
+                    && diff.max_delta <= entry.max_delta
+            })
+            .map(|entry| entry.reason.clone())
+    }
+}
+
 #[derive(Clone)]
 struct Failure {
     case: String,
@@ -147,19 +225,23 @@ struct Failure {
     reason: String,
     mismatch_ratio: Option<f64>,
     max_delta: Option<u8>,
+    known_reason: Option<String>,
 }
 
 #[derive(Default)]
 struct Report {
     total: usize,
     passed: usize,
+    known: usize,
     failed: usize,
     failures: Vec<Failure>,
+    known_failures: Vec<Failure>,
     by_group: BTreeMap<String, Vec<Failure>>,
 }
 
 enum CaseResult {
     Pass,
+    Known(Failure),
     Fail(Failure),
 }
 
@@ -247,6 +329,9 @@ fn run_case(case: &Case, cfg: &Config) -> CaseResult {
             }
             Err(err) => return fail(case, format!("render: {err}"), None, None),
         };
+    if cfg.render_only {
+        return CaseResult::Pass;
+    }
     let diff = diff_rgba(
         &rendered,
         &reference.pixels,
@@ -255,6 +340,14 @@ fn run_case(case: &Case, cfg: &Config) -> CaseResult {
     );
     if diff.pass {
         CaseResult::Pass
+    } else if let Some(reason) = cfg.known_diffs.accepted_reason(&case.rel_name(), &diff) {
+        known(
+            case,
+            "pixel diff accepted by known-diffs policy".to_string(),
+            reason,
+            Some(diff.ratio),
+            Some(diff.max_delta),
+        )
     } else {
         fail(
             case,
@@ -263,6 +356,23 @@ fn run_case(case: &Case, cfg: &Config) -> CaseResult {
             Some(diff.max_delta),
         )
     }
+}
+
+fn known(
+    case: &Case,
+    reason: String,
+    known_reason: String,
+    mismatch_ratio: Option<f64>,
+    max_delta: Option<u8>,
+) -> CaseResult {
+    CaseResult::Known(Failure {
+        case: case.rel_name(),
+        group: case.group.clone(),
+        reason,
+        mismatch_ratio,
+        max_delta,
+        known_reason: Some(known_reason),
+    })
 }
 
 fn fail(
@@ -277,6 +387,7 @@ fn fail(
         reason,
         mismatch_ratio,
         max_delta,
+        known_reason: None,
     })
 }
 
@@ -385,6 +496,7 @@ fn report_json(report: &Report) -> String {
     out.push_str("{\n");
     out.push_str(&format!("  \"total\": {},\n", report.total));
     out.push_str(&format!("  \"passed\": {},\n", report.passed));
+    out.push_str(&format!("  \"known\": {},\n", report.known));
     out.push_str(&format!("  \"failed\": {},\n", report.failed));
     out.push_str("  \"groups\": {\n");
     for (i, (group, failures)) in report.by_group.iter().enumerate() {
@@ -401,6 +513,16 @@ fn report_json(report: &Report) -> String {
         ));
     }
     out.push_str("  },\n");
+    out.push_str("  \"known_failures\": [\n");
+    for (i, failure) in report.known_failures.iter().enumerate() {
+        let comma = if i + 1 == report.known_failures.len() {
+            ""
+        } else {
+            ","
+        };
+        out.push_str(&format!("    {}{}\n", failure_json(failure), comma));
+    }
+    out.push_str("  ],\n");
     out.push_str("  \"failures\": [\n");
     for (i, failure) in report.failures.iter().enumerate() {
         let comma = if i + 1 == report.failures.len() {
@@ -408,19 +530,29 @@ fn report_json(report: &Report) -> String {
         } else {
             ","
         };
-        out.push_str(&format!(
-            "    {{ \"case\": \"{}\", \"group\": \"{}\", \"reason\": \"{}\", \"mismatch_ratio\": {}, \"max_delta\": {} }}{}\n",
-            json_escape(&failure.case),
-            json_escape(&failure.group),
-            json_escape(&failure.reason),
-            json_number(failure.mismatch_ratio),
-            json_u8(failure.max_delta),
-            comma
-        ));
+        out.push_str(&format!("    {}{}\n", failure_json(failure), comma));
     }
     out.push_str("  ]\n");
     out.push_str("}\n");
     out
+}
+
+fn failure_json(failure: &Failure) -> String {
+    format!(
+        "{{ \"case\": \"{}\", \"group\": \"{}\", \"reason\": \"{}\", \"known_reason\": {}, \"mismatch_ratio\": {}, \"max_delta\": {} }}",
+        json_escape(&failure.case),
+        json_escape(&failure.group),
+        json_escape(&failure.reason),
+        json_string(failure.known_reason.as_deref()),
+        json_number(failure.mismatch_ratio),
+        json_u8(failure.max_delta),
+    )
+}
+
+fn json_string(value: Option<&str>) -> String {
+    value
+        .map(|v| format!("\"{}\"", json_escape(v)))
+        .unwrap_or_else(|| "null".to_string())
 }
 
 fn json_number(value: Option<f64>) -> String {

@@ -4,129 +4,77 @@ pub(super) struct SvgSample {
     pub(super) reference_png: &'static [u8],
 }
 
+macro_rules! sample {
+    ($path:literal) => {
+        SvgSample {
+            name: concat!($path, ".svg"),
+            svg: include_bytes!(concat!(
+                "../../../../../tests/resvg-test-suite/tests/",
+                $path,
+                ".svg"
+            )),
+            reference_png: include_bytes!(concat!(
+                "../../../../../tests/resvg-test-suite/tests/",
+                $path,
+                ".png"
+            )),
+        }
+    };
+}
+
 pub(super) const SVG_SAMPLES: &[SvgSample] = &[
-    SvgSample {
-        name: "shapes/rect/simple-case.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/shapes/rect/simple-case.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/shapes/rect/simple-case.png"
-        ),
-    },
-    SvgSample {
-        name: "shapes/path/M-L-L-Z.svg",
-        svg: include_bytes!("../../../../../tests/resvg-test-suite/tests/shapes/path/M-L-L-Z.svg"),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/shapes/path/M-L-L-Z.png"
-        ),
-    },
-    SvgSample {
-        name: "painting/stroke/line-as-curve-1.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/painting/stroke/line-as-curve-1.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/painting/stroke/line-as-curve-1.png"
-        ),
-    },
-    SvgSample {
-        name: "structure/image/embedded-png.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/structure/image/embedded-png.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/structure/image/embedded-png.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientUnits=userSpaceOnUse.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/linearGradient/gradientTransform.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientTransform.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/gradientTransform.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/linearGradient/spreadMethod=reflect.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=reflect.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=reflect.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/linearGradient/spreadMethod=repeat.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=repeat.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/spreadMethod=repeat.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/linearGradient/many-stops.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/many-stops.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/many-stops.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/gradientUnits=userSpaceOnUse.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/radialGradient/gradientTransform.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/gradientTransform.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/gradientTransform.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/radialGradient/focal-point-correction.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/focal-point-correction.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/focal-point-correction.png"
-        ),
-    },
-    SvgSample {
-        name: "paint-servers/radialGradient/spreadMethod=repeat.svg",
-        svg: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/spreadMethod=repeat.svg"
-        ),
-        reference_png: include_bytes!(
-            "../../../../../tests/resvg-test-suite/tests/paint-servers/radialGradient/spreadMethod=repeat.png"
-        ),
-    },
+    sample!("shapes/rect/simple-case"),
+    sample!("shapes/circle/simple-case"),
+    sample!("shapes/ellipse/simple-case"),
+    sample!("shapes/line/simple-case"),
+    sample!("shapes/line/with-transform"),
+    sample!("shapes/polygon/simple-case"),
+    sample!("shapes/polyline/simple-case"),
+    sample!("shapes/path/M-L-L-Z"),
+    sample!("shapes/path/M-C"),
+    sample!("shapes/path/M-C-S"),
+    sample!("shapes/path/M-Q"),
+    sample!("shapes/path/M-Q-T"),
+    sample!("shapes/path/M-A"),
+    sample!("shapes/path/M-L-Z-A"),
+    sample!("painting/fill/named-color"),
+    sample!("painting/fill/currentColor"),
+    sample!("painting/fill/rgb-color"),
+    sample!("painting/fill/hsl-with-alpha"),
+    sample!("painting/fill/linear-gradient-on-shape"),
+    sample!("painting/fill/radial-gradient-on-shape"),
+    sample!("painting/fill-rule/nonzero"),
+    sample!("painting/fill-rule/evenodd"),
+    sample!("painting/opacity/50percent"),
+    sample!("painting/opacity/group-opacity"),
+    sample!("painting/opacity/mixed-group-opacity"),
+    sample!("painting/stroke/line-as-curve-1"),
+    sample!("painting/stroke/line-as-curve-2"),
+    sample!("painting/stroke/linear-gradient"),
+    sample!("painting/stroke/radial-gradient"),
+    sample!("paint-servers/linearGradient/gradientUnits=userSpaceOnUse"),
+    sample!("paint-servers/linearGradient/gradientUnits=objectBoundingBox-with-percent"),
+    sample!("paint-servers/linearGradient/gradientTransform"),
+    sample!("paint-servers/linearGradient/gradientTransform-and-transform"),
+    sample!("paint-servers/linearGradient/spreadMethod=reflect"),
+    sample!("paint-servers/linearGradient/spreadMethod=repeat"),
+    sample!("paint-servers/linearGradient/many-stops"),
+    sample!("paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke"),
+    sample!("paint-servers/radialGradient/gradientUnits=userSpaceOnUse"),
+    sample!("paint-servers/radialGradient/gradientUnits=objectBoundingBox-with-percent"),
+    sample!("paint-servers/radialGradient/gradientTransform"),
+    sample!("paint-servers/radialGradient/focal-point-correction"),
+    sample!("paint-servers/radialGradient/spreadMethod=reflect"),
+    sample!("paint-servers/radialGradient/spreadMethod=repeat"),
+    sample!("paint-servers/radialGradient/many-stops"),
+    sample!("paint-servers/pattern/simple-case"),
+    sample!("paint-servers/pattern/patternUnits=userSpaceOnUse-with-percent"),
+    sample!("paint-servers/pattern/patternContentUnits-with-viewBox"),
+    sample!("paint-servers/pattern/transform-and-patternTransform"),
+    sample!("structure/image/embedded-png"),
+    sample!("structure/image/embedded-jpeg-as-image-jpeg"),
+    sample!("structure/image/embedded-gif"),
+    sample!("structure/image/embedded-svg"),
+    sample!("structure/image/preserveAspectRatio=none"),
+    sample!("structure/image/raster-image-and-size-with-odd-numbers"),
 ];

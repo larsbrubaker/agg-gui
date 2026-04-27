@@ -59,6 +59,16 @@ pub(super) fn stroke(ctx: &mut LcdGfxCtx<'_>) {
             clip,
             FillRule::NonZero,
         );
+    } else if let Some(pattern) = ctx.state.stroke_pattern.clone() {
+        gradient::fill_pattern(
+            ctx.active_buffer(),
+            &mut materialized,
+            &pattern,
+            global_alpha,
+            &xform,
+            clip,
+            FillRule::NonZero,
+        );
     } else {
         ctx.active_buffer()
             .fill_path(&mut materialized, color, &xform, clip, FillRule::NonZero);

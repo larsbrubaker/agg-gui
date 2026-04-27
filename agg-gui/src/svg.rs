@@ -6,13 +6,14 @@
 //! hardware targets all share one render path.
 
 use std::fmt;
+use std::sync::Arc;
 
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
 use usvg::tiny_skia_path::PathSegment;
 
-use crate::draw_ctx::{DrawCtx, FillRule};
-use crate::framebuffer::Framebuffer;
+use crate::draw_ctx::{DrawCtx, FillRule, PatternPaint};
+use crate::framebuffer::{unpremultiply_rgba_inplace, Framebuffer};
 use crate::gfx_ctx::GfxCtx;
 use crate::lcd_coverage::LcdBuffer;
 use crate::lcd_gfx_ctx::LcdGfxCtx;
@@ -263,7 +264,7 @@ fn fill_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
     };
 
     emit_path(path, ctx);
-    if !paint::apply_fill_paint(ctx, fill.paint(), state.opacity * fill.opacity().get()) {
+    if !apply_fill_paint(ctx, fill.paint(), state.opacity * fill.opacity().get()) {
         return;
     }
     ctx.set_fill_rule(map_fill_rule(fill.rule()));
@@ -274,7 +275,7 @@ fn stroke_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
     let Some(stroke) = path.stroke() else {
         return;
     };
-    if !paint::apply_stroke_paint(ctx, stroke.paint(), state.opacity * stroke.opacity().get()) {
+    if !apply_stroke_paint(ctx, stroke.paint(), state.opacity * stroke.opacity().get()) {
         return;
     }
 
@@ -289,6 +290,36 @@ fn stroke_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
         .unwrap_or_default();
     ctx.set_line_dash(&dashes, stroke.dashoffset() as f64);
     ctx.stroke();
+}
+
+fn apply_fill_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) -> bool {
+    if let usvg::Paint::Pattern(pattern) = paint {
+        if !ctx.supports_fill_pattern() {
+            return false;
+        }
+        if let Some(pattern) = render_pattern_paint(pattern, opacity) {
+            ctx.set_fill_pattern(pattern);
+            return true;
+        }
+        return false;
+    }
+
+    paint::apply_fill_paint(ctx, paint, opacity)
+}
+
+fn apply_stroke_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) -> bool {
+    if let usvg::Paint::Pattern(pattern) = paint {
+        if !ctx.supports_stroke_pattern() {
+            return false;
+        }
+        if let Some(pattern) = render_pattern_paint(pattern, opacity) {
+            ctx.set_stroke_pattern(pattern);
+            return true;
+        }
+        return false;
+    }
+
+    paint::apply_stroke_paint(ctx, paint, opacity)
 }
 
 fn render_image(
@@ -337,6 +368,45 @@ fn render_image(
     }
 
     Ok(())
+}
+
+fn render_pattern_paint(pattern: &Arc<usvg::Pattern>, opacity: f32) -> Option<PatternPaint> {
+    let rect = pattern.rect();
+    let width = rect.width() as f64;
+    let height = rect.height() as f64;
+    if width <= f64::EPSILON || height <= f64::EPSILON {
+        return None;
+    }
+
+    let pixel_width = width.ceil().clamp(1.0, 4096.0) as u32;
+    let pixel_height = height.ceil().clamp(1.0, 4096.0) as u32;
+    let mut tile = Framebuffer::new(pixel_width, pixel_height);
+    {
+        let mut ctx = GfxCtx::new(&mut tile);
+        let transform = TransAffine::new_custom(
+            pixel_width as f64 / width,
+            0.0,
+            0.0,
+            -(pixel_height as f64 / height),
+            -(rect.x() as f64) * pixel_width as f64 / width,
+            (rect.y() as f64 + height) * pixel_height as f64 / height,
+        );
+        ctx.set_transform(transform);
+        render_group(pattern.root(), &mut ctx, SvgRenderState { opacity }).ok()?;
+    }
+
+    let mut pixels = tile.into_pixels();
+    unpremultiply_rgba_inplace(&mut pixels);
+    Some(PatternPaint {
+        x: rect.x() as f64,
+        y: rect.y() as f64,
+        width,
+        height,
+        transform: to_trans_affine(pattern.transform()),
+        pixels: Arc::new(pixels),
+        pixel_width,
+        pixel_height,
+    })
 }
 
 fn emit_path(path: &usvg::Path, ctx: &mut dyn DrawCtx) {

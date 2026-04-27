@@ -111,26 +111,15 @@ Done, briefly:
 - Started bridge-level linear/radial gradient fills and gradient strokes for RGBA, LCD, and hardware targets. The hardware path uses native shader ramps so the same SVG paint model reaches every active backend.
 - Added `resvg-test-suite` as the reference corpus and use its paired PNGs in tests and demos.
 - Added an opt-in data-driven SVG regression harness that discovers paired SVG/PNG cases, supports filters/shards/limits, and writes grouped JSON reports.
+- Added render-only corpus mode (`AGG_GUI_SVG_RENDER_ONLY=1`): current smoke coverage is `1676 / 1679` cases rendering successfully; the 3 remaining render failures are invalid-size/invalid-encoding SVG inputs.
 - SVG Test shows four fixed columns: `reference.png`, `agg-rgba-bitmap render`, `agg-lcd-bitmap render`, and `hardware render`.
 - SVG Test supports fixed headers, bidirectional scrolling, default 50% zoom, 50%/100%/Custom zoom controls, and Ctrl+wheel zoom around the mouse position.
 - LCD demo display now preserves and blits the LCD color/alpha planes instead of collapsing them to RGBA.
 
-Current SVG Test rows are intentionally sparse and represent broad capability boundaries:
+Current SVG Test rows are a 54-row curated smoke set covering broad capability boundaries:
 
-- `shapes/rect/simple-case.svg` — basic solid fill and viewport mapping.
-- `shapes/path/M-L-L-Z.svg` — path construction and fill.
-- `painting/stroke/line-as-curve-1.svg` — stroke pipeline.
-- `structure/image/embedded-png.svg` — embedded raster image decode/blit.
-- `paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg` — basic user-space linear gradient fill.
-- `paint-servers/linearGradient/gradientTransform.svg` — gradient transform handling.
-- `paint-servers/linearGradient/spreadMethod=reflect.svg` — reflected linear-gradient spread mode.
-- `paint-servers/linearGradient/spreadMethod=repeat.svg` — repeated linear-gradient spread mode.
-- `paint-servers/linearGradient/many-stops.svg` — multi-stop gradient interpolation.
-- `paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg` — stroke paint servers and stop opacity.
-- `paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg` — basic user-space radial gradient fill.
-- `paint-servers/radialGradient/gradientTransform.svg` — radial gradient transform handling.
-- `paint-servers/radialGradient/focal-point-correction.svg` — focal radial-gradient handling.
-- `paint-servers/radialGradient/spreadMethod=repeat.svg` — repeated radial-gradient spread mode.
+- Basic shapes, path command variants, solid color parsing, fill rules, opacity, strokes, gradients, patterns, and embedded images.
+- Keep this list around 40-50 differentiated examples long. Add rows for visual coverage, not as a replacement for the full regression harness.
 
 ---
 
@@ -294,8 +283,12 @@ The harness is environment-driven so normal `cargo test` stays fast:
 - `AGG_GUI_SVG_FILTER=<substring>` runs a feature/path subset.
 - `AGG_GUI_SVG_LIMIT=<n>` caps the number of cases for smoke runs.
 - `AGG_GUI_SVG_SHARD=<index>/<count>` splits the suite across jobs/agents.
+- `AGG_GUI_SVG_RENDER_ONLY=1` checks parse/render success without pixel diffing.
 - `AGG_GUI_SVG_STRICT=1` makes failures fail the test; omit it for report-only triage.
 - `AGG_GUI_SVG_REPORT=<path>` overrides the JSON report path.
+- `AGG_GUI_SVG_KNOWN_DIFFS=<path>` overrides the known-diffs policy file. The default is `tests/svg_known_diffs.txt`.
+
+Strict mode still passes accepted known diffs, but keeps them visible in the report under `known_failures`. Each policy entry is specific and threshold-bounded so unexpected regressions remain failures.
 
 ```rust
 // agg-gui/tests/svg_regression.rs

@@ -138,6 +138,54 @@ impl RadialGradientPaint {
     }
 }
 
+/// Repeating raster pattern paint expressed in SVG/user drawing coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatternPaint {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub transform: TransAffine,
+    /// Straight-alpha RGBA tile pixels in bottom-up row order.
+    pub pixels: Arc<Vec<u8>>,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+}
+
+impl PatternPaint {
+    pub fn sample(&self, mut x: f64, mut y: f64) -> Color {
+        if self.width <= f64::EPSILON
+            || self.height <= f64::EPSILON
+            || self.pixel_width == 0
+            || self.pixel_height == 0
+            || self.pixels.is_empty()
+        {
+            return Color::transparent();
+        }
+
+        self.transform.inverse_transform(&mut x, &mut y);
+        let tx = (x - self.x).rem_euclid(self.width);
+        let ty_down = (y - self.y).rem_euclid(self.height);
+        let px = ((tx / self.width) * self.pixel_width as f64)
+            .floor()
+            .clamp(0.0, self.pixel_width.saturating_sub(1) as f64) as usize;
+        let py = (((self.height - ty_down) / self.height) * self.pixel_height as f64)
+            .floor()
+            .clamp(0.0, self.pixel_height.saturating_sub(1) as f64) as usize;
+        let i = (py * self.pixel_width as usize + px) * 4;
+        if i + 3 >= self.pixels.len() {
+            return Color::transparent();
+        }
+
+        Color::rgba(
+            self.pixels[i] as f32 / 255.0,
+            self.pixels[i + 1] as f32 / 255.0,
+            self.pixels[i + 2] as f32 / 255.0,
+            self.pixels[i + 3] as f32 / 255.0,
+        )
+    }
+}
+
 fn apply_spread(t: f64, spread: GradientSpread) -> f64 {
     match spread {
         GradientSpread::Pad => t.clamp(0.0, 1.0),
@@ -220,18 +268,26 @@ pub trait DrawCtx {
     fn set_stroke_color(&mut self, color: Color);
     fn set_fill_linear_gradient(&mut self, _gradient: LinearGradientPaint) {}
     fn set_fill_radial_gradient(&mut self, _gradient: RadialGradientPaint) {}
+    fn set_fill_pattern(&mut self, _pattern: PatternPaint) {}
     fn set_stroke_linear_gradient(&mut self, _gradient: LinearGradientPaint) {}
     fn set_stroke_radial_gradient(&mut self, _gradient: RadialGradientPaint) {}
+    fn set_stroke_pattern(&mut self, _pattern: PatternPaint) {}
     fn supports_fill_linear_gradient(&self) -> bool {
         false
     }
     fn supports_fill_radial_gradient(&self) -> bool {
         false
     }
+    fn supports_fill_pattern(&self) -> bool {
+        false
+    }
     fn supports_stroke_linear_gradient(&self) -> bool {
         false
     }
     fn supports_stroke_radial_gradient(&self) -> bool {
+        false
+    }
+    fn supports_stroke_pattern(&self) -> bool {
         false
     }
     fn set_line_width(&mut self, w: f64);

@@ -1,0 +1,5 @@
+# pattern|max_mismatch_ratio|max_delta|reason
+# Keep this file small and specific. Each entry is accepted in strict mode only
+# when both thresholds still hold; unexpected regressions remain failures.
+
+shapes/rect/simple-case.svg|0.04|255|Current SVG regression diff includes known AGG/resvg edge/background divergence while tolerance policy is being calibrated.

@@ -49,7 +49,7 @@ use agg_rust::rounded_rect::RoundedRect;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
-use crate::draw_ctx::{DrawCtx, FillRule, LinearGradientPaint, RadialGradientPaint};
+use crate::draw_ctx::{DrawCtx, FillRule, LinearGradientPaint, PatternPaint, RadialGradientPaint};
 use crate::lcd_coverage::{rasterize_text_lcd_cached, LcdBuffer, LcdMask};
 use crate::text::{measure_text_metrics, Font, TextMetrics};
 
@@ -70,9 +70,11 @@ struct LcdState {
     fill_color: Color,
     fill_linear_gradient: Option<LinearGradientPaint>,
     fill_radial_gradient: Option<RadialGradientPaint>,
+    fill_pattern: Option<PatternPaint>,
     stroke_color: Color,
     stroke_linear_gradient: Option<LinearGradientPaint>,
     stroke_radial_gradient: Option<RadialGradientPaint>,
+    stroke_pattern: Option<PatternPaint>,
     fill_rule: FillRule,
     line_width: f64,
     line_join: LineJoin,
@@ -97,9 +99,11 @@ impl Default for LcdState {
             fill_color: Color::black(),
             fill_linear_gradient: None,
             fill_radial_gradient: None,
+            fill_pattern: None,
             stroke_color: Color::black(),
             stroke_linear_gradient: None,
             stroke_radial_gradient: None,
+            stroke_pattern: None,
             fill_rule: FillRule::NonZero,
             line_width: 1.0,
             line_join: LineJoin::Round,
@@ -202,10 +206,12 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         self.state.fill_color = color;
         self.state.fill_linear_gradient = None;
         self.state.fill_radial_gradient = None;
+        self.state.fill_pattern = None;
     }
     fn set_fill_linear_gradient(&mut self, gradient: LinearGradientPaint) {
         self.state.fill_linear_gradient = Some(gradient);
         self.state.fill_radial_gradient = None;
+        self.state.fill_pattern = None;
     }
     fn supports_fill_linear_gradient(&self) -> bool {
         true
@@ -213,18 +219,29 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     fn set_fill_radial_gradient(&mut self, gradient: RadialGradientPaint) {
         self.state.fill_linear_gradient = None;
         self.state.fill_radial_gradient = Some(gradient);
+        self.state.fill_pattern = None;
     }
     fn supports_fill_radial_gradient(&self) -> bool {
+        true
+    }
+    fn set_fill_pattern(&mut self, pattern: PatternPaint) {
+        self.state.fill_linear_gradient = None;
+        self.state.fill_radial_gradient = None;
+        self.state.fill_pattern = Some(pattern);
+    }
+    fn supports_fill_pattern(&self) -> bool {
         true
     }
     fn set_stroke_color(&mut self, color: Color) {
         self.state.stroke_color = color;
         self.state.stroke_linear_gradient = None;
         self.state.stroke_radial_gradient = None;
+        self.state.stroke_pattern = None;
     }
     fn set_stroke_linear_gradient(&mut self, gradient: LinearGradientPaint) {
         self.state.stroke_linear_gradient = Some(gradient);
         self.state.stroke_radial_gradient = None;
+        self.state.stroke_pattern = None;
     }
     fn supports_stroke_linear_gradient(&self) -> bool {
         true
@@ -232,8 +249,17 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     fn set_stroke_radial_gradient(&mut self, gradient: RadialGradientPaint) {
         self.state.stroke_linear_gradient = None;
         self.state.stroke_radial_gradient = Some(gradient);
+        self.state.stroke_pattern = None;
     }
     fn supports_stroke_radial_gradient(&self) -> bool {
+        true
+    }
+    fn set_stroke_pattern(&mut self, pattern: PatternPaint) {
+        self.state.stroke_linear_gradient = None;
+        self.state.stroke_radial_gradient = None;
+        self.state.stroke_pattern = Some(pattern);
+    }
+    fn supports_stroke_pattern(&self) -> bool {
         true
     }
     fn set_line_width(&mut self, w: f64) {
@@ -394,6 +420,17 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
                 self.active_buffer(),
                 &mut path,
                 &gradient,
+                global_alpha,
+                &xform,
+                clip,
+                rule,
+            );
+        } else if let Some(pattern) = self.state.fill_pattern.clone() {
+            let global_alpha = self.state.global_alpha as f32;
+            gradient::fill_pattern(
+                self.active_buffer(),
+                &mut path,
+                &pattern,
                 global_alpha,
                 &xform,
                 clip,

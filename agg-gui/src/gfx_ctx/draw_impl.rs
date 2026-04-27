@@ -160,7 +160,53 @@ pub(crate) fn rasterize_radial_gradient_fill(
     );
 }
 
+pub(crate) fn rasterize_pattern_fill(
+    fb: &mut Framebuffer,
+    path: &mut PathStorage,
+    pattern: &PatternPaint,
+    global_alpha: f32,
+    mode: CompOp,
+    clip: Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
+    transform: &TransAffine,
+) {
+    rasterize_sampled_paint_fill(
+        fb,
+        path,
+        |x, y| pattern.sample(x, y),
+        global_alpha,
+        mode,
+        clip,
+        fill_rule,
+        transform,
+    );
+}
+
 fn rasterize_sampled_gradient_fill<F>(
+    fb: &mut Framebuffer,
+    path: &mut PathStorage,
+    sample: F,
+    global_alpha: f32,
+    _mode: CompOp,
+    clip: Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
+    transform: &TransAffine,
+) where
+    F: FnMut(f64, f64) -> Color,
+{
+    rasterize_sampled_paint_fill(
+        fb,
+        path,
+        sample,
+        global_alpha,
+        _mode,
+        clip,
+        fill_rule,
+        transform,
+    );
+}
+
+fn rasterize_sampled_paint_fill<F>(
     fb: &mut Framebuffer,
     path: &mut PathStorage,
     mut sample: F,
@@ -337,10 +383,16 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn set_fill_radial_gradient(&mut self, gradient: crate::draw_ctx::RadialGradientPaint) {
         self.set_fill_radial_gradient(gradient)
     }
+    fn set_fill_pattern(&mut self, pattern: crate::draw_ctx::PatternPaint) {
+        self.set_fill_pattern(pattern)
+    }
     fn supports_fill_linear_gradient(&self) -> bool {
         true
     }
     fn supports_fill_radial_gradient(&self) -> bool {
+        true
+    }
+    fn supports_fill_pattern(&self) -> bool {
         true
     }
     fn set_stroke_color(&mut self, c: crate::color::Color) {
@@ -352,10 +404,16 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn set_stroke_radial_gradient(&mut self, gradient: crate::draw_ctx::RadialGradientPaint) {
         self.set_stroke_radial_gradient(gradient)
     }
+    fn set_stroke_pattern(&mut self, pattern: crate::draw_ctx::PatternPaint) {
+        self.set_stroke_pattern(pattern)
+    }
     fn supports_stroke_linear_gradient(&self) -> bool {
         true
     }
     fn supports_stroke_radial_gradient(&self) -> bool {
+        true
+    }
+    fn supports_stroke_pattern(&self) -> bool {
         true
     }
     fn set_line_width(&mut self, w: f64) {
