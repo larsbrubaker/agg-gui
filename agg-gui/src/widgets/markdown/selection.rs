@@ -17,19 +17,19 @@ use super::{LayoutItem, LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, B
 #[derive(Clone)]
 pub(super) struct SelectableFragment {
     pub range: Range<usize>,
-    text: String,
-    kind: SelectableKind,
-    text_x: f64,
-    y: f64,
-    height: f64,
-    width: f64,
-    font_size: f64,
-    clip: Option<Rect>,
-    line_prefix: Option<&'static str>,
+    pub(super) text: String,
+    pub(super) kind: SelectableKind,
+    pub(super) text_x: f64,
+    pub(super) y: f64,
+    pub(super) height: f64,
+    pub(super) width: f64,
+    pub(super) font_size: f64,
+    pub(super) clip: Option<Rect>,
+    pub(super) line_prefix: Option<&'static str>,
 }
 
 #[derive(Clone)]
-enum SelectableKind {
+pub(super) enum SelectableKind {
     Text {
         style: LineStyle,
         link: Option<String>,
@@ -205,7 +205,8 @@ impl MarkdownView {
                         0.0
                     };
                     let content_y = y + scrollbar_h;
-                    let clip = Rect::new(pad, content_y, *viewport_width, row_h * rows.len() as f64);
+                    let clip =
+                        Rect::new(pad, content_y, *viewport_width, row_h * rows.len() as f64);
                     let mut cy = content_y + row_h * rows.len() as f64;
                     for (ri, row) in rows.iter().enumerate() {
                         if ri > 0 {
@@ -300,7 +301,12 @@ impl MarkdownView {
                 (
                     0.0,
                     fragment.range.start
-                        + byte_at_x(&self.active_font(), &fragment.text, fragment.font_size, pos.x - x0),
+                        + byte_at_x(
+                            &self.active_font(),
+                            &fragment.text,
+                            fragment.font_size,
+                            pos.x - x0,
+                        ),
                 )
             };
 
@@ -340,7 +346,6 @@ impl MarkdownView {
 
     fn copy_payloads(&self, range: Range<usize>) -> (String, String) {
         let mut markdown = String::new();
-        let mut html = String::new();
         let mut cursor = range.start;
 
         for fragment in &self.selectable_fragments {
@@ -355,7 +360,6 @@ impl MarkdownView {
             if cursor < gap_end {
                 let gap = &self.selectable_text[cursor..gap_end];
                 markdown.push_str(gap);
-                html.push_str(&html_gap(gap));
             }
 
             let start = range.start.max(fragment.range.start);
@@ -365,7 +369,6 @@ impl MarkdownView {
                 let local_end = end - fragment.range.start;
                 let selected = &fragment.text[local_start..local_end];
                 fragment.push_markdown(selected, start == fragment.range.start, &mut markdown);
-                fragment.push_html(selected, &mut html);
             }
             cursor = end;
         }
@@ -373,9 +376,10 @@ impl MarkdownView {
         if cursor < range.end {
             let gap = &self.selectable_text[cursor..range.end];
             markdown.push_str(gap);
-            html.push_str(&html_gap(gap));
         }
 
+        let html =
+            super::rich_html::copy_html(&self.selectable_fragments, &self.selectable_text, range);
         (markdown, html)
     }
 
@@ -405,7 +409,8 @@ impl MarkdownView {
                 let before = &fragment.text[..start];
                 let selected = &fragment.text[start..end];
                 (
-                    fragment.text_x + measure_advance(&self.active_font(), before, fragment.font_size),
+                    fragment.text_x
+                        + measure_advance(&self.active_font(), before, fragment.font_size),
                     measure_advance(&self.active_font(), selected, fragment.font_size),
                 )
             };
@@ -488,51 +493,6 @@ impl SelectableFragment {
             }
         }
     }
-
-    fn push_html(&self, selected: &str, out: &mut String) {
-        match &self.kind {
-            SelectableKind::Text { style, link, code } => {
-                if let Some(url) = link {
-                    push_wrapped_html(selected, out, |inner, out| {
-                        out.push_str("<a href=\"");
-                        out.push_str(&escape_attr(url));
-                        out.push_str("\">");
-                        out.push_str(&escape_html(inner));
-                        out.push_str("</a>");
-                    });
-                } else if *code {
-                    push_wrapped_html(selected, out, |inner, out| {
-                        out.push_str("<code>");
-                        out.push_str(&escape_html(inner));
-                        out.push_str("</code>");
-                    });
-                } else if let Some(tag) = heading_tag(*style) {
-                    out.push('<');
-                    out.push_str(tag);
-                    out.push('>');
-                    out.push_str(&escape_html(selected));
-                    out.push_str("</");
-                    out.push_str(tag);
-                    out.push('>');
-                } else {
-                    out.push_str(&escape_html(selected));
-                }
-            }
-            SelectableKind::CodeBlock => {
-                out.push_str("<pre><code>");
-                out.push_str(&escape_html(selected));
-                out.push_str("</code></pre>");
-            }
-            SelectableKind::TableCell => out.push_str(&escape_html(selected)),
-            SelectableKind::Image { url, alt, .. } => {
-                out.push_str("<img src=\"");
-                out.push_str(&escape_attr(url));
-                out.push_str("\" alt=\"");
-                out.push_str(&escape_attr(alt));
-                out.push_str("\">");
-            }
-        }
-    }
 }
 
 fn byte_at_x(font: &Arc<Font>, text: &str, font_size: f64, x: f64) -> usize {
@@ -568,35 +528,17 @@ fn heading_prefix(style: LineStyle) -> Option<&'static str> {
     }
 }
 
-fn heading_tag(style: LineStyle) -> Option<&'static str> {
-    match style {
-        LineStyle::H1 => Some("h1"),
-        LineStyle::H2 => Some("h2"),
-        LineStyle::H3 => Some("h3"),
-        LineStyle::H4 => Some("h4"),
-        _ => None,
-    }
-}
-
-fn html_gap(gap: &str) -> String {
-    escape_html(gap).replace('\n', "<br>\n").replace('\t', "    ")
-}
-
-fn escape_html(text: &str) -> String {
+pub(super) fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
-fn escape_attr(text: &str) -> String {
+pub(super) fn escape_attr(text: &str) -> String {
     escape_html(text).replace('"', "&quot;")
 }
 
-fn push_wrapped_markdown(
-    selected: &str,
-    out: &mut String,
-    wrap: impl FnOnce(&str, &mut String),
-) {
+fn push_wrapped_markdown(selected: &str, out: &mut String, wrap: impl FnOnce(&str, &mut String)) {
     let leading_len = selected.len() - selected.trim_start().len();
     let trailing_len = selected.len() - selected.trim_end().len();
     let content_start = leading_len;
@@ -606,18 +548,6 @@ fn push_wrapped_markdown(
         wrap(&selected[content_start..content_end], out);
     }
     out.push_str(&selected[content_end..]);
-}
-
-fn push_wrapped_html(selected: &str, out: &mut String, wrap: impl FnOnce(&str, &mut String)) {
-    let leading_len = selected.len() - selected.trim_start().len();
-    let trailing_len = selected.len() - selected.trim_end().len();
-    let content_start = leading_len;
-    let content_end = selected.len().saturating_sub(trailing_len);
-    out.push_str(&escape_html(&selected[..content_start]));
-    if content_start < content_end {
-        wrap(&selected[content_start..content_end], out);
-    }
-    out.push_str(&escape_html(&selected[content_end..]));
 }
 
 #[cfg(test)]
@@ -638,7 +568,6 @@ mod tests {
     #[test]
     fn html_escapes_text_and_gaps() {
         assert_eq!(escape_html("<a&b>"), "&lt;a&amp;b&gt;");
-        assert_eq!(html_gap("a\nb\tc"), "a<br>\nb    c");
     }
 
     #[test]
@@ -659,11 +588,17 @@ mod tests {
         assert!(markdown.contains("let x = 1;"));
         assert!(markdown.contains("C\tD"));
         assert!(markdown.contains("![Alt](image.png)"));
-        assert!(html.contains("<h1>Title</h1>"));
-        assert!(html.contains("<a href=\"https://example.com\">link</a>"));
-        assert!(html.contains("<code>code</code>"));
-        assert!(html.contains("<pre><code>let x = 1;</code></pre>"));
-        assert!(html.contains("<img src=\"image.png\" alt=\"Alt\">"));
+        assert!(!html.contains("<h1>"));
+        assert!(html.contains("font-size:"));
+        assert!(html.contains("<table"));
+        assert!(html.contains("<th"));
+        assert!(!html.contains("<!--StartFragment-->"));
+        assert!(html.contains("<a href=\"https://example.com\""));
+        assert!(html.contains(">link</a>"));
+        assert!(html.contains(">code</code>"));
+        assert!(html.contains("<pre style="));
+        assert!(html.contains("let x = 1;"));
+        assert!(html.contains("<img src=\"image.png\" alt=\"Alt\""));
     }
 
     #[test]
@@ -706,5 +641,29 @@ mod tests {
         ));
 
         assert_eq!(hit, Some(("image.png".to_string(), "Alt".to_string(), 0)));
+    }
+
+    #[test]
+    fn copy_payloads_render_ordered_and_bullet_lists_as_html_lists() {
+        crate::widget::set_current_viewport(Size::new(480.0, 320.0));
+        let mut view = MarkdownView::new(
+            "1. First item\n2. Second item with [link](https://example.com)\n\n- Alpha\n- Beta",
+            test_font(),
+        );
+        view.layout_markdown(Size::new(480.0, 2000.0));
+        view.select_all_text();
+
+        let (_, html) = view.copy_payloads(view.selection_range().expect("selection"));
+
+        assert!(html.contains("<ol"));
+        assert!(html.contains("<li"));
+        assert!(html.contains(">First item"));
+        assert!(html.contains(">Second item"));
+        assert!(html.contains("<a href=\"https://example.com\""));
+        assert!(html.contains("<ul"));
+        assert!(html.contains(">Alpha"));
+        assert!(html.contains(">Beta"));
+        assert!(!html.contains(">1. First item"));
+        assert!(!html.contains(">• Alpha"));
     }
 }

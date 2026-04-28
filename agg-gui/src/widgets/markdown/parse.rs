@@ -23,7 +23,7 @@ fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut cur_style = LineStyle::Body;
     let mut cur_indent = 0.0_f64;
     let mut list_depth = 0u32;
-    let mut list_ordinal: Vec<u64> = Vec::new();
+    let mut list_ordinal: Vec<Option<u64>> = Vec::new();
     let mut in_image: Option<String> = None;
     let mut link_stack: Vec<String> = Vec::new();
     let mut quote_depth = 0u32;
@@ -262,7 +262,7 @@ fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
             }
             MdEvent::Start(Tag::List(first)) => {
                 list_depth += 1;
-                list_ordinal.push(first.unwrap_or(1));
+                list_ordinal.push(first);
                 cur_indent = (if quote { 16.0 } else { 0.0 }) + list_depth as f64 * 16.0;
             }
             MdEvent::End(TagEnd::List(_)) => {
@@ -292,7 +292,7 @@ fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                     quote,
                     link,
                 );
-                if let Some(n) = list_ordinal.last_mut() {
+                if let Some(Some(n)) = list_ordinal.last_mut() {
                     cur_text = format!("{}. ", n);
                     *n += 1;
                 } else {
@@ -388,5 +388,25 @@ mod tests {
                 "  indented".to_string()
             ])
         );
+    }
+
+    #[test]
+    fn unordered_lists_preserve_bullet_markers() {
+        let items = parse_markdown("- Alpha\n- Beta");
+        let first_text = items.iter().find_map(|item| {
+            if let ParagraphItem::Flow { items, .. } = item {
+                items.first().and_then(|inline| {
+                    if let InlineItem::Text { text, .. } = inline {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+
+        assert_eq!(first_text, Some("• Alpha"));
     }
 }

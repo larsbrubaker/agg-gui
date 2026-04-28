@@ -52,17 +52,27 @@ fn set_text_impl(text: &str) {
 
 /// Write HTML plus a plain-text fallback to the clipboard.
 pub fn set_rich_text(plain_text: &str, html_text: &str) {
-    set_rich_text_impl(plain_text, html_text);
+    let html = html_fragment_for_clipboard(html_text);
+    set_rich_text_impl(plain_text, &html);
+}
+
+/// Mark the selected HTML fragment explicitly for rich-text paste targets.
+///
+/// Windows CF_HTML wrappers also carry byte offsets, but browser editors such
+/// as Gmail are more reliable when the payload itself includes these markers.
+pub fn html_fragment_for_clipboard(html_text: &str) -> String {
+    if html_text.contains("<!--StartFragment-->") && html_text.contains("<!--EndFragment-->") {
+        html_text.to_string()
+    } else {
+        format!("<!--StartFragment-->{html_text}<!--EndFragment-->")
+    }
 }
 
 #[cfg(feature = "clipboard")]
 fn set_rich_text_impl(plain_text: &str, html_text: &str) {
     if let Ok(mut cb) = Clipboard::new() {
         if cb
-            .set_html(
-                Cow::Borrowed(html_text),
-                Some(Cow::Borrowed(plain_text)),
-            )
+            .set_html(Cow::Borrowed(html_text), Some(Cow::Borrowed(plain_text)))
             .is_ok()
         {
             return;
@@ -104,4 +114,23 @@ fn set_image_rgba_impl(data: &[u8], width: u32, height: u32) -> bool {
 #[cfg(not(feature = "clipboard"))]
 fn set_image_rgba_impl(_: &[u8], _: u32, _: u32) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::html_fragment_for_clipboard;
+
+    #[test]
+    fn rich_html_is_wrapped_with_fragment_markers_for_gmail() {
+        let html = html_fragment_for_clipboard("<h1>Hello</h1>");
+        assert!(html.starts_with("<!--StartFragment-->"));
+        assert!(html.ends_with("<!--EndFragment-->"));
+        assert!(html.contains("<h1>Hello</h1>"));
+    }
+
+    #[test]
+    fn rich_html_wrapper_is_idempotent() {
+        let html = "<!--StartFragment--><b>Hello</b><!--EndFragment-->";
+        assert_eq!(html_fragment_for_clipboard(html), html);
+    }
 }

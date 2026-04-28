@@ -36,12 +36,13 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
-mod image_loader;
 mod event;
 mod image_context;
+mod image_loader;
 mod layout;
 mod paint;
 mod parse;
+mod rich_html;
 mod selection;
 
 // ── Styled line representation ─────────────────────────────────────────────────

@@ -46,7 +46,10 @@ impl MarkdownView {
             self.context_menu = None;
             return false;
         };
-        let mut actions = vec![ImageContextAction::CopyImage, ImageContextAction::CopyImageUrl];
+        let mut actions = vec![
+            ImageContextAction::CopyImage,
+            ImageContextAction::CopyImageUrl,
+        ];
         if self.on_image_open.is_some() {
             actions.push(ImageContextAction::OpenImage);
         }
