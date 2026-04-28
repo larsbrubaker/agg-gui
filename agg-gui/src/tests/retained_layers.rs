@@ -163,6 +163,9 @@ impl DrawCtx for RetainedLayerCtx {
     fn supports_compositing_layers(&self) -> bool {
         true
     }
+    fn supports_retained_layers(&self) -> bool {
+        true
+    }
     fn composite_retained_layer(
         &mut self,
         _key: u64,

@@ -454,6 +454,14 @@ pub trait DrawCtx {
         false
     }
 
+    /// Whether this backend can retain named offscreen layers across frames.
+    ///
+    /// Generic compositing support is enough for isolated opacity groups, but
+    /// retained widget backbuffers need a backend-owned surface keyed by ID.
+    fn supports_retained_layers(&self) -> bool {
+        false
+    }
+
     /// Begin a new transparent compositing layer that will be multiplied by
     /// `alpha` when composited back into the parent target.
     ///

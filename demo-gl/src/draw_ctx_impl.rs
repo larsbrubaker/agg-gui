@@ -645,6 +645,10 @@ impl DrawCtx for GlGfxCtx {
         true
     }
 
+    fn supports_retained_layers(&self) -> bool {
+        true
+    }
+
     fn push_layer(&mut self, width: f64, height: f64) {
         unsafe {
             self.push_gl_layer(width, height, 1.0);

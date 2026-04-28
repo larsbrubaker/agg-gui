@@ -63,7 +63,7 @@ fn paint_subtree_unified_backbuffer(
     }
 
     match spec.kind {
-        BackbufferKind::GlFbo if ctx.supports_compositing_layers() => {
+        BackbufferKind::GlFbo if ctx.supports_retained_layers() => {
             paint_subtree_gl_backbuffer(widget, ctx, include_overlay, spec);
             true
         }
