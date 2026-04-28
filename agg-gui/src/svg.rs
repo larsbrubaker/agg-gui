@@ -19,6 +19,12 @@ use crate::gfx_ctx::GfxCtx;
 use crate::lcd_coverage::LcdBuffer;
 use crate::lcd_gfx_ctx::LcdGfxCtx;
 
+pub use compare::{
+    compare_svg_rgba, SvgCompareResult, SvgCompareThresholds, DEFAULT_ALPHA_TOLERANCE,
+    DEFAULT_MISMATCH_RATIO, DEFAULT_OPAQUE_RGB_TOLERANCE, DEFAULT_TRANSLUCENT_RGB_TOLERANCE,
+    DEFAULT_VISUAL_RGB_TOLERANCE,
+};
+
 #[derive(Clone, Copy, Debug)]
 struct SvgRenderState {
     opacity: f32,
@@ -626,6 +632,7 @@ fn map_fill_rule(rule: usvg::FillRule) -> FillRule {
 
 #[cfg(test)]
 mod clip_tests;
+pub mod compare;
 #[cfg(test)]
 mod gradient_tests;
 #[cfg(test)]

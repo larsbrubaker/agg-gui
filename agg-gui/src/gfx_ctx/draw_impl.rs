@@ -141,10 +141,9 @@ pub(crate) fn rasterize_stroke(
 ) {
     let mut curves = ConvCurve::new(path);
     if dashes.is_empty() {
-        let stroke = ConvStroke::new(&mut curves);
         rasterize_stroke_source(
             fb,
-            stroke,
+            &mut curves,
             color,
             width,
             join,
@@ -157,10 +156,9 @@ pub(crate) fn rasterize_stroke(
     } else {
         let mut dash = ConvDash::new(&mut curves);
         configure_dashes(&mut dash, dashes, dash_offset);
-        let stroke = ConvStroke::new(dash);
         rasterize_stroke_source(
             fb,
-            stroke,
+            dash,
             color,
             width,
             join,

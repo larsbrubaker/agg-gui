@@ -4,23 +4,33 @@
 //! builds write into the in-process clipboard bridge that the demo shell
 //! forwards to browser clipboard events.
 
-#[cfg(feature = "clipboard")]
+#[cfg(all(feature = "clipboard", not(test)))]
 use std::borrow::Cow;
 
-#[cfg(feature = "clipboard")]
+#[cfg(all(feature = "clipboard", not(test)))]
 use arboard::Clipboard;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+thread_local! {
+    static TEST_TEXT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
 
 /// Read plain text from the clipboard.
 pub fn get_text() -> Option<String> {
     get_text_impl()
 }
 
-#[cfg(feature = "clipboard")]
+#[cfg(all(feature = "clipboard", not(test)))]
 fn get_text_impl() -> Option<String> {
     Clipboard::new().ok()?.get_text().ok()
 }
 
-#[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn get_text_impl() -> Option<String> {
+    TEST_TEXT.with(|text| text.borrow().clone())
+}
+
+#[cfg(all(not(feature = "clipboard"), not(test), not(target_arch = "wasm32")))]
 fn get_text_impl() -> Option<String> {
     None
 }
@@ -35,14 +45,19 @@ pub fn set_text(text: &str) {
     set_text_impl(text);
 }
 
-#[cfg(feature = "clipboard")]
+#[cfg(all(feature = "clipboard", not(test)))]
 fn set_text_impl(text: &str) {
     if let Ok(mut cb) = Clipboard::new() {
         let _ = cb.set_text(text.to_string());
     }
 }
 
-#[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn set_text_impl(text: &str) {
+    TEST_TEXT.with(|slot| *slot.borrow_mut() = Some(text.to_string()));
+}
+
+#[cfg(all(not(feature = "clipboard"), not(test), not(target_arch = "wasm32")))]
 fn set_text_impl(_: &str) {}
 
 #[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
@@ -68,7 +83,7 @@ pub fn html_fragment_for_clipboard(html_text: &str) -> String {
     }
 }
 
-#[cfg(feature = "clipboard")]
+#[cfg(all(feature = "clipboard", not(test)))]
 fn set_rich_text_impl(plain_text: &str, html_text: &str) {
     if let Ok(mut cb) = Clipboard::new() {
         if cb
@@ -81,7 +96,7 @@ fn set_rich_text_impl(plain_text: &str, html_text: &str) {
     set_text(plain_text);
 }
 
-#[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
+#[cfg(all(any(not(feature = "clipboard"), test), not(target_arch = "wasm32")))]
 fn set_rich_text_impl(plain_text: &str, _: &str) {
     set_text(plain_text);
 }

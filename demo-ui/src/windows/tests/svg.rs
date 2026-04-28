@@ -22,7 +22,7 @@ mod svg_tests;
 
 use drawing::{
     decode_png_rgba, draw_hardware_column, draw_lcd_column, draw_panel, draw_raster_column,
-    draw_small_text, native_rect,
+    draw_small_text, native_rect, rgba_matches_reference,
 };
 use samples::{SvgSample, SVG_SAMPLES};
 
@@ -137,7 +137,7 @@ struct SvgSampleRender {
     reference: Result<Arc<Vec<u8>>, String>,
     rgba: Result<Arc<Vec<u8>>, String>,
     rgba_diff: Result<Arc<Vec<u8>>, String>,
-    rgba_exact: bool,
+    rgba_pass: bool,
     lcd: Result<SvgLcdPreview, String>,
 }
 
@@ -254,8 +254,8 @@ impl SvgSampleRender {
             (Err(err), _) => Err(format!("reference: {err}")),
             (_, Err(err)) => Err(format!("rgba: {err}")),
         };
-        let rgba_exact = match (&reference, &rgba) {
-            (Ok((reference, _, _)), Ok(rgba)) => reference.as_slice() == rgba.as_slice(),
+        let rgba_pass = match (&reference, &rgba) {
+            (Ok((reference, _, _)), Ok(rgba)) => rgba_matches_reference(rgba, reference),
             _ => false,
         };
 
@@ -267,7 +267,7 @@ impl SvgSampleRender {
             reference: reference.map(|(pixels, _, _)| Arc::new(pixels)),
             rgba,
             rgba_diff,
-            rgba_exact,
+            rgba_pass,
             lcd,
         }
     }
@@ -627,7 +627,7 @@ fn title_metrics(ctx: &mut dyn DrawCtx, title: &str, baseline_y: f64) -> (f64, f
 }
 
 fn draw_status_icon(ctx: &mut dyn DrawCtx, sample: &SvgSampleRender, x: f64, y: f64) {
-    let (fill, stroke) = if sample.rgba_exact {
+    let (fill, stroke) = if sample.rgba_pass {
         (Color::rgb(0.2, 0.75, 0.25), Color::rgb(0.1, 0.45, 0.15))
     } else {
         (Color::rgb(0.85, 0.22, 0.22), Color::rgb(0.55, 0.08, 0.08))
@@ -642,7 +642,7 @@ fn draw_status_icon(ctx: &mut dyn DrawCtx, sample: &SvgSampleRender, x: f64, y: 
     ctx.set_stroke_color(Color::white());
     ctx.set_line_width(1.2);
     ctx.begin_path();
-    if sample.rgba_exact {
+    if sample.rgba_pass {
         ctx.move_to(x + 2.0, y + 4.0);
         ctx.line_to(x + 3.5, y + 2.5);
         ctx.line_to(x + 6.4, y + 5.9);

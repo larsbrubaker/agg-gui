@@ -544,15 +544,19 @@ impl TextField {
                             EventResult::Consumed
                         }
                         'z' | 'Z' if !mods.shift => {
-                            self.do_undo();
+                            if !self.read_only {
+                                self.do_undo();
+                            }
                             EventResult::Consumed
                         }
                         'z' | 'Z' | 'y' | 'Y' => {
-                            self.do_redo();
+                            if !self.read_only {
+                                self.do_redo();
+                            }
                             EventResult::Consumed
                         }
                         'x' | 'X' => {
-                            if self.has_selection() {
+                            if !self.read_only && self.has_selection() {
                                 clipboard_set(&self.selection());
                                 self.do_delete(false, false); // delete selection via do_delete
                             }
@@ -565,8 +569,10 @@ impl TextField {
                             EventResult::Consumed
                         }
                         'v' | 'V' => {
-                            if let Some(clip) = clipboard_get() {
-                                self.do_insert(&clip, false);
+                            if !self.read_only {
+                                if let Some(clip) = clipboard_get() {
+                                    self.do_insert(&clip, false);
+                                }
                             }
                             EventResult::Consumed
                         }

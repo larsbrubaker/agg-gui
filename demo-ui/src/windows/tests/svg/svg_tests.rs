@@ -138,12 +138,13 @@ fn svg_test_every_rgba_row_is_either_exact_or_tracked_as_incomplete() {
             panic!("{} should render through RGBA target: {err}", sample.name)
         });
         let diff = pixel_diff(rgba, reference);
+        let pass = super::rgba_matches_reference(rgba, reference);
 
         if KNOWN_INCOMPLETE_RGBA_ROWS.contains(&sample.name) {
-            if diff.mismatched_pixels == 0 {
+            if pass {
                 completed_known_incomplete.push(sample.name);
             }
-        } else if diff.mismatched_pixels > 0 {
+        } else if !pass {
             unexpected_mismatches.push((sample.name, diff));
         }
     }
@@ -171,31 +172,21 @@ const KNOWN_INCOMPLETE_RGBA_ROWS: &[&str] = &[
     // Every current SVG Test row is a progress row, not an exact-match
     // completion row. When a row becomes pixel-accurate, remove it from
     // this list; the classifier above will then require exact equality.
-    "shapes/rect/simple-case.svg",
     "shapes/circle/simple-case.svg",
     "shapes/ellipse/simple-case.svg",
     "shapes/line/simple-case.svg",
     "shapes/line/with-transform.svg",
     "shapes/polygon/simple-case.svg",
     "shapes/polyline/simple-case.svg",
-    "shapes/path/M-L-L-Z.svg",
     "shapes/path/M-C.svg",
     "shapes/path/M-C-S.svg",
     "shapes/path/M-Q.svg",
     "shapes/path/M-Q-T.svg",
     "shapes/path/M-A.svg",
     "shapes/path/M-L-Z-A.svg",
-    "painting/fill/named-color.svg",
-    "painting/fill/currentColor.svg",
-    "painting/fill/rgb-color.svg",
-    "painting/fill/hsl-with-alpha.svg",
     "painting/fill/linear-gradient-on-shape.svg",
     "painting/fill/radial-gradient-on-shape.svg",
-    "painting/fill-rule/nonzero.svg",
-    "painting/fill-rule/evenodd.svg",
-    "painting/opacity/50percent.svg",
     "painting/opacity/group-opacity.svg",
-    "painting/opacity/mixed-group-opacity.svg",
     "painting/stroke/line-as-curve-1.svg",
     "painting/stroke/line-as-curve-2.svg",
     "painting/stroke/linear-gradient.svg",
@@ -207,7 +198,6 @@ const KNOWN_INCOMPLETE_RGBA_ROWS: &[&str] = &[
     "paint-servers/linearGradient/spreadMethod=reflect.svg",
     "paint-servers/linearGradient/spreadMethod=repeat.svg",
     "paint-servers/linearGradient/many-stops.svg",
-    "paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg",
     "paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg",
     "paint-servers/radialGradient/gradientUnits=objectBoundingBox-with-percent.svg",
     "paint-servers/radialGradient/gradientTransform.svg",

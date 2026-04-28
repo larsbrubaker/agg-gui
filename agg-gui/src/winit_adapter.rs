@@ -4,9 +4,17 @@
 //! winit for window/event handling forward raw `winit` events through
 //! these helpers instead of re-implementing the mapping themselves.
 
-use winit::event::MouseButton as WinitMouseButton;
+use winit::event::{KeyEvent as WinitKeyEvent, MouseButton as WinitMouseButton};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
 use winit::window::{CursorIcon as WinitCursor, Window as WinitWindow};
+
+#[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "redox"
+))]
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 
 use crate::cursor::CursorIcon;
 use crate::event::{Key, Modifiers, MouseButton};
@@ -58,6 +66,51 @@ pub fn key(k: &WinitKey) -> Option<Key> {
         WinitKey::Character(s) => Key::Char(s.chars().next()?),
         _ => return None,
     })
+}
+
+/// Map a full winit key event to this crate's [`Key`].
+///
+/// Clipboard shortcuts on Windows can carry control-character text such as
+/// `\x03` for Ctrl+C.  Winit's modifier-supplement key keeps the user's base
+/// key, so shortcut handlers still see `Key::Char('c')`.
+pub fn key_event(event: &WinitKeyEvent, mods: Modifiers) -> Option<Key> {
+    key(&shortcut_logical_key(event, mods))
+}
+
+#[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "redox"
+))]
+fn shortcut_logical_key(event: &WinitKeyEvent, mods: Modifiers) -> WinitKey {
+    shortcut_logical_key_from_keys(
+        event.logical_key.clone(),
+        event.key_without_modifiers(),
+        mods,
+    )
+}
+
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "redox"
+)))]
+fn shortcut_logical_key(event: &WinitKeyEvent, _: Modifiers) -> WinitKey {
+    event.logical_key.clone()
+}
+
+fn shortcut_logical_key_from_keys(
+    logical_key: WinitKey,
+    modifierless_key: WinitKey,
+    mods: Modifiers,
+) -> WinitKey {
+    if mods.ctrl || mods.meta {
+        modifierless_key
+    } else {
+        logical_key
+    }
 }
 
 /// Translate a [`CursorIcon`] to winit's [`CursorIcon`](WinitCursor).
@@ -114,5 +167,56 @@ pub fn apply_cursor(window: &WinitWindow, icon: CursorIcon) {
     } else {
         window.set_cursor_visible(true);
         window.set_cursor(cursor_icon(icon));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shortcut_key(logical_key: WinitKey, modifierless_key: WinitKey, mods: Modifiers) -> Key {
+        key(&shortcut_logical_key_from_keys(
+            logical_key,
+            modifierless_key,
+            mods,
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn ctrl_clipboard_shortcuts_use_modifierless_character() {
+        let mods = Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        };
+
+        assert_eq!(
+            shortcut_key(
+                WinitKey::Character("\u{3}".into()),
+                WinitKey::Character("c".into()),
+                mods,
+            ),
+            Key::Char('c')
+        );
+        assert_eq!(
+            shortcut_key(
+                WinitKey::Character("\u{16}".into()),
+                WinitKey::Character("v".into()),
+                mods,
+            ),
+            Key::Char('v')
+        );
+    }
+
+    #[test]
+    fn plain_text_input_keeps_logical_character() {
+        assert_eq!(
+            shortcut_key(
+                WinitKey::Character("C".into()),
+                WinitKey::Character("c".into()),
+                Modifiers::default(),
+            ),
+            Key::Char('C')
+        );
     }
 }

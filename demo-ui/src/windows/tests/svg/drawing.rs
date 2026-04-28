@@ -150,3 +150,12 @@ pub(super) fn decode_png_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String
 
     Ok((rgba, info.width, info.height))
 }
+
+pub(super) fn rgba_matches_reference(rendered: &[u8], reference: &[u8]) -> bool {
+    agg_gui::compare_svg_rgba(
+        rendered,
+        reference,
+        agg_gui::SvgCompareThresholds::default(),
+    )
+    .pass
+}

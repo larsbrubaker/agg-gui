@@ -112,6 +112,31 @@ fn test_text_field_tracks_external_text_cell() {
     assert_eq!(text.borrow().as_str(), "typed locally");
 }
 
+#[test]
+fn test_read_only_text_field_rejects_paste() {
+    use crate::text::Font;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut field = TextField::new(font)
+        .with_text("locked")
+        .with_read_only(true);
+    field.layout(Size::new(180.0, 32.0));
+    field.on_event(&crate::Event::FocusGained);
+
+    crate::clipboard::set_text(" pasted");
+    let result = field.on_event(&crate::Event::KeyDown {
+        key: Key::Char('v'),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        },
+    });
+
+    assert_eq!(result, crate::EventResult::Consumed);
+    assert_eq!(field.text(), "locked");
+}
+
 /// Tab key advances focus through focusable widgets.
 #[test]
 fn test_tab_focus_advance() {

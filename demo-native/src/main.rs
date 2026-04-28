@@ -481,7 +481,7 @@ fn main() {
                             }
                             return;
                         }
-                        if let Some(key) = winit_adapter::key(&key_event.logical_key) {
+                        if let Some(key) = winit_adapter::key_event(&key_event, current_mods) {
                             app.on_key_down(key, current_mods);
                         }
                     }
