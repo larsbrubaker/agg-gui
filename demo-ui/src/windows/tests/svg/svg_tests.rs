@@ -124,41 +124,137 @@ fn svg_test_sample_rows_decode_and_render_for_bitmap_targets() {
 }
 
 #[test]
-fn svg_test_text_anchor_middle_rgba_is_not_done_until_it_matches_reference_exactly() {
-    let sample = super::SVG_SAMPLES
-        .iter()
-        .find(|sample| sample.name == "text/text-anchor/middle-on-text.svg")
-        .expect("SVG Test should include the text-anchor middle sample");
-    let rendered = super::SvgSampleRender::new(sample);
-    let reference = rendered
-        .reference
-        .as_ref()
-        .unwrap_or_else(|err| panic!("{} reference PNG should decode: {err}", sample.name));
-    let rgba = rendered
-        .rgba
-        .as_ref()
-        .unwrap_or_else(|err| panic!("{} should render through RGBA target: {err}", sample.name));
-    let diff = pixel_diff(rgba, reference);
+fn svg_test_every_rgba_row_is_either_exact_or_tracked_as_incomplete() {
+    let mut unexpected_mismatches = Vec::new();
+    let mut completed_known_incomplete = Vec::new();
+
+    for sample in super::SVG_SAMPLES {
+        let rendered = super::SvgSampleRender::new(sample);
+        let reference = rendered
+            .reference
+            .as_ref()
+            .unwrap_or_else(|err| panic!("{} reference PNG should decode: {err}", sample.name));
+        let rgba = rendered.rgba.as_ref().unwrap_or_else(|err| {
+            panic!("{} should render through RGBA target: {err}", sample.name)
+        });
+        let diff = pixel_diff(rgba, reference);
+
+        if KNOWN_INCOMPLETE_RGBA_ROWS.contains(&sample.name) {
+            if diff.mismatched_pixels == 0 {
+                completed_known_incomplete.push(sample.name);
+            }
+        } else if diff.mismatched_pixels > 0 {
+            unexpected_mismatches.push((sample.name, diff));
+        }
+    }
 
     assert!(
-        diff.mismatched_pixels > 0,
-        "{} now matches reference.png exactly; replace this not-done guard with an exact-match assertion",
-        sample.name
+        completed_known_incomplete.is_empty(),
+        "these rows now match reference.png exactly; remove them from KNOWN_INCOMPLETE_RGBA_ROWS:\n{}",
+        completed_known_incomplete.join("\n")
+    );
+    assert!(
+        unexpected_mismatches.is_empty(),
+        "these SVG Test rows do not match reference.png exactly and must either be fixed or added to KNOWN_INCOMPLETE_RGBA_ROWS:\n{}",
+        unexpected_mismatches
+            .iter()
+            .map(|(name, diff)| format!(
+                "{name} ({} mismatched pixels, max delta {})",
+                diff.mismatched_pixels, diff.max_delta
+            ))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
+const KNOWN_INCOMPLETE_RGBA_ROWS: &[&str] = &[
+    // Every current SVG Test row is a progress row, not an exact-match
+    // completion row. When a row becomes pixel-accurate, remove it from
+    // this list; the classifier above will then require exact equality.
+    "shapes/rect/simple-case.svg",
+    "shapes/circle/simple-case.svg",
+    "shapes/ellipse/simple-case.svg",
+    "shapes/line/simple-case.svg",
+    "shapes/line/with-transform.svg",
+    "shapes/polygon/simple-case.svg",
+    "shapes/polyline/simple-case.svg",
+    "shapes/path/M-L-L-Z.svg",
+    "shapes/path/M-C.svg",
+    "shapes/path/M-C-S.svg",
+    "shapes/path/M-Q.svg",
+    "shapes/path/M-Q-T.svg",
+    "shapes/path/M-A.svg",
+    "shapes/path/M-L-Z-A.svg",
+    "painting/fill/named-color.svg",
+    "painting/fill/currentColor.svg",
+    "painting/fill/rgb-color.svg",
+    "painting/fill/hsl-with-alpha.svg",
+    "painting/fill/linear-gradient-on-shape.svg",
+    "painting/fill/radial-gradient-on-shape.svg",
+    "painting/fill-rule/nonzero.svg",
+    "painting/fill-rule/evenodd.svg",
+    "painting/opacity/50percent.svg",
+    "painting/opacity/group-opacity.svg",
+    "painting/opacity/mixed-group-opacity.svg",
+    "painting/stroke/line-as-curve-1.svg",
+    "painting/stroke/line-as-curve-2.svg",
+    "painting/stroke/linear-gradient.svg",
+    "painting/stroke/radial-gradient.svg",
+    "paint-servers/linearGradient/gradientUnits=userSpaceOnUse.svg",
+    "paint-servers/linearGradient/gradientUnits=objectBoundingBox-with-percent.svg",
+    "paint-servers/linearGradient/gradientTransform.svg",
+    "paint-servers/linearGradient/gradientTransform-and-transform.svg",
+    "paint-servers/linearGradient/spreadMethod=reflect.svg",
+    "paint-servers/linearGradient/spreadMethod=repeat.svg",
+    "paint-servers/linearGradient/many-stops.svg",
+    "paint-servers/linearGradient/single-stop-with-opacity-used-by-stroke.svg",
+    "paint-servers/radialGradient/gradientUnits=userSpaceOnUse.svg",
+    "paint-servers/radialGradient/gradientUnits=objectBoundingBox-with-percent.svg",
+    "paint-servers/radialGradient/gradientTransform.svg",
+    "paint-servers/radialGradient/focal-point-correction.svg",
+    "paint-servers/radialGradient/spreadMethod=reflect.svg",
+    "paint-servers/radialGradient/spreadMethod=repeat.svg",
+    "paint-servers/radialGradient/many-stops.svg",
+    "paint-servers/pattern/simple-case.svg",
+    "paint-servers/pattern/patternUnits=userSpaceOnUse-with-percent.svg",
+    "paint-servers/pattern/patternContentUnits-with-viewBox.svg",
+    "paint-servers/pattern/transform-and-patternTransform.svg",
+    "structure/image/embedded-png.svg",
+    "structure/image/embedded-jpeg-as-image-jpeg.svg",
+    "structure/image/embedded-gif.svg",
+    "structure/image/embedded-svg.svg",
+    "structure/image/preserveAspectRatio=none.svg",
+    "structure/image/raster-image-and-size-with-odd-numbers.svg",
+    "text/text/simple-case.svg",
+    "text/tspan/sequential.svg",
+    "text/text-anchor/middle-on-text.svg",
+    "text/text-decoration/underline.svg",
+];
+
 struct PixelDiff {
     mismatched_pixels: usize,
+    max_delta: u8,
 }
 
 fn pixel_diff(a: &[u8], b: &[u8]) -> PixelDiff {
-    let mismatched_pixels = a
-        .chunks_exact(4)
-        .zip(b.chunks_exact(4))
-        .filter(|(a, b)| a != b)
-        .count()
-        + usize::from(a.len() != b.len());
-    PixelDiff { mismatched_pixels }
+    let mut mismatched_pixels = usize::from(a.len() != b.len());
+    let mut max_delta = 0_u8;
+    for (a, b) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+        let pixel_delta = a
+            .iter()
+            .zip(b.iter())
+            .map(|(&a, &b)| a.abs_diff(b))
+            .max()
+            .unwrap_or(0);
+        if pixel_delta > 0 {
+            mismatched_pixels += 1;
+            max_delta = max_delta.max(pixel_delta);
+        }
+    }
+    PixelDiff {
+        mismatched_pixels,
+        max_delta,
+    }
 }
 
 fn assert_property(props: &[(&'static str, String)], name: &str, expected: &str) {
