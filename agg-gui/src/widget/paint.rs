@@ -1,5 +1,17 @@
 use super::*;
 
+std::thread_local! {
+    static PAINT_CLIP_STACK: std::cell::RefCell<Vec<Rect>> =
+        std::cell::RefCell::new(Vec::new());
+}
+
+/// Current visible paint clip in root coordinates, if painting is inside a
+/// clipped subtree. Widgets can use this to avoid starting expensive work for
+/// content that traversal visits but the active clip will discard.
+pub fn current_paint_clip() -> Option<Rect> {
+    PAINT_CLIP_STACK.with(|stack| stack.borrow().last().copied())
+}
+
 // ---------------------------------------------------------------------------
 // Tree traversal helpers (free functions operating on &mut dyn Widget)
 // ---------------------------------------------------------------------------
@@ -220,6 +232,16 @@ fn paint_subtree_direct_inner(
         .unwrap_or((0.0, 0.0, b.width, b.height));
     ctx.save();
     ctx.clip_rect(cx, cy, cw, ch);
+    let clip = root_rect_from_local(ctx, cx, cy, cw, ch);
+    PAINT_CLIP_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        let clipped = if let Some(prev) = stack.last().copied() {
+            intersect_rects(prev, clip).unwrap_or_else(|| Rect::new(0.0, 0.0, 0.0, 0.0))
+        } else {
+            clip
+        };
+        stack.push(clipped);
+    });
 
     let n = widget.children().len();
     for i in 0..n {
@@ -236,6 +258,9 @@ fn paint_subtree_direct_inner(
         ctx.restore();
     }
 
+    PAINT_CLIP_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
     ctx.restore(); // lifts the children clip before paint_overlay
     if include_overlay {
         widget.paint_overlay(ctx);
@@ -245,6 +270,38 @@ fn paint_subtree_direct_inner(
     if snap_this {
         ctx.restore();
     }
+}
+
+fn root_rect_from_local(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) -> Rect {
+    let mut points = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)];
+    let transform = ctx.root_transform();
+    for (px, py) in &mut points {
+        transform.transform(px, py);
+    }
+    let min_x = points.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = points
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = points.iter().map(|(_, y)| *y).fold(f64::INFINITY, f64::min);
+    let max_y = points
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(f64::NEG_INFINITY, f64::max);
+    Rect::new(
+        min_x,
+        min_y,
+        (max_x - min_x).max(0.0),
+        (max_y - min_y).max(0.0),
+    )
+}
+
+fn intersect_rects(a: Rect, b: Rect) -> Option<Rect> {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = (a.x + a.width).min(b.x + b.width);
+    let y1 = (a.y + a.height).min(b.y + b.height);
+    (x1 >= x0 && y1 >= y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
 }
 
 /// Backbuffered paint: re-raster through AGG if dirty, blit the cached

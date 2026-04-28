@@ -114,8 +114,7 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
     let readme = include_str!("../../README.md");
 
     // Base directory for resolving relative image paths (agg-gui workspace root).
-    // On native targets we can load files at runtime; on WASM this will always
-    // return None (files not accessible), showing placeholder boxes instead.
+    // HTTP(S) images are resolved asynchronously by MarkdownView itself.
     let base_dir = {
         // CARGO_MANIFEST_DIR is set at compile time for demo-ui; its parent is agg-gui/.
         let manifest = env!("CARGO_MANIFEST_DIR");
@@ -128,10 +127,10 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
     let md_view = MarkdownView::new(readme, Arc::clone(&font))
         .with_font_size(13.0)
         .with_padding(12.0)
+        .on_link_click(crate::url::open_url)
         .with_image_provider(move |url| {
             // Only handle relative paths / local file URLs on native.
             let path = if url.starts_with("http://") || url.starts_with("https://") {
-                // Remote URL — not supported at runtime; return None for placeholder.
                 return None;
             } else {
                 base_dir.join(url)
@@ -139,7 +138,7 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
             load_png(&path)
         });
 
-    Box::new(ScrollView::new(Box::new(md_view)))
+    Box::new(ScrollView::new(Box::new(md_view)).horizontal(true))
 }
 
 // ---------------------------------------------------------------------------

@@ -27,17 +27,20 @@
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
 //! - Links (coloured text, URL is not opened — add `on_link_click` if needed)
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
-
-use crate::color::Color;
+use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult};
-use crate::geometry::{Rect, Size};
+use crate::event::{Event, EventResult, MouseButton};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::{measure_text_metrics, Font};
+use crate::text::Font;
 use crate::widget::Widget;
+
+mod image_loader;
+mod layout;
+mod paint;
+mod parse;
 
 // ── Styled line representation ─────────────────────────────────────────────────
 
@@ -76,8 +79,23 @@ enum LayoutItem {
         runs: Vec<LineRun>,
         style: LineStyle,
         indent: f64,
+        quote: bool,
         y: f64,
         height: f64,
+    },
+    Table {
+        rows: Vec<Vec<String>>,
+        y: f64,
+        height: f64,
+        row_h: f64,
+        col_widths: Vec<f64>,
+    },
+    CodeBlock {
+        lines: Vec<String>,
+        y: f64,
+        height: f64,
+        line_h: f64,
+        width: f64,
     },
 }
 
@@ -85,10 +103,14 @@ enum LayoutItem {
 enum LineRun {
     Text {
         text: String,
+        link: Option<String>,
+        code: bool,
         x: f64,
+        width: f64,
     },
     Image {
         alt: String,
+        link: Option<String>,
         cache_idx: usize,
         x: f64,
         y_offset: f64,
@@ -101,8 +123,16 @@ enum LineRun {
 
 #[derive(Clone)]
 enum InlineItem {
-    Text(String),
-    Image { url: String, alt: String },
+    Text {
+        text: String,
+        link: Option<String>,
+        code: bool,
+    },
+    Image {
+        url: String,
+        alt: String,
+        link: Option<String>,
+    },
 }
 
 enum ParagraphItem {
@@ -110,7 +140,10 @@ enum ParagraphItem {
         items: Vec<InlineItem>,
         style: LineStyle,
         indent: f64,
+        quote: bool,
     },
+    Table(Vec<Vec<String>>),
+    CodeBlock(Vec<String>),
     Spacer,
     Rule,
 }
@@ -119,8 +152,21 @@ enum ParagraphItem {
 
 struct ImageEntry {
     url: String,
-    /// `None` = provider returned nothing, `Some(...)` = decoded image.
-    data: Option<(Vec<u8>, u32, u32)>,
+    state: Arc<Mutex<ImageState>>,
+}
+
+#[derive(Clone)]
+struct ImagePixels {
+    data: Arc<Vec<u8>>,
+    width: u32,
+    height: u32,
+}
+
+enum ImageState {
+    RemotePending,
+    Loading,
+    Ready { image: ImagePixels, seen: bool },
+    Failed,
 }
 
 // ── MarkdownView widget ────────────────────────────────────────────────────────
@@ -148,6 +194,7 @@ pub struct MarkdownView {
     items: Vec<LayoutItem>,
     /// Total content height from the last layout pass.
     content_h: f64,
+    on_link_click: Option<Box<dyn FnMut(&str)>>,
 }
 
 impl MarkdownView {
@@ -164,6 +211,7 @@ impl MarkdownView {
             image_cache: Vec::new(),
             items: Vec::new(),
             content_h: 0.0,
+            on_link_click: None,
         }
     }
 
@@ -195,6 +243,11 @@ impl MarkdownView {
         self
     }
 
+    pub fn on_link_click(mut self, cb: impl FnMut(&str) + 'static) -> Self {
+        self.on_link_click = Some(Box::new(cb));
+        self
+    }
+
     pub fn with_margin(mut self, m: Insets) -> Self {
         self.base.margin = m;
         self
@@ -208,262 +261,6 @@ impl MarkdownView {
         self
     }
 
-    // ── Markdown → paragraph items ────────────────────────────────────────────
-
-    fn parse_paragraphs(&self) -> Vec<ParagraphItem> {
-        let mut out = Vec::new();
-        let opts =
-            Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
-        let parser = Parser::new_ext(&self.markdown, opts);
-
-        let mut cur_items = Vec::new();
-        let mut cur_text = String::new();
-        let mut cur_style = LineStyle::Body;
-        let mut cur_indent = 0.0_f64;
-        let mut list_depth = 0u32;
-        let mut list_ordinal: Vec<u64> = Vec::new();
-        let mut in_image: Option<String> = None;
-
-        fn flush_text(items: &mut Vec<InlineItem>, text: &mut String) {
-            let t = text.trim().to_string();
-            if !t.is_empty() {
-                items.push(InlineItem::Text(t));
-            }
-            text.clear();
-        }
-        fn flush_flow(
-            out: &mut Vec<ParagraphItem>,
-            items: &mut Vec<InlineItem>,
-            text: &mut String,
-            style: LineStyle,
-            indent: f64,
-        ) {
-            flush_text(items, text);
-            if !items.is_empty() {
-                out.push(ParagraphItem::Flow {
-                    items: std::mem::take(items),
-                    style,
-                    indent,
-                });
-            }
-        }
-        fn add_spacer(out: &mut Vec<ParagraphItem>) {
-            if !matches!(out.last(), Some(ParagraphItem::Spacer)) {
-                out.push(ParagraphItem::Spacer);
-            }
-        }
-        fn append_text(text: &mut String, value: &str) {
-            if !text.is_empty() && !text.ends_with(' ') && !text.ends_with('\n') {
-                text.push(' ');
-            }
-            text.push_str(value.trim_start());
-        }
-
-        for ev in parser {
-            match ev {
-                MdEvent::Start(Tag::Image { dest_url, .. }) => {
-                    flush_text(&mut cur_items, &mut cur_text);
-                    in_image = Some(dest_url.to_string());
-                }
-                MdEvent::End(TagEnd::Image) => {
-                    if let Some(url) = in_image.take() {
-                        let alt = cur_text.trim().to_string();
-                        cur_text.clear();
-                        cur_items.push(InlineItem::Image { url, alt });
-                    }
-                }
-                MdEvent::Text(t) if in_image.is_some() => cur_text.push_str(&t),
-                MdEvent::Start(Tag::Heading { level, .. }) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    cur_style = match level as u8 {
-                        1 => LineStyle::H1,
-                        2 => LineStyle::H2,
-                        3 => LineStyle::H3,
-                        _ => LineStyle::H4,
-                    };
-                    cur_indent = 0.0;
-                }
-                MdEvent::End(TagEnd::Heading(_)) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    add_spacer(&mut out);
-                    cur_style = LineStyle::Body;
-                    cur_indent = 0.0;
-                }
-                MdEvent::Start(Tag::Paragraph) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                }
-                MdEvent::End(TagEnd::Paragraph) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    add_spacer(&mut out);
-                }
-                MdEvent::Start(Tag::List(first)) => {
-                    list_depth += 1;
-                    list_ordinal.push(first.unwrap_or(1));
-                    cur_indent = list_depth as f64 * 16.0;
-                }
-                MdEvent::End(TagEnd::List(_)) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    list_depth = list_depth.saturating_sub(1);
-                    list_ordinal.pop();
-                    cur_indent = list_depth as f64 * 16.0;
-                    if list_depth == 0 {
-                        add_spacer(&mut out);
-                    }
-                }
-                MdEvent::Start(Tag::Item) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    if let Some(n) = list_ordinal.last_mut() {
-                        cur_text = format!("{}. ", n);
-                        *n += 1;
-                    } else {
-                        cur_text = "• ".to_string();
-                    }
-                }
-                MdEvent::End(TagEnd::Item) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                }
-                MdEvent::Start(Tag::CodeBlock(_)) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    cur_style = LineStyle::Code;
-                }
-                MdEvent::End(TagEnd::CodeBlock) => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    add_spacer(&mut out);
-                    cur_style = LineStyle::Body;
-                }
-                MdEvent::Rule => {
-                    flush_flow(
-                        &mut out,
-                        &mut cur_items,
-                        &mut cur_text,
-                        cur_style,
-                        cur_indent,
-                    );
-                    out.push(ParagraphItem::Rule);
-                }
-                MdEvent::Text(t) => append_text(&mut cur_text, &t),
-                MdEvent::Code(t) => append_text(&mut cur_text, &format!("`{t}`")),
-                MdEvent::SoftBreak | MdEvent::HardBreak => cur_text.push(' '),
-                MdEvent::Start(Tag::Link { .. }) | MdEvent::End(TagEnd::Link) => {}
-                _ => {}
-            }
-        }
-        flush_flow(
-            &mut out,
-            &mut cur_items,
-            &mut cur_text,
-            cur_style,
-            cur_indent,
-        );
-        out
-    }
-
-    // ── Word-wrapping ─────────────────────────────────────────────────────────
-
-    fn text_width(&self, text: &str, style: LineStyle) -> f64 {
-        let font_size = style.font_size(self.font_size);
-        measure_text_metrics(&self.active_font(), text, font_size).width
-    }
-
-    fn inline_image_size(&self, cache_idx: usize, alt: &str, max_w: f64) -> (f64, f64) {
-        if let Some((_, iw, ih)) = self.image_cache[cache_idx].data.as_ref() {
-            let scale = (max_w / *iw as f64).min(1.0);
-            (*iw as f64 * scale, *ih as f64 * scale)
-        } else {
-            let label = if alt.is_empty() { "image" } else { alt };
-            let w = self.text_width(label, LineStyle::Body) + 16.0;
-            (w.min(max_w), self.font_size * 1.45)
-        }
-    }
-
-    fn push_text_run(runs: &mut Vec<LineRun>, text: String, x: f64) {
-        if let Some(LineRun::Text { text: last, .. }) = runs.last_mut() {
-            last.push_str(&text);
-        } else {
-            runs.push(LineRun::Text { text, x });
-        }
-    }
-
-    fn push_line(
-        items: &mut Vec<LayoutItem>,
-        runs: &mut Vec<LineRun>,
-        style: LineStyle,
-        indent: f64,
-        height: f64,
-    ) {
-        for run in runs.iter_mut() {
-            if let LineRun::Image {
-                y_offset,
-                height: image_h,
-                ..
-            } = run
-            {
-                *y_offset = (height - *image_h).max(0.0) * 0.5;
-            }
-        }
-        items.push(LayoutItem::Line {
-            runs: std::mem::take(runs),
-            style,
-            indent,
-            y: 0.0,
-            height,
-        });
-    }
-
     // ── Image cache management ────────────────────────────────────────────────
 
     /// Return the cache index for `url`, loading it via the provider if not yet cached.
@@ -472,15 +269,116 @@ impl MarkdownView {
         if let Some(idx) = self.image_cache.iter().position(|e| e.url == url) {
             return idx;
         }
-        // Load via provider.
-        let data = self.image_provider.as_ref().and_then(|p| p(url));
+
+        let state = Arc::new(Mutex::new(
+            if let Some((data, width, height)) = self.image_provider.as_ref().and_then(|p| p(url)) {
+                ImageState::Ready {
+                    image: ImagePixels {
+                        data: Arc::new(data),
+                        width,
+                        height,
+                    },
+                    seen: false,
+                }
+            } else if is_remote_url(url) {
+                ImageState::RemotePending
+            } else {
+                ImageState::Failed
+            },
+        ));
+
         let idx = self.image_cache.len();
         self.image_cache.push(ImageEntry {
             url: url.to_string(),
-            data,
+            state,
         });
         idx
     }
+
+    fn link_at(&self, pos: Point) -> Option<&str> {
+        let pad = self.padding;
+        for item in &self.items {
+            if let LayoutItem::Line {
+                runs,
+                indent,
+                y,
+                height,
+                ..
+            } = item
+            {
+                let tx = pad + indent;
+                for run in runs {
+                    match run {
+                        LineRun::Text {
+                            link: Some(url),
+                            x,
+                            width,
+                            ..
+                        } => {
+                            if point_in_rect(pos, tx + x, *y, *width, *height) {
+                                return Some(url);
+                            }
+                        }
+                        LineRun::Image {
+                            link: Some(url),
+                            x,
+                            y_offset,
+                            width,
+                            height,
+                            ..
+                        } => {
+                            if point_in_rect(pos, tx + x, y + y_offset, *width, *height) {
+                                return Some(url);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+fn point_in_rect(pos: Point, x: f64, y: f64, w: f64, h: f64) -> bool {
+    pos.x >= x && pos.x <= x + w && pos.y >= y && pos.y <= y + h
+}
+
+fn is_rect_visible_in_root(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) -> bool {
+    let mut points = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)];
+    let transform = ctx.root_transform();
+    for (px, py) in &mut points {
+        transform.transform(px, py);
+    }
+    let min_x = points.iter().map(|(x, _)| *x).fold(f64::INFINITY, f64::min);
+    let max_x = points
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = points.iter().map(|(_, y)| *y).fold(f64::INFINITY, f64::min);
+    let max_y = points
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let viewport = crate::widget::current_viewport();
+    let root_visible =
+        max_x >= 0.0 && min_x <= viewport.width && max_y >= 0.0 && min_y <= viewport.height;
+    if !root_visible {
+        return false;
+    }
+
+    if let Some(clip) = crate::widget::current_paint_clip() {
+        max_x >= clip.x
+            && min_x <= clip.x + clip.width
+            && max_y >= clip.y
+            && min_y <= clip.y + clip.height
+    } else {
+        true
+    }
+}
+
+fn is_remote_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
 }
 
 impl Widget for MarkdownView {
@@ -511,237 +409,60 @@ impl Widget for MarkdownView {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let pad = self.padding;
-        let max_w = (available.width - pad * 2.0).max(1.0);
-
-        let paragraphs = self.parse_paragraphs();
-        let mut laid_out = Vec::new();
-
-        for item in &paragraphs {
-            match item {
-                ParagraphItem::Rule => laid_out.push(LayoutItem::Line {
-                    runs: Vec::new(),
-                    style: LineStyle::Rule,
-                    indent: 0.0,
-                    y: 0.0,
-                    height: 8.0,
-                }),
-                ParagraphItem::Spacer => {
-                    let metrics = measure_text_metrics(&self.active_font(), "", self.font_size);
-                    laid_out.push(LayoutItem::Line {
-                        runs: Vec::new(),
-                        style: LineStyle::Body,
-                        indent: 0.0,
-                        y: 0.0,
-                        height: metrics.line_height * 0.65,
-                    });
-                }
-                ParagraphItem::Flow {
-                    items,
-                    style,
-                    indent,
-                } => {
-                    let font_size = style.font_size(self.font_size);
-                    let metrics = measure_text_metrics(&self.active_font(), "", font_size);
-                    let line_h = metrics.line_height * 1.3;
-                    let avail = (max_w - indent).max(1.0);
-                    let mut runs = Vec::new();
-                    let mut used = 0.0;
-                    let mut row_h = line_h;
-                    for inline in items {
-                        match inline {
-                            InlineItem::Text(text) => {
-                                for word in text.split_whitespace() {
-                                    let mut value = word.to_string();
-                                    if used > 0.0 {
-                                        value.insert(0, ' ');
-                                    }
-                                    let mut w = self.text_width(&value, *style);
-                                    if used > 0.0 && used + w > avail {
-                                        Self::push_line(
-                                            &mut laid_out,
-                                            &mut runs,
-                                            *style,
-                                            *indent,
-                                            row_h,
-                                        );
-                                        used = 0.0;
-                                        row_h = line_h;
-                                        value = word.to_string();
-                                        w = self.text_width(&value, *style);
-                                    }
-                                    Self::push_text_run(&mut runs, value, used);
-                                    used += w;
-                                }
-                            }
-                            InlineItem::Image { url, alt } => {
-                                let cache_idx = self.get_or_load_image(url);
-                                let (iw, ih) = self.inline_image_size(cache_idx, alt, avail);
-                                if used > 0.0 && used + iw > avail {
-                                    Self::push_line(
-                                        &mut laid_out,
-                                        &mut runs,
-                                        *style,
-                                        *indent,
-                                        row_h,
-                                    );
-                                    used = 0.0;
-                                    row_h = line_h;
-                                }
-                                runs.push(LineRun::Image {
-                                    alt: alt.clone(),
-                                    cache_idx,
-                                    x: used,
-                                    y_offset: (row_h - ih).max(0.0) * 0.5,
-                                    width: iw,
-                                    height: ih,
-                                });
-                                used += iw + 4.0;
-                                row_h = row_h.max(ih);
-                            }
-                        }
-                    }
-                    if !runs.is_empty() {
-                        Self::push_line(&mut laid_out, &mut runs, *style, *indent, row_h);
-                    }
-                }
-            }
-        }
-
-        // Assign Y positions (Y-up: cursor starts at top and decrements).
-        let total_h: f64 = laid_out
-            .iter()
-            .map(|item| match item {
-                LayoutItem::Line { height, .. } => *height,
-            })
-            .sum::<f64>()
-            + pad * 2.0;
-        let mut y = total_h - pad;
-
-        self.items.clear();
-        for mut item in laid_out {
-            let item_h = match &item {
-                LayoutItem::Line { height, .. } => *height,
-            };
-            y -= item_h;
-            match &mut item {
-                LayoutItem::Line { y: item_y, .. } => *item_y = y,
-            }
-            self.items.push(item);
-        }
-
-        self.content_h = total_h;
-        self.bounds = Rect::new(0.0, 0.0, available.width, total_h);
-        Size::new(available.width, total_h)
+        self.layout_markdown(available)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let pad = self.padding;
-        let w = self.bounds.width;
-        let font = self.active_font();
-        ctx.set_font(Arc::clone(&font));
-
-        for item in &self.items {
-            match item {
-                LayoutItem::Line {
-                    runs,
-                    style,
-                    indent,
-                    y,
-                    height,
-                } => {
-                    let fs = style.font_size(self.font_size);
-                    ctx.set_font_size(fs);
-
-                    let tx = pad + indent;
-                    let ty = y + height * 0.5;
-                    let metrics = measure_text_metrics(&font, "", fs);
-                    let text_y = ty - (metrics.ascent - metrics.descent) * 0.5;
-
-                    match style {
-                        LineStyle::Rule => {
-                            ctx.set_fill_color(v.separator);
-                            ctx.begin_path();
-                            ctx.rect(pad, ty, w - pad * 2.0, 1.0);
-                            ctx.fill();
-                        }
-                        LineStyle::Code => {
-                            ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.15));
-                            ctx.begin_path();
-                            ctx.rounded_rect(pad, *y, w - pad * 2.0, *height, 3.0);
-                            ctx.fill();
-                            ctx.set_fill_color(v.accent);
-                            for run in runs {
-                                if let LineRun::Text { text, x } = run {
-                                    ctx.fill_text(text, tx + x + 4.0, text_y);
-                                }
-                            }
-                        }
-                        _ => {
-                            ctx.set_fill_color(v.text_color);
-                            for run in runs {
-                                match run {
-                                    LineRun::Text { text, x } => {
-                                        ctx.fill_text(text, tx + x, text_y)
-                                    }
-                                    LineRun::Image {
-                                        alt,
-                                        cache_idx,
-                                        x,
-                                        y_offset,
-                                        width,
-                                        height,
-                                    } => {
-                                        let rx = tx + x;
-                                        let ry = y + y_offset;
-                                        if let Some(entry) = self.image_cache.get(*cache_idx) {
-                                            if let Some((data, iw, ih)) = &entry.data {
-                                                ctx.draw_image_rgba(
-                                                    data.as_slice(),
-                                                    *iw,
-                                                    *ih,
-                                                    rx,
-                                                    ry,
-                                                    *width,
-                                                    *height,
-                                                );
-                                            } else {
-                                                ctx.set_fill_color(Color::rgba(
-                                                    0.5, 0.5, 0.5, 0.15,
-                                                ));
-                                                ctx.begin_path();
-                                                ctx.rounded_rect(rx, ry, *width, *height, 3.0);
-                                                ctx.fill();
-                                                ctx.set_fill_color(v.text_dim);
-                                                ctx.set_font_size(self.font_size * 0.85);
-                                                let label = if alt.is_empty() {
-                                                    "image".to_string()
-                                                } else {
-                                                    alt.clone()
-                                                };
-                                                ctx.fill_text(&label, rx + 8.0, ry + height * 0.5);
-                                                ctx.set_font_size(fs);
-                                                ctx.set_fill_color(v.text_color);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if matches!(style, LineStyle::H1 | LineStyle::H2) && !runs.is_empty() {
-                        ctx.set_fill_color(v.separator);
-                        ctx.begin_path();
-                        ctx.rect(pad, *y, w - pad * 2.0, 1.0);
-                        ctx.fill();
-                    }
-                }
-            }
-        }
+        self.paint_markdown(ctx);
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
+    fn needs_draw(&self) -> bool {
+        if !self.is_visible() {
+            return false;
+        }
+        self.image_cache.iter().any(|entry| {
+            entry
+                .state
+                .lock()
+                .map(|state| {
+                    matches!(
+                        *state,
+                        ImageState::Loading | ImageState::Ready { seen: false, .. }
+                    )
+                })
+                .unwrap_or(false)
+        }) || self.children().iter().any(|c| c.needs_draw())
+    }
+
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        match event {
+            Event::MouseMove { pos } => {
+                if self.link_at(*pos).is_some() {
+                    set_cursor_icon(CursorIcon::PointingHand);
+                }
+                EventResult::Ignored
+            }
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } if self.link_at(*pos).is_some() => EventResult::Consumed,
+            Event::MouseUp {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let url = self.link_at(*pos).map(str::to_string);
+                if let Some(url) = url {
+                    if let Some(cb) = self.on_link_click.as_mut() {
+                        cb(&url);
+                    }
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+            _ => EventResult::Ignored,
+        }
     }
 }

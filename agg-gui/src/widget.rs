@@ -691,7 +691,7 @@ mod paint;
 mod tree;
 
 pub use app::App;
-pub use paint::{paint_global_overlays, paint_subtree};
+pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
 pub use tree::{
     active_modal_path, collect_inspector_nodes, current_mouse_world, current_viewport,
     dispatch_event, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type,

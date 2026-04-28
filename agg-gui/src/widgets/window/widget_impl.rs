@@ -187,6 +187,11 @@ impl Widget for Window {
             && local_pos.y <= b.height
     }
 
+    fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
+        self.requested_visible()
+            && (self.drag_mode != DragMode::None || self.resize_dir(local_pos).is_some())
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         // Rising-edge visibility detection → request parent raise.  The
         // sidebar toggles `visible_cell`; we observe the transition here
