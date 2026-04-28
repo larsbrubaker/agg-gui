@@ -405,13 +405,29 @@ impl Widget for Window {
             ctx.fill();
         }
 
-        ctx.set_layer_rounded_clip(0.0, 0.0, w, h, CORNER_R);
+        self.foreground_layer_active.set(false);
+        if ctx.supports_compositing_layers() {
+            ctx.push_layer(w, h);
+            self.foreground_layer_active.set(true);
+        }
 
-        // Window body.
-        ctx.set_fill_color(v.window_fill);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
-        ctx.fill();
+        // Window body. Expanded windows leave the top strip to `WindowTitleBar`
+        // so the top corner alpha comes from one shape, not overlapping fills.
+        let content_h = (h - TITLE_H).max(0.0);
+        if content_h > 0.0 {
+            ctx.set_fill_color(v.window_fill);
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, 0.0, w, content_h, CORNER_R);
+            ctx.rect(
+                0.0,
+                (content_h - CORNER_R).max(0.0),
+                w,
+                CORNER_R.min(content_h),
+            );
+            ctx.fill();
+        }
+
+        ctx.set_layer_rounded_clip(0.0, 0.0, w, h, CORNER_R);
 
         // Sync the title-bar sub-widget's display state for this frame
         // and paint it.  Positioning was done in `layout`; we just need
@@ -544,6 +560,12 @@ impl Widget for Window {
             ctx.move_to(w, cr);
             ctx.line_to(w, h - cr);
             ctx.stroke();
+        }
+    }
+
+    fn finish_paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if self.foreground_layer_active.replace(false) {
+            ctx.pop_layer();
         }
     }
 

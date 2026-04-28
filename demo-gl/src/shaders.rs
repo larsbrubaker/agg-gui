@@ -61,9 +61,9 @@ pub(crate) const TEX_FRAG: &str = "#version 300 es\nprecision mediump float;\nin
 pub(crate) const TEX_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;out vec4 frag_color;void main(){frag_color=texture(u_tex,v_uv);}";
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) const LAYER_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_tex;uniform float u_alpha;out vec4 frag_color;void main(){vec4 c=texture(u_tex,v_uv);frag_color=vec4(c.rgb*u_alpha,c.a*u_alpha);}";
+pub(crate) const LAYER_FRAG: &str = "#version 300 es\nprecision mediump float;\nin vec2 v_uv;uniform sampler2D u_tex;uniform float u_alpha;uniform vec2 u_layer_size;uniform vec4 u_mask_rect;uniform float u_mask_radius;uniform int u_mask_enabled;out vec4 frag_color;float rounded_mask(vec2 p){vec2 half_size=u_mask_rect.zw*0.5;float r=min(u_mask_radius,min(half_size.x,half_size.y));vec2 center=u_mask_rect.xy+half_size;vec2 q=abs(p-center)-max(half_size-vec2(r),vec2(0.0));float dist=length(max(q,vec2(0.0)))+min(max(q.x,q.y),0.0)-r;return clamp(0.5-dist,0.0,1.0);}void main(){vec4 c=texture(u_tex,v_uv);float mask=(u_mask_enabled==0)?1.0:rounded_mask(v_uv*u_layer_size);float a=u_alpha*mask;frag_color=vec4(c.rgb*a,c.a*a);}";
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) const LAYER_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;uniform float u_alpha;out vec4 frag_color;void main(){vec4 c=texture(u_tex,v_uv);frag_color=vec4(c.rgb*u_alpha,c.a*u_alpha);}";
+pub(crate) const LAYER_FRAG: &str = "#version 330 core\nin vec2 v_uv;uniform sampler2D u_tex;uniform float u_alpha;uniform vec2 u_layer_size;uniform vec4 u_mask_rect;uniform float u_mask_radius;uniform int u_mask_enabled;out vec4 frag_color;float rounded_mask(vec2 p){vec2 half_size=u_mask_rect.zw*0.5;float r=min(u_mask_radius,min(half_size.x,half_size.y));vec2 center=u_mask_rect.xy+half_size;vec2 q=abs(p-center)-max(half_size-vec2(r),vec2(0.0));float dist=length(max(q,vec2(0.0)))+min(max(q.x,q.y),0.0)-r;return clamp(0.5-dist,0.0,1.0);}void main(){vec4 c=texture(u_tex,v_uv);float mask=(u_mask_enabled==0)?1.0:rounded_mask(v_uv*u_layer_size);float a=u_alpha*mask;frag_color=vec4(c.rgb*a,c.a*a);}";
 
 // ---------------------------------------------------------------------------
 // LCD subpixel compositing pipeline

@@ -140,7 +140,8 @@ impl Widget for WindowTitleBar {
         if st.collapsed {
             ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
         } else {
-            ctx.rect(0.0, 0.0, w, h);
+            ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
+            ctx.rect(0.0, 0.0, w, CORNER_R.min(h));
         }
         ctx.fill();
 

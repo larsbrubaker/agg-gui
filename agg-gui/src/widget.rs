@@ -518,6 +518,13 @@ pub trait Widget {
     /// be occluded by child content.
     fn paint_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
 
+    /// Called after `paint`, child painting, and optional overlay painting.
+    ///
+    /// Most widgets do not need this. It exists for widgets that intentionally
+    /// open a backend compositing scope in `paint` and must close it after all
+    /// descendants have rendered into that scope.
+    fn finish_paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+
     /// Paint app-level overlays after the entire widget tree has been painted.
     ///
     /// The traversal preserves this widget's local transform but skips ancestor

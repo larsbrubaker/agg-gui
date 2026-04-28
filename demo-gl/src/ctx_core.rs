@@ -61,6 +61,10 @@ impl GlGfxCtx {
         let layer_res_loc = gl.get_uniform_location(layer_prog, "u_resolution");
         let layer_sampler_loc = gl.get_uniform_location(layer_prog, "u_tex");
         let layer_alpha_loc = gl.get_uniform_location(layer_prog, "u_alpha");
+        let layer_size_loc = gl.get_uniform_location(layer_prog, "u_layer_size");
+        let layer_mask_rect_loc = gl.get_uniform_location(layer_prog, "u_mask_rect");
+        let layer_mask_radius_loc = gl.get_uniform_location(layer_prog, "u_mask_radius");
+        let layer_mask_enabled_loc = gl.get_uniform_location(layer_prog, "u_mask_enabled");
 
         let tex_vao = gl.create_vertex_array().expect("create tex VAO");
         let tex_vbo = gl.create_buffer().expect("create tex VBO");
@@ -129,6 +133,10 @@ impl GlGfxCtx {
             layer_res_loc,
             layer_sampler_loc,
             layer_alpha_loc,
+            layer_size_loc,
+            layer_mask_rect_loc,
+            layer_mask_radius_loc,
+            layer_mask_enabled_loc,
             lcd_prog,
             lcd_vao,
             lcd_vbo,

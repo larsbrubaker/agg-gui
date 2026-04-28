@@ -44,7 +44,7 @@ use std::cell::Cell;
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::event::{Event, EventResult};
 use agg_gui::widget::Widget;
-use agg_gui::{GlPaint, Rect, Size};
+use agg_gui::{GlPaint, Rect, Size, TransAffine};
 use glow::HasContext;
 
 // ---------------------------------------------------------------------------
@@ -92,6 +92,32 @@ impl GlCubeWidget {
     }
 }
 
+fn transformed_widget_rect(t: &TransAffine, width: f64, height: f64) -> Rect {
+    let corners = [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)];
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for (mut x, mut y) in corners {
+        t.transform(&mut x, &mut y);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+
+    Rect::new(min_x, min_y, max_x - min_x, max_y - min_y)
+}
+
+fn gl_pixel_rect(rect: Rect) -> [i32; 4] {
+    let x0 = rect.x.floor() as i32;
+    let y0 = rect.y.floor() as i32;
+    let x1 = (rect.x + rect.width).ceil() as i32;
+    let y1 = (rect.y + rect.height).ceil() as i32;
+    [x0, y0, (x1 - x0).max(0), (y1 - y0).max(0)]
+}
+
 impl Widget for GlCubeWidget {
     fn type_name(&self) -> &'static str {
         "GlCubeWidget"
@@ -124,7 +150,7 @@ impl Widget for GlCubeWidget {
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let t = ctx.transform();
-        let screen_rect = Rect::new(t.tx, t.ty, self.bounds.width, self.bounds.height);
+        let screen_rect = transformed_widget_rect(&t, self.bounds.width, self.bounds.height);
         CUBE_SCREEN_RECT.with(|r| r.set(screen_rect));
 
         // Theme-aware placeholder fill — `BarGridGlRenderer` only clears
@@ -442,10 +468,7 @@ impl BarGridGlRenderer {
             return;
         }
 
-        let gl_x = fb_rect.x as i32;
-        let gl_y = fb_rect.y as i32;
-        let gl_w = fb_rect.width as i32;
-        let gl_h = fb_rect.height as i32;
+        let [gl_x, gl_y, gl_w, gl_h] = gl_pixel_rect(fb_rect);
 
         // Intersect widget scissor with the parent clip so collapsed
         // windows (and any other parent clip) correctly hide GL content.
@@ -716,6 +739,37 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cube_gl_rect_scales_logical_bounds_to_physical_pixels() {
+        let transform = TransAffine::new_custom(2.0, 0.0, 0.0, 2.0, 40.0, 24.0);
+
+        let rect = transformed_widget_rect(&transform, 100.0, 50.0);
+
+        assert_eq!(rect.x, 40.0);
+        assert_eq!(rect.y, 24.0);
+        assert_eq!(rect.width, 200.0);
+        assert_eq!(rect.height, 100.0);
+    }
+
+    #[test]
+    fn cube_gl_rect_uses_transformed_extent_for_fractional_dpi() {
+        let transform = TransAffine::new_custom(1.5, 0.0, 0.0, 1.25, 10.0, 20.0);
+
+        let rect = transformed_widget_rect(&transform, 11.0, 8.0);
+
+        assert_eq!(rect.x, 10.0);
+        assert_eq!(rect.y, 20.0);
+        assert_eq!(rect.width, 16.5);
+        assert_eq!(rect.height, 10.0);
+    }
+
+    #[test]
+    fn cube_gl_pixel_rect_covers_fractional_physical_extent() {
+        let rect = Rect::new(10.25, 20.5, 16.5, 10.25);
+
+        assert_eq!(gl_pixel_rect(rect), [10, 20, 17, 11]);
+    }
 
     #[test]
     fn bar_wave_phase_stays_bounded_for_long_running_animation() {

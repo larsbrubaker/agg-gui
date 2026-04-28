@@ -196,6 +196,9 @@ pub struct Window {
     /// `apply_resize` and the tight-fit pre-pass see a current value
     /// even when the content tree contains a flex-fill widget.
     last_content_natural_h: Cell<f64>,
+    /// True between `paint()` and `finish_paint()` when GL compositing opened
+    /// a foreground layer for body/title/children. The shadow stays outside.
+    foreground_layer_active: Cell<bool>,
 
     /// Window title string — stored so external callers (z-order
     /// persistence, inspector display, etc.) can identify this window
@@ -269,6 +272,7 @@ impl Window {
             tight_content_fit: false,
             floor_content_height: false,
             last_content_natural_h: Cell::new(0.0),
+            foreground_layer_active: Cell::new(false),
             title: title_str,
             on_raised: None,
         }

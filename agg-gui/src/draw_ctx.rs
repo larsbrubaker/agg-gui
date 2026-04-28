@@ -466,6 +466,10 @@ pub trait DrawCtx {
     /// Constrain subsequent drawing in the current layer to a rounded-rect
     /// mask. Used by window layers after shadows are drawn so chrome/content
     /// cannot write into rounded transparent corners.
+    ///
+    /// This is a containment clip, not the visual antialiasing edge. Backends
+    /// should leave enough room for partially-transparent edge pixels so the
+    /// caller's normal alpha coverage can feather corners and edges.
     fn set_layer_rounded_clip(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _r: f64) {}
 
     /// Composite a previously retained backend layer. Returns `true` when

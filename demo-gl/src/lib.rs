@@ -140,6 +140,7 @@ struct GlLayerEntry {
     parent_fbo: Option<glow::Framebuffer>,
     saved: SavedGlDrawState,
     retained_key: Option<u64>,
+    rounded_clip: Option<LayerRoundedClip>,
 }
 
 struct RetainedGlLayer {
@@ -148,6 +149,16 @@ struct RetainedGlLayer {
     stencil: glow::Renderbuffer,
     width: i32,
     height: i32,
+    rounded_clip: Option<LayerRoundedClip>,
+}
+
+#[derive(Clone, Copy)]
+struct LayerRoundedClip {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    r: f32,
 }
 
 /// A [`DrawCtx`] that renders via `glow` (WebGL2 or native GL).
@@ -195,6 +206,10 @@ pub struct GlGfxCtx {
     layer_res_loc: Option<glow::UniformLocation>,
     layer_sampler_loc: Option<glow::UniformLocation>,
     layer_alpha_loc: Option<glow::UniformLocation>,
+    layer_size_loc: Option<glow::UniformLocation>,
+    layer_mask_rect_loc: Option<glow::UniformLocation>,
+    layer_mask_radius_loc: Option<glow::UniformLocation>,
+    layer_mask_enabled_loc: Option<glow::UniformLocation>,
 
     // LCD subpixel compositing pipeline (see `LCD_VERT` / `LCD_FRAG`).
     lcd_prog: glow::Program,

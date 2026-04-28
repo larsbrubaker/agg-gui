@@ -13,6 +13,47 @@ fn scaled_layer_size(width: f64, height: f64, sx: f64, sy: f64) -> (i32, i32) {
     )
 }
 
+const ROUNDED_CLIP_ALPHA_FEATHER_PX: f64 = 1.0;
+
+fn rounded_stencil_inflation(t: &TransAffine) -> (f64, f64) {
+    let (sx, sy) = layer_scale_from_transform(t);
+    (
+        ROUNDED_CLIP_ALPHA_FEATHER_PX / sx,
+        ROUNDED_CLIP_ALPHA_FEATHER_PX / sy,
+    )
+}
+
+fn transformed_rounded_clip(
+    t: &TransAffine,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    r: f64,
+) -> LayerRoundedClip {
+    let corners = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)];
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (mut px, mut py) in corners {
+        t.transform(&mut px, &mut py);
+        min_x = min_x.min(px);
+        min_y = min_y.min(py);
+        max_x = max_x.max(px);
+        max_y = max_y.max(py);
+    }
+
+    let (sx, sy) = layer_scale_from_transform(t);
+    LayerRoundedClip {
+        x: min_x as f32,
+        y: min_y as f32,
+        w: (max_x - min_x).abs() as f32,
+        h: (max_y - min_y).abs() as f32,
+        r: (r * sx.min(sy)) as f32,
+    }
+}
+
 impl GlGfxCtx {
     pub(crate) unsafe fn push_gl_layer(&mut self, width: f64, height: f64, alpha: f64) {
         let saved = self.capture_draw_state();
@@ -97,6 +138,7 @@ impl GlGfxCtx {
             parent_fbo,
             saved,
             retained_key: None,
+            rounded_clip: None,
         });
         self.current_fbo = Some(fbo);
         self.viewport = (width as f32, height as f32);
@@ -139,6 +181,11 @@ impl GlGfxCtx {
         self.apply_scissor();
         self.composite_layer_texture(&layer);
         self.apply_scissor();
+        if let Some(key) = layer.retained_key {
+            if let Some(retained) = self.retained_layers.get_mut(&key) {
+                retained.rounded_clip = layer.rounded_clip;
+            }
+        }
         if layer.retained_key.is_none() {
             self.gl.delete_renderbuffer(layer.stencil);
             self.gl.delete_framebuffer(layer.fbo);
@@ -182,6 +229,7 @@ impl GlGfxCtx {
             parent_fbo,
             saved,
             retained_key: Some(key),
+            rounded_clip: retained.rounded_clip,
         });
         self.current_fbo = Some(fbo);
         self.viewport = (width as f32, height as f32);
@@ -234,6 +282,7 @@ impl GlGfxCtx {
             parent_fbo: self.current_fbo,
             saved: self.capture_draw_state(),
             retained_key: Some(key),
+            rounded_clip: retained.rounded_clip,
         };
         self.composite_layer_texture(&layer);
         true
@@ -322,6 +371,7 @@ impl GlGfxCtx {
                 stencil,
                 width,
                 height,
+                rounded_clip: None,
             },
         );
     }
@@ -329,6 +379,11 @@ impl GlGfxCtx {
     pub(crate) unsafe fn set_rounded_layer_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
         if self.layer_stack.is_empty() {
             return;
+        }
+
+        let exact_clip = transformed_rounded_clip(self.ctm(), x, y, w, h, r);
+        if let Some(layer) = self.layer_stack.last_mut() {
+            layer.rounded_clip = Some(exact_clip);
         }
 
         self.gl.clear_stencil(0);
@@ -345,8 +400,18 @@ impl GlGfxCtx {
         self.fill_color = Color::rgba(1.0, 1.0, 1.0, 1.0);
         self.global_alpha = 1.0;
         self.path = PathStorage::new();
-        let r = r.min(w * 0.5).min(h * 0.5).max(0.0);
-        let mut rr = RoundedRect::new(x, y, x + w, y + h, r);
+        // The stencil is only a containment guard. Inflate it by one physical
+        // pixel so any later draw can use its own alpha coverage to feather
+        // rounded corners or edges without being cut off by a binary stencil.
+        let (inflate_x, inflate_y) = rounded_stencil_inflation(self.ctm());
+        let r = r.min(w * 0.5).min(h * 0.5).max(0.0) + inflate_x.max(inflate_y);
+        let mut rr = RoundedRect::new(
+            x - inflate_x,
+            y - inflate_y,
+            x + w + inflate_x,
+            y + h + inflate_y,
+            r,
+        );
         rr.normalize_radius();
         self.path.concat_path(&mut rr, 0);
         self.do_fill();
@@ -384,6 +449,26 @@ impl GlGfxCtx {
         );
         gl.uniform_1_i32(self.layer_sampler_loc.as_ref(), 0);
         gl.uniform_1_f32(self.layer_alpha_loc.as_ref(), layer.alpha as f32);
+        gl.uniform_2_f32(
+            self.layer_size_loc.as_ref(),
+            layer.width as f32,
+            layer.height as f32,
+        );
+        if let Some(mask) = layer.rounded_clip {
+            gl.uniform_4_f32(
+                self.layer_mask_rect_loc.as_ref(),
+                mask.x,
+                mask.y,
+                mask.w,
+                mask.h,
+            );
+            gl.uniform_1_f32(self.layer_mask_radius_loc.as_ref(), mask.r);
+            gl.uniform_1_i32(self.layer_mask_enabled_loc.as_ref(), 1);
+        } else {
+            gl.uniform_4_f32(self.layer_mask_rect_loc.as_ref(), 0.0, 0.0, 0.0, 0.0);
+            gl.uniform_1_f32(self.layer_mask_radius_loc.as_ref(), 0.0);
+            gl.uniform_1_i32(self.layer_mask_enabled_loc.as_ref(), 0);
+        }
         gl.bind_vertex_array(Some(self.tex_vao));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.tex_vbo));
         gl.buffer_data_u8_slice(
@@ -416,7 +501,10 @@ impl GlGfxCtx {
 
 #[cfg(test)]
 mod tests {
-    use super::{layer_scale_from_transform, scaled_layer_size};
+    use super::{
+        layer_scale_from_transform, rounded_stencil_inflation, scaled_layer_size,
+        transformed_rounded_clip,
+    };
     use agg_gui::TransAffine;
 
     #[test]
@@ -433,5 +521,33 @@ mod tests {
         let (sx, sy) = layer_scale_from_transform(&t);
 
         assert_eq!(scaled_layer_size(11.0, 7.0, sx, sy), (17, 11));
+    }
+
+    #[test]
+    fn rounded_clip_stencil_inflates_by_one_physical_pixel() {
+        let t = TransAffine::new_scaling(2.0, 4.0);
+
+        assert_eq!(rounded_stencil_inflation(&t), (0.5, 0.25));
+    }
+
+    #[test]
+    fn rounded_clip_stencil_inflation_handles_fractional_dpi() {
+        let t = TransAffine::new_scaling(1.25, 1.5);
+
+        assert_eq!(rounded_stencil_inflation(&t), (0.8, 0.6666666666666666));
+    }
+
+    #[test]
+    fn rounded_clip_mask_metadata_uses_physical_layer_coordinates() {
+        let mut t = TransAffine::new_scaling(2.0, 2.0);
+        t.premultiply(&TransAffine::new_translation(8.0, 6.0));
+
+        let clip = transformed_rounded_clip(&t, 4.0, 3.0, 20.0, 10.0, 5.0);
+
+        assert_eq!(clip.x, 24.0);
+        assert_eq!(clip.y, 18.0);
+        assert_eq!(clip.w, 40.0);
+        assert_eq!(clip.h, 20.0);
+        assert_eq!(clip.r, 10.0);
     }
 }

@@ -240,6 +240,7 @@ fn paint_subtree_direct_inner(
     if include_overlay {
         widget.paint_overlay(ctx);
     }
+    widget.finish_paint(ctx);
 
     if snap_this {
         ctx.restore();
