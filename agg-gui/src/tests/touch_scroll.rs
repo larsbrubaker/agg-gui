@@ -74,3 +74,41 @@ fn middle_drag_capture_moves_from_hover_consuming_child_to_scroll_view() {
         "middle-drag scrolling should stay captured by ScrollView, not by its content child"
     );
 }
+
+#[test]
+fn middle_drag_scroll_uses_mouse_down_as_stable_anchor() {
+    let v_offset = Rc::new(Cell::new(40.0));
+    let h_offset = Rc::new(Cell::new(30.0));
+    let scroll = ScrollView::new(Box::new(MoveConsumer::new()))
+        .horizontal(true)
+        .with_offset_cell(Rc::clone(&v_offset))
+        .with_h_offset_cell(Rc::clone(&h_offset));
+    let mut app = App::new(Box::new(scroll));
+    let viewport = Size::new(100.0, 100.0);
+    app.layout(viewport);
+
+    app.on_mouse_down(50.0, 92.0, MouseButton::Middle, Modifiers::default());
+    assert_eq!(v_offset.get(), 40.0, "mouse-down alone must not scroll");
+    assert_eq!(h_offset.get(), 30.0, "mouse-down alone must not scroll");
+
+    // A layout pass between mouse-down and first move must not change the drag
+    // anchor. This catches jumps caused by mixing viewport/header coordinates
+    // into the scroll position.
+    app.layout(viewport);
+    assert_eq!(
+        v_offset.get(),
+        40.0,
+        "layout after mouse-down must not scroll"
+    );
+    assert_eq!(
+        h_offset.get(),
+        30.0,
+        "layout after mouse-down must not scroll"
+    );
+
+    app.on_mouse_move(40.0, 82.0);
+    app.on_mouse_up(40.0, 82.0, MouseButton::Middle, Modifiers::default());
+
+    assert_eq!(v_offset.get(), 50.0);
+    assert_eq!(h_offset.get(), 40.0);
+}

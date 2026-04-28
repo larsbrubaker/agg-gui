@@ -47,6 +47,7 @@ pub(super) fn composite_framebuffers(
     src: &Framebuffer,
     dest_x: i32,
     dest_y: i32,
+    alpha: f64,
 ) {
     let src_w = src.width() as i32;
     let src_h = src.height() as i32;
@@ -68,14 +69,15 @@ pub(super) fn composite_framebuffers(
             }
             let si = ((sy * src_w + sx) * 4) as usize;
             let di = ((dy * dst_w + dx) * 4) as usize;
-            let sa = src_px[si + 3] as f32 / 255.0;
+            let layer_alpha = alpha.clamp(0.0, 1.0) as f32;
+            let sa = (src_px[si + 3] as f32 / 255.0) * layer_alpha;
             if sa < 1e-4 {
                 continue;
             } // fully transparent source — skip
             let inv_sa = 1.0 - sa;
             // Premultiplied SrcOver — same formula for all four channels.
             for k in 0..4 {
-                let s = src_px[si + k] as f32;
+                let s = src_px[si + k] as f32 * layer_alpha;
                 let d = dst_px[di + k] as f32;
                 dst_px[di + k] = (s + d * inv_sa).round().clamp(0.0, 255.0) as u8;
             }
@@ -422,6 +424,12 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn push_layer(&mut self, w: f64, h: f64) {
         self.push_layer(w, h)
     }
+    fn supports_compositing_layers(&self) -> bool {
+        true
+    }
+    fn push_layer_with_alpha(&mut self, w: f64, h: f64, alpha: f64) {
+        self.push_layer_with_alpha(w, h, alpha)
+    }
     fn pop_layer(&mut self) {
         self.pop_layer()
     }
@@ -672,7 +680,7 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         let screen_x = (tx + dst_x).round() as i32;
         let screen_y = (ty + dst_y).round() as i32;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        composite_framebuffers(fb, &scaled, screen_x, screen_y);
+        composite_framebuffers(fb, &scaled, screen_x, screen_y, 1.0);
     }
 }
 

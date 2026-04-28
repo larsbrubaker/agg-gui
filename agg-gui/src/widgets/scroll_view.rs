@@ -297,7 +297,9 @@ pub struct ScrollView {
     painted_style_epoch: Cell<u64>,
 
     middle_dragging: bool,
-    middle_last_pos: Point,
+    middle_start_world: Point,
+    middle_start_v_offset: f64,
+    middle_start_h_offset: f64,
 }
 
 impl ScrollView {
@@ -326,7 +328,9 @@ impl ScrollView {
             viewport_cell: None,
             painted_style_epoch: Cell::new(0),
             middle_dragging: false,
-            middle_last_pos: Point::ORIGIN,
+            middle_start_world: Point::ORIGIN,
+            middle_start_v_offset: 0.0,
+            middle_start_h_offset: 0.0,
         }
     }
 

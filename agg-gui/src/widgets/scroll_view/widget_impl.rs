@@ -235,15 +235,15 @@ impl Widget for ScrollView {
             // ── Mouse move ────────────────────────────────────────────────────
             Event::MouseMove { pos } => {
                 if self.middle_dragging {
-                    let dx = pos.x - self.middle_last_pos.x;
-                    let dy = pos.y - self.middle_last_pos.y;
+                    let world = crate::widget::current_mouse_world().unwrap_or(*pos);
+                    let dx = world.x - self.middle_start_world.x;
+                    let dy = world.y - self.middle_start_world.y;
                     if self.h.enabled {
-                        self.h.offset -= dx;
+                        self.h.offset = self.middle_start_h_offset - dx;
                     }
                     if self.v.enabled {
-                        self.v.offset += dy;
+                        self.v.offset = self.middle_start_v_offset + dy;
                     }
-                    self.middle_last_pos = *pos;
                     self.clamp_offsets();
                     let (_, vh) = self.viewport();
                     self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
@@ -304,7 +304,9 @@ impl Widget for ScrollView {
                     || (self.h.enabled && self.h.content > vw)
                 {
                     self.middle_dragging = true;
-                    self.middle_last_pos = *pos;
+                    self.middle_start_world = crate::widget::current_mouse_world().unwrap_or(*pos);
+                    self.middle_start_v_offset = self.v.offset;
+                    self.middle_start_h_offset = self.h.offset;
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }

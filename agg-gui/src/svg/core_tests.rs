@@ -134,7 +134,7 @@ fn multiplies_group_and_paint_opacity() {
     }
 
     let center = ((1 * fb.width() + 1) * 4) as usize;
-    assert_eq!(&fb.pixels()[center..center + 4], &[63, 0, 0, 63]);
+    assert_eq!(&fb.pixels()[center..center + 4], &[64, 0, 0, 64]);
 }
 
 #[test]

@@ -34,7 +34,16 @@ pub(super) fn render_pattern_paint(
             -render_x * pixel_width as f64 / width,
             (render_y + height) * pixel_height as f64 / height,
         ));
-        render_group(pattern.root(), &mut ctx, SvgRenderState { opacity }).ok()?;
+        render_group(
+            pattern.root(),
+            &mut ctx,
+            SvgRenderState {
+                opacity,
+                layer_width: pixel_width as f64,
+                layer_height: pixel_height as f64,
+            },
+        )
+        .ok()?;
     }
 
     let mut pixels = tile.into_pixels();

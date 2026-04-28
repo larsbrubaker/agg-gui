@@ -22,11 +22,17 @@ use crate::lcd_gfx_ctx::LcdGfxCtx;
 #[derive(Clone, Copy, Debug)]
 struct SvgRenderState {
     opacity: f32,
+    layer_width: f64,
+    layer_height: f64,
 }
 
 impl Default for SvgRenderState {
     fn default() -> Self {
-        Self { opacity: 1.0 }
+        Self {
+            opacity: 1.0,
+            layer_width: 1.0,
+            layer_height: 1.0,
+        }
     }
 }
 
@@ -252,7 +258,15 @@ pub fn render_svg_tree_at_size(
 
     ctx.save();
     ctx.set_transform(svg_to_ctx);
-    render_group(tree.root(), ctx, SvgRenderState::default())?;
+    render_group(
+        tree.root(),
+        ctx,
+        SvgRenderState {
+            layer_width: width.max(1) as f64,
+            layer_height: height.max(1) as f64,
+            ..SvgRenderState::default()
+        },
+    )?;
     ctx.restore();
     Ok(())
 }
@@ -268,8 +282,14 @@ fn render_group(
     ctx: &mut dyn DrawCtx,
     parent_state: SvgRenderState,
 ) -> Result<(), SvgRenderError> {
+    let group_opacity = group.opacity().get();
+    if group_opacity < 1.0 && parent_state.opacity > 0.0 && ctx.supports_compositing_layers() {
+        return render_isolated_group_with_opacity(group, ctx, parent_state, group_opacity);
+    }
+
     let state = SvgRenderState {
-        opacity: parent_state.opacity * group.opacity().get(),
+        opacity: parent_state.opacity * group_opacity,
+        ..parent_state
     };
 
     ctx.save();
@@ -282,6 +302,43 @@ fn render_group(
             usvg::Node::Text(text) => render_text(text, ctx, state)?,
         }
     }
+    ctx.restore();
+    Ok(())
+}
+
+fn render_isolated_group_with_opacity(
+    group: &usvg::Group,
+    ctx: &mut dyn DrawCtx,
+    parent_state: SvgRenderState,
+    group_opacity: f32,
+) -> Result<(), SvgRenderError> {
+    let saved_transform = ctx.transform();
+
+    ctx.save();
+    ctx.reset_transform();
+    ctx.push_layer_with_alpha(
+        parent_state.layer_width,
+        parent_state.layer_height,
+        (parent_state.opacity * group_opacity) as f64,
+    );
+    ctx.set_transform(saved_transform);
+
+    let state = SvgRenderState {
+        opacity: 1.0,
+        ..parent_state
+    };
+    ctx.save();
+    apply_group_clip(ctx, group);
+    for node in group.children() {
+        match node {
+            usvg::Node::Group(group) => render_group(group, ctx, state)?,
+            usvg::Node::Path(path) => render_path(path, ctx, state),
+            usvg::Node::Image(image) => render_image(image, ctx, state)?,
+            usvg::Node::Text(text) => render_text(text, ctx, state)?,
+        }
+    }
+    ctx.restore();
+    ctx.pop_layer();
     ctx.restore();
     Ok(())
 }
@@ -573,6 +630,8 @@ mod clip_tests;
 mod gradient_tests;
 #[cfg(test)]
 mod image_tests;
+#[cfg(test)]
+mod opacity_tests;
 #[cfg(test)]
 mod text_tests;
 
