@@ -229,17 +229,10 @@ impl MarkdownView {
 
     fn inline_image_size(&self, cache_idx: usize, alt: &str, max_w: f64) -> (f64, f64) {
         if let Some((iw, ih)) = self.image_cache.get(cache_idx).and_then(|entry| {
-            entry
-                .state
-                .lock()
-                .ok()
-                .and_then(|mut state| match &mut *state {
-                    ImageState::Ready { image, seen } => {
-                        *seen = true;
-                        Some((image.width, image.height))
-                    }
-                    _ => None,
-                })
+            entry.state.lock().ok().and_then(|state| match &*state {
+                ImageState::Ready { image, .. } => Some((image.width, image.height)),
+                _ => None,
+            })
         }) {
             let scale = (max_w / iw as f64).min(1.0);
             (iw as f64 * scale, ih as f64 * scale)
@@ -343,7 +336,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::text::Font;
+    use crate::widget::Widget;
 
+    use super::super::ImagePixels;
     use super::*;
 
     const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
@@ -408,5 +403,31 @@ mod tests {
         });
         let (viewport_width, content_width) = table.expect("table item");
         assert!(content_width > viewport_width);
+    }
+
+    #[test]
+    fn ready_remote_image_stays_dirty_until_painted() {
+        crate::widget::set_current_viewport(Size::new(220.0, 200.0));
+        let mut view = MarkdownView::new("![badge](https://example.com/badge.svg)", test_font())
+            .with_font_size(12.0)
+            .with_padding(8.0);
+
+        view.layout_markdown(Size::new(220.0, 1000.0));
+        let state = Arc::clone(&view.image_cache[0].state);
+        *state.lock().expect("image state") = ImageState::Ready {
+            image: ImagePixels {
+                data: Arc::new(vec![255, 0, 0, 255]),
+                width: 1,
+                height: 1,
+            },
+            seen: false,
+        };
+
+        view.layout_markdown(Size::new(220.0, 1000.0));
+
+        assert!(
+            view.needs_draw(),
+            "layout must not clear a freshly loaded image before retained parents repaint"
+        );
     }
 }

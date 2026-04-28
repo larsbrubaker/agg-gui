@@ -142,14 +142,16 @@ impl MarkdownView {
                                                     );
                                                 }
                                             }
-                                            let ready = entry.state.lock().ok().and_then(|state| {
-                                                match &*state {
-                                                    ImageState::Ready { image, .. } => {
-                                                        Some(image.clone())
+                                            let ready =
+                                                entry.state.lock().ok().and_then(|mut state| {
+                                                    match &mut *state {
+                                                        ImageState::Ready { image, seen } => {
+                                                            *seen = true;
+                                                            Some(image.clone())
+                                                        }
+                                                        _ => None,
                                                     }
-                                                    _ => None,
-                                                }
-                                            });
+                                                });
                                             if let Some(image) = ready {
                                                 ctx.draw_image_rgba(
                                                     image.data.as_slice(),
