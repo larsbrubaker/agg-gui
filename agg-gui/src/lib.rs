@@ -26,6 +26,7 @@
 
 pub mod animation;
 pub mod app_state;
+pub mod clipboard;
 pub mod color;
 pub mod cursor;
 pub mod device_scale;

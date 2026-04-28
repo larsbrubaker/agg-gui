@@ -38,32 +38,12 @@ use crate::text::{measure_advance, measure_text_metrics, Font};
 use crate::widget::Widget;
 use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary, TextEditState};
 
-// ─── Clipboard shim (same cfg matrix as `TextField`) ─────────────────────────
-
-#[cfg(feature = "clipboard")]
 fn clipboard_get() -> Option<String> {
-    arboard::Clipboard::new().ok()?.get_text().ok()
-}
-#[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
-fn clipboard_get() -> Option<String> {
-    None
-}
-#[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn clipboard_get() -> Option<String> {
-    crate::wasm_clipboard::get()
+    crate::clipboard::get_text()
 }
 
-#[cfg(feature = "clipboard")]
 fn clipboard_set(text: &str) {
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        let _ = cb.set_text(text.to_string());
-    }
-}
-#[cfg(all(not(feature = "clipboard"), not(target_arch = "wasm32")))]
-fn clipboard_set(_: &str) {}
-#[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn clipboard_set(text: &str) {
-    crate::wasm_clipboard::set(text);
+    crate::clipboard::set_text(text);
 }
 
 // ─── Wrapping helper ─────────────────────────────────────────────────────────

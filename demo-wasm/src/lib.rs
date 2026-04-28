@@ -522,6 +522,12 @@ pub fn wasm_clipboard_get() -> Option<String> {
     agg_gui::wasm_clipboard::get()
 }
 
+/// Read the in-process HTML clipboard buffer. Returns `None` when empty.
+#[wasm_bindgen]
+pub fn wasm_clipboard_get_html() -> Option<String> {
+    agg_gui::wasm_clipboard::get_html()
+}
+
 /// Write `text` into the in-process clipboard buffer.
 /// Called by the JS `paste` DOM event handler with the text from
 /// `event.clipboardData` before synthesising a Ctrl+V key event.

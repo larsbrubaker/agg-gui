@@ -223,8 +223,12 @@ function handleCopy(e: Event) {
   if (!wasmModule) return;
   const ce = e as ClipboardEvent;
   const text = (wasmModule["wasm_clipboard_get"] as ClipGetFn)();
+  const html = (wasmModule["wasm_clipboard_get_html"] as ClipGetFn | undefined)?.();
   if (text !== null && text !== undefined && text.length > 0) {
     ce.clipboardData?.setData("text/plain", text);
+    if (html !== null && html !== undefined && html.length > 0) {
+      ce.clipboardData?.setData("text/html", html);
+    }
     ce.preventDefault();
   }
 }
@@ -237,8 +241,12 @@ function handleCut(e: Event) {
   if (!wasmModule) return;
   const ce = e as ClipboardEvent;
   const text = (wasmModule["wasm_clipboard_get"] as ClipGetFn)();
+  const html = (wasmModule["wasm_clipboard_get_html"] as ClipGetFn | undefined)?.();
   if (text !== null && text !== undefined && text.length > 0) {
     ce.clipboardData?.setData("text/plain", text);
+    if (html !== null && html !== undefined && html.length > 0) {
+      ce.clipboardData?.setData("text/html", html);
+    }
     ce.preventDefault();
   }
 }

@@ -128,6 +128,7 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
         .with_font_size(13.0)
         .with_padding(12.0)
         .on_link_click(crate::url::open_url)
+        .on_image_open(crate::url::open_url)
         .with_image_provider(move |url| {
             // Only handle relative paths / local file URLs on native.
             let path = if url.starts_with("http://") || url.starts_with("https://") {

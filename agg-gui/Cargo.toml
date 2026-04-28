@@ -23,7 +23,7 @@ clipper2-rust = "1.0.3"
 ttf-parser = "0.25"
 rustybuzz = "0.20"
 tess2-rust = "1.1.0"
-arboard  = { version = "3", optional = true }
+arboard  = { version = "3", optional = true, features = ["image-data"] }
 winit    = { version = "0.30", optional = true }
 web-time = "1"
 pulldown-cmark = "0.11"

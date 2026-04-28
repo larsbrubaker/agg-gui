@@ -21,6 +21,7 @@ impl MarkdownView {
         let w = self.bounds.width;
         let font = self.active_font();
         ctx.set_font(Arc::clone(&font));
+        self.paint_selection(ctx);
 
         for item in &self.items {
             match item {
@@ -108,6 +109,7 @@ impl MarkdownView {
                                         }
                                     }
                                     LineRun::Image {
+                                        url: _,
                                         alt,
                                         link: _,
                                         cache_idx,
@@ -307,6 +309,7 @@ impl MarkdownView {
                 }
             }
         }
+        self.paint_context_menu(ctx);
     }
 
     fn paint_block_scrollbar(

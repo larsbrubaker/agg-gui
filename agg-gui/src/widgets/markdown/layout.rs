@@ -159,6 +159,7 @@ impl MarkdownView {
                                     row_h = line_h;
                                 }
                                 runs.push(LineRun::Image {
+                                    url: url.clone(),
                                     alt: alt.clone(),
                                     link: link.clone(),
                                     cache_idx,
@@ -208,6 +209,7 @@ impl MarkdownView {
 
         self.content_h = total_h;
         self.bounds = crate::geometry::Rect::new(0.0, 0.0, wrap_w, total_h);
+        self.rebuild_selection_model();
         Size::new(wrap_w, total_h)
     }
 
@@ -316,6 +318,7 @@ impl MarkdownView {
     ) {
         for run in runs.iter_mut() {
             if let LineRun::Image {
+                url: _,
                 y_offset,
                 height: image_h,
                 ..

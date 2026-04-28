@@ -29,18 +29,20 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, MouseButton};
+use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
 mod image_loader;
+mod event;
+mod image_context;
 mod layout;
 mod paint;
 mod parse;
+mod selection;
 
 // ── Styled line representation ─────────────────────────────────────────────────
 
@@ -114,6 +116,7 @@ enum LineRun {
         width: f64,
     },
     Image {
+        url: String,
         alt: String,
         link: Option<String>,
         cache_idx: usize,
@@ -207,7 +210,17 @@ pub struct MarkdownView {
     /// Total content height from the last layout pass.
     content_h: f64,
     on_link_click: Option<Box<dyn FnMut(&str)>>,
+    on_image_open: Option<Box<dyn FnMut(&str)>>,
     block_scrolls: Vec<BlockScroll>,
+    focused: bool,
+    selecting_drag: bool,
+    selection_anchor: Option<usize>,
+    selection_cursor: Option<usize>,
+    selection_drag_start: Option<Point>,
+    selection_dragged: bool,
+    selectable_text: String,
+    selectable_fragments: Vec<selection::SelectableFragment>,
+    context_menu: Option<image_context::MarkdownContextMenuState>,
 }
 
 impl MarkdownView {
@@ -225,7 +238,17 @@ impl MarkdownView {
             items: Vec::new(),
             content_h: 0.0,
             on_link_click: None,
+            on_image_open: None,
             block_scrolls: Vec::new(),
+            focused: false,
+            selecting_drag: false,
+            selection_anchor: None,
+            selection_cursor: None,
+            selection_drag_start: None,
+            selection_dragged: false,
+            selectable_text: String::new(),
+            selectable_fragments: Vec::new(),
+            context_menu: None,
         }
     }
 
@@ -259,6 +282,11 @@ impl MarkdownView {
 
     pub fn on_link_click(mut self, cb: impl FnMut(&str) + 'static) -> Self {
         self.on_link_click = Some(Box::new(cb));
+        self
+    }
+
+    pub fn on_image_open(mut self, cb: impl FnMut(&str) + 'static) -> Self {
+        self.on_image_open = Some(Box::new(cb));
         self
     }
 
@@ -334,6 +362,7 @@ impl MarkdownView {
                             }
                         }
                         LineRun::Image {
+                            url: _,
                             link: Some(url),
                             x,
                             y_offset,
@@ -646,102 +675,10 @@ impl Widget for MarkdownView {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        match event {
-            Event::MouseMove { pos } => {
-                if let Some(block_idx) = self.dragging_block() {
-                    if self.drag_block_scrollbar(block_idx, *pos) {
-                        crate::animation::request_draw();
-                    }
-                    return EventResult::Consumed;
-                }
-                if self.hit_scrollbar(*pos).is_some() {
-                    set_cursor_icon(CursorIcon::ResizeHorizontal);
-                }
-                if self.link_at(*pos).is_some() {
-                    set_cursor_icon(CursorIcon::PointingHand);
-                }
-                EventResult::Ignored
-            }
-            Event::MouseWheel {
-                pos,
-                delta_x,
-                delta_y,
-                modifiers,
-            } => {
-                if let Some((block_idx, viewport, content)) = self.point_over_scrollable_block(*pos)
-                {
-                    let delta = if delta_x.abs() > 1e-6 {
-                        delta_x * 40.0
-                    } else if modifiers.shift {
-                        delta_y * 40.0
-                    } else {
-                        0.0
-                    };
-                    if delta.abs() > 1e-6 {
-                        let old = self.block_scroll_offset(block_idx);
-                        if self.scroll_block_to(block_idx, old + delta, viewport, content) {
-                            crate::animation::request_draw();
-                        }
-                        return EventResult::Consumed;
-                    }
-                }
-                EventResult::Ignored
-            }
-            Event::MouseDown {
-                pos,
-                button: MouseButton::Left,
-                ..
-            } => {
-                if let Some(hit) = self.hit_scrollbar(*pos) {
-                    let drag_thumb_offset = pos.x - self.padding - hit.thumb.x;
-                    let scroll = self.block_scroll_mut(hit.block_idx);
-                    if hit.on_thumb {
-                        scroll.dragging = true;
-                        scroll.drag_thumb_offset = drag_thumb_offset;
-                    } else {
-                        let center = pos.x - self.padding - hit.thumb.width * 0.5;
-                        let travel = (hit.bar.width - hit.thumb.width).max(1.0);
-                        let frac = ((center - hit.bar.x) / travel).clamp(0.0, 1.0);
-                        self.scroll_block_to(
-                            hit.block_idx,
-                            frac * (hit.content_width - hit.viewport_width).max(0.0),
-                            hit.viewport_width,
-                            hit.content_width,
-                        );
-                    }
-                    crate::animation::request_draw();
-                    return EventResult::Consumed;
-                }
-                if self.link_at(*pos).is_some() {
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-            Event::MouseUp {
-                pos,
-                button: MouseButton::Left,
-                ..
-            } => {
-                let was_dragging = self.block_scrolls.iter().any(|scroll| scroll.dragging);
-                if was_dragging {
-                    for scroll in &mut self.block_scrolls {
-                        scroll.dragging = false;
-                    }
-                    crate::animation::request_draw();
-                    return EventResult::Consumed;
-                }
-                let url = self.link_at(*pos).map(str::to_string);
-                if let Some(url) = url {
-                    if let Some(cb) = self.on_link_click.as_mut() {
-                        cb(&url);
-                    }
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-            _ => EventResult::Ignored,
-        }
+        self.handle_markdown_event(event)
+    }
+
+    fn is_focusable(&self) -> bool {
+        true
     }
 }
