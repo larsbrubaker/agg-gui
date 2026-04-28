@@ -10,7 +10,8 @@ use crate::draw_ctx::DrawCtx;
 use crate::text::measure_text_metrics;
 
 use super::{
-    image_loader, is_rect_visible_in_root, ImageState, LayoutItem, LineRun, LineStyle, MarkdownView,
+    image_loader, is_rect_visible_in_root, scrollbar_rect, scrollbar_thumb, ImageState, LayoutItem,
+    LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
 
 impl MarkdownView {
@@ -190,14 +191,27 @@ impl MarkdownView {
                     }
                 }
                 LayoutItem::Table {
+                    block_idx,
                     rows,
                     y,
+                    height: _,
                     row_h,
                     col_widths,
-                    ..
+                    viewport_width,
+                    content_width,
                 } => {
                     let table_w: f64 = col_widths.iter().sum();
-                    let mut cy = y + row_h * rows.len() as f64;
+                    let scroll_x = self.block_scroll_offset(*block_idx);
+                    let scrollbar_h = if content_width > viewport_width {
+                        BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP
+                    } else {
+                        0.0
+                    };
+                    let content_y = y + scrollbar_h;
+                    ctx.save();
+                    ctx.clip_rect(pad, content_y, *viewport_width, row_h * rows.len() as f64);
+                    ctx.translate(-scroll_x, 0.0);
+                    let mut cy = content_y + row_h * rows.len() as f64;
                     ctx.set_font_size(self.font_size);
                     for (ri, row) in rows.iter().enumerate() {
                         cy -= row_h;
@@ -227,36 +241,97 @@ impl MarkdownView {
                     }
                     ctx.set_fill_color(v.separator);
                     ctx.begin_path();
-                    ctx.rect(pad, y + row_h * rows.len() as f64, table_w, 1.0);
+                    ctx.rect(pad, content_y + row_h * rows.len() as f64, table_w, 1.0);
                     ctx.fill();
+                    ctx.restore();
+
+                    if *content_width > *viewport_width {
+                        self.paint_block_scrollbar(
+                            ctx,
+                            *y,
+                            *viewport_width,
+                            *content_width,
+                            scroll_x,
+                        );
+                    }
                 }
                 LayoutItem::CodeBlock {
+                    block_idx,
                     lines,
                     y,
                     height,
                     line_h,
-                    width,
+                    viewport_width,
+                    content_width,
                 } => {
                     let code_pad_x = self.font_size;
                     let code_pad_y = self.font_size * 0.75;
                     let fs = LineStyle::Code.font_size(self.font_size);
+                    let scroll_x = self.block_scroll_offset(*block_idx);
+                    let scrollbar_h = if content_width > viewport_width {
+                        BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP
+                    } else {
+                        0.0
+                    };
+                    let content_y = y + scrollbar_h;
+                    let content_h = height - scrollbar_h;
                     ctx.set_font_size(fs);
                     ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.12));
                     ctx.begin_path();
-                    ctx.rounded_rect(pad, *y, *width, *height, 4.0);
+                    ctx.rounded_rect(pad, *y, *viewport_width, *height, 4.0);
                     ctx.fill();
                     ctx.set_fill_color(v.text_color);
 
+                    ctx.save();
+                    ctx.clip_rect(pad, content_y, *viewport_width, content_h);
+                    ctx.translate(-scroll_x, 0.0);
                     let metrics = measure_text_metrics(&font, "", fs);
-                    let mut line_top = y + height - code_pad_y - line_h;
+                    let mut line_top = content_y + content_h - code_pad_y - line_h;
                     for line in lines {
                         let ty = line_top + line_h * 0.5;
                         let text_y = ty - (metrics.ascent - metrics.descent) * 0.5;
                         ctx.fill_text(line, pad + code_pad_x, text_y);
                         line_top -= line_h;
                     }
+                    ctx.restore();
+
+                    if *content_width > *viewport_width {
+                        self.paint_block_scrollbar(
+                            ctx,
+                            *y,
+                            *viewport_width,
+                            *content_width,
+                            scroll_x,
+                        );
+                    }
                 }
             }
         }
+    }
+
+    fn paint_block_scrollbar(
+        &self,
+        ctx: &mut dyn DrawCtx,
+        block_y: f64,
+        viewport_width: f64,
+        content_width: f64,
+        offset: f64,
+    ) {
+        let bar = scrollbar_rect(block_y, viewport_width);
+        let thumb = scrollbar_thumb(bar, viewport_width, content_width, offset);
+        ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.18));
+        ctx.begin_path();
+        ctx.rounded_rect(self.padding + bar.x, bar.y, bar.width, bar.height, 4.0);
+        ctx.fill();
+        ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.55));
+        ctx.begin_path();
+        ctx.rounded_rect(
+            self.padding + thumb.x,
+            thumb.y,
+            thumb.width,
+            thumb.height,
+            4.0,
+        );
+        ctx.fill();
     }
 }

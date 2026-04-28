@@ -138,7 +138,7 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
             load_png(&path)
         });
 
-    Box::new(ScrollView::new(Box::new(md_view)).horizontal(true))
+    Box::new(ScrollView::new(Box::new(md_view)))
 }
 
 // ---------------------------------------------------------------------------

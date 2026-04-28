@@ -6,7 +6,10 @@
 use crate::geometry::Size;
 use crate::text::measure_text_metrics;
 
-use super::{ImageState, InlineItem, LayoutItem, LineRun, LineStyle, MarkdownView};
+use super::{
+    clamp_block_offset, ImageState, InlineItem, LayoutItem, LineRun, LineStyle, MarkdownView,
+    BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
+};
 
 impl MarkdownView {
     pub(super) fn layout_markdown(&mut self, available: Size) -> Size {
@@ -18,10 +21,10 @@ impl MarkdownView {
             viewport_w
         };
         let max_w = (wrap_w - pad * 2.0).max(1.0);
-        let mut content_w = wrap_w.max(1.0);
 
         let paragraphs = self.parse_paragraphs();
         let mut laid_out = Vec::new();
+        let mut block_idx = 0usize;
 
         for item in &paragraphs {
             match item {
@@ -45,26 +48,52 @@ impl MarkdownView {
                     });
                 }
                 super::ParagraphItem::Table(rows) => {
-                    let (col_widths, row_h, height) = self.layout_table(rows);
-                    content_w = content_w.max(col_widths.iter().sum::<f64>() + pad * 2.0);
+                    let (col_widths, row_h, mut height) = self.layout_table(rows);
+                    let content_width = col_widths.iter().sum::<f64>();
+                    let viewport_width = max_w;
+                    if content_width > viewport_width {
+                        height += BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP;
+                    }
+                    let offset = clamp_block_offset(
+                        self.block_scroll_offset(block_idx),
+                        viewport_width,
+                        content_width,
+                    );
+                    self.block_scroll_mut(block_idx).offset = offset;
                     laid_out.push(LayoutItem::Table {
+                        block_idx,
                         rows: rows.clone(),
                         y: 0.0,
                         height,
                         row_h,
                         col_widths,
+                        viewport_width,
+                        content_width,
                     });
+                    block_idx += 1;
                 }
                 super::ParagraphItem::CodeBlock(lines) => {
-                    let (line_h, height, width) = self.layout_code_block(lines, max_w);
-                    content_w = content_w.max(width + pad * 2.0);
+                    let (line_h, mut height, content_width) = self.layout_code_block(lines, max_w);
+                    let viewport_width = max_w;
+                    if content_width > viewport_width {
+                        height += BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP;
+                    }
+                    let offset = clamp_block_offset(
+                        self.block_scroll_offset(block_idx),
+                        viewport_width,
+                        content_width,
+                    );
+                    self.block_scroll_mut(block_idx).offset = offset;
                     laid_out.push(LayoutItem::CodeBlock {
+                        block_idx,
                         lines: lines.clone(),
                         y: 0.0,
                         height,
                         line_h,
-                        width,
+                        viewport_width,
+                        content_width,
                     });
+                    block_idx += 1;
                 }
                 super::ParagraphItem::Flow {
                     items,
@@ -178,8 +207,8 @@ impl MarkdownView {
         }
 
         self.content_h = total_h;
-        self.bounds = crate::geometry::Rect::new(0.0, 0.0, content_w, total_h);
-        Size::new(content_w, total_h)
+        self.bounds = crate::geometry::Rect::new(0.0, 0.0, wrap_w, total_h);
+        Size::new(wrap_w, total_h)
     }
 
     fn text_width(&self, text: &str, style: LineStyle) -> f64 {
@@ -303,5 +332,78 @@ impl MarkdownView {
             y: 0.0,
             height,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::text::Font;
+
+    use super::*;
+
+    const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+
+    fn test_font() -> Arc<Font> {
+        Arc::new(Font::from_slice(TEST_FONT).expect("test font"))
+    }
+
+    #[test]
+    fn wide_code_block_does_not_expand_document_width() {
+        crate::widget::set_current_viewport(Size::new(220.0, 200.0));
+        let mut view = MarkdownView::new(
+            "```text\nthis line is intentionally much much wider than the viewport\n```",
+            test_font(),
+        )
+        .with_font_size(12.0)
+        .with_padding(8.0);
+
+        let size = view.layout_markdown(Size::new(220.0, 1000.0));
+
+        assert_eq!(size.width, 220.0);
+        let code = view.items.iter().find_map(|item| {
+            if let LayoutItem::CodeBlock {
+                viewport_width,
+                content_width,
+                ..
+            } = item
+            {
+                Some((*viewport_width, *content_width))
+            } else {
+                None
+            }
+        });
+        let (viewport_width, content_width) = code.expect("code block item");
+        assert!(content_width > viewport_width);
+    }
+
+    #[test]
+    fn wide_table_does_not_expand_document_width() {
+        crate::widget::set_current_viewport(Size::new(220.0, 200.0));
+        let mut view = MarkdownView::new(
+            "| Column | Value |\n| --- | --- |\n| ThisIsAnExtremelyLongUnbrokenTableCell | another-long-value |",
+            test_font(),
+        )
+        .with_font_size(12.0)
+        .with_padding(8.0);
+
+        let size = view.layout_markdown(Size::new(220.0, 1000.0));
+
+        assert_eq!(size.width, 220.0);
+        let table = view.items.iter().find_map(|item| {
+            if let LayoutItem::Table {
+                viewport_width,
+                content_width,
+                ..
+            } = item
+            {
+                Some((*viewport_width, *content_width))
+            } else {
+                None
+            }
+        });
+        let (viewport_width, content_width) = table.expect("table item");
+        assert!(content_width > viewport_width);
     }
 }

@@ -84,18 +84,23 @@ enum LayoutItem {
         height: f64,
     },
     Table {
+        block_idx: usize,
         rows: Vec<Vec<String>>,
         y: f64,
         height: f64,
         row_h: f64,
         col_widths: Vec<f64>,
+        viewport_width: f64,
+        content_width: f64,
     },
     CodeBlock {
+        block_idx: usize,
         lines: Vec<String>,
         y: f64,
         height: f64,
         line_h: f64,
-        width: f64,
+        viewport_width: f64,
+        content_width: f64,
     },
 }
 
@@ -155,6 +160,13 @@ struct ImageEntry {
     state: Arc<Mutex<ImageState>>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct BlockScroll {
+    offset: f64,
+    dragging: bool,
+    drag_thumb_offset: f64,
+}
+
 #[derive(Clone)]
 struct ImagePixels {
     data: Arc<Vec<u8>>,
@@ -195,6 +207,7 @@ pub struct MarkdownView {
     /// Total content height from the last layout pass.
     content_h: f64,
     on_link_click: Option<Box<dyn FnMut(&str)>>,
+    block_scrolls: Vec<BlockScroll>,
 }
 
 impl MarkdownView {
@@ -212,6 +225,7 @@ impl MarkdownView {
             items: Vec::new(),
             content_h: 0.0,
             on_link_click: None,
+            block_scrolls: Vec::new(),
         }
     }
 
@@ -338,10 +352,207 @@ impl MarkdownView {
         }
         None
     }
+
+    fn block_scroll_mut(&mut self, block_idx: usize) -> &mut BlockScroll {
+        if block_idx >= self.block_scrolls.len() {
+            self.block_scrolls
+                .resize(block_idx + 1, BlockScroll::default());
+        }
+        &mut self.block_scrolls[block_idx]
+    }
+
+    fn block_scroll_offset(&self, block_idx: usize) -> f64 {
+        self.block_scrolls
+            .get(block_idx)
+            .map(|s| s.offset)
+            .unwrap_or(0.0)
+    }
+
+    fn hit_scrollbar(&self, pos: Point) -> Option<BlockHit> {
+        for item in &self.items {
+            match item {
+                LayoutItem::Table {
+                    block_idx,
+                    y,
+                    height,
+                    viewport_width,
+                    content_width,
+                    ..
+                }
+                | LayoutItem::CodeBlock {
+                    block_idx,
+                    y,
+                    height,
+                    viewport_width,
+                    content_width,
+                    ..
+                } if *content_width > *viewport_width => {
+                    let bar = scrollbar_rect(*y, *viewport_width);
+                    if point_in_rect(pos, self.padding + bar.x, bar.y, bar.width, bar.height) {
+                        let offset = self.block_scroll_offset(*block_idx);
+                        let thumb = scrollbar_thumb(bar, *viewport_width, *content_width, offset);
+                        let thumb_hit = point_in_rect(
+                            pos,
+                            self.padding + thumb.x,
+                            thumb.y,
+                            thumb.width,
+                            thumb.height,
+                        );
+                        return Some(BlockHit {
+                            block_idx: *block_idx,
+                            viewport_width: *viewport_width,
+                            content_width: *content_width,
+                            bar,
+                            thumb,
+                            on_thumb: thumb_hit,
+                        });
+                    }
+                    let _ = height;
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn point_over_scrollable_block(&self, pos: Point) -> Option<(usize, f64, f64)> {
+        for item in &self.items {
+            match item {
+                LayoutItem::Table {
+                    block_idx,
+                    y,
+                    height,
+                    viewport_width,
+                    content_width,
+                    ..
+                }
+                | LayoutItem::CodeBlock {
+                    block_idx,
+                    y,
+                    height,
+                    viewport_width,
+                    content_width,
+                    ..
+                } if *content_width > *viewport_width
+                    && point_in_rect(pos, self.padding, *y, *viewport_width, *height) =>
+                {
+                    return Some((*block_idx, *viewport_width, *content_width));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn block_metrics(&self, block_idx: usize) -> Option<(Rect, f64, f64)> {
+        self.items.iter().find_map(|item| match item {
+            LayoutItem::Table {
+                block_idx: idx,
+                y,
+                viewport_width,
+                content_width,
+                ..
+            }
+            | LayoutItem::CodeBlock {
+                block_idx: idx,
+                y,
+                viewport_width,
+                content_width,
+                ..
+            } if *idx == block_idx && *content_width > *viewport_width => Some((
+                scrollbar_rect(*y, *viewport_width),
+                *viewport_width,
+                *content_width,
+            )),
+            _ => None,
+        })
+    }
+
+    fn dragging_block(&self) -> Option<usize> {
+        self.block_scrolls
+            .iter()
+            .enumerate()
+            .find_map(|(idx, scroll)| scroll.dragging.then_some(idx))
+    }
+
+    fn scroll_block_to(
+        &mut self,
+        block_idx: usize,
+        offset: f64,
+        viewport: f64,
+        content: f64,
+    ) -> bool {
+        let scroll = self.block_scroll_mut(block_idx);
+        let next = clamp_block_offset(offset, viewport, content);
+        let changed = (next - scroll.offset).abs() > 1e-6;
+        scroll.offset = next;
+        changed
+    }
+
+    fn drag_block_scrollbar(&mut self, block_idx: usize, pos: Point) -> bool {
+        let Some((bar, viewport, content)) = self.block_metrics(block_idx) else {
+            return false;
+        };
+        let offset = self.block_scroll_offset(block_idx);
+        let thumb = scrollbar_thumb(bar, viewport, content, offset);
+        let drag_thumb_offset = self
+            .block_scrolls
+            .get(block_idx)
+            .map(|scroll| scroll.drag_thumb_offset)
+            .unwrap_or(0.0);
+        let travel = (bar.width - thumb.width).max(1.0);
+        let raw_start = pos.x - self.padding - drag_thumb_offset;
+        let frac = ((raw_start - bar.x) / travel).clamp(0.0, 1.0);
+        self.scroll_block_to(
+            block_idx,
+            frac * (content - viewport).max(0.0),
+            viewport,
+            content,
+        )
+    }
 }
 
 fn point_in_rect(pos: Point, x: f64, y: f64, w: f64, h: f64) -> bool {
     pos.x >= x && pos.x <= x + w && pos.y >= y && pos.y <= y + h
+}
+
+#[derive(Clone, Copy)]
+struct BlockHit {
+    block_idx: usize,
+    viewport_width: f64,
+    content_width: f64,
+    bar: Rect,
+    thumb: Rect,
+    on_thumb: bool,
+}
+
+pub(super) const BLOCK_SCROLLBAR_H: f64 = 10.0;
+pub(super) const BLOCK_SCROLLBAR_GAP: f64 = 4.0;
+const BLOCK_SCROLLBAR_MIN_THUMB: f64 = 24.0;
+
+fn scrollbar_rect(block_y: f64, viewport_width: f64) -> Rect {
+    Rect::new(0.0, block_y + 1.0, viewport_width, BLOCK_SCROLLBAR_H)
+}
+
+fn scrollbar_thumb(bar: Rect, viewport_width: f64, content_width: f64, offset: f64) -> Rect {
+    let ratio = (viewport_width / content_width).clamp(0.0, 1.0);
+    let thumb_w = (bar.width * ratio)
+        .max(BLOCK_SCROLLBAR_MIN_THUMB)
+        .min(bar.width);
+    let travel = (bar.width - thumb_w).max(0.0);
+    let max_scroll = (content_width - viewport_width).max(0.0);
+    let x = if max_scroll > 0.0 {
+        bar.x + travel * (offset / max_scroll).clamp(0.0, 1.0)
+    } else {
+        bar.x
+    };
+    Rect::new(x, bar.y, thumb_w, bar.height)
+}
+
+fn clamp_block_offset(offset: f64, viewport_width: f64, content_width: f64) -> f64 {
+    offset
+        .clamp(0.0, (content_width - viewport_width).max(0.0))
+        .round()
 }
 
 fn is_rect_visible_in_root(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) -> bool {
@@ -437,8 +648,42 @@ impl Widget for MarkdownView {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                if let Some(block_idx) = self.dragging_block() {
+                    if self.drag_block_scrollbar(block_idx, *pos) {
+                        crate::animation::request_draw();
+                    }
+                    return EventResult::Consumed;
+                }
+                if self.hit_scrollbar(*pos).is_some() {
+                    set_cursor_icon(CursorIcon::ResizeHorizontal);
+                }
                 if self.link_at(*pos).is_some() {
                     set_cursor_icon(CursorIcon::PointingHand);
+                }
+                EventResult::Ignored
+            }
+            Event::MouseWheel {
+                pos,
+                delta_x,
+                delta_y,
+                modifiers,
+            } => {
+                if let Some((block_idx, viewport, content)) = self.point_over_scrollable_block(*pos)
+                {
+                    let delta = if delta_x.abs() > 1e-6 {
+                        delta_x * 40.0
+                    } else if modifiers.shift {
+                        delta_y * 40.0
+                    } else {
+                        0.0
+                    };
+                    if delta.abs() > 1e-6 {
+                        let old = self.block_scroll_offset(block_idx);
+                        if self.scroll_block_to(block_idx, old + delta, viewport, content) {
+                            crate::animation::request_draw();
+                        }
+                        return EventResult::Consumed;
+                    }
                 }
                 EventResult::Ignored
             }
@@ -446,12 +691,46 @@ impl Widget for MarkdownView {
                 pos,
                 button: MouseButton::Left,
                 ..
-            } if self.link_at(*pos).is_some() => EventResult::Consumed,
+            } => {
+                if let Some(hit) = self.hit_scrollbar(*pos) {
+                    let drag_thumb_offset = pos.x - self.padding - hit.thumb.x;
+                    let scroll = self.block_scroll_mut(hit.block_idx);
+                    if hit.on_thumb {
+                        scroll.dragging = true;
+                        scroll.drag_thumb_offset = drag_thumb_offset;
+                    } else {
+                        let center = pos.x - self.padding - hit.thumb.width * 0.5;
+                        let travel = (hit.bar.width - hit.thumb.width).max(1.0);
+                        let frac = ((center - hit.bar.x) / travel).clamp(0.0, 1.0);
+                        self.scroll_block_to(
+                            hit.block_idx,
+                            frac * (hit.content_width - hit.viewport_width).max(0.0),
+                            hit.viewport_width,
+                            hit.content_width,
+                        );
+                    }
+                    crate::animation::request_draw();
+                    return EventResult::Consumed;
+                }
+                if self.link_at(*pos).is_some() {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
             Event::MouseUp {
                 pos,
                 button: MouseButton::Left,
                 ..
             } => {
+                let was_dragging = self.block_scrolls.iter().any(|scroll| scroll.dragging);
+                if was_dragging {
+                    for scroll in &mut self.block_scrolls {
+                        scroll.dragging = false;
+                    }
+                    crate::animation::request_draw();
+                    return EventResult::Consumed;
+                }
                 let url = self.link_at(*pos).map(str::to_string);
                 if let Some(url) = url {
                     if let Some(cb) = self.on_link_click.as_mut() {
