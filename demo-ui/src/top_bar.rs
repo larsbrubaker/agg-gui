@@ -374,6 +374,9 @@ impl Widget for MenuButton {
     fn type_name(&self) -> &'static str {
         "MenuButton"
     }
+    fn is_visible(&self) -> bool {
+        self.visible
+    }
     fn bounds(&self) -> Rect {
         self.bounds
     }
@@ -387,7 +390,7 @@ impl Widget for MenuButton {
         &mut self.children
     }
     fn layout(&mut self, available: Size) -> Size {
-        self.visible = available.width < Self::MOBILE_BREAKPOINT;
+        self.visible = available.width > 0.0 && available.width < Self::MOBILE_BREAKPOINT;
         if !self.visible {
             self.bounds = Rect::new(0.0, 0.0, 0.0, available.height);
             return Size::new(0.0, available.height);
@@ -689,7 +692,7 @@ const GITHUB_URL: &str = "https://github.com/larsbrubaker/agg-gui";
 
 /// Build the FlexRow child for `TopMenuBar`.
 ///
-/// Layout: `[Backend button] [spacer] [flex(1.0)] [GitHub link] [gap] [ThemeToggle]`.
+/// Layout: `[Backend button] [Demos button on mobile] [spacer] [flex(1.0)] [GitHub link] [gap] [ThemeToggle]`.
 /// The GitHub `Hyperlink` opens the project page in a new tab on both
 /// native (via the `webbrowser` crate) and WASM (via
 /// `window.open(_, "_blank")`).
@@ -727,13 +730,13 @@ pub fn build_top_bar_inner(
     Box::new(
         FlexRow::new()
             .with_gap(0.0)
-            .add(Box::new(MenuButton::new(
-                Arc::clone(&font),
-                mobile_menu_open,
-            )))
             .add(Box::new(BackendButton::new(
                 Arc::clone(&font),
                 show_backend,
+            )))
+            .add(Box::new(MenuButton::new(
+                Arc::clone(&font),
+                mobile_menu_open,
             )))
             .add(Box::new(SizedBox::new().with_width(8.0)))
             .add_flex(Box::new(SizedBox::new()), 1.0)

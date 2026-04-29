@@ -190,6 +190,55 @@ fn top_bar_scrolls_horizontally_when_controls_overflow() {
     );
 }
 
+#[test]
+fn mobile_top_bar_places_demos_button_after_backend() {
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let (mut app, _handles) = build_test_app(font);
+    app.layout(Size::new(360.0, 640.0));
+
+    let top_bar = find_widget_by_type(app.root(), "TopMenuBar").expect("top bar must exist");
+    let row = top_bar.children()[0].as_ref();
+    let row_children = row.children();
+    let backend = row_children
+        .iter()
+        .find(|child| child.type_name() == "BackendButton")
+        .expect("backend button must exist");
+    let demos = row_children
+        .iter()
+        .find(|child| child.type_name() == "MenuButton")
+        .expect("demos button must exist");
+
+    assert!(
+        backend.bounds().x < demos.bounds().x,
+        "mobile top bar should place Demos to the right of Backend"
+    );
+}
+
+#[test]
+fn desktop_top_bar_hides_demos_button() {
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let (mut app, _handles) = build_test_app(font);
+    app.layout(Size::new(720.0, 640.0));
+
+    let top_bar = find_widget_by_type(app.root(), "TopMenuBar").expect("top bar must exist");
+    let row = top_bar.children()[0].as_ref();
+    let demos = row
+        .children()
+        .iter()
+        .find(|child| child.type_name() == "MenuButton")
+        .expect("demos button must exist");
+
+    assert_eq!(
+        demos.bounds().width,
+        0.0,
+        "desktop top bar should hide Demos when the sidebar is visible"
+    );
+    assert!(
+        !demos.is_visible(),
+        "desktop top bar should not paint Demos when the sidebar is visible"
+    );
+}
+
 fn build_test_app(font: Arc<Font>) -> (agg_gui::App, DemoHandles) {
     build_demo_ui(
         font,
