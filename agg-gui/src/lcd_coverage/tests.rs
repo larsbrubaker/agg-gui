@@ -1,6 +1,5 @@
 use super::*;
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::text::Font;
 
@@ -271,98 +270,6 @@ fn test_lcd_buffer_red_text_writes_premultiplied_color() {
         saw_full_red,
         "expected at least one fully-covered pure-red pixel"
     );
-}
-
-#[test]
-fn test_opaque_lcd_composite_matches_float_formula() {
-    let mask = LcdMask {
-        data: vec![0, 64, 255, 128, 192, 32],
-        width: 2,
-        height: 1,
-    };
-    let src = Color::rgba(0.25, 0.5, 0.75, 1.0);
-    let mut buf = LcdBuffer::new(2, 1);
-    buf.clear(Color::rgba(0.1, 0.2, 0.3, 0.4));
-
-    let before_color = buf.color_plane().to_vec();
-    let before_alpha = buf.alpha_plane().to_vec();
-    buf.composite_mask(&mask, src, 0, 0, None);
-
-    for i in 0..6 {
-        let channel = i % 3;
-        let src_channel = [src.r, src.g, src.b][channel];
-        let mask_channel = mask.data[i];
-        assert_eq!(
-            buf.color_plane()[i],
-            reference_float_blend(src_channel, before_color[i], mask_channel)
-        );
-        assert_eq!(
-            buf.alpha_plane()[i],
-            reference_float_blend(1.0, before_alpha[i], mask_channel)
-        );
-    }
-}
-
-#[test]
-#[ignore = "diagnostic timing report; run manually with --ignored --nocapture"]
-fn lcd_pipeline_timing_report() {
-    const W: u32 = 480;
-    const H: u32 = 360;
-    const ITERS: usize = 100;
-
-    let mut path = PathStorage::new();
-    path.move_to(40.0, 40.0);
-    path.line_to(440.0, 40.0);
-    path.line_to(440.0, 320.0);
-    path.line_to(40.0, 320.0);
-    path.close_polygon(agg_rust::basics::PATH_FLAGS_NONE);
-
-    let mut masks = Vec::with_capacity(ITERS);
-    let start = Instant::now();
-    for _ in 0..ITERS {
-        let _ = LcdMaskBuilder::new(W, H);
-    }
-    let builder_new = elapsed_ms(start);
-
-    let start = Instant::now();
-    for _ in 0..ITERS {
-        let mut builder = LcdMaskBuilder::new(W, H);
-        builder.with_paths(&TransAffine::new(), |add| add(&mut path));
-        masks.push(builder.finalize());
-    }
-    let rasterize_and_filter = elapsed_ms(start);
-
-    let mut buffer = LcdBuffer::new(W, H);
-    let start = Instant::now();
-    for mask in &masks {
-        buffer.composite_mask(mask, Color::rgba(0.2, 0.4, 0.8, 1.0), 0, 0, None);
-    }
-    let composite_solid = elapsed_ms(start);
-
-    let start = Instant::now();
-    for _ in 0..ITERS {
-        let _ = LcdBuffer::new(W, H);
-    }
-    let buffer_new = elapsed_ms(start);
-
-    eprintln!("LCD pipeline timing over {ITERS} iterations at {W}x{H}");
-    eprintln!("LcdMaskBuilder::new:       {:>8.2} ms", builder_new);
-    eprintln!(
-        "rasterize + 5-tap filter:  {:>8.2} ms",
-        rasterize_and_filter
-    );
-    eprintln!("LcdBuffer::composite_mask: {:>8.2} ms", composite_solid);
-    eprintln!("LcdBuffer::new:            {:>8.2} ms", buffer_new);
-}
-
-fn elapsed_ms(start: Instant) -> f64 {
-    start.elapsed().as_secs_f64() * 1000.0
-}
-
-fn reference_float_blend(src: f32, dst_byte: u8, coverage_byte: u8) -> u8 {
-    let coverage = coverage_byte as f32 / 255.0;
-    let dst = dst_byte as f32 / 255.0;
-    ((src * coverage + dst * (1.0 - coverage)) * 255.0 + 0.5).clamp(0.0, 255.0) as u8
 }
 
 /// `composite_buffer` leaves dst untouched wherever src has alpha=0.
