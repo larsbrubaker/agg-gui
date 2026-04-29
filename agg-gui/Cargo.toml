@@ -1,11 +1,11 @@
 [package]
 name = "agg-gui"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.70"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 license = "MIT"
-description = "A Rust GUI framework built on AGG — immediate-mode widgets, Y-up layout, halo-AA rendering via tess2"
+description = "Immediate-mode Rust GUI library with AGG rendering, Y-up layout, widgets, text, SVG, and native/WASM adapters"
 repository = "https://github.com/larsbrubaker/agg-gui"
 homepage = "https://larsbrubaker.github.io/agg-gui/"
 documentation = "https://docs.rs/agg-gui"

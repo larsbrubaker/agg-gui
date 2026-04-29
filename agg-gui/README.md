@@ -1,8 +1,11 @@
 # agg-gui
 
-A Rust GUI framework built on [Anti-Grain Geometry (AGG)](https://github.com/larsbrubaker/agg-rust).
-Widgets rasterize directly via AGG paths — no retained scene graph, no DOM, no CSS.
-The rendering model is immediate-mode: full redraw every frame, deterministic layout, Y-up coordinates throughout.
+`agg-gui` is an immediate-mode Rust GUI library built on
+[Anti-Grain Geometry (AGG)](https://github.com/larsbrubaker/agg-rust).
+It provides widgets, flex layout, text editing, markdown, SVG/image rendering,
+theming, hit-tested input, and optional native/WASM adapter helpers while keeping
+the rendering model simple: full redraw every frame, deterministic layout, and
+Y-up coordinates throughout.
 
 > Part of the [rust-apps](https://github.com/larsbrubaker/rust-apps) suite — a collection of Rust graphics and geometry libraries by Lars Brubaker.
 
@@ -34,20 +37,25 @@ Optional features:
 agg-gui = { version = "0.1", features = ["winit-adapter", "clipboard"] }
 ```
 
-## Widget Library
+## Widgets And Layout
 
 | Widget | Description |
 |--------|-------------|
 | `Label` | Static text, theme-aware color, left/center/right alignment |
 | `Button` | Themeable background, focus ring, disabled state, click callback |
+| `CollapsingHeader` | Expand/collapse section with animated disclosure |
 | `Checkbox` | Animated check mark, shared state cell for two-way binding |
+| `ComboBox` | Popup-backed single-selection control |
+| `ColorPicker` | Interactive color selection widget |
 | `Slider` | Linear value control with focus ring and keyboard nudge |
 | `DragValue` | Click-drag to increment/decrement numeric values |
 | `RadioGroup` | Single-selection group with shared state |
 | `ProgressBar` | Filled track with optional label |
 | `ToggleSwitch` | Animated on/off toggle |
 | `TextField` | Full text editing: cursor, selection, clipboard, undo/redo |
+| `TextArea` | Multi-line text editing |
 | `Hyperlink` | Underlined link text with click callback |
+| `ImageView` | Image display widget |
 | `ScrollView` | Vertical scroll with drag-thumb and mouse-wheel support |
 | `Window` | Floating panel: draggable title bar, close button, resize handles, collapse |
 | `FlexColumn` | Vertical flex layout with gap, padding, fixed + growing children |
@@ -59,6 +67,7 @@ agg-gui = { version = "0.1", features = ["winit-adapter", "clipboard"] }
 | `TreeView` | Hierarchical list with expand/collapse and drag-and-drop |
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
+| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives |
 | `Separator` | Horizontal or vertical rule |
 | `Spacer` / `Padding` | Layout utility widgets |
 
@@ -75,7 +84,10 @@ agg-gui = { version = "0.1", features = ["winit-adapter", "clipboard"] }
   touchscreen laptops.
 - **Drawing API** — `DrawCtx` covers paths, fills, strokes, rounded rects, circles,
   arcs, Bézier curves, text, transforms, clipping, compositing layers, image blitting,
-  and inline GL content. Two implementations: software AGG rasterizer + halo-AA GL path.
+  SVG rendering, and inline GL content. Two implementations: software AGG rasterizer
+  + halo-AA GL path.
+- **Platform adapters** — crate-owned event, cursor, clipboard, font, device-scale,
+  screenshot, and platform types, with optional winit and WASM helper modules.
 - **Inspector** — built-in widget-tree inspector overlay highlighting hovered widgets,
   showing bounds and properties, reporting hover position.
 
