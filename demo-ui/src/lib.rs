@@ -12,7 +12,6 @@ mod shell;
 mod sidebar;
 mod specs;
 mod state;
-mod startup_timing;
 mod top_bar;
 mod url;
 mod windows;

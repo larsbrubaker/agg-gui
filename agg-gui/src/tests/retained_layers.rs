@@ -224,10 +224,8 @@ fn test_idle_retained_window_does_not_request_reactive_redraw() {
 
     let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
     let toggle = ToggleSwitch::new(false);
-    let mut window =
-        Window::new("Idle", Arc::clone(&font), Box::new(toggle)).with_bounds(Rect::new(
-            0.0, 0.0, 120.0, 80.0,
-        ));
+    let mut window = Window::new("Idle", Arc::clone(&font), Box::new(toggle))
+        .with_bounds(Rect::new(0.0, 0.0, 120.0, 80.0));
     window.layout(Size::new(200.0, 120.0));
 
     let mut ctx = RetainedLayerCtx::new();

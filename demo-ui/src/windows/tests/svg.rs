@@ -21,8 +21,8 @@ mod samples;
 mod svg_tests;
 
 use drawing::{
-    decode_png_rgba, decode_png_size, diff_rgba_pixels, draw_hardware_column, draw_lcd_column, draw_panel,
-    draw_raster_column, draw_small_text, native_rect, rgba_matches_reference,
+    decode_png_rgba, decode_png_size, diff_rgba_pixels, draw_hardware_column, draw_lcd_column,
+    draw_panel, draw_raster_column, draw_small_text, native_rect, rgba_matches_reference,
 };
 use samples::{SvgSample, SVG_SAMPLES};
 
@@ -277,18 +277,21 @@ impl SvgSampleRender {
     }
 
     fn rgba_diff(&self) -> &Result<Arc<Vec<u8>>, String> {
-        self.rgba_diff.get_or_init(|| match (self.reference(), self.rgba()) {
-            (Ok(reference), Ok(rgba)) => Ok(Arc::new(diff_rgba_pixels(reference, rgba))),
-            (Err(err), _) => Err(format!("reference: {err}")),
-            (_, Err(err)) => Err(format!("rgba: {err}")),
-        })
+        self.rgba_diff
+            .get_or_init(|| match (self.reference(), self.rgba()) {
+                (Ok(reference), Ok(rgba)) => Ok(Arc::new(diff_rgba_pixels(reference, rgba))),
+                (Err(err), _) => Err(format!("reference: {err}")),
+                (_, Err(err)) => Err(format!("rgba: {err}")),
+            })
     }
 
     fn rgba_pass(&self) -> bool {
-        *self.rgba_pass.get_or_init(|| match (self.reference(), self.rgba()) {
-            (Ok(reference), Ok(rgba)) => rgba_matches_reference(rgba, reference),
-            _ => false,
-        })
+        *self
+            .rgba_pass
+            .get_or_init(|| match (self.reference(), self.rgba()) {
+                (Ok(reference), Ok(rgba)) => rgba_matches_reference(rgba, reference),
+                _ => false,
+            })
     }
 }
 

@@ -322,6 +322,10 @@ impl LcdBuffer {
         let sr = src.r.clamp(0.0, 1.0);
         let sg = src.g.clamp(0.0, 1.0);
         let sb = src.b.clamp(0.0, 1.0);
+        if sa == 1.0 {
+            self.composite_opaque_mask(mask, sr, sg, sb, dst_x, dst_y, clip);
+            return;
+        }
         let dst_w_i = self.width as i32;
         let dst_h_i = self.height as i32;
         let dst_w_u = self.width as usize;
@@ -383,6 +387,64 @@ impl LcdBuffer {
                 self.alpha[di] = (ra_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
                 self.alpha[di + 1] = (ra_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
                 self.alpha[di + 2] = (ra_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+
+    fn composite_opaque_mask(
+        &mut self,
+        mask: &LcdMask,
+        sr: f32,
+        sg: f32,
+        sb: f32,
+        dst_x: i32,
+        dst_y: i32,
+        clip: Option<(i32, i32, i32, i32)>,
+    ) {
+        let sr = (sr * 255.0 + 0.5).clamp(0.0, 255.0) as u16;
+        let sg = (sg * 255.0 + 0.5).clamp(0.0, 255.0) as u16;
+        let sb = (sb * 255.0 + 0.5).clamp(0.0, 255.0) as u16;
+        let dst_w_i = self.width as i32;
+        let dst_h_i = self.height as i32;
+        let dst_w_u = self.width as usize;
+        let mw = mask.width as i32;
+        let mh = mask.height as i32;
+        let (cx1, cy1, cx2, cy2) = match clip {
+            Some((cx1, cy1, cx2, cy2)) => {
+                (cx1.max(0), cy1.max(0), cx2.min(dst_w_i), cy2.min(dst_h_i))
+            }
+            None => (0, 0, dst_w_i, dst_h_i),
+        };
+        if cx1 >= cx2 || cy1 >= cy2 {
+            return;
+        }
+
+        for my in 0..mh {
+            let dy = dst_y + my;
+            if dy < cy1 || dy >= cy2 {
+                continue;
+            }
+            let dy_u = dy as usize;
+            for mx in 0..mw {
+                let dx = dst_x + mx;
+                if dx < cx1 || dx >= cx2 {
+                    continue;
+                }
+                let mi = ((my * mw + mx) * 3) as usize;
+                let mr = mask.data[mi] as u16;
+                let mg = mask.data[mi + 1] as u16;
+                let mb = mask.data[mi + 2] as u16;
+                if mr == 0 && mg == 0 && mb == 0 {
+                    continue;
+                }
+
+                let di = (dy_u * dst_w_u + (dx as usize)) * 3;
+                self.color[di] = blend_opaque_channel(sr, self.color[di], mr);
+                self.color[di + 1] = blend_opaque_channel(sg, self.color[di + 1], mg);
+                self.color[di + 2] = blend_opaque_channel(sb, self.color[di + 2], mb);
+                self.alpha[di] = blend_opaque_channel(255, self.alpha[di], mr);
+                self.alpha[di + 1] = blend_opaque_channel(255, self.alpha[di + 1], mg);
+                self.alpha[di + 2] = blend_opaque_channel(255, self.alpha[di + 2], mb);
             }
         }
     }
@@ -572,6 +634,11 @@ fn flip_plane(src: &[u8], width: u32, height: u32) -> Vec<u8> {
             .copy_from_slice(&src[y * row_bytes..(y + 1) * row_bytes]);
     }
     out
+}
+
+#[inline]
+fn blend_opaque_channel(src: u16, dst: u8, coverage: u16) -> u8 {
+    ((src * coverage + (dst as u16) * (255 - coverage) + 127) / 255) as u8
 }
 
 mod mask;

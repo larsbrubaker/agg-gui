@@ -2,7 +2,6 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
 use agg_gui::{
     AccentColor, App, FlexColumn, FlexRow, Font, InspectorNode, InspectorPanel, Key, Modifiers,
@@ -16,7 +15,6 @@ use crate::shell::{BackendPane, CanvasBg, SidebarPane, TopMenuBar};
 use crate::sidebar::{build_sidebar, SidebarEntry, SidebarGroup};
 use crate::specs::{find_cube_idx, tile_rect, DEMOS, TESTS};
 use crate::state::{SavedState, StateAccessor};
-use crate::startup_timing::StartupTiming;
 use crate::top_bar::{self, build_top_bar_inner};
 use crate::windows;
 
@@ -28,7 +26,6 @@ pub fn build_demo_ui(
     initial_state: Option<SavedState>,
     platform: PlatformHooks,
 ) -> (App, DemoHandles) {
-    let timing = StartupTiming::new("[agg-gui demo-ui startup]");
     let show_inspector = Rc::new(Cell::new(
         initial_state
             .as_ref()
@@ -188,7 +185,6 @@ pub fn build_demo_ui(
         .as_deref()
         .and_then(windows::font_option_index)
         .unwrap_or_else(|| font_index_cell.get());
-    timing.mark("state cells and font settings");
     windows::init_system_cells(windows::SystemCells {
         font_name: Rc::clone(&font_name_cell),
         font_index: Rc::clone(&font_index_cell),
@@ -209,7 +205,6 @@ pub fn build_demo_ui(
         let cells = windows::system_cells();
         windows::request_font_by_index(&cells, resolved_font_idx);
     }
-    timing.mark("init_system_cells/request_font_by_index");
     let all_specs_count = DEMOS.len() + TESTS.len();
     let reset_cells: Vec<Rc<Cell<Option<Rect>>>> = (0..all_specs_count)
         .map(|_| Rc::new(Cell::new(None)))
@@ -334,18 +329,15 @@ pub fn build_demo_ui(
             SidebarGroup { name, entries }
         })
         .collect();
-    timing.mark("sidebar groups");
     let sidebar_widget = build_sidebar(
         Arc::clone(&font),
         Rc::clone(&about_open),
         &sidebar_groups,
         on_organize,
     );
-    timing.mark("build_sidebar");
     let sidebar_panel = SidebarPane::new(sidebar_widget, Rc::clone(&mobile_menu_open));
     let mut canvas = Stack::new().add(Box::new(CanvasBg::new()));
     for (i, spec) in DEMOS.iter().enumerate() {
-        let demo_start = Instant::now();
         let open_cell = Rc::clone(&demo_entries[i].open);
         let reset_cell = Rc::clone(&reset_cells[i]);
         let initial = initial_state
@@ -365,12 +357,6 @@ pub fn build_demo_ui(
                 Rc::clone(&screenshot_capturing),
             )
         };
-        timing.mark_if_slow(
-            &format!("build_demo_content {}", spec.title),
-            demo_start,
-            25.0,
-        );
-        let window_start = Instant::now();
         let auto_size = spec.title == "\u{F096} Frame";
         let win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(
@@ -386,11 +372,8 @@ pub fn build_demo_ui(
             .with_auto_size(auto_size)
             .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(win));
-        timing.mark_if_slow(&format!("build_demo_window {}", spec.title), window_start, 25.0);
     }
-    timing.mark("demo windows");
     {
-        let cube_start = Instant::now();
         let open_cell = Rc::clone(&demo_entries[cube_idx].open);
         let reset_cell = Rc::clone(&reset_cells[cube_idx]);
         let spec = &DEMOS[cube_idx];
@@ -414,16 +397,13 @@ pub fn build_demo_ui(
             .with_maximized_cell(Rc::clone(&demo_max_cells[cube_idx]))
             .on_raised(make_on_raised());
         canvas.children_mut()[1 + cube_idx] = Box::new(win);
-        timing.mark_if_slow("build_cube_window", cube_start, 25.0);
     }
     let mut resize_sub: std::collections::HashMap<String, windows::ResizeTestWindow> =
         windows::window_resize_sub_windows(Arc::clone(&font))
             .into_iter()
             .map(|e| (e.title.clone(), e))
             .collect();
-    timing.mark("window_resize_sub_windows");
     for (i, spec) in TESTS.iter().enumerate() {
-        let test_start = Instant::now();
         let total_i = DEMOS.len() + i;
         let open_cell = Rc::clone(&test_entries[i].open);
         let reset_cell = Rc::clone(&reset_cells[total_i]);
@@ -464,7 +444,6 @@ pub fn build_demo_ui(
                 win = win.with_height_floor_to_content(true);
             }
             canvas = canvas.add(Box::new(win));
-            timing.mark_if_slow(&format!("build_resize_test {}", spec.title), test_start, 25.0);
             continue;
         }
         let content: Box<dyn Widget> = match spec.title {
@@ -492,11 +471,8 @@ pub fn build_demo_ui(
             .with_maximized_cell(Rc::clone(&test_max_cells[i]))
             .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(win));
-        timing.mark_if_slow(&format!("build_test_window {}", spec.title), test_start, 25.0);
     }
-    timing.mark("test windows");
     {
-        let about_start = Instant::now();
         let about_initial = initial_state
             .as_ref()
             .map(|st| &st.about)
@@ -514,12 +490,10 @@ pub fn build_demo_ui(
         .with_maximized_cell(Rc::clone(&about_max_cell))
         .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(about_win));
-        timing.mark_if_slow("build_about_window", about_start, 25.0);
     }
     let inspector_snapshot_cell: Rc<RefCell<Option<agg_gui::InspectorSavedState>>> =
         Rc::new(RefCell::new(None));
     {
-        let inspector_start = Instant::now();
         let mut inspector = InspectorPanel::new(
             Arc::clone(&font),
             Rc::clone(&inspector_nodes),
@@ -539,9 +513,7 @@ pub fn build_demo_ui(
                 .with_visible_cell(Rc::clone(&show_inspector))
                 .on_raised(make_on_raised());
         canvas = canvas.add(Box::new(inspector_win));
-        timing.mark_if_slow("build_inspector_window", inspector_start, 25.0);
     }
-    timing.mark("about/inspector windows");
     {
         let saved_order = z_order_cell.borrow().clone();
         if !saved_order.is_empty() {
@@ -631,7 +603,6 @@ pub fn build_demo_ui(
         backend_name,
         on_reset_all,
     );
-    timing.mark("build_backend_panel");
     let backend_pane = BackendPane {
         bounds: Rect::default(),
         children: vec![backend_panel_widget],
@@ -649,13 +620,11 @@ pub fn build_demo_ui(
         Rc::clone(&theme_pref),
         Rc::clone(&accent_color),
     );
-    timing.mark("build_top_bar");
     let root = FlexColumn::new()
         .with_gap(0.0)
         .add(Box::new(TopMenuBar::new(top_bar_inner)))
         .add_flex(Box::new(demos_body), 1.0);
     let mut app = App::new(Box::new(root));
-    timing.mark("build_root_app");
     let on_organize_key = {
         move || {
             for (i, cell) in rc_for_key.iter().enumerate() {
@@ -751,6 +720,5 @@ pub fn build_demo_ui(
         screenshot_capturing: Rc::clone(&screenshot_capturing),
         state: state_accessor,
     };
-    timing.mark("state_accessor/handles");
     (app, handles)
 }

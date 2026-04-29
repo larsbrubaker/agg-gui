@@ -6,14 +6,14 @@
 use std::sync::Arc;
 
 use agg_gui::{
-    AccentColor, DrawCtx, Event, EventResult, Font, Framebuffer, GfxCtx, Rect, Size,
-    ThemePreference, Widget,
+    find_widget_by_type, AccentColor, DrawCtx, Event, EventResult, Font, Framebuffer, GfxCtx, Rect,
+    Size, ThemePreference, Widget,
 };
 
 use crate::api::{DemoHandles, PlatformHooks};
 use crate::app_builder::build_demo_ui;
-use crate::RunMode;
 use crate::state::{SavedState, WindowState};
+use crate::RunMode;
 
 const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
@@ -150,7 +150,10 @@ fn continuous_mode_forces_host_redraw_after_idle_paint() {
     let mut fb = Framebuffer::new(1200, 900);
     let mut ctx = GfxCtx::new(&mut fb);
     app.paint(&mut ctx);
-    assert!(!app.wants_draw(), "test setup should be idle before mode change");
+    assert!(
+        !app.wants_draw(),
+        "test setup should be idle before mode change"
+    );
 
     handles.run_mode.set(RunMode::Continuous);
     let host_wants_draw = handles.run_mode.get() == RunMode::Continuous || app.wants_draw();
@@ -158,6 +161,32 @@ fn continuous_mode_forces_host_redraw_after_idle_paint() {
     assert!(
         host_wants_draw,
         "continuous mode must force the platform host to draw even when the app is idle"
+    );
+}
+
+#[test]
+fn top_bar_scrolls_horizontally_when_controls_overflow() {
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let (mut app, _handles) = build_test_app(font);
+    let viewport = Size::new(360.0, 640.0);
+    app.layout(viewport);
+
+    let top_bar = find_widget_by_type(app.root(), "TopMenuBar").expect("top bar must exist");
+    let content = top_bar.children()[0].bounds();
+    assert!(
+        content.width > top_bar.bounds().width,
+        "narrow top bar should keep overflow controls in horizontally scrollable content"
+    );
+    assert_eq!(content.x, 0.0);
+
+    app.on_mouse_wheel_xy(180.0, 18.0, 1.0, 0.0);
+    app.layout(viewport);
+
+    let top_bar = find_widget_by_type(app.root(), "TopMenuBar").expect("top bar must exist");
+    let content = top_bar.children()[0].bounds();
+    assert!(
+        content.x < 0.0,
+        "horizontal wheel over the top bar should pan overflow content into view"
     );
 }
 

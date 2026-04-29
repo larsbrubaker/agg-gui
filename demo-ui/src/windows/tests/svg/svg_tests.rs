@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use agg_gui::{
     find_widget_by_type, set_scroll_visibility, Event, Font, Modifiers, MouseButton, Point,
@@ -350,6 +351,68 @@ fn svg_sample_render_defers_bitmap_generation_until_access() {
         rendered.lcd.get().is_none(),
         "accessing RGBA should not force LCD generation"
     );
+}
+
+#[test]
+#[ignore = "diagnostic timing report; run manually with --ignored --nocapture"]
+fn svg_sample_render_timing_report() {
+    let mut total_new = 0.0;
+    let mut total_reference = 0.0;
+    let mut total_rgba = 0.0;
+    let mut total_lcd = 0.0;
+    let mut total_diff = 0.0;
+    let mut total_compare = 0.0;
+
+    eprintln!(
+        "{:<72} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "sample", "new", "png", "rgba", "lcd", "diff", "cmp"
+    );
+    for sample in super::SVG_SAMPLES {
+        let start = Instant::now();
+        let rendered = super::SvgSampleRender::new(sample);
+        let new_ms = elapsed_ms(start);
+
+        let start = Instant::now();
+        let _ = rendered.reference();
+        let reference_ms = elapsed_ms(start);
+
+        let start = Instant::now();
+        let _ = rendered.rgba();
+        let rgba_ms = elapsed_ms(start);
+
+        let start = Instant::now();
+        let _ = rendered.lcd();
+        let lcd_ms = elapsed_ms(start);
+
+        let start = Instant::now();
+        let _ = rendered.rgba_diff();
+        let diff_ms = elapsed_ms(start);
+
+        let start = Instant::now();
+        let _ = rendered.rgba_pass();
+        let compare_ms = elapsed_ms(start);
+
+        total_new += new_ms;
+        total_reference += reference_ms;
+        total_rgba += rgba_ms;
+        total_lcd += lcd_ms;
+        total_diff += diff_ms;
+        total_compare += compare_ms;
+
+        eprintln!(
+            "{:<72} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+            sample.name, new_ms, reference_ms, rgba_ms, lcd_ms, diff_ms, compare_ms
+        );
+    }
+
+    eprintln!(
+        "{:<72} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+        "TOTAL", total_new, total_reference, total_rgba, total_lcd, total_diff, total_compare
+    );
+}
+
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
 }
 
 fn assert_property(props: &[(&'static str, String)], name: &str, expected: &str) {

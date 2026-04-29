@@ -1,7 +1,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use agg_gui::{DrawCtx, Event, EventResult, Rect, Size, Widget};
+use agg_gui::{
+    widget::current_mouse_world, DrawCtx, Event, EventResult, MouseButton, Rect, Size, Widget,
+};
 
 // ── Canvas background ──────────────────────────────────────────────────────────
 
@@ -58,13 +60,55 @@ impl Widget for CanvasBg {
 pub(crate) struct TopMenuBar {
     pub(crate) bounds: Rect,
     pub(crate) children: Vec<Box<dyn Widget>>,
+    h_offset: f64,
+    content_width: f64,
+    middle_dragging: bool,
+    middle_start_world_x: f64,
+    middle_start_h_offset: f64,
 }
 
 impl TopMenuBar {
+    const H: f64 = 36.0;
+    const MOBILE_BREAKPOINT: f64 = 720.0;
+    const DESKTOP_CONTENT_W: f64 = 562.0;
+    const MOBILE_CONTENT_W: f64 = 662.0;
+
     pub(crate) fn new(inner_row: Box<dyn Widget>) -> Self {
         Self {
             bounds: Rect::default(),
             children: vec![inner_row],
+            h_offset: 0.0,
+            content_width: 0.0,
+            middle_dragging: false,
+            middle_start_world_x: 0.0,
+            middle_start_h_offset: 0.0,
+        }
+    }
+
+    fn min_content_width(viewport_width: f64) -> f64 {
+        if viewport_width < Self::MOBILE_BREAKPOINT {
+            Self::MOBILE_CONTENT_W
+        } else {
+            Self::DESKTOP_CONTENT_W
+        }
+    }
+
+    fn max_scroll(&self) -> f64 {
+        (self.content_width - self.bounds.width).max(0.0)
+    }
+
+    fn clamp_offset(&mut self) {
+        self.h_offset = self.h_offset.clamp(0.0, self.max_scroll());
+    }
+
+    fn update_child_bounds(&mut self) {
+        if let Some(child) = self.children.first_mut() {
+            child.set_bounds(Rect::new(
+                -self.h_offset.round(),
+                0.0,
+                self.content_width,
+                Self::H,
+            ));
         }
     }
 }
@@ -87,12 +131,16 @@ impl Widget for TopMenuBar {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let h = 36.0_f64;
+        let h = Self::H;
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
+        self.content_width = available
+            .width
+            .max(Self::min_content_width(available.width));
+        self.clamp_offset();
         if let Some(child) = self.children.first_mut() {
-            child.layout(Size::new(available.width, h));
-            child.set_bounds(Rect::new(0.0, 0.0, available.width, h));
+            child.layout(Size::new(self.content_width, h));
         }
+        self.update_child_bounds();
         Size::new(available.width, h)
     }
 
@@ -113,8 +161,60 @@ impl Widget for TopMenuBar {
         ctx.fill();
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        match event {
+            Event::MouseWheel {
+                delta_x,
+                delta_y,
+                modifiers,
+                ..
+            } => {
+                let delta = if delta_x.abs() > f64::EPSILON {
+                    *delta_x
+                } else if modifiers.shift {
+                    *delta_y
+                } else {
+                    0.0
+                };
+                if delta.abs() <= f64::EPSILON || self.max_scroll() <= 0.0 {
+                    return EventResult::Ignored;
+                }
+                let before = self.h_offset;
+                self.h_offset += delta * 40.0;
+                self.clamp_offset();
+                if (self.h_offset - before).abs() > f64::EPSILON {
+                    self.update_child_bounds();
+                    agg_gui::animation::request_draw();
+                    return EventResult::Consumed;
+                }
+                EventResult::Ignored
+            }
+            Event::MouseDown {
+                button: MouseButton::Middle,
+                ..
+            } if self.max_scroll() > 0.0 => {
+                self.middle_dragging = true;
+                self.middle_start_world_x = current_mouse_world().map(|p| p.x).unwrap_or(0.0);
+                self.middle_start_h_offset = self.h_offset;
+                EventResult::Consumed
+            }
+            Event::MouseMove { pos } if self.middle_dragging => {
+                let world_x = current_mouse_world().map(|p| p.x).unwrap_or(pos.x);
+                self.h_offset = self.middle_start_h_offset - (world_x - self.middle_start_world_x);
+                self.clamp_offset();
+                self.update_child_bounds();
+                agg_gui::animation::request_draw();
+                EventResult::Consumed
+            }
+            Event::MouseUp {
+                button: MouseButton::Middle,
+                ..
+            } if self.middle_dragging => {
+                self.middle_dragging = false;
+                EventResult::Consumed
+            }
+            _ => EventResult::Ignored,
+        }
     }
 }
 

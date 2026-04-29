@@ -87,23 +87,27 @@ pub fn compare_svg_rgba(
     let mut translucent_rgb_failures = 0usize;
     let mut visual_failures = 0usize;
     let mut max_alpha_delta = 0u8;
-    let mut max_visual_distance = 0.0_f64;
+    let mut max_visual_distance_sq = 0u32;
+    let visual_threshold_sq = (thresholds.visual_rgb * thresholds.visual_rgb).ceil() as u32;
     for (a, b) in rendered.chunks_exact(4).zip(reference.chunks_exact(4)) {
-        let rgba_delta = max_rgba_delta(a, b);
-        let rgb_delta = max_rgb_delta(a, b);
+        let dr = a[0].abs_diff(b[0]);
+        let dg = a[1].abs_diff(b[1]);
+        let db = a[2].abs_diff(b[2]);
         let alpha_delta = a[3].abs_diff(b[3]);
-        let premul_delta = max_rgb_delta(&premultiply_pixel(a), &premultiply_pixel(b));
-        let visual_distance = color_distance(composite_over_white(a), composite_over_white(b));
+        let rgb_delta = dr.max(dg).max(db);
+        let rgba_delta = rgb_delta.max(alpha_delta);
+        let premul_delta = premul_rgb_delta(a, b);
+        let visual_distance_sq = visual_rgb_distance_sq_over_white(a, b);
 
         max_delta = max_delta.max(rgba_delta);
         max_alpha_delta = max_alpha_delta.max(alpha_delta);
-        max_visual_distance = max_visual_distance.max(visual_distance);
+        max_visual_distance_sq = max_visual_distance_sq.max(visual_distance_sq);
 
         let opaque_rgb_failed = a[3] == 255 && b[3] == 255 && rgb_delta > thresholds.opaque_rgb;
         let alpha_failed = alpha_delta > thresholds.alpha;
         let translucent_rgb_failed =
             (a[3] < 255 || b[3] < 255) && premul_delta > thresholds.translucent_rgb;
-        let visual_failed = visual_distance > thresholds.visual_rgb;
+        let visual_failed = visual_distance_sq > visual_threshold_sq;
 
         opaque_rgb_failures += usize::from(opaque_rgb_failed);
         alpha_failures += usize::from(alpha_failed);
@@ -126,51 +130,40 @@ pub fn compare_svg_rgba(
         translucent_rgb_failures,
         visual_failures,
         max_alpha_delta,
-        max_visual_distance,
+        max_visual_distance: (max_visual_distance_sq as f64).sqrt(),
     }
 }
 
-fn max_rgba_delta(a: &[u8], b: &[u8]) -> u8 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&a, &b)| a.abs_diff(b))
-        .max()
-        .unwrap_or(0)
+fn premul_rgb_delta(a: &[u8], b: &[u8]) -> u8 {
+    let aa = a[3] as u32;
+    let ba = b[3] as u32;
+    let pr = premul_channel(a[0], aa).abs_diff(premul_channel(b[0], ba));
+    let pg = premul_channel(a[1], aa).abs_diff(premul_channel(b[1], ba));
+    let pb = premul_channel(a[2], aa).abs_diff(premul_channel(b[2], ba));
+    pr.max(pg).max(pb) as u8
 }
 
-fn max_rgb_delta(a: &[u8], b: &[u8]) -> u8 {
-    a[..3]
-        .iter()
-        .zip(b[..3].iter())
-        .map(|(&a, &b)| a.abs_diff(b))
-        .max()
-        .unwrap_or(0)
+fn visual_rgb_distance_sq_over_white(a: &[u8], b: &[u8]) -> u32 {
+    let aa = a[3] as u32;
+    let ba = b[3] as u32;
+    let ar = composite_channel_over_white(a[0], aa);
+    let ag = composite_channel_over_white(a[1], aa);
+    let ab = composite_channel_over_white(a[2], aa);
+    let br = composite_channel_over_white(b[0], ba);
+    let bg = composite_channel_over_white(b[1], ba);
+    let bb = composite_channel_over_white(b[2], ba);
+    let dr = ar as i32 - br as i32;
+    let dg = ag as i32 - bg as i32;
+    let db = ab as i32 - bb as i32;
+    (dr * dr + dg * dg + db * db) as u32
 }
 
-fn premultiply_pixel(px: &[u8]) -> [u8; 4] {
-    let a = px[3] as u32;
-    [
-        (((px[0] as u32) * a + 127) / 255) as u8,
-        (((px[1] as u32) * a + 127) / 255) as u8,
-        (((px[2] as u32) * a + 127) / 255) as u8,
-        px[3],
-    ]
+fn premul_channel(channel: u8, alpha: u32) -> u32 {
+    ((channel as u32) * alpha + 127) / 255
 }
 
-fn composite_over_white(px: &[u8]) -> [u8; 3] {
-    let a = px[3] as u32;
-    [
-        (((px[0] as u32) * a + 255 * (255 - a) + 127) / 255) as u8,
-        (((px[1] as u32) * a + 255 * (255 - a) + 127) / 255) as u8,
-        (((px[2] as u32) * a + 255 * (255 - a) + 127) / 255) as u8,
-    ]
-}
-
-fn color_distance(a: [u8; 3], b: [u8; 3]) -> f64 {
-    let dr = a[0] as f64 - b[0] as f64;
-    let dg = a[1] as f64 - b[1] as f64;
-    let db = a[2] as f64 - b[2] as f64;
-    (dr * dr + dg * dg + db * db).sqrt()
+fn composite_channel_over_white(channel: u8, alpha: u32) -> u32 {
+    ((channel as u32) * alpha + 255 * (255 - alpha) + 127) / 255
 }
 
 #[cfg(test)]

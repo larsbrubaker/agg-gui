@@ -28,11 +28,9 @@
 // the deployed WASM bundle runs.  No platform-specific GL renderer
 // here; the platform shell only wires up the OS window + event loop.
 mod rendering;
-mod startup_timing;
 
 use demo_gl::GlCubeWidget;
 use rendering::render_frame;
-use startup_timing::StartupTiming;
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -119,15 +117,12 @@ fn save_state_to_disk(text: &str) {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    let timing = StartupTiming::new();
     let event_loop = EventLoop::new().expect("EventLoop::new");
-    timing.mark("EventLoop::new");
 
     // Pull saved window size / fullscreen out of the state file BEFORE building
     // the window so we can apply it as initial attributes.  Full UI state is
     // reloaded later (once fonts + GL context exist).
     let initial_state = load_saved_state();
-    timing.mark("load_saved_state");
     let (start_w, start_h) = match initial_state.as_ref() {
         Some(s) => (s.window_w.unwrap_or(1280), s.window_h.unwrap_or(720)),
         None => (1280, 720),
@@ -195,7 +190,6 @@ fn main() {
                 .expect("no suitable GL config")
         })
         .expect("DisplayBuilder::build");
-    timing.mark("DisplayBuilder::build");
 
     let window = window.expect("window");
     // Belt-and-suspenders — some platforms don't fully honour the initial
@@ -218,7 +212,6 @@ fn main() {
             .create_context(&gl_config, &context_attributes)
             .expect("create_context")
     };
-    timing.mark("create_context");
 
     let size = window.inner_size();
     let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
@@ -232,31 +225,25 @@ fn main() {
             .create_window_surface(&gl_config, &surface_attributes)
             .expect("create_window_surface")
     };
-    timing.mark("create_window_surface");
 
     let gl_context = not_current_gl_context
         .make_current(&gl_surface)
         .expect("make_current");
-    timing.mark("make_current");
 
     // Wrap in Rc so GlGfxCtx can share the context.
     let gl = Rc::new(unsafe {
         glow::Context::from_loader_function_cstr(|s| gl_display.get_proc_address(s))
     });
-    timing.mark("load_gl_functions");
 
     let default_font_asset = demo_ui::font_asset_by_name(demo_ui::DEFAULT_FONT_NAME)
         .expect("default demo font asset is registered");
     install_demo_font_asset(default_font_asset.name, default_font_asset.path);
-    timing.mark("install_default_font_asset");
     let font = demo_ui::load_font_by_name(demo_ui::DEFAULT_FONT_NAME)
         .expect("default demo font asset should load at startup");
-    timing.mark("load_default_font");
 
     let init_w = size.width.max(1) as f32;
     let init_h = size.height.max(1) as f32;
     let mut gl_ctx = unsafe { GlGfxCtx::new(Rc::clone(&gl), init_w, init_h) };
-    timing.mark("GlGfxCtx::new");
 
     // Publish the OS device scale BEFORE `build_demo_ui` so first-run
     // defaults (LCD subpixel + baseline snapping) can consult it — both
@@ -290,7 +277,6 @@ fn main() {
         initial_state,
         platform,
     );
-    timing.mark("build_demo_ui");
     let show_inspector = Rc::clone(&handles.show_inspector);
     let inspector_nodes = Rc::clone(&handles.inspector_nodes);
     let hovered_bounds = Rc::clone(&handles.hovered_bounds);
@@ -359,7 +345,6 @@ fn main() {
         win_w = init_size.width;
         win_h = init_size.height;
     }
-    timing.mark("initial_surface_resize");
     screen_size.set((win_w, win_h));
 
     // (Device scale was already published above, before `build_demo_ui`,
@@ -389,13 +374,10 @@ fn main() {
         &inspector_nodes,
         &hovered_bounds,
     );
-    timing.mark("first_render_frame");
     let _ = gl_surface.swap_buffers(&gl_context);
-    timing.mark("first_swap_buffers");
 
     // Finally, reveal the window — its first visible frame is our content.
     window.set_visible(true);
-    timing.mark("window_visible");
 
     #[allow(deprecated)]
     event_loop
@@ -730,8 +712,7 @@ fn main() {
                     // its enclosing window/tab/header is actually showing
                     // it.  With nothing dirty and no deadline, `Wait` means
                     // the loop idles until the next OS input event.
-                    let want_next =
-                        continuous || app.wants_draw() || screenshot_request.get();
+                    let want_next = continuous || app.wants_draw() || screenshot_request.get();
                     elwt.set_control_flow(if want_next {
                         ControlFlow::Poll
                     } else if let Some(deadline) = auto_screenshot_at {

@@ -30,7 +30,6 @@ mod clipboard_exports;
 mod fonts;
 mod gl_resources;
 mod platform;
-mod startup_timing;
 
 use demo_gl::{begin_frame, render_app_frame, GlGfxCtx};
 use gl_resources::{GlCubeWidget, GlState, CUBE_SCREEN_RECT};
@@ -40,7 +39,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{App, InspectorNode, Key, Modifiers, MouseButton, Rect, Size};
-use startup_timing::{log as log_startup_timing, next_render_index, now_ms};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -128,14 +126,8 @@ fn save_state_wasm(accessor: &demo_ui::StateAccessor) {
 fn ensure_demo_app() {
     DEMO_APP.with(|cell| {
         if cell.borrow().is_none() {
-            let total_start = now_ms();
-            let mut phase_start = total_start;
             let font = default_font();
-            log_startup_timing("default_font", now_ms() - phase_start);
-            phase_start = now_ms();
             let initial_state = load_state_wasm();
-            log_startup_timing("load_state_wasm", now_ms() - phase_start);
-            phase_start = now_ms();
             // Refresh button on the Render tab — WebGL2's `antialias`
             // attribute is only honoured at canvas-context creation time,
             // so the only way to apply a new MSAA choice is to reload the
@@ -164,8 +156,6 @@ fn ensure_demo_app() {
                 initial_state,
                 platform,
             );
-            log_startup_timing("demo_ui::build_demo_ui", now_ms() - phase_start);
-            phase_start = now_ms();
             SHOW_INSPECTOR.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.show_inspector)));
             INSPECTOR_NODES.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.inspector_nodes)));
             HOVERED_BOUNDS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.hovered_bounds)));
@@ -180,8 +170,6 @@ fn ensure_demo_app() {
             CUBE_VISIBLE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.cube_visible)));
             STATE_ACCESSOR.with(|c| *c.borrow_mut() = Some(handles.state));
             *cell.borrow_mut() = Some(app);
-            log_startup_timing("store demo handles", now_ms() - phase_start);
-            log_startup_timing("ensure_demo_app total", now_ms() - total_start);
         }
     });
 }
@@ -189,10 +177,8 @@ fn ensure_demo_app() {
 fn ensure_gl_state() {
     GL_STATE.with(|cell| {
         if cell.borrow().is_none() {
-            let start = now_ms();
             let gl = init_webgl2();
             *cell.borrow_mut() = Some(unsafe { GlState::new(gl) });
-            log_startup_timing("ensure_gl_state", now_ms() - start);
         }
     });
 }
@@ -206,9 +192,7 @@ fn ensure_gl_ctx(width: f32, height: f32) {
     GL_CTX.with(|cell| {
         let mut borrow = cell.borrow_mut();
         if borrow.is_none() {
-            let start = now_ms();
             *borrow = Some(unsafe { GlGfxCtx::new(gl_rc, width, height) });
-            log_startup_timing("ensure_gl_ctx", now_ms() - start);
         }
     });
 }
@@ -263,26 +247,9 @@ fn init_webgl2() -> glow::Context {
 /// native path).
 #[wasm_bindgen]
 pub fn render(width: u32, height: u32, frame_ms: f64) {
-    let frame_index = next_render_index();
-    let log_frame = frame_index < 3;
-    let render_start = now_ms();
-    let mut phase_start = render_start;
-
     ensure_demo_app();
-    if log_frame {
-        log_startup_timing("render.ensure_demo_app", now_ms() - phase_start);
-    }
-    phase_start = now_ms();
     ensure_gl_state();
-    if log_frame {
-        log_startup_timing("render.ensure_gl_state", now_ms() - phase_start);
-    }
-    phase_start = now_ms();
     ensure_gl_ctx(width as f32, height as f32);
-    if log_frame {
-        log_startup_timing("render.ensure_gl_ctx", now_ms() - phase_start);
-    }
-    phase_start = now_ms();
 
     // ── 1. Update screen size for the backend panel ─────────────────────────
     SCREEN_SIZE.with(|c| {
@@ -290,10 +257,6 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
             rc.set((width, height));
         }
     });
-    if log_frame {
-        log_startup_timing("render.update_screen_size", now_ms() - phase_start);
-    }
-    phase_start = now_ms();
 
     // ── 2. Paint widget tree through the shared capture orchestration ──────
     //
@@ -351,11 +314,6 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
             }
         });
     }
-    let paint_elapsed = now_ms() - phase_start;
-    if log_frame || paint_elapsed > 100.0 {
-        log_startup_timing("render.paint_frame", paint_elapsed);
-    }
-    phase_start = now_ms();
 
     // ── 5. Push frame time to history so backend panel shows live CPU usage ───
     if frame_ms > 0.0 {
@@ -365,10 +323,6 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
             }
         });
     }
-    if log_frame {
-        log_startup_timing("render.frame_history", now_ms() - phase_start);
-    }
-    phase_start = now_ms();
 
     // ── 7. Auto-save layout when state changes ─────────────────────────────
     // Same policy as native: diff the serialized state against the last
@@ -395,20 +349,11 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
             });
         }
     });
-    let autosave_elapsed = now_ms() - phase_start;
-    if log_frame || autosave_elapsed > 100.0 {
-        log_startup_timing("render.auto_save", autosave_elapsed);
-    }
 
     // Frame successfully rendered — clear the dirty flag.  `needs_draw()`
     // will return `true` again only if an event fires or an animation source
     // (cube / focus) still needs frames.
     NEEDS_DRAW.with(|c| c.set(false));
-
-    let render_elapsed = now_ms() - render_start;
-    if log_frame || render_elapsed > 100.0 {
-        log_startup_timing(&format!("render total #{}", frame_index + 1), render_elapsed);
-    }
 }
 
 // ---------------------------------------------------------------------------

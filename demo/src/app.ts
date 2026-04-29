@@ -21,14 +21,6 @@ type SetPlatformFn = (platform: string) => void;
 let wasmModule: Record<string, unknown> | null = null;
 const fontFetchCache = new Map<string, Promise<Uint8Array>>();
 let fontDrainRunning = false;
-const startupT0 = performance.now();
-let renderCount = 0;
-
-function startupLog(label: string, start?: number) {
-  const now = performance.now();
-  const suffix = start === undefined ? "" : ` (+${(now - start).toFixed(1)} ms)`;
-  console.info(`[agg-gui startup] ${label}: ${(now - startupT0).toFixed(1)} ms${suffix}`);
-}
 
 // --- Canvas setup ---
 // The WASM module calls getContext("webgl2") on this element internally.
@@ -104,10 +96,6 @@ function render() {
   const t0 = performance.now();
   (wasmModule["render"] as RenderFn)(canvas.width, canvas.height, lastFrameMs);
   lastFrameMs = performance.now() - t0;
-  if (renderCount < 3 || lastFrameMs > 100) {
-    startupLog(`render #${renderCount + 1}`, t0);
-  }
-  renderCount += 1;
 }
 
 // --- Animation loop (reactive) ---
@@ -451,16 +439,12 @@ function parseFontRequest(request: string): [string, string] {
 function fetchFontBytes(path: string): Promise<Uint8Array> {
   let pending = fontFetchCache.get(path);
   if (!pending) {
-    const t0 = performance.now();
     pending = fetch(new URL(path, location.href))
       .then((response) => {
         if (!response.ok) throw new Error(`Font fetch failed for ${path}: ${response.status}`);
         return response.arrayBuffer();
       })
-      .then((buffer) => {
-        startupLog(`fetch font ${path}`, t0);
-        return new Uint8Array(buffer);
-      });
+      .then((buffer) => new Uint8Array(buffer));
     fontFetchCache.set(path, pending);
   }
   return pending;
@@ -471,21 +455,15 @@ function fallbackFontPaths(module: Record<string, unknown>): [string, string] {
 }
 
 async function installFontRequest(module: Record<string, unknown>, request: string) {
-  const t0 = performance.now();
   const [name, path] = parseFontRequest(request);
   const [iconsPath, emojiPath] = fallbackFontPaths(module);
-  const fetchStart = performance.now();
   const [primary, icons, emoji] = await Promise.all([
     fetchFontBytes(path),
     fetchFontBytes(iconsPath),
     fetchFontBytes(emojiPath),
   ]);
-  startupLog(`fetch bundle for font ${name}`, fetchStart);
-  const installStart = performance.now();
   const ok = (module["install_loaded_font"] as InstallFontFn)(name, primary, icons, emoji);
   if (!ok) throw new Error(`WASM rejected font ${name}`);
-  startupLog(`install font ${name}`, installStart);
-  startupLog(`font request ${name}`, t0);
 }
 
 async function drainPendingFontRequests() {
@@ -494,53 +472,37 @@ async function drainPendingFontRequests() {
   if (!takeRequest) return;
 
   fontDrainRunning = true;
-  const t0 = performance.now();
-  let count = 0;
   try {
     for (;;) {
       const request = takeRequest();
       if (!request) break;
-      count += 1;
       await installFontRequest(wasmModule, request);
     }
   } catch (e) {
     console.error(e);
   } finally {
     fontDrainRunning = false;
-    if (count > 0) {
-      startupLog(`drain pending font requests (${count})`, t0);
-    }
   }
 }
 
 async function init() {
   try {
-    startupLog("init start");
     setLoadingText("Loading WASM…");
-    const importStart = performance.now();
     const wasm    = await import("../public/pkg/demo_wasm.js");
-    startupLog("import JS glue", importStart);
     const wasmUrl = new URL("./public/pkg/demo_wasm_bg.wasm", location.href);
-    const wasmInitStart = performance.now();
     await wasm.default({ module_or_path: wasmUrl });
-    startupLog("instantiate WASM", wasmInitStart);
 
     const module = wasm as unknown as Record<string, unknown>;
     (module["set_client_platform"] as SetPlatformFn | undefined)?.(detectClientPlatform());
     setLoadingText("Loading fonts…");
-    const defaultFontStart = performance.now();
     await installFontRequest(module, (module["default_font_request"] as StringFn)());
-    startupLog("default font ready", defaultFontStart);
 
     wasmModule = module;
     // Expose on window so Playwright tests can access WASM functions directly.
     (window as unknown as Record<string, unknown>).__wasm = wasmModule;
     setLoadingText("Drawing first frame…");
-    const firstRenderStart = performance.now();
     render();
-    startupLog("first render complete", firstRenderStart);
     loadingEl.classList.add("hidden");
-    startupLog("loading overlay hidden");
 
     // Start the reactive animation loop.
     requestAnimationFrame(animationLoop);
