@@ -134,6 +134,31 @@ pub fn dispatch_event(
     result
 }
 
+/// Give visible widgets a chance to handle a key ignored by the focused path.
+///
+/// Traverses in reverse paint order so topmost windows/menu bars win.
+pub fn dispatch_unconsumed_key(
+    widget: &mut dyn Widget,
+    key: &Key,
+    modifiers: Modifiers,
+) -> EventResult {
+    if !widget.is_visible() {
+        return EventResult::Ignored;
+    }
+    for child in widget.children_mut().iter_mut().rev() {
+        if dispatch_unconsumed_key(child.as_mut(), key, modifiers) == EventResult::Consumed {
+            widget.mark_dirty();
+            return EventResult::Consumed;
+        }
+    }
+    let before = crate::animation::invalidation_epoch();
+    let result = widget.on_unconsumed_key(key, modifiers);
+    if result == EventResult::Consumed || before != crate::animation::invalidation_epoch() {
+        widget.mark_dirty();
+    }
+    result
+}
+
 /// Produce a version of `event` with mouse positions replaced by `new_pos`.
 /// Non-mouse events (key, focus) are returned unchanged.
 fn translate_event(event: &Event, new_pos: Point) -> Event {

@@ -666,6 +666,10 @@ impl Widget for MarkdownView {
         self.context_menu_contains(local_pos)
     }
 
+    fn has_active_modal(&self) -> bool {
+        self.context_menu.is_some()
+    }
+
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         self.paint_context_menu(ctx);
     }

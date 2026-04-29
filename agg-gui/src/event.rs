@@ -17,11 +17,10 @@ pub enum MouseButton {
 
 /// Modifier keys held at the time of an event.
 ///
-/// `meta` is the platform-specific "command" key: **Cmd** on macOS, **Super /
-/// Windows key** on Linux, **Windows key** on Windows.  Widgets that want
-/// portable clipboard / select-all / undo shortcuts should treat
-/// `ctrl || meta` as the "command" modifier so both Windows-style
-/// `Ctrl+C` and Mac-style `Cmd+C` work without branching on the host OS.
+/// `meta` is the platform-specific "super" key: **Cmd** on macOS, **Super /
+/// Windows key** on Linux, **Windows key** on Windows. Widgets that want
+/// portable command shortcuts should use the runtime platform helpers rather
+/// than treating `ctrl || meta` as universally equivalent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Modifiers {
     pub shift: bool,

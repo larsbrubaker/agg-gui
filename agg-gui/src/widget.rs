@@ -354,6 +354,14 @@ pub trait Widget {
     /// coordinates. Return [`EventResult::Consumed`] to stop bubbling.
     fn on_event(&mut self, event: &Event) -> EventResult;
 
+    /// Handle a key that was not consumed by the focused widget path.
+    ///
+    /// This is used for window/menu accelerators: focused controls get first
+    /// chance at the key, then visible widgets in paint order may claim it.
+    fn on_unconsumed_key(&mut self, _key: &Key, _modifiers: Modifiers) -> EventResult {
+        EventResult::Ignored
+    }
+
     /// Whether this widget can receive keyboard focus. Default: false.
     fn is_focusable(&self) -> bool {
         false
@@ -694,7 +702,7 @@ pub use app::App;
 pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
 pub use tree::{
     active_modal_path, collect_inspector_nodes, current_mouse_world, current_viewport,
-    dispatch_event, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type,
-    global_overlay_hit_path, hit_test_subtree, set_current_mouse_world, set_current_viewport,
-    InspectorNode,
+    dispatch_event, dispatch_unconsumed_key, find_widget_by_id, find_widget_by_id_mut,
+    find_widget_by_type, global_overlay_hit_path, hit_test_subtree, set_current_mouse_world,
+    set_current_viewport, InspectorNode,
 };

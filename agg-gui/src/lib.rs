@@ -42,6 +42,7 @@ pub mod lcd_coverage;
 pub mod lcd_gfx_ctx;
 pub mod persistence;
 pub mod pixel_bounds;
+pub mod platform;
 pub mod screenshot;
 pub mod svg;
 pub mod text;
@@ -78,6 +79,7 @@ pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};
 pub use gfx_ctx::GfxCtx;
 pub use layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
+pub use platform::{current_platform, platform_from_name, set_platform, Platform};
 pub use screenshot::ScreenshotHandle;
 pub use svg::{
     compare_svg_rgba, parse_svg, render_svg, render_svg_at_size, render_svg_at_size_with_options,
@@ -109,9 +111,11 @@ pub use widgets::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
     Button, Checkbox, CollapsingHeader, ColorPicker, ComboBox, Container, DragValue, FlexColumn,
     FlexRow, Hyperlink, ImageView, InspectorPanel, InspectorSavedState, Label, LabelAlign,
-    MarkdownView, NodeIcon, Padding, ProgressBar, RadioGroup, Resize, ScrollBarColor,
-    ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SizedBox, Slider,
-    Spacer, Splitter, Stack, TabView, TextArea, TextField, ToggleSwitch, Tooltip, TreeView, Window,
+    MarkdownView, MenuBar, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
+    NodeIcon, Padding, PopupMenu, ProgressBar, RadioGroup, Resize, ScrollBarColor, ScrollBarKind,
+    ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, ShortcutKey, SizedBox, Slider,
+    Spacer, Splitter, Stack, TabView, TextArea, TextField, ToggleSwitch, Tooltip, TopMenu,
+    TreeView, Window,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

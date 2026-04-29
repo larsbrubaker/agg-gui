@@ -673,6 +673,39 @@ fn test_scroll_view_reports_overlay_animation_draw_need() {
 }
 
 #[test]
+fn test_toggle_switch_reports_animation_draw_need() {
+    use crate::widget::paint_subtree;
+
+    let mut toggle = ToggleSwitch::new(false);
+    toggle.layout(Size::new(100.0, 40.0));
+    toggle.set_bounds(crate::Rect::new(0.0, 0.0, 34.0, 20.0));
+
+    assert!(
+        !toggle.needs_draw(),
+        "idle toggle switch should not keep the host repainting"
+    );
+
+    let event = crate::Event::MouseDown {
+        pos: crate::Point::new(10.0, 10.0),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    };
+    assert_eq!(toggle.on_event(&event), crate::EventResult::Consumed);
+    assert!(
+        toggle.needs_draw(),
+        "press-ring tween must make retained parents repaint"
+    );
+
+    let mut fb = Framebuffer::new(40, 24);
+    let mut ctx = GfxCtx::new(&mut fb);
+    paint_subtree(&mut toggle, &mut ctx);
+    assert!(
+        crate::animation::wants_draw(),
+        "in-flight toggle tweens must request the next frame"
+    );
+}
+
+#[test]
 fn test_scroll_view_reports_global_style_epoch_change() {
     use crate::widget::paint_subtree;
 

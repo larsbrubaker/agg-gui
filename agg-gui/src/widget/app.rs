@@ -57,8 +57,8 @@ pub struct App {
     viewport_height: f64,
     /// Viewport size in logical pixels from the most recent layout pass.
     viewport_size: Size,
-    /// Optional global key handler called *before* dispatching to the focused widget.
-    /// Returns `true` if the key was handled globally (suppresses focused dispatch).
+    /// Optional legacy key handler called after widget-tree dispatch.
+    /// Returns `true` if the key was handled.
     global_key_handler: Option<Box<dyn FnMut(Key, Modifiers) -> bool>>,
     /// Multi-touch gesture recogniser.  Platform shells feed raw touches
     /// through [`App::on_touch_start/move/end/cancel`]; widgets read the
@@ -103,8 +103,8 @@ impl App {
             .map(|path| widget_at_path_ref(self.root.as_ref(), path).type_name())
     }
 
-    /// Register a global key handler invoked before the focused widget receives
-    /// the key.  Return `true` to consume the event (suppress focused dispatch).
+    /// Register a legacy global key handler invoked only after the widget tree
+    /// has ignored the key. Prefer widget-owned key handling for new behavior.
     ///
     /// # Example
     /// ```ignore
@@ -306,30 +306,31 @@ impl App {
         }
     }
 
-    /// Key pressed. Delivered to the focused widget and bubbles up.
-    ///
-    /// If a global key handler was registered via [`set_global_key_handler`] and
-    /// it returns `true`, the key is consumed and the focused widget does not
-    /// receive it.
+    /// Key pressed. Delivered to the focused widget first, then to the visible
+    /// widget tree as an unconsumed key if focus ignores it.
     pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
         if key == Key::Tab {
             self.advance_focus(!mods.shift);
             return;
         }
-        // Call global handler first; bail out if it consumes the key.
-        if let Some(ref mut handler) = self.global_key_handler {
-            if handler(key.clone(), mods) {
-                return;
-            }
-        }
         let event = Event::KeyDown {
-            key,
+            key: key.clone(),
             modifiers: mods,
         };
-        if let Some(path) = active_modal_path(self.root.as_ref()) {
-            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
+        let result = if let Some(path) = active_modal_path(self.root.as_ref()) {
+            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN)
         } else if let Some(path) = self.focus.clone() {
-            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
+            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN)
+        } else {
+            EventResult::Ignored
+        };
+        if result != EventResult::Consumed {
+            let result = dispatch_unconsumed_key(self.root.as_mut(), &key, mods);
+            if result != EventResult::Consumed {
+                if let Some(ref mut handler) = self.global_key_handler {
+                    handler(key, mods);
+                }
+            }
         }
     }
 

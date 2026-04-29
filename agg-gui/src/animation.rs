@@ -122,12 +122,18 @@ impl Tween {
     }
 
     /// Update the target.  If it differs from the current target, re-anchors
-    /// the animation at the current interpolated value so reversals are smooth.
+    /// the animation at the current interpolated value so reversals are smooth
+    /// and requests the first frame of the transition.
+    ///
+    /// Widgets that own a `Tween` must also report `tween.is_animating()` from
+    /// `Widget::needs_draw()` so retained parents repaint every frame until
+    /// the tween settles.
     pub fn set_target(&mut self, new_target: f64) {
         if (self.target - new_target).abs() > 1e-9 {
             self.start_value = self.current;
             self.target = new_target;
             self.start_time = Some(Instant::now());
+            request_draw();
         }
     }
 

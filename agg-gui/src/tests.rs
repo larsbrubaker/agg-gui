@@ -6,7 +6,7 @@
 use crate::{
     App, Button, Color, ComboBox, CompOp, Container, FlexColumn, FlexRow, Framebuffer, GfxCtx, Key,
     Modifiers, MouseButton, ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollView, Size,
-    SizedBox, Splitter, TabView, TextField, Widget,
+    SizedBox, Splitter, TabView, TextField, ToggleSwitch, Widget,
 };
 
 /// Sample RGBA at pixel (x, y) in a framebuffer.
@@ -45,5 +45,6 @@ mod retained_layers;
 mod touch_scroll;
 mod tree_view;
 mod widgets;
+mod window_layout;
 mod window_maximize;
 mod windowing;

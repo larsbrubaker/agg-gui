@@ -113,7 +113,9 @@ pub fn set_image_rgba(data: &[u8], width: u32, height: u32) -> bool {
 
 #[cfg(feature = "clipboard")]
 fn set_image_rgba_impl(data: &[u8], width: u32, height: u32) -> bool {
-    use arboard::ImageData;
+    use std::borrow::Cow;
+
+    use arboard::{Clipboard, ImageData};
 
     let Ok(mut cb) = Clipboard::new() else {
         return false;

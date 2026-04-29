@@ -26,7 +26,9 @@
 //! - `on_mouse_move/down/up/wheel/leave` — mouse events
 //! - `on_key_down` — keyboard events
 
+mod fonts;
 mod gl_resources;
+mod platform;
 
 use demo_gl::{begin_frame, render_app_frame, GlGfxCtx};
 use gl_resources::{GlCubeWidget, GlState, CUBE_SCREEN_RECT};
@@ -96,46 +98,6 @@ fn default_font() -> Arc<agg_gui::Font> {
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
     console_error_panic_hook::set_once();
-}
-
-#[wasm_bindgen]
-pub fn default_font_request() -> String {
-    format!(
-        "{}\t{}",
-        demo_ui::DEFAULT_FONT_NAME,
-        demo_ui::font_asset_by_name(demo_ui::DEFAULT_FONT_NAME)
-            .map(|asset| asset.path)
-            .unwrap_or("assets/Nunito_Regular.ttf")
-    )
-}
-
-#[wasm_bindgen]
-pub fn fallback_font_paths() -> String {
-    format!(
-        "{}\t{}",
-        demo_ui::FONT_AWESOME_PATH,
-        demo_ui::EMOJI_FONT_PATH
-    )
-}
-
-#[wasm_bindgen]
-pub fn take_pending_font_request() -> Option<String> {
-    demo_ui::take_pending_font_request().map(|(name, path)| format!("{name}\t{path}"))
-}
-
-#[wasm_bindgen]
-pub fn install_loaded_font(
-    name: String,
-    primary_bytes: Vec<u8>,
-    icon_bytes: Vec<u8>,
-    emoji_bytes: Vec<u8>,
-) -> bool {
-    let ok = demo_ui::install_font_bytes(&name, primary_bytes, Some(icon_bytes), Some(emoji_bytes))
-        .is_ok();
-    if ok {
-        mark_dirty();
-    }
-    ok
 }
 
 // ---------------------------------------------------------------------------

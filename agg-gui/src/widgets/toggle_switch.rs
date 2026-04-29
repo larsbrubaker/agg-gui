@@ -232,6 +232,15 @@ impl Widget for ToggleSwitch {
         Size::new(PILL_W + 2.0 * PILL_HALO, PILL_H + 2.0 * PILL_HALO)
     }
 
+    fn needs_draw(&self) -> bool {
+        if !self.is_visible() {
+            return false;
+        }
+        self.anim.is_animating()
+            || self.press_anim.is_animating()
+            || self.children().iter().any(|c| c.needs_draw())
+    }
+
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
 

@@ -1,20 +1,21 @@
 //! Right-click image actions for `MarkdownView`.
 //!
-//! This module owns the small Markdown-local context menu used to copy image
-//! pixels or URLs and to delegate image opening back to the application.
+//! This module adapts image-specific actions onto the shared menu
+//! infrastructure so Markdown context menus match the rest of the UI.
 
 use crate::clipboard;
 use crate::draw_ctx::DrawCtx;
-use crate::geometry::{Point, Rect};
+use crate::event::{Event, EventResult, Modifiers, MouseButton};
+use crate::geometry::Point;
+use crate::widget::current_viewport;
+use crate::widgets::menu::{MenuEntry, MenuItem, MenuResponse, PopupMenu};
 
 use super::{ImageState, MarkdownView};
 
 #[derive(Clone)]
 pub(super) struct MarkdownContextMenuState {
-    pos: Point,
     image: ImageContextTarget,
-    actions: Vec<ImageContextAction>,
-    hovered: Option<usize>,
+    menu: PopupMenu,
 }
 
 #[derive(Clone)]
@@ -24,7 +25,7 @@ struct ImageContextTarget {
     cache_idx: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum ImageContextAction {
     CopyImage,
     CopyImageUrl,
@@ -37,6 +38,23 @@ impl ImageContextAction {
             ImageContextAction::CopyImage => "Copy Image",
             ImageContextAction::CopyImageUrl => "Copy Image URL",
             ImageContextAction::OpenImage => "Open Image",
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            ImageContextAction::CopyImage => "copy-image",
+            ImageContextAction::CopyImageUrl => "copy-image-url",
+            ImageContextAction::OpenImage => "open-image",
+        }
+    }
+
+    fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "copy-image" => Some(Self::CopyImage),
+            "copy-image-url" => Some(Self::CopyImageUrl),
+            "open-image" => Some(Self::OpenImage),
+            _ => None,
         }
     }
 }
@@ -54,15 +72,19 @@ impl MarkdownView {
         if self.on_image_open.is_some() {
             actions.push(ImageContextAction::OpenImage);
         }
+        let items = actions
+            .iter()
+            .map(|action| MenuItem::action(action.label(), action.id()).into())
+            .collect::<Vec<MenuEntry>>();
+        let mut menu = PopupMenu::new(items);
+        menu.open_at(pos);
         self.context_menu = Some(MarkdownContextMenuState {
-            pos,
             image: ImageContextTarget {
                 url,
                 alt,
                 cache_idx,
             },
-            actions,
-            hovered: None,
+            menu,
         });
         true
     }
@@ -71,39 +93,44 @@ impl MarkdownView {
         let Some(menu) = self.context_menu.as_mut() else {
             return false;
         };
-        let was = menu.hovered;
-        menu.hovered = menu.action_index_at(pos);
-        if was != menu.hovered {
-            crate::animation::request_draw_without_invalidation();
-        }
-        menu.bounds().contains(pos)
+        let event = Event::MouseMove { pos };
+        let (result, _) = menu.menu.handle_event(&event, current_viewport());
+        result == EventResult::Consumed
     }
 
-    pub(super) fn context_menu_contains(&self, pos: Point) -> bool {
+    pub(super) fn context_menu_contains(&self, _pos: Point) -> bool {
         self.context_menu
             .as_ref()
-            .map(|menu| menu.bounds().contains(pos))
+            .map(|menu| menu.menu.is_open())
             .unwrap_or(false)
     }
 
     pub(super) fn handle_context_menu_mouse_down(&mut self, pos: Point) -> bool {
-        let Some(menu) = self.context_menu.clone() else {
+        let Some(menu_state) = self.context_menu.as_mut() else {
             return false;
         };
-        if let Some(action) = menu.action_at(pos) {
-            self.run_image_action(action, &menu.image);
-            self.context_menu = None;
-            self.suppress_next_left_mouse_up = true;
-            crate::animation::request_draw();
-            true
-        } else if menu.bounds().contains(pos) {
-            self.suppress_next_left_mouse_up = true;
-            true
-        } else {
-            self.context_menu = None;
-            crate::animation::request_draw();
-            false
+        let event = Event::MouseDown {
+            pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        };
+        let (result, response) = menu_state.menu.handle_event(&event, current_viewport());
+        match response {
+            MenuResponse::Action(action_id) => {
+                let image = menu_state.image.clone();
+                self.context_menu = None;
+                self.suppress_next_left_mouse_up = true;
+                if let Some(action) = ImageContextAction::from_id(&action_id) {
+                    self.run_image_action(action, &image);
+                }
+            }
+            MenuResponse::Closed => {
+                self.context_menu = None;
+                self.suppress_next_left_mouse_up = true;
+            }
+            MenuResponse::None => {}
         }
+        result == EventResult::Consumed
     }
 
     fn run_image_action(&mut self, action: ImageContextAction, image: &ImageContextTarget) {
@@ -141,80 +168,14 @@ impl MarkdownView {
     }
 
     pub(super) fn paint_context_menu(&self, ctx: &mut dyn DrawCtx) {
-        let Some(menu) = &self.context_menu else {
+        let Some(menu_state) = &self.context_menu else {
             return;
         };
-        let bounds = menu.bounds();
-        let v = ctx.visuals();
-        ctx.set_fill_color(v.panel_fill);
-        ctx.begin_path();
-        ctx.rounded_rect(bounds.x, bounds.y, bounds.width, bounds.height, 4.0);
-        ctx.fill();
-        ctx.set_stroke_color(v.widget_stroke);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rounded_rect(bounds.x, bounds.y, bounds.width, bounds.height, 4.0);
-        ctx.stroke();
-
-        ctx.set_font(std::sync::Arc::clone(&self.active_font()));
-        ctx.set_font_size(self.font_size);
-        for (idx, action) in menu.actions.iter().enumerate() {
-            let row_y = bounds.y + bounds.height - (idx as f64 + 1.0) * MENU_ROW_H;
-            if menu.hovered == Some(idx) {
-                ctx.set_fill_color(v.selection_bg_unfocused);
-                ctx.begin_path();
-                ctx.rect(
-                    bounds.x + 2.0,
-                    row_y + 2.0,
-                    bounds.width - 4.0,
-                    MENU_ROW_H - 4.0,
-                );
-                ctx.fill();
-            }
-            ctx.set_fill_color(v.text_color);
-            ctx.fill_text(action.label(), bounds.x + MENU_PAD_X, row_y + 8.0);
-        }
-    }
-}
-
-impl MarkdownContextMenuState {
-    fn bounds(&self) -> Rect {
-        Rect::new(
-            self.pos.x,
-            self.pos.y - self.actions.len() as f64 * MENU_ROW_H,
-            MENU_W,
-            self.actions.len() as f64 * MENU_ROW_H,
-        )
-    }
-
-    fn action_at(&self, pos: Point) -> Option<ImageContextAction> {
-        self.action_index_at(pos)
-            .and_then(|idx| self.actions.get(idx).copied())
-    }
-
-    fn action_index_at(&self, pos: Point) -> Option<usize> {
-        let bounds = self.bounds();
-        if !bounds.contains(pos) {
-            return None;
-        }
-        let from_top = ((bounds.y + bounds.height - pos.y) / MENU_ROW_H).floor() as usize;
-        (from_top < self.actions.len()).then_some(from_top)
-    }
-}
-
-const MENU_W: f64 = 144.0;
-const MENU_ROW_H: f64 = 24.0;
-const MENU_PAD_X: f64 = 10.0;
-
-trait RectContains {
-    fn contains(self, point: Point) -> bool;
-}
-
-impl RectContains for Rect {
-    fn contains(self, point: Point) -> bool {
-        point.x >= self.x
-            && point.x <= self.x + self.width
-            && point.y >= self.y
-            && point.y <= self.y + self.height
+        menu_state.menu.paint(
+            ctx,
+            std::sync::Arc::clone(&self.active_font()),
+            self.font_size,
+            current_viewport(),
+        );
     }
 }

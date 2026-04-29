@@ -82,6 +82,14 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         win_h: WIN_H,
     },
     DemoSpec {
+        title: "\u{F0C9} Menus",
+        label: "\u{F0C9} Menus",
+        group: "Widgets",
+        open: false,
+        win_w: 520.0,
+        win_h: 320.0,
+    },
+    DemoSpec {
         title: "\u{F2D0} Modals",
         label: "\u{F2D0} Modals",
         group: "Widgets",

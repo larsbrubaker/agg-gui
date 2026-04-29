@@ -45,6 +45,7 @@ pub(crate) fn build_demo_content(
         "\u{F07D} Scrolling" => windows::scrolling_demo(font),
         "\u{F0DB} Panels" => windows::panels_demo(font),
         "\u{F075} Popups" => windows::popups_demo(font),
+        "\u{F0C9} Menus" => windows::menu_demo(font),
         "\u{F0C3} Rendering Test" => rendering_test::rendering_test_view(font),
         "\u{F013} System" => windows::system_view(font),
         "\u{F031} LCD Subpixel" => windows::truetype_lcd_view(font),

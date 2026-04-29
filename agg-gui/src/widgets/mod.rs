@@ -11,6 +11,7 @@ pub mod image_view;
 pub mod inspector;
 pub mod label;
 pub mod markdown;
+pub mod menu;
 pub mod primitives;
 pub mod progress_bar;
 pub mod radio_group;
@@ -42,6 +43,10 @@ pub use image_view::ImageView;
 pub use inspector::{InspectorPanel, InspectorSavedState};
 pub use label::{Label, LabelAlign};
 pub use markdown::MarkdownView;
+pub use menu::{
+    MenuBar, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut, PopupMenu,
+    ShortcutKey, TopMenu,
+};
 pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
 pub use progress_bar::ProgressBar;
 pub use radio_group::RadioGroup;

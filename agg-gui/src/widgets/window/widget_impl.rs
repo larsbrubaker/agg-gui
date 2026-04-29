@@ -319,8 +319,26 @@ impl Widget for Window {
 
         if let Some(child) = self.children.first_mut() {
             if !self.collapsed {
-                child.layout(Size::new(self.bounds.width, content_h));
-                child.set_bounds(Rect::new(0.0, 0.0, self.bounds.width, content_h));
+                let desired = child.layout(Size::new(self.bounds.width, content_h));
+                let child_h = if child.v_anchor().is_stretch() {
+                    content_h
+                } else {
+                    desired.height.clamp(
+                        child.min_size().height,
+                        child.max_size().height.min(content_h),
+                    )
+                };
+                let child_y = if child.v_anchor().contains(VAnchor::BOTTOM) {
+                    0.0
+                } else if child.v_anchor().contains(VAnchor::CENTER) {
+                    ((content_h - child_h) * 0.5).max(0.0)
+                } else {
+                    (content_h - child_h).max(0.0)
+                };
+                if (child_h - content_h).abs() > f64::EPSILON {
+                    child.layout(Size::new(self.bounds.width, child_h));
+                }
+                child.set_bounds(Rect::new(0.0, child_y, self.bounds.width, child_h));
             }
             // When collapsed the child keeps its last bounds but is not visible
             // because hit_test returns false for the content area.
