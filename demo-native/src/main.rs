@@ -53,7 +53,16 @@ use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
-use winit::window::{Fullscreen, WindowAttributes};
+use winit::window::{Fullscreen, Icon, WindowAttributes};
+
+const APP_ICON_SIZE: u32 = 256;
+const APP_ICON_RGBA: &[u8] = include_bytes!("../assets/app-icon-256.rgba");
+
+fn app_window_icon() -> Option<Icon> {
+    Icon::from_rgba(APP_ICON_RGBA.to_vec(), APP_ICON_SIZE, APP_ICON_SIZE)
+        .map_err(|err| eprintln!("failed to load app icon: {err}"))
+        .ok()
+}
 
 fn demo_asset_path(relative: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -144,6 +153,7 @@ fn main() {
     // around the not-yet-resized GL surface.
     let mut window_attributes = WindowAttributes::default()
         .with_title("agg-gui — Demo (GL)")
+        .with_window_icon(app_window_icon())
         .with_inner_size(LogicalSize::new(start_w, start_h))
         .with_maximized(start_maximized)
         .with_visible(false);
