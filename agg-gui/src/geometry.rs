@@ -5,6 +5,7 @@
 
 /// A 2D point in first-quadrant (Y-up) coordinates.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct Point {
     pub x: f64,
     pub y: f64,
@@ -20,6 +21,7 @@ impl Point {
 
 /// A 2D size (width × height), always non-negative.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct Size {
     pub width: f64,
     pub height: f64,
@@ -49,6 +51,7 @@ impl Size {
 ///
 /// `(x, y)` is the bottom-left corner. Width and height are positive.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct Rect {
     pub x: f64,
     pub y: f64,

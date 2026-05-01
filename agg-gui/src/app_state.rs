@@ -34,6 +34,7 @@ use std::rc::Rc;
 
 /// Snapshot of the OS window state — serialisable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct OsWindowState {
     /// Logical width in pixels.  `None` = no saved size (use app default).
     pub width: Option<u32>,

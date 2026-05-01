@@ -25,20 +25,55 @@ const VALUE_W: f64 = 44.0;
 /// Gap between the track's right edge and the value label's left edge.
 const VALUE_GAP: f64 = 6.0;
 
+/// Inspector-visible properties of a [`Slider`].
+///
+/// **The "companion props" pattern:** widgets that opt into the reflection-
+/// driven inspector hold a small `*Props` struct exposing only their
+/// directly-editable values.  This sidesteps two structural problems with
+/// deriving `Reflect` on the whole widget:
+///   1. `bevy_reflect::Reflect` requires `Send + Sync`, which widgets violate
+///      because they carry `Rc<Cell<…>>` and non-`Sync` callbacks.
+///   2. Sub-widgets (`Label` here) and `Arc<Font>` would force a cascading
+///      `Reflect` derive across types that don't have it.
+///
+/// The companion struct contains plain values (`f64`, `bool`, `Option<usize>`)
+/// — `Send + Sync + Reflect`-friendly — and the widget routes all reads/writes
+/// through it.  The inspector edits the companion live and the widget reacts.
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[derive(Clone, Debug)]
+pub struct SliderProps {
+    pub value: f64,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub show_value: bool,
+    /// Fixed decimals for the value label — overrides the step-based
+    /// auto-format when `Some`.
+    pub decimals: Option<usize>,
+    pub font_size: f64,
+}
+
+impl Default for SliderProps {
+    fn default() -> Self {
+        Self {
+            value: 0.0,
+            min: 0.0,
+            max: 1.0,
+            step: 0.01,
+            show_value: true,
+            decimals: None,
+            font_size: 12.0,
+        }
+    }
+}
+
 /// A horizontal slider for a `f64` value within `[min, max]`.
 pub struct Slider {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty
     base: WidgetBase,
-    value: f64,
-    min: f64,
-    max: f64,
-    step: f64,
-    show_value: bool,
-    /// Fixed decimals for the value label — overrides the step-based
-    /// auto-format when `Some`.  Matches `DragValue::with_decimals`.
-    decimals: Option<usize>,
-    font_size: f64,
+    /// Reflectable, inspector-editable values — see [`SliderProps`].
+    pub props: SliderProps,
     dragging: bool,
     focused: bool,
     hovered: bool,
@@ -51,10 +86,7 @@ pub struct Slider {
     value_cell: Option<Rc<Cell<f64>>>,
     /// Backbuffered Label that renders the numeric value.  Updated in
     /// `layout()` with the current formatted value so the text follows
-    /// drags live.  Uses the same proven text-cache path every other
-    /// Label in the app does, which matters: previous attempts to
-    /// render the value via direct `ctx.fill_text` were unreliable on
-    /// some rendering paths.
+    /// drags live.
     value_label: Label,
     /// Tracks the string last pushed into `value_label` so we only
     /// invalidate its cache when the displayed value actually changes.
@@ -72,13 +104,15 @@ impl Slider {
             bounds: Rect::default(),
             children: Vec::new(),
             base: WidgetBase::new(),
-            value: v,
-            min,
-            max,
-            step: (max - min) / 100.0,
-            show_value: true,
-            decimals: None,
-            font_size,
+            props: SliderProps {
+                value: v,
+                min,
+                max,
+                step: (max - min) / 100.0,
+                show_value: true,
+                decimals: None,
+                font_size,
+            },
             dragging: false,
             focused: false,
             hovered: false,
@@ -90,7 +124,7 @@ impl Slider {
     }
 
     pub fn with_step(mut self, step: f64) -> Self {
-        self.step = step;
+        self.props.step = step;
         self
     }
 
@@ -101,19 +135,19 @@ impl Slider {
     /// will drive this slider live; drag interactions here write back
     /// to the cell too.  Pattern mirrors `ToggleSwitch::with_state_cell`.
     pub fn with_value_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
-        self.value = cell.get().clamp(self.min, self.max);
+        self.props.value = cell.get().clamp(self.props.min, self.props.max);
         self.value_cell = Some(cell);
         self
     }
     pub fn with_show_value(mut self, show: bool) -> Self {
-        self.show_value = show;
+        self.props.show_value = show;
         self
     }
 
     /// Force a specific decimal count for the numeric value label.  When
     /// unset, the format falls back to a heuristic based on `step`.
     pub fn with_decimals(mut self, decimals: usize) -> Self {
-        self.decimals = Some(decimals);
+        self.props.decimals = Some(decimals);
         self
     }
 
@@ -144,18 +178,18 @@ impl Slider {
     }
 
     pub fn value(&self) -> f64 {
-        self.value
+        self.props.value
     }
 
     pub fn set_value(&mut self, v: f64) {
-        self.value = v.clamp(self.min, self.max);
+        self.props.value = v.clamp(self.props.min, self.props.max);
         if let Some(cell) = &self.value_cell {
-            cell.set(self.value);
+            cell.set(self.props.value);
         }
     }
 
     fn fire(&mut self) {
-        let v = self.value;
+        let v = self.props.value;
         if let Some(cell) = &self.value_cell {
             cell.set(v);
         }
@@ -168,7 +202,7 @@ impl Slider {
     /// lives in a reserved strip to the right of this, outside the track
     /// so a thumb at max doesn't overdraw the digits.
     fn track_right(&self) -> f64 {
-        let reserved = if self.show_value {
+        let reserved = if self.props.show_value {
             VALUE_W + VALUE_GAP
         } else {
             0.0
@@ -180,8 +214,8 @@ impl Slider {
     fn thumb_x(&self) -> f64 {
         let track_left = THUMB_R;
         let track_right = self.track_right();
-        let t = if self.max > self.min {
-            (self.value - self.min) / (self.max - self.min)
+        let t = if self.props.max > self.props.min {
+            (self.props.value - self.props.min) / (self.props.max - self.props.min)
         } else {
             0.0
         };
@@ -192,26 +226,26 @@ impl Slider {
         let track_left = THUMB_R;
         let track_right = self.track_right();
         let t = ((x - track_left) / (track_right - track_left)).clamp(0.0, 1.0);
-        let raw = self.min + t * (self.max - self.min);
+        let raw = self.props.min + t * (self.props.max - self.props.min);
         // Snap to step
-        let snapped = (raw / self.step).round() * self.step;
-        snapped.clamp(self.min, self.max)
+        let snapped = (raw / self.props.step).round() * self.props.step;
+        snapped.clamp(self.props.min, self.props.max)
     }
 
-    /// Format `self.value` using `decimals` if set, otherwise heuristic
+    /// Format the slider's value using `decimals` if set, otherwise heuristic
     /// based on `step`.
     fn format_value(&self) -> String {
-        if let Some(d) = self.decimals {
-            return format!("{:.*}", d, self.value);
+        if let Some(d) = self.props.decimals {
+            return format!("{:.*}", d, self.props.value);
         }
-        if self.step >= 1.0 {
-            format!("{:.0}", self.value)
-        } else if self.step >= 0.1 {
-            format!("{:.1}", self.value)
-        } else if self.step >= 0.01 {
-            format!("{:.2}", self.value)
+        if self.props.step >= 1.0 {
+            format!("{:.0}", self.props.value)
+        } else if self.props.step >= 0.1 {
+            format!("{:.1}", self.props.value)
+        } else if self.props.step >= 0.01 {
+            format!("{:.2}", self.props.value)
         } else {
-            format!("{:.3}", self.value)
+            format!("{:.3}", self.props.value)
         }
     }
 }
@@ -231,6 +265,15 @@ impl Widget for Slider {
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
         &mut self.children
+    }
+
+    #[cfg(feature = "reflect")]
+    fn as_reflect(&self) -> Option<&dyn bevy_reflect::Reflect> {
+        Some(&self.props)
+    }
+    #[cfg(feature = "reflect")]
+    fn as_reflect_mut(&mut self) -> Option<&mut dyn bevy_reflect::Reflect> {
+        Some(&mut self.props)
     }
 
     fn is_focusable(&self) -> bool {
@@ -260,7 +303,7 @@ impl Widget for Slider {
         // back by rounding inside the source cell.
         if !self.dragging {
             if let Some(cell) = &self.value_cell {
-                self.value = cell.get().clamp(self.min, self.max);
+                self.props.value = cell.get().clamp(self.props.min, self.props.max);
             }
         }
 
@@ -268,7 +311,7 @@ impl Widget for Slider {
         // actually changed — Label's `set_text` invalidates its cache
         // so we want to skip this when the value is unchanged (e.g.
         // idle frames between drags).
-        if self.show_value {
+        if self.props.show_value {
             let new_text = self.format_value();
             if new_text != self.last_value_text {
                 self.value_label.set_text(new_text.clone());
@@ -276,7 +319,7 @@ impl Widget for Slider {
             }
             // Size the label to exactly the reserved strip; right-align
             // anchors the digits to the widget's right edge.
-            let lh = self.font_size * 1.5;
+            let lh = self.props.font_size * 1.5;
             let _ = self.value_label.layout(Size::new(VALUE_W, lh));
             self.value_label
                 .set_bounds(Rect::new(0.0, 0.0, VALUE_W, lh));
@@ -345,7 +388,7 @@ impl Widget for Slider {
         // same text-raster path as every other label in the app.  The
         // Label is right-aligned inside its box and positioned in the
         // reserved strip to the right of the track.
-        if self.show_value {
+        if self.props.show_value {
             self.value_label.set_color(v.text_color);
             let lb = self.value_label.bounds();
             let strip_left = track_right + VALUE_GAP;
@@ -365,7 +408,7 @@ impl Widget for Slider {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
                 if self.dragging {
-                    self.value = self.value_from_x(pos.x);
+                    self.props.value = self.value_from_x(pos.x);
                     self.fire();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
@@ -382,7 +425,7 @@ impl Widget for Slider {
                 ..
             } => {
                 self.dragging = true;
-                self.value = self.value_from_x(pos.x);
+                self.props.value = self.value_from_x(pos.x);
                 self.fire();
                 crate::animation::request_draw();
                 EventResult::Consumed
@@ -401,19 +444,23 @@ impl Widget for Slider {
             Event::KeyDown { key, .. } => {
                 let changed = match key {
                     Key::ArrowLeft => {
-                        self.value = (self.value - self.step).clamp(self.min, self.max);
+                        self.props.value =
+                            (self.props.value - self.props.step).clamp(self.props.min, self.props.max);
                         true
                     }
                     Key::ArrowRight => {
-                        self.value = (self.value + self.step).clamp(self.min, self.max);
+                        self.props.value =
+                            (self.props.value + self.props.step).clamp(self.props.min, self.props.max);
                         true
                     }
                     Key::ArrowDown => {
-                        self.value = (self.value - self.step * 10.0).clamp(self.min, self.max);
+                        self.props.value = (self.props.value - self.props.step * 10.0)
+                            .clamp(self.props.min, self.props.max);
                         true
                     }
                     Key::ArrowUp => {
-                        self.value = (self.value + self.step * 10.0).clamp(self.min, self.max);
+                        self.props.value = (self.props.value + self.props.step * 10.0)
+                            .clamp(self.props.min, self.props.max);
                         true
                     }
                     _ => false,

@@ -40,6 +40,7 @@ use crate::geometry::Size;
 /// Used for both widget **margin** (space outside the widget) and container
 /// **padding** (space inside the container around its children).
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct Insets {
     pub left: f64,
     pub right: f64,
@@ -131,6 +132,8 @@ impl Insets {
 /// At most one of `LEFT`, `CENTER`, `RIGHT` may be set for position anchoring;
 /// combining `LEFT | RIGHT` means "stretch", not "anchor to both edges".
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[cfg_attr(feature = "reflect", reflect(opaque))]
 pub struct HAnchor(u8);
 
 impl HAnchor {
@@ -193,6 +196,8 @@ impl std::ops::BitAnd for HAnchor {
 /// Y-up convention: `BOTTOM` is the visually lower edge (small Y), `TOP` is
 /// the visually upper edge (large Y).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[cfg_attr(feature = "reflect", reflect(opaque))]
 pub struct VAnchor(u8);
 
 impl VAnchor {
@@ -280,6 +285,7 @@ impl std::ops::BitAnd for VAnchor {
 /// }
 /// ```
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct WidgetBase {
     /// Space outside this widget's bounds (read by the parent during layout).
     pub margin: Insets,

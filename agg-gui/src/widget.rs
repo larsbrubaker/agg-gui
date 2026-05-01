@@ -398,6 +398,29 @@ pub trait Widget {
         vec![]
     }
 
+    /// Opt-in reflection accessor for the inspector's typed property editors.
+    ///
+    /// Widgets that derive [`bevy_reflect::Reflect`] (via the `reflect`
+    /// cargo feature) override this to return `Some(self)` so the inspector
+    /// can walk their fields with type information — boolean toggles,
+    /// numeric sliders, color pickers, enum dropdowns — instead of falling
+    /// back to the read-only string [`properties`](Self::properties) list.
+    ///
+    /// Default returns `None`; the inspector then uses the string list.
+    /// Available only with the `reflect` feature so consumers without it
+    /// don't pay the dependency cost.
+    #[cfg(feature = "reflect")]
+    fn as_reflect(&self) -> Option<&dyn bevy_reflect::Reflect> {
+        None
+    }
+
+    /// Mutable counterpart of [`as_reflect`](Self::as_reflect).  Used by the
+    /// inspector to write edits back into the live widget.
+    #[cfg(feature = "reflect")]
+    fn as_reflect_mut(&mut self) -> Option<&mut dyn bevy_reflect::Reflect> {
+        None
+    }
+
     /// Whether this widget renders into its own offscreen buffer before
     /// compositing into the parent.
     ///

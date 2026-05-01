@@ -41,6 +41,8 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 mod drawing;
 mod inspector_tree;
 mod layer_compositing;
+#[cfg(feature = "reflect")]
+mod reflect_roundtrip;
 mod layout_lcd;
 mod retained_layers;
 mod touch_scroll;

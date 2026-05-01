@@ -7,6 +7,7 @@ use agg_rust::color::Rgba8;
 
 /// An RGBA color with f32 components in [0.0, 1.0].
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct Color {
     pub r: f32,
     pub g: f32,

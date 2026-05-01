@@ -212,6 +212,7 @@ pub struct InspectorPanel {
 
 /// Serializable inspector UI state — apply at startup, snapshot at shutdown.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct InspectorSavedState {
     pub expanded: Vec<bool>,
     pub selected: Option<usize>,

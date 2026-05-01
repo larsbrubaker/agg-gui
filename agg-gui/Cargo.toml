@@ -25,6 +25,7 @@ rustybuzz = "0.20"
 tess2-rust = "1.1.0"
 arboard  = { version = "3", optional = true, features = ["image-data"] }
 winit    = { version = "0.30", optional = true }
+bevy_reflect = { version = "0.18", optional = true }
 web-time = "1"
 pulldown-cmark = "0.11"
 png = "0.17"
@@ -34,12 +35,19 @@ base64 = "0.22.1"
 ehttp = "0.3.1"
 
 [features]
+default        = ["reflect"]
 clipboard      = ["dep:arboard"]
 # winit-adapter: exposes `agg_gui::winit_adapter` with helpers mapping
 # `winit` types (`MouseButton`, `Modifiers`, `Key`, `CursorIcon`) to the
 # crate's input/cursor types.  Off by default so consumers that don't use
 # winit (wasm, bring-your-own event loop) don't pull the dep.
 winit-adapter  = ["dep:winit"]
+# reflect: pulls in bevy_reflect and adds `#[derive(Reflect)]` on value
+# types, saved-state structs, and opt-in widgets.  Powers the property
+# inspector's typed editors and unifies serialization.  Default-on so
+# the demo apps see the full inspector experience; library users that
+# want a smaller dep tree can disable it.
+reflect        = ["dep:bevy_reflect"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

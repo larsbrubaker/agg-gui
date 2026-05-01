@@ -25,6 +25,7 @@ use crate::color::Color;
 
 /// User preference for which palette to apply.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub enum ThemePreference {
     #[default]
     Dark,
@@ -54,6 +55,7 @@ impl ThemePreference {
 
 /// Built-in accent swatches exposed by the demo and usable by hosts.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub enum AccentColor {
     #[default]
     Blue,
@@ -144,6 +146,7 @@ impl AccentColor {
 /// ctx.set_fill_color(v.window_fill);
 /// ```
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct Visuals {
     // ── Chrome ────────────────────────────────────────────────────────────────
     /// Canvas / app background (behind all floating windows).

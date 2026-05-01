@@ -215,6 +215,79 @@ pub struct InspectorNode {
     pub properties: Vec<(&'static str, String)>,
 }
 
+/// Walk a reflected struct's fields and produce `(name, display)` pairs
+/// suitable for the inspector's property pane.  Public so callers can build
+/// the same typed dump for ad-hoc reflectable values (e.g. a debug hover
+/// inspector outside the widget tree).
+#[cfg(feature = "reflect")]
+pub fn reflect_fields(reflected: &dyn bevy_reflect::Reflect) -> Vec<(&'static str, String)> {
+    use bevy_reflect::{ReflectRef, TypeInfo};
+    let mut out = Vec::new();
+    if let ReflectRef::Struct(s) = reflected.reflect_ref() {
+        // The TypeInfo of the struct gives us field NAMES with `'static`
+        // lifetime — required because `InspectorNode::properties` is
+        // `Vec<(&'static str, String)>`.  Falling back to indexed names
+        // ("field_0") for unrepresented info keeps the dump alive even on
+        // tuple structs that don't carry named fields.
+        let names: Vec<&'static str> = if let Some(TypeInfo::Struct(info)) =
+            reflected.get_represented_type_info()
+        {
+            (0..s.field_len())
+                .map(|i| info.field_at(i).map(|f| f.name()).unwrap_or(""))
+                .collect()
+        } else {
+            vec![""; s.field_len()]
+        };
+        for i in 0..s.field_len() {
+            let name = names.get(i).copied().unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+            if let Some(field) = s.field_at(i) {
+                out.push((name, format_reflect_value(field)));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(feature = "reflect")]
+fn format_reflect_value(value: &dyn bevy_reflect::PartialReflect) -> String {
+    // Try common primitive types first for clean output, then fall back to
+    // `Debug` via `reflect_short_type_path`.  bevy_reflect's `Debug` impl
+    // for arbitrary reflected values produces verbose "Reflected(..)" style
+    // output — bypass it for the types the inspector sees on a typical frame.
+    if let Some(v) = value.try_downcast_ref::<bool>() {
+        return v.to_string();
+    }
+    if let Some(v) = value.try_downcast_ref::<f64>() {
+        return format!("{v:.3}");
+    }
+    if let Some(v) = value.try_downcast_ref::<f32>() {
+        return format!("{v:.3}");
+    }
+    if let Some(v) = value.try_downcast_ref::<i32>() {
+        return v.to_string();
+    }
+    if let Some(v) = value.try_downcast_ref::<u32>() {
+        return v.to_string();
+    }
+    if let Some(v) = value.try_downcast_ref::<usize>() {
+        return v.to_string();
+    }
+    if let Some(v) = value.try_downcast_ref::<String>() {
+        return format!("\"{v}\"");
+    }
+    if let Some(v) = value.try_downcast_ref::<crate::color::Color>() {
+        return format!(
+            "rgba({:.2}, {:.2}, {:.2}, {:.2})",
+            v.r, v.g, v.b, v.a
+        );
+    }
+    // Generic fallback: `Debug`-print the reflected value.
+    format!("{value:?}")
+}
+
 /// Snapshot pushed to the platform render loop so the host can draw a
 /// Chrome F12-style three-band overlay (margin + bounds + padding) around
 /// the widget the inspector is hovering.
@@ -350,6 +423,16 @@ pub fn collect_inspector_nodes(
         },
     )];
     props.extend(widget.properties());
+    // Reflection-driven property dump.  Widgets that opt into the
+    // companion-props pattern (`Widget::as_reflect`) get their reflected
+    // struct fields surfaced here as `(name, formatted)` pairs — typed,
+    // accurate, and free of the hand-maintained `properties()` strings
+    // they would otherwise need.  Fields that aren't a struct, or that
+    // can't be displayed, are silently skipped.
+    #[cfg(feature = "reflect")]
+    if let Some(reflected) = widget.as_reflect() {
+        props.extend(reflect_fields(reflected));
+    }
     out.push(InspectorNode {
         type_name: widget.type_name(),
         screen_bounds: abs,

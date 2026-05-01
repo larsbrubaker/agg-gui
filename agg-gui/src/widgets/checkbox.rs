@@ -29,16 +29,24 @@ const FOCUS_PAD: f64 = 2.0;
 const GAP: f64 = 8.0;
 const BOX_STROKE_WIDTH: f64 = 1.5;
 
+/// Inspector-visible properties of a [`Checkbox`].  See [`SliderProps`] for
+/// the rationale of the companion-props pattern.
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[derive(Clone, Debug, Default)]
+pub struct CheckboxProps {
+    pub checked: bool,
+    pub font_size: f64,
+    /// Explicit label colour override; `None` → follow active visuals.
+    pub label_color: Option<Color>,
+}
+
 /// A boolean toggle with a square box and a text label.
 pub struct Checkbox {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>, // always empty — label stored separately
     base: WidgetBase,
     font: Arc<Font>,
-    font_size: f64,
-    /// Explicit label color override.  `None` → follow active visuals.
-    label_color: Option<Color>,
-    checked: bool,
+    pub props: CheckboxProps,
     /// When set, this cell is the authoritative checked state.  `paint` reads
     /// from it and `toggle` writes to it so the checkbox stays in sync with
     /// external state changes (e.g. a window's close button setting it to false).
@@ -60,9 +68,11 @@ impl Checkbox {
             children: Vec::new(),
             base: WidgetBase::new(),
             font,
-            font_size,
-            label_color: None,
-            checked,
+            props: CheckboxProps {
+                checked,
+                font_size,
+                label_color: None,
+            },
             state_cell: None,
             hovered: false,
             focused: false,
@@ -72,13 +82,13 @@ impl Checkbox {
     }
 
     pub fn with_font_size(mut self, size: f64) -> Self {
-        self.font_size = size;
+        self.props.font_size = size;
         self.label_widget =
             Label::new(self.label_widget.text_str(), Arc::clone(&self.font)).with_font_size(size);
         self
     }
     pub fn with_label_color(mut self, c: Color) -> Self {
-        self.label_color = Some(c);
+        self.props.label_color = Some(c);
         self
     }
 
@@ -119,15 +129,15 @@ impl Checkbox {
     }
 
     pub fn checked(&self) -> bool {
-        self.checked
+        self.props.checked
     }
     pub fn set_checked(&mut self, v: bool) {
-        self.checked = v;
+        self.props.checked = v;
     }
 
     fn toggle(&mut self) {
         let new_val = !self.effective_checked();
-        self.checked = new_val;
+        self.props.checked = new_val;
         if let Some(ref cell) = self.state_cell {
             cell.set(new_val);
         }
@@ -143,7 +153,7 @@ impl Checkbox {
         if let Some(ref cell) = self.state_cell {
             cell.get()
         } else {
-            self.checked
+            self.props.checked
         }
     }
 
@@ -180,6 +190,15 @@ impl Widget for Checkbox {
         &mut self.children
     }
 
+    #[cfg(feature = "reflect")]
+    fn as_reflect(&self) -> Option<&dyn bevy_reflect::Reflect> {
+        Some(&self.props)
+    }
+    #[cfg(feature = "reflect")]
+    fn as_reflect_mut(&mut self) -> Option<&mut dyn bevy_reflect::Reflect> {
+        Some(&mut self.props)
+    }
+
     fn is_focusable(&self) -> bool {
         true
     }
@@ -202,7 +221,7 @@ impl Widget for Checkbox {
 
     fn layout(&mut self, available: Size) -> Size {
         let box_slot_w = BOX_SIZE + FOCUS_PAD * 2.0;
-        let h = (BOX_SIZE + FOCUS_PAD * 2.0).max(self.font_size * 1.25);
+        let h = (BOX_SIZE + FOCUS_PAD * 2.0).max(self.props.font_size * 1.25);
         // Layout the label within the remaining width after the box + gap.
         let label_avail_w = (available.width - box_slot_w - GAP).max(0.0);
         let s = self.label_widget.layout(Size::new(label_avail_w, h));
@@ -282,7 +301,7 @@ impl Widget for Checkbox {
         }
 
         // Label — rendered through backbuffered Label child.
-        let label_color = self.label_color.unwrap_or(v.text_color);
+        let label_color = self.props.label_color.unwrap_or(v.text_color);
         self.label_widget.set_color(label_color);
 
         let lw = self.label_widget.bounds().width;
