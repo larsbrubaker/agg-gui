@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["reflect"]
+reflect = ["agg-gui/reflect", "demo-gl/reflect", "demo-ui/reflect"]
+
 [dependencies]
 agg-gui                 = { path = "../agg-gui" }
 demo-gl                 = { path = "../demo-gl" }
