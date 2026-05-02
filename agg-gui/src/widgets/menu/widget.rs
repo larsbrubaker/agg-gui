@@ -65,6 +65,23 @@ impl PopupMenu {
         self.state.handle_event(&mut self.items, event, viewport)
     }
 
+    /// Return `true` if `pos` falls inside any of the popup's currently
+    /// laid-out panels (the open menu plus any nested submenus).  Used
+    /// by `MenuBar` to detect a mouse-up in "neutral space" — outside
+    /// both the menu bar AND the popup body — so the bar can dismiss
+    /// the popup without waiting for a follow-up event.
+    pub fn body_contains(&self, pos: Point, viewport: Size) -> bool {
+        self.state
+            .layouts(&self.items, viewport)
+            .iter()
+            .any(|layout| {
+                pos.x >= layout.rect.x
+                    && pos.x <= layout.rect.x + layout.rect.width
+                    && pos.y >= layout.rect.y
+                    && pos.y <= layout.rect.y + layout.rect.height
+            })
+    }
+
     pub fn handle_shortcut(&mut self, key: &Key, modifiers: Modifiers) -> MenuResponse {
         self.state.handle_shortcut(&mut self.items, key, modifiers)
     }
@@ -318,6 +335,30 @@ impl Widget for MenuBar {
                     }
                 }
             }
+            // Drag-release in neutral space cancels.  The user pressed
+            // a top menu, dragged off both the bar and the popup body,
+            // and let go — the standard menu convention is to dismiss.
+            // The popup state's drag-release handler treats outside-
+            // popup-body as a no-op (so a mouse-up still on the bar
+            // doesn't close), so the bar enforces the cancel here
+            // since only the bar knows where its own top-menu rects
+            // live.
+            if let Event::MouseUp {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                if self.popup.state.is_mouse_up_activation_armed()
+                    && self.menu_at(*pos).is_none()
+                    && !self.popup.body_contains(*pos, current_viewport())
+                {
+                    self.popup.close();
+                    self.open_index = None;
+                    crate::animation::request_draw();
+                    return EventResult::Consumed;
+                }
+            }
             let (result, response) = self.popup.handle_event(event, current_viewport());
             if let MenuResponse::Action(action) = response {
                 if let Some(idx) = self.open_index {
@@ -400,6 +441,108 @@ mod tests {
     fn test_font() -> Arc<Font> {
         const FONT_BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
         Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    /// Desktop drag-and-release in neutral space cancels the popup —
+    /// the user opened a menu, dragged off the menu bar / popup body,
+    /// and released somewhere unrelated.  Without this, dragging out
+    /// of a menu would leave it open with no obvious way to close it
+    /// from the same gesture.
+    #[test]
+    fn desktop_drag_release_in_neutral_space_closes_popup() {
+        crate::touch_state::clear_last_touch_event_for_testing();
+        let viewport = Size::new(300.0, 180.0);
+        crate::widget::set_current_viewport(viewport);
+        let mut bar = MenuBar::new(
+            test_font(),
+            vec![TopMenu::new(
+                "File",
+                vec![super::super::model::MenuItem::action("New", "file.new").into()],
+            )],
+            |_| {},
+        );
+        bar.layout(Size::new(300.0, BAR_H));
+
+        // Press File — popup opens, drag-release armed.
+        bar.on_event(&Event::MouseDown {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(bar.popup.is_open());
+
+        // Drag through neutral space (off the bar, off the popup
+        // body) and release there — popup must close.
+        let neutral = Point::new(280.0, 170.0);
+        bar.on_event(&Event::MouseMove { pos: neutral });
+        bar.on_event(&Event::MouseUp {
+            pos: neutral,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(
+            !bar.popup.is_open(),
+            "drag-release in neutral space must close the popup",
+        );
+    }
+
+    /// Mobile backdrop dismiss: with a popup open, tapping outside the
+    /// menu bar AND outside the popup body closes it.  The touch shell
+    /// fires MouseMove + MouseDown + MouseUp at the tap position, all
+    /// within the touch-synthesis window.  The MouseDown lands outside
+    /// any top-menu rect so the bar's "tap on top menu" path doesn't
+    /// run; popup.handle_event sees an outside-click and closes.
+    #[test]
+    fn mobile_backdrop_tap_dismisses_popup() {
+        crate::touch_state::clear_last_touch_event_for_testing();
+        let viewport = Size::new(300.0, 180.0);
+        crate::widget::set_current_viewport(viewport);
+        let mut bar = MenuBar::new(
+            test_font(),
+            vec![TopMenu::new(
+                "File",
+                vec![super::super::model::MenuItem::action("New", "file.new").into()],
+            )],
+            |_| {},
+        );
+        bar.layout(Size::new(300.0, BAR_H));
+
+        // Open File via a tap.
+        let file_pos = Point::new(8.0, 8.0);
+        crate::touch_state::note_touch_event();
+        bar.on_event(&Event::MouseMove { pos: file_pos });
+        crate::touch_state::note_touch_event();
+        bar.on_event(&Event::MouseDown {
+            pos: file_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: file_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(bar.popup.is_open());
+
+        // Tap outside both the menu bar and the popup body.
+        let backdrop = Point::new(280.0, 170.0);
+        crate::touch_state::note_touch_event();
+        bar.on_event(&Event::MouseMove { pos: backdrop });
+        crate::touch_state::note_touch_event();
+        bar.on_event(&Event::MouseDown {
+            pos: backdrop,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: backdrop,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(
+            !bar.popup.is_open(),
+            "tapping outside the menu bar and popup body must dismiss the popup on mobile",
+        );
     }
 
     /// Desktop hover-switch: with a popup open, moving the cursor over
