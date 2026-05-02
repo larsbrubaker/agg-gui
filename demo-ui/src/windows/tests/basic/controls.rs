@@ -126,12 +126,13 @@ const ALL_CURSORS: &[(CursorIcon, &str)] = &[
 ];
 
 /// Full-width row button that sets the OS cursor to `icon` on hover.
+/// The row's hover background is drawn directly; the cursor name renders
+/// through a real `Label` child so its glyph cache stays warm.
 struct CursorRow {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     icon: CursorIcon,
     hovered: bool,
-    label: Label,
 }
 
 impl CursorRow {
@@ -140,10 +141,9 @@ impl CursorRow {
     fn new(icon: CursorIcon, name: &'static str, font: Arc<Font>) -> Self {
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
+            children: vec![Box::new(Label::new(name, font).with_font_size(12.0))],
             icon,
             hovered: false,
-            label: Label::new(name, font).with_font_size(12.0),
         }
     }
 }
@@ -167,9 +167,13 @@ impl Widget for CursorRow {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, Self::H);
-        let ls = self.label.layout(Size::new(available.width, Self::H));
-        self.label
-            .set_bounds(Rect::new(0.0, 0.0, ls.width, ls.height));
+        if let Some(child) = self.children.first_mut() {
+            let s = child.layout(Size::new(available.width, Self::H));
+            // Centre the label within the row.
+            let lx = (available.width - s.width) * 0.5;
+            let ly = (Self::H - s.height) * 0.5;
+            child.set_bounds(Rect::new(lx, ly, s.width, s.height));
+        }
         Size::new(available.width, Self::H)
     }
 
@@ -184,18 +188,10 @@ impl Widget for CursorRow {
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, self.bounds.width, Self::H, 3.0);
         ctx.fill();
-
-        // Center label.
-        self.label.set_color(v.text_color);
-        let lw = self.label.bounds().width;
-        let lh = self.label.bounds().height;
-        let lx = (self.bounds.width - lw) * 0.5;
-        let ly = (Self::H - lh) * 0.5;
-        self.label.set_bounds(Rect::new(lx, ly, lw, lh));
-        ctx.save();
-        ctx.translate(lx, ly);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        if let Some(child) = self.children.first_mut() {
+            child.set_label_color(v.text_color);
+        }
+        // Label child paints itself via the framework's tree walk.
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

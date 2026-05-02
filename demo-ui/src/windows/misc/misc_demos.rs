@@ -9,11 +9,12 @@ use agg_gui::{
 };
 
 /// A color swatch + name row used by the Colors section of misc_demos.
+/// The swatch rectangle is painted directly; the name renders through a
+/// real `Label` child so its glyph cache stays warm across frames.
 struct SwatchRow {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     color: Color,
-    label: Label,
 }
 
 impl Widget for SwatchRow {
@@ -35,13 +36,10 @@ impl Widget for SwatchRow {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, 22.0);
-        let ls = self.label.layout(Size::new(available.width - 30.0, 22.0));
-        self.label.set_bounds(Rect::new(
-            28.0,
-            (22.0 - ls.height) * 0.5,
-            ls.width,
-            ls.height,
-        ));
+        if let Some(child) = self.children.first_mut() {
+            let s = child.layout(Size::new(available.width - 30.0, 22.0));
+            child.set_bounds(Rect::new(28.0, (22.0 - s.height) * 0.5, s.width, s.height));
+        }
         Size::new(available.width, 22.0)
     }
 
@@ -51,12 +49,10 @@ impl Widget for SwatchRow {
         ctx.begin_path();
         ctx.rounded_rect(0.0, 3.0, 20.0, 16.0, 3.0);
         ctx.fill();
-        self.label.set_color(v.text_color);
-        let lb = self.label.bounds();
-        ctx.save();
-        ctx.translate(lb.x, lb.y);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        if let Some(child) = self.children.first_mut() {
+            child.set_label_color(v.text_color);
+        }
+        // Label child paints itself via the framework's tree walk.
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
@@ -360,9 +356,10 @@ fn colors_section(font: &Arc<Font>) -> Box<dyn Widget> {
         col.push(
             Box::new(SwatchRow {
                 bounds: Rect::default(),
-                children: Vec::new(),
+                children: vec![Box::new(
+                    Label::new(name, Arc::clone(font)).with_font_size(11.5),
+                )],
                 color,
-                label: Label::new(name, Arc::clone(font)).with_font_size(11.5),
             }),
             0.0,
         );

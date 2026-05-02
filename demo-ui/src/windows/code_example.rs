@@ -9,7 +9,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::widget::paint_subtree;
 use agg_gui::{
     Button, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow,
     Font, Insets, Label, Rect, ScrollView, Separator, Size, SizedBox, TextField, Widget,
@@ -27,7 +26,6 @@ pub struct AgeDisplay {
     pub children: Vec<Box<dyn Widget>>,
     pub name: Rc<RefCell<String>>,
     pub age: Rc<Cell<u32>>,
-    label: Label,
     debug_repr: bool,
 }
 
@@ -36,9 +34,8 @@ impl AgeDisplay {
         let text = format!("{} is {}", name.borrow(), age.get());
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
+            children: vec![Box::new(Label::new(text, font).with_font_size(13.0))],
             name,
-            label: Label::new(&text, font).with_font_size(13.0),
             age,
             debug_repr: false,
         }
@@ -52,11 +49,22 @@ impl AgeDisplay {
         );
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
+            children: vec![Box::new(Label::new(text, font).with_font_size(11.0))],
             name,
-            label: Label::new(&text, font).with_font_size(11.0),
             age,
             debug_repr: true,
+        }
+    }
+
+    fn current_text(&self) -> String {
+        if self.debug_repr {
+            format!(
+                "CodeExample {{ name: \"{}\", age: {} }}",
+                self.name.borrow(),
+                self.age.get()
+            )
+        } else {
+            format!("{} is {}", self.name.borrow(), self.age.get())
         }
     }
 }
@@ -79,33 +87,29 @@ impl Widget for AgeDisplay {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        // Update label text — only re-rasterizes when the age actually changes.
-        let text = if self.debug_repr {
-            format!(
-                "CodeExample {{ name: \"{}\", age: {} }}",
-                self.name.borrow(),
-                self.age.get()
-            )
+        // Refresh the live text on the Label child — `set_label_text`
+        // only invalidates Label's glyph cache when the value changed.
+        let text = self.current_text();
+        let s = if let Some(child) = self.children.first_mut() {
+            child.set_label_text(&text);
+            child.layout(Size::new(available.width, 20.0))
         } else {
-            format!("{} is {}", self.name.borrow(), self.age.get())
+            Size::new(0.0, 20.0)
         };
-        self.label.set_text(text);
-        let s = self.label.layout(Size::new(available.width, 20.0));
         let h = s.height.max(20.0);
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
-        self.label
-            .set_bounds(Rect::new(0.0, (h - s.height) * 0.5, s.width, s.height));
+        if let Some(child) = self.children.first_mut() {
+            child.set_bounds(Rect::new(0.0, (h - s.height) * 0.5, s.width, s.height));
+        }
         Size::new(available.width, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let color = ctx.visuals().text_color;
-        self.label.set_color(color);
-        let lb = self.label.bounds();
-        ctx.save();
-        ctx.translate(lb.x, lb.y);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        if let Some(child) = self.children.first_mut() {
+            child.set_label_color(color);
+        }
+        // Label child paints itself via the framework's tree walk.
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {

@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, DragValue, FlexColumn, FlexRow, Font, Rect, ScrollView, Separator, SizedBox, Slider,
+    Button, DragValue, FlexColumn, FlexRow, Font, ScrollView, Separator, SizedBox, Slider,
     Widget,
 };
 
@@ -240,13 +240,11 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
 
     // ── Readout ──
     col.push(
-        Box::new(OffsetReadout {
-            bounds: Rect::default(),
-            children: Vec::new(),
-            font: Arc::clone(&font),
-            offset: Rc::clone(&scroll_off),
-            max: Rc::clone(&max_scroll),
-        }),
+        Box::new(OffsetReadout::new(
+            Arc::clone(&font),
+            Rc::clone(&scroll_off),
+            Rc::clone(&max_scroll),
+        )),
         0.0,
     );
 

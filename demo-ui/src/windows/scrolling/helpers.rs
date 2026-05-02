@@ -354,11 +354,29 @@ impl<T: Clone + Copy + PartialEq + 'static> Widget for SegRow<T> {
 
 pub struct OffsetReadout {
     pub bounds: Rect,
+    /// Single Label child holding the live offset / max-scroll text.
+    /// Composing through Label keeps the glyph cache warm — `paint()`
+    /// only refreshes the text via `set_label_text`, which Label
+    /// internally uses to invalidate its cache only when the value
+    /// actually changes.
     pub children: Vec<Box<dyn Widget>>,
-    pub font: Arc<Font>,
     pub offset: Rc<Cell<f64>>,
     pub max: Rc<Cell<f64>>,
 }
+
+impl OffsetReadout {
+    pub fn new(font: Arc<Font>, offset: Rc<Cell<f64>>, max: Rc<Cell<f64>>) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: vec![Box::new(
+                Label::new("", font).with_font_size(11.0),
+            )],
+            offset,
+            max,
+        }
+    }
+}
+
 impl Widget for OffsetReadout {
     fn type_name(&self) -> &'static str {
         "OffsetReadout"
@@ -377,6 +395,10 @@ impl Widget for OffsetReadout {
     }
     fn layout(&mut self, a: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, a.width, 16.0);
+        if let Some(child) = self.children.first_mut() {
+            let s = child.layout(Size::new(a.width, 16.0));
+            child.set_bounds(Rect::new(2.0, 0.0, s.width, s.height));
+        }
         Size::new(a.width, 16.0)
     }
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -386,10 +408,11 @@ impl Widget for OffsetReadout {
             self.offset.get(),
             self.max.get()
         );
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(11.0);
-        ctx.set_fill_color(v.text_dim);
-        ctx.fill_text(&text, 2.0, 3.0);
+        if let Some(child) = self.children.first_mut() {
+            child.set_label_text(&text);
+            child.set_label_color(v.text_dim);
+        }
+        // Label child paints itself via the framework's tree walk.
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored

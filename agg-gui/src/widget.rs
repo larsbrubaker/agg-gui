@@ -419,6 +419,14 @@ pub trait Widget {
     /// (theme text on subtle bg) appearances.
     fn set_label_color(&mut self, _color: crate::color::Color) {}
 
+    /// If this widget is text-bearing (e.g. `Label`), update its
+    /// displayed text.  Default is a no-op.  Composite widgets that
+    /// own a `Label` child use this to push live values (e.g. an FPS
+    /// counter) into the child without bypassing the standard
+    /// backbuffered glyph cache — calling this on a `Label` only
+    /// invalidates the cache when the text actually changed.
+    fn set_label_text(&mut self, _text: &str) {}
+
     /// Opt-in reflection accessor for the inspector's typed property editors.
     ///
     /// Widgets that derive [`bevy_reflect::Reflect`] (via the `reflect`

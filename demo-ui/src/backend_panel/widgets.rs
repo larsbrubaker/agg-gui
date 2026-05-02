@@ -96,10 +96,14 @@ impl Widget for Sparkline {
 /// rebuild the cache every frame anyway — direct rasterization is cheaper.
 pub(super) struct FpsLabel {
     bounds: Rect,
+    /// One Label child holding the live CPU-usage text.  Stored in
+    /// `children` so the framework recurses into it through the
+    /// standard tree walk; `paint()` only refreshes the text/colour
+    /// via the Widget-trait `set_label_text` / `set_label_color`
+    /// methods (Label internally only invalidates its glyph cache
+    /// when the text actually changes).
     children: Vec<Box<dyn Widget>>,
     history: Rc<RefCell<FrameHistory>>,
-    /// Inner Label — not buffered (text changes every frame).
-    label: Label,
 }
 
 impl FpsLabel {
@@ -108,9 +112,8 @@ impl FpsLabel {
         label.buffered = false; // live counter: no benefit to caching
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
+            children: vec![Box::new(label)],
             history,
-            label,
         }
     }
 }
@@ -134,9 +137,11 @@ impl Widget for FpsLabel {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, 18.0);
-        let s = self.label.layout(Size::new(available.width, 18.0));
-        self.label
-            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        if let Some(child) = self.children.first_mut() {
+            let s = child.layout(Size::new(available.width, 18.0));
+            let ly = (18.0 - s.height) * 0.5;
+            child.set_bounds(Rect::new(12.0, ly, s.width, s.height));
+        }
         Size::new(available.width, 18.0)
     }
 
@@ -145,21 +150,11 @@ impl Widget for FpsLabel {
         let hist = self.history.borrow();
         let text = format!("Mean CPU usage: {:.2} ms / frame", hist.mean_ms());
         drop(hist);
-
-        // Update label text and color, then paint it.
-        self.label.set_text(text);
-        self.label.set_color(v.text_dim);
-
-        let h = self.bounds.height;
-        let lw = self.label.bounds().width;
-        let lh = self.label.bounds().height;
-        let ly = (h - lh) * 0.5;
-        self.label.set_bounds(Rect::new(0.0, ly, lw, lh));
-
-        ctx.save();
-        ctx.translate(12.0, ly);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        if let Some(child) = self.children.first_mut() {
+            child.set_label_text(&text);
+            child.set_label_color(v.text_dim);
+        }
+        // Label child paints itself via the framework's tree walk.
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
@@ -176,8 +171,6 @@ pub(super) struct ScreenSizeLabel {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     screen_size: Rc<Cell<(u32, u32)>>,
-    /// Inner Label — not buffered (value changes on resize).
-    label: Label,
 }
 
 impl ScreenSizeLabel {
@@ -186,9 +179,8 @@ impl ScreenSizeLabel {
         label.buffered = false;
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
+            children: vec![Box::new(label)],
             screen_size,
-            label,
         }
     }
 }
@@ -212,9 +204,11 @@ impl Widget for ScreenSizeLabel {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, 18.0);
-        let s = self.label.layout(Size::new(available.width, 18.0));
-        self.label
-            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        if let Some(child) = self.children.first_mut() {
+            let s = child.layout(Size::new(available.width, 18.0));
+            let ly = (18.0 - s.height) * 0.5;
+            child.set_bounds(Rect::new(12.0, ly, s.width, s.height));
+        }
         Size::new(available.width, 18.0)
     }
 
@@ -222,20 +216,11 @@ impl Widget for ScreenSizeLabel {
         let v = ctx.visuals();
         let (w, h) = self.screen_size.get();
         let text = format!("{w} \u{00d7} {h}");
-
-        self.label.set_text(text);
-        self.label.set_color(v.text_dim);
-
-        let height = self.bounds.height;
-        let lw = self.label.bounds().width;
-        let lh = self.label.bounds().height;
-        let ly = (height - lh) * 0.5;
-        self.label.set_bounds(Rect::new(0.0, ly, lw, lh));
-
-        ctx.save();
-        ctx.translate(12.0, ly);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        if let Some(child) = self.children.first_mut() {
+            child.set_label_text(&text);
+            child.set_label_color(v.text_dim);
+        }
+        // Label child paints itself via the framework's tree walk.
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
