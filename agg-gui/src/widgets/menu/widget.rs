@@ -275,6 +275,27 @@ impl Widget for MenuBar {
                     };
                 }
             }
+            // Mobile-tap path: with no MouseMove between taps, a tap on
+            // a different top menu would otherwise be seen by the popup
+            // handler as an outside-click (close popup) and never reach
+            // the menu-bar's open path below — leaving the user staring
+            // at a closed bar.  Detect the "tap on a different top menu"
+            // case BEFORE delegating to the popup so we can switch
+            // directly.  Tapping the currently-open menu still falls
+            // through, letting the popup close it (toggle behaviour).
+            if let Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                if let Some(idx) = self.menu_at(*pos) {
+                    if self.open_index != Some(idx) {
+                        self.open_menu(idx);
+                        return EventResult::Consumed;
+                    }
+                }
+            }
             let (result, response) = self.popup.handle_event(event, current_viewport());
             if let MenuResponse::Action(action) = response {
                 if let Some(idx) = self.open_index {
@@ -498,6 +519,68 @@ mod tests {
 
         assert!(bar.popup.is_open());
         assert_eq!(bar.open_index, Some(0));
+    }
+
+    /// Mobile-tap path: a tap on the menu bar fires `MouseDown` + `MouseUp`
+    /// with NO `MouseMove` between them.  When one top menu is already open
+    /// and the user taps a different top menu, the bar must close the
+    /// current popup AND open the tapped one in the same event.  Without
+    /// this, the popup-handler (which sees the MouseDown as an outside
+    /// click) just closes the open menu, and the tapped menu never opens —
+    /// the user has to tap twice to switch menus on mobile.
+    #[test]
+    fn tap_on_other_top_menu_switches_open_popup() {
+        let viewport = Size::new(300.0, 180.0);
+        crate::widget::set_current_viewport(viewport);
+        let mut bar = MenuBar::new(
+            test_font(),
+            vec![
+                TopMenu::new(
+                    "File",
+                    vec![super::super::model::MenuItem::action("New", "file.new").into()],
+                ),
+                TopMenu::new(
+                    "Edit",
+                    vec![super::super::model::MenuItem::action("Copy", "edit.copy").into()],
+                ),
+            ],
+            |_| {},
+        );
+        bar.layout(Size::new(300.0, BAR_H));
+
+        // Tap (mouse-down + mouse-up, no move) on File.
+        bar.on_event(&Event::MouseDown {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(bar.popup.is_open());
+        assert_eq!(bar.open_index, Some(0));
+
+        // Tap on Edit — no MouseMove in between.  Should switch.
+        let edit_pos = Point::new(60.0, 8.0);
+        assert_eq!(
+            bar.on_event(&Event::MouseDown {
+                pos: edit_pos,
+                button: MouseButton::Left,
+                modifiers: Modifiers::default(),
+            }),
+            EventResult::Consumed,
+        );
+        assert!(
+            bar.popup.is_open(),
+            "tapping a different top menu must keep a popup open (Edit's), not just close File's"
+        );
+        assert_eq!(bar.open_index, Some(1));
+        let Some(super::super::model::MenuEntry::Item(item)) = bar.popup.items.first() else {
+            panic!("popup should contain Edit items after the tap");
+        };
+        assert_eq!(item.action.as_deref(), Some("edit.copy"));
     }
 
     #[test]
