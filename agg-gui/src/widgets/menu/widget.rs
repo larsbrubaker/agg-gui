@@ -275,14 +275,22 @@ impl Widget for MenuBar {
                     };
                 }
             }
-            // Mobile-tap path: with no MouseMove between taps, a tap on
-            // a different top menu would otherwise be seen by the popup
-            // handler as an outside-click (close popup) and never reach
-            // the menu-bar's open path below — leaving the user staring
-            // at a closed bar.  Detect the "tap on a different top menu"
-            // case BEFORE delegating to the popup so we can switch
-            // directly.  Tapping the currently-open menu still falls
-            // through, letting the popup close it (toggle behaviour).
+            // Mobile-tap path: a tap synthesises MouseMove → MouseDown
+            // → MouseUp at the same point.  When one menu is open and
+            // the user taps a different top menu, the MouseMove already
+            // hovers / opens the new menu (existing path above), but
+            // the MouseDown that follows would otherwise reach
+            // `popup.handle_event` and close it (the click is on the
+            // bar, outside the popup body).  Same problem for a tap
+            // with NO synthesised MouseMove — the popup would close
+            // and the tapped menu never opens.
+            //
+            // Whenever a MouseDown lands on a top-menu rect while a
+            // popup is open, swallow the event here: switch the open
+            // menu when the tap was on a different one, or no-op when
+            // it was the currently-open one.  Closing via ESC, item
+            // activation, or click outside-the-bar-AND-outside-the-
+            // popup-body still works.
             if let Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
@@ -292,8 +300,8 @@ impl Widget for MenuBar {
                 if let Some(idx) = self.menu_at(*pos) {
                     if self.open_index != Some(idx) {
                         self.open_menu(idx);
-                        return EventResult::Consumed;
                     }
+                    return EventResult::Consumed;
                 }
             }
             let (result, response) = self.popup.handle_event(event, current_viewport());
@@ -519,6 +527,74 @@ mod tests {
 
         assert!(bar.popup.is_open());
         assert_eq!(bar.open_index, Some(0));
+    }
+
+    /// Mobile-tap path with the touch shell's synthetic MouseMove preamble:
+    /// `touchstart` fires `on_mouse_move(pos)` followed by `on_touch_start`,
+    /// then `touchend` fires `on_mouse_down + on_mouse_up`.  So a tap is
+    /// actually MouseMove → MouseDown → MouseUp at the same position.
+    /// When one menu is open, that MouseMove already opens the tapped
+    /// top menu (the existing hover-driven path); the FOLLOWING MouseDown
+    /// must NOT close it (the click on the bar would otherwise be seen as
+    /// outside the popup body and close the popup).
+    #[test]
+    fn mobile_tap_sequence_keeps_other_top_menu_open() {
+        let viewport = Size::new(300.0, 180.0);
+        crate::widget::set_current_viewport(viewport);
+        let mut bar = MenuBar::new(
+            test_font(),
+            vec![
+                TopMenu::new(
+                    "File",
+                    vec![super::super::model::MenuItem::action("New", "file.new").into()],
+                ),
+                TopMenu::new(
+                    "Edit",
+                    vec![super::super::model::MenuItem::action("Copy", "edit.copy").into()],
+                ),
+            ],
+            |_| {},
+        );
+        bar.layout(Size::new(300.0, BAR_H));
+
+        // Tap File — the touch shell sends MouseMove(file_pos) first,
+        // then MouseDown + MouseUp at the same position.
+        let file_pos = Point::new(8.0, 8.0);
+        bar.on_event(&Event::MouseMove { pos: file_pos });
+        bar.on_event(&Event::MouseDown {
+            pos: file_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: file_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(bar.popup.is_open());
+        assert_eq!(bar.open_index, Some(0));
+
+        // Tap Edit — same MouseMove → MouseDown → MouseUp sequence.
+        // The MouseMove already opens Edit (hover handler).  The
+        // MouseDown that follows must NOT close it just because the
+        // click is on the menu bar (outside the popup body).
+        let edit_pos = Point::new(60.0, 8.0);
+        bar.on_event(&Event::MouseMove { pos: edit_pos });
+        bar.on_event(&Event::MouseDown {
+            pos: edit_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: edit_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(
+            bar.popup.is_open(),
+            "Edit must stay open after the tap completes — currently the MouseDown on the menu bar closes it",
+        );
+        assert_eq!(bar.open_index, Some(1));
     }
 
     /// Mobile-tap path: a tap on the menu bar fires `MouseDown` + `MouseUp`
