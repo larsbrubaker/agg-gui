@@ -93,6 +93,12 @@ pub struct Button {
     /// subtle button that flips to the accent look when its `active_fn`
     /// returns true.
     subtle: bool,
+    /// When `true` AND in the inactive state, the inactive background
+    /// is fully transparent (no fill) so the button reads as part of
+    /// its parent — sidebar list rows want this.  Hovered / pressed
+    /// inactive states paint a faint text-coloured overlay instead of
+    /// the `widget_bg` shade.  Active state is unaffected.
+    ghost: bool,
     /// How the child label is positioned inside the button rect.
     /// `Center` (default) centres horizontally; `Left` insets by
     /// [`LEFT_LABEL_PAD`] and is the right choice for full-width
@@ -128,6 +134,7 @@ impl Button {
             enabled_fn: None,
             active_fn: None,
             subtle: false,
+            ghost: false,
             label_align: LabelAlign::Center,
             label_pad_h: LEFT_LABEL_PAD,
             hovered: false,
@@ -192,6 +199,24 @@ impl Button {
     /// the label past a group-marker triangle in sidebar rows.
     pub fn with_label_pad_h(mut self, pad: f64) -> Self {
         self.label_pad_h = pad;
+        self
+    }
+
+    /// Use a transparent inactive background + faint text-coloured
+    /// hover/pressed overlay instead of the muted `widget_bg` fill.
+    /// Implies [`with_subtle`] (theme text colour, accent on active).
+    /// Right for sidebar list rows where the inactive state should
+    /// blend with the panel.
+    pub fn with_ghost(mut self) -> Self {
+        self.subtle = true;
+        self.ghost = true;
+        let theme_text = crate::theme::current_visuals().text_color;
+        self.children[0] = Self::build_label_with_color(
+            &self.label_text,
+            &self.font,
+            self.font_size,
+            theme_text,
+        );
         self
     }
 
@@ -400,7 +425,18 @@ impl Widget for Button {
         // Background — color depends on interaction state. Disabled buttons
         // use neutral widget colors instead of a washed-out accent, so they
         // don't look like secondary active actions.
-        let base_bg = if muted && (self.pressed || self.hovered) {
+        let base_bg = if muted && self.ghost && self.pressed {
+            // Ghost (transparent-inactive) buttons paint a faint
+            // text-coloured overlay on hover / press instead of the
+            // widget_bg shade.  Matches the egui-style sidebar row
+            // look the demo's `ToggleButton` had before refactor.
+            Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.16)
+        } else if muted && self.ghost && self.hovered {
+            Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.10)
+        } else if muted && self.ghost {
+            // Fully transparent when the user isn't interacting.
+            Color::rgba(0.0, 0.0, 0.0, 0.0)
+        } else if muted && (self.pressed || self.hovered) {
             v.widget_bg_hovered
         } else if muted {
             v.widget_bg

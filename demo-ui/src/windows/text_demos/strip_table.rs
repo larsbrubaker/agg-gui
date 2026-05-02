@@ -87,19 +87,47 @@ fn strip_demo_regions(width: f64, height: f64, body_text_size: f64) -> Vec<Strip
     ]
 }
 
-/// Custom painter for the egui Strip demo's exact/remainder/relative regions.
+/// Strip layout demo composed from real `Container` + `Label` children —
+/// one Container per region, positioned at the absolute rect computed by
+/// [`strip_demo_regions`].  Text inside each region is a backbuffered
+/// `Label` (multi-line, wrapped by `\n` lines) inside the Container, so
+/// glyph rasterization is cached the same way the rest of the demo
+/// renders text.  The canvas only handles the per-frame placement of
+/// child bounds and a theme-coloured stroke overlay around each region.
 struct StripDemoCanvas {
     bounds: Rect,
+    /// 5 children — each one Container(bg=region.bg) wrapping a Label.
+    /// Order matches [`strip_demo_regions`] so layout can drive bounds
+    /// from the same shared data.
     children: Vec<Box<dyn Widget>>,
-    font: Arc<Font>,
 }
 
 impl StripDemoCanvas {
     fn new(font: Arc<Font>) -> Self {
+        // Build the 5 region children once at construction.  Bounds are
+        // assigned each layout from `strip_demo_regions`; Container's
+        // own layout fills its slot, the Label inside wraps to it.
+        // We use placeholder dimensions so the sub-layouts have something
+        // sane to compute against on the first frame before `layout()`
+        // runs for the first time.
+        let regions = strip_demo_regions(400.0, 300.0, 14.0);
+        let children: Vec<Box<dyn Widget>> = regions
+            .into_iter()
+            .map(|region| {
+                let label = Label::new(region.label, Arc::clone(&font))
+                    .with_font_size(11.0)
+                    .with_align(LabelAlign::Left)
+                    .with_wrap(true);
+                let cell = Container::new()
+                    .with_background(region.bg)
+                    .with_padding(6.0)
+                    .add(Box::new(label));
+                Box::new(cell) as Box<dyn Widget>
+            })
+            .collect();
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
-            font,
+            children,
         }
     }
 }
@@ -133,32 +161,37 @@ impl Widget for StripDemoCanvas {
             320.0
         };
         self.bounds = Rect::new(0.0, 0.0, w, h);
+
+        // Place each child Container at its precomputed region rect.
+        let regions = strip_demo_regions(w, h, 14.0);
+        for (i, region) in regions.iter().enumerate() {
+            if let Some(child) = self.children.get_mut(i) {
+                child.layout(Size::new(region.rect.width, region.rect.height));
+                child.set_bounds(region.rect);
+            }
+        }
         Size::new(w, h)
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
+        // Region backgrounds + text are painted by the Container/Label
+        // children via the framework's tree walk after this returns.
+    }
+
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        // Theme-coloured stroke is drawn ON TOP of children so it stays
+        // visible regardless of how each Container fills its background.
+        // Painting in the overlay pass (which runs after `paint_subtree`
+        // recurses into children) keeps the stroke consistent without
+        // teaching `Container` about the active visuals.
         let v = ctx.visuals();
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(11.0);
+        ctx.set_stroke_color(v.widget_stroke);
+        ctx.set_line_width(1.0);
         for region in strip_demo_regions(self.bounds.width, self.bounds.height, 14.0) {
             let r = region.rect;
-            ctx.set_fill_color(region.bg);
-            ctx.begin_path();
-            ctx.rect(r.x, r.y, r.width, r.height);
-            ctx.fill();
-            ctx.set_stroke_color(v.widget_stroke);
-            ctx.set_line_width(1.0);
             ctx.begin_path();
             ctx.rect(r.x, r.y, r.width, r.height);
             ctx.stroke();
-
-            ctx.set_fill_color(v.text_color);
-            for (line_i, line) in region.label.lines().enumerate() {
-                let y = r.y + r.height - 15.0 - line_i as f64 * 13.0;
-                if y >= r.y {
-                    ctx.fill_text(line, r.x + 6.0, y);
-                }
-            }
         }
     }
 

@@ -95,7 +95,10 @@ impl ToggleButton {
         let state_click = state;
         let btn = Button::new(text, font)
             .with_font_size(TB_FONT_SIZE)
-            .with_subtle()
+            // Ghost variant of subtle: inactive background is transparent
+            // so the row blends with the sidebar's panel fill, matching
+            // the egui-style "toggle row" look the demo had pre-refactor.
+            .with_ghost()
             .with_h_anchor(HAnchor::STRETCH)
             .with_label_align(LabelAlign::Left)
             .with_label_pad_h(TB_INDENT)
