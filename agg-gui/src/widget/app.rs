@@ -387,6 +387,17 @@ impl App {
         out
     }
 
+    /// `true` while a widget is actively capturing the pointer — i.e. the
+    /// user is mid-drag (a window edge, slider thumb, scrollbar, etc.).
+    /// Used by the demo harness to throttle expensive per-frame snapshots
+    /// (the inspector tree walk) during interactions; the snapshot can
+    /// safely defer until the user releases without changing the visible
+    /// outcome (the underlying widget tree topology doesn't change during
+    /// a drag, only the widgets' bounds).
+    pub fn has_captured_pointer(&self) -> bool {
+        self.captured.is_some()
+    }
+
     /// Serialize the widget tree — types, bounds, depth, properties — as JSON.
     ///
     /// Produces a flat array of nodes in paint-order DFS.  Suitable for writing

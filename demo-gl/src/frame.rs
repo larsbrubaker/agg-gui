@@ -111,14 +111,38 @@ pub fn render_app_frame(
     // Inspector snapshot sync: refresh the tree snapshot when the
     // inspector is shown, or clear the hover highlight when it's hidden
     // so the overlay vanishes without waiting for the next mouse event.
+    //
+    // Two skip cases keep the snapshot off the hot path:
+    //   1. The inspector is hidden — nothing reads `inspector_nodes`.
+    //   2. The user is mid-drag (window resize, slider, etc.) — the tree
+    //      topology hasn't changed, only the bounds; snapshot would just
+    //      walk every widget for the same answer.  Resizing the
+    //      Inspector window itself with ~250 widgets in scope was
+    //      otherwise re-walking the entire tree per frame, dominating
+    //      a ~200ms frame.  The next snapshot fires once the user
+    //      releases (capture clears) and `should_refresh` becomes true.
     if show_inspector {
         let epoch = agg_gui::animation::invalidation_epoch();
         let nodes_empty = inspector_nodes.borrow().is_empty();
-        let should_refresh =
-            nodes_empty || INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.get() != Some(epoch));
+        let captured = app.has_captured_pointer();
+        let should_refresh = nodes_empty
+            || (!captured
+                && INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.get() != Some(epoch)));
         if should_refresh {
+            let t = web_time::Instant::now();
             *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();
             INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.set(Some(epoch)));
+            let elapsed = t.elapsed();
+            // Slow-frame breadcrumb so a future regression is visible
+            // without a profiler.  10ms = 100Hz budget; anything past
+            // that on the snapshot alone is worth investigating.
+            if elapsed.as_millis() >= 10 {
+                let n = inspector_nodes.borrow().len();
+                eprintln!(
+                    "[inspector] collect_inspector_nodes {n} widgets in {:.1}ms",
+                    elapsed.as_secs_f64() * 1000.0,
+                );
+            }
         }
     } else {
         *hovered_bounds.borrow_mut() = None;
