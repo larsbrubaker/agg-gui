@@ -21,7 +21,7 @@ use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{paint_subtree, Widget};
+use crate::widget::Widget;
 use crate::widgets::label::Label;
 
 const BOX_SIZE: f64 = 16.0;
@@ -43,7 +43,9 @@ pub struct CheckboxProps {
 /// A boolean toggle with a square box and a text label.
 pub struct Checkbox {
     bounds: Rect,
-    children: Vec<Box<dyn Widget>>, // always empty — label stored separately
+    /// `children[0]` is the [`Label`] that renders the text — composed as a
+    /// real child so the framework's paint walk handles it.
+    children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
     font: Arc<Font>,
     pub props: CheckboxProps,
@@ -54,18 +56,19 @@ pub struct Checkbox {
     hovered: bool,
     focused: bool,
     on_change: Option<Box<dyn FnMut(bool)>>,
-    /// Backbuffered text label — painted manually so we can position it.
-    label_widget: Label,
+    /// Tracked label text — used for empty-check during layout and to rebuild
+    /// the Label child when font size changes.
+    label_text: String,
 }
 
 impl Checkbox {
     pub fn new(label: impl Into<String>, font: Arc<Font>, checked: bool) -> Self {
-        let label_str: String = label.into();
+        let label_text: String = label.into();
         let font_size = 14.0;
-        let label_widget = Label::new(&label_str, Arc::clone(&font)).with_font_size(font_size);
+        let label_widget = Label::new(&label_text, Arc::clone(&font)).with_font_size(font_size);
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
+            children: vec![Box::new(label_widget)],
             base: WidgetBase::new(),
             font,
             props: CheckboxProps {
@@ -77,14 +80,14 @@ impl Checkbox {
             hovered: false,
             focused: false,
             on_change: None,
-            label_widget,
+            label_text,
         }
     }
 
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.props.font_size = size;
-        self.label_widget =
-            Label::new(self.label_widget.text_str(), Arc::clone(&self.font)).with_font_size(size);
+        self.children[0] =
+            Box::new(Label::new(&self.label_text, Arc::clone(&self.font)).with_font_size(size));
         self
     }
     pub fn with_label_color(mut self, c: Color) -> Self {
@@ -222,12 +225,17 @@ impl Widget for Checkbox {
     fn layout(&mut self, available: Size) -> Size {
         let box_slot_w = BOX_SIZE + FOCUS_PAD * 2.0;
         let h = (BOX_SIZE + FOCUS_PAD * 2.0).max(self.props.font_size * 1.25);
-        // Layout the label within the remaining width after the box + gap.
         let label_avail_w = (available.width - box_slot_w - GAP).max(0.0);
-        let s = self.label_widget.layout(Size::new(label_avail_w, h));
-        self.label_widget
-            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
-        let natural_w = if self.label_widget.text_str().is_empty() {
+        let s = self.children[0].layout(Size::new(label_avail_w, h));
+        let lx = if self.label_text.is_empty() {
+            box_slot_w
+        } else {
+            box_slot_w + GAP
+        };
+        let ly = (h - s.height) * 0.5;
+        self.children[0]
+            .set_bounds(Rect::new(lx, ly, s.width, s.height));
+        let natural_w = if self.label_text.is_empty() {
             box_slot_w
         } else {
             box_slot_w + GAP + s.width
@@ -300,24 +308,9 @@ impl Widget for Checkbox {
             ctx.stroke();
         }
 
-        // Label — rendered through backbuffered Label child.
+        // Label colour — child paints itself via the framework's tree walk.
         let label_color = self.props.label_color.unwrap_or(v.text_color);
-        self.label_widget.set_color(label_color);
-
-        let lw = self.label_widget.bounds().width;
-        let lh = self.label_widget.bounds().height;
-        let lx = if self.label_widget.text_str().is_empty() {
-            BOX_SIZE + FOCUS_PAD * 2.0
-        } else {
-            BOX_SIZE + FOCUS_PAD * 2.0 + GAP
-        };
-        let ly = (h - lh) * 0.5;
-        self.label_widget.set_bounds(Rect::new(lx, ly, lw, lh));
-
-        ctx.save();
-        ctx.translate(lx, ly);
-        paint_subtree(&mut self.label_widget, ctx);
-        ctx.restore();
+        self.children[0].set_label_color(label_color);
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

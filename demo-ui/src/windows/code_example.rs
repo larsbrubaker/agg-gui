@@ -352,11 +352,11 @@ mod tests {
         let mut display = AgeDisplay::new(Rc::clone(&name), Rc::clone(&age), test_font());
 
         display.layout(Size::new(240.0, 40.0));
-        assert_eq!(display.label.text_str(), "Arthur is 42");
+        assert_eq!(display.current_text(), "Arthur is 42");
 
         *name.borrow_mut() = "Ford".to_string();
         age.set(43);
         display.layout(Size::new(240.0, 40.0));
-        assert_eq!(display.label.text_str(), "Ford is 43");
+        assert_eq!(display.current_text(), "Ford is 43");
     }
 }

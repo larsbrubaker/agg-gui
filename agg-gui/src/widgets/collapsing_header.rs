@@ -4,8 +4,8 @@
 //!
 //! ```text
 //! CollapsingHeader
-//!   ├── Label (header text, drawn manually)
-//!   └── child widget (shown when expanded, hidden when collapsed)
+//!   ├── Label  (children[0]: header text, framework-painted)
+//!   └── child  (children[1]: shown when expanded, swapped out when collapsed)
 //! ```
 //!
 //! The triangle indicator is drawn as a path.  Clicking anywhere on the header
@@ -18,7 +18,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
-use crate::widget::{paint_subtree, Widget};
+use crate::widget::Widget;
 use crate::widgets::label::Label;
 
 const HEADER_H: f64 = 22.0;
@@ -29,11 +29,12 @@ const INDENT: f64 = 12.0;
 /// below the header row.  When collapsed, only the header row is shown.
 pub struct CollapsingHeader {
     bounds: Rect,
+    /// `children[0]` is the header [`Label`].  When expanded, the content lives
+    /// at `children[1]`; when collapsed, it is parked in `self.content`.
     children: Vec<Box<dyn Widget>>,
-    label: Label,
     open: bool,
     hovered: bool,
-    /// The content shown when expanded.
+    /// The content shown when expanded.  Stored here while collapsed.
     content: Option<Box<dyn Widget>>,
 }
 
@@ -44,8 +45,7 @@ impl CollapsingHeader {
         let label = Label::new(text, Arc::clone(&font)).with_font_size(13.0);
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
-            label,
+            children: vec![Box::new(label)],
             open: true,
             hovered: false,
             content: None,
@@ -85,46 +85,43 @@ impl Widget for CollapsingHeader {
     fn layout(&mut self, available: Size) -> Size {
         let w = available.width;
 
-        // Sync `children` with `open` state so the framework dispatches events
-        // to the content only when it is visible.  When closed the content
-        // lives in `self.content`; when open it lives in `self.children[0]`.
-        if self.open && self.children.is_empty() {
+        // Sync `children[1]` with `open` state so the framework dispatches
+        // events to content only when visible.  Closed → parked in `self.content`.
+        if self.open && self.children.len() == 1 {
             if let Some(c) = self.content.take() {
                 self.children.push(c);
             }
-        } else if !self.open && !self.children.is_empty() {
+        } else if !self.open && self.children.len() > 1 {
             if let Some(c) = self.children.pop() {
                 self.content = Some(c);
             }
         }
 
-        // Layout label inside the header row.
-        let label_available = Size::new(w - INDENT - TRIANGLE_SIZE * 2.0, HEADER_H);
-        let ls = self.label.layout(label_available);
-        let ly = (HEADER_H - ls.height) * 0.5;
-        self.label.set_bounds(Rect::new(
-            INDENT + TRIANGLE_SIZE * 2.0 + 4.0,
-            ly,
-            ls.width,
-            ls.height,
-        ));
-
-        // Layout content if open — as a child so the framework paints and
-        // dispatches events normally.  Content is inset from the left by
-        // INDENT * 0.5 for visual hierarchy.
-        let content_h = if self.open && !self.children.is_empty() {
+        // Layout content first so we know total height before placing the label.
+        let content_h = if self.open && self.children.len() > 1 {
             let inset = INDENT * 0.5;
             let avail_w = (w - inset).max(0.0);
-            let child = &mut self.children[0];
+            let child = &mut self.children[1];
             let cs = child.layout(Size::new(avail_w, available.height - HEADER_H));
-            // Content sits at the bottom of our bounds (Y-up: y = 0).
             child.set_bounds(Rect::new(inset, 0.0, cs.width, cs.height));
             cs.height
         } else {
             0.0
         };
-
         let total_h = HEADER_H + content_h;
+
+        // Layout label inside the header row (Y-up: header sits at the top).
+        let label_avail = Size::new(w - INDENT - TRIANGLE_SIZE * 2.0, HEADER_H);
+        let ls = self.children[0].layout(label_avail);
+        let header_bottom = total_h - HEADER_H;
+        let label_y = header_bottom + (HEADER_H - ls.height) * 0.5;
+        self.children[0].set_bounds(Rect::new(
+            INDENT + TRIANGLE_SIZE * 2.0 + 4.0,
+            label_y,
+            ls.width,
+            ls.height,
+        ));
+
         self.bounds = Rect::new(0.0, 0.0, w, total_h);
         Size::new(w, total_h)
     }
@@ -177,19 +174,11 @@ impl Widget for CollapsingHeader {
         }
         ctx.fill();
 
-        // Label.
-        self.label.set_color(v.text_color);
-        let lb = self.label.bounds();
-        // Label y is in header-local coords, but header is at top of our bounds (in Y-up).
-        let label_offset_y = h - HEADER_H + lb.y;
-        ctx.save();
-        ctx.translate(lb.x, label_offset_y);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        // Label colour — child paints itself via the framework's tree walk.
+        self.children[0].set_label_color(v.text_color);
 
-        // Content is painted by the framework via normal child recursion —
-        // it lives in `self.children[0]` (when open) and has its own bounds
-        // so `dispatch_event` reaches it without manual forwarding.
+        // Content (children[1] when open) is painted by the framework via
+        // normal child recursion.
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

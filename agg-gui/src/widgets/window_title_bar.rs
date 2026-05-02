@@ -25,7 +25,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
-use crate::widget::{paint_subtree, Widget};
+use crate::widget::Widget;
 use crate::widgets::label::Label;
 
 // ── Button constants — kept in sync with `window.rs` so event hit-tests
@@ -66,8 +66,8 @@ impl TitleBarView {
 /// separator below (when the window is expanded).
 pub(crate) struct WindowTitleBar {
     bounds: Rect,
+    /// `children[0]` is the title [`Label`] — framework paints it.
     children: Vec<Box<dyn Widget>>,
-    label: Label,
     state: Rc<RefCell<TitleBarView>>,
 }
 
@@ -76,15 +76,14 @@ impl WindowTitleBar {
         let label = Label::new(title, Arc::clone(&font)).with_font_size(13.0);
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
-            label,
+            children: vec![Box::new(label)],
             state,
         }
     }
 
     #[allow(dead_code)]
     pub fn set_title(&mut self, title: &str) {
-        self.label.set_text(title);
+        self.children[0].set_label_text(title);
     }
 }
 
@@ -114,15 +113,14 @@ impl Widget for WindowTitleBar {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        // Label::layout returns its intrinsic size but doesn't set its own
-        // bounds — the caller must.  Without this set_bounds the title
-        // label would report (0, 0, 0, 0) at paint time and render at
-        // the origin of the title bar strip.
-        let s = self
-            .label
+        // Position the title label at its final paint location so the
+        // framework's child-paint walk lands it correctly.
+        let s = self.children[0]
             .layout(Size::new(available.width - 48.0, available.height));
-        self.label
-            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        let lx = 24.0;
+        let ly = (available.height - s.height) * 0.5;
+        self.children[0]
+            .set_bounds(Rect::new(lx, ly, s.width, s.height));
         available
     }
 
@@ -174,17 +172,8 @@ impl Widget for WindowTitleBar {
         }
         ctx.stroke();
 
-        // Title label — backbuffered `Label` painted via `paint_subtree`.
-        self.label.set_color(st.title_color);
-        let lw = self.label.bounds().width;
-        let lh = self.label.bounds().height;
-        let lx = 24.0;
-        let ly = (h - lh) * 0.5;
-        self.label.set_bounds(Rect::new(lx, ly, lw, lh));
-        ctx.save();
-        ctx.translate(lx, ly);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+        // Title label colour — child paints itself via the framework's tree walk.
+        self.children[0].set_label_color(st.title_color);
 
         // Maximize / restore button.
         let mc_x = w - MAX_PAD;
