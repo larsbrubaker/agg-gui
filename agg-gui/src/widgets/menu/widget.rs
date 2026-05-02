@@ -81,6 +81,13 @@ pub struct MenuBar {
     hover_index: Option<usize>,
     popup: PopupMenu,
     on_action: Box<dyn FnMut(&str)>,
+    /// True between a `MouseDown` and the matching `MouseUp` — i.e. the
+    /// user is actively dragging.  Used to decide whether a `MouseMove`
+    /// should switch the currently-open top menu (drag-switch, desktop
+    /// pattern) or just update the hover indicator (the touch shell's
+    /// synthesised pre-tap MouseMove must not switch — its companion
+    /// MouseDown is what carries the open intent).
+    mouse_button_held: bool,
 }
 
 pub struct TopMenu {
@@ -115,6 +122,7 @@ impl MenuBar {
             hover_index: None,
             popup: PopupMenu::new(Vec::new()),
             on_action: Box::new(on_action),
+            mouse_button_held: false,
         }
     }
 
@@ -249,10 +257,30 @@ impl Widget for MenuBar {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // Track button-held so MouseMove can distinguish a desktop drag
+        // from the touch shell's synthesised pre-tap hover.  Set BEFORE
+        // the rest of the dispatch so the in-flight MouseDown sees its
+        // own button-held = true; cleared on MouseUp similarly.
+        match event {
+            Event::MouseDown {
+                button: MouseButton::Left,
+                ..
+            } => self.mouse_button_held = true,
+            Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => self.mouse_button_held = false,
+            _ => {}
+        }
         if let Event::MouseMove { pos } = event {
             let hovered = self.menu_at(*pos);
             self.set_hover_index(hovered);
-            if self.popup.is_open() {
+            // Drag-switch — only when the button is held.  The synth
+            // MouseMove the touch shell fires before a tap has the
+            // button up; switching open menus from that move would
+            // make the subsequent MouseDown look like "click on
+            // currently-open menu" and toggle-close it.
+            if self.popup.is_open() && self.mouse_button_held {
                 if let Some(idx) = hovered {
                     if self.open_index != Some(idx) {
                         let activate_on_release = self.popup.state.is_mouse_up_activation_armed();
@@ -275,22 +303,13 @@ impl Widget for MenuBar {
                     };
                 }
             }
-            // Mobile-tap path: a tap synthesises MouseMove → MouseDown
-            // → MouseUp at the same point.  When one menu is open and
-            // the user taps a different top menu, the MouseMove already
-            // hovers / opens the new menu (existing path above), but
-            // the MouseDown that follows would otherwise reach
-            // `popup.handle_event` and close it (the click is on the
-            // bar, outside the popup body).  Same problem for a tap
-            // with NO synthesised MouseMove — the popup would close
-            // and the tapped menu never opens.
-            //
-            // Whenever a MouseDown lands on a top-menu rect while a
-            // popup is open, swallow the event here: switch the open
-            // menu when the tap was on a different one, or no-op when
-            // it was the currently-open one.  Closing via ESC, item
-            // activation, or click outside-the-bar-AND-outside-the-
-            // popup-body still works.
+            // Tap-to-switch: when one menu is already open and a
+            // MouseDown lands on a DIFFERENT top menu's bar, switch
+            // directly.  Without this, the popup handler would see the
+            // MouseDown as outside-the-popup-body and close the menu,
+            // leaving the user staring at an empty bar.  Clicking the
+            // currently-open menu falls through to the popup so it can
+            // close (toggle, the desktop convention).
             if let Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
@@ -300,8 +319,8 @@ impl Widget for MenuBar {
                 if let Some(idx) = self.menu_at(*pos) {
                     if self.open_index != Some(idx) {
                         self.open_menu(idx);
+                        return EventResult::Consumed;
                     }
-                    return EventResult::Consumed;
                 }
             }
             let (result, response) = self.popup.handle_event(event, current_viewport());
@@ -527,6 +546,53 @@ mod tests {
 
         assert!(bar.popup.is_open());
         assert_eq!(bar.open_index, Some(0));
+    }
+
+    /// Clicking the currently-open top menu's bar item closes the popup
+    /// (toggle).  Standard desktop menubar convention; on mobile it's
+    /// also the natural way to dismiss a popup without a row tap.
+    #[test]
+    fn click_on_currently_open_top_menu_closes_popup() {
+        let viewport = Size::new(300.0, 180.0);
+        crate::widget::set_current_viewport(viewport);
+        let mut bar = MenuBar::new(
+            test_font(),
+            vec![TopMenu::new(
+                "File",
+                vec![super::super::model::MenuItem::action("New", "file.new").into()],
+            )],
+            |_| {},
+        );
+        bar.layout(Size::new(300.0, BAR_H));
+
+        // Open via a click on File.
+        bar.on_event(&Event::MouseDown {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(bar.popup.is_open());
+
+        // Click File again — should close (toggle).
+        bar.on_event(&Event::MouseDown {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert!(
+            !bar.popup.is_open(),
+            "click on the currently-open top menu must close it (desktop toggle)"
+        );
     }
 
     /// Mobile-tap path with the touch shell's synthetic MouseMove preamble:
