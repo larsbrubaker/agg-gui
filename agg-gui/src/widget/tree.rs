@@ -1,5 +1,19 @@
 use super::*;
 
+/// Recursively call `mark_dirty` on `widget` and every visible
+/// descendant.  Used by the host frame loop after an async data
+/// source (image fetch + decode, font load, etc.) finishes outside
+/// the normal event-dispatch path that would otherwise mark widgets
+/// dirty as the event bubbles.  Called explicitly at the top of the
+/// frame so the user-visible "freshly-decoded data lands in stale
+/// FBO contents" bug never opens a one-frame race window.
+pub fn mark_subtree_dirty(widget: &mut dyn Widget) {
+    widget.mark_dirty();
+    for child in widget.children_mut().iter_mut() {
+        mark_subtree_dirty(child.as_mut());
+    }
+}
+
 /// Walk the subtree rooted at `widget` and return the path (list of child
 /// indices) to the deepest widget that passes `hit_test` at `local_pos`.
 ///

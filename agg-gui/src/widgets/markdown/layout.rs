@@ -409,6 +409,74 @@ mod tests {
         assert!(content_width > viewport_width);
     }
 
+    /// Regression test for the SVG-badge "wrong scale on first frame"
+    /// bug: when an image transitions from RemotePending to Ready, the
+    /// next layout pass must reserve the IMAGE'S dimensions (not the
+    /// alt-text placeholder dimensions) in its LineRun.
+    #[test]
+    fn newly_ready_image_layout_uses_image_dimensions() {
+        crate::widget::set_current_viewport(Size::new(400.0, 200.0));
+        let mut view =
+            MarkdownView::new("![badge](https://example.com/badge.svg)", test_font())
+                .with_font_size(12.0)
+                .with_padding(8.0);
+
+        // First layout: image is still RemotePending — placeholder dims.
+        view.layout_markdown(Size::new(400.0, 1000.0));
+        let placeholder_dims = view.items.iter().find_map(|item| {
+            if let LayoutItem::Line { runs, .. } = item {
+                runs.iter().find_map(|run| {
+                    if let LineRun::Image { width, height, .. } = run {
+                        Some((*width, *height))
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+        let placeholder_dims = placeholder_dims.expect("first layout produced an image LineRun");
+
+        // Image arrives — dimensions distinct from the placeholder.
+        let state = Arc::clone(&view.image_cache[0].state);
+        *state.lock().expect("image state") = ImageState::Ready {
+            image: ImagePixels {
+                data: Arc::new(vec![0u8; 200 * 40 * 4]),
+                width: 200,
+                height: 40,
+            },
+            seen: false,
+        };
+
+        // Second layout pass: the LineRun must now carry the image's
+        // dimensions (not the placeholder).
+        view.layout_markdown(Size::new(400.0, 1000.0));
+        let ready_dims = view.items.iter().find_map(|item| {
+            if let LayoutItem::Line { runs, .. } = item {
+                runs.iter().find_map(|run| {
+                    if let LineRun::Image { width, height, .. } = run {
+                        Some((*width, *height))
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+        let ready_dims = ready_dims.expect("second layout produced an image LineRun");
+
+        assert_ne!(
+            ready_dims, placeholder_dims,
+            "ready image must change LineRun dims away from the placeholder",
+        );
+        assert!(
+            (ready_dims.0 - 200.0).abs() < 0.5 && (ready_dims.1 - 40.0).abs() < 0.5,
+            "ready image LineRun must use the image's natural dimensions; got {ready_dims:?}",
+        );
+    }
+
     #[test]
     fn ready_remote_image_stays_dirty_until_painted() {
         crate::widget::set_current_viewport(Size::new(220.0, 200.0));

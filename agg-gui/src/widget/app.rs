@@ -64,6 +64,14 @@ pub struct App {
     /// through [`App::on_touch_start/move/end/cancel`]; widgets read the
     /// per-frame aggregate via [`crate::current_multi_touch`].
     touch_state: crate::touch_state::TouchState,
+    /// Last `async_state_epoch` `App::paint` observed.  At the top of
+    /// each paint, if the current epoch differs we explicitly mark
+    /// every widget dirty via `mark_subtree_dirty`, so a freshly-
+    /// loaded image (or any other async result that landed outside
+    /// the event-dispatch dirty-propagation path) lands in newly-
+    /// rasterised retained backbuffers, not the previous frame's
+    /// stale FBO contents.
+    last_async_state_epoch: u64,
 }
 
 impl App {
@@ -78,6 +86,7 @@ impl App {
             viewport_size: Size::new(1.0, 1.0),
             global_key_handler: None,
             touch_state: crate::touch_state::TouchState::new(),
+            last_async_state_epoch: 0,
         }
     }
 
@@ -150,6 +159,21 @@ impl App {
     /// after `paint` returns to decide whether to schedule continuous draws.
     pub fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         crate::animation::clear_draw_request();
+        // Async-state dirty walk: an image load (or other async source)
+        // that finished outside event dispatch bumped
+        // `async_state_epoch`.  Walk the whole tree and mark every
+        // widget dirty so retained backbuffers re-rasterise on this
+        // frame — without this, the freshly-decoded pixels would land
+        // inside a Window FBO whose cache check sees no other change
+        // and composites the previous frame's stale bitmap.  The
+        // explicit walk replaces a brittle "compare an extra epoch
+        // inside every cache" mechanism with a single deterministic
+        // hook at the start of paint.
+        let async_epoch = crate::animation::async_state_epoch();
+        if async_epoch != self.last_async_state_epoch {
+            tree::mark_subtree_dirty(self.root.as_mut());
+            self.last_async_state_epoch = async_epoch;
+        }
         let viewport = self.viewport_size;
         crate::widgets::combo_box::begin_combo_popup_frame(viewport);
         crate::widgets::tooltip::begin_tooltip_frame();
