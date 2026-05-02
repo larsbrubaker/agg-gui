@@ -219,6 +219,13 @@ pub struct InspectorPanel {
     /// each entry is `(rect, field_name, row_kind)`.  Used by `on_event` to
     /// translate a click to a queued edit.
     prop_hits: Vec<PropHit>,
+    /// Fingerprint of the `inspector_nodes` Vec we last rebuilt the
+    /// `TreeView` from — `(data ptr as usize, len)`.  When the harness
+    /// skips its snapshot pass (e.g. during a window-resize drag), the
+    /// Vec is reused and the ptr stays the same; we then skip the
+    /// per-frame `tree_view.nodes` rebuild too, so the tree's row
+    /// widgets reuse their backbuffers and the resize stays cheap.
+    last_inspector_nodes_fingerprint: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Debug)]
@@ -280,6 +287,7 @@ impl InspectorPanel {
             pending_expanded: None,
             pending_selected: None,
             snapshot_out: None,
+            last_inspector_nodes_fingerprint: None,
         }
     }
 
@@ -456,70 +464,86 @@ impl Widget for InspectorPanel {
         self.bounds.height = available.height;
 
         let nodes = self.nodes.borrow();
+        // Fingerprint of the inspector_nodes Vec.  When the harness skips
+        // a snapshot pass (e.g. during a window-resize drag) the Vec is
+        // reused, so the data ptr stays the same — we then skip the
+        // tree_view.nodes rebuild here.  Combined with TreeView's row
+        // caching, this is what makes inspector window resizing cheap.
+        let nodes_fingerprint = (nodes.as_ptr() as usize, nodes.len());
+        let pending_state =
+            self.pending_expanded.is_some() || self.pending_selected.is_some();
+        let nodes_unchanged = !pending_state
+            && self.last_inspector_nodes_fingerprint == Some(nodes_fingerprint)
+            && !self.tree_view.nodes.is_empty();
 
-        // Preserve expansion/selection state by index before rebuilding.
-        // On the very first layout after startup `pending_expanded` /
-        // `pending_selected` (set by `apply_saved_state`) seed the vectors
-        // so restored state takes effect without an extra click.
-        let mut old_expanded: Vec<bool> =
-            self.tree_view.nodes.iter().map(|n| n.is_expanded).collect();
-        let mut old_selected: Vec<bool> =
-            self.tree_view.nodes.iter().map(|n| n.is_selected).collect();
-        if let Some(pe) = self.pending_expanded.take() {
-            old_expanded = pe;
-        }
-        if let Some(ps) = self.pending_selected.take() {
-            old_selected = vec![false; old_expanded.len().max(ps.map(|i| i + 1).unwrap_or(0))];
-            if let Some(i) = ps {
-                if i < old_selected.len() {
-                    old_selected[i] = true;
+        if !nodes_unchanged {
+            // Preserve expansion/selection state by index before rebuilding.
+            // On the very first layout after startup `pending_expanded` /
+            // `pending_selected` (set by `apply_saved_state`) seed the vectors
+            // so restored state takes effect without an extra click.
+            let mut old_expanded: Vec<bool> =
+                self.tree_view.nodes.iter().map(|n| n.is_expanded).collect();
+            let mut old_selected: Vec<bool> =
+                self.tree_view.nodes.iter().map(|n| n.is_selected).collect();
+            if let Some(pe) = self.pending_expanded.take() {
+                old_expanded = pe;
+            }
+            if let Some(ps) = self.pending_selected.take() {
+                old_selected =
+                    vec![false; old_expanded.len().max(ps.map(|i| i + 1).unwrap_or(0))];
+                if let Some(i) = ps {
+                    if i < old_selected.len() {
+                        old_selected[i] = true;
+                    }
                 }
             }
-        }
 
-        self.tree_view.nodes.clear();
+            self.tree_view.nodes.clear();
 
-        // Convert flat InspectorNode list (with depths) to parent-child TreeNode
-        // structure. Uses a depth stack: depth_stack[d] = tree node index of the
-        // last node placed at depth d.
-        let mut depth_stack: Vec<usize> = Vec::new();
-        let mut per_parent_counts: std::collections::HashMap<Option<usize>, u32> =
-            std::collections::HashMap::new();
+            // Convert flat InspectorNode list (with depths) to parent-child TreeNode
+            // structure. Uses a depth stack: depth_stack[d] = tree node index of the
+            // last node placed at depth d.
+            let mut depth_stack: Vec<usize> = Vec::new();
+            let mut per_parent_counts: std::collections::HashMap<Option<usize>, u32> =
+                std::collections::HashMap::new();
 
-        for (orig_idx, node) in nodes.iter().enumerate() {
-            let parent = if node.depth == 0 {
-                None
-            } else {
-                depth_stack.get(node.depth.saturating_sub(1)).copied()
-            };
+            for (orig_idx, node) in nodes.iter().enumerate() {
+                let parent = if node.depth == 0 {
+                    None
+                } else {
+                    depth_stack.get(node.depth.saturating_sub(1)).copied()
+                };
 
-            let order = {
-                let cnt = per_parent_counts.entry(parent).or_insert(0);
-                let o = *cnt;
-                *cnt += 1;
-                o
-            };
+                let order = {
+                    let cnt = per_parent_counts.entry(parent).or_insert(0);
+                    let o = *cnt;
+                    *cnt += 1;
+                    o
+                };
 
-            // Label: "TypeName  width×height"
-            let b = &node.screen_bounds;
-            let label = format!("{}  {:.0}×{:.0}", node.type_name, b.width, b.height);
+                // Label: "TypeName  width×height"
+                let b = &node.screen_bounds;
+                let label =
+                    format!("{}  {:.0}×{:.0}", node.type_name, b.width, b.height);
 
-            let tv_idx = self.tree_view.nodes.len();
-            self.tree_view
-                .nodes
-                .push(TreeNode::new(label, NodeIcon::Package, parent, order));
+                let tv_idx = self.tree_view.nodes.len();
+                self.tree_view
+                    .nodes
+                    .push(TreeNode::new(label, NodeIcon::Package, parent, order));
 
-            // Restore or default expansion (default: expanded so tree is open).
-            self.tree_view.nodes[tv_idx].is_expanded =
-                old_expanded.get(orig_idx).copied().unwrap_or(true);
-            self.tree_view.nodes[tv_idx].is_selected =
-                old_selected.get(orig_idx).copied().unwrap_or(false);
+                // Restore or default expansion (default: expanded so tree is open).
+                self.tree_view.nodes[tv_idx].is_expanded =
+                    old_expanded.get(orig_idx).copied().unwrap_or(true);
+                self.tree_view.nodes[tv_idx].is_selected =
+                    old_selected.get(orig_idx).copied().unwrap_or(false);
 
-            // Update depth stack.
-            if depth_stack.len() <= node.depth {
-                depth_stack.resize(node.depth + 1, 0);
+                // Update depth stack.
+                if depth_stack.len() <= node.depth {
+                    depth_stack.resize(node.depth + 1, 0);
+                }
+                depth_stack[node.depth] = tv_idx;
             }
-            depth_stack[node.depth] = tv_idx;
+            self.last_inspector_nodes_fingerprint = Some(nodes_fingerprint);
         }
 
         // Sync selected field from TreeView selection.

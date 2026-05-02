@@ -93,6 +93,17 @@ pub struct TreeView {
     dragging_scrollbar: bool,
     sb_drag_start_y: f64,
     sb_drag_start_offset: f64,
+
+    /// Hash of the row-content state at the last `layout()` rebuild —
+    /// covers everything that affects WHICH `TreeRow` widgets exist
+    /// (node order, label text, expand / select / hover / focus state)
+    /// but NOT what affects only their bounds (viewport size, scroll
+    /// offset).  When the next `layout()` finds an unchanged signature,
+    /// it reuses the cached `row_widgets` Vec — preserving each Label's
+    /// backbuffer cache — and only repositions them.  Without this,
+    /// resizing a window with a 250+-row tree (the inspector) re-rasterised
+    /// every label every frame.
+    last_row_content_sig: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +136,37 @@ impl TreeView {
             dragging_scrollbar: false,
             sb_drag_start_y: 0.0,
             sb_drag_start_offset: 0.0,
+            last_row_content_sig: None,
         }
+    }
+
+    /// Hash of everything that affects WHICH `TreeRow` widgets we'd build
+    /// — but not their bounds.  Used by `layout()` to skip rebuilding the
+    /// row widget vec when the user is just resizing the parent (window
+    /// resize, scroll, etc.) and the underlying node list hasn't moved.
+    fn row_content_signature(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.nodes.len().hash(&mut h);
+        for n in &self.nodes {
+            n.label.hash(&mut h);
+            n.parent.hash(&mut h);
+            n.order.hash(&mut h);
+            n.is_expanded.hash(&mut h);
+            n.is_selected.hash(&mut h);
+            (n.icon as u8).hash(&mut h);
+        }
+        self.hovered_row.hash(&mut h);
+        self.focused.hash(&mut h);
+        // Drag state affects which row to skip in the build.
+        self.drag
+            .as_ref()
+            .map(|d| (d.live, d.node_idx))
+            .hash(&mut h);
+        self.font_size.to_bits().hash(&mut h);
+        self.row_height.to_bits().hash(&mut h);
+        self.indent_width.to_bits().hash(&mut h);
+        h.finish()
     }
 
     pub fn with_row_height(mut self, h: f64) -> Self {
@@ -390,19 +431,53 @@ impl Widget for TreeView {
         let ind = self.indent_width;
         let font_size = self.font_size;
 
+        // Reuse cached rows when the row content is unchanged from the
+        // previous layout — happens every frame of a window-resize drag.
+        // We only reposition the existing TreeRow widgets and refresh the
+        // toggle_rects, preserving each TreeRow's child Label backbuffers.
+        // Without this, resizing a window with the inspector open
+        // re-rasterised every label every frame.
+        let visible_rows: Vec<&FlatRow> = rows
+            .iter()
+            .filter(|flat| {
+                !self
+                    .drag
+                    .as_ref()
+                    .map_or(false, |d| d.live && d.node_idx == flat.node_idx)
+            })
+            .collect();
+        let new_sig = self.row_content_signature();
+        let can_reuse = self.last_row_content_sig == Some(new_sig)
+            && self.row_widgets.len() == visible_rows.len()
+            && !self.row_widgets.is_empty();
+
+        if can_reuse {
+            // Reposition existing rows in place — no allocations, no
+            // text re-rasterisation.  TreeRow positions depend only on
+            // `i`, `h`, `rh`, and `scroll_offset`; widths track `w`.
+            for (i, flat) in visible_rows.iter().enumerate() {
+                let y_bot = h - (i as f64 + 1.0) * rh + self.scroll_offset;
+                let row = &mut self.row_widgets[i];
+                row.layout(Size::new(w, rh));
+                row.set_bounds(Rect::new(0.0, y_bot, w, rh));
+                // Refresh the toggle hit-rect for the new y_bot / x.
+                if let Some(meta) = self.row_metas.get_mut(i) {
+                    debug_assert_eq!(meta.node_idx, flat.node_idx);
+                    if let Some(ref mut tr) = meta.toggle_rect {
+                        // toggle x stays at indent + EXPAND start; y is
+                        // recomputed against the new y_bot.
+                        tr.y = y_bot + (rh - tr.height) * 0.5;
+                    }
+                }
+            }
+            return available;
+        }
+
+        // Full rebuild path — content has changed since the last layout.
         self.row_widgets.clear();
         self.row_metas.clear();
 
-        for (i, flat) in rows.iter().enumerate() {
-            // Skip the node being dragged — its ghost is painted at the cursor instead.
-            if self
-                .drag
-                .as_ref()
-                .map_or(false, |d| d.live && d.node_idx == flat.node_idx)
-            {
-                continue;
-            }
-
+        for (i, flat) in visible_rows.iter().enumerate() {
             let node = &self.nodes[flat.node_idx];
 
             // Y position of this row in TreeView-local (Y-up) coordinates.
@@ -441,6 +516,7 @@ impl Widget for TreeView {
             });
             self.row_widgets.push(Box::new(tree_row));
         }
+        self.last_row_content_sig = Some(new_sig);
 
         available
     }
