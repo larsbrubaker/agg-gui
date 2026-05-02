@@ -11,12 +11,28 @@ const WIN_ORIGIN_X: f64 = 20.0;
 const WIN_ORIGIN_Y: f64 = 20.0; // from the TOP of the canvas (Y-down thinking)
 
 /// Compute the tiled rect for demo index `i` given canvas `height` (Y-up space).
+///
+/// When the natural tiled row position would push the window past the bottom
+/// of the canvas, we bias the placement toward the **top** instead — pinning
+/// to `y_up = 4` (the bottom of the canvas in Y-up coordinates) hides demos
+/// behind the OS task bar and was the dominant complaint when many demos with
+/// the default 290px height tile in a 720px canvas.  Overflowed demos are
+/// stacked near the top with a small per-index stagger so they don't all
+/// occupy the same pixel row.
 pub(crate) fn tile_rect(i: usize, canvas_height: f64, win_w: f64, win_h: f64) -> Rect {
     let col = i % WIN_COLS;
     let row = i / WIN_COLS;
     let x = WIN_ORIGIN_X + col as f64 * (WIN_W + WIN_GAP_X);
     let y_down = WIN_ORIGIN_Y + row as f64 * (WIN_H + WIN_GAP_Y);
-    let y = (canvas_height - y_down - win_h).max(4.0);
+    let y_up_natural = canvas_height - y_down - win_h;
+    let y = if y_up_natural < 4.0 {
+        // Natural position overflows the bottom — re-anchor near the top.
+        let top_y = (canvas_height - win_h - WIN_ORIGIN_Y).max(4.0);
+        let stagger = (i as f64 * 24.0) % 200.0;
+        (top_y - stagger).max(4.0)
+    } else {
+        y_up_natural
+    };
     Rect::new(x, y, win_w, win_h)
 }
 
@@ -159,8 +175,8 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         label: "\u{F0CE} Table",
         group: "Layout",
         open: false,
-        win_w: WIN_W,
-        win_h: WIN_H,
+        win_w: 720.0,
+        win_h: 560.0,
     },
     DemoSpec {
         title: "\u{F07D} Scrolling",
