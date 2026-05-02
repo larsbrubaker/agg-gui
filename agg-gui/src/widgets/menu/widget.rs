@@ -17,6 +17,18 @@ use super::model::MenuEntry;
 use super::paint::{paint_menu_bar_button, paint_popup_stack, MenuStyle};
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 
+/// Mouse events synthesised from a touch tap arrive within a few
+/// milliseconds of the corresponding `touchstart`/`touchend`.  Allow a
+/// generous window (50 ms) so a busy frame doesn't accidentally
+/// classify a synthesised event as a desktop click.
+const TOUCH_SYNTH_WINDOW_MS: u128 = 50;
+
+fn is_touch_synthesized() -> bool {
+    crate::touch_state::last_touch_event_age()
+        .map(|d| d.as_millis() < TOUCH_SYNTH_WINDOW_MS)
+        .unwrap_or(false)
+}
+
 #[derive(Clone)]
 pub struct PopupMenu {
     pub items: Vec<MenuEntry>,
@@ -81,13 +93,6 @@ pub struct MenuBar {
     hover_index: Option<usize>,
     popup: PopupMenu,
     on_action: Box<dyn FnMut(&str)>,
-    /// True between a `MouseDown` and the matching `MouseUp` — i.e. the
-    /// user is actively dragging.  Used to decide whether a `MouseMove`
-    /// should switch the currently-open top menu (drag-switch, desktop
-    /// pattern) or just update the hover indicator (the touch shell's
-    /// synthesised pre-tap MouseMove must not switch — its companion
-    /// MouseDown is what carries the open intent).
-    mouse_button_held: bool,
 }
 
 pub struct TopMenu {
@@ -122,7 +127,6 @@ impl MenuBar {
             hover_index: None,
             popup: PopupMenu::new(Vec::new()),
             on_action: Box::new(on_action),
-            mouse_button_held: false,
         }
     }
 
@@ -257,30 +261,21 @@ impl Widget for MenuBar {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        // Track button-held so MouseMove can distinguish a desktop drag
-        // from the touch shell's synthesised pre-tap hover.  Set BEFORE
-        // the rest of the dispatch so the in-flight MouseDown sees its
-        // own button-held = true; cleared on MouseUp similarly.
-        match event {
-            Event::MouseDown {
-                button: MouseButton::Left,
-                ..
-            } => self.mouse_button_held = true,
-            Event::MouseUp {
-                button: MouseButton::Left,
-                ..
-            } => self.mouse_button_held = false,
-            _ => {}
-        }
         if let Event::MouseMove { pos } = event {
             let hovered = self.menu_at(*pos);
             self.set_hover_index(hovered);
-            // Drag-switch — only when the button is held.  The synth
-            // MouseMove the touch shell fires before a tap has the
-            // button up; switching open menus from that move would
-            // make the subsequent MouseDown look like "click on
-            // currently-open menu" and toggle-close it.
-            if self.popup.is_open() && self.mouse_button_held {
+            // Hover-switch a different open menu while a popup is open.
+            // Suppressed when this MouseMove was synthesised by the
+            // touch shell from a touchstart — on mobile the synth move
+            // arrives at the tap position immediately followed by a
+            // synth MouseDown at the same point; switching the open
+            // menu here would make that MouseDown look like a click on
+            // the currently-open menu and toggle-close the popup the
+            // user just tapped to open.  On desktop the
+            // `last_touch_event_age` is `None` (or very large), so
+            // hover-switch works as before.
+            let from_touch = is_touch_synthesized();
+            if self.popup.is_open() && !from_touch {
                 if let Some(idx) = hovered {
                     if self.open_index != Some(idx) {
                         let activate_on_release = self.popup.state.is_mouse_up_activation_armed();
@@ -405,6 +400,56 @@ mod tests {
     fn test_font() -> Arc<Font> {
         const FONT_BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
         Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    /// Desktop hover-switch: with a popup open, moving the cursor over
+    /// a different top menu's bar (button NOT held — i.e. AFTER the
+    /// click that opened the first menu has already released) opens
+    /// that other menu.  Standard desktop menubar behaviour.
+    #[test]
+    fn hover_after_release_switches_open_top_menu_on_desktop() {
+        crate::touch_state::clear_last_touch_event_for_testing();
+        let viewport = Size::new(300.0, 180.0);
+        crate::widget::set_current_viewport(viewport);
+        let mut bar = MenuBar::new(
+            test_font(),
+            vec![
+                TopMenu::new(
+                    "File",
+                    vec![super::super::model::MenuItem::action("New", "file.new").into()],
+                ),
+                TopMenu::new(
+                    "Edit",
+                    vec![super::super::model::MenuItem::action("Copy", "edit.copy").into()],
+                ),
+            ],
+            |_| {},
+        );
+        bar.layout(Size::new(300.0, BAR_H));
+
+        // Click File and release.
+        bar.on_event(&Event::MouseDown {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        bar.on_event(&Event::MouseUp {
+            pos: Point::new(8.0, 8.0),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        assert_eq!(bar.open_index, Some(0));
+
+        // Hover over Edit (button NOT held) — should switch open menu.
+        bar.on_event(&Event::MouseMove {
+            pos: Point::new(60.0, 8.0),
+        });
+        assert_eq!(
+            bar.open_index,
+            Some(1),
+            "moving the cursor over a different top menu after release \
+             must switch the open popup (desktop hover-switch)"
+        );
     }
 
     #[test]
@@ -553,6 +598,7 @@ mod tests {
     /// also the natural way to dismiss a popup without a row tap.
     #[test]
     fn click_on_currently_open_top_menu_closes_popup() {
+        crate::touch_state::clear_last_touch_event_for_testing();
         let viewport = Size::new(300.0, 180.0);
         crate::widget::set_current_viewport(viewport);
         let mut bar = MenuBar::new(
@@ -623,10 +669,14 @@ mod tests {
         );
         bar.layout(Size::new(300.0, BAR_H));
 
-        // Tap File — the touch shell sends MouseMove(file_pos) first,
-        // then MouseDown + MouseUp at the same position.
+        // Tap File — the touch shell calls `note_touch_event` from each
+        // touch lifecycle entry point, then synthesises MouseMove(at
+        // tap pos) → MouseDown → MouseUp.  Replicate that ordering by
+        // marking the touch event before each synthesised mouse event.
         let file_pos = Point::new(8.0, 8.0);
+        crate::touch_state::note_touch_event();
         bar.on_event(&Event::MouseMove { pos: file_pos });
+        crate::touch_state::note_touch_event();
         bar.on_event(&Event::MouseDown {
             pos: file_pos,
             button: MouseButton::Left,
@@ -640,12 +690,20 @@ mod tests {
         assert!(bar.popup.is_open());
         assert_eq!(bar.open_index, Some(0));
 
-        // Tap Edit — same MouseMove → MouseDown → MouseUp sequence.
-        // The MouseMove already opens Edit (hover handler).  The
-        // MouseDown that follows must NOT close it just because the
-        // click is on the menu bar (outside the popup body).
+        // Tap Edit — same touch lifecycle then MouseMove + MouseDown +
+        // MouseUp.  The MouseMove must NOT switch the open menu (it's
+        // synthesised from touchstart, not a desktop hover); the
+        // MouseDown carries the open intent.
         let edit_pos = Point::new(60.0, 8.0);
+        crate::touch_state::note_touch_event();
         bar.on_event(&Event::MouseMove { pos: edit_pos });
+        assert_eq!(
+            bar.open_index,
+            Some(0),
+            "synthesised pre-tap MouseMove must not switch the open menu — \
+             only the subsequent MouseDown should",
+        );
+        crate::touch_state::note_touch_event();
         bar.on_event(&Event::MouseDown {
             pos: edit_pos,
             button: MouseButton::Left,
@@ -658,7 +716,7 @@ mod tests {
         });
         assert!(
             bar.popup.is_open(),
-            "Edit must stay open after the tap completes — currently the MouseDown on the menu bar closes it",
+            "Edit must stay open after the tap completes",
         );
         assert_eq!(bar.open_index, Some(1));
     }

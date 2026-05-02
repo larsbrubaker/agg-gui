@@ -279,6 +279,15 @@ impl TouchState {
 
 thread_local! {
     static CURRENT: RefCell<Option<MultiTouchInfo>> = RefCell::new(None);
+    /// Wall-clock time of the most recent touch lifecycle event
+    /// (`Start` / `Move` / `End` / `Cancel`).  Set by `App`'s touch
+    /// entry points.  Mouse events the touch shell synthesises arrive
+    /// within milliseconds of a touch event — widgets that need to
+    /// distinguish a touch tap from a desktop click read
+    /// [`last_touch_event_age`] and treat anything under a few tens
+    /// of milliseconds as touch-synthesised.
+    static LAST_TOUCH_EVENT_AT: std::cell::Cell<Option<web_time::Instant>> =
+        const { std::cell::Cell::new(None) };
 }
 
 /// Publish this frame's multi-touch aggregate.  Called by
@@ -292,4 +301,29 @@ pub fn set_current(info: Option<MultiTouchInfo>) {
 /// writes: `if let Some(mt) = current_multi_touch() { … }`.
 pub fn current_multi_touch() -> Option<MultiTouchInfo> {
     CURRENT.with(|c| *c.borrow())
+}
+
+/// Record that a touch lifecycle event just fired.  Called from
+/// `App::on_touch_start/move/end/cancel`.
+pub(crate) fn note_touch_event() {
+    LAST_TOUCH_EVENT_AT.with(|c| c.set(Some(web_time::Instant::now())));
+}
+
+/// Time elapsed since the most recent touch lifecycle event, or
+/// `None` if no touch event has ever fired.  Mouse events
+/// synthesised from a touchstart / touchend by the web shell arrive
+/// within a millisecond of the touch event — widgets needing to
+/// tell touch-synthesised mouse events apart from real desktop
+/// clicks check this against a small threshold.
+pub fn last_touch_event_age() -> Option<std::time::Duration> {
+    LAST_TOUCH_EVENT_AT.with(|c| c.get()).map(|t| t.elapsed())
+}
+
+/// Forget any prior touch event so the next mouse event reads as
+/// "from desktop" until [`note_touch_event`] runs again.  Tests use
+/// this to isolate desktop-mouse scenarios from a sibling test that
+/// just simulated a touch tap.
+#[doc(hidden)]
+pub fn clear_last_touch_event_for_testing() {
+    LAST_TOUCH_EVENT_AT.with(|c| c.set(None));
 }

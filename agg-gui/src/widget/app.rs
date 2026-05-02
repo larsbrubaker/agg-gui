@@ -459,6 +459,7 @@ impl App {
     ) {
         let pos = self.flip_y(screen_x, screen_y);
         self.touch_state.on_start(device, id, pos, force);
+        crate::touch_state::note_touch_event();
     }
     pub fn on_touch_move(
         &mut self,
@@ -470,6 +471,7 @@ impl App {
     ) {
         let pos = self.flip_y(screen_x, screen_y);
         self.touch_state.on_move(device, id, pos, force);
+        crate::touch_state::note_touch_event();
     }
     pub fn on_touch_end(
         &mut self,
@@ -477,6 +479,7 @@ impl App {
         id: crate::touch_state::TouchId,
     ) {
         self.touch_state.on_end_or_cancel(device, id);
+        crate::touch_state::note_touch_event();
     }
     pub fn on_touch_cancel(
         &mut self,
@@ -484,6 +487,7 @@ impl App {
         id: crate::touch_state::TouchId,
     ) {
         self.touch_state.on_end_or_cancel(device, id);
+        crate::touch_state::note_touch_event();
     }
     /// Current number of fingers down across all devices.  Used by
     /// widgets that want to know the gesture has *begun* before the
