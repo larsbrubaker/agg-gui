@@ -12,7 +12,7 @@ use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
-use crate::widget::{paint_subtree, Widget};
+use crate::widget::Widget;
 use crate::widgets::label::Label;
 
 const DOT_R: f64 = 7.0; // outer circle radius
@@ -22,10 +22,18 @@ const ROW_H: f64 = 22.0;
 /// A group of mutually-exclusive radio options.
 ///
 /// Each option is a `(label, value_string)` pair. `selected` is the index of
-/// the currently chosen option.
+/// the currently chosen option.  Each option's text is held as a real
+/// `Label` child in `children` so the inspector tree mirrors the visible
+/// row structure (RadioGroup → Label × N) and the framework recurses
+/// into the labels naturally — RadioGroup's `paint()` only draws the
+/// dot circles.
 pub struct RadioGroup {
     bounds: Rect,
-    children: Vec<Box<dyn Widget>>, // always empty — label_widgets stored separately
+    /// One `Label` child per option, stored as `Box<dyn Widget>` so the
+    /// framework's tree walks (paint / hit-test / inspector) recurse into
+    /// them.  Mutated through `set_label_color` (Widget trait method) to
+    /// retint per frame without rebuilding.
+    children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
     options: Vec<String>,
     selected: usize,
@@ -34,8 +42,6 @@ pub struct RadioGroup {
     font: Arc<Font>,
     font_size: f64,
     on_change: Option<Box<dyn FnMut(usize)>>,
-    /// One backbuffered Label per option.
-    label_widgets: Vec<Label>,
     /// Optional external mirror of `selected` — same bidirectional-binding
     /// pattern as `Slider::with_value_cell` / `ToggleSwitch::with_state_cell`.
     selected_cell: Option<Rc<Cell<usize>>>,
@@ -45,13 +51,17 @@ impl RadioGroup {
     pub fn new(options: Vec<impl Into<String>>, selected: usize, font: Arc<Font>) -> Self {
         let font_size = 14.0;
         let opts: Vec<String> = options.into_iter().map(|s| s.into()).collect();
-        let label_widgets = opts
+        let children: Vec<Box<dyn Widget>> = opts
             .iter()
-            .map(|text| Label::new(text.as_str(), Arc::clone(&font)).with_font_size(font_size))
+            .map(|text| {
+                Box::new(
+                    Label::new(text.as_str(), Arc::clone(&font)).with_font_size(font_size),
+                ) as Box<dyn Widget>
+            })
             .collect();
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
+            children,
             base: WidgetBase::new(),
             options: opts,
             selected,
@@ -60,7 +70,6 @@ impl RadioGroup {
             font,
             font_size,
             on_change: None,
-            label_widgets,
             selected_cell: None,
         }
     }
@@ -80,11 +89,16 @@ impl RadioGroup {
 
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.font_size = size;
-        // Rebuild label widgets with new font size.
-        self.label_widgets = self
+        // Rebuild label children with new font size.
+        self.children = self
             .options
             .iter()
-            .map(|text| Label::new(text.as_str(), Arc::clone(&self.font)).with_font_size(size))
+            .map(|text| {
+                Box::new(
+                    Label::new(text.as_str(), Arc::clone(&self.font))
+                        .with_font_size(size),
+                ) as Box<dyn Widget>
+            })
             .collect();
         self
     }
@@ -212,9 +226,16 @@ impl Widget for RadioGroup {
         let h = self.options.len() as f64 * ROW_H;
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
         let label_avail_w = (available.width - DOT_R * 2.0 - GAP).max(0.0);
-        for lw in self.label_widgets.iter_mut() {
-            let s = lw.layout(Size::new(label_avail_w, ROW_H));
-            lw.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        let lx = DOT_R * 2.0 + GAP;
+        for (i, child) in self.children.iter_mut().enumerate() {
+            let s = child.layout(Size::new(label_avail_w, ROW_H));
+            // Position the label child in the row's vertical centre,
+            // offset right of the radio dot.  In Y-up the first row
+            // (i=0) sits at the TOP of the widget — see `row_center_y`.
+            let row_top_y = h - (i as f64) * ROW_H;
+            let cy = row_top_y - ROW_H * 0.5;
+            let ly = cy - s.height * 0.5;
+            child.set_bounds(Rect::new(lx, ly, s.width, s.height));
         }
         Size::new(available.width, h)
     }
@@ -232,12 +253,17 @@ impl Widget for RadioGroup {
             ctx.stroke();
         }
 
+        // Paint just the radio dot for each row — the row's text is a
+        // real `Label` child that the framework recurses into after this
+        // method returns (positioned by `layout`).  Setting label colour
+        // here through the `set_label_color` Widget-trait method keeps
+        // the foreground theme-aware without rebuilding the Label.
+        let text_color = v.text_color;
         for i in 0..self.options.len() {
             let cy = self.row_center_y(i, h);
             let checked = i == self.selected;
             let hovered = self.hovered == Some(i);
 
-            // Outer circle.
             let border = if checked {
                 v.accent
             } else if hovered {
@@ -258,7 +284,8 @@ impl Widget for RadioGroup {
             ctx.circle(DOT_R, cy, DOT_R);
             ctx.stroke();
 
-            // Inner dot when checked — always white since it's on the accent color background.
+            // Inner dot when checked — always widget_bg so it stays
+            // readable on the accent surface.
             if checked {
                 ctx.set_fill_color(v.widget_bg);
                 ctx.begin_path();
@@ -266,19 +293,9 @@ impl Widget for RadioGroup {
                 ctx.fill();
             }
 
-            // Label — rendered through backbuffered Label child.
-            self.label_widgets[i].set_color(v.text_color);
-
-            let lw = self.label_widgets[i].bounds().width;
-            let lh = self.label_widgets[i].bounds().height;
-            let lx = DOT_R * 2.0 + GAP;
-            let ly = cy - lh * 0.5;
-            self.label_widgets[i].set_bounds(Rect::new(lx, ly, lw, lh));
-
-            ctx.save();
-            ctx.translate(lx, ly);
-            paint_subtree(&mut self.label_widgets[i], ctx);
-            ctx.restore();
+            if let Some(child) = self.children.get_mut(i) {
+                child.set_label_color(text_color);
+            }
         }
     }
 
