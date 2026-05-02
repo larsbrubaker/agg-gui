@@ -37,20 +37,23 @@ const DEFAULT_VISIBLE_ITEMS: usize = 8;
 const SCROLLBAR_W: f64 = 6.0;
 
 pub(super) struct ComboPopupRequest {
-    x: f64,
-    y: f64,
-    width: f64,
-    popup_h: f64,
-    opens_up: bool,
-    first_item: usize,
-    visible_count: usize,
-    selected: usize,
-    hovered_item: Option<usize>,
-    scrollbar: Option<PreparedScrollbar>,
-    options: Vec<String>,
-    font: Arc<Font>,
-    font_size: f64,
-    item_fonts: Option<Vec<Arc<Font>>>,
+    pub(super) x: f64,
+    pub(super) y: f64,
+    pub(super) width: f64,
+    pub(super) popup_h: f64,
+    pub(super) opens_up: bool,
+    pub(super) first_item: usize,
+    pub(super) visible_count: usize,
+    pub(super) selected: usize,
+    pub(super) hovered_item: Option<usize>,
+    pub(super) scrollbar: Option<PreparedScrollbar>,
+    pub(super) item_count: usize,
+    /// The combo's per-option `Label` widgets, shared by `Rc` so the
+    /// popup paint pass can route text through their backbuffer caches
+    /// (each Label keeps its own glyph bitmap; calling `paint_subtree`
+    /// on the Label is what makes popup item rendering compositional
+    /// and reuses the cache between frames).
+    pub(super) item_labels: Rc<RefCell<Vec<Label>>>,
 }
 
 thread_local! {
@@ -89,8 +92,12 @@ pub struct ComboBox {
     // ── Backbuffered labels ──────────────────────────────────────────────────
     /// Label for the currently selected option (shown in the closed button area).
     selected_label: Label,
-    /// One label per option, used when the dropdown is open.
-    item_labels: Vec<Label>,
+    /// One label per option, painted in the popup overlay pass.  Held
+    /// behind `Rc<RefCell<…>>` so the popup-queue request shares the
+    /// same widgets (no clone, no fresh backbuffers each frame); the
+    /// drain pass paints them via `paint_subtree` so each Label's
+    /// glyph bitmap is cached and reused across frames.
+    item_labels: Rc<RefCell<Vec<Label>>>,
     /// Optional per-item font overrides, set via [`with_item_fonts`].
     /// `None` means every entry (and the selected label) uses `self.font`
     /// — the default.  `Some(vec)` means each entry uses `vec[i]` and
@@ -121,10 +128,11 @@ impl ComboBox {
             font_size,
             Arc::clone(&font),
         );
-        let item_labels = opts
+        let item_labels: Vec<Label> = opts
             .iter()
             .map(|t| Self::make_label(t, font_size, Arc::clone(&font)))
             .collect();
+        let item_labels = Rc::new(RefCell::new(item_labels));
 
         Self {
             bounds: Rect::default(),
@@ -187,11 +195,12 @@ impl ComboBox {
             size,
             Arc::clone(&self.font),
         );
-        self.item_labels = self
+        let new_labels: Vec<Label> = self
             .options
             .iter()
             .map(|t| Self::make_label(t, size, Arc::clone(&self.font)))
             .collect();
+        *self.item_labels.borrow_mut() = new_labels;
         self
     }
 
@@ -243,7 +252,7 @@ impl ComboBox {
     pub fn set_item_fonts(&mut self, fonts: Vec<Arc<Font>>) {
         self.item_fonts = Some(fonts.clone());
         let size = self.font_size;
-        self.item_labels = self
+        let new_labels: Vec<Label> = self
             .options
             .iter()
             .enumerate()
@@ -257,6 +266,7 @@ impl ComboBox {
                     .with_ignore_system_font(true)
             })
             .collect();
+        *self.item_labels.borrow_mut() = new_labels;
         if let Some(sel_font) = fonts.get(self.selected).cloned() {
             self.selected_label = Label::new(
                 self.options
@@ -377,12 +387,14 @@ impl Widget for ComboBox {
 
         // Layout item labels in the floating panel. The panel may open
         // above or below depending on available screen space.
-        for i in 0..self.item_labels.len() {
-            let s = self.item_labels[i].layout(Size::new(inner_w, ITEM_H));
+        let mut labels = self.item_labels.borrow_mut();
+        for i in 0..labels.len() {
+            let s = labels[i].layout(Size::new(inner_w, ITEM_H));
             let ir = self.item_rect(i);
             let ly = ir.y + (ITEM_H - s.height) * 0.5;
-            self.item_labels[i].set_bounds(Rect::new(PAD_X, ly, s.width, s.height));
+            labels[i].set_bounds(Rect::new(PAD_X, ly, s.width, s.height));
         }
+        drop(labels);
 
         Size::new(available.width, CLOSED_H)
     }
@@ -467,10 +479,8 @@ impl Widget for ComboBox {
                 selected: self.selected,
                 hovered_item: self.hovered_item,
                 scrollbar,
-                options: self.options.clone(),
-                font: Arc::clone(&self.font),
-                font_size: self.font_size,
-                item_fonts: self.item_fonts.clone(),
+                item_count: self.options.len(),
+                item_labels: Rc::clone(&self.item_labels),
             });
         }
     }

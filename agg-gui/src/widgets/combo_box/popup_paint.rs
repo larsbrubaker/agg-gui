@@ -9,15 +9,14 @@
 //! while the outer device-scale CTM is still active, so logical x/y multiply
 //! up to physical pixels naturally and we avoid double-scaling on HiDPI.
 
-use std::sync::Arc;
-
 use super::{
-    submit_combo_popup_internal, ComboPopupRequest, COMBO_POPUP_QUEUE, CORNER_R, CURRENT_COMBO_VIEWPORT,
-    ITEM_H, PAD_X, SCROLLBAR_W,
+    submit_combo_popup_internal, ComboPopupRequest, COMBO_POPUP_QUEUE, CORNER_R,
+    CURRENT_COMBO_VIEWPORT, ITEM_H, PAD_X, SCROLLBAR_W,
 };
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::Size;
+use crate::widget::{paint_subtree, Widget};
 use crate::widgets::scrollbar::paint_prepared_scrollbar;
 
 pub(crate) fn submit_combo_popup(request: ComboPopupRequest) {
@@ -67,18 +66,24 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
     ctx.fill();
 
-    let has_scroll = request.options.len() > request.visible_count;
+    let has_scroll = request.item_count > request.visible_count;
     let text_w = if has_scroll {
         (request.width - SCROLLBAR_W - 4.0).max(0.0)
     } else {
         request.width
     };
 
+    // Borrow the shared item-label vec for the duration of the popup
+    // paint.  Painting through `paint_subtree(label, ctx)` keeps each
+    // Label's backbuffer cache hot — text is rasterised once and the
+    // bitmap is blitted on subsequent frames, instead of the prior
+    // raw `ctx.fill_text` per item per frame.
+    let mut labels = request.item_labels.borrow_mut();
     for row in 0..request.visible_count {
         let idx = request.first_item + row;
-        let Some(text) = request.options.get(idx) else {
+        if idx >= labels.len() {
             break;
-        };
+        }
         let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
         let is_selected = idx == request.selected;
         let is_hovered = request.hovered_item == Some(idx);
@@ -100,22 +105,25 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
             ctx.fill();
         }
 
-        let font = request
-            .item_fonts
-            .as_ref()
-            .and_then(|fonts| fonts.get(idx))
-            .cloned()
-            .unwrap_or_else(|| Arc::clone(&request.font));
-        ctx.set_font(font);
-        ctx.set_font_size(request.font_size);
-        ctx.set_fill_color(if is_selected {
+        let label = &mut labels[idx];
+        label.set_color(if is_selected {
             Color::white()
         } else {
             v.text_color
         });
-        let baseline = item_y + (ITEM_H - request.font_size) * 0.5;
-        ctx.fill_text(text, request.x + PAD_X, baseline);
+        // Translate the ctx so the Label paints at its desired global
+        // popup position.  Label's own paint routes through its
+        // backbuffer cache via `paint_subtree`, so glyph rasterisation
+        // is shared across frames and per-item-font preview combos
+        // stay snappy.
+        let lh = label.bounds().height;
+        let ly = item_y + (ITEM_H - lh) * 0.5;
+        ctx.save();
+        ctx.translate(request.x + PAD_X, ly);
+        paint_subtree(label, ctx);
+        ctx.restore();
     }
+    drop(labels);
 
     if let Some(scrollbar) = request.scrollbar {
         paint_prepared_scrollbar(ctx, scrollbar);
