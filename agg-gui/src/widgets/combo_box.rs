@@ -436,6 +436,16 @@ impl Widget for ComboBox {
             let mut y = 0.0;
             let t = ctx.root_transform();
             t.transform(&mut x, &mut y);
+            // `root_transform` includes the outer device-scale multiplier, but
+            // the popup queue is drained while that same scale is still active
+            // on the ctx and `viewport_h` (and the rest of the popup geometry)
+            // are in logical units.  Strip the scale here so request coords
+            // stay in logical root space — otherwise on HiDPI mobile (DPR 2-3)
+            // the popup paints at scale²-magnified position while hit-testing
+            // (which is purely logical) stays adjacent to the closed button.
+            let scale = crate::device_scale::device_scale().max(1e-6);
+            let x = x / scale;
+            let y = y / scale;
             let viewport_h = crate::widgets::combo_box::current_combo_viewport()
                 .map(|s| s.height)
                 .unwrap_or(f64::MAX / 4.0);

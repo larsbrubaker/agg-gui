@@ -587,3 +587,107 @@ fn test_combo_popup_uses_root_transform_inside_layer() {
     );
     assert_eq!(selected.get(), 2);
 }
+
+/// HiDPI guard: under `device_scale > 1`, the popup must paint at the same
+/// logical position the hit-test reports. The submitted request coords come
+/// from `ctx.root_transform()` — which already includes the outer device-scale
+/// multiplier — and the global drain pass runs while that scale is still on
+/// the ctx, so the request must be in LOGICAL units to avoid double-scaling
+/// the popup off the visible button. Mobile bug regression: dropdown rendered
+/// near the top of the screen while the click area stayed adjacent to the
+/// closed combo.
+#[test]
+fn test_combo_popup_paints_at_logical_root_coords_under_hidpi() {
+    use crate::text::Font;
+    use crate::{DrawCtx, Event, EventResult, Rect};
+    use std::sync::Arc;
+
+    struct ScaleGuard;
+    impl Drop for ScaleGuard {
+        fn drop(&mut self) {
+            crate::set_device_scale(1.0);
+        }
+    }
+    let _g = ScaleGuard;
+    crate::set_device_scale(2.0);
+
+    struct PositioningRoot {
+        bounds: Rect,
+        children: Vec<Box<dyn Widget>>,
+    }
+    impl Widget for PositioningRoot {
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+            let child = &mut self.children[0];
+            child.layout(Size::new(180.0, 24.0));
+            child.set_bounds(Rect::new(0.0, 20.0, 180.0, 24.0));
+            available
+        }
+        fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _event: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+    }
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let combo = ComboBox::new(
+        vec![
+            "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
+        ],
+        0,
+        font,
+    );
+    let root = PositioningRoot {
+        bounds: Rect::default(),
+        children: vec![Box::new(combo)],
+    };
+    let mut app = App::new(Box::new(root));
+
+    // App.layout takes physical input and divides by scale internally.
+    let viewport_phys = Size::new(360.0, 440.0);
+    app.layout(viewport_phys);
+
+    // Combo at logical y=20 → Y-up logical [20, 44] → physical Y-up [40, 88].
+    // Screen y (Y-down) range: [440-88, 440-40] = [352, 400].
+    // Screen y=380 → logical y=(440-380)/2=30, inside the closed button.
+    app.on_mouse_down(20.0, 380.0, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(20.0, 380.0, MouseButton::Left, Modifiers::default());
+    assert_eq!(
+        app.root().children()[0]
+            .properties()
+            .into_iter()
+            .find(|(k, _)| *k == "open")
+            .map(|(_, v)| v),
+        Some("true".to_string())
+    );
+
+    let mut fb = Framebuffer::new(viewport_phys.width as u32, viewport_phys.height as u32);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.clear(Color::rgba(1.0, 0.0, 0.0, 1.0));
+    app.paint(&mut ctx);
+
+    // With the bug, request.y from `ctx.root_transform()` is 40 (physical) and
+    // gets multiplied by the outer scale at drain → popup paints at physical
+    // Y-up [128, 392], leaving rows 88..128 transparent / clear-colored.
+    // With the fix, request.y is 20 logical → popup paints at physical Y-up
+    // [88, 396], covering this sample.
+    let p = sample(&fb, 180, 100);
+    assert!(
+        !(p[0] > 200 && p[1] < 50 && p[2] < 50),
+        "popup must overpaint the clear color at logical position above the \
+         button under HiDPI; sample at physical (180, 100) was {p:?} (red \
+         clear color = popup painted somewhere else)"
+    );
+}
