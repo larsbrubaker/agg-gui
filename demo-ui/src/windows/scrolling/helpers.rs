@@ -10,10 +10,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::widget::paint_subtree;
-use agg_gui::{
-    Color, DrawCtx, Event, EventResult, Font, Label, MouseButton, Point, Rect, Size, Widget,
-};
+use agg_gui::{Color, DrawCtx, Event, EventResult, Font, Label, Rect, Size, Widget};
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -23,11 +20,20 @@ pub const LOREM_IPSUM_LONG: &str = "Lorem ipsum dolor sit amet, consectetur adip
      Sed sit amet magna et arcu efficitur porttitor. Suspendisse potenti. \
      Praesent consequat, lacus in sollicitudin tempor, ex purus commodo urna.";
 
-// ── RowList: virtual row list with direct text painting ────────────────────
+// ── RowList: virtualised row list rendered through Label children ──────────
 
+/// Demo virtualised list — rows that aren't on-screen don't allocate
+/// Label widgets.  `layout()` resizes `children` to match the visible
+/// range and pushes each row's formatted text into the Label child via
+/// the `set_label_text` Widget-trait method, which Label uses to keep
+/// its glyph cache valid across frames (no re-rasterisation when the
+/// text didn't change).  The framework paints the Label children
+/// itself; `paint()` only draws striping and the highlight overlay.
 pub struct RowList {
     bounds: Rect,
-    children: Vec<Box<dyn Widget>>, // always empty
+    /// Pool of Label children, sized to the current visible range.
+    /// Index `i` in this vec corresponds to row `first_visible + i`.
+    children: Vec<Box<dyn Widget>>,
     font: Arc<Font>,
     font_size: f64,
     row_height: f64,
@@ -39,6 +45,9 @@ pub struct RowList {
     /// When bound, rows outside this content-space rect are skipped in paint.
     /// The rect uses top-down coordinates (y = 0 at top of content).
     viewport: Option<Rc<Cell<Rect>>>,
+    /// First absolute row index currently mapped to `children[0]`;
+    /// `last_visible_count` is `children.len()`.
+    first_visible: usize,
 }
 
 impl RowList {
@@ -59,6 +68,7 @@ impl RowList {
             formatter,
             striped: true,
             viewport: None,
+            first_visible: 0,
         }
     }
 
@@ -102,19 +112,9 @@ impl Widget for RowList {
         let n = self.count.get();
         let h = (n as f64) * self.row_height;
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
-        Size::new(available.width, h)
-    }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let n = self.count.get();
-        if n == 0 {
-            return;
-        }
-        let total_h = (n as f64) * self.row_height;
-
-        // Pick which row range to paint.  Without a viewport cell we paint
-        // everything (and rely on upstream clip to cull).
+        // Pick which row range is currently visible — the same range the
+        // pre-refactor `paint()` used to pick which rows to draw.
         let (first, last) = match &self.viewport {
             Some(cell) => {
                 let vp = cell.get();
@@ -125,16 +125,52 @@ impl Widget for RowList {
             None => (0, n),
         };
 
-        let highlight = self.highlight.get();
-        ctx.set_font(Arc::clone(&self.font));
-        ctx.set_font_size(self.font_size);
+        // Resize the Label child pool to the visible count.  Reusing the
+        // existing children preserves their glyph caches across scrolls;
+        // only freshly-added rows allocate.
+        let visible = last.saturating_sub(first);
+        while self.children.len() < visible {
+            self.children.push(Box::new(
+                Label::new("", Arc::clone(&self.font)).with_font_size(self.font_size),
+            ));
+        }
+        self.children.truncate(visible);
+        self.first_visible = first;
 
-        for i in first..last {
-            // Row 0 at top of content → in Y-up local space:
-            //   y_bottom_of_row = total_h - (i + 1) * row_height
-            let y_bottom = total_h - (i as f64 + 1.0) * self.row_height;
+        // Push the formatter's text + bounds into each visible row's
+        // Label child.  In Y-up: row `first` is the topmost visible
+        // row, with its bottom edge at `h - (first + 1) * row_h`.
+        for (slot, row) in (first..last).enumerate() {
+            let y_bottom = h - (row as f64 + 1.0) * self.row_height;
             let y_text = y_bottom + (self.row_height - self.font_size) * 0.5;
+            let text = (self.formatter)(row);
+            if let Some(child) = self.children.get_mut(slot) {
+                child.set_label_text(&text);
+                let s = child.layout(Size::new(
+                    available.width - self.padding_x,
+                    self.row_height,
+                ));
+                child.set_bounds(Rect::new(self.padding_x, y_text, s.width, s.height));
+            }
+        }
 
+        Size::new(available.width, h)
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let v = ctx.visuals();
+        let n = self.count.get();
+        if n == 0 {
+            return;
+        }
+        let total_h = (n as f64) * self.row_height;
+        let highlight = self.highlight.get();
+        let visible_first = self.first_visible;
+        let visible_last = visible_first + self.children.len();
+
+        // Stripes + highlight under the row labels (children paint after).
+        for i in visible_first..visible_last {
+            let y_bottom = total_h - (i as f64 + 1.0) * self.row_height;
             if self.striped && i % 2 == 0 {
                 ctx.set_fill_color(Color::rgba(
                     v.text_color.r,
@@ -152,16 +188,20 @@ impl Widget for RowList {
                 ctx.rect(0.0, y_bottom, self.bounds.width, self.row_height);
                 ctx.fill();
             }
+        }
 
-            let text = (self.formatter)(i);
-            let c = if highlight == Some(i) {
+        // Recolour each visible row's Label child to match highlight state.
+        for (slot, row) in (visible_first..visible_last).enumerate() {
+            let color = if highlight == Some(row) {
                 v.accent
             } else {
                 v.text_color
             };
-            ctx.set_fill_color(c);
-            ctx.fill_text(&text, self.padding_x, y_text);
+            if let Some(child) = self.children.get_mut(slot) {
+                child.set_label_color(color);
+            }
         }
+        // Label children paint themselves via the framework's tree walk.
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
@@ -171,13 +211,17 @@ impl Widget for RowList {
 
 // ── SegRow: segmented-button row ─────────────────────────────────────────────
 
+/// Generic segmented selector for the scrolling demos.  Composed from
+/// real `Button` children — each segment uses `with_subtle()` +
+/// `with_active_fn()` so the inactive segments paint muted and the
+/// selected one flips to the accent surface.  Same pattern as
+/// `RunModeRow` / `MsaaRow` in the backend panel; lives here because
+/// the scrolling demos pre-date the consolidation.
 pub struct SegRow<T: Clone + Copy + PartialEq + 'static> {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    options: Vec<(&'static str, T)>,
+    n: usize,
     state: Rc<Cell<T>>,
-    hovered: Option<usize>,
-    labels: Vec<Label>,
     /// Optional callback fired when the selection changes.
     on_change: Option<Rc<dyn Fn()>>,
     last: Cell<Option<T>>,
@@ -185,18 +229,32 @@ pub struct SegRow<T: Clone + Copy + PartialEq + 'static> {
 
 impl<T: Clone + Copy + PartialEq + 'static> SegRow<T> {
     pub fn new(font: Arc<Font>, options: Vec<(&'static str, T)>, state: Rc<Cell<T>>) -> Self {
-        let labels = options
-            .iter()
-            .map(|(text, _)| Label::new(*text, Arc::clone(&font)).with_font_size(12.0))
-            .collect();
+        let n = options.len();
         let start = state.get();
+        let children: Vec<Box<dyn Widget>> = options
+            .into_iter()
+            .map(|(text, val)| {
+                let state_active = Rc::clone(&state);
+                let state_click = Rc::clone(&state);
+                let btn = agg_gui::Button::new(text, Arc::clone(&font))
+                    .with_font_size(12.0)
+                    .with_subtle()
+                    .with_h_anchor(agg_gui::HAnchor::STRETCH)
+                    .with_active_fn(move || state_active.get() == val)
+                    .on_click(move || {
+                        if state_click.get() != val {
+                            state_click.set(val);
+                            agg_gui::animation::request_draw();
+                        }
+                    });
+                Box::new(btn) as Box<dyn Widget>
+            })
+            .collect();
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
-            options,
+            children,
+            n,
             state,
-            hovered: None,
-            labels,
             on_change: None,
             last: Cell::new(Some(start)),
         }
@@ -208,39 +266,7 @@ impl<T: Clone + Copy + PartialEq + 'static> SegRow<T> {
     }
 
     const BTN_H: f64 = 24.0;
-    const BTN_PAD_X: f64 = 14.0; // horizontal padding around label
-    const BTN_MIN_W: f64 = 56.0; // never smaller than this per segment
     const BTN_GAP: f64 = 1.0;
-
-    /// Natural width needed to fit every option's label + padding + gaps.
-    /// Computed from the label widths stored in `self.labels` AFTER they are
-    /// laid out — so `layout` calls this only after measuring labels.
-    fn natural_width(&self) -> f64 {
-        let n = self.labels.len().max(1);
-        let per: f64 = self
-            .labels
-            .iter()
-            .map(|l| l.bounds().width + Self::BTN_PAD_X * 2.0)
-            .fold(Self::BTN_MIN_W, f64::max);
-        per * n as f64 + Self::BTN_GAP * (n - 1) as f64
-    }
-
-    fn btn_rect(&self, i: usize, total_w: f64) -> Rect {
-        let n = self.options.len().max(1);
-        let w = ((total_w - Self::BTN_GAP * (n - 1) as f64) / n as f64).max(20.0);
-        let y = (self.bounds.height - Self::BTN_H) * 0.5;
-        Rect::new(i as f64 * (w + Self::BTN_GAP), y, w, Self::BTN_H)
-    }
-
-    fn hit(&self, pos: Point) -> Option<usize> {
-        for i in 0..self.options.len() {
-            let r = self.btn_rect(i, self.bounds.width);
-            if pos.x >= r.x && pos.x <= r.x + r.width && pos.y >= r.y && pos.y <= r.y + r.height {
-                return Some(i);
-            }
-        }
-        None
-    }
 }
 
 impl<T: Clone + Copy + PartialEq + 'static> Widget for SegRow<T> {
@@ -261,15 +287,21 @@ impl<T: Clone + Copy + PartialEq + 'static> Widget for SegRow<T> {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        // First pass: measure labels so we know how wide each segment needs
-        // to be.  Use a generous horizontal budget so text doesn't wrap.
-        for lbl in self.labels.iter_mut() {
-            let s = lbl.layout(Size::new(available.width, Self::BTN_H));
-            lbl.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+        let n = self.n.max(1);
+        let row_h = Self::BTN_H + 6.0;
+        self.bounds = Rect::new(0.0, 0.0, available.width, row_h);
+        let cell_w = ((available.width - Self::BTN_GAP * (n - 1) as f64) / n as f64).max(20.0);
+        let y = (row_h - Self::BTN_H) * 0.5;
+        for (i, child) in self.children.iter_mut().enumerate() {
+            child.layout(Size::new(cell_w, Self::BTN_H));
+            child.set_bounds(Rect::new(
+                i as f64 * (cell_w + Self::BTN_GAP),
+                y,
+                cell_w,
+                Self::BTN_H,
+            ));
         }
-        // Natural "fit" width — never wider than the slot we were given.
-        let natural = self.natural_width().min(available.width);
-        self.bounds = Rect::new(0.0, 0.0, natural, Self::BTN_H + 6.0);
+
         // Fire on_change when state changed since last layout.
         let cur = self.state.get();
         if self.last.get() != Some(cur) {
@@ -278,75 +310,15 @@ impl<T: Clone + Copy + PartialEq + 'static> Widget for SegRow<T> {
                 cb();
             }
         }
-        Size::new(natural, Self::BTN_H + 6.0)
+        Size::new(available.width, row_h)
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let current = self.state.get();
-        for (i, (_lbl, val)) in self.options.iter().enumerate() {
-            let r = self.btn_rect(i, self.bounds.width);
-            let active = *val == current;
-            let hovered = self.hovered == Some(i);
-            let bg = if active {
-                v.accent
-            } else if hovered {
-                v.widget_bg_hovered
-            } else {
-                v.widget_bg
-            };
-            ctx.set_fill_color(bg);
-            ctx.begin_path();
-            ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
-            ctx.fill();
-
-            let tc = if active { Color::white() } else { v.text_color };
-            self.labels[i].set_color(tc);
-            let lw = self.labels[i].bounds().width;
-            let lh = self.labels[i].bounds().height;
-            let lx = r.x + (r.width - lw) * 0.5;
-            let ly = r.y + (r.height - lh) * 0.5;
-            self.labels[i].set_bounds(Rect::new(lx, ly, lw, lh));
-
-            ctx.save();
-            ctx.translate(lx, ly);
-            paint_subtree(&mut self.labels[i], ctx);
-            ctx.restore();
-            let _ = bg;
-        }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
+        // Buttons paint themselves through the framework's tree walk.
     }
 
-    fn on_event(&mut self, event: &Event) -> EventResult {
-        match event {
-            Event::MouseMove { pos } => {
-                let was = self.hovered;
-                self.hovered = self.hit(*pos);
-                if was != self.hovered {
-                    agg_gui::animation::request_draw();
-                }
-                EventResult::Ignored
-            }
-            Event::MouseDown {
-                button: MouseButton::Left,
-                pos,
-                ..
-            } => {
-                if let Some(i) = self.hit(*pos) {
-                    let next = self.options[i].1;
-                    if self.state.get() != next {
-                        self.state.set(next);
-                        self.last.set(Some(next));
-                        if let Some(cb) = &self.on_change {
-                            cb();
-                        }
-                    }
-                    agg_gui::animation::request_draw();
-                    return EventResult::Consumed;
-                }
-                EventResult::Ignored
-            }
-            _ => EventResult::Ignored,
-        }
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
     }
 }
 
