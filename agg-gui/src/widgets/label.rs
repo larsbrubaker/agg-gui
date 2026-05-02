@@ -1,4 +1,4 @@
-//! `Label` — static text display widget.
+﻿//! `Label` — static text display widget.
 //!
 //! Labels are non-interactive by design (`hit_test` always returns `false`
 //! and `on_event` always returns `Ignored`).  This makes them safe to use as
@@ -508,6 +508,12 @@ impl Widget for Label {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

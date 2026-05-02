@@ -1,4 +1,4 @@
-//! `TabView` — a tabbed container with a clickable tab bar.
+﻿//! `TabView` — a tabbed container with a clickable tab bar.
 //!
 //! An optional action button can be placed at the right end of the tab bar.
 //! An optional sidebar widget can be shown to the right of the content area
@@ -243,6 +243,12 @@ impl Widget for TabView {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

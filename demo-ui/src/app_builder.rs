@@ -34,6 +34,8 @@ pub fn build_demo_ui(
     ));
     let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
     let hovered_bounds = Rc::new(RefCell::new(None::<agg_gui::InspectorOverlay>));
+    let base_edits: Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>> =
+        Rc::new(RefCell::new(Vec::new()));
     #[cfg(feature = "reflect")]
     let inspector_edits: Rc<RefCell<Vec<agg_gui::InspectorEdit>>> =
         Rc::new(RefCell::new(Vec::new()));
@@ -527,7 +529,8 @@ pub fn build_demo_ui(
             Rc::clone(&inspector_nodes),
             Rc::clone(&hovered_bounds),
         )
-        .with_snapshot_cell(Rc::clone(&inspector_snapshot_cell));
+        .with_snapshot_cell(Rc::clone(&inspector_snapshot_cell))
+        .with_base_edit_queue(Rc::clone(&base_edits));
         #[cfg(feature = "reflect")]
         {
             inspector = inspector.with_edit_queue(Rc::clone(&inspector_edits));
@@ -756,6 +759,7 @@ pub fn build_demo_ui(
         show_inspector,
         inspector_nodes,
         hovered_bounds,
+        base_edits,
         #[cfg(feature = "reflect")]
         inspector_edits,
         cube_visible,

@@ -1,4 +1,4 @@
-//! `ImageView` — paints an `Option<(rgba8_top_down, w, h)>` as an image.
+﻿//! `ImageView` — paints an `Option<(rgba8_top_down, w, h)>` as an image.
 //!
 //! Reads its pixel data from an `Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>`
 //! — the same shape [`ScreenshotHandle::image`][crate::ScreenshotHandle]
@@ -110,6 +110,12 @@ impl Widget for ImageView {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

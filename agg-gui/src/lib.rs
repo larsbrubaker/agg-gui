@@ -103,9 +103,10 @@ pub use theme::{
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
 pub use widget::{
-    collect_inspector_nodes, current_mouse_world, current_viewport, find_widget_by_id,
-    find_widget_by_id_mut, find_widget_by_type, App, BackbufferKind, BackbufferSpec,
-    BackbufferState, InspectorNode, InspectorOverlay, Widget,
+    apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
+    find_widget_by_id, find_widget_by_id_mut, find_widget_by_type, App, BackbufferKind,
+    BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay, Widget, WidgetBaseEdit,
+    WidgetBaseField,
 };
 #[cfg(feature = "reflect")]
 pub use widget::{

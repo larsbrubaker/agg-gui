@@ -1,4 +1,4 @@
-//! `Widget` impl for `TreeView` — extracted from `mod.rs` to keep the
+﻿//! `Widget` impl for `TreeView` — extracted from `mod.rs` to keep the
 //! main file under the project's 800-line cap.  All TreeView logic
 //! still lives in `mod.rs`; this submodule only routes the trait
 //! methods (layout / paint / event dispatch / focus / hit-test) into
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::layout_props::{HAnchor, Insets, VAnchor};
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 use super::drag::{paint_drop_child_highlight, paint_drop_line, paint_ghost};
@@ -39,6 +39,12 @@ impl Widget for TreeView {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

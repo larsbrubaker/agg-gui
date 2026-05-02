@@ -57,6 +57,8 @@ thread_local! {
     static INSPECTOR_NODES: RefCell<Option<Rc<RefCell<Vec<InspectorNode>>>>>    = RefCell::new(None);
     /// Shared hover-bounds handle — written by the inspector, read by render().
     static HOVERED_BOUNDS: RefCell<Option<Rc<RefCell<Option<InspectorOverlay>>>>>           = RefCell::new(None);
+    /// Pending WidgetBase live-edits — drained by `render_app_frame` each frame.
+    static BASE_EDITS: RefCell<Option<Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>>>> = RefCell::new(None);
     /// Pending inspector edits — drained by `render_app_frame` each frame.
     #[cfg(feature = "reflect")]
     static INSPECTOR_EDITS: RefCell<Option<Rc<RefCell<Vec<agg_gui::InspectorEdit>>>>> = RefCell::new(None);
@@ -162,6 +164,7 @@ fn ensure_demo_app() {
             SHOW_INSPECTOR.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.show_inspector)));
             INSPECTOR_NODES.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.inspector_nodes)));
             HOVERED_BOUNDS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.hovered_bounds)));
+            BASE_EDITS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.base_edits)));
             #[cfg(feature = "reflect")]
             INSPECTOR_EDITS
                 .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.inspector_edits)));
@@ -279,15 +282,17 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
     let screenshot_image_rc = SCREENSHOT_IMAGE.with(|c| c.borrow().as_ref().map(Rc::clone));
     let inspector_nodes_rc = INSPECTOR_NODES.with(|c| c.borrow().as_ref().map(Rc::clone));
     let hovered_bounds_rc = HOVERED_BOUNDS.with(|c| c.borrow().as_ref().map(Rc::clone));
+    let base_edits_rc = BASE_EDITS.with(|c| c.borrow().as_ref().map(Rc::clone));
     #[cfg(feature = "reflect")]
     let inspector_edits_rc = INSPECTOR_EDITS.with(|c| c.borrow().as_ref().map(Rc::clone));
     let gl_rc_for_clear = GL_STATE.with(|gl_cell| gl_cell.borrow().as_ref().map(|s| s.gl_rc()));
-    if let (Some(req), Some(cap), Some(img), Some(nodes), Some(hb), Some(gl_rc)) = (
+    if let (Some(req), Some(cap), Some(img), Some(nodes), Some(hb), Some(base_edits), Some(gl_rc)) = (
         screenshot_request_rc,
         screenshot_capturing_rc,
         screenshot_image_rc,
         inspector_nodes_rc,
         hovered_bounds_rc,
+        base_edits_rc,
         gl_rc_for_clear,
     ) {
         GL_CTX.with(|ctx_cell| {
@@ -313,6 +318,7 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                                     show_inspector,
                                     &nodes,
                                     &hb,
+                                    &base_edits,
                                     #[cfg(feature = "reflect")]
                                     inspector_edits_rc.as_ref().expect(
                                         "INSPECTOR_EDITS must be initialised with reflect on",

@@ -1,4 +1,4 @@
-//! Flex layout widgets: `FlexColumn` (vertical) and `FlexRow` (horizontal).
+﻿//! Flex layout widgets: `FlexColumn` (vertical) and `FlexRow` (horizontal).
 //!
 //! # Y-up layout convention
 //!
@@ -299,6 +299,12 @@ impl Widget for FlexColumn {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn padding(&self) -> Insets {
         self.inner_padding
@@ -635,6 +641,12 @@ impl Widget for FlexRow {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn padding(&self) -> Insets {
         self.inner_padding

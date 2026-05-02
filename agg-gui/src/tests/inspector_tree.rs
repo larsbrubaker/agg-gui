@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 /// InspectorPanel must build the TreeView with the correct nodes:
 /// - Two InspectorNodes (Root at depth 0, Child at depth 1) must produce two
@@ -24,6 +24,8 @@ fn test_inspector_row0_at_top() {
             depth: 0,
             margin: crate::layout_props::Insets::ZERO,
             padding: crate::layout_props::Insets::ZERO,
+            h_anchor: crate::layout_props::HAnchor::FIT,
+            v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
         },
@@ -33,6 +35,8 @@ fn test_inspector_row0_at_top() {
             depth: 1,
             margin: crate::layout_props::Insets::ZERO,
             padding: crate::layout_props::Insets::ZERO,
+            h_anchor: crate::layout_props::HAnchor::FIT,
+            v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
         },
@@ -114,6 +118,8 @@ fn test_inspector_tree_populates_from_nodes() {
             depth: 0,
             margin: crate::layout_props::Insets::ZERO,
             padding: crate::layout_props::Insets::ZERO,
+            h_anchor: crate::layout_props::HAnchor::FIT,
+            v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
         },
@@ -123,6 +129,8 @@ fn test_inspector_tree_populates_from_nodes() {
             depth: 1,
             margin: crate::layout_props::Insets::ZERO,
             padding: crate::layout_props::Insets::ZERO,
+            h_anchor: crate::layout_props::HAnchor::FIT,
+            v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
         },
@@ -132,6 +140,8 @@ fn test_inspector_tree_populates_from_nodes() {
             depth: 0,
             margin: crate::layout_props::Insets::ZERO,
             padding: crate::layout_props::Insets::ZERO,
+            h_anchor: crate::layout_props::HAnchor::FIT,
+            v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
         },
@@ -196,6 +206,8 @@ fn test_inspector_tree_default_expanded() {
             depth: 0,
             margin: crate::layout_props::Insets::ZERO,
             padding: crate::layout_props::Insets::ZERO,
+            h_anchor: crate::layout_props::HAnchor::FIT,
+            v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
         },
@@ -205,6 +217,8 @@ fn test_inspector_tree_default_expanded() {
             depth: 1,
             margin: crate::layout_props::Insets::ZERO,
             padding: crate::layout_props::Insets::ZERO,
+            h_anchor: crate::layout_props::HAnchor::FIT,
+            v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
         },
@@ -237,6 +251,8 @@ fn test_inspector_tree_drag_disabled() {
         depth: 0,
         margin: crate::layout_props::Insets::ZERO,
         padding: crate::layout_props::Insets::ZERO,
+        h_anchor: crate::layout_props::HAnchor::FIT,
+        v_anchor: crate::layout_props::VAnchor::FIT,
         path: vec![],
         properties: vec![],
     }]));
@@ -366,6 +382,8 @@ fn test_inspector_top_row_appears_at_top_of_tree_area() {
         depth: 0,
         margin: crate::layout_props::Insets::ZERO,
         padding: crate::layout_props::Insets::ZERO,
+        h_anchor: crate::layout_props::HAnchor::FIT,
+        v_anchor: crate::layout_props::VAnchor::FIT,
         path: vec![],
         properties: vec![],
     }]));

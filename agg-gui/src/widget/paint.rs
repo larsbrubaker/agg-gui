@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use crate::framebuffer::Framebuffer;
+use crate::gfx_ctx::GfxCtx;
+use crate::lcd_coverage::LcdBuffer;
+
 use super::*;
 
 std::thread_local! {

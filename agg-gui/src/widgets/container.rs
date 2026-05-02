@@ -1,4 +1,4 @@
-//! `Container` — a rectangular box with optional background, border, and
+﻿//! `Container` — a rectangular box with optional background, border, and
 //! padding that holds zero or more child widgets.
 //!
 //! Phase 4 child layout is a simple top-down vertical stack (bottom-most child
@@ -165,6 +165,12 @@ impl Widget for Container {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn padding(&self) -> Insets {
         self.props.inner_padding

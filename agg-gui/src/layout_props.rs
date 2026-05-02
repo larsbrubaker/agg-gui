@@ -162,6 +162,26 @@ impl HAnchor {
     pub fn is_stretch(self) -> bool {
         self.contains(Self::LEFT) && self.contains(Self::RIGHT)
     }
+
+    /// Raw bit value — used by the inspector to store/cycle anchor presets.
+    #[inline]
+    pub fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// Short display name for the inspector properties pane.
+    pub fn display_name(self) -> &'static str {
+        match self.0 {
+            b if b == Self::FIT.0               => "Fit",
+            b if b == Self::STRETCH.0           => "Stretch",
+            b if b == Self::LEFT.0              => "Left",
+            b if b == Self::CENTER.0            => "Center",
+            b if b == Self::RIGHT.0             => "Right",
+            b if b == Self::MAX_FIT_OR_STRETCH.0 => "MaxFitStr",
+            b if b == Self::MIN_FIT_OR_STRETCH.0 => "MinFitStr",
+            _                                   => "Abs",
+        }
+    }
 }
 
 impl Default for HAnchor {
@@ -224,6 +244,26 @@ impl VAnchor {
     #[inline]
     pub fn is_stretch(self) -> bool {
         self.contains(Self::BOTTOM) && self.contains(Self::TOP)
+    }
+
+    /// Raw bit value — used by the inspector to store/cycle anchor presets.
+    #[inline]
+    pub fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// Short display name for the inspector properties pane.
+    pub fn display_name(self) -> &'static str {
+        match self.0 {
+            b if b == Self::FIT.0               => "Fit",
+            b if b == Self::STRETCH.0           => "Stretch",
+            b if b == Self::BOTTOM.0            => "Bottom",
+            b if b == Self::CENTER.0            => "Center",
+            b if b == Self::TOP.0               => "Top",
+            b if b == Self::MAX_FIT_OR_STRETCH.0 => "MaxFitStr",
+            b if b == Self::MIN_FIT_OR_STRETCH.0 => "MinFitStr",
+            _                                   => "Abs",
+        }
     }
 }
 

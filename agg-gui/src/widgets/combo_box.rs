@@ -1,4 +1,4 @@
-//! `ComboBox` — a single-selection dropdown widget.
+﻿//! `ComboBox` — a single-selection dropdown widget.
 //!
 //! The widget always occupies its compact closed height.  When open, options
 //! are painted as a floating panel below the button in `paint_overlay()` so
@@ -343,6 +343,12 @@ impl Widget for ComboBox {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

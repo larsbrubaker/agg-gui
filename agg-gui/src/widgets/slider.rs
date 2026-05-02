@@ -1,4 +1,4 @@
-//! `Slider` — a horizontal range slider with a draggable thumb.
+﻿//! `Slider` — a horizontal range slider with a draggable thumb.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -282,6 +282,12 @@ impl Widget for Slider {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

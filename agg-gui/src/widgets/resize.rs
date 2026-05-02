@@ -1,4 +1,4 @@
-//! `Resize` — a nested, user-draggable resizable container.
+﻿//! `Resize` — a nested, user-draggable resizable container.
 //!
 //! Egui-parity port of `egui::Resize`.  Wraps a single child widget
 //! and exposes a bottom-right grip the user can drag to resize the
@@ -167,6 +167,12 @@ impl Widget for Resize {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

@@ -21,6 +21,7 @@ pub fn render_frame(
     show_inspector: bool,
     inspector_nodes: &Rc<RefCell<Vec<agg_gui::InspectorNode>>>,
     hovered_bounds: &Rc<RefCell<Option<InspectorOverlay>>>,
+    base_edits: &Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>>,
     #[cfg(feature = "reflect")] inspector_edits: &Rc<
         RefCell<Vec<agg_gui::InspectorEdit>>,
     >,
@@ -36,6 +37,7 @@ pub fn render_frame(
         show_inspector,
         inspector_nodes,
         hovered_bounds,
+        base_edits,
         #[cfg(feature = "reflect")]
         inspector_edits,
     );

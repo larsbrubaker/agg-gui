@@ -1,4 +1,4 @@
-//! `DragValue` — a numeric scrubber that lets the user drag left/right to change a value.
+﻿//! `DragValue` — a numeric scrubber that lets the user drag left/right to change a value.
 //!
 //! Displays the current value as formatted text centered inside a lightly
 //! tinted rectangle.  Clicking and dragging horizontally adjusts the value at
@@ -284,6 +284,12 @@ impl Widget for DragValue {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

@@ -1,4 +1,4 @@
-//! `Checkbox` — a boolean toggle with a label.
+﻿//! `Checkbox` — a boolean toggle with a label.
 //!
 //! # Composition
 //!
@@ -208,6 +208,12 @@ impl Widget for Checkbox {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

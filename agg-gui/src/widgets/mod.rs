@@ -1,6 +1,7 @@
 pub mod button;
 pub mod checkbox;
 pub mod collapsing_header;
+pub mod conditional;
 pub mod color_picker;
 pub mod combo_box;
 pub mod container;
@@ -49,7 +50,8 @@ pub use menu::{
     MenuBar, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut, PopupMenu,
     ShortcutKey, TopMenu,
 };
-pub use primitives::{Conditional, Padding, Separator, SizedBox, Spacer, Stack};
+pub use conditional::Conditional;
+pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
 pub use progress_bar::ProgressBar;
 pub use radio_group::RadioGroup;
 pub use resize::Resize;

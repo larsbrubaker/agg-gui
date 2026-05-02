@@ -1,4 +1,4 @@
-//! `ProgressBar` — a read-only horizontal progress indicator.
+﻿//! `ProgressBar` — a read-only horizontal progress indicator.
 
 use std::sync::Arc;
 
@@ -125,6 +125,12 @@ impl Widget for ProgressBar {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

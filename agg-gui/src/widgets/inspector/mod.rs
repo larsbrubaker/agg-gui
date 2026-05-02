@@ -1,4 +1,4 @@
-//! Widget inspector panel — uses the system `TreeView` for tree display.
+﻿//! Widget inspector panel — uses the system `TreeView` for tree display.
 //!
 //! Layout (Y-up, panel fills its full bounds):
 //! ```text
@@ -65,6 +65,12 @@ impl Widget for InternalPresenceNode {
     }
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor
@@ -217,6 +223,9 @@ pub struct InspectorPanel {
     /// which property row was hit when the layout next paints.
     #[cfg(feature = "reflect")]
     pub edits: Option<Rc<RefCell<Vec<crate::widget::InspectorEdit>>>>,
+    /// Queue for WidgetBase live-edits (margin, anchors).  Not gated on
+    /// `reflect` — available on every widget via `widget_base_mut`.
+    pub base_edits: Option<Rc<RefCell<Vec<crate::widget::WidgetBaseEdit>>>>,
     /// Cached row hit-rectangles built during paint (panel-local bounds);
     /// each entry is `(rect, field_name, row_kind)`.  Used by `on_event` to
     /// translate a click to a queued edit.
@@ -239,12 +248,40 @@ pub(super) struct PropHit {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(not(feature = "reflect"), allow(dead_code))]
 pub(super) enum PropHitKind {
-    /// Clicking flips the bool.
+    /// Clicking flips the bool (widget-specific reflected field).
+    #[cfg_attr(not(feature = "reflect"), allow(dead_code))]
     BoolToggle { current: bool },
-    /// Clicking the left half decrements, right half increments by `step`.
+    /// Clicking the left half decrements, right half increments (reflected field).
+    #[cfg_attr(not(feature = "reflect"), allow(dead_code))]
     NumericStep { current: f64, step: f64 },
+    /// Click left half → subtract step from an Insets side; right half → add.
+    InsetField {
+        target: InsetsTarget,
+        side: InsetsSide,
+        current: f64,
+        step: f64,
+    },
+    /// Click anywhere on the row to advance to the next HAnchor preset.
+    HAnchorCycle { current_bits: u8 },
+    /// Click anywhere on the row to advance to the next VAnchor preset.
+    VAnchorCycle { current_bits: u8 },
+}
+
+/// Which Insets struct the edit targets.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum InsetsTarget {
+    Margin,
+    // Padding editing not yet supported (stored differently per container).
+}
+
+/// Which side of the Insets to update.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum InsetsSide {
+    Left,
+    Right,
+    Top,
+    Bottom,
 }
 
 /// Serializable inspector UI state — apply at startup, snapshot at shutdown.
@@ -285,6 +322,7 @@ impl InspectorPanel {
             tree_view,
             #[cfg(feature = "reflect")]
             edits: None,
+            base_edits: None,
             prop_hits: Vec::new(),
             pending_expanded: None,
             pending_selected: None,
@@ -298,6 +336,18 @@ impl InspectorPanel {
     /// that persists app state.
     pub fn with_snapshot_cell(mut self, cell: Rc<RefCell<Option<InspectorSavedState>>>) -> Self {
         self.snapshot_out = Some(cell);
+        self
+    }
+
+    /// Bind a queue the inspector pushes [`crate::widget::WidgetBaseEdit`]s
+    /// into when the user edits margin, anchor, or size-constraint fields.
+    /// The host frame loop drains and applies via
+    /// [`crate::widget::apply_widget_base_edit`].
+    pub fn with_base_edit_queue(
+        mut self,
+        cell: Rc<RefCell<Vec<crate::widget::WidgetBaseEdit>>>,
+    ) -> Self {
+        self.base_edits = Some(cell);
         self
     }
 
@@ -403,6 +453,26 @@ impl InspectorPanel {
     }
 }
 
+// ── Anchor cycle helpers ──────────────────────────────────────────────────────
+
+fn next_h_anchor(bits: u8) -> HAnchor {
+    // Cycle: FIT → STRETCH → LEFT → CENTER → RIGHT → FIT
+    if bits == HAnchor::FIT.bits()     { HAnchor::STRETCH }
+    else if bits == HAnchor::STRETCH.bits() { HAnchor::LEFT }
+    else if bits == HAnchor::LEFT.bits()    { HAnchor::CENTER }
+    else if bits == HAnchor::CENTER.bits()  { HAnchor::RIGHT }
+    else                                    { HAnchor::FIT }
+}
+
+fn next_v_anchor(bits: u8) -> VAnchor {
+    // Cycle: FIT → STRETCH → BOTTOM → CENTER → TOP → FIT
+    if bits == VAnchor::FIT.bits()     { VAnchor::STRETCH }
+    else if bits == VAnchor::STRETCH.bits() { VAnchor::BOTTOM }
+    else if bits == VAnchor::BOTTOM.bits()  { VAnchor::CENTER }
+    else if bits == VAnchor::CENTER.bits()  { VAnchor::TOP }
+    else                                    { VAnchor::FIT }
+}
+
 // ── Widget impl ───────────────────────────────────────────────────────────────
 
 impl InspectorPanel {
@@ -448,6 +518,65 @@ impl InspectorPanel {
         );
     }
 
+    /// Test a click against the property rows for WidgetBase fields (margin,
+    /// anchor).  Returns `true` if a `WidgetBaseEdit` was queued.  Not gated
+    /// on `reflect` — uses `widget_base_mut` which is always available.
+    fn try_emit_base_edit_from_click(&self, pos: Point) -> bool {
+        let Some(queue) = &self.base_edits else {
+            return false;
+        };
+        let Some(sel_idx) = self.selected else {
+            return false;
+        };
+        let nodes = self.nodes.borrow();
+        let Some(node) = nodes.get(sel_idx) else {
+            return false;
+        };
+        let Some(hit) = self.prop_hits.iter().find(|h| {
+            pos.x >= h.rect.x
+                && pos.x <= h.rect.x + h.rect.width
+                && pos.y >= h.rect.y
+                && pos.y <= h.rect.y + h.rect.height
+        }) else {
+            return false;
+        };
+        let field = match &hit.kind {
+            PropHitKind::InsetField {
+                target: InsetsTarget::Margin,
+                side,
+                current,
+                step,
+            } => {
+                let mid = hit.rect.x + hit.rect.width * 0.5;
+                let new_v = (if pos.x < mid {
+                    *current - *step
+                } else {
+                    *current + *step
+                })
+                .max(0.0);
+                match side {
+                    InsetsSide::Left => crate::widget::WidgetBaseField::MarginLeft(new_v),
+                    InsetsSide::Right => crate::widget::WidgetBaseField::MarginRight(new_v),
+                    InsetsSide::Top => crate::widget::WidgetBaseField::MarginTop(new_v),
+                    InsetsSide::Bottom => crate::widget::WidgetBaseField::MarginBottom(new_v),
+                }
+            }
+            PropHitKind::HAnchorCycle { current_bits } => {
+                crate::widget::WidgetBaseField::HAnchor(next_h_anchor(*current_bits))
+            }
+            PropHitKind::VAnchorCycle { current_bits } => {
+                crate::widget::WidgetBaseField::VAnchor(next_v_anchor(*current_bits))
+            }
+            _ => return false,
+        };
+        queue.borrow_mut().push(crate::widget::WidgetBaseEdit {
+            path: node.path.clone(),
+            field,
+        });
+        crate::animation::request_draw();
+        true
+    }
+
     /// Test a panel-local click against the cached property-row rectangles
     /// painted last frame.  Returns true if the click produced a queued edit.
     #[cfg(feature = "reflect")]
@@ -490,6 +619,7 @@ impl InspectorPanel {
                     new_value: Box::new(new_v),
                 }
             }
+            _ => return false,
         };
         queue.borrow_mut().push(edit);
         crate::animation::request_draw();

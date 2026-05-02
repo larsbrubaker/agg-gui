@@ -1,4 +1,4 @@
-//! Native GL demo for agg-gui.
+﻿//! Native GL demo for agg-gui.
 //!
 //! Renders via `GlGfxCtx` (tess2 → GL vertex buffers), matching the WASM path.
 //!
@@ -290,6 +290,7 @@ fn main() {
     let show_inspector = Rc::clone(&handles.show_inspector);
     let inspector_nodes = Rc::clone(&handles.inspector_nodes);
     let hovered_bounds = Rc::clone(&handles.hovered_bounds);
+    let base_edits = Rc::clone(&handles.base_edits);
     #[cfg(feature = "reflect")]
     let inspector_edits = Rc::clone(&handles.inspector_edits);
     // `cube_visible` used to drive the ControlFlow decision; now the 3-D
@@ -385,6 +386,7 @@ fn main() {
         show_inspector.get(),
         &inspector_nodes,
         &hovered_bounds,
+        &base_edits,
         #[cfg(feature = "reflect")]
         &inspector_edits,
     );
@@ -448,6 +450,7 @@ fn main() {
                             show_inspector.get(),
                             &inspector_nodes,
                             &hovered_bounds,
+                            &base_edits,
                             #[cfg(feature = "reflect")]
                             &inspector_edits,
                         );
@@ -687,6 +690,7 @@ fn main() {
                                     show_insp,
                                     &inspector_nodes,
                                     &hovered_bounds,
+                                    &base_edits,
                                     #[cfg(feature = "reflect")]
                                     &inspector_edits,
                                 )

@@ -1,4 +1,4 @@
-//! `ToggleSwitch` — an iOS-style pill-shaped boolean toggle widget.
+﻿//! `ToggleSwitch` — an iOS-style pill-shaped boolean toggle widget.
 //!
 //! Renders as a rounded-rectangle (pill) with a sliding white circle inside.
 //! The pill is gray when off and blue when on.  Supports keyboard activation
@@ -226,6 +226,12 @@ impl Widget for ToggleSwitch {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

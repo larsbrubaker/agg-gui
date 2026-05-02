@@ -224,6 +224,10 @@ pub struct InspectorNode {
     /// widgets that override [`Widget::padding`].  Drawn as the green band
     /// inset from `screen_bounds`.
     pub padding: crate::layout_props::Insets,
+    /// Horizontal anchor from the widget's `WidgetBase`, if present.
+    pub h_anchor: crate::layout_props::HAnchor,
+    /// Vertical anchor from the widget's `WidgetBase`, if present.
+    pub v_anchor: crate::layout_props::VAnchor,
     pub depth: usize,
     /// Path of child indices from the App root to this widget.  Used by the
     /// inspector's live-editing pipeline to walk back to the live widget and
@@ -461,11 +465,20 @@ fn collect_inspector_nodes_with_path(
     if let Some(reflected) = widget.as_reflect() {
         props.extend(reflect_fields(reflected));
     }
+    let (h_anchor, v_anchor) = widget
+        .widget_base()
+        .map(|b| (b.h_anchor, b.v_anchor))
+        .unwrap_or((
+            crate::layout_props::HAnchor::FIT,
+            crate::layout_props::VAnchor::FIT,
+        ));
     out.push(InspectorNode {
         type_name: widget.type_name(),
         screen_bounds: abs,
         margin: widget.margin(),
         padding: widget.padding(),
+        h_anchor,
+        v_anchor,
         depth,
         path: path_prefix.to_vec(),
         properties: props,
@@ -538,6 +551,62 @@ impl std::fmt::Debug for InspectorEdit {
             .field("field_path", &self.field_path)
             .finish_non_exhaustive()
     }
+}
+
+// ---------------------------------------------------------------------------
+// WidgetBase live editing (no reflect feature required)
+// ---------------------------------------------------------------------------
+
+/// One field in a widget's [`crate::layout_props::WidgetBase`] that the
+/// inspector can change at runtime.
+#[derive(Clone, Debug)]
+pub enum WidgetBaseField {
+    MarginLeft(f64),
+    MarginRight(f64),
+    MarginTop(f64),
+    MarginBottom(f64),
+    HAnchor(crate::layout_props::HAnchor),
+    VAnchor(crate::layout_props::VAnchor),
+    MinWidth(f64),
+    MinHeight(f64),
+    MaxWidth(f64),
+    MaxHeight(f64),
+}
+
+/// Queued mutation for a widget's `WidgetBase`.  The inspector pushes these;
+/// the host frame loop drains and applies via [`apply_widget_base_edit`].
+#[derive(Clone, Debug)]
+pub struct WidgetBaseEdit {
+    /// Path of child indices from the App root to the target widget.
+    pub path: Vec<usize>,
+    pub field: WidgetBaseField,
+}
+
+/// Apply a single queued `WidgetBaseEdit` against the live widget tree.
+/// Returns `true` when the edit landed, `false` if the path was stale or the
+/// widget does not expose a `WidgetBase`.
+pub fn apply_widget_base_edit(root: &mut dyn Widget, edit: &WidgetBaseEdit) -> bool {
+    let Some(target) = walk_path_mut(root, &edit.path) else {
+        return false;
+    };
+    let Some(base) = target.widget_base_mut() else {
+        return false;
+    };
+    match &edit.field {
+        WidgetBaseField::MarginLeft(v) => base.margin.left = *v,
+        WidgetBaseField::MarginRight(v) => base.margin.right = *v,
+        WidgetBaseField::MarginTop(v) => base.margin.top = *v,
+        WidgetBaseField::MarginBottom(v) => base.margin.bottom = *v,
+        WidgetBaseField::HAnchor(a) => base.h_anchor = *a,
+        WidgetBaseField::VAnchor(a) => base.v_anchor = *a,
+        WidgetBaseField::MinWidth(v) => base.min_size.width = v.max(0.0),
+        WidgetBaseField::MinHeight(v) => base.min_size.height = v.max(0.0),
+        WidgetBaseField::MaxWidth(v) => base.max_size.width = v.max(0.0),
+        WidgetBaseField::MaxHeight(v) => base.max_size.height = v.max(0.0),
+    }
+    target.mark_dirty();
+    crate::animation::request_draw();
+    true
 }
 
 /// Apply a single queued inspector edit against the live widget tree.

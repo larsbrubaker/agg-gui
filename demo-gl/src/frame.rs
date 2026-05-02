@@ -88,10 +88,23 @@ pub fn render_app_frame(
     show_inspector: bool,
     inspector_nodes: &Rc<RefCell<Vec<InspectorNode>>>,
     hovered_bounds: &Rc<RefCell<Option<InspectorOverlay>>>,
+    base_edits: &Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>>,
     #[cfg(feature = "reflect")] inspector_edits: &Rc<
         RefCell<Vec<agg_gui::InspectorEdit>>,
     >,
 ) {
+    // Drain WidgetBase live-edits (margin, anchor) first — always available,
+    // no reflect feature required.
+    {
+        let mut q = base_edits.borrow_mut();
+        if !q.is_empty() {
+            for edit in q.drain(..) {
+                let _ = agg_gui::apply_widget_base_edit(app.root_mut(), &edit);
+            }
+            INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.set(None));
+        }
+    }
+
     // Drain pending inspector edits FIRST so the layout/paint that follows
     // sees the new values.  Stale-path edits (the tree shape changed since
     // the inspector snapshot) silently fail; the next frame's snapshot will

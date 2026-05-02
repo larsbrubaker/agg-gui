@@ -1,4 +1,4 @@
-//! `RadioGroup` — a set of mutually exclusive radio buttons.
+﻿//! `RadioGroup` — a set of mutually exclusive radio buttons.
 //!
 //! Each option label is rendered through a backbuffered [`Label`] child,
 //! so glyph rasterization is cached and only repeated when text or color changes.
@@ -206,6 +206,12 @@ impl Widget for RadioGroup {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

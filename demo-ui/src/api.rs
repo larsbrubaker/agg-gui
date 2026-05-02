@@ -78,6 +78,10 @@ pub struct DemoHandles {
     pub show_inspector: Rc<Cell<bool>>,
     pub inspector_nodes: Rc<RefCell<Vec<InspectorNode>>>,
     pub hovered_bounds: Rc<RefCell<Option<InspectorOverlay>>>,
+    /// Pending WidgetBase live-edits (margin, anchors).  The platform harness
+    /// drains and applies via `agg_gui::apply_widget_base_edit` each frame.
+    /// Always present — does not require the `reflect` feature.
+    pub base_edits: Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>>,
     /// Pending inspector edits — the platform harness drains and applies via
     /// `agg_gui::apply_inspector_edit` each frame after layout.  Only present
     /// with the `reflect` cargo feature.

@@ -1,4 +1,4 @@
-//! `Widget` impl for `InspectorPanel` — extracted from `mod.rs` to keep
+﻿//! `Widget` impl for `InspectorPanel` — extracted from `mod.rs` to keep
 //! the parent file under the project's 800-line cap.  All InspectorPanel
 //! state and helpers still live in the parent module; this file only
 //! routes the trait methods (layout / paint / event dispatch) into them.
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Rect, Size};
-use crate::layout_props::{HAnchor, Insets, VAnchor};
+use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::{InspectorOverlay, Widget};
 use crate::widgets::tree_view::{NodeIcon, TreeNode};
 
@@ -36,6 +36,12 @@ impl Widget for InspectorPanel {
 
     fn margin(&self) -> Insets {
         self.base.margin
+    }
+    fn widget_base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+    fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor
@@ -251,6 +257,9 @@ impl Widget for InspectorPanel {
                 button: MouseButton::Left,
                 ..
             } => {
+                if pos.y < self.split_y() - 2.0 && self.try_emit_base_edit_from_click(*pos) {
+                    return EventResult::Consumed;
+                }
                 #[cfg(feature = "reflect")]
                 if pos.y < self.split_y() - 2.0 && self.try_emit_edit_from_click(*pos) {
                     return EventResult::Consumed;
