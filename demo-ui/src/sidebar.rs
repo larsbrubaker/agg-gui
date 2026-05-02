@@ -24,10 +24,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    Button, CollapsingHeader, Color, DrawCtx, Event, EventResult, FlexColumn, Font, Insets, Label,
-    MouseButton, Point, Rect, ScrollView, Separator, Size, SizedBox, TextField, Widget,
+    Button, CollapsingHeader, DrawCtx, Event, EventResult, FlexColumn, Font, HAnchor, Insets,
+    Label, LabelAlign, Rect, ScrollView, Separator, Size, SizedBox, TextField, Widget,
 };
 
 /// One entry in the sidebar list (demo window, test window, or tool).
@@ -63,7 +62,6 @@ pub struct SidebarGroup<'a> {
 
 const TB_HEIGHT: f64 = 22.0;
 const TB_INDENT: f64 = 22.0; // left indent so items nest under group triangle
-const TB_R: f64 = 4.0;
 const TB_FONT_SIZE: f64 = 13.0;
 /// Vertical inset of the row background — leaves a 1 px sliver of the panel
 /// colour above and below so consecutive selected rows don't fuse into one
@@ -81,24 +79,34 @@ const TB_BG_INSET_L: f64 = TB_INDENT - TB_BG_PAD_L;
 /// margin so the pill's right end has the same breathing room as top/bottom.
 const TB_BG_INSET_R: f64 = 5.0;
 
+/// Sidebar list row — full-width clickable pill that toggles a shared
+/// `Rc<Cell<bool>>` (a demo window's open state).  Composed from a single
+/// `Button` child styled with `with_subtle()` + `with_active_fn()`,
+/// stretched horizontally and inset on the leading edge by `TB_INDENT`
+/// so the label nests under its `CollapsingHeader` group triangle.
 struct ToggleButton {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    label: Label,
-    state: Rc<Cell<bool>>,
-    hovered: bool,
-    pressed: bool,
 }
 
 impl ToggleButton {
     fn new(text: &str, font: Arc<Font>, state: Rc<Cell<bool>>) -> Self {
+        let state_active = Rc::clone(&state);
+        let state_click = state;
+        let btn = Button::new(text, font)
+            .with_font_size(TB_FONT_SIZE)
+            .with_subtle()
+            .with_h_anchor(HAnchor::STRETCH)
+            .with_label_align(LabelAlign::Left)
+            .with_label_pad_h(TB_INDENT)
+            .with_active_fn(move || state_active.get())
+            .on_click(move || {
+                state_click.set(!state_click.get());
+                agg_gui::animation::request_draw();
+            });
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
-            label: Label::new(text, font).with_font_size(TB_FONT_SIZE),
-            state,
-            hovered: false,
-            pressed: false,
+            children: vec![Box::new(btn)],
         }
     }
 }
@@ -122,142 +130,25 @@ impl Widget for ToggleButton {
 
     fn layout(&mut self, available: Size) -> Size {
         let w = available.width;
-        let inner_w = (w - TB_INDENT - 6.0).max(1.0);
-        let ls = self.label.layout(Size::new(inner_w, TB_HEIGHT));
-        // Vertically centre the label inside the row; left-align after the
-        // indent used to mark group membership.
-        let ly = ((TB_HEIGHT - ls.height) * 0.5).max(0.0);
-        self.label
-            .set_bounds(Rect::new(TB_INDENT, ly, ls.width.min(inner_w), ls.height));
         self.bounds = Rect::new(0.0, 0.0, w, TB_HEIGHT);
+        let pill_w = (w - TB_BG_INSET_L - TB_BG_INSET_R).max(1.0);
+        let child = &mut self.children[0];
+        child.layout(Size::new(pill_w, TB_HEIGHT - TB_BG_INSET_V * 2.0));
+        child.set_bounds(Rect::new(
+            TB_BG_INSET_L,
+            TB_BG_INSET_V,
+            pill_w,
+            TB_HEIGHT - TB_BG_INSET_V * 2.0,
+        ));
         Size::new(w, TB_HEIGHT)
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let w = self.bounds.width;
-        let h = self.bounds.height;
-        let selected = self.state.get();
-
-        // Row background — hover darkens; pressed goes further; selected is accent-filled.
-        let bg = if selected {
-            v.accent
-        } else if self.pressed {
-            Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.16)
-        } else if self.hovered {
-            Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.10)
-        } else {
-            Color::rgba(0.0, 0.0, 0.0, 0.0)
-        };
-        if bg.a > 0.001 {
-            let bx = TB_BG_INSET_L;
-            let bw = (w - TB_BG_INSET_L - TB_BG_INSET_R).max(1.0);
-            let by = TB_BG_INSET_V;
-            let bh = (h - TB_BG_INSET_V * 2.0).max(1.0);
-            ctx.set_fill_color(bg);
-            ctx.begin_path();
-            ctx.rounded_rect(bx, by, bw, bh, TB_R);
-            ctx.fill();
-        }
-
-        // Label colour inverts on selected so it stays readable on the accent bg.
-        let text_color = if selected {
-            let lum = 0.299 * v.accent.r + 0.587 * v.accent.g + 0.114 * v.accent.b;
-            if lum < 0.5 {
-                Color::white()
-            } else {
-                Color::rgb(0.08, 0.08, 0.10)
-            }
-        } else {
-            v.text_color
-        };
-        self.label.set_color(text_color);
-
-        // Draw the label at the position computed in `layout()` — left-aligned
-        // after the group indent, vertically centred in the row.  Label's
-        // LCD path samples the actual painted pixel beneath it, so no
-        // bg declaration is needed here (the accent / hover / pressed
-        // pill we just painted above IS the destination Label will read).
-        let lb = self.label.bounds();
-        ctx.save();
-        ctx.translate(lb.x, lb.y);
-        paint_subtree(&mut self.label, ctx);
-        ctx.restore();
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
+        // Button child paints itself via the framework's tree walk.
     }
 
-    fn on_event(&mut self, event: &Event) -> EventResult {
-        match event {
-            Event::MouseMove { pos } => {
-                let inside = pos.x >= 0.0
-                    && pos.x <= self.bounds.width
-                    && pos.y >= 0.0
-                    && pos.y <= self.bounds.height;
-                let was_hover = self.hovered;
-                let was_pressed = self.pressed;
-                self.hovered = inside;
-                if !inside {
-                    self.pressed = false;
-                }
-                if was_hover != self.hovered || was_pressed != self.pressed {
-                    agg_gui::animation::request_draw();
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-            Event::MouseDown {
-                button: MouseButton::Left,
-                pos,
-                ..
-            } => {
-                let inside = pos.x >= 0.0
-                    && pos.x <= self.bounds.width
-                    && pos.y >= 0.0
-                    && pos.y <= self.bounds.height;
-                if inside {
-                    self.pressed = true;
-                    agg_gui::animation::request_draw();
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-            Event::MouseUp {
-                button: MouseButton::Left,
-                pos,
-                ..
-            } => {
-                let inside = pos.x >= 0.0
-                    && pos.x <= self.bounds.width
-                    && pos.y >= 0.0
-                    && pos.y <= self.bounds.height;
-                let was_pressed = self.pressed;
-                self.pressed = false;
-                if was_pressed && inside {
-                    // Toggle the shared open-state cell: this is what opens /
-                    // closes the associated demo Window.  The Window reads
-                    // its `visible_cell` next layout, so we MUST request a
-                    // repaint — otherwise the show/hide only takes effect
-                    // the next time something else triggers a frame.
-                    self.state.set(!self.state.get());
-                    agg_gui::animation::request_draw();
-                    return EventResult::Consumed;
-                }
-                if was_pressed {
-                    // Lost the press (released outside) — visible state change.
-                    agg_gui::animation::request_draw();
-                }
-                EventResult::Ignored
-            }
-            _ => EventResult::Ignored,
-        }
-    }
-
-    fn hit_test(&self, local_pos: Point) -> bool {
-        local_pos.x >= 0.0
-            && local_pos.x <= self.bounds.width
-            && local_pos.y >= 0.0
-            && local_pos.y <= self.bounds.height
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
     }
 }
 

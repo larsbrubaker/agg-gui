@@ -29,6 +29,11 @@ use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::label::{Label, LabelAlign};
 
+/// Default horizontal padding used to inset a left- or right-aligned label
+/// from the button edge.  Center-aligned labels ignore this and centre
+/// inside the button bounds.
+const LEFT_LABEL_PAD: f64 = 8.0;
+
 /// A theme for [`Button`] visual states.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ButtonTheme {
@@ -88,6 +93,16 @@ pub struct Button {
     /// subtle button that flips to the accent look when its `active_fn`
     /// returns true.
     subtle: bool,
+    /// How the child label is positioned inside the button rect.
+    /// `Center` (default) centres horizontally; `Left` insets by
+    /// [`LEFT_LABEL_PAD`] and is the right choice for full-width
+    /// sidebar rows where the label hugs the leading edge.
+    label_align: LabelAlign,
+    /// Custom horizontal inset applied when `label_align` is `Left` or
+    /// `Right`.  Defaults to [`LEFT_LABEL_PAD`]; sidebar entries with
+    /// indent > 0 set this to push the label past a group-marker
+    /// triangle.
+    label_pad_h: f64,
 
     hovered: bool,
     pressed: bool,
@@ -113,6 +128,8 @@ impl Button {
             enabled_fn: None,
             active_fn: None,
             subtle: false,
+            label_align: LabelAlign::Center,
+            label_pad_h: LEFT_LABEL_PAD,
             hovered: false,
             pressed: false,
             focused: false,
@@ -152,6 +169,29 @@ impl Button {
     /// toggles out of plain `Button`s without hand-rolled paint code.
     pub fn with_active_fn(mut self, f: impl Fn() -> bool + 'static) -> Self {
         self.active_fn = Some(Rc::new(f));
+        self
+    }
+
+    /// Override how the child label is aligned inside the button rect.
+    /// Defaults to [`LabelAlign::Center`].  Use [`LabelAlign::Left`] for
+    /// full-width sidebar rows where the label hugs the leading edge.
+    /// Also rebuilds the child Label so its own internal alignment matches.
+    pub fn with_label_align(mut self, align: LabelAlign) -> Self {
+        self.label_align = align;
+        self.children[0] = Box::new(
+            Label::new(&self.label_text, Arc::clone(&self.font))
+                .with_font_size(self.font_size)
+                .with_color(self.theme.label_color)
+                .with_align(align),
+        );
+        self
+    }
+
+    /// Override the horizontal padding used when `label_align` is `Left`
+    /// or `Right`.  Defaults to a small visual gutter; bump it up to indent
+    /// the label past a group-marker triangle in sidebar rows.
+    pub fn with_label_pad_h(mut self, pad: f64) -> Self {
+        self.label_pad_h = pad;
         self
     }
 
@@ -310,7 +350,13 @@ impl Widget for Button {
         }
         .min(available.width);
         let size = Size::new(width, height);
-        let label_x = ((size.width - label_size.width) * 0.5).max(0.0);
+        let label_x = match self.label_align {
+            LabelAlign::Left => self.label_pad_h.min(size.width),
+            LabelAlign::Right => {
+                (size.width - label_size.width - self.label_pad_h).max(0.0)
+            }
+            LabelAlign::Center => ((size.width - label_size.width) * 0.5).max(0.0),
+        };
         let label_y = ((size.height - label_size.height) * 0.5).max(0.0);
         self.children[0].set_bounds(Rect::new(
             label_x,

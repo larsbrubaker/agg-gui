@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    font_settings, FlexColumn, FlexRow, Font, Label, Rect, ScrollView, Separator, SizedBox, Slider,
+    font_settings, FlexColumn, FlexRow, Font, Label, ScrollView, Separator, SizedBox, Slider,
     TabView, TextField, ToggleSwitch, Widget,
 };
 
@@ -430,16 +430,19 @@ fn build_render_tab(font: Arc<Font>) -> Box<dyn Widget> {
     };
     col.push(body(msaa_body), 0.0);
     col.push(
-        match cells.platform.kind {
-            PlatformKind::Native => Box::new(crate::backend_panel::MsaaRow::new(
-                Arc::clone(&font),
-                Rc::clone(&cells.msaa_samples),
-            )) as Box<dyn Widget>,
-            PlatformKind::Web => Box::new(MsaaBoolRow::new(
-                Arc::clone(&font),
-                Rc::clone(&cells.msaa_samples),
-            )) as Box<dyn Widget>,
-        },
+        Box::new(crate::backend_panel::MsaaRow::new(
+            Arc::clone(&font),
+            Rc::clone(&cells.msaa_samples),
+            // Native shells expose the full 5-way MSAA picker; the WASM
+            // shell only gets `Off` / `On` because browser WebGL exposes
+            // a boolean `antialias` flag (the browser picks the actual
+            // sample count).  Same widget, different segments — both
+            // write to `cells.msaa_samples`.
+            match cells.platform.kind {
+                PlatformKind::Native => crate::backend_panel::MsaaRow::NATIVE_SEGMENTS,
+                PlatformKind::Web => crate::backend_panel::MsaaRow::WEB_SEGMENTS,
+            },
+        )) as Box<dyn Widget>,
         0.0,
     );
 
@@ -488,151 +491,3 @@ fn build_render_tab(font: Arc<Font>) -> Box<dyn Widget> {
 
 // ── On/Off MSAA row (web — WebGL2 only exposes a boolean) ────────────────
 
-/// Two-button segmented control (Off / On) bound to the same
-/// `Rc<Cell<u8>>` as the native MsaaRow — On maps to 4 (a reasonable
-/// default the browser typically honours), Off to 0.  That way the
-/// persisted state file has the same shape regardless of which shell
-/// wrote it; the WASM harness simply reads `msaa_samples > 0`.
-struct MsaaBoolRow {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-    samples: Rc<Cell<u8>>,
-    hovered: Option<usize>,
-    labels: Vec<agg_gui::Label>,
-}
-
-impl MsaaBoolRow {
-    const BTN_W: f64 = 60.0;
-    const BTN_H: f64 = 24.0;
-    const LABELS: &'static [&'static str] = &["Off", "On"];
-    /// Index 0 → 0 samples, index 1 → 4 samples (default WebGL MSAA level).
-    const VALS: &'static [u8] = &[0, 4];
-
-    fn new(font: Arc<Font>, samples: Rc<Cell<u8>>) -> Self {
-        let labels = Self::LABELS
-            .iter()
-            .map(|t| agg_gui::Label::new(*t, Arc::clone(&font)).with_font_size(12.0))
-            .collect();
-        Self {
-            bounds: agg_gui::Rect::default(),
-            children: Vec::new(),
-            samples,
-            hovered: None,
-            labels,
-        }
-    }
-
-    fn btn_rect(&self, i: usize) -> agg_gui::Rect {
-        let gy = (self.bounds.height - Self::BTN_H) * 0.5;
-        agg_gui::Rect::new(
-            12.0 + i as f64 * (Self::BTN_W + 4.0),
-            gy,
-            Self::BTN_W,
-            Self::BTN_H,
-        )
-    }
-}
-
-impl Widget for MsaaBoolRow {
-    fn type_name(&self) -> &'static str {
-        "MsaaBoolRow"
-    }
-    fn bounds(&self) -> agg_gui::Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, b: agg_gui::Rect) {
-        self.bounds = b;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-
-    fn layout(&mut self, available: agg_gui::Size) -> agg_gui::Size {
-        self.bounds = agg_gui::Rect::new(0.0, 0.0, available.width, Self::BTN_H + 8.0);
-        for i in 0..Self::LABELS.len() {
-            let r = self.btn_rect(i);
-            let s = self.labels[i].layout(agg_gui::Size::new(r.width, r.height));
-            self.labels[i].set_bounds(agg_gui::Rect::new(0.0, 0.0, s.width, s.height));
-        }
-        agg_gui::Size::new(available.width, Self::BTN_H + 8.0)
-    }
-
-    fn paint(&mut self, ctx: &mut dyn agg_gui::DrawCtx) {
-        let v = ctx.visuals();
-        let current = self.samples.get();
-
-        for i in 0..Self::LABELS.len() {
-            let r = self.btn_rect(i);
-            let active = current == Self::VALS[i];
-            let hovered = self.hovered == Some(i);
-
-            let bg = if active {
-                v.accent
-            } else if hovered {
-                v.widget_bg_hovered
-            } else {
-                v.widget_bg
-            };
-            ctx.set_fill_color(bg);
-            ctx.begin_path();
-            ctx.rounded_rect(r.x, r.y, r.width, r.height, 4.0);
-            ctx.fill();
-
-            self.labels[i].set_text(Self::LABELS[i]);
-            let text_color = if active {
-                agg_gui::Color::white()
-            } else {
-                v.text_color
-            };
-            self.labels[i].set_color(text_color);
-
-            let lw = self.labels[i].bounds().width;
-            let lh = self.labels[i].bounds().height;
-            let lx = r.x + (r.width - lw) * 0.5;
-            let ly = r.y + (r.height - lh) * 0.5;
-            self.labels[i].set_bounds(agg_gui::Rect::new(lx, ly, lw, lh));
-
-            ctx.save();
-            ctx.translate(lx, ly);
-            agg_gui::widget::paint_subtree(&mut self.labels[i], ctx);
-            ctx.restore();
-        }
-    }
-
-    fn on_event(&mut self, event: &agg_gui::Event) -> agg_gui::EventResult {
-        let hit = |p: agg_gui::Point| {
-            (0..Self::LABELS.len()).find(|&i| {
-                let r = self.btn_rect(i);
-                p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
-            })
-        };
-        match event {
-            agg_gui::Event::MouseMove { pos } => {
-                let was = self.hovered;
-                self.hovered = hit(*pos);
-                if was != self.hovered {
-                    agg_gui::animation::request_draw();
-                }
-                agg_gui::EventResult::Ignored
-            }
-            agg_gui::Event::MouseDown {
-                button: agg_gui::MouseButton::Left,
-                pos,
-                ..
-            } => {
-                if let Some(i) = hit(*pos) {
-                    if self.samples.get() != Self::VALS[i] {
-                        self.samples.set(Self::VALS[i]);
-                        agg_gui::animation::request_draw();
-                    }
-                    return agg_gui::EventResult::Consumed;
-                }
-                agg_gui::EventResult::Ignored
-            }
-            _ => agg_gui::EventResult::Ignored,
-        }
-    }
-}

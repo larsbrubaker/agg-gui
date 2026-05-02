@@ -6,7 +6,7 @@ use std::sync::Arc;
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
     measure_text_metrics, Button, Checkbox, Color, Container, DragValue, DrawCtx, Event,
-    EventResult, FlexColumn, FlexRow, Font, Label, LabelAlign, MouseButton, Point, Rect,
+    EventResult, FlexColumn, FlexRow, Font, HAnchor, Label, LabelAlign, MouseButton, Point, Rect,
     ScrollView, Separator, Size, SizedBox, TextField, Widget,
 };
 
@@ -363,54 +363,51 @@ impl Widget for TextLayoutPreview {
     }
 }
 
+/// Generic n-segment selector — a row of equally-sized `Button` children
+/// sharing a `Rc<Cell<usize>>` for the selected index.  Inactive segments
+/// use the muted theme colours (`with_subtle()`); the selected segment
+/// flips to the accent surface (`with_active_fn`).  Width is divided
+/// evenly across segments — passes `cell_w` as `available.width` so each
+/// stretching child fills its slot.
 struct SelectionButtons {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    labels: Vec<String>,
-    selected: Rc<Cell<usize>>,
-    hovered: Option<usize>,
-    font_size: f64,
-    label_widgets: Vec<Label>,
+    n: usize,
+    button_h: f64,
 }
 
 impl SelectionButtons {
     fn new(options: Vec<impl Into<String>>, selected: Rc<Cell<usize>>, font: Arc<Font>) -> Self {
         let labels: Vec<String> = options.into_iter().map(|s| s.into()).collect();
-        let font_size = 12.0;
-        let label_widgets = labels
-            .iter()
-            .map(|text| {
-                Label::new(text.as_str(), Arc::clone(&font))
+        let font_size: f64 = 12.0;
+        let button_h = (font_size * 1.7).max(24.0);
+        let n = labels.len();
+        let children: Vec<Box<dyn Widget>> = labels
+            .into_iter()
+            .enumerate()
+            .map(|(i, text)| {
+                let sel_active = Rc::clone(&selected);
+                let sel_click = Rc::clone(&selected);
+                let btn = Button::new(text, Arc::clone(&font))
                     .with_font_size(font_size)
-                    .with_align(LabelAlign::Center)
+                    .with_subtle()
+                    .with_h_anchor(HAnchor::STRETCH)
+                    .with_active_fn(move || sel_active.get() == i)
+                    .on_click(move || {
+                        if sel_click.get() != i {
+                            sel_click.set(i);
+                            agg_gui::animation::request_draw();
+                        }
+                    });
+                Box::new(btn) as Box<dyn Widget>
             })
             .collect();
         Self {
             bounds: Rect::default(),
-            children: Vec::new(),
-            labels,
-            selected,
-            hovered: None,
-            font_size,
-            label_widgets,
+            children,
+            n,
+            button_h,
         }
-    }
-
-    fn button_h(&self) -> f64 {
-        (self.font_size * 1.7).max(24.0)
-    }
-
-    fn index_at(&self, p: Point) -> Option<usize> {
-        if self.labels.is_empty()
-            || p.x < 0.0
-            || p.y < 0.0
-            || p.x > self.bounds.width
-            || p.y > self.bounds.height
-        {
-            return None;
-        }
-        let cell_w = self.bounds.width / self.labels.len() as f64;
-        Some(((p.x / cell_w).floor() as usize).min(self.labels.len() - 1))
     }
 }
 
@@ -436,100 +433,25 @@ impl Widget for SelectionButtons {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let h = self.button_h();
+        let h = self.button_h;
         let w = available.width;
         self.bounds = Rect::new(0.0, 0.0, w, h);
-        if !self.labels.is_empty() {
-            let cell_w = w / self.labels.len() as f64;
-            for label in &mut self.label_widgets {
-                label.layout(Size::new(cell_w, h));
-                label.set_bounds(Rect::new(0.0, 0.0, cell_w, h));
+        if self.n > 0 {
+            let cell_w = w / self.n as f64;
+            for (i, child) in self.children.iter_mut().enumerate() {
+                child.layout(Size::new(cell_w, h));
+                child.set_bounds(Rect::new(i as f64 * cell_w, 0.0, cell_w, h));
             }
         }
         Size::new(w, h)
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        if self.labels.is_empty() {
-            return;
-        }
-
-        let v = ctx.visuals();
-        let n = self.labels.len();
-        let cell_w = self.bounds.width / n as f64;
-        let h = self.bounds.height;
-        let selected = self.selected.get().min(n - 1);
-
-        for i in 0..n {
-            let x = i as f64 * cell_w;
-            let is_selected = i == selected;
-            let is_hovered = self.hovered == Some(i);
-            let bg = if is_selected {
-                v.accent
-            } else if is_hovered {
-                v.widget_bg_hovered
-            } else {
-                v.widget_bg
-            };
-            let text = if is_selected {
-                Color::white()
-            } else {
-                v.text_color
-            };
-
-            ctx.set_fill_color(bg);
-            ctx.begin_path();
-            ctx.rounded_rect(x, 0.0, cell_w, h, 4.0);
-            ctx.fill();
-
-            ctx.set_stroke_color(v.widget_stroke);
-            ctx.set_line_width(1.0);
-            ctx.begin_path();
-            ctx.rounded_rect(
-                x + 0.5,
-                0.5,
-                (cell_w - 1.0).max(0.0),
-                (h - 1.0).max(0.0),
-                4.0,
-            );
-            ctx.stroke();
-
-            self.label_widgets[i].set_color(text);
-            let lb = self.label_widgets[i].bounds();
-            ctx.save();
-            ctx.translate(x + (cell_w - lb.width) * 0.5, (h - lb.height) * 0.5);
-            paint_subtree(&mut self.label_widgets[i], ctx);
-            ctx.restore();
-        }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
+        // Buttons paint themselves through the framework's tree walk.
     }
 
-    fn on_event(&mut self, event: &Event) -> EventResult {
-        match event {
-            Event::MouseMove { pos } => {
-                let was = self.hovered;
-                self.hovered = self.index_at(*pos);
-                if was != self.hovered {
-                    agg_gui::animation::request_draw();
-                }
-                EventResult::Ignored
-            }
-            Event::MouseDown {
-                button: MouseButton::Left,
-                pos,
-                ..
-            } => {
-                if let Some(i) = self.index_at(*pos) {
-                    if self.selected.get() != i {
-                        self.selected.set(i);
-                        agg_gui::animation::request_draw();
-                    }
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-            _ => EventResult::Ignored,
-        }
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
     }
 }
 

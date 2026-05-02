@@ -415,33 +415,44 @@ impl Widget for TogglePill {
 
 // ── MSAA row ─────────────────────────────────────────────────────────────────
 
-/// MSAA sample-count selector — five segmented buttons (Off / 2× / 4× / 8× /
-/// 16×).  Writes to a shared `Rc<Cell<u8>>`; the platform harness reads that
-/// value from the persisted state file at startup to configure the GL
-/// surface.  Matches `RunModeRow`'s look and event model.
+/// MSAA sample-count selector — a row of segmented buttons composed from
+/// real `Button` children.  The set of segments is supplied at
+/// construction (`(label, sample_count)` pairs) so the same widget powers
+/// both the native shell's 5-way Off/2×/4×/8×/16× picker and the WASM
+/// shell's 2-way Off/On picker (browser WebGL only exposes a boolean
+/// `antialias` flag).  Each segment uses `with_subtle()` +
+/// `with_active_fn()` so the selected sample count flips to the accent
+/// surface and the others stay muted.
 ///
-/// Exposed to other crate modules (the System window's Render tab uses the
-/// same widget) via `pub(crate)`.
-/// MSAA sample-count selector — five segmented buttons (Off / 2× / 4× /
-/// 8× / 16×) composed from real `Button` children.  Each segment uses
-/// `with_subtle()` + `with_active_fn()` so the selected sample count
-/// flips to the accent surface and the others stay muted.  Matches the
-/// composition pattern used by `ThemeToggle` and `RunModeRow`.
+/// Exposed to other crate modules (the System window's Render tab uses
+/// the same widget) via `pub(crate)`.
 pub(crate) struct MsaaRow {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
 
 impl MsaaRow {
-    const BTN_W: f64 = 44.0;
     const BTN_H: f64 = 24.0;
-    const TEXT: &'static [&'static str] = &["Off", "2×", "4×", "8×", "16×"];
-    const VALS: &'static [u8] = &[0, 2, 4, 8, 16];
+    /// Default segments matching the native shell's MSAA dropdown.
+    pub(crate) const NATIVE_SEGMENTS: &'static [(&'static str, u8)] = &[
+        ("Off", 0),
+        ("2×", 2),
+        ("4×", 4),
+        ("8×", 8),
+        ("16×", 16),
+    ];
+    /// Browser WebGL only exposes a boolean `antialias` flag; "On" maps
+    /// to 4 (a sensible default the browser typically honours).
+    pub(crate) const WEB_SEGMENTS: &'static [(&'static str, u8)] =
+        &[("Off", 0), ("On", 4)];
 
-    pub(crate) fn new(font: Arc<Font>, samples: Rc<Cell<u8>>) -> Self {
-        let children: Vec<Box<dyn Widget>> = Self::TEXT
+    pub(crate) fn new(
+        font: Arc<Font>,
+        samples: Rc<Cell<u8>>,
+        segments: &'static [(&'static str, u8)],
+    ) -> Self {
+        let children: Vec<Box<dyn Widget>> = segments
             .iter()
-            .zip(Self::VALS.iter())
             .map(|(label, val)| {
                 let samples_active = Rc::clone(&samples);
                 let samples_click = Rc::clone(&samples);
@@ -462,6 +473,17 @@ impl MsaaRow {
         Self {
             bounds: Rect::default(),
             children,
+        }
+    }
+
+    /// Per-segment button width — tighter for the 5-way native list,
+    /// roomier for the 2-way Web list so each button can fit a longer
+    /// label without truncating.
+    fn btn_width(&self) -> f64 {
+        if self.children.len() <= 2 {
+            60.0
+        } else {
+            44.0
         }
     }
 }
@@ -487,12 +509,13 @@ impl Widget for MsaaRow {
         let row_h = Self::BTN_H + 8.0;
         self.bounds = Rect::new(0.0, 0.0, available.width, row_h);
         let gy = (row_h - Self::BTN_H) * 0.5;
+        let bw = self.btn_width();
         for (i, child) in self.children.iter_mut().enumerate() {
-            child.layout(Size::new(Self::BTN_W, Self::BTN_H));
+            child.layout(Size::new(bw, Self::BTN_H));
             child.set_bounds(Rect::new(
-                12.0 + i as f64 * (Self::BTN_W + 4.0),
+                12.0 + i as f64 * (bw + 4.0),
                 gy,
-                Self::BTN_W,
+                bw,
                 Self::BTN_H,
             ));
         }
