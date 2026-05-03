@@ -42,6 +42,9 @@ pub mod bar_grid;
 mod bar_grid_math;
 pub use bar_grid::{BarGridWgpuRenderer, WgpuCubeWidget, CUBE_SCREEN_RECT};
 
+pub mod custom_render;
+pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
+
 pub mod msaa;
 pub use msaa::MsaaFramebuffer;
 
@@ -380,6 +383,28 @@ impl WgpuGfxCtx {
         self.flush_to_surface(&view);
     }
 
+    /// Queue a custom wgpu render pass to run at the current point in the
+    /// frame's draw order. The user-supplied [`WgpuCustomRender`] is invoked
+    /// from `end_frame` after the active 2-D pass closes; subsequent 2-D
+    /// content reopens with `LoadOp::Load` so it composites on top.
+    ///
+    /// `screen_rect` is the widget's logical-pixel rect in agg-gui Y-up
+    /// coords. The implementor receives it via
+    /// [`WgpuCustomRenderCtx::screen_rect`] and is responsible for any
+    /// scissor / viewport conversions to wgpu's Y-down convention.
+    pub fn push_custom_render(
+        &mut self,
+        renderer: custom_render::SharedCustomRenderer,
+        screen_rect: agg_gui::Rect,
+    ) {
+        let parent_clip = self.current_clip();
+        self.commands.push(DrawCommand::Custom {
+            renderer,
+            screen_rect,
+            parent_clip,
+        });
+    }
+
     /// Stash a handle to the current frame's surface texture so a later
     /// [`Self::read_screenshot`] call can copy from it.  Called from the
     /// platform shell with `frame.texture.clone()` BEFORE [`begin_frame`].
@@ -617,6 +642,14 @@ pub(crate) enum DrawCommand {
     /// reopens the 2-D pass with `LoadOp::Load`.
     DrawBarGrid {
         renderer: std::rc::Rc<std::cell::RefCell<Option<bar_grid::BarGridWgpuRenderer>>>,
+        screen_rect: agg_gui::Rect,
+        parent_clip: Option<[i32; 4]>,
+    },
+    /// Generic custom-render hook — dispatches to user code implementing
+    /// [`WgpuCustomRender`].  Same pass-break / reopen semantics as
+    /// `DrawBarGrid`. Pushed via [`WgpuGfxCtx::push_custom_render`].
+    Custom {
+        renderer: custom_render::SharedCustomRenderer,
         screen_rect: agg_gui::Rect,
         parent_clip: Option<[i32; 4]>,
     },

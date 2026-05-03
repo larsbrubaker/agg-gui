@@ -372,6 +372,15 @@ pub(crate) fn prepare_all(
                     parent_clip: *parent_clip,
                 });
             }
+
+            DrawCommand::Custom { renderer, screen_rect, parent_clip } => {
+                // Identical structure to DrawBarGrid: pass-break + reopen.
+                out.push(Prepared::Custom {
+                    renderer: std::rc::Rc::clone(renderer),
+                    screen_rect: *screen_rect,
+                    parent_clip: *parent_clip,
+                });
+            }
         }
     }
 

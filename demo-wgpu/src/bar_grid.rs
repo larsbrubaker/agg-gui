@@ -231,19 +231,29 @@ fn bar_wave_phase(elapsed_secs: f64) -> f32 {
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 pub struct BarGridWgpuRenderer {
-    /// 3-D bar pipeline configured for `sample_count`.
+    /// 3-D bar pipeline — always `sample_count = 1`, since AA comes from
+    /// SSAA (rendering into an oversized off-screen framebuffer and
+    /// downsampling) instead of hardware MSAA.
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     vbo: wgpu::Buffer,
     ibo: wgpu::Buffer,
     instance_vbo: wgpu::Buffer,
-    /// Lazy-allocated off-screen MSAA framebuffer (with depth) sized to the
-    /// widget rect.  Built on first draw because we need the device handle.
+    /// Lazy-allocated off-screen framebuffer (with depth) sized to
+    /// `ssaa_scale × {widget_w, widget_h}`.  At `ssaa_scale = 1` it's the
+    /// widget's own pixel rect (no AA); at `2` it's 4× the pixel count
+    /// (label "4×"); at `4` it's 16× (label "16×").  The shared `tex_pipeline`
+    /// blits this onto the surface with a linear sampler, which performs the
+    /// downsample for free at 2× minification (a single bilinear tap is the
+    /// 2×2 box) and an approximation at 4× minification.
     framebuffer: Option<MsaaFramebuffer>,
     surface_format: wgpu::TextureFormat,
-    sample_count: u32,
+    /// Linear scale of the off-screen framebuffer (1 = no AA, 2 = 4× SSAA,
+    /// 4 = 16× SSAA).  Driven by [`crate::msaa::ssaa_linear_scale`] from the
+    /// widget's UI-facing samples cell.
+    ssaa_scale: u32,
     /// Animation start time — passed in by the widget so renderer
-    /// rebuilds (e.g. an MSAA toggle) keep the bar wave phase continuous.
+    /// rebuilds (e.g. an SSAA scale toggle) keep the bar wave phase continuous.
     start: web_time::Instant,
 }
 
@@ -251,15 +261,14 @@ impl BarGridWgpuRenderer {
     pub fn new(
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
-        sample_count: u32,
+        ssaa_samples: u32,
         start: web_time::Instant,
     ) -> Self {
-        // Clamp through the same logic the framebuffer will apply, so the
-        // pipeline's `MultisampleState` matches the colour attachment we'll
-        // hand it later.  Without this an out-of-spec saved value (e.g. `8`
-        // on a device that only supports `[1, 4]` for the surface format)
-        // panics during pipeline creation instead of silently degrading.
-        let sample_count = crate::msaa::safe_sample_count(sample_count);
+        let ssaa_scale = crate::msaa::ssaa_linear_scale(ssaa_samples);
+        // Pipeline is single-sample regardless of SSAA factor.  AA happens
+        // by the framebuffer being bigger than the screen rect, not by
+        // hardware multisampling.
+        let sample_count: u32 = 1;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bar_grid"),
             source: wgpu::ShaderSource::Wgsl(BAR_WGSL.into()),
@@ -392,34 +401,37 @@ impl BarGridWgpuRenderer {
             instance_vbo,
             framebuffer: None,
             surface_format,
-            sample_count: sample_count.max(1),
+            ssaa_scale,
             start,
         }
     }
 
-    /// Sample count this renderer's pipeline was built for.  Used by the
-    /// caller (cube widget) to detect when a new MSAA setting requires a
-    /// fresh renderer.
-    pub fn sample_count(&self) -> u32 {
-        self.sample_count
+    /// Linear SSAA scale this renderer was built for (1 / 2 / 4).  Used by
+    /// the cube widget to detect when a new toolbar setting needs a fresh
+    /// renderer.
+    pub fn ssaa_scale(&self) -> u32 {
+        self.ssaa_scale
     }
 
-    /// Lazy-allocate the off-screen [`MsaaFramebuffer`] on first draw and
-    /// resize it on widget changes.  Returns a mutable reference for the
-    /// caller to use as render attachments + blit source.
+    /// Lazy-allocate the off-screen framebuffer at `ssaa_scale × widget`
+    /// pixels and resize it on widget changes.  Single-sample throughout —
+    /// AA comes from the size, not the sample count.
     fn ensure_framebuffer(
         &mut self,
         device: &wgpu::Device,
-        w: u32,
-        h: u32,
+        widget_w: u32,
+        widget_h: u32,
     ) -> &mut MsaaFramebuffer {
+        let scale = self.ssaa_scale.max(1);
+        let w = widget_w.saturating_mul(scale).max(1);
+        let h = widget_h.saturating_mul(scale).max(1);
         let needs_new = self.framebuffer.is_none();
         if needs_new {
             self.framebuffer = Some(MsaaFramebuffer::new(
                 device,
                 w,
                 h,
-                self.sample_count,
+                /* sample_count = */ 1,
                 self.surface_format,
                 /* with_depth = */ true,
             ));
@@ -464,10 +476,17 @@ impl BarGridWgpuRenderer {
         let widget_w = gl_w as u32;
         let widget_h = gl_h as u32;
 
-        // Lazy-init / resize the off-screen MSAA framebuffer to the bar-grid
-        // rect.  Memory scales with the visible 3-D area, not the full target.
+        // Lazy-init / resize the off-screen framebuffer at `ssaa_scale ×
+        // widget` pixels.  Memory scales with the visible 3-D area × the SSAA
+        // factor (4× for "4×", 16× for "16×").
+        let scale = self.ssaa_scale.max(1);
         let _ = self.ensure_framebuffer(device, widget_w, widget_h);
+        let fb_w = widget_w.saturating_mul(scale).max(1);
+        let fb_h = widget_h.saturating_mul(scale).max(1);
 
+        // Aspect comes from the widget rect (not the SSAA-scaled framebuffer)
+        // — the camera frames the same scene, we just sample it at higher
+        // density before downsampling.
         let aspect = gl_w as f32 / gl_h.max(1) as f32;
         let proj = perspective(35_f32.to_radians(), aspect, 0.5, 100.0);
         let view = look_at([-7.0, 8.5, 11.0], [0.0, 0.5, 0.0], [0.0, 1.0, 0.0]);
@@ -535,8 +554,10 @@ impl BarGridWgpuRenderer {
                 multiview_mask: None,
             });
 
-            pass.set_viewport(0.0, 0.0, widget_w as f32, widget_h as f32, 0.0, 1.0);
-            pass.set_scissor_rect(0, 0, widget_w, widget_h);
+            // Render at the supersampled framebuffer size so geometry edges
+            // are sampled at SSAA resolution; the blit pass below downsamples.
+            pass.set_viewport(0.0, 0.0, fb_w as f32, fb_h as f32, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, fb_w, fb_h);
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bar_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vbo.slice(..));
@@ -547,18 +568,38 @@ impl BarGridWgpuRenderer {
         }
 
         // ── Pass 2: composite onto the active 2-D target ───────────────────
-        // `MsaaFramebuffer::blit_to` runs the shared `tex_pipeline` with
-        // alpha-blending so transparent pixels (where bars aren't covered)
-        // preserve the 2-D content underneath.
-        fb.blit_to(
-            device,
-            encoder,
-            target_view,
-            target_size,
-            screen_rect,
-            parent_clip,
-            pipelines,
-        );
+        // Pick the right downsample at the SSAA scale:
+        //   • scale 1 (Off):  no minification, bilinear is identity-equivalent
+        //   • scale 2 (4×):   2× minification — single bilinear tap is the
+        //                     exact 2×2 box average, no shader work needed
+        //   • scale 4 (16×):  4× minification — single bilinear would only
+        //                     average 4 of 16 source texels.  Switch to
+        //                     `blit_downsample_4x_to` (4 bilinear taps in a
+        //                     2×2 quadrant grid → exact 4×4 box).
+        // Both methods alpha-blend through `BLEND_STANDARD` so transparent
+        // pixels (where bars aren't covered) preserve the 2-D content
+        // underneath.
+        if self.ssaa_scale >= 4 {
+            fb.blit_downsample_4x_to(
+                device,
+                encoder,
+                target_view,
+                target_size,
+                screen_rect,
+                parent_clip,
+                pipelines,
+            );
+        } else {
+            fb.blit_to(
+                device,
+                encoder,
+                target_view,
+                target_size,
+                screen_rect,
+                parent_clip,
+                pipelines,
+            );
+        }
 
         let _ = (bar_ub, bar_bind_group);
     }
@@ -576,12 +617,13 @@ pub struct WgpuCubeWidget {
     /// `DrawCommand::DrawBarGrid` queued for this frame holds a clone of the
     /// `Rc` and reads the renderer back at execute time.
     renderer: Rc<RefCell<Option<BarGridWgpuRenderer>>>,
-    /// Shared MSAA sample-count cell.  Read each paint and run through
-    /// [`crate::msaa::safe_sample_count`]; if the resulting count differs
-    /// from the active renderer, `paint()` rebuilds the renderer.  UI
-    /// controls (e.g. the Off / 4× row at the top of the 3-D Animation
-    /// window) write to the same cell — same `Rc<Cell<u8>>` the demo-ui
-    /// state layer persists, so a tweak round-trips to disk for free.
+    /// Shared SSAA samples cell.  Values map to a linear framebuffer scale
+    /// via [`crate::msaa::ssaa_linear_scale`]: `1`/`0` → 1× (Off), `4` → 2×
+    /// (4× SSAA), `16` → 4× (16× SSAA).  The widget rebuilds the renderer
+    /// when the resulting linear scale changes.  UI controls (Off / 4× /
+    /// 16× toolbar at the top of the 3-D Animation window) write to the
+    /// same cell — same `Rc<Cell<u8>>` the demo-ui state layer persists,
+    /// so a tweak round-trips to disk for free.
     sample_count: Rc<Cell<u8>>,
     /// Animation start time — owned by the widget so it survives renderer
     /// rebuilds (the MSAA toggle drops + recreates the renderer to apply
@@ -598,13 +640,13 @@ impl Default for WgpuCubeWidget {
 }
 
 impl WgpuCubeWidget {
-    /// Build a new cube widget bound to a shared MSAA `Rc<Cell<u8>>`.
-    /// The cell starts at the desired sample count (`0` / `1` = no MSAA,
-    /// `4` = the highest WebGPU-spec-guaranteed value).  Out-of-spec
-    /// values are clamped on the read side via
-    /// [`crate::msaa::safe_sample_count`] so an old saved `8` doesn't
-    /// panic on pipeline creation; the cell itself preserves the user's
-    /// raw choice.
+    /// Build a new cube widget bound to a shared SSAA samples `Rc<Cell<u8>>`.
+    /// The cell stores the UI-facing pixel multiplier (`0`/`1` = Off,
+    /// `4` = 4× SSAA, `16` = 16× SSAA).  Values get clamped on the read
+    /// side by [`crate::msaa::ssaa_linear_scale`], so an old saved MSAA
+    /// `8` (or any out-of-band value) maps to a sensible step instead of
+    /// panicking.  The cell itself preserves the user's raw choice for
+    /// state persistence.
     pub fn new(sample_count: Rc<Cell<u8>>) -> Self {
         Self {
             bounds: Rect::default(),
@@ -689,23 +731,24 @@ impl Widget for WgpuCubeWidget {
         // still lays out and renders, the bars simply don't appear.
         if let Some(any) = ctx.as_any_mut() {
             if let Some(wgpu_ctx) = any.downcast_mut::<WgpuGfxCtx>() {
-                // Read the shared MSAA cell, clamp through the spec-safe
-                // helper, and rebuild the renderer if the active sample
-                // count no longer matches.  No restart required — the UI
-                // toggles in the cube widget's title bar take effect on
-                // the next paint.
-                let desired = crate::msaa::safe_sample_count(self.sample_count.get() as u32);
+                // Read the shared SSAA-samples cell and convert to the
+                // linear framebuffer scale.  Rebuild the renderer if the
+                // resulting scale no longer matches the active one.  The UI
+                // toolbar (Off / 4× / 16×) writes to this cell, so the
+                // toggle takes effect on the next paint with no restart.
+                let raw = self.sample_count.get() as u32;
+                let desired_scale = crate::msaa::ssaa_linear_scale(raw);
                 {
                     let mut slot = self.renderer.borrow_mut();
                     let needs_rebuild = match slot.as_ref() {
-                        Some(r) => r.sample_count() != desired,
+                        Some(r) => r.ssaa_scale() != desired_scale,
                         None => true,
                     };
                     if needs_rebuild {
                         *slot = Some(BarGridWgpuRenderer::new(
                             &wgpu_ctx.device,
                             wgpu_ctx.surface_format,
-                            desired,
+                            raw,
                             self.start,
                         ));
                     }

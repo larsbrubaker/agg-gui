@@ -193,6 +193,55 @@ struct VOut {
 ";
 
 // ---------------------------------------------------------------------------
+// 4×4-box downsample pipeline — used by SSAA at 4× linear minification.
+//
+// The destination quad is 1/4 the linear size of the source texture; a single
+// bilinear tap would only cover 4 of the 16 source texels under each output
+// pixel.  We instead place 4 bilinear taps at the centres of the four 2×2
+// quadrants of the 4×4 source region under each dst pixel.  Each tap exactly
+// averages its 2×2 quadrant (bilinear at the texel-grid junction has uniform
+// 0.25/0.25/0.25/0.25 weights), so averaging the 4 taps gives the correct
+// 4×4 box average — every source texel contributes 1/16, no aliasing.
+//
+// Reuses the textured-quad bind groups (TexUniforms + texture + sampler) and
+// vertex shader from `TEX_WGSL`; only the fragment shader changes.
+// ---------------------------------------------------------------------------
+
+pub(crate) const TEX_DOWNSAMPLE_4X_WGSL: &str = "
+struct TexUniforms {
+    resolution: vec2<f32>,
+    pad: vec2<f32>,
+}
+@group(0) @binding(0) var<uniform> u: TexUniforms;
+@group(1) @binding(0) var u_tex: texture_2d<f32>;
+@group(1) @binding(1) var u_sampler: sampler;
+
+struct VIn {
+    @location(0) pos: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+}
+struct VOut {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) v_uv: vec2<f32>,
+}
+
+@vertex fn vs_main(in: VIn) -> VOut {
+    let ndc = (in.pos / u.resolution) * 2.0 - 1.0;
+    return VOut(vec4<f32>(ndc, 0.0, 1.0), in.uv);
+}
+
+@fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
+    let dims = vec2<f32>(textureDimensions(u_tex, 0));
+    let texel = vec2<f32>(1.0) / dims;
+    let s0 = textureSample(u_tex, u_sampler, in.v_uv + vec2<f32>(-1.0, -1.0) * texel);
+    let s1 = textureSample(u_tex, u_sampler, in.v_uv + vec2<f32>( 1.0, -1.0) * texel);
+    let s2 = textureSample(u_tex, u_sampler, in.v_uv + vec2<f32>(-1.0,  1.0) * texel);
+    let s3 = textureSample(u_tex, u_sampler, in.v_uv + vec2<f32>( 1.0,  1.0) * texel);
+    return (s0 + s1 + s2 + s3) * 0.25;
+}
+";
+
+// ---------------------------------------------------------------------------
 // Layer composite pipeline
 // ---------------------------------------------------------------------------
 // Reuses the TEX_WGSL vertex shader.

@@ -99,6 +99,23 @@ pub fn wasm_start() {
     });
 }
 
+/// Zero-sized `HasDisplayHandle` impl that returns the `Web` display handle
+/// variant.  Plumbed into `InstanceDescriptor::new_with_display_handle` to
+/// work around wgpu 29's `MissingDisplayHandle` rejection of canvas
+/// surfaces (they have no real display, but wgpu-core requires one of the
+/// two display sources to be `Some`).  Trivially `Send + Sync` since it
+/// holds no state.
+#[derive(Debug)]
+struct WebDisplay;
+
+impl wgpu::rwh::HasDisplayHandle for WebDisplay {
+    fn display_handle(
+        &self,
+    ) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+        Ok(wgpu::rwh::DisplayHandle::web())
+    }
+}
+
 async fn init_wgpu_async() -> Result<WgpuInit, String> {
     let document = web_sys::window()
         .ok_or("no global window")?
@@ -113,7 +130,16 @@ async fn init_wgpu_async() -> Result<WgpuInit, String> {
     // wgpu's `webgl` feature targets `Backends::GL` on wasm32.  WebGPU is
     // intentionally NOT requested here so behaviour matches `demo-wasm` and
     // works on every browser with WebGL2 (vs. WebGPU, still uneven in 2026).
-    let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    //
+    // wgpu 29 has a quirk in `wgpu_core::Instance::create_surface`: if BOTH
+    // the instance's display handle AND the surface target's display handle
+    // are `None`, it returns `MissingDisplayHandle` — even though
+    // `SurfaceTarget::Canvas` legitimately has no display handle (canvases
+    // bind to a window-like handle, not a display).  Workaround: hand the
+    // instance a no-op `Web` display handle so the `(None, None)` branch
+    // doesn't fire.  Cost is one zero-sized boxed shim.
+    let mut instance_desc =
+        wgpu::InstanceDescriptor::new_with_display_handle(Box::new(WebDisplay));
     instance_desc.backends = wgpu::Backends::GL;
     let instance = wgpu::Instance::new(instance_desc);
 

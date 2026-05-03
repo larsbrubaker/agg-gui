@@ -33,11 +33,31 @@ use crate::pipelines::{TexUniforms, WgpuPipelines};
 /// desktop adapters but rejected by validation on others (and on most
 /// WebGL2 backends) — pipeline creation panics rather than silently
 /// degrading.  Callers building MSAA-aware widgets pass their saved /
-/// requested setting through this and rebuild on change; the demo's UI
-/// presents only `Off` and `4×` choices to match.
+/// requested setting through this and rebuild on change.
 pub fn safe_sample_count(requested: u32) -> u32 {
     match requested {
         0 | 1 => 1,
+        _ => 4,
+    }
+}
+
+/// Map a UI-facing SSAA "samples" choice to the linear render-target scale
+/// factor used when supersampling onto an oversized framebuffer.
+///
+/// Cell values are pixel multipliers (`1` / `4` / `16`); the linear scale is
+/// `sqrt(samples)`, so a 16-sample request allocates a 4× linear (= 16×
+/// pixel) backbuffer that gets bilinear-downsampled to the on-screen rect.
+/// Unlike hardware MSAA this works on any adapter — the framebuffer stays
+/// `sample_count = 1` and only the *size* changes, so the WebGPU
+/// `{1, 4}`-only guarantee for multisampled formats is irrelevant.
+///
+/// Saved values from the old MSAA-semantics era (`0` for off) are coerced
+/// to `1`.  Anything between supported steps is rounded to the nearest
+/// supported step so out-of-band saves don't fail loudly.
+pub fn ssaa_linear_scale(requested_samples: u32) -> u32 {
+    match requested_samples {
+        0 | 1 => 1,
+        2..=8 => 2,
         _ => 4,
     }
 }
@@ -184,6 +204,13 @@ impl MsaaFramebuffer {
     /// pixels (where the widget didn't render) preserve the 2-D content
     /// underneath.
     ///
+    /// At ≥4× linear minification (e.g. SSAA 16×) a single bilinear tap
+    /// only reads 4 of the 16 source texels per output pixel; in that case
+    /// the caller can dispatch through `tex_downsample_4x_pipeline` instead
+    /// by routing through this method's higher-level helper.  This base
+    /// `blit_to` always runs the single-tap pipeline — fine for 1×/2×
+    /// minification (perfect 2×2 box at 2×).
+    ///
     /// `parent_clip` is intersected with `dst_rect` to set the pass scissor —
     /// pass the framework scissor that was active when the widget called
     /// `gl_paint` / pushed its draw command.
@@ -195,6 +222,57 @@ impl MsaaFramebuffer {
         target_size: (u32, u32),
         dst_rect: Rect,
         parent_clip: Option<[i32; 4]>,
+        pipelines: &WgpuPipelines,
+    ) {
+        self.blit_to_inner(
+            device,
+            encoder,
+            target_view,
+            target_size,
+            dst_rect,
+            parent_clip,
+            &pipelines.tex_pipeline,
+            pipelines,
+        );
+    }
+
+    /// 4×4-box downsample variant of [`Self::blit_to`].  Use when the
+    /// framebuffer is exactly 4× the linear size of `dst_rect` (SSAA 16×):
+    /// runs `tex_downsample_4x_pipeline` so all 16 source texels under each
+    /// output pixel contribute equally, instead of the 4-of-16 you'd get
+    /// from a single bilinear tap.
+    pub fn blit_downsample_4x_to(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+        dst_rect: Rect,
+        parent_clip: Option<[i32; 4]>,
+        pipelines: &WgpuPipelines,
+    ) {
+        self.blit_to_inner(
+            device,
+            encoder,
+            target_view,
+            target_size,
+            dst_rect,
+            parent_clip,
+            &pipelines.tex_downsample_4x_pipeline,
+            pipelines,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn blit_to_inner(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+        dst_rect: Rect,
+        parent_clip: Option<[i32; 4]>,
+        pipeline: &wgpu::RenderPipeline,
         pipelines: &WgpuPipelines,
     ) {
         let [gl_x, gl_y, gl_w, gl_h] = pixel_rect(dst_rect);
@@ -292,7 +370,7 @@ impl MsaaFramebuffer {
         });
         pass.set_viewport(0.0, 0.0, target_size.0 as f32, target_size.1 as f32, 0.0, 1.0);
         pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
-        pass.set_pipeline(&pipelines.tex_pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &tex_bg0, &[]);
         pass.set_bind_group(1, &tex_bg1, &[]);
         pass.set_vertex_buffer(0, vb.slice(..));

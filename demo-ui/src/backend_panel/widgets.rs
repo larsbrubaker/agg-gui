@@ -418,37 +418,42 @@ pub(crate) struct MsaaRow {
 
 impl MsaaRow {
     const BTN_H: f64 = 24.0;
-    /// Cube-widget segments: only the WebGPU-spec-guaranteed safe values.
-    /// `8` and `16` need `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` and
-    /// per-format support varies even on otherwise-MSAA-capable adapters,
-    /// so the in-window MSAA row keeps to `Off` / `4×` only.
+    /// Cube-widget segments — these are SSAA pixel multipliers, not MSAA
+    /// sample counts.  The cube widget renders into an offscreen texture
+    /// at `sqrt(samples) × {w, h}` and downsamples to the surface, so
+    /// `Off / 4× / 16×` work identically on every adapter (no spec-only
+    /// `{1, 4}` MSAA limit, no per-format adapter feature dance).  Cell
+    /// values: `1` = no AA, `4` = 2× linear, `16` = 4× linear.
     pub(crate) const CUBE_SEGMENTS: &'static [(&'static str, u8)] =
-        &[("Off", 0), ("4×", 4)];
+        &[("Off", 1), ("4×", 4), ("16×", 16)];
 
     pub(crate) fn new(
         font: Arc<Font>,
         samples: Rc<Cell<u8>>,
         segments: &'static [(&'static str, u8)],
     ) -> Self {
-        let children: Vec<Box<dyn Widget>> = segments
-            .iter()
-            .map(|(label, val)| {
-                let samples_active = Rc::clone(&samples);
-                let samples_click = Rc::clone(&samples);
-                let this = *val;
-                let btn = Button::new(*label, Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_subtle()
-                    .with_active_fn(move || samples_active.get() == this)
-                    .on_click(move || {
-                        if samples_click.get() != this {
-                            samples_click.set(this);
-                            agg_gui::animation::request_draw();
-                        }
-                    });
-                Box::new(btn) as Box<dyn Widget>
-            })
-            .collect();
+        // Leading "SSAA" label so the row reads as a labelled control set
+        // instead of three free-floating buttons.  Treated as child[0] in
+        // layout; the segment buttons follow at child[1..].
+        let label_widget: Box<dyn Widget> =
+            Box::new(Label::new("SSAA", Arc::clone(&font)).with_font_size(12.0));
+        let mut children: Vec<Box<dyn Widget>> = vec![label_widget];
+        children.extend(segments.iter().map(|(label, val)| {
+            let samples_active = Rc::clone(&samples);
+            let samples_click = Rc::clone(&samples);
+            let this = *val;
+            let btn = Button::new(*label, Arc::clone(&font))
+                .with_font_size(12.0)
+                .with_subtle()
+                .with_active_fn(move || samples_active.get() == this)
+                .on_click(move || {
+                    if samples_click.get() != this {
+                        samples_click.set(this);
+                        agg_gui::animation::request_draw();
+                    }
+                });
+            Box::new(btn) as Box<dyn Widget>
+        }));
         Self {
             bounds: Rect::default(),
             children,
@@ -458,8 +463,12 @@ impl MsaaRow {
     /// Per-segment button width — tighter for the 5-way native list,
     /// roomier for the 2-way Web list so each button can fit a longer
     /// label without truncating.
+    ///
+    /// `children[0]` is the leading "SSAA" label, so segment count is
+    /// `children.len() - 1`.
     fn btn_width(&self) -> f64 {
-        if self.children.len() <= 2 {
+        let segments = self.children.len().saturating_sub(1);
+        if segments <= 2 {
             60.0
         } else {
             44.0
@@ -489,10 +498,21 @@ impl Widget for MsaaRow {
         self.bounds = Rect::new(0.0, 0.0, available.width, row_h);
         let gy = (row_h - Self::BTN_H) * 0.5;
         let bw = self.btn_width();
-        for (i, child) in self.children.iter_mut().enumerate() {
+
+        // Layout: 12 px gutter, "SSAA" label at child[0], 8 px gap, then
+        // segment buttons at child[1..].
+        const LABEL_W: f64 = 44.0;
+        const LABEL_GAP: f64 = 8.0;
+        if let Some(label) = self.children.first_mut() {
+            label.layout(Size::new(LABEL_W, Self::BTN_H));
+            label.set_bounds(Rect::new(12.0, gy, LABEL_W, Self::BTN_H));
+        }
+        let buttons_x = 12.0 + LABEL_W + LABEL_GAP;
+        for (i, child) in self.children.iter_mut().enumerate().skip(1) {
+            let btn_idx = (i - 1) as f64;
             child.layout(Size::new(bw, Self::BTN_H));
             child.set_bounds(Rect::new(
-                12.0 + i as f64 * (bw + 4.0),
+                buttons_x + btn_idx * (bw + 4.0),
                 gy,
                 bw,
                 Self::BTN_H,

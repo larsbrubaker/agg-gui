@@ -127,6 +127,12 @@ pub(crate) enum Prepared {
         screen_rect: agg_gui::Rect,
         parent_clip: Option<[i32; 4]>,
     },
+    /// Generic custom render hook (see `crate::custom_render`).
+    Custom {
+        renderer: crate::custom_render::SharedCustomRenderer,
+        screen_rect: agg_gui::Rect,
+        parent_clip: Option<[i32; 4]>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +157,8 @@ impl WgpuGfxCtx {
 
         execute_prepared(
             &self.device,
+            &self.queue,
+            self.surface_format,
             &mut encoder,
             surface_view,
             &self.pipelines,
@@ -167,6 +175,8 @@ impl WgpuGfxCtx {
 
 fn execute_prepared<'a>(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    surface_format: wgpu::TextureFormat,
     encoder: &mut wgpu::CommandEncoder,
     surface_view: &'a wgpu::TextureView,
     pipelines: &WgpuPipelines,
@@ -219,13 +229,15 @@ fn execute_prepared<'a>(
             }
 
             // Drive the pass forward until end-of-list or a pass break.  Layer
-            // push/pop and DrawBarGrid all force the active 2-D pass to end so
-            // the boundary handler below can do its work on the bare encoder.
+            // push/pop, DrawBarGrid, and Custom all force the active 2-D pass
+            // to end so the boundary handler below can do its work on the
+            // bare encoder.
             while i < prepared.len() {
                 match &prepared[i] {
                     Prepared::PushLayer { .. }
                     | Prepared::PopLayer { .. }
-                    | Prepared::DrawBarGrid { .. } => break,
+                    | Prepared::DrawBarGrid { .. }
+                    | Prepared::Custom { .. } => break,
                     other => {
                         execute_one(&mut pass, pipelines, other, target_vp);
                         i += 1;
@@ -270,6 +282,22 @@ fn execute_prepared<'a>(
                             *parent_clip,
                         );
                     }
+                    i += 1;
+                }
+                Prepared::Custom { renderer, screen_rect, parent_clip } => {
+                    // Generic external render hook — see `custom_render` mod.
+                    let target_size = (target_vp.0 as u32, target_vp.1 as u32);
+                    let ctx = crate::custom_render::WgpuCustomRenderCtx {
+                        device,
+                        queue,
+                        encoder,
+                        target_view,
+                        target_size,
+                        surface_format,
+                        screen_rect: *screen_rect,
+                        parent_clip: *parent_clip,
+                    };
+                    renderer.borrow_mut().render(ctx);
                     i += 1;
                 }
                 _ => unreachable!("loop only breaks on pass-boundary commands"),
@@ -360,7 +388,8 @@ fn execute_one(
         // Pass-boundary commands are handled in the outer driver, not here.
         Prepared::PushLayer { .. }
         | Prepared::PopLayer { .. }
-        | Prepared::DrawBarGrid { .. } => {}
+        | Prepared::DrawBarGrid { .. }
+        | Prepared::Custom { .. } => {}
     }
 }
 

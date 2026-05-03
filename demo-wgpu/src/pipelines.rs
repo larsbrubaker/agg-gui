@@ -15,7 +15,8 @@ use std::mem::size_of;
 use bytemuck::{Pod, Zeroable};
 
 use crate::shaders::{
-    AA_SOLID_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_WGSL, LCD_WGSL, SOLID_WGSL, TEX_WGSL,
+    AA_SOLID_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_WGSL, LCD_WGSL, SOLID_WGSL,
+    TEX_DOWNSAMPLE_4X_WGSL, TEX_WGSL,
 };
 
 // ---------------------------------------------------------------------------
@@ -148,6 +149,13 @@ pub struct WgpuPipelines {
     pub tex_pipeline: wgpu::RenderPipeline,
     pub tex_bgl0: wgpu::BindGroupLayout,
     pub tex_bgl1: wgpu::BindGroupLayout,
+
+    // ── 4×4-box downsample (SSAA at 4× linear) ─────────────────────────────
+    /// Same vertex / bind groups as `tex_pipeline`; fragment shader runs
+    /// 4 bilinear taps in a 2×2 quadrant grid for an exact 4×4 box average.
+    /// Used by the cube widget at the highest SSAA setting where a single
+    /// bilinear minification would drop 12 of 16 source texels per output.
+    pub tex_downsample_4x_pipeline: wgpu::RenderPipeline,
 
     // ── Layer composite (SDF rounded-corner mask in fragment shader) ──────────
     pub layer_pipeline: wgpu::RenderPipeline,
@@ -324,6 +332,13 @@ impl WgpuPipelines {
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
             sample_count,
         );
+        let tex_ds4_sm = mk_shader(device, "tex_downsample_4x", TEX_DOWNSAMPLE_4X_WGSL);
+        let tex_downsample_4x_pipeline = build_pipeline(
+            device, "tex_downsample_4x", &tex_pl, &tex_ds4_sm, &tex_ds4_sm,
+            &[vbl_pos2_uv2()],
+            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            sample_count,
+        );
         let layer_pipeline = build_pipeline(
             device, "layer", &layer_pl, &layer_sm, &layer_sm,
             &[vbl_pos2_uv2()],
@@ -378,6 +393,7 @@ impl WgpuPipelines {
             tex_pipeline,
             tex_bgl0,
             tex_bgl1,
+            tex_downsample_4x_pipeline,
             layer_pipeline,
             layer_bgl0,
             layer_bgl1,
