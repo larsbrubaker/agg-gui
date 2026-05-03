@@ -99,6 +99,12 @@ pub struct Button {
     /// inactive states paint a faint text-coloured overlay instead of
     /// the `widget_bg` shade.  Active state is unaffected.
     ghost: bool,
+    /// When `true`, draw a 1-px stroke around the button rect using the
+    /// theme's `widget_stroke` colour while inactive — gives subtle
+    /// segmented buttons a defined edge so they don't visually bleed
+    /// into a parent that has the same `widget_bg` shade.  Active state
+    /// already has a high-contrast accent fill and skips the stroke.
+    outlined: bool,
     /// How the child label is positioned inside the button rect.
     /// `Center` (default) centres horizontally; `Left` insets by
     /// [`LEFT_LABEL_PAD`] and is the right choice for full-width
@@ -135,6 +141,7 @@ impl Button {
             active_fn: None,
             subtle: false,
             ghost: false,
+            outlined: false,
             label_align: LabelAlign::Center,
             label_pad_h: LEFT_LABEL_PAD,
             hovered: false,
@@ -224,6 +231,16 @@ impl Button {
     /// fill, theme `text_color` label.  Pair with [`with_active_fn`] to
     /// build segmented controls — inactive segments paint subtle, the
     /// selected segment flips to the accent surface.
+    /// Draw a 1-px `widget_stroke` outline around the button while inactive.
+    /// Combined with [`Self::with_subtle`] this gives top-bar segmented
+    /// controls a defined edge so they don't visually bleed into a parent
+    /// that shares the same `widget_bg` colour.  Active state already paints
+    /// a high-contrast accent fill and skips the stroke.
+    pub fn with_outlined(mut self) -> Self {
+        self.outlined = true;
+        self
+    }
+
     pub fn with_subtle(mut self) -> Self {
         self.subtle = true;
         // Subtle buttons use the theme's text colour, not the white-on-accent
@@ -476,6 +493,19 @@ impl Widget for Button {
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.fill();
+
+        // Optional outline — opt-in via `with_outlined()` for inactive
+        // segmented buttons that want a defined edge against a same-colour
+        // parent (e.g. top-bar tabs).  Active state already has a
+        // high-contrast accent fill and skips this so the selected segment
+        // visually pops.
+        if enabled && self.outlined && !active {
+            ctx.set_stroke_color(v.widget_stroke);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            ctx.rounded_rect(0.5, 0.5, (w - 1.0).max(0.0), (h - 1.0).max(0.0), r);
+            ctx.stroke();
+        }
 
         // Retint the child label so subtle / active states show the right
         // foreground colour without rebuilding the Label widget.  Calling

@@ -199,19 +199,51 @@ impl WgpuGfxCtx {
             }
         };
 
+        // Sampler choice tracks the upload's mipmap policy:
+        // - Small textures (Label backbuffers, glyph atlases): no mipmaps
+        //   were generated, so use the nearest sampler — preserves the
+        //   crisp 1:1 pixel-perfect blit the Label / pixel-test paths
+        //   were originally written for.
+        // - Large textures (screenshots, big images): mipmap chain was
+        //   uploaded; use the linear (trilinear-with-mipmaps) sampler so
+        //   downsampling at draw time picks an appropriate mip level
+        //   instead of point-aliasing at the base mip.
+        let use_nearest = !should_use_mipmaps(img_w, img_h);
         self.commands.push(DrawCommand::Textured {
             verts,
             texture,
             view,
-            nearest: true,
+            nearest: use_nearest,
             clip: self.current_clip(),
         });
     }
 }
 
+/// Threshold at which an upload generates a mipmap chain so heavily
+/// downsampled draws (e.g. the screenshot preview pane shrinking a
+/// 1920×1080 capture into a 400×225 panel) sample with trilinear
+/// quality instead of point-aliasing.
+///
+/// Smaller textures (Label backbuffers, glyph images) are typically
+/// drawn at their native size and benefit from no-mipmap, point-filter
+/// crispness.
+const MIPMAP_MIN_DIM: u32 = 256;
+
+/// Whether an image of `(w, h)` should get a mipmap chain on upload.
+pub(crate) fn should_use_mipmaps(w: u32, h: u32) -> bool {
+    w.max(h) >= MIPMAP_MIN_DIM
+}
+
 /// Upload an RGBA8 image to a freshly-created `wgpu::Texture` and return both
 /// the `Arc<Texture>` and its default view.  Used by both the slice and arc
 /// blit paths; the texture is always created with `TEXTURE_BINDING | COPY_DST`.
+///
+/// Generates a CPU-side box-filtered mipmap chain when [`should_use_mipmaps`]
+/// returns true.  The mips are cheap one-shot work at upload (screenshots
+/// upload rarely; the L1 image cache reuses the texture across frames) and
+/// give the linear+linear+linear-mipmap sampler enough levels to produce a
+/// clean filtered result no matter how aggressively the call site
+/// downsamples — a 4× shrink samples mip 2, a 16× shrink samples mip 4, etc.
 fn upload_rgba_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -219,6 +251,15 @@ fn upload_rgba_texture(
     w: u32,
     h: u32,
 ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
+    let with_mipmaps = should_use_mipmaps(w, h);
+    let mip_level_count = if with_mipmaps {
+        // floor(log2(max(w, h))) + 1 levels — the WebGPU rule for a full
+        // chain down to the 1×1 root mip.
+        w.max(h).max(1).ilog2() + 1
+    } else {
+        1
+    };
+
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
@@ -226,13 +267,15 @@ fn upload_rgba_texture(
             height: h,
             depth_or_array_layers: 1,
         },
-        mip_level_count: 1,
+        mip_level_count,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
+
+    // Mip 0: the source bytes, full resolution.
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,
@@ -252,6 +295,90 @@ fn upload_rgba_texture(
             depth_or_array_layers: 1,
         },
     );
+
+    // Mips 1..N: each level is the previous level box-filtered to half the
+    // dimensions.  Box filter (averaging 2×2 blocks) is the standard
+    // mip-generation kernel — Lanczos / Mitchell would be sharper but the
+    // visual difference at typical screenshot panel sizes is negligible
+    // and the box filter is trivially correct.  Done CPU-side because
+    // screenshots upload rarely; a GPU compute / blit chain would be
+    // faster but pulls in a render pass per level.
+    if with_mipmaps {
+        let mut prev = data.to_vec();
+        let mut prev_w = w;
+        let mut prev_h = h;
+        for level in 1..mip_level_count {
+            let next_w = (prev_w / 2).max(1);
+            let next_h = (prev_h / 2).max(1);
+            let next = box_downsample(&prev, prev_w, prev_h, next_w, next_h);
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: level,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &next,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(next_w * 4),
+                    rows_per_image: Some(next_h),
+                },
+                wgpu::Extent3d {
+                    width: next_w,
+                    height: next_h,
+                    depth_or_array_layers: 1,
+                },
+            );
+            prev = next;
+            prev_w = next_w;
+            prev_h = next_h;
+        }
+    }
+
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (Arc::new(texture), view)
+}
+
+/// Box-filter a source RGBA8 image to the given target size, averaging
+/// each `(src_w/dst_w) × (src_h/dst_h)` block into a single pixel.  Used
+/// for CPU mip-chain generation in [`upload_rgba_texture`].
+fn box_downsample(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    let mut dst = vec![0u8; (dst_w as usize) * (dst_h as usize) * 4];
+    // The typical case is dst dims = src/2; we keep the math general for
+    // the odd-pixel rounding case (e.g. a 17×17 → 8×8 step where the last
+    // row/col needs to average a 3-row block).
+    let kx = src_w as f32 / dst_w as f32;
+    let ky = src_h as f32 / dst_h as f32;
+    for dy in 0..dst_h {
+        for dx in 0..dst_w {
+            let sx0 = (dx as f32 * kx).floor() as u32;
+            let sx1 = ((dx + 1) as f32 * kx).ceil().min(src_w as f32) as u32;
+            let sy0 = (dy as f32 * ky).floor() as u32;
+            let sy1 = ((dy + 1) as f32 * ky).ceil().min(src_h as f32) as u32;
+            let mut r = 0u32;
+            let mut g = 0u32;
+            let mut b = 0u32;
+            let mut a = 0u32;
+            let mut n = 0u32;
+            for sy in sy0..sy1 {
+                for sx in sx0..sx1 {
+                    let i = ((sy * src_w + sx) * 4) as usize;
+                    r += src[i] as u32;
+                    g += src[i + 1] as u32;
+                    b += src[i + 2] as u32;
+                    a += src[i + 3] as u32;
+                    n += 1;
+                }
+            }
+            if n > 0 {
+                let di = ((dy * dst_w + dx) * 4) as usize;
+                dst[di] = (r / n) as u8;
+                dst[di + 1] = (g / n) as u8;
+                dst[di + 2] = (b / n) as u8;
+                dst[di + 3] = (a / n) as u8;
+            }
+        }
+    }
+    dst
 }

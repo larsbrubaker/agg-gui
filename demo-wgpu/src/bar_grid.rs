@@ -242,6 +242,8 @@ pub struct BarGridWgpuRenderer {
     framebuffer: Option<MsaaFramebuffer>,
     surface_format: wgpu::TextureFormat,
     sample_count: u32,
+    /// Animation start time — passed in by the widget so renderer
+    /// rebuilds (e.g. an MSAA toggle) keep the bar wave phase continuous.
     start: web_time::Instant,
 }
 
@@ -250,6 +252,7 @@ impl BarGridWgpuRenderer {
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
         sample_count: u32,
+        start: web_time::Instant,
     ) -> Self {
         // Clamp through the same logic the framebuffer will apply, so the
         // pipeline's `MultisampleState` matches the colour attachment we'll
@@ -390,7 +393,7 @@ impl BarGridWgpuRenderer {
             framebuffer: None,
             surface_format,
             sample_count: sample_count.max(1),
-            start: web_time::Instant::now(),
+            start,
         }
     }
 
@@ -580,6 +583,12 @@ pub struct WgpuCubeWidget {
     /// window) write to the same cell — same `Rc<Cell<u8>>` the demo-ui
     /// state layer persists, so a tweak round-trips to disk for free.
     sample_count: Rc<Cell<u8>>,
+    /// Animation start time — owned by the widget so it survives renderer
+    /// rebuilds (the MSAA toggle drops + recreates the renderer to apply
+    /// the new sample count).  Passing the same `start` to each new
+    /// `BarGridWgpuRenderer` keeps the bar wave phase continuous, so the
+    /// only visible change at a toggle is the AA itself.
+    start: web_time::Instant,
 }
 
 impl Default for WgpuCubeWidget {
@@ -602,6 +611,7 @@ impl WgpuCubeWidget {
             children: Vec::new(),
             renderer: Rc::new(RefCell::new(None)),
             sample_count,
+            start: web_time::Instant::now(),
         }
     }
 
@@ -696,6 +706,7 @@ impl Widget for WgpuCubeWidget {
                             &wgpu_ctx.device,
                             wgpu_ctx.surface_format,
                             desired,
+                            self.start,
                         ));
                     }
                 }

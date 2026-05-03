@@ -142,7 +142,11 @@ impl Gpu {
             .unwrap_or(caps.formats[0]);
 
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // `RENDER_ATTACHMENT` for the deferred 2-D + bar-grid passes;
+            // `COPY_SRC` so `WgpuGfxCtx::read_screenshot` can blit the
+            // post-render surface contents to a staging buffer for the
+            // capture-pixels path.  The Take-Screenshot button needs this.
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             format: surface_format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -261,6 +265,9 @@ fn main() {
     let screen_size = Rc::clone(&handles.screen_size);
     let frame_history = Rc::clone(&handles.frame_history);
     let window_maximized = Rc::clone(&handles.window_maximized);
+    let screenshot_request = Rc::clone(&handles.screenshot_request);
+    let screenshot_image = Rc::clone(&handles.screenshot_image);
+    let screenshot_capturing = Rc::clone(&handles.screenshot_capturing);
     let state_accessor = handles.state;
 
     let mut win_w = gpu.config.width;
@@ -299,6 +306,9 @@ fn main() {
         &base_edits,
         #[cfg(feature = "reflect")]
         &inspector_edits,
+        &screenshot_request,
+        &screenshot_capturing,
+        &screenshot_image,
     );
     window.set_visible(true);
 
@@ -417,6 +427,9 @@ fn main() {
                     &base_edits,
                     #[cfg(feature = "reflect")]
                     &inspector_edits,
+                    &screenshot_request,
+                    &screenshot_capturing,
+                    &screenshot_image,
                 );
             }
             Event::AboutToWait => {
@@ -437,6 +450,9 @@ fn main() {
                         &base_edits,
                         #[cfg(feature = "reflect")]
                         &inspector_edits,
+                        &screenshot_request,
+                        &screenshot_capturing,
+                        &screenshot_image,
                     );
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
                     frame_history.borrow_mut().push(last_frame_ms as f32);
@@ -496,32 +512,72 @@ fn paint_frame(
     hovered_bounds: &Rc<RefCell<Option<agg_gui::InspectorOverlay>>>,
     base_edits: &Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>>,
     #[cfg(feature = "reflect")] inspector_edits: &Rc<RefCell<Vec<agg_gui::InspectorEdit>>>,
+    screenshot_request: &Rc<std::cell::Cell<bool>>,
+    screenshot_capturing: &Rc<std::cell::Cell<bool>>,
+    screenshot_image: &Rc<RefCell<Option<(std::sync::Arc<Vec<u8>>, u32, u32)>>>,
 ) {
-    let frame = match gpu.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-        // All non-success cases (Lost / Outdated / Timeout / Occluded /
-        // Validation) — skip this frame; the surface will be reconfigured or
-        // the next tick will retry.
-        _ => return,
-    };
-    let view = frame
-        .texture
-        .create_view(&wgpu::TextureViewDescriptor::default());
-
-    begin_frame(ctx, view);
-    render_app_frame(
+    // The shared screenshot orchestration uses two render passes when a
+    // capture is requested: pass 1 hides the screenshot preview panel
+    // (so captured pixels don't nest), reads back the surface, then pass
+    // 2 paints normally with the fresh image visible.  No-op fast path
+    // when no capture is pending.
+    //
+    // wgpu's swap chain takes ownership of the surface texture at
+    // `frame.present()`, so the pixel read MUST happen before present.
+    // We do it inside `render_fn` and stash the result on the ctx; the
+    // orchestration's read-back closure then just retrieves it.
+    let capturing_for_render = Rc::clone(screenshot_capturing);
+    agg_gui::screenshot::run_frame_with_capture(
+        screenshot_request,
+        screenshot_capturing,
+        screenshot_image,
         ctx,
-        app,
-        w,
-        h,
-        frame_ms,
-        show_inspector,
-        inspector_nodes,
-        hovered_bounds,
-        base_edits,
-        #[cfg(feature = "reflect")]
-        inspector_edits,
+        |gc| {
+            let Some(frame) = acquire_frame(gpu) else { return };
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            // Stash the texture handle so `read_screenshot` (called below
+            // before present) can copy from it.  `wgpu::Texture` is
+            // internally ref-counted; the handle stays valid for as long
+            // as we hold this clone.
+            gc.set_surface_texture(frame.texture.clone());
+            begin_frame(gc, view);
+            render_app_frame(
+                gc,
+                app,
+                w,
+                h,
+                frame_ms,
+                show_inspector,
+                inspector_nodes,
+                hovered_bounds,
+                base_edits,
+                #[cfg(feature = "reflect")]
+                inspector_edits,
+            );
+            gc.end_frame();
+            // Read back BEFORE present.  `read_screenshot` issues its own
+            // copy_texture_to_buffer + queue.submit + poll, so by the
+            // time it returns the staging buffer holds the pixels and the
+            // GPU is idle on the surface texture — safe to present after.
+            if capturing_for_render.get() {
+                let pixels = gc.read_screenshot();
+                gc.set_pending_screenshot(pixels);
+            }
+            frame.present();
+        },
+        |gc| gc.take_pending_screenshot(),
     );
-    ctx.end_frame();
-    frame.present();
+}
+
+/// Acquire the next surface texture, returning `None` (skip frame) for any
+/// non-success case so the caller doesn't paint into a stale view.
+fn acquire_frame(gpu: &Gpu) -> Option<wgpu::SurfaceTexture> {
+    match gpu.surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => {
+            Some(f)
+        }
+        _ => None,
+    }
 }

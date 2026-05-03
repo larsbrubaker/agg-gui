@@ -83,6 +83,7 @@ impl ThemeToggle {
                 let btn = Button::new(*label, Arc::clone(&font))
                     .with_font_size(11.0)
                     .with_subtle()
+                    .with_outlined()
                     .with_active_fn(move || {
                         std::mem::discriminant(&pref_active.get())
                             == std::mem::discriminant(&this)
@@ -172,6 +173,7 @@ impl BackendButton {
         let btn = Button::new("\u{F109} Backend", font)
             .with_font_size(12.0)
             .with_subtle()
+            .with_outlined()
             .with_active_fn(move || show_active.get())
             .on_click(move || {
                 show_click.set(!show_click.get());
@@ -242,6 +244,7 @@ impl MenuButton {
         let btn = Button::new("\u{F0C9} Demos", font)
             .with_font_size(12.0)
             .with_subtle()
+            .with_outlined()
             .with_active_fn(move || open_active.get())
             .on_click(move || {
                 open_click.set(!open_click.get());
@@ -586,6 +589,10 @@ pub fn build_top_bar_inner(
                 font,
                 theme_pref,
                 accent_color,
-            ))),
+            )))
+            // 3-px breathing room between the Color button and the window's
+            // right edge / native window-control buttons.  Without this the
+            // button's outer border touches the chrome and looks pinched.
+            .add(Box::new(SizedBox::new().with_width(3.0))),
     )
 }
