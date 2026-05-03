@@ -418,18 +418,12 @@ pub(crate) struct MsaaRow {
 
 impl MsaaRow {
     const BTN_H: f64 = 24.0;
-    /// Default segments matching the native shell's MSAA dropdown.
-    pub(crate) const NATIVE_SEGMENTS: &'static [(&'static str, u8)] = &[
-        ("Off", 0),
-        ("2×", 2),
-        ("4×", 4),
-        ("8×", 8),
-        ("16×", 16),
-    ];
-    /// Browser WebGL only exposes a boolean `antialias` flag; "On" maps
-    /// to 4 (a sensible default the browser typically honours).
-    pub(crate) const WEB_SEGMENTS: &'static [(&'static str, u8)] =
-        &[("Off", 0), ("On", 4)];
+    /// Cube-widget segments: only the WebGPU-spec-guaranteed safe values.
+    /// `8` and `16` need `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` and
+    /// per-format support varies even on otherwise-MSAA-capable adapters,
+    /// so the in-window MSAA row keeps to `Off` / `4×` only.
+    pub(crate) const CUBE_SEGMENTS: &'static [(&'static str, u8)] =
+        &[("Off", 0), ("4×", 4)];
 
     pub(crate) fn new(
         font: Arc<Font>,

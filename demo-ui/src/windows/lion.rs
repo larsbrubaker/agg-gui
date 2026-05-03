@@ -449,7 +449,8 @@ pub fn lion_demo(font: Arc<Font>) -> Box<dyn Widget> {
          smooth silhouette = halo-AA edges; fresh tess2 every frame.",
         Arc::clone(&font),
     )
-    .with_font_size(11.0);
+    .with_font_size(11.0)
+    .with_wrap(true);
 
     let view = LionView::new(alpha);
 

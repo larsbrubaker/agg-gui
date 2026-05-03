@@ -20,7 +20,7 @@ use crate::windows;
 
 pub fn build_demo_ui(
     font: Arc<Font>,
-    cube_widget: Box<dyn Widget>,
+    cube_widget_factory: Box<dyn FnOnce(Rc<Cell<u8>>) -> Box<dyn Widget>>,
     renderer_name: &'static str,
     backend_name: &'static str,
     initial_state: Option<SavedState>,
@@ -202,7 +202,6 @@ pub fn build_demo_ui(
         faux_weight: Rc::clone(&faux_weight_cell),
         faux_italic: Rc::clone(&faux_italic_cell),
         primary_weight: Rc::clone(&primary_weight_cell),
-        msaa_samples: Rc::clone(&msaa_samples_cell),
         system_tab: Rc::clone(&system_tab_cell),
         platform: platform.clone(),
     });
@@ -388,7 +387,15 @@ pub fn build_demo_ui(
             .filter(|ws| ws.has_valid_bounds())
             .map(|ws| ws.to_rect())
             .unwrap_or_else(|| tile_rect(cube_idx, default_canvas_h, spec.win_w, spec.win_h));
-        let content = windows::cube_content(Arc::clone(&font), cube_widget);
+        // Build the cube widget here, after the MSAA cell exists, so the
+        // widget and the toolbar inside `cube_content` can both bind to the
+        // same `Rc<Cell<u8>>` without an extra plumbing path.
+        let cube_widget = cube_widget_factory(Rc::clone(&msaa_samples_cell));
+        let content = windows::cube_content(
+            Arc::clone(&font),
+            cube_widget,
+            Rc::clone(&msaa_samples_cell),
+        );
         let win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(
                 initial.x,

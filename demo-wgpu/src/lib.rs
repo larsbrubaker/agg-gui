@@ -42,6 +42,9 @@ pub mod bar_grid;
 mod bar_grid_math;
 pub use bar_grid::{BarGridWgpuRenderer, WgpuCubeWidget, CUBE_SCREEN_RECT};
 
+pub mod msaa;
+pub use msaa::MsaaFramebuffer;
+
 /// GPU handle passed to widgets via `DrawCtx::gl_paint` on the wgpu backend.
 ///
 /// All fields are owned (cloned `Arc<...>` for device/queue, `wgpu::TextureView`
@@ -263,7 +266,13 @@ impl WgpuGfxCtx {
         width: f32,
         height: f32,
     ) -> Self {
-        let pipelines = WgpuPipelines::new(&device, surface_format);
+        // 2-D pipelines stay sample_count=1: text and shapes already have
+        // analytic edge AA via the tess2 halo strip + per-vertex alpha, so
+        // hardware MSAA wouldn't add visible quality and would cost a full-
+        // surface MSAA buffer (and per-layer ones) every frame.  MSAA belongs
+        // scoped to the bar-grid renderer, which manages its own multi-sample
+        // attachments and resolves into the active 1-sample target view.
+        let pipelines = WgpuPipelines::new(&device, surface_format, 1);
         Self {
             device,
             queue,
@@ -443,5 +452,15 @@ pub(crate) enum DrawCommand {
         layer_h: u32,
         alpha: f32,
         rounded_clip: Option<LayerRoundedClip>,
+    },
+    /// Render the 3-D bar-grid scene into the current render target.  The
+    /// renderer is shared with [`bar_grid::WgpuCubeWidget`] via `Rc<RefCell<>>`
+    /// so it persists across frames; `execute_prepared` ends the active 2-D
+    /// pass, drives the renderer onto the active layer or surface, then
+    /// reopens the 2-D pass with `LoadOp::Load`.
+    DrawBarGrid {
+        renderer: std::rc::Rc<std::cell::RefCell<Option<bar_grid::BarGridWgpuRenderer>>>,
+        screen_rect: agg_gui::Rect,
+        parent_clip: Option<[i32; 4]>,
     },
 }

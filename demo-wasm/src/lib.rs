@@ -193,15 +193,22 @@ fn ensure_demo_app() {
         if cell.borrow().is_none() {
             let font = default_font();
             let initial_state = load_state_wasm();
-            let running_msaa: u8 = 0; // wgpu+webgl: MSAA off in this initial port.
+            let running_msaa: u8 = initial_state
+                .as_ref()
+                .map(|s| s.msaa_samples)
+                .unwrap_or(0);
             let platform = demo_ui::PlatformHooks::web(running_msaa, || {
                 if let Some(win) = web_sys::window() {
                     let _ = win.location().reload();
                 }
             });
+            // The cube widget takes a shared `Rc<Cell<u8>>` for the MSAA
+            // sample count, built by `build_demo_ui` from the saved state
+            // and reused by the in-window MSAA toolbar — same live-toggle
+            // path as the native shell.
             let (app, handles) = demo_ui::build_demo_ui(
                 Arc::clone(&font),
-                Box::new(WgpuCubeWidget::new()),
+                Box::new(|msaa_cell| Box::new(WgpuCubeWidget::new(msaa_cell))),
                 "wgpu / WebGL2",
                 "Browser wgpu (WebGL2 backend)",
                 initial_state,

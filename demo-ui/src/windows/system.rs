@@ -50,17 +50,14 @@ pub struct SystemCells {
     pub faux_weight: Rc<Cell<f64>>,
     pub faux_italic: Rc<Cell<f64>>,
     pub primary_weight: Rc<Cell<f64>>,
-    /// GL surface MSAA sample count (0/2/4/8/16).  Persisted via
-    /// `StateAccessor::msaa_samples`; surfaced in the Render tab with an
-    /// "applies on next launch" caveat.
-    pub msaa_samples: Rc<Cell<u8>>,
     /// Active tab index inside the System window.  Bound to the TabView
     /// so clicks round-trip back into the persistence layer.
     pub system_tab: Rc<Cell<usize>>,
-    /// Host-shell classification + relaunch/refresh hook.  Lives on
-    /// `SystemCells` so `system_view` can render platform-appropriate
-    /// controls (native 0/2/4/8/16 vs web on/off, "Relaunch" vs "Refresh"
-    /// button label) without either platform crate carrying UI code.
+    /// Host-shell classification + relaunch hook.  Retained on `SystemCells`
+    /// for any future System-tab control that needs to know the host kind
+    /// or trigger a process relaunch — the MSAA + Render tab that used to
+    /// consume these moved out when MSAA became a 3-D Animation widget
+    /// concern, but the hooks themselves still come from the platform shell.
     pub platform: crate::PlatformHooks,
 }
 
@@ -93,19 +90,19 @@ pub fn try_cells() -> Option<SystemCells> {
 // ---------------------------------------------------------------------------
 
 pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
-    // Split into two tabs so typography and OS-render settings don't
-    // share a single wall-of-sliders.  Content body builders live below
-    // as `build_font_tab` / `build_render_tab` so the TabView builder
-    // can stay readable.
+    // Single Font tab — typography settings only.  The previous Render tab
+    // (MSAA + Relaunch) was removed when MSAA moved out of the surface
+    // pipeline and onto the 3-D Animation widget itself: it's a per-frame
+    // bar-grid concern, applies live, and doesn't need its own settings
+    // panel.  Kept as a TabView for visual consistency and because new
+    // System-scoped tabs (audio, accessibility, …) may land here.
     let font_tab = build_font_tab(Arc::clone(&font));
-    let render_tab = build_render_tab(Arc::clone(&font));
     let cells = cells();
 
     Box::new(
         TabView::new(Arc::clone(&font))
             .with_font_size(13.0)
             .add_tab("Font", font_tab)
-            .add_tab("Render", render_tab)
             .with_active_tab_cell(Rc::clone(&cells.system_tab)),
     )
 }
@@ -375,119 +372,4 @@ fn build_font_tab(font: Arc<Font>) -> Box<dyn Widget> {
 
     Box::new(ScrollView::new(Box::new(col)))
 }
-
-// ── Render tab ───────────────────────────────────────────────────────────────
-
-fn build_render_tab(font: Arc<Font>) -> Box<dyn Widget> {
-    use crate::PlatformKind;
-    use agg_gui::widgets::button::Button;
-
-    let cells = cells();
-    let mut col = FlexColumn::new().with_gap(10.0).with_padding(14.0);
-
-    let heading = |text: &str| -> Box<dyn Widget> {
-        Box::new(Label::new(text, Arc::clone(&font)).with_font_size(16.0))
-    };
-    let body = |text: &str| -> Box<dyn Widget> {
-        Box::new(
-            Label::new(text, Arc::clone(&font))
-                .with_font_size(13.0)
-                .with_wrap(true),
-        )
-    };
-
-    // Platform-appropriate preamble.
-    let intro = match cells.platform.kind {
-        PlatformKind::Native => {
-            "OS-level rendering settings.  The GL surface is created once at \
-             startup, so changes here take effect on the next relaunch — use \
-             the Relaunch button below after editing."
-        }
-        PlatformKind::Web => {
-            "OS-level rendering settings.  The WebGL surface is created once \
-             by the browser at canvas creation, so changes here take effect \
-             after a page refresh — use the Refresh button below after editing."
-        }
-    };
-    col.push(body(intro), 0.0);
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    // ── MSAA ─────────────────────────────────────────────────────────────
-    col.push(heading("MSAA"), 0.0);
-    let msaa_body = match cells.platform.kind {
-        PlatformKind::Native => {
-            "Hardware multi-sample anti-aliasing for direct-GL content (e.g. \
-             the 3D Animation cube grid).  Widget / text rendering uses \
-             analytic halo-AA instead and is unaffected."
-        }
-        PlatformKind::Web => {
-            "Hardware multi-sample anti-aliasing on the WebGL2 canvas.  The \
-             browser WebGL spec only exposes a single boolean `antialias` \
-             flag — the browser picks the sample count (typically 4×).  \
-             Widget / text rendering uses analytic halo-AA instead and is \
-             unaffected."
-        }
-    };
-    col.push(body(msaa_body), 0.0);
-    col.push(
-        Box::new(crate::backend_panel::MsaaRow::new(
-            Arc::clone(&font),
-            Rc::clone(&cells.msaa_samples),
-            // Native shells expose the full 5-way MSAA picker; the WASM
-            // shell only gets `Off` / `On` because browser WebGL exposes
-            // a boolean `antialias` flag (the browser picks the actual
-            // sample count).  Same widget, different segments — both
-            // write to `cells.msaa_samples`.
-            match cells.platform.kind {
-                PlatformKind::Native => crate::backend_panel::MsaaRow::NATIVE_SEGMENTS,
-                PlatformKind::Web => crate::backend_panel::MsaaRow::WEB_SEGMENTS,
-            },
-        )) as Box<dyn Widget>,
-        0.0,
-    );
-
-    // ── Relaunch / Refresh button ────────────────────────────────────────
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(
-        body(
-            "Apply the setting above by restarting the app.  Any unsaved UI \
-         state — open windows, positions, z-order — is written to disk \
-         before the restart, so your layout will come back exactly as \
-         you left it.",
-        ),
-        0.0,
-    );
-    let btn_label = match cells.platform.kind {
-        PlatformKind::Native => "Relaunch",
-        PlatformKind::Web => "Refresh",
-    };
-    let reload = Rc::clone(&cells.platform.on_reload);
-    let msaa_cell = Rc::clone(&cells.msaa_samples);
-    let running_msaa = cells.platform.running_msaa;
-    let kind = cells.platform.kind;
-    // Button only enables when the persisted MSAA choice differs from
-    // whatever's actually running right now — restart is pointless when
-    // there's nothing to change.  Web host only gets a boolean MSAA, so
-    // compare on `> 0` there instead of exact sample count.
-    let reload_btn = Button::new(btn_label, Arc::clone(&font))
-        .with_font_size(13.0)
-        .with_enabled_fn(move || match kind {
-            PlatformKind::Native => msaa_cell.get() != running_msaa,
-            PlatformKind::Web => (msaa_cell.get() > 0) != (running_msaa > 0),
-        })
-        .on_click(move || (reload)());
-    col.push(
-        Box::new(
-            SizedBox::new()
-                .with_width(140.0)
-                .with_height(30.0)
-                .with_child(Box::new(reload_btn)),
-        ),
-        0.0,
-    );
-
-    Box::new(ScrollView::new(Box::new(col)))
-}
-
-// ── On/Off MSAA row (web — WebGL2 only exposes a boolean) ────────────────
 

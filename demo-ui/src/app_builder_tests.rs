@@ -242,7 +242,7 @@ fn desktop_top_bar_hides_demos_button() {
 fn build_test_app(font: Arc<Font>) -> (agg_gui::App, DemoHandles) {
     build_demo_ui(
         font,
-        Box::new(IdleCube::new()),
+        Box::new(|_msaa_cell| Box::new(IdleCube::new())),
         "TestRenderer",
         "TestBackend",
         Some(saved_state_with_backend_open()),

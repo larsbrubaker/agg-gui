@@ -117,6 +117,16 @@ pub(crate) enum Prepared {
         bg0: wgpu::BindGroup,
         bg1: wgpu::BindGroup,
     },
+    /// Drive the bar-grid 3-D renderer onto whatever render target is
+    /// active when execute reaches this point.  Treated as a pass break
+    /// (current pass ends, renderer records its own pass on the same
+    /// encoder, parent pass reopens with `LoadOp::Load`) so the renderer
+    /// targets the active layer when the cube widget is hosted in a window.
+    DrawBarGrid {
+        renderer: std::rc::Rc<std::cell::RefCell<Option<crate::bar_grid::BarGridWgpuRenderer>>>,
+        screen_rect: agg_gui::Rect,
+        parent_clip: Option<[i32; 4]>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +150,7 @@ impl WgpuGfxCtx {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
 
         execute_prepared(
+            &self.device,
             &mut encoder,
             surface_view,
             &self.pipelines,
@@ -155,6 +166,7 @@ impl WgpuGfxCtx {
 // ---------------------------------------------------------------------------
 
 fn execute_prepared<'a>(
+    device: &wgpu::Device,
     encoder: &mut wgpu::CommandEncoder,
     surface_view: &'a wgpu::TextureView,
     pipelines: &WgpuPipelines,
@@ -206,10 +218,14 @@ fn execute_prepared<'a>(
                 pass.draw(0..6, 0..1);
             }
 
-            // Drive the pass forward until end-of-list or a layer boundary.
+            // Drive the pass forward until end-of-list or a pass break.  Layer
+            // push/pop and DrawBarGrid all force the active 2-D pass to end so
+            // the boundary handler below can do its work on the bare encoder.
             while i < prepared.len() {
                 match &prepared[i] {
-                    Prepared::PushLayer { .. } | Prepared::PopLayer { .. } => break,
+                    Prepared::PushLayer { .. }
+                    | Prepared::PopLayer { .. }
+                    | Prepared::DrawBarGrid { .. } => break,
                     other => {
                         execute_one(&mut pass, pipelines, other, target_vp);
                         i += 1;
@@ -235,7 +251,28 @@ fn execute_prepared<'a>(
                     pending_composite = Some((vb, bg0, bg1));
                     i += 1;
                 }
-                _ => unreachable!("loop only breaks on layer boundary commands"),
+                Prepared::DrawBarGrid { renderer, screen_rect, parent_clip } => {
+                    // Render onto whatever target is current — surface when
+                    // the cube widget is at top level, the active window's
+                    // layer view when hosted in a window.  No stack change;
+                    // next iteration reopens the same target with Load.  The
+                    // renderer needs `pipelines` so its blit-onto-target pass
+                    // can reuse the shared 2-D textured-quad pipeline.
+                    if let Some(r) = renderer.borrow_mut().as_mut() {
+                        let target_size = (target_vp.0 as u32, target_vp.1 as u32);
+                        r.draw(
+                            device,
+                            encoder,
+                            target_view,
+                            target_size,
+                            pipelines,
+                            *screen_rect,
+                            *parent_clip,
+                        );
+                    }
+                    i += 1;
+                }
+                _ => unreachable!("loop only breaks on pass-boundary commands"),
             }
         }
     }
@@ -320,8 +357,10 @@ fn execute_one(
             pass.set_vertex_buffer(0, vb.slice(..));
             pass.draw(0..6, 0..1);
         }
-        // Layer boundaries are handled in the outer driver, not here.
-        Prepared::PushLayer { .. } | Prepared::PopLayer { .. } => {}
+        // Pass-boundary commands are handled in the outer driver, not here.
+        Prepared::PushLayer { .. }
+        | Prepared::PopLayer { .. }
+        | Prepared::DrawBarGrid { .. } => {}
     }
 }
 

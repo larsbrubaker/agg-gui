@@ -262,6 +262,17 @@ pub trait GlPaint {
 /// origin at the bottom-left, positive-Y upward.  This matches `GfxCtx` and
 /// the widget tree layout invariant.
 pub trait DrawCtx {
+    /// Optional escape hatch for widgets that need direct access to a
+    /// backend-specific concrete context (e.g. to push a custom GPU draw
+    /// command into the deferred command stream).
+    ///
+    /// The default returns `None`; backends that opt in override to return
+    /// `Some(self)`.  Callers must handle the `None` case gracefully — if a
+    /// widget falls back through `gl_paint` it works on every backend.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     fn set_fill_color(&mut self, color: Color);

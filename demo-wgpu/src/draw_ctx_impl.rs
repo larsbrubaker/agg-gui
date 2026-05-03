@@ -14,6 +14,10 @@ use agg_rust::basics::PATH_FLAGS_NONE;
 use agg_rust::rounded_rect::RoundedRect;
 
 impl DrawCtx for WgpuGfxCtx {
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self as &mut dyn std::any::Any)
+    }
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     fn set_fill_color(&mut self, c: Color) {
@@ -421,33 +425,24 @@ impl DrawCtx for WgpuGfxCtx {
 
     // ── GL / GPU content ──────────────────────────────────────────────────────
 
-    fn gl_paint(&mut self, screen_rect: agg_gui::Rect, painter: &mut dyn agg_gui::GlPaint) {
-        // Flush any 2-D commands accumulated up to this point so the painter
-        // overlays on the correct backdrop.  Mid-frame layer state isn't
-        // supported by this path yet — the wgpu cube widget is always at the
-        // top level on the surface in the current demo.
-        let Some(view) = self.surface_view.clone() else {
-            return;
-        };
-        if !self.commands.is_empty() {
-            self.flush_to_surface(&view);
-        }
-
-        let target_size = (self.viewport.0 as u32, self.viewport.1 as u32);
-        let pctx = crate::WgpuPaintContext {
-            device: std::sync::Arc::clone(&self.device),
-            queue: std::sync::Arc::clone(&self.queue),
-            target_view: view,
-            surface_format: self.surface_format,
-            target_size,
-        };
-        let parent_clip = self.current_clip();
-        painter.gl_paint(
-            &pctx as &dyn std::any::Any,
-            screen_rect,
-            target_size.0 as i32,
-            target_size.1 as i32,
-            parent_clip,
-        );
+    fn gl_paint(&mut self, _screen_rect: agg_gui::Rect, _painter: &mut dyn agg_gui::GlPaint) {
+        // TEMPORARY: gl_paint is a no-op on the wgpu backend.
+        //
+        // The previous synchronous-flush approach caused two architectural
+        // problems when the painter ran inside a layer (e.g. the cube widget
+        // inside a "3D Animation" window):
+        //   1. `target_view` was hard-wired to the surface, so bar-grid draws
+        //      went to the surface and were then *covered* by the layer
+        //      composite quad on pop_layer.
+        //   2. The mid-frame `flush_to_surface` discarded the local target /
+        //      load-op state, so 2-D draws after the painter targeted the
+        //      surface instead of the active layer — and on tile-based GPUs
+        //      this manifested as a hang under continuous repaint.
+        //
+        // The clean fix is a `DrawBarGrid` deferred command driven by an
+        // `as_any_mut` downcast on `DrawCtx`, with the layer target/depth
+        // attachment plumbed through the deferred-flush state machine.
+        // Tracking that as a follow-up; until then the cube widget's
+        // `paint()` only renders its theme-coloured placeholder fill.
     }
 }

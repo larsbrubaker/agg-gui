@@ -20,3 +20,15 @@ wgpu      = { version = "29", default-features = false, features = ["wgsl", "vul
 pollster  = "0.4"
 raw-window-handle = "0.6"
 web-time  = "1"
+
+[build-dependencies]
+winresource = "0.1.31"
+
+[package.metadata.bundle]
+name = "agg-gui Demo"
+identifier = "com.matterhackers.agg-gui.demo"
+icon = [
+    "assets/app-icon.icns",
+    "assets/app-icon.ico",
+    "assets/app-icon.png",
+]

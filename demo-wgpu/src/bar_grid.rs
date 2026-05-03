@@ -28,18 +28,20 @@
 //! a light/dark toggle recolours the bars on the next paint without rebuilding
 //! the pipeline.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::event::{Event, EventResult};
 use agg_gui::geometry::Rect;
 use agg_gui::widget::Widget;
-use agg_gui::{GlPaint, Size, TransAffine};
+use agg_gui::{Size, TransAffine};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::bar_grid_math::{look_at, mat4_mul, normalize3, perspective};
-use crate::WgpuPaintContext;
+use crate::msaa::MsaaFramebuffer;
+use crate::{DrawCommand, WgpuGfxCtx};
 
 thread_local! {
     /// Set each frame by [`WgpuCubeWidget::paint`].  Mirrors the GL backend
@@ -229,18 +231,32 @@ fn bar_wave_phase(elapsed_secs: f64) -> f32 {
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 pub struct BarGridWgpuRenderer {
+    /// 3-D bar pipeline configured for `sample_count`.
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     vbo: wgpu::Buffer,
     ibo: wgpu::Buffer,
     instance_vbo: wgpu::Buffer,
-    /// Cached depth texture — re-created when the target rect's size changes.
-    depth_texture: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
+    /// Lazy-allocated off-screen MSAA framebuffer (with depth) sized to the
+    /// widget rect.  Built on first draw because we need the device handle.
+    framebuffer: Option<MsaaFramebuffer>,
+    surface_format: wgpu::TextureFormat,
+    sample_count: u32,
     start: web_time::Instant,
 }
 
 impl BarGridWgpuRenderer {
-    pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Self {
+        // Clamp through the same logic the framebuffer will apply, so the
+        // pipeline's `MultisampleState` matches the colour attachment we'll
+        // hand it later.  Without this an out-of-spec saved value (e.g. `8`
+        // on a device that only supports `[1, 4]` for the surface format)
+        // panics during pipeline creation instead of silently degrading.
+        let sample_count = crate::msaa::safe_sample_count(sample_count);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bar_grid"),
             source: wgpu::ShaderSource::Wgsl(BAR_WGSL.into()),
@@ -319,7 +335,13 @@ impl BarGridWgpuRenderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                // GL backend leaves face culling disabled (default in GL),
+                // so the bar-box vertex winding produced for both Y-up faces
+                // is rendered regardless of orientation.  Match that here —
+                // turning back-face culling on under wgpu's CCW front-face
+                // default drops every face that happens to be wound the
+                // wrong way and produces a skeletal-looking grid.
+                cull_mode: None,
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
@@ -331,7 +353,11 @@ impl BarGridWgpuRenderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: sample_count.max(1),
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -361,79 +387,84 @@ impl BarGridWgpuRenderer {
             vbo,
             ibo,
             instance_vbo,
-            depth_texture: None,
+            framebuffer: None,
+            surface_format,
+            sample_count: sample_count.max(1),
             start: web_time::Instant::now(),
         }
     }
 
-    /// (Re)allocate the depth texture if the requested size differs from the
-    /// currently cached one.  Returns the view backing this frame's depth.
-    fn ensure_depth(&mut self, device: &wgpu::Device, w: u32, h: u32) -> &wgpu::TextureView {
-        let needs_new = match &self.depth_texture {
-            Some((_, _, cw, ch)) => *cw != w || *ch != h,
-            None => true,
-        };
-        if needs_new {
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("bar_grid_depth"),
-                size: wgpu::Extent3d {
-                    width: w.max(1),
-                    height: h.max(1),
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: DEPTH_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            self.depth_texture = Some((texture, view, w, h));
-        }
-        &self.depth_texture.as_ref().unwrap().1
+    /// Sample count this renderer's pipeline was built for.  Used by the
+    /// caller (cube widget) to detect when a new MSAA setting requires a
+    /// fresh renderer.
+    pub fn sample_count(&self) -> u32 {
+        self.sample_count
     }
 
-    /// Draw the bar grid onto `target_view` at `screen_rect` (Y-up).
-    /// `target_size` is the full target dimensions in physical pixels.
-    pub fn draw(
+    /// Lazy-allocate the off-screen [`MsaaFramebuffer`] on first draw and
+    /// resize it on widget changes.  Returns a mutable reference for the
+    /// caller to use as render attachments + blit source.
+    fn ensure_framebuffer(
         &mut self,
-        pctx: &WgpuPaintContext,
+        device: &wgpu::Device,
+        w: u32,
+        h: u32,
+    ) -> &mut MsaaFramebuffer {
+        let needs_new = self.framebuffer.is_none();
+        if needs_new {
+            self.framebuffer = Some(MsaaFramebuffer::new(
+                device,
+                w,
+                h,
+                self.sample_count,
+                self.surface_format,
+                /* with_depth = */ true,
+            ));
+        }
+        let fb = self.framebuffer.as_mut().unwrap();
+        fb.ensure_size(device, w, h);
+        fb
+    }
+
+    /// Drive the bar-grid scene onto `target_view` using the caller's
+    /// `encoder`.  No submission happens here — the deferred-flush owner
+    /// finishes/submits the encoder once it has accumulated all the frame's
+    /// passes.
+    ///
+    /// `target_size` is the active render target's full dimensions (surface
+    /// or layer).  `screen_rect` is the bar grid's logical rect in Y-up
+    /// pixels of that target; `parent_clip` is the framework scissor in the
+    /// same coordinate space.
+    ///
+    /// `pipelines` is the shared 2-D pipeline collection — used for the
+    /// blit pass that copies the (resolved) bar-grid output into
+    /// `target_view`.  We can't auto-resolve MSAA into `target_view`
+    /// directly because wgpu's resolve covers the full attachment area,
+    /// which would clobber the 2-D content outside the bar-grid rect.
+    pub(crate) fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+        pipelines: &crate::pipelines::WgpuPipelines,
         screen_rect: Rect,
         parent_clip: Option<[i32; 4]>,
     ) {
         if screen_rect.width < 1.0 || screen_rect.height < 1.0 {
             return;
         }
-        let target_size = pctx.target_size;
-
-        let [gl_x, gl_y, gl_w, gl_h] = pixel_rect(screen_rect);
+        let [_, _, gl_w, gl_h] = pixel_rect(screen_rect);
         if gl_w <= 0 || gl_h <= 0 {
             return;
         }
+        let widget_w = gl_w as u32;
+        let widget_h = gl_h as u32;
 
-        // Convert Y-up screen-space rect to wgpu's Y-down framebuffer
-        // convention so set_viewport / set_scissor target the same pixels
-        // as the GL backend.
-        let vp_y_down = (target_size.1 as i32 - (gl_y + gl_h)).max(0);
+        // Lazy-init / resize the off-screen MSAA framebuffer to the bar-grid
+        // rect.  Memory scales with the visible 3-D area, not the full target.
+        let _ = self.ensure_framebuffer(device, widget_w, widget_h);
 
-        // Intersect the widget rect with the parent clip in Y-up; convert
-        // the intersection to Y-down for the scissor call.
-        let [sx, sy_up, sw, sh] = if let Some([px, py, pw, ph]) = parent_clip {
-            let x1 = gl_x.max(px);
-            let y1 = gl_y.max(py);
-            let x2 = (gl_x + gl_w).min(px + pw);
-            let y2 = (gl_y + gl_h).min(py + ph);
-            [x1, y1, (x2 - x1).max(0), (y2 - y1).max(0)]
-        } else {
-            [gl_x, gl_y, gl_w, gl_h]
-        };
-        if sw <= 0 || sh <= 0 {
-            return;
-        }
-        let scissor_y_down = (target_size.1 as i32 - (sy_up + sh)).max(0);
-
-        // Build view-projection: aspect from physical scissor extent.
         let aspect = gl_w as f32 / gl_h.max(1) as f32;
         let proj = perspective(35_f32.to_radians(), aspect, 0.5, 100.0);
         let view = look_at([-7.0, 8.5, 11.0], [0.0, 0.5, 0.0], [0.0, 1.0, 0.0]);
@@ -441,8 +472,7 @@ impl BarGridWgpuRenderer {
 
         let palette = bar_palette_for_theme();
         let phase = bar_wave_phase(self.start.elapsed().as_secs_f64());
-
-        let uniforms = BarUniforms {
+        let bar_uniforms = BarUniforms {
             view_proj,
             light_dir: normalize3([0.55, 0.85, 0.45]),
             phase,
@@ -457,84 +487,77 @@ impl BarGridWgpuRenderer {
             peak_color: palette.peak,
             _pad4: 0.0,
         };
-        let ub = pctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("bar_grid_uniforms"),
-                contents: bytemuck::bytes_of(&uniforms),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let bind_group = pctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bar_ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("bar_grid_uniforms"),
+            contents: bytemuck::bytes_of(&bar_uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bar_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bar_grid_bg"),
             layout: &self.bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: ub.as_entire_binding(),
+                resource: bar_ub.as_entire_binding(),
             }],
         });
 
-        let depth_view = {
-            let v = self.ensure_depth(&pctx.device, target_size.0, target_size.1);
-            // Re-borrow as &TextureView with the lifetime of self; we store the
-            // texture so the view stays valid for the pass.
-            unsafe { &*(v as *const wgpu::TextureView) }
-        };
-
-        let mut encoder = pctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("bar_grid"),
-            });
+        // ── Pass 1: render bars into off-screen framebuffer ────────────────
+        let fb = self.framebuffer.as_ref().unwrap();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("bar_grid_pass"),
+                label: Some("bar_grid_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &pctx.target_view,
-                    resolve_target: None,
+                    view: fb.render_view(),
+                    resolve_target: fb.resolve_target(),
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        // Preserve AGG-rendered backdrop; depth gets cleared below.
-                        load: wgpu::LoadOp::Load,
+                        // Clear to transparent — pixels the bars don't cover
+                        // alpha-blend through to the 2-D backdrop in pass 2.
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
-                    }),
-                    stencil_ops: None,
+                depth_stencil_attachment: fb.depth_view().map(|dv| {
+                    wgpu::RenderPassDepthStencilAttachment {
+                        view: dv,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Discard,
+                        }),
+                        stencil_ops: None,
+                    }
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
 
-            pass.set_viewport(
-                gl_x as f32,
-                vp_y_down as f32,
-                gl_w as f32,
-                gl_h as f32,
-                0.0,
-                1.0,
-            );
-            pass.set_scissor_rect(
-                sx.max(0) as u32,
-                scissor_y_down.max(0) as u32,
-                sw as u32,
-                sh as u32,
-            );
-
+            pass.set_viewport(0.0, 0.0, widget_w as f32, widget_h as f32, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, widget_w, widget_h);
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
+            pass.set_bind_group(0, &bar_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vbo.slice(..));
             pass.set_vertex_buffer(1, self.instance_vbo.slice(..));
             pass.set_index_buffer(self.ibo.slice(..), wgpu::IndexFormat::Uint16);
             let instances = (GRID_COLS * GRID_ROWS) as u32;
             pass.draw_indexed(0..36, 0, 0..instances);
         }
-        pctx.queue.submit(std::iter::once(encoder.finish()));
+
+        // ── Pass 2: composite onto the active 2-D target ───────────────────
+        // `MsaaFramebuffer::blit_to` runs the shared `tex_pipeline` with
+        // alpha-blending so transparent pixels (where bars aren't covered)
+        // preserve the 2-D content underneath.
+        fb.blit_to(
+            device,
+            encoder,
+            target_view,
+            target_size,
+            screen_rect,
+            parent_clip,
+            pipelines,
+        );
+
+        let _ = (bar_ub, bar_bind_group);
     }
 }
 
@@ -545,22 +568,48 @@ impl BarGridWgpuRenderer {
 pub struct WgpuCubeWidget {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
-    renderer: Option<BarGridWgpuRenderer>,
+    /// Lazy-init renderer shared with the deferred draw command.  Wrapped in
+    /// `Rc<RefCell<Option<>>>` so the widget can keep ownership while the
+    /// `DrawCommand::DrawBarGrid` queued for this frame holds a clone of the
+    /// `Rc` and reads the renderer back at execute time.
+    renderer: Rc<RefCell<Option<BarGridWgpuRenderer>>>,
+    /// Shared MSAA sample-count cell.  Read each paint and run through
+    /// [`crate::msaa::safe_sample_count`]; if the resulting count differs
+    /// from the active renderer, `paint()` rebuilds the renderer.  UI
+    /// controls (e.g. the Off / 4× row at the top of the 3-D Animation
+    /// window) write to the same cell — same `Rc<Cell<u8>>` the demo-ui
+    /// state layer persists, so a tweak round-trips to disk for free.
+    sample_count: Rc<Cell<u8>>,
 }
 
 impl Default for WgpuCubeWidget {
     fn default() -> Self {
-        Self::new()
+        Self::new(Rc::new(Cell::new(0)))
     }
 }
 
 impl WgpuCubeWidget {
-    pub fn new() -> Self {
+    /// Build a new cube widget bound to a shared MSAA `Rc<Cell<u8>>`.
+    /// The cell starts at the desired sample count (`0` / `1` = no MSAA,
+    /// `4` = the highest WebGPU-spec-guaranteed value).  Out-of-spec
+    /// values are clamped on the read side via
+    /// [`crate::msaa::safe_sample_count`] so an old saved `8` doesn't
+    /// panic on pipeline creation; the cell itself preserves the user's
+    /// raw choice.
+    pub fn new(sample_count: Rc<Cell<u8>>) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
-            renderer: None,
+            renderer: Rc::new(RefCell::new(None)),
+            sample_count,
         }
+    }
+
+    /// Borrow a clone of the shared sample-count cell.  UI controls that
+    /// want to drive the MSAA setting (and have the persistence layer
+    /// write through to disk) can grab a clone via this getter.
+    pub fn sample_count_cell(&self) -> Rc<Cell<u8>> {
+        Rc::clone(&self.sample_count)
     }
 }
 
@@ -624,32 +673,44 @@ impl Widget for WgpuCubeWidget {
         ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
         ctx.fill();
 
-        ctx.gl_paint(screen_rect, self);
+        // Backend-specific path: downcast to WgpuGfxCtx and queue a deferred
+        // bar-grid draw.  On non-wgpu backends the downcast yields `None`
+        // and the widget is just the placeholder fill above — the demo
+        // still lays out and renders, the bars simply don't appear.
+        if let Some(any) = ctx.as_any_mut() {
+            if let Some(wgpu_ctx) = any.downcast_mut::<WgpuGfxCtx>() {
+                // Read the shared MSAA cell, clamp through the spec-safe
+                // helper, and rebuild the renderer if the active sample
+                // count no longer matches.  No restart required — the UI
+                // toggles in the cube widget's title bar take effect on
+                // the next paint.
+                let desired = crate::msaa::safe_sample_count(self.sample_count.get() as u32);
+                {
+                    let mut slot = self.renderer.borrow_mut();
+                    let needs_rebuild = match slot.as_ref() {
+                        Some(r) => r.sample_count() != desired,
+                        None => true,
+                    };
+                    if needs_rebuild {
+                        *slot = Some(BarGridWgpuRenderer::new(
+                            &wgpu_ctx.device,
+                            wgpu_ctx.surface_format,
+                            desired,
+                        ));
+                    }
+                }
+                let parent_clip = wgpu_ctx.current_clip();
+                wgpu_ctx.commands.push(DrawCommand::DrawBarGrid {
+                    renderer: Rc::clone(&self.renderer),
+                    screen_rect,
+                    parent_clip,
+                });
+            }
+        }
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
-    }
-}
-
-/// Drives [`BarGridWgpuRenderer`] from `DrawCtx::gl_paint`'s `&dyn Any` handle.
-/// The renderer is created lazily on the first call, then reused across frames.
-impl GlPaint for WgpuCubeWidget {
-    fn gl_paint(
-        &mut self,
-        gl: &dyn std::any::Any,
-        screen_rect: Rect,
-        _full_w: i32,
-        _full_h: i32,
-        parent_clip: Option<[i32; 4]>,
-    ) {
-        let Some(pctx) = gl.downcast_ref::<WgpuPaintContext>() else {
-            return;
-        };
-        let renderer = self
-            .renderer
-            .get_or_insert_with(|| BarGridWgpuRenderer::new(&pctx.device, pctx.surface_format));
-        renderer.draw(pctx, screen_rect, parent_clip);
     }
 }
 

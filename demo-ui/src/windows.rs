@@ -274,11 +274,31 @@ fn load_png(path: &std::path::Path) -> Option<(Vec<u8>, u32, u32)> {
 // 3D Animation window content
 // ---------------------------------------------------------------------------
 
-/// Wrap the platform-provided GL widget for placement inside a floating
-/// `Window`.  No label, no decorative chrome — the GL widget fills the
-/// window's content rect and paints its own theme-aware background each
-/// frame (see `GlCubeWidget::paint`), so the whole content area follows
-/// the active theme automatically when the user toggles light / dark.
-pub fn cube_content(_font: Arc<Font>, cube_widget: Box<dyn Widget>) -> Box<dyn Widget> {
-    cube_widget
+/// Wrap the platform-provided cube widget for placement inside a floating
+/// `Window`.  Stacks an MSAA segmented row above the cube — toggling it
+/// re-builds the bar-grid renderer with the new sample count on the next
+/// paint (no relaunch needed; MSAA is scoped to the bar-grid framebuffer).
+///
+/// The segments are limited to the WebGPU-spec-guaranteed safe set
+/// (`Off` / `4×`); higher values like `8` and `16` require an opt-in
+/// adapter feature and aren't universally supported by the surface format.
+pub fn cube_content(
+    font: Arc<Font>,
+    cube_widget: Box<dyn Widget>,
+    msaa_cell: std::rc::Rc<std::cell::Cell<u8>>,
+) -> Box<dyn Widget> {
+    use agg_gui::FlexColumn;
+
+    let toolbar = Box::new(crate::backend_panel::MsaaRow::new(
+        Arc::clone(&font),
+        msaa_cell,
+        crate::backend_panel::MsaaRow::CUBE_SEGMENTS,
+    )) as Box<dyn Widget>;
+
+    Box::new(
+        FlexColumn::new()
+            .with_gap(0.0)
+            .add(toolbar)
+            .add_flex(cube_widget, 1.0),
+    )
 }

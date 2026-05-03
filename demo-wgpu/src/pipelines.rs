@@ -80,8 +80,17 @@ const _: () = assert!(size_of::<LcbUniforms>() == 16);
 // Blend states
 // ---------------------------------------------------------------------------
 
-/// Standard 2D composite: src-alpha / one-minus-src-alpha for colour; alpha
-/// channel accumulated from destination only (zero src, one dst).
+/// Standard 2-D composite: src-alpha / one-minus-src-alpha for colour, with
+/// premultiplied-style alpha accumulation so the same pipelines work both
+/// against the surface (alpha stays pinned at 1) and against transparent layer
+/// textures (alpha builds up correctly so the layer composite has something
+/// to alpha-blend against).
+///
+/// Earlier wired this with `alpha = { Zero, One }` to "preserve framebuffer
+/// alpha", which is fine on the surface but leaves layer textures stuck at
+/// alpha=0 — the composite then degenerates into pure additive blending and
+/// every windowed widget renders as washed-out white.  `One / OMSA` is a
+/// fixed-point at 1 on the surface AND accumulates correctly on a layer.
 const BLEND_STANDARD: wgpu::BlendState = wgpu::BlendState {
     color: wgpu::BlendComponent {
         src_factor: wgpu::BlendFactor::SrcAlpha,
@@ -89,8 +98,8 @@ const BLEND_STANDARD: wgpu::BlendState = wgpu::BlendState {
         operation: wgpu::BlendOperation::Add,
     },
     alpha: wgpu::BlendComponent {
-        src_factor: wgpu::BlendFactor::Zero,
-        dst_factor: wgpu::BlendFactor::One,
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
         operation: wgpu::BlendOperation::Add,
     },
 };
@@ -114,8 +123,14 @@ const BLEND_PREMUL: wgpu::BlendState = wgpu::BlendState {
 // ---------------------------------------------------------------------------
 
 /// All render pipelines, bind-group layouts, and shared samplers.
-/// Created once per `WgpuGfxCtx`; lives for its entire lifetime.
-pub(crate) struct WgpuPipelines {
+///
+/// Created once per [`crate::WgpuGfxCtx`] and reused for the lifetime of the
+/// context.  The struct is publicly visible so library primitives like
+/// [`crate::msaa::MsaaFramebuffer::blit_to`] can take a reference and reuse
+/// the shared 2-D textured-quad pipeline; the fields themselves stay
+/// `pub(crate)` so external code can hold a `&WgpuPipelines` but cannot
+/// reach in and rebuild individual pipelines.
+pub struct WgpuPipelines {
     // ── Solid colour ─────────────────────────────────────────────────────────
     pub solid_pipeline: wgpu::RenderPipeline,
     pub solid_bgl: wgpu::BindGroupLayout,
@@ -163,7 +178,16 @@ pub(crate) struct WgpuPipelines {
 impl WgpuPipelines {
     /// Construct all pipelines.  Panics if any WGSL shader fails to compile —
     /// a startup crash is preferable to a silent runtime black screen.
-    pub(crate) fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
+    ///
+    /// `sample_count` bakes into every pipeline's `MultisampleState`.  Must
+    /// match the sample count of every render-pass color attachment those
+    /// pipelines target — both the surface MSAA buffer and any layer MSAA
+    /// buffers.  `1` disables MSAA.
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Self {
         // ── Samplers ─────────────────────────────────────────────────────────
         let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("nearest"),
@@ -280,56 +304,67 @@ impl WgpuPipelines {
             device, "solid", &solid_pl, &solid_sm, &solid_sm,
             &[vbl_pos2()],
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            sample_count,
         );
         let aa_solid_pipeline = build_pipeline(
             device, "aa_solid", &aa_solid_pl, &aa_solid_sm, &aa_solid_sm,
             &[vbl_pos2_alpha()],
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            sample_count,
         );
         let gradient_pipeline = build_pipeline(
             device, "gradient", &gradient_pl, &gradient_sm, &gradient_sm,
             &[vbl_pos2_alpha()],
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            sample_count,
         );
         let tex_pipeline = build_pipeline(
             device, "tex", &tex_pl, &tex_sm, &tex_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            sample_count,
         );
         let layer_pipeline = build_pipeline(
             device, "layer", &layer_pl, &layer_sm, &layer_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::ALL,
+            sample_count,
         );
         let lcd_r = build_pipeline(
             device, "lcd_r", &lcd_pl, &lcd_sm, &lcd_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::RED,
+            sample_count,
         );
         let lcd_g = build_pipeline(
             device, "lcd_g", &lcd_pl, &lcd_sm, &lcd_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::GREEN,
+            sample_count,
         );
         let lcd_b = build_pipeline(
             device, "lcd_b", &lcd_pl, &lcd_sm, &lcd_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::BLUE,
+            sample_count,
         );
         let lcb_r = build_pipeline(
             device, "lcb_r", &lcb_pl, &lcb_sm, &lcb_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::RED,
+            sample_count,
         );
         let lcb_g = build_pipeline(
             device, "lcb_g", &lcb_pl, &lcb_sm, &lcb_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::GREEN,
+            sample_count,
         );
         let lcb_b = build_pipeline(
             device, "lcb_b", &lcb_pl, &lcb_sm, &lcb_sm,
             &[vbl_pos2_uv2()],
             surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::BLUE,
+            sample_count,
         );
 
         Self {
@@ -480,6 +515,7 @@ fn build_pipeline(
     surface_format: wgpu::TextureFormat,
     blend: Option<wgpu::BlendState>,
     write_mask: wgpu::ColorWrites,
+    sample_count: u32,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
@@ -506,7 +542,11 @@ fn build_pipeline(
             ..Default::default()
         },
         depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
         multiview_mask: None,
         cache: None,
     })
