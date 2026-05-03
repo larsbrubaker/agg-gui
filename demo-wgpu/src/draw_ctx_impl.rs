@@ -238,8 +238,8 @@ impl DrawCtx for WgpuGfxCtx {
 
     // ── Text ──────────────────────────────────────────────────────────────────
 
-    fn fill_text(&mut self, _text: &str, _x: f64, _y: f64) {
-        todo!("Phase 7: implement text via LCD mask pipeline or grayscale path")
+    fn fill_text(&mut self, text: &str, x: f64, y: f64) {
+        self.fill_text_impl(text, x, y);
     }
 
     fn fill_text_gsv(&mut self, _text: &str, _x: f64, _y: f64, _size: f64) {
@@ -255,11 +255,75 @@ impl DrawCtx for WgpuGfxCtx {
     // ── Image blitting ────────────────────────────────────────────────────────
 
     fn has_image_blit(&self) -> bool {
-        false // Set to true once Phase 6 implements the texture pipeline.
+        true
+    }
+
+    fn draw_image_rgba(
+        &mut self,
+        data: &[u8],
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        self.draw_image_rgba_slice_impl(data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
+    }
+
+    fn draw_image_rgba_arc(
+        &mut self,
+        data: &std::sync::Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        self.draw_image_rgba_arc_impl(data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
     fn has_lcd_mask_composite(&self) -> bool {
-        false // Set to true once Phase 7 implements the LCD pipeline.
+        true
+    }
+
+    fn draw_lcd_mask(
+        &mut self,
+        mask: &[u8],
+        mask_w: u32,
+        mask_h: u32,
+        src_color: agg_gui::Color,
+        dst_x: f64,
+        dst_y: f64,
+    ) {
+        self.draw_lcd_mask_slice_impl(mask, mask_w, mask_h, src_color, dst_x, dst_y);
+    }
+
+    fn draw_lcd_mask_arc(
+        &mut self,
+        mask: &std::sync::Arc<Vec<u8>>,
+        mask_w: u32,
+        mask_h: u32,
+        src_color: agg_gui::Color,
+        dst_x: f64,
+        dst_y: f64,
+    ) {
+        self.draw_lcd_mask_arc_impl(mask, mask_w, mask_h, src_color, dst_x, dst_y);
+    }
+
+    fn draw_lcd_backbuffer_arc(
+        &mut self,
+        color: &std::sync::Arc<Vec<u8>>,
+        alpha: &std::sync::Arc<Vec<u8>>,
+        w: u32,
+        h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        self.draw_lcd_backbuffer_arc_impl(color, alpha, w, h, dst_x, dst_y, dst_w, dst_h);
     }
 
     // ── Transform ─────────────────────────────────────────────────────────────
@@ -318,41 +382,41 @@ impl DrawCtx for WgpuGfxCtx {
     // ── Compositing layers ────────────────────────────────────────────────────
 
     fn supports_compositing_layers(&self) -> bool {
-        false // Becomes true once Phase 8 implements push/pop layer.
+        true
     }
 
     fn supports_retained_layers(&self) -> bool {
-        false // Becomes true once Phase 8 implements retained layers.
+        true
     }
 
-    fn push_layer(&mut self, _width: f64, _height: f64) {
-        // No-op until Phase 8.
+    fn push_layer(&mut self, width: f64, height: f64) {
+        self.push_layer_with_alpha_impl(width, height, 1.0, None);
     }
 
-    fn push_layer_with_alpha(&mut self, _width: f64, _height: f64, _alpha: f64) {
-        // No-op until Phase 8.
+    fn push_layer_with_alpha(&mut self, width: f64, height: f64, alpha: f64) {
+        self.push_layer_with_alpha_impl(width, height, alpha, None);
     }
 
     fn pop_layer(&mut self) {
-        // No-op until Phase 8.
+        self.pop_layer_impl();
     }
 
-    fn set_layer_rounded_clip(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _r: f64) {
-        // No-op until Phase 8.
+    fn set_layer_rounded_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        self.set_layer_rounded_clip_impl(x, y, w, h, r);
     }
 
     fn composite_retained_layer(
         &mut self,
-        _key: u64,
-        _width: f64,
-        _height: f64,
-        _alpha: f64,
+        key: u64,
+        width: f64,
+        height: f64,
+        alpha: f64,
     ) -> bool {
-        false // No-op until Phase 8.
+        self.composite_retained_layer_impl(key, width, height, alpha)
     }
 
-    fn push_retained_layer_with_alpha(&mut self, _key: u64, width: f64, height: f64, alpha: f64) {
-        self.push_layer_with_alpha(width, height, alpha);
+    fn push_retained_layer_with_alpha(&mut self, key: u64, width: f64, height: f64, alpha: f64) {
+        self.push_layer_with_alpha_impl(width, height, alpha, Some(key));
     }
 
     // ── GL / GPU content ──────────────────────────────────────────────────────

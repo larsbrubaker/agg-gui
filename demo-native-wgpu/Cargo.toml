@@ -1,0 +1,22 @@
+[package]
+name = "demo-native-wgpu"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "demo-native-wgpu"
+path = "src/main.rs"
+
+[features]
+default = ["reflect"]
+reflect = ["agg-gui/reflect", "demo-wgpu/reflect", "demo-ui/reflect"]
+
+[dependencies]
+agg-gui   = { path = "../agg-gui", features = ["clipboard", "winit-adapter"] }
+demo-wgpu = { path = "../demo-wgpu" }
+demo-ui   = { path = "../demo-ui" }
+winit     = "0.30"
+wgpu      = { version = "29", default-features = false, features = ["wgsl", "vulkan", "dx12", "metal"] }
+pollster  = "0.4"
+raw-window-handle = "0.6"
+web-time  = "1"

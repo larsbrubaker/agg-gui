@@ -46,6 +46,7 @@ mod draw_ctx_impl;
 mod end_frame;
 mod gradient;
 mod image_blit;
+mod layers;
 mod pipelines;
 mod primitives;
 mod shaders;
@@ -56,6 +57,7 @@ use std::sync::{Arc, Weak};
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::{FillRule, LinearGradientPaint, RadialGradientPaint};
+use agg_gui::gl_renderer::GlyphCache;
 use agg_gui::text::Font;
 use agg_gui::TransAffine;
 use agg_gui::{LineCap, LineJoin};
@@ -204,6 +206,11 @@ pub struct WgpuGfxCtx {
     pub(crate) font: Option<Arc<Font>>,
     pub(crate) font_size: f64,
     pub(crate) lcd_mode: bool,
+
+    /// Tessellated-glyph cache shared with the GL backend — produces XY
+    /// triangles per `(font, glyph_id, size)` key.  Lives on the context so
+    /// glyph tessellations persist across frames.
+    pub(crate) glyph_cache: GlyphCache,
 }
 
 impl WgpuGfxCtx {
@@ -254,6 +261,7 @@ impl WgpuGfxCtx {
             font: None,
             font_size: 16.0,
             lcd_mode: false,
+            glyph_cache: GlyphCache::new(),
         }
     }
 
@@ -374,6 +382,18 @@ pub(crate) enum DrawCommand {
     /// Composite the topmost layer texture into its parent and resume the
     /// parent render target.
     PopLayer {
+        texture: Arc<wgpu::Texture>,
+        view: wgpu::TextureView,
+        origin_x: f32,
+        origin_y: f32,
+        layer_w: u32,
+        layer_h: u32,
+        alpha: f32,
+        rounded_clip: Option<LayerRoundedClip>,
+    },
+    /// Composite a previously-retained layer onto the current render target
+    /// without entering it as a draw target.  Used by `composite_retained_layer`.
+    CompositeLayer {
         texture: Arc<wgpu::Texture>,
         view: wgpu::TextureView,
         origin_x: f32,
