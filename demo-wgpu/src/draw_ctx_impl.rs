@@ -421,7 +421,33 @@ impl DrawCtx for WgpuGfxCtx {
 
     // ── GL / GPU content ──────────────────────────────────────────────────────
 
-    fn gl_paint(&mut self, _screen_rect: agg_gui::Rect, _painter: &mut dyn agg_gui::GlPaint) {
-        todo!("Phase 9: emit DrawCommand::GlPaint and pass WgpuPaintContext")
+    fn gl_paint(&mut self, screen_rect: agg_gui::Rect, painter: &mut dyn agg_gui::GlPaint) {
+        // Flush any 2-D commands accumulated up to this point so the painter
+        // overlays on the correct backdrop.  Mid-frame layer state isn't
+        // supported by this path yet — the wgpu cube widget is always at the
+        // top level on the surface in the current demo.
+        let Some(view) = self.surface_view.clone() else {
+            return;
+        };
+        if !self.commands.is_empty() {
+            self.flush_to_surface(&view);
+        }
+
+        let target_size = (self.viewport.0 as u32, self.viewport.1 as u32);
+        let pctx = crate::WgpuPaintContext {
+            device: std::sync::Arc::clone(&self.device),
+            queue: std::sync::Arc::clone(&self.queue),
+            target_view: view,
+            surface_format: self.surface_format,
+            target_size,
+        };
+        let parent_clip = self.current_clip();
+        painter.gl_paint(
+            &pctx as &dyn std::any::Any,
+            screen_rect,
+            target_size.0 as i32,
+            target_size.1 as i32,
+            parent_clip,
+        );
     }
 }

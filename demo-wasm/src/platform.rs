@@ -1,7 +1,4 @@
-//! WASM platform convention bridge.
-//!
-//! JavaScript detects the browser client's OS and reports it here so the shared
-//! menu and shortcut code can display and match platform-native accelerators.
+//! WASM platform convention bridge — mirror of `demo-wasm/src/platform.rs`.
 
 use wasm_bindgen::prelude::*;
 

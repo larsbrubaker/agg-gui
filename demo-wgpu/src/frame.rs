@@ -24,16 +24,22 @@ thread_local! {
     static LAYOUT_FRAME_KEY: Cell<Option<(u32, u32, u64)>> = const { Cell::new(None) };
 }
 
-/// Record a clear pass for the new frame.
+/// Record a clear pass for the new frame and stash the surface view.
 ///
-/// In the wgpu backend the actual clear happens inside `end_frame` when the
-/// `DrawCommand::Clear` is flushed into the first render pass.  Calling this
-/// function simply pushes the correct clear color so the deferred command list
-/// starts with a clean framebuffer.
-pub fn begin_frame(ctx: &mut WgpuGfxCtx) {
+/// `view` is the `wgpu::TextureView` for this frame's surface texture, taken
+/// over so that any mid-frame `DrawCtx::gl_paint` calls (which need to target
+/// the same attachment as the 2-D deferred pipeline) can find it without the
+/// caller plumbing it through every method.  The view is consumed by
+/// [`WgpuGfxCtx::end_frame`].
+///
+/// The actual clear happens inside `end_frame` when the leading
+/// `DrawCommand::Clear` is flushed into the first render pass — calling this
+/// function simply pushes the correct clear colour so the deferred command
+/// list starts with a clean framebuffer.
+pub fn begin_frame(ctx: &mut WgpuGfxCtx, view: wgpu::TextureView) {
+    ctx.surface_view = Some(view);
     let bg = agg_gui::current_visuals().bg_color;
-    ctx.commands
-        .push(crate::DrawCommand::Clear(bg));
+    ctx.commands.push(crate::DrawCommand::Clear(bg));
 }
 
 /// Reset `ctx`, sync the inspector snapshot, lay out and paint `app`.

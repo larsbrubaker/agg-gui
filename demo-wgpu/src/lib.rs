@@ -39,11 +39,39 @@ pub mod frame;
 pub use frame::{begin_frame, render_app_frame};
 
 pub mod bar_grid;
+mod bar_grid_math;
 pub use bar_grid::{BarGridWgpuRenderer, WgpuCubeWidget, CUBE_SCREEN_RECT};
+
+/// GPU handle passed to widgets via `DrawCtx::gl_paint` on the wgpu backend.
+///
+/// All fields are owned (cloned `Arc<...>` for device/queue, `wgpu::TextureView`
+/// is internally ref-counted) so the struct is `'static` and works with the
+/// `&dyn std::any::Any` plumbing of [`agg_gui::GlPaint`].
+///
+/// Painters create their own `wgpu::CommandEncoder` and submit it via
+/// `queue.submit(...)`.  `WgpuGfxCtx` flushes any pending 2-D commands
+/// before invoking the painter, so submissions interleave in the natural
+/// paint order without an explicit barrier.
+#[derive(Clone)]
+pub struct WgpuPaintContext {
+    /// Device used to build pipelines, buffers, and textures.
+    pub device: Arc<wgpu::Device>,
+    /// Queue used to submit the painter's command encoder.
+    pub queue: Arc<wgpu::Queue>,
+    /// Render-target view — same surface or layer texture the 2-D pipeline
+    /// is rendering to this frame.  Painters open render passes against it
+    /// with `LoadOp::Load` to overlay on existing content.
+    pub target_view: wgpu::TextureView,
+    /// Format of `target_view` — needed for pipeline `ColorTargetState`.
+    pub surface_format: wgpu::TextureFormat,
+    /// Full target dimensions in physical pixels.
+    pub target_size: (u32, u32),
+}
 
 mod ctx_core;
 mod draw_ctx_impl;
 mod end_frame;
+mod end_frame_prepare;
 mod gradient;
 mod image_blit;
 mod layers;
@@ -211,6 +239,13 @@ pub struct WgpuGfxCtx {
     /// triangles per `(font, glyph_id, size)` key.  Lives on the context so
     /// glyph tessellations persist across frames.
     pub(crate) glyph_cache: GlyphCache,
+
+    /// Surface texture view for the current frame — set by [`begin_frame`],
+    /// cleared by [`Self::end_frame`].  Required so widgets that issue raw GPU
+    /// draws via `DrawCtx::gl_paint` can target the same attachment as the
+    /// deferred 2-D pipeline without the platform shell having to plumb the
+    /// view through every call.
+    pub(crate) surface_view: Option<wgpu::TextureView>,
 }
 
 impl WgpuGfxCtx {
@@ -262,6 +297,7 @@ impl WgpuGfxCtx {
             font_size: 16.0,
             lcd_mode: false,
             glyph_cache: GlyphCache::new(),
+            surface_view: None,
         }
     }
 
@@ -294,12 +330,17 @@ impl WgpuGfxCtx {
         self.lcd_mode = on;
     }
 
-    /// Flush all deferred draw commands into a single wgpu command submission
-    /// and present the surface.
+    /// Flush all deferred draw commands into a single wgpu command submission.
     ///
     /// Must be called after `render_app_frame` and before `surface.present()`.
-    pub fn end_frame(&mut self, surface_view: &wgpu::TextureView) {
-        self.flush_to_surface(surface_view);
+    /// The surface view used as the render target was stashed by
+    /// [`begin_frame`][crate::begin_frame] — the platform shell does not need
+    /// to pass it again here.
+    pub fn end_frame(&mut self) {
+        let Some(view) = self.surface_view.take() else {
+            return;
+        };
+        self.flush_to_surface(&view);
     }
 
     /// Read the current frame's rendered pixels back to CPU memory as a
@@ -402,11 +443,5 @@ pub(crate) enum DrawCommand {
         layer_h: u32,
         alpha: f32,
         rounded_clip: Option<LayerRoundedClip>,
-    },
-    /// Inline GPU content drawn by a [`agg_gui::GlPaint`] implementor.
-    GlPaint {
-        screen_rect: agg_gui::Rect,
-        /// Heap-boxed to keep DrawCommand object-safe.
-        painter: Box<dyn agg_gui::GlPaint>,
     },
 }

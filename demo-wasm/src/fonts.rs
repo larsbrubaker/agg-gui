@@ -1,4 +1,4 @@
-//! WASM font-loading exports.
+//! WASM font-loading exports — mirror of `demo-wasm/src/fonts.rs`.
 //!
 //! The browser shell fetches font bytes on demand and passes them here so the
 //! shared demo UI can install fonts without depending on web APIs.
