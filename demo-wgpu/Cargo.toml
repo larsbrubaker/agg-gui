@@ -1,0 +1,27 @@
+[package]
+name = "demo-wgpu"
+version = "0.1.0"
+edition = "2021"
+description = "Shared WgpuGfxCtx — DrawCtx implementation via wgpu (native Vulkan/DX12/Metal + WebGL2/WebGPU)"
+
+[features]
+default = ["reflect"]
+# Forwards to agg-gui's `reflect` feature so the live inspector edit-queue
+# plumbing in `render_app_frame` is wired up.
+reflect = ["agg-gui/reflect"]
+
+[dependencies]
+agg-gui  = { path = "../agg-gui" }
+agg-rust = "1.0.2"
+bytemuck = { version = "1", features = ["derive"] }
+web-time = "1"
+# wgsl is enabled by default in wgpu; native backends are enabled per target below.
+wgpu = { version = "29", default-features = false, features = ["wgsl"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.wgpu]
+version = "29"
+features = ["vulkan", "dx12", "metal"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
+version = "29"
+features = ["webgl"]

@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cargo doc *)"
+      "Bash(cargo doc *)",
+      "Bash(python3 -)"
     ]
   }
 }

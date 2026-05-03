@@ -1,5 +1,5 @@
 [workspace]
-members = ["agg-gui", "demo-native", "demo-wasm", "demo-gl", "demo-ui"]
+members = ["agg-gui", "demo-native", "demo-wasm", "demo-gl", "demo-ui", "demo-wgpu"]
 default-members = ["agg-gui", "demo-native", "demo-gl", "demo-ui"]
 resolver = "2"
 
