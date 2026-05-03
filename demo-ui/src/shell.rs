@@ -341,10 +341,14 @@ impl Widget for SidebarPane {
         let w = target_w.min(available.width);
         self.bounds = Rect::new(0.0, 0.0, w, available.height);
         if let Some(child) = self.children.first_mut() {
-            // Inner content starts 1 px in so the separator sits at x=0.
-            let inner_w = (w - 1.0).max(0.0);
-            child.layout(Size::new(inner_w, available.height));
-            child.set_bounds(Rect::new(1.0, 0.0, inner_w, available.height));
+            // Child fills the full pane width so the panel_bg backdrop runs
+            // edge-to-edge.  The 1-px separator drawn in `paint_overlay`
+            // sits ON TOP of panel_bg at x=0 — that way the translucent
+            // `separator` colour blends against the same backdrop as
+            // `BackendPane`'s right edge, instead of against the darker
+            // canvas bg behind us.  Keeps both edges visually identical.
+            child.layout(Size::new(w, available.height));
+            child.set_bounds(Rect::new(0.0, 0.0, w, available.height));
         }
         Size::new(w, available.height)
     }

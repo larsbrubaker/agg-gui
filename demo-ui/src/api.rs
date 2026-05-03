@@ -118,5 +118,27 @@ pub struct DemoHandles {
     /// paints an empty frame (not the stale previous capture) — this keeps
     /// the captured pixels free of the screenshot-of-a-screenshot recursion.
     pub screenshot_capturing: Rc<Cell<bool>>,
+    /// Set to `true` once a capture has succeeded at least once this session
+    /// (either via GPU-direct `DrawCtx::capture_screenshot` on wgpu, or via
+    /// the legacy `screenshot_image` path on software backends).  Drives the
+    /// Save / Copy buttons' enabled state — independent of which path the
+    /// platform uses, so the buttons light up in both flows.
+    pub screenshot_available: Rc<Cell<bool>>,
+    /// Click-deferred Save: the Save button sets this from the event-dispatch
+    /// closure (no `ctx` available there); the platform harness drains it in
+    /// its post-paint pass and performs the GPU readback + PNG encode + disk
+    /// write (or download trigger on WASM).
+    pub screenshot_save_pending: Rc<Cell<bool>>,
+    /// Click-deferred Copy.  Same flow as `screenshot_save_pending`, but the
+    /// harness pipes the bytes to the system clipboard.
+    pub screenshot_copy_pending: Rc<Cell<bool>>,
+    /// Continuous-capture flag mirrored from the screenshot demo's "Capture
+    /// continuously" checkbox.  Read by the platform harness each frame:
+    /// while set, the harness re-arms `screenshot_request` and keeps the
+    /// loop awake.  Driving it from the harness — instead of from a hidden
+    /// child widget inside the screenshot Window's retained backbuffer —
+    /// is what makes continuous mode robust: the Window's backbuffer cache
+    /// can short-circuit child paint, but the harness runs unconditionally.
+    pub screenshot_continuous: Rc<Cell<bool>>,
     pub state: StateAccessor,
 }

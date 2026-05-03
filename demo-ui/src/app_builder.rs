@@ -56,6 +56,10 @@ pub fn build_demo_ui(
     let screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>> =
         Rc::new(RefCell::new(None));
     let screenshot_capturing = Rc::new(Cell::new(false));
+    let screenshot_available = Rc::new(Cell::new(false));
+    let screenshot_save_pending = Rc::new(Cell::new(false));
+    let screenshot_copy_pending = Rc::new(Cell::new(false));
+    let screenshot_continuous = Rc::new(Cell::new(false));
     let initial_theme = initial_state
         .as_ref()
         .map(|s| s.theme_pref)
@@ -359,6 +363,10 @@ pub fn build_demo_ui(
                 Rc::clone(&screenshot_request),
                 Rc::clone(&screenshot_image),
                 Rc::clone(&screenshot_capturing),
+                Rc::clone(&screenshot_available),
+                Rc::clone(&screenshot_save_pending),
+                Rc::clone(&screenshot_copy_pending),
+                Rc::clone(&screenshot_continuous),
             )
         };
         let auto_size = spec.title == "\u{F096} Frame";
@@ -778,6 +786,10 @@ pub fn build_demo_ui(
         screenshot_request: Rc::clone(&screenshot_request),
         screenshot_image: Rc::clone(&screenshot_image),
         screenshot_capturing: Rc::clone(&screenshot_capturing),
+        screenshot_available: Rc::clone(&screenshot_available),
+        screenshot_save_pending: Rc::clone(&screenshot_save_pending),
+        screenshot_copy_pending: Rc::clone(&screenshot_copy_pending),
+        screenshot_continuous: Rc::clone(&screenshot_continuous),
         state: state_accessor,
     };
     (app, handles)

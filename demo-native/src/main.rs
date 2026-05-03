@@ -26,7 +26,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{winit_adapter, App, Modifiers, Size};
+use agg_gui::{winit_adapter, App, DrawCtx, Modifiers, Size};
 use demo_wgpu::{begin_frame, render_app_frame, WgpuCubeWidget, WgpuGfxCtx};
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
@@ -266,8 +266,10 @@ fn main() {
     let frame_history = Rc::clone(&handles.frame_history);
     let window_maximized = Rc::clone(&handles.window_maximized);
     let screenshot_request = Rc::clone(&handles.screenshot_request);
-    let screenshot_image = Rc::clone(&handles.screenshot_image);
-    let screenshot_capturing = Rc::clone(&handles.screenshot_capturing);
+    let screenshot_available = Rc::clone(&handles.screenshot_available);
+    let screenshot_save_pending = Rc::clone(&handles.screenshot_save_pending);
+    let screenshot_copy_pending = Rc::clone(&handles.screenshot_copy_pending);
+    let screenshot_continuous = Rc::clone(&handles.screenshot_continuous);
     let state_accessor = handles.state;
 
     let mut win_w = gpu.config.width;
@@ -307,8 +309,9 @@ fn main() {
         #[cfg(feature = "reflect")]
         &inspector_edits,
         &screenshot_request,
-        &screenshot_capturing,
-        &screenshot_image,
+        &screenshot_available,
+        &screenshot_save_pending,
+        &screenshot_copy_pending,
     );
     window.set_visible(true);
 
@@ -428,12 +431,24 @@ fn main() {
                     #[cfg(feature = "reflect")]
                     &inspector_edits,
                     &screenshot_request,
-                    &screenshot_capturing,
-                    &screenshot_image,
+                    &screenshot_available,
+                    &screenshot_save_pending,
+                    &screenshot_copy_pending,
                 );
             }
             Event::AboutToWait => {
-                let continuous = run_mode.get() == demo_ui::RunMode::Continuous;
+                // Continuous run mode keeps the app repainting unconditionally
+                // (used by perf graphs etc.).  Continuous SCREENSHOT capture is
+                // separate: the screenshot demo's checkbox sets
+                // `screenshot_continuous`; the harness re-arms the capture flag
+                // every tick and forces another paint, bypassing the Window's
+                // retained backbuffer cache (which would otherwise short-circuit
+                // child paint between capture frames).
+                if screenshot_continuous.get() {
+                    screenshot_request.set(true);
+                }
+                let continuous = run_mode.get() == demo_ui::RunMode::Continuous
+                    || screenshot_continuous.get();
                 let want_render = continuous || app.wants_draw();
                 if want_render {
                     let t0 = web_time::Instant::now();
@@ -451,8 +466,9 @@ fn main() {
                         #[cfg(feature = "reflect")]
                         &inspector_edits,
                         &screenshot_request,
-                        &screenshot_capturing,
-                        &screenshot_image,
+                        &screenshot_available,
+                        &screenshot_save_pending,
+                        &screenshot_copy_pending,
                     );
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
                     frame_history.borrow_mut().push(last_frame_ms as f32);
@@ -513,62 +529,80 @@ fn paint_frame(
     base_edits: &Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>>,
     #[cfg(feature = "reflect")] inspector_edits: &Rc<RefCell<Vec<agg_gui::InspectorEdit>>>,
     screenshot_request: &Rc<std::cell::Cell<bool>>,
-    screenshot_capturing: &Rc<std::cell::Cell<bool>>,
-    screenshot_image: &Rc<RefCell<Option<(std::sync::Arc<Vec<u8>>, u32, u32)>>>,
+    screenshot_available: &Rc<std::cell::Cell<bool>>,
+    screenshot_save_pending: &Rc<std::cell::Cell<bool>>,
+    screenshot_copy_pending: &Rc<std::cell::Cell<bool>>,
 ) {
-    // The shared screenshot orchestration uses two render passes when a
-    // capture is requested: pass 1 hides the screenshot preview panel
-    // (so captured pixels don't nest), reads back the surface, then pass
-    // 2 paints normally with the fresh image visible.  No-op fast path
-    // when no capture is pending.
+    // GPU-direct screenshot flow: a single render per frame.  When a capture
+    // is requested we issue ONE extra `copy_texture_to_texture` after
+    // `end_frame()` and before `present()` — pure GPU work, no readback.
+    // The screenshot widget's preview pane samples the capture texture
+    // directly each frame via `DrawCtx::draw_captured_screenshot`.
     //
     // wgpu's swap chain takes ownership of the surface texture at
-    // `frame.present()`, so the pixel read MUST happen before present.
-    // We do it inside `render_fn` and stash the result on the ctx; the
-    // orchestration's read-back closure then just retrieves it.
-    let capturing_for_render = Rc::clone(screenshot_capturing);
-    agg_gui::screenshot::run_frame_with_capture(
-        screenshot_request,
-        screenshot_capturing,
-        screenshot_image,
+    // `frame.present()`, so the GPU copy MUST happen before present.
+    let want_capture = screenshot_request.get();
+
+    let Some(frame) = acquire_frame(gpu) else {
+        return;
+    };
+    let view = frame
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    ctx.set_surface_texture(frame.texture.clone());
+    begin_frame(ctx, view);
+    render_app_frame(
         ctx,
-        |gc| {
-            let Some(frame) = acquire_frame(gpu) else { return };
-            let view = frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-            // Stash the texture handle so `read_screenshot` (called below
-            // before present) can copy from it.  `wgpu::Texture` is
-            // internally ref-counted; the handle stays valid for as long
-            // as we hold this clone.
-            gc.set_surface_texture(frame.texture.clone());
-            begin_frame(gc, view);
-            render_app_frame(
-                gc,
-                app,
-                w,
-                h,
-                frame_ms,
-                show_inspector,
-                inspector_nodes,
-                hovered_bounds,
-                base_edits,
-                #[cfg(feature = "reflect")]
-                inspector_edits,
-            );
-            gc.end_frame();
-            // Read back BEFORE present.  `read_screenshot` issues its own
-            // copy_texture_to_buffer + queue.submit + poll, so by the
-            // time it returns the staging buffer holds the pixels and the
-            // GPU is idle on the surface texture — safe to present after.
-            if capturing_for_render.get() {
-                let pixels = gc.read_screenshot();
-                gc.set_pending_screenshot(pixels);
-            }
-            frame.present();
-        },
-        |gc| gc.take_pending_screenshot(),
+        app,
+        w,
+        h,
+        frame_ms,
+        show_inspector,
+        inspector_nodes,
+        hovered_bounds,
+        base_edits,
+        #[cfg(feature = "reflect")]
+        inspector_edits,
     );
+    ctx.end_frame();
+
+    if want_capture {
+        // Cheap GPU op: copy_texture_to_texture from surface into our
+        // long-lived capture texture.  The screenshot widget will sample
+        // the texture next frame and on every frame thereafter.
+        if ctx.capture_screenshot() {
+            screenshot_request.set(false);
+            screenshot_available.set(true);
+        }
+    }
+
+    // Drain deferred Save / Copy actions — the click handlers can't read
+    // pixels themselves (no `DrawCtx` access in event dispatch), so they
+    // flip a pending flag and we run the GPU readback here, after
+    // capture_screenshot has populated the capture texture.
+    if screenshot_save_pending.replace(false) {
+        let (rgba, sw, sh) = ctx.read_captured_screenshot();
+        if !rgba.is_empty() {
+            if let Err(err) = agg_gui::screenshot::download_rgba_as_png(
+                &rgba,
+                sw,
+                sh,
+                "agg-gui-screenshot.png",
+            ) {
+                eprintln!("screenshot save failed: {err}");
+            }
+        }
+    }
+    if screenshot_copy_pending.replace(false) {
+        let (rgba, sw, sh) = ctx.read_captured_screenshot();
+        if !rgba.is_empty() {
+            if let Err(err) = agg_gui::screenshot::copy_rgba_to_clipboard(&rgba, sw, sh) {
+                eprintln!("screenshot copy failed: {err}");
+            }
+        }
+    }
+
+    frame.present();
 }
 
 /// Acquire the next surface texture, returning `None` (skip frame) for any

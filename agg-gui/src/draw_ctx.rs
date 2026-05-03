@@ -720,6 +720,61 @@ pub trait DrawCtx {
         self.draw_image_rgba(&rgba, w, h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    // ── Screenshot capture (GPU-direct path) ──────────────────────────────────
+    //
+    // Hardware-accelerated screenshot pipeline.  The capture lives on the GPU
+    // as a backend-internal texture, so the live preview pane samples it
+    // directly with proper downsample filtering — no CPU readback per frame,
+    // no re-upload, no mipmap generation in the hot path.  Pixels are pulled
+    // back to system memory only when the user actually clicks Save / Copy.
+    //
+    // Default impls are no-ops returning `false` / empty so the software
+    // backend stays unchanged: the screenshot widget falls back to the
+    // existing `draw_image_rgba_arc` + Vec<u8> path automatically.
+
+    /// Snapshot the current frame's surface into the backend's internal
+    /// screenshot texture (allocating / resizing as needed).  Must be
+    /// called inside the active frame, after `end_frame` has flushed the
+    /// 2-D render but before the platform shell calls present.
+    ///
+    /// Returns `true` if the backend supports the capture path.
+    fn capture_screenshot(&mut self) -> bool {
+        false
+    }
+
+    /// True if a previously-captured screenshot is held by the backend
+    /// and available for [`Self::draw_captured_screenshot`].
+    fn has_captured_screenshot(&self) -> bool {
+        false
+    }
+
+    /// Dimensions of the held capture, or `None` when no capture exists.
+    fn captured_screenshot_size(&self) -> Option<(u32, u32)> {
+        None
+    }
+
+    /// Draw the held capture into `(dst_x, dst_y, dst_w, dst_h)` using the
+    /// backend's preferred filtered sampling.  Returns `true` if the
+    /// capture exists and was drawn.
+    fn draw_captured_screenshot(
+        &mut self,
+        _dst_x: f64,
+        _dst_y: f64,
+        _dst_w: f64,
+        _dst_h: f64,
+    ) -> bool {
+        false
+    }
+
+    /// Read the held capture's pixels back to CPU memory as Y-down RGBA8 —
+    /// for Save / Copy.  This is intentionally a single-shot synchronous
+    /// readback; widgets should NOT call this every frame.  Returns
+    /// `(empty, 0, 0)` on backends without a capture or without GPU
+    /// readback support.
+    fn read_captured_screenshot(&mut self) -> (Vec<u8>, u32, u32) {
+        (Vec::new(), 0, 0)
+    }
+
     // ── Theme / Visuals ───────────────────────────────────────────────────────
 
     /// Return the currently-active [`Visuals`] palette.

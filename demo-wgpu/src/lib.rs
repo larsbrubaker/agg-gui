@@ -263,6 +263,17 @@ pub struct WgpuGfxCtx {
     /// stash the result here, then the screenshot orchestration picks it
     /// up via [`Self::take_pending_screenshot`] in its read-back closure.
     pub(crate) pending_screenshot: Option<(Vec<u8>, u32, u32)>,
+
+    /// GPU-resident copy of the most recent surface contents — populated by
+    /// [`DrawCtx::capture_screenshot`], sampled directly by
+    /// [`DrawCtx::draw_captured_screenshot`].  Lives on the GPU so the
+    /// screenshot preview pane can render it every frame with no CPU
+    /// readback (the previous Vec<u8> + re-upload + mipmap gen path was
+    /// blowing the frame budget under continuous capture).
+    ///
+    /// Pixels are pulled back to system memory only when the user clicks
+    /// Save or Copy — see [`DrawCtx::read_captured_screenshot`].
+    pub(crate) capture_texture: Option<(Arc<wgpu::Texture>, wgpu::TextureView, u32, u32)>,
 }
 
 impl WgpuGfxCtx {
@@ -323,6 +334,7 @@ impl WgpuGfxCtx {
             surface_view: None,
             surface_texture: None,
             pending_screenshot: None,
+            capture_texture: None,
         }
     }
 
