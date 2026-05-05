@@ -42,20 +42,47 @@ std::thread_local! {
 
 /// Request that the host schedule another draw as soon as possible.
 ///
-/// This is also the canonical visual invalidation hook: event dispatch compares
-/// [`invalidation_epoch`] before/after delivery and dirties the affected
-/// retained ancestor path when a widget requested a draw.
+/// **This is the right default for every widget state mutation that affects
+/// visual output.**  Calling it from inside an `on_event` handler advances
+/// [`invalidation_epoch`]; `dispatch_event` reads that epoch before/after
+/// delivery and automatically calls `mark_dirty` up the ancestor path when
+/// it sees a bump — so a retained ancestor's backbuffer cache invalidates
+/// without the widget needing to know about that ancestor at all.
+///
+/// Without the epoch bump, a `Widget::on_event` that returns `Ignored` (the
+/// common case for `MouseMove`) leaves the ancestor cache thinking
+/// "nothing changed", and the next frame composites a stale bitmap.  Hover
+/// effects, focus rings, and any other appearance change driven by event
+/// state ALL need this hook.
+///
+/// Reach for [`request_draw_without_invalidation`] only when you're certain
+/// no retained widget's *content* changed — overlays, position-only
+/// translations, and similar.  When in doubt, use `request_draw`.
 pub fn request_draw() {
     NEEDS_DRAW.with(|c| c.set(true));
     INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
 }
 
-/// Request a frame without dirtying retained widget backbuffers.
+/// Request a frame **without** advancing [`invalidation_epoch`].
 ///
-/// Use this for app-level overlays whose source state changed outside a
-/// retained subtree. The inspector hover rectangle is the canonical case:
-/// it must redraw, but the inspected/inspector windows do not need their FBOs
-/// rebuilt just because the overlay target moved.
+/// `dispatch_event` won't mark retained ancestors dirty for this call, so
+/// any widget that drew its previous frame into a backbuffer cache will
+/// composite the cached bitmap unchanged.  Use this **only** when:
+///
+/// * The change lives in an app-level overlay that paints fresh every
+///   frame outside any retained subtree (inspector hover rectangle, popup
+///   menus rendered via `paint_global_overlay`, scroll-fade decorations).
+/// * The change is position-only — a window drag-move, where the cached
+///   content is reused at a translated origin (see `Window::on_event` for
+///   the canonical example).
+///
+/// **Do NOT call this from a widget that mutated its own state and expects
+/// the next paint to reflect it.**  That's [`request_draw`]'s job.  Hover
+/// indices, focus changes, animation ticks, button-press states — anything
+/// where the *content* of a retained widget differs from the cached
+/// bitmap — must call `request_draw` so the cache invalidates.  The
+/// `MenuBar` hover regression in `widgets/menu/widget/tests_2.rs` exists
+/// precisely because this distinction was missed once already.
 pub fn request_draw_without_invalidation() {
     NEEDS_DRAW.with(|c| c.set(true));
 }

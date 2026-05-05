@@ -97,6 +97,27 @@ pub trait Widget {
 
     /// Handle an event. The event's positions are already in **local** Y-up
     /// coordinates. Return [`EventResult::Consumed`] to stop bubbling.
+    ///
+    /// # Invalidation contract
+    ///
+    /// If your handler mutates state that affects the next paint (hover
+    /// index, focus, button-pressed bool, animation phase, ...), call
+    /// [`crate::animation::request_draw`] from inside the handler.  That
+    /// bumps the invalidation epoch, which `dispatch_event` reads to mark
+    /// retained ancestor backbuffers dirty — without it, the cached
+    /// bitmap composites unchanged and your state mutation is invisible
+    /// until something else dirties the cache.
+    ///
+    /// Returning `Consumed` *also* dirties the ancestor path automatically,
+    /// so a consumed click handler that calls `request_draw` is belt-and-
+    /// suspenders.  But `MouseMove` handlers that return `Ignored` (the
+    /// usual case for hover-tracking) **only** invalidate via
+    /// `request_draw`'s epoch bump.  Forgetting it produces "hover only
+    /// works the first time after I drag the window resize edge" bugs.
+    ///
+    /// `request_draw_without_invalidation` is for the rare cases where
+    /// the visual change is in an app-overlay or a position-only
+    /// composite — see its rustdoc.
     fn on_event(&mut self, event: &Event) -> EventResult;
 
     /// Handle a key that was not consumed by the focused widget path.
