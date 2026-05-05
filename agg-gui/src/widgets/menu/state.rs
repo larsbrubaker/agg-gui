@@ -9,6 +9,18 @@ use crate::geometry::{Point, Size};
 use super::geometry::{hit_test, item_at_path, stack_layout, MenuHit, PopupLayout};
 use super::model::{MenuEntry, MenuSelection};
 
+/// Wall-clock window during which a touch event still classifies follow-up
+/// mouse events as touch-synthesised.  Mirrors the constant in the menu
+/// widget; duplicated here so this module stays standalone-testable
+/// instead of pulling in the widget impl.
+const TOUCH_SYNTH_WINDOW_MS: u128 = 50;
+
+fn is_touch_synthesized() -> bool {
+    crate::touch_state::last_touch_event_age()
+        .map(|d| d.as_millis() < TOUCH_SYNTH_WINDOW_MS)
+        .unwrap_or(false)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAnchorKind {
     Context,
@@ -183,6 +195,14 @@ impl PopupMenuState {
                 Some(path)
             }
             _ => None,
+        };
+        // Touch-synth MouseMove arrives during a tap; treat hover as None
+        // so the dropped finger doesn't leave a hover panel behind on the
+        // popup row after the tap closes the menu.
+        let next_hover = if is_touch_synthesized() {
+            None
+        } else {
+            next_hover
         };
         if self.hover_path != next_hover {
             self.hover_path = next_hover;

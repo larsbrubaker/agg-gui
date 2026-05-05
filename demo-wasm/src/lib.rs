@@ -34,7 +34,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{App, InspectorNode, InspectorOverlay, Key, Modifiers, MouseButton};
-use demo_wgpu::{begin_frame, render_app_frame, WgpuCubeWidget, WgpuGfxCtx, CUBE_SCREEN_RECT};
+use demo_wgpu::{
+    begin_frame, render_app_frame, MsaaFramebuffer, WgpuCubeWidget, WgpuGfxCtx,
+    CUBE_SCREEN_RECT,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -62,6 +65,14 @@ thread_local! {
     static AUTO_SAVE:         RefCell<agg_gui::persistence::AutoSave> = RefCell::new(agg_gui::persistence::AutoSave::new());
     static NEEDS_DRAW:        Cell<bool> = Cell::new(true);
     static CUBE_VISIBLE:      RefCell<Option<Rc<Cell<bool>>>> = RefCell::new(None);
+    /// Intermediate "scene" framebuffer that rendering targets every frame
+    /// before being blit-displayed onto the real swap-chain surface.
+    /// Required because WebGL2 surfaces only advertise `COLOR_TARGET` —
+    /// without an intermediate, the GPU-direct screenshot path
+    /// (`copy_texture_to_texture(surface → capture)`) fails validation.
+    /// The scene texture is `RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC`,
+    /// so screenshots copy from it cleanly.
+    static SCENE_FB:          RefCell<Option<MsaaFramebuffer>> = RefCell::new(None);
 }
 
 /// All wgpu state that survives the async init and lives for the lifetime of
@@ -283,6 +294,36 @@ fn ensure_wgpu_ctx(width: f32, height: f32) {
     });
 }
 
+/// Lazily allocate the scene framebuffer the first time it's requested,
+/// resizing on subsequent calls when the surface size changes.
+fn ensure_scene_fb(width: u32, height: u32) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    SCENE_FB.with(|cell| {
+        WGPU_INIT.with(|init_cell| {
+            let init_borrow = init_cell.borrow();
+            let Some(init) = init_borrow.as_ref() else {
+                return;
+            };
+            let mut fb_borrow = cell.borrow_mut();
+            match fb_borrow.as_mut() {
+                Some(fb) => fb.ensure_size(&init.device, width, height),
+                None => {
+                    *fb_borrow = Some(MsaaFramebuffer::new(
+                        &init.device,
+                        width,
+                        height,
+                        /* sample_count = */ 1,
+                        init.surface_format,
+                        /* with_depth = */ false,
+                    ));
+                }
+            }
+        });
+    });
+}
+
 /// Reconfigure the wgpu surface for a new canvas size.  Called from `render`
 /// when the JS-side caller's `width`/`height` differ from the configured
 /// surface — the canvas typically resizes on browser zoom or window resize.
@@ -299,6 +340,7 @@ fn resize_surface_if_needed(width: u32, height: u32) {
             }
         }
     });
+    ensure_scene_fb(width, height);
 }
 
 // ---------------------------------------------------------------------------
@@ -346,39 +388,87 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
         }
     });
     let Some(frame) = frame else { return };
-    let view = frame
+    let surface_view = frame
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
 
     if let (Some(nodes), Some(hb), Some(base_edits)) =
         (inspector_nodes_rc, hovered_bounds_rc, base_edits_rc)
     {
-        WGPU_CTX.with(|ctx_cell| {
-            let mut ctx_borrow = ctx_cell.borrow_mut();
-            if let Some(wgpu_ctx) = ctx_borrow.as_mut() {
-                begin_frame(wgpu_ctx, view);
-                DEMO_APP.with(|app_cell| {
-                    let mut app_borrow = app_cell.borrow_mut();
-                    if let Some(app) = app_borrow.as_mut() {
-                        render_app_frame(
-                            wgpu_ctx,
-                            app,
-                            width,
-                            height,
-                            frame_ms,
-                            show_inspector,
-                            &nodes,
-                            &hb,
-                            &base_edits,
-                            #[cfg(feature = "reflect")]
-                            inspector_edits_rc.as_ref().expect(
-                                "INSPECTOR_EDITS must be initialised with reflect on",
-                            ),
-                        );
-                    }
-                });
-                wgpu_ctx.end_frame();
-            }
+        // Render every frame into the intermediate scene framebuffer
+        // instead of straight to the swap-chain surface.  The scene
+        // texture is `RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC`,
+        // so it can serve as the source of the GPU-direct screenshot
+        // copy — the WebGL2 surface texture only advertises
+        // `COLOR_TARGET`, which is why a direct
+        // `copy_texture_to_texture(surface → capture)` fails on WASM.
+        // After the deferred command list flushes, we run a textured-
+        // quad blit pass on the scene to display it on the real surface.
+        SCENE_FB.with(|fb_cell| {
+            let fb_borrow = fb_cell.borrow();
+            let Some(scene_fb) = fb_borrow.as_ref() else {
+                return;
+            };
+            let scene_view = scene_fb.render_view().clone();
+            let scene_texture = scene_fb.resolve_texture().clone();
+
+            WGPU_CTX.with(|ctx_cell| {
+                let mut ctx_borrow = ctx_cell.borrow_mut();
+                if let Some(wgpu_ctx) = ctx_borrow.as_mut() {
+                    // `set_surface_texture` is what `capture_screenshot`
+                    // copies from — point it at the scene texture so
+                    // screenshots succeed.
+                    wgpu_ctx.set_surface_texture(scene_texture);
+                    begin_frame(wgpu_ctx, scene_view);
+                    DEMO_APP.with(|app_cell| {
+                        let mut app_borrow = app_cell.borrow_mut();
+                        if let Some(app) = app_borrow.as_mut() {
+                            render_app_frame(
+                                wgpu_ctx,
+                                app,
+                                width,
+                                height,
+                                frame_ms,
+                                show_inspector,
+                                &nodes,
+                                &hb,
+                                &base_edits,
+                                #[cfg(feature = "reflect")]
+                                inspector_edits_rc.as_ref().expect(
+                                    "INSPECTOR_EDITS must be initialised with reflect on",
+                                ),
+                            );
+                        }
+                    });
+                    wgpu_ctx.end_frame();
+
+                    // Display: blit the scene onto the actual surface
+                    // through the shared 2-D textured-quad pipeline.
+                    let device = Arc::clone(&wgpu_ctx.device());
+                    let queue = Arc::clone(&wgpu_ctx.queue());
+                    let mut encoder = device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("scene_blit_to_surface"),
+                        },
+                    );
+                    let dst_rect = agg_gui::Rect::new(
+                        0.0,
+                        0.0,
+                        width as f64,
+                        height as f64,
+                    );
+                    scene_fb.blit_to(
+                        &device,
+                        &mut encoder,
+                        &surface_view,
+                        (width, height),
+                        dst_rect,
+                        None,
+                        wgpu_ctx.pipelines(),
+                    );
+                    queue.submit(std::iter::once(encoder.finish()));
+                }
+            });
         });
     }
     frame.present();

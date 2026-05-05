@@ -221,9 +221,21 @@ impl MenuBar {
     }
 
     fn set_hover_index(&mut self, hover: Option<usize>) {
+        // Touch devices have no real cursor; the synth-MouseMove fired
+        // alongside a touchstart would otherwise paint a hover panel that
+        // sticks after the tap (no MouseMove ever leaves the bar to clear
+        // it).  Coerce hover to `None` for any input within the touch-synth
+        // window so a tap-to-open / tap-to-close cycle leaves no residue.
+        let hover = if is_touch_synthesized() { None } else { hover };
         if self.hover_index != hover {
             self.hover_index = hover;
-            crate::animation::request_draw_without_invalidation();
+            // `request_draw()` (NOT `_without_invalidation`) — the bar's
+            // hover paint lives inside the parent Window's retained
+            // backbuffer, so the cache must invalidate or the next paint
+            // composites a stale bitmap.  The epoch bump in `request_draw`
+            // is what `dispatch_event` reads to mark the ancestor path
+            // dirty even when this MouseMove returns `Ignored`.
+            crate::animation::request_draw();
         }
         // Cursor moved to a different top-menu (or off any) — clear
         // the post-close hover suppression so the next genuine hover

@@ -81,6 +81,52 @@ fn top_level_menu_tracks_hover() {
 }
 
 #[test]
+fn hover_change_advances_invalidation_epoch() {
+    // Regression: the hover panel paints inside the parent Window's
+    // retained backbuffer.  When `set_hover_index` mutates `hover_index`
+    // it must bump the invalidation epoch so `dispatch_event` marks the
+    // ancestor cache dirty — otherwise the next frame composites a
+    // stale bitmap and hover never appears.  The bug previously
+    // appeared as: hover only briefly visible when something else
+    // (e.g. a resize-edge highlight) happened to dirty the Window.
+    crate::touch_state::clear_last_touch_event_for_testing();
+    let mut bar = MenuBar::new(
+        test_font(),
+        vec![TopMenu::new(
+            "File",
+            vec![MenuItem::action("New", "file.new").into()],
+        )],
+        |_| {},
+    );
+    bar.layout(Size::new(300.0, BAR_H));
+
+    // Hover off → onto the bar; epoch must advance so retained ancestors
+    // re-rasterise.
+    let before = crate::animation::invalidation_epoch();
+    bar.on_event(&Event::MouseMove {
+        pos: Point::new(8.0, 8.0),
+    });
+    assert!(
+        crate::animation::invalidation_epoch() != before,
+        "MenuBar hover change must advance the invalidation epoch so the \
+         parent Window's backbuffer cache invalidates"
+    );
+
+    // No-op move (still over same menu) shouldn't advance the epoch
+    // — the cache is already correct for this hover state.
+    let before = crate::animation::invalidation_epoch();
+    bar.on_event(&Event::MouseMove {
+        pos: Point::new(10.0, 8.0),
+    });
+    assert_eq!(
+        crate::animation::invalidation_epoch(),
+        before,
+        "MouseMove that doesn't change hover_index should not advance \
+         the epoch"
+    );
+}
+
+#[test]
 fn mouse_down_drag_release_activates_popup_item() {
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);

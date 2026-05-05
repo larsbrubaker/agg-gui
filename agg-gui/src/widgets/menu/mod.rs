@@ -222,6 +222,60 @@ mod tests {
     }
 
     #[test]
+    fn touch_synthesized_move_does_not_set_popup_hover() {
+        // Regression: a touch tap synthesises a MouseMove at the tap point
+        // before the MouseDown.  Without suppression, that move would set
+        // `hover_path` and the post-tap state would still paint a hover
+        // panel on the just-tapped row even though the menu has closed.
+        // After the fix, an enabled-row MouseMove inside the touch-synth
+        // window must leave `hover_path` as `None`.
+        let items = test_items();
+        let mut state = PopupMenuState::default();
+        state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
+        let viewport = Size::new(400.0, 240.0);
+        let first_row = state.layouts(&items, viewport)[0].rows[0].rect;
+
+        // Force the touch-synth window to be active by recording a touch
+        // event right before the MouseMove — same call the touch shells
+        // make on every touchstart / touchmove / touchend.
+        crate::touch_state::clear_last_touch_event_for_testing();
+        crate::touch_state::note_touch_event();
+
+        state.update_hover(
+            &items,
+            Point::new(first_row.x + 10.0, first_row.y + 10.0),
+            viewport,
+        );
+        assert_eq!(
+            state.hover_path, None,
+            "a touch-synth MouseMove must not paint a popup-row hover"
+        );
+
+        // Reset for sibling tests.
+        crate::touch_state::clear_last_touch_event_for_testing();
+    }
+
+    #[test]
+    fn desktop_move_still_sets_popup_hover() {
+        // Mirror test: outside the touch-synth window the same MouseMove
+        // SHOULD set hover so desktop users see the subtle hover panel.
+        let items = test_items();
+        let mut state = PopupMenuState::default();
+        state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
+        let viewport = Size::new(400.0, 240.0);
+        let first_row = state.layouts(&items, viewport)[0].rows[0].rect;
+
+        crate::touch_state::clear_last_touch_event_for_testing();
+
+        assert!(state.update_hover(
+            &items,
+            Point::new(first_row.x + 10.0, first_row.y + 10.0),
+            viewport,
+        ));
+        assert_eq!(state.hover_path, Some(vec![0]));
+    }
+
+    #[test]
     fn outside_click_dismisses_menu() {
         let mut items = test_items();
         let mut state = PopupMenuState::default();

@@ -82,7 +82,7 @@ mod end_frame_prepare;
 mod gradient;
 mod image_blit;
 mod layers;
-mod pipelines;
+pub mod pipelines;
 mod primitives;
 mod shaders;
 mod text_render;
@@ -382,6 +382,34 @@ impl WgpuGfxCtx {
             return;
         };
         self.flush_to_surface(&view);
+    }
+
+    /// Borrow the shared 2-D pipeline collection.  Exposed so platform
+    /// shells (currently `demo-wasm`) can drive a [`MsaaFramebuffer::blit_to`]
+    /// when they need to composite an intermediate scene texture onto the
+    /// real swap-chain surface — see the comment on
+    /// [`MsaaFramebuffer::resolve_texture`] for the WebGL2 scene-buffer
+    /// pattern.  The returned `&WgpuPipelines` only exposes the fields
+    /// `pub(crate)` library code already uses; external callers can pass
+    /// it back into other library APIs but cannot reach in directly.
+    pub fn pipelines(&self) -> &pipelines::WgpuPipelines {
+        &self.pipelines
+    }
+
+    /// Borrow a clone-able handle to the wgpu device used for resource
+    /// allocation.  Exposed alongside [`Self::pipelines`] so platform
+    /// shells driving an external blit pass (currently `demo-wasm`'s
+    /// scene-buffer → surface composite) don't need to hold a duplicate
+    /// `Arc<wgpu::Device>` themselves.
+    pub fn device(&self) -> &Arc<wgpu::Device> {
+        &self.device
+    }
+
+    /// Borrow a clone-able handle to the wgpu queue.  Same rationale as
+    /// [`Self::device`] — the shell submits the scene-blit encoder
+    /// through this queue.
+    pub fn queue(&self) -> &Arc<wgpu::Queue> {
+        &self.queue
     }
 
     /// Queue a custom wgpu render pass to run at the current point in the

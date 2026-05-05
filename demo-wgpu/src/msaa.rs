@@ -193,6 +193,17 @@ impl MsaaFramebuffer {
         &self.resolve.1
     }
 
+    /// Single-sample resolved texture handle.  Exposed so a platform shell
+    /// (currently `demo-wasm`) can use this `MsaaFramebuffer` as the
+    /// intermediate "scene" target — pass `resolve_texture().clone()` to
+    /// [`crate::WgpuGfxCtx::set_surface_texture`] so the GPU-direct
+    /// screenshot path copies from this scene texture instead of from the
+    /// real swap-chain surface (which on WebGL2 cannot advertise
+    /// `COPY_SRC` and so can't be the source of a `copy_texture_to_*`).
+    pub fn resolve_texture(&self) -> &wgpu::Texture {
+        &self.resolve.0
+    }
+
     /// Depth attachment view, when one was requested at construction.
     pub fn depth_view(&self) -> Option<&wgpu::TextureView> {
         self.depth.as_ref().map(|(_, v)| v)
@@ -394,7 +405,16 @@ fn alloc_resolve(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        // `COPY_SRC` so this texture can serve as the source of a
+        // `copy_texture_to_texture` / `copy_texture_to_buffer` —
+        // specifically when `demo-wasm` uses an `MsaaFramebuffer` as the
+        // intermediate scene buffer behind the screenshot path.  Cost is
+        // a flag bit; backends that don't physically support COPY_SRC on
+        // a non-swap-chain texture are extinct in practice (wgpu's
+        // WebGL2 backend does support it on regular textures).
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());

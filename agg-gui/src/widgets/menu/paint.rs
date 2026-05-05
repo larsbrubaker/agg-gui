@@ -78,8 +78,19 @@ pub fn paint_menu_bar_button(
     hovered: bool,
 ) {
     let v = ctx.visuals();
+    // Subtle desktop hover: a translucent accent tint under the label, not
+    // the full accent.  Translucent because the underlying `top_bar_bg` is
+    // already a very light gray (≈0.88 in the light theme); a fully-opaque
+    // `widget_bg_hovered` panel reads as nothing — `widget_bg_hovered` is
+    // only ~0.04 brighter than the bar.  Translucent accent stays visible
+    // on either theme while reserving the FULL accent for the OPENED state.
     if open || hovered {
-        ctx.set_fill_color(if open { v.accent } else { v.accent_hovered });
+        let bg = if open {
+            v.accent
+        } else {
+            v.accent.with_alpha(0.18)
+        };
+        ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(
             rect.x + 1.0,
@@ -90,11 +101,7 @@ pub fn paint_menu_bar_button(
         );
         ctx.fill();
     }
-    ctx.set_fill_color(if open || hovered {
-        Color::white()
-    } else {
-        v.text_color
-    });
+    ctx.set_fill_color(if open { Color::white() } else { v.text_color });
     ctx.fill_text(label, rect.x + 9.0, rect.y + 7.0);
 }
 
@@ -143,8 +150,15 @@ fn paint_item_row(
     let v = ctx.visuals();
     let hovered = hovered && item.enabled;
     let open = open && item.enabled;
+    // Same subtle/strong split as `paint_menu_bar_button`: hover hints
+    // with a translucent accent tint; open commits with full accent.
     if hovered || open {
-        ctx.set_fill_color(if open { v.accent } else { v.accent_hovered });
+        let bg = if open {
+            v.accent
+        } else {
+            v.accent.with_alpha(0.18)
+        };
+        ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(
             rect.x + 3.0,
@@ -158,7 +172,7 @@ fn paint_item_row(
 
     let text_color = if !item.enabled {
         v.text_color.with_alpha(0.45)
-    } else if open || hovered {
+    } else if open {
         Color::white()
     } else {
         v.text_color
