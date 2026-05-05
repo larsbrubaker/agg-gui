@@ -184,10 +184,13 @@ async fn init_wgpu_async() -> Result<WgpuInit, String> {
         canvas.height().max(1),
     );
     let config = wgpu::SurfaceConfiguration {
-        // RENDER_ATTACHMENT for the deferred 2-D + bar-grid passes; COPY_SRC
-        // so `WgpuGfxCtx::read_screenshot` can blit the post-render surface
-        // contents to a staging buffer for the capture-pixels path.
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        // WebGL2 surfaces only advertise `COLOR_TARGET` (== RENDER_ATTACHMENT);
+        // requesting `COPY_SRC` panics at `Surface::configure` validation.
+        // The native shell adds `COPY_SRC` so screenshots can copy the
+        // surface texture, but on WASM that path isn't available — the
+        // browser-side capture story (via canvas.toBlob / readPixels in
+        // GL) goes through a different mechanism, so we simply omit it.
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format: surface_format,
         width: size.0,
         height: size.1,
