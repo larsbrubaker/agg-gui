@@ -19,6 +19,7 @@ pub(crate) fn build_demo_content(
     screenshot_save_pending: Rc<Cell<bool>>,
     screenshot_copy_pending: Rc<Cell<bool>>,
     screenshot_continuous: Rc<Cell<bool>>,
+    screenshot_capture_seq: Rc<Cell<u64>>,
 ) -> Box<dyn Widget> {
     match title {
         // basic.rs
@@ -63,6 +64,7 @@ pub(crate) fn build_demo_content(
             screenshot_save_pending,
             screenshot_copy_pending,
             screenshot_continuous,
+            screenshot_capture_seq,
         ),
         // text_demos.rs
         "\u{F0C9} Strip" => windows::strip_demo(font),

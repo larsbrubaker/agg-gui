@@ -81,6 +81,12 @@ thread_local! {
     static SCREENSHOT_SAVE_PENDING:   RefCell<Option<Rc<Cell<bool>>>> = RefCell::new(None);
     /// Click-deferred Copy: same pattern, pipes bytes to the system clipboard.
     static SCREENSHOT_COPY_PENDING:   RefCell<Option<Rc<Cell<bool>>>> = RefCell::new(None);
+    /// Monotonic counter the harness increments after a successful capture.
+    /// `ImageView`'s `needs_draw` checks for a mismatch against its own
+    /// `last_seen_seq` so the screenshot Window's backbuffer invalidates
+    /// exactly once per capture and the new screenshot displays
+    /// immediately, instead of waiting for an unrelated event.
+    static SCREENSHOT_CAPTURE_SEQ:    RefCell<Option<Rc<Cell<u64>>>> = RefCell::new(None);
     /// Intermediate "scene" framebuffer that rendering targets every frame
     /// before being blit-displayed onto the real swap-chain surface.
     /// Required because WebGL2 surfaces only advertise `COLOR_TARGET` —
@@ -294,6 +300,8 @@ fn ensure_demo_app() {
                 .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_save_pending)));
             SCREENSHOT_COPY_PENDING
                 .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_copy_pending)));
+            SCREENSHOT_CAPTURE_SEQ
+                .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_capture_seq)));
             STATE_ACCESSOR.with(|c| *c.borrow_mut() = Some(handles.state));
             *cell.borrow_mut() = Some(app);
         }
@@ -396,20 +404,11 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
     });
     CUBE_SCREEN_RECT.with(|r| r.set(agg_gui::Rect::default()));
 
-    // Continuous capture: while the screenshot demo's checkbox is on,
-    // re-arm the request every frame and force another draw.  Mirrors the
-    // demo-native AboutToWait branch so the WASM and native screenshot
-    // demos behave identically.
-    let continuous_on = SCREENSHOT_CONTINUOUS
-        .with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
-    if continuous_on {
-        SCREENSHOT_REQUEST.with(|c| {
-            if let Some(ref rc) = *c.borrow() {
-                rc.set(true);
-            }
-        });
-        mark_dirty();
-    }
+    // Continuous capture re-arming is driven by `ImageView::paint` inside
+    // the screenshot demo — keeping it scoped to "screenshot window is
+    // open" so closing the window genuinely idles the host loop.  See
+    // the comment on `ImageView.continuous` for why the harness must
+    // not re-arm here.
 
     let show_inspector =
         SHOW_INSPECTOR.with(|c| c.borrow().as_ref().map(|r| r.get()).unwrap_or(false));
@@ -505,6 +504,16 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                                     rc.set(true);
                                 }
                             });
+                            // Bump capture seq + wake the loop so
+                            // `ImageView::needs_draw` flips true exactly
+                            // once and the new screenshot displays on the
+                            // very next frame.
+                            SCREENSHOT_CAPTURE_SEQ.with(|c| {
+                                if let Some(ref rc) = *c.borrow() {
+                                    rc.set(rc.get().wrapping_add(1));
+                                }
+                            });
+                            mark_dirty();
                         }
                     }
 

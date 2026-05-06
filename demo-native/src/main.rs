@@ -268,8 +268,11 @@ fn main() {
     let screenshot_request = Rc::clone(&handles.screenshot_request);
     let screenshot_available = Rc::clone(&handles.screenshot_available);
     let screenshot_save_pending = Rc::clone(&handles.screenshot_save_pending);
+    let screenshot_capture_seq = Rc::clone(&handles.screenshot_capture_seq);
     let screenshot_copy_pending = Rc::clone(&handles.screenshot_copy_pending);
-    let screenshot_continuous = Rc::clone(&handles.screenshot_continuous);
+    // `handles.screenshot_continuous` is consumed by `ImageView::paint` via
+    // its own clone — the harness no longer needs to read it directly.
+    let _screenshot_continuous = Rc::clone(&handles.screenshot_continuous);
     let state_accessor = handles.state;
 
     let mut win_w = gpu.config.width;
@@ -312,6 +315,7 @@ fn main() {
         &screenshot_available,
         &screenshot_save_pending,
         &screenshot_copy_pending,
+        &screenshot_capture_seq,
     );
     window.set_visible(true);
 
@@ -434,21 +438,18 @@ fn main() {
                     &screenshot_available,
                     &screenshot_save_pending,
                     &screenshot_copy_pending,
+                    &screenshot_capture_seq,
                 );
             }
             Event::AboutToWait => {
                 // Continuous run mode keeps the app repainting unconditionally
-                // (used by perf graphs etc.).  Continuous SCREENSHOT capture is
-                // separate: the screenshot demo's checkbox sets
-                // `screenshot_continuous`; the harness re-arms the capture flag
-                // every tick and forces another paint, bypassing the Window's
-                // retained backbuffer cache (which would otherwise short-circuit
-                // child paint between capture frames).
-                if screenshot_continuous.get() {
-                    screenshot_request.set(true);
-                }
-                let continuous = run_mode.get() == demo_ui::RunMode::Continuous
-                    || screenshot_continuous.get();
+                // (used by perf graphs etc.).  Continuous SCREENSHOT capture
+                // is driven from inside `ImageView::paint` in the screenshot
+                // demo — re-arming it from the harness here would un-scope
+                // it from "window is open", so closing the screenshot
+                // window with the checkbox still on would leave the host
+                // loop spinning forever.
+                let continuous = run_mode.get() == demo_ui::RunMode::Continuous;
                 let want_render = continuous || app.wants_draw();
                 if want_render {
                     let t0 = web_time::Instant::now();
@@ -469,6 +470,7 @@ fn main() {
                         &screenshot_available,
                         &screenshot_save_pending,
                         &screenshot_copy_pending,
+                        &screenshot_capture_seq,
                     );
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
                     frame_history.borrow_mut().push(last_frame_ms as f32);
@@ -532,6 +534,7 @@ fn paint_frame(
     screenshot_available: &Rc<std::cell::Cell<bool>>,
     screenshot_save_pending: &Rc<std::cell::Cell<bool>>,
     screenshot_copy_pending: &Rc<std::cell::Cell<bool>>,
+    screenshot_capture_seq: &Rc<std::cell::Cell<u64>>,
 ) {
     // GPU-direct screenshot flow: a single render per frame.  When a capture
     // is requested we issue ONE extra `copy_texture_to_texture` after
@@ -573,6 +576,13 @@ fn paint_frame(
         if ctx.capture_screenshot() {
             screenshot_request.set(false);
             screenshot_available.set(true);
+            // Bump the capture seq + wake the loop so `ImageView`'s
+            // `needs_draw` flips true exactly once and the new
+            // screenshot displays on the very next frame, instead of
+            // waiting for an unrelated event (mouse hover, etc.) to
+            // dirty the screenshot Window's backbuffer cache.
+            screenshot_capture_seq.set(screenshot_capture_seq.get().wrapping_add(1));
+            agg_gui::animation::request_draw();
         }
     }
 

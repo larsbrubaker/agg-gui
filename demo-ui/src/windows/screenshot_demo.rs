@@ -46,6 +46,7 @@ pub fn screenshot_demo(
     screenshot_save_pending: Rc<Cell<bool>>,
     screenshot_copy_pending: Rc<Cell<bool>>,
     screenshot_continuous: Rc<Cell<bool>>,
+    screenshot_capture_seq: Rc<Cell<u64>>,
 ) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()
         .with_gap(10.0)
@@ -92,6 +93,9 @@ pub fn screenshot_demo(
             font: Arc::clone(&font),
             source: Rc::clone(&screenshot_image),
             continuous: Rc::clone(&screenshot_continuous),
+            request: Rc::clone(&screenshot_request),
+            capture_seq: Rc::clone(&screenshot_capture_seq),
+            last_seen_seq: Cell::new(0),
         }),
         1.0,
     );
@@ -172,8 +176,24 @@ struct ImageView {
     /// Continuous-capture flag.  When set, `needs_draw` returns `true` so
     /// the enclosing Window's retained backbuffer re-rasters every frame —
     /// otherwise the GPU capture texture would update underneath a cached
-    /// preview pane that never re-samples it.
+    /// preview pane that never re-samples it.  And `paint` re-arms
+    /// `request` each frame so the platform harness drives a capture per
+    /// frame.  Driving the re-arm from `paint` (rather than the harness)
+    /// is what keeps continuous mode SCOPED to "screenshot window is
+    /// visible" — when the user closes the window, paint stops, the
+    /// re-arm stops, and the loop idles.
     continuous: Rc<Cell<bool>>,
+    request: Rc<Cell<bool>>,
+    /// Monotonic counter the harness bumps after each successful capture.
+    /// `needs_draw` returns `true` when this differs from
+    /// `last_seen_seq`, so the enclosing Window's retained backbuffer
+    /// invalidates exactly once per capture and the new screenshot
+    /// appears immediately on the next frame instead of waiting for an
+    /// unrelated event (mouse hover, etc.) to dirty the cache.  Using a
+    /// targeted seq counter — instead of `signal_async_state_change` —
+    /// keeps continuous-capture cost bounded to the screenshot Window.
+    capture_seq: Rc<Cell<u64>>,
+    last_seen_seq: Cell<u64>,
 }
 
 impl Widget for ImageView {
@@ -194,7 +214,11 @@ impl Widget for ImageView {
     }
 
     fn needs_draw(&self) -> bool {
-        self.continuous.get()
+        // Continuous mode keeps the loop going every frame; outside of it,
+        // a fresh capture (signalled by the harness bumping `capture_seq`)
+        // triggers exactly one re-raster of the parent Window's retained
+        // backbuffer so the new screenshot displays immediately.
+        self.continuous.get() || self.last_seen_seq.get() != self.capture_seq.get()
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -203,6 +227,23 @@ impl Widget for ImageView {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        // Re-arm continuous capture HERE — `paint` only runs when the
+        // screenshot window is visible (and its retained backbuffer is
+        // dirty, which `needs_draw=true` ensures), so when the user
+        // closes the window the re-arm stops and the host loop goes idle.
+        // Driving this from the harness instead would keep the loop
+        // running forever after a close because `screenshot_continuous`
+        // is a long-lived `Rc<Cell<bool>>` with no implicit "scoped to
+        // open window" lifetime.
+        if self.continuous.get() {
+            self.request.set(true);
+        }
+        // Record the capture seq we're about to display so `needs_draw`
+        // stops returning `true` until the next bump.  Without this the
+        // first successful capture would force a re-raster every frame
+        // forever because the seqs would stay out-of-sync.
+        self.last_seen_seq.set(self.capture_seq.get());
+
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -296,6 +337,7 @@ mod tests {
             Rc::new(Cell::new(false)),
             Rc::new(Cell::new(false)),
             Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(0u64)),
         );
 
         demo.layout(Size::new(320.0, 260.0));

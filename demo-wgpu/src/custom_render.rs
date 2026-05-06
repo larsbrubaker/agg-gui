@@ -42,6 +42,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::pipelines::WgpuPipelines;
+
 /// Inputs handed to a [`WgpuCustomRender`] implementor at execution time.
 ///
 /// Field invariants:
@@ -53,6 +55,11 @@ use std::rc::Rc;
 ///   - `screen_rect` is the widget's logical-pixel rect in **bottom-up
 ///     Y-up coords** (agg-gui convention). Convert to wgpu's top-down
 ///     Y-down convention as needed when computing scissor / viewport.
+///   - `pipelines` is the shared 2-D pipeline collection.  Implementors
+///     that own an [`crate::msaa::MsaaFramebuffer`] can call
+///     [`crate::msaa::MsaaFramebuffer::blit_to`] with this to composite
+///     their offscreen output onto `target_view` through the same
+///     textured-quad pipeline the 2-D path uses.
 pub struct WgpuCustomRenderCtx<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
@@ -65,6 +72,11 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// the parent pass had no clip). Format is `[x, y, w, h]` in wgpu
     /// top-down pixel coords.
     pub parent_clip: Option<[i32; 4]>,
+    /// Shared 2-D pipeline collection — exposed so an offscreen-buffered
+    /// custom renderer can blit its resolved framebuffer onto the active
+    /// 2-D render target without rebuilding the textured-quad pipeline
+    /// itself.  See [`crate::msaa::MsaaFramebuffer::blit_to`].
+    pub pipelines: &'a WgpuPipelines,
 }
 
 /// Trait implemented by widgets that want to inject custom wgpu render

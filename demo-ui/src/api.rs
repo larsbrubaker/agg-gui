@@ -133,12 +133,19 @@ pub struct DemoHandles {
     /// harness pipes the bytes to the system clipboard.
     pub screenshot_copy_pending: Rc<Cell<bool>>,
     /// Continuous-capture flag mirrored from the screenshot demo's "Capture
-    /// continuously" checkbox.  Read by the platform harness each frame:
-    /// while set, the harness re-arms `screenshot_request` and keeps the
-    /// loop awake.  Driving it from the harness — instead of from a hidden
-    /// child widget inside the screenshot Window's retained backbuffer —
-    /// is what makes continuous mode robust: the Window's backbuffer cache
-    /// can short-circuit child paint, but the harness runs unconditionally.
+    /// continuously" checkbox.  Read by the screenshot demo's `ImageView`
+    /// from inside `paint` to re-arm `screenshot_request` each frame —
+    /// keeping the continuous loop scoped to "screenshot window is open".
     pub screenshot_continuous: Rc<Cell<bool>>,
+    /// Monotonic counter the platform harness increments after a successful
+    /// `DrawCtx::capture_screenshot`.  The screenshot demo's `ImageView`
+    /// compares this against its locally-cached value in `needs_draw` so
+    /// the parent Window's retained backbuffer invalidates exactly once
+    /// per capture — the post-click "the new screenshot doesn't appear
+    /// until I move the mouse" bug.  Bumping a counter (instead of
+    /// calling `signal_async_state_change`) keeps continuous-capture
+    /// performance bounded: only the screenshot Window invalidates,
+    /// not every retained Window in the app.
+    pub screenshot_capture_seq: Rc<Cell<u64>>,
     pub state: StateAccessor,
 }

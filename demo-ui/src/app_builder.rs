@@ -60,6 +60,7 @@ pub fn build_demo_ui(
     let screenshot_save_pending = Rc::new(Cell::new(false));
     let screenshot_copy_pending = Rc::new(Cell::new(false));
     let screenshot_continuous = Rc::new(Cell::new(false));
+    let screenshot_capture_seq: Rc<Cell<u64>> = Rc::new(Cell::new(0));
     let initial_theme = initial_state
         .as_ref()
         .map(|s| s.theme_pref)
@@ -367,6 +368,7 @@ pub fn build_demo_ui(
                 Rc::clone(&screenshot_save_pending),
                 Rc::clone(&screenshot_copy_pending),
                 Rc::clone(&screenshot_continuous),
+                Rc::clone(&screenshot_capture_seq),
             )
         };
         let auto_size = spec.title == "\u{F096} Frame";
@@ -790,6 +792,7 @@ pub fn build_demo_ui(
         screenshot_save_pending: Rc::clone(&screenshot_save_pending),
         screenshot_copy_pending: Rc::clone(&screenshot_copy_pending),
         screenshot_continuous: Rc::clone(&screenshot_continuous),
+        screenshot_capture_seq: Rc::clone(&screenshot_capture_seq),
         state: state_accessor,
     };
     (app, handles)

@@ -296,6 +296,7 @@ fn execute_prepared<'a>(
                         surface_format,
                         screen_rect: *screen_rect,
                         parent_clip: *parent_clip,
+                        pipelines,
                     };
                     renderer.borrow_mut().render(ctx);
                     i += 1;
