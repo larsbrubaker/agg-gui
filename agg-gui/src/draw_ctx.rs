@@ -109,6 +109,27 @@ pub struct RadialGradientPaint {
 }
 
 impl RadialGradientPaint {
+    /// Convenience constructor for the common case: focal point at the centre,
+    /// identity transform, `Pad` spread. Stops are `(offset, color)` pairs.
+    pub fn centered(cx: f64, cy: f64, r: f64, stops: &[(f64, Color)]) -> Self {
+        Self {
+            cx,
+            cy,
+            r,
+            fx: cx,
+            fy: cy,
+            transform: TransAffine::default(),
+            spread: GradientSpread::Pad,
+            stops: stops
+                .iter()
+                .map(|(offset, color)| GradientStop {
+                    offset: *offset,
+                    color: *color,
+                })
+                .collect(),
+        }
+    }
+
     pub fn sample(&self, mut x: f64, mut y: f64) -> Color {
         if self.stops.is_empty() {
             return Color::transparent();

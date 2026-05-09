@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.70"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
@@ -15,6 +15,7 @@ categories = ["gui", "graphics", "rendering"]
 exclude = [
     "reference-egui-main/",
     "src/gl_renderer/lion.txt",
+    "target/",
 ]
 
 [dependencies]

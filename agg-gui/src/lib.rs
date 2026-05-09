@@ -47,6 +47,7 @@ pub mod screenshot;
 pub mod svg;
 pub mod text;
 pub mod theme;
+pub mod timestep;
 pub mod touch_state;
 pub mod undo;
 #[cfg(target_arch = "wasm32")]
@@ -100,6 +101,7 @@ pub use text::{measure_text_metrics, Font, TextMetrics};
 pub use theme::{
     current_visuals, current_visuals_epoch, set_visuals, AccentColor, ThemePreference, Visuals,
 };
+pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
 pub use widget::{

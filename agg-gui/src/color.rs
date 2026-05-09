@@ -24,6 +24,43 @@ impl Color {
         Self { r, g, b, a: 1.0 }
     }
 
+    /// `Color` from 8-bit sRGB-style channels at full alpha.
+    ///
+    /// Each `u8` is divided by 255 into an f32 component. Convenient when
+    /// transcribing CSS / SVG / Canvas color literals — `Color::from_rgb8(0, 255, 242)`
+    /// instead of `Color::rgb(0.0, 1.0, 242.0 / 255.0)`.
+    pub const fn from_rgb8(r: u8, g: u8, b: u8) -> Self {
+        Self {
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: 1.0,
+        }
+    }
+
+    /// `Color` from 8-bit RGBA channels (each `u8` divided by 255).
+    pub const fn from_rgba8(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self {
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: a as f32 / 255.0,
+        }
+    }
+
+    /// Per-channel linear interpolation toward `other` by `t` in `[0, 1]`.
+    ///
+    /// `t = 0` returns `self`; `t = 1` returns `other`. Values outside `[0, 1]`
+    /// extrapolate (callers may want to clamp first).
+    pub fn lerp(self, other: Self, t: f32) -> Self {
+        Self {
+            r: self.r + (other.r - self.r) * t,
+            g: self.g + (other.g - self.g) * t,
+            b: self.b + (other.b - self.b) * t,
+            a: self.a + (other.a - self.a) * t,
+        }
+    }
+
     pub const fn white() -> Self {
         Self::rgb(1.0, 1.0, 1.0)
     }
