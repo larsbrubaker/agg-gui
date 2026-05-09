@@ -40,6 +40,7 @@ pub mod gl_renderer;
 pub mod layout_props;
 pub mod lcd_coverage;
 pub mod lcd_gfx_ctx;
+pub mod paints;
 pub mod persistence;
 pub mod pixel_bounds;
 pub mod platform;
