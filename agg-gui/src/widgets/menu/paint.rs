@@ -184,10 +184,19 @@ fn paint_item_row(
     } else {
         match item.selection {
             MenuSelection::Check { selected: true } => {
-                ctx.fill_text("\u{f00c}", rect.x + style.icon_x, rect.y + 7.0);
+                // U+2713 CHECK MARK — present in every general-purpose
+                // font (CascadiaCode, Inter, system serif, etc.). Used
+                // to be the Font Awesome `\u{f00c}` glyph, but that
+                // requires bundling FA which not all consumers do; the
+                // FA codepoint then renders as a tofu box in plain
+                // fonts. Standard Unicode keeps the menu working
+                // regardless of which font the caller passes in.
+                ctx.fill_text("\u{2713}", rect.x + style.icon_x, rect.y + 7.0);
             }
             MenuSelection::Radio { selected: true } => {
-                ctx.fill_text("\u{f111}", rect.x + style.icon_x, rect.y + 7.0);
+                // U+25CF BLACK CIRCLE — equivalent reasoning. Replaces
+                // FA `\u{f111}` so the radio dot renders in plain fonts.
+                ctx.fill_text("\u{25CF}", rect.x + style.icon_x, rect.y + 7.0);
             }
             MenuSelection::None
             | MenuSelection::Check { selected: false }
@@ -207,7 +216,11 @@ fn paint_item_row(
         );
     }
     if item.has_submenu() {
-        ctx.fill_text("\u{f105}", rect.x + rect.width - 18.0, rect.y + 7.0);
+        // U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE — Unicode-standard
+        // submenu indicator. Replaces FA `\u{f105}` for the same reason
+        // as the check / radio glyphs above (FA isn't always available
+        // in the caller's font).
+        ctx.fill_text("\u{25B8}", rect.x + rect.width - 18.0, rect.y + 7.0);
     }
 }
 
