@@ -549,11 +549,11 @@ pub use backbuffer::{
 };
 pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
 pub use tree::{
-    active_modal_path, collect_inspector_nodes, current_mouse_world, current_viewport,
-    dispatch_event, dispatch_unconsumed_key, find_widget_by_id, find_widget_by_id_mut,
-    find_widget_by_type, global_overlay_hit_path, hit_test_subtree, mark_subtree_dirty,
-    set_current_mouse_world, set_current_viewport, walk_path_mut, InspectorNode,
-    InspectorOverlay, WidgetBaseEdit, WidgetBaseField, apply_widget_base_edit,
+    active_modal_path, apply_widget_base_edit, collect_inspector_nodes, current_mouse_world,
+    current_viewport, dispatch_event, dispatch_unconsumed_key, find_widget_by_id,
+    find_widget_by_id_mut, find_widget_by_type, global_overlay_hit_path, hit_test_subtree,
+    mark_subtree_dirty, set_current_mouse_world, set_current_viewport, walk_path_mut,
+    InspectorNode, InspectorOverlay, WidgetBaseEdit, WidgetBaseField,
 };
 #[cfg(feature = "reflect")]
 pub use tree::{apply_inspector_edit, reflect_fields, InspectorEdit};

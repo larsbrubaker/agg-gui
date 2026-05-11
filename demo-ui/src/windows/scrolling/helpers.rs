@@ -146,10 +146,7 @@ impl Widget for RowList {
             let text = (self.formatter)(row);
             if let Some(child) = self.children.get_mut(slot) {
                 child.set_label_text(&text);
-                let s = child.layout(Size::new(
-                    available.width - self.padding_x,
-                    self.row_height,
-                ));
+                let s = child.layout(Size::new(available.width - self.padding_x, self.row_height));
                 child.set_bounds(Rect::new(self.padding_x, y_text, s.width, s.height));
             }
         }
@@ -340,9 +337,7 @@ impl OffsetReadout {
     pub fn new(font: Arc<Font>, offset: Rc<Cell<f64>>, max: Rc<Cell<f64>>) -> Self {
         Self {
             bounds: Rect::default(),
-            children: vec![Box::new(
-                Label::new("", font).with_font_size(11.0),
-            )],
+            children: vec![Box::new(Label::new("", font).with_font_size(11.0))],
             offset,
             max,
         }

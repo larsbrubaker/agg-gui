@@ -1,4 +1,4 @@
-﻿//! `Widget` impl for `InspectorPanel` — extracted from `mod.rs` to keep
+//! `Widget` impl for `InspectorPanel` — extracted from `mod.rs` to keep
 //! the parent file under the project's 800-line cap.  All InspectorPanel
 //! state and helpers still live in the parent module; this file only
 //! routes the trait methods (layout / paint / event dispatch) into them.
@@ -13,8 +13,8 @@ use crate::widget::{InspectorOverlay, Widget};
 use crate::widgets::tree_view::{NodeIcon, TreeNode};
 
 use super::{
-    c_border, c_dim_text, c_header_bg, c_panel_bg, c_props_bg, c_split_bg, c_text,
-    InspectorPanel, HEADER_H, MIN_PROPS_H, MIN_TREE_H,
+    c_border, c_dim_text, c_header_bg, c_panel_bg, c_props_bg, c_split_bg, c_text, InspectorPanel,
+    HEADER_H, MIN_PROPS_H, MIN_TREE_H,
 };
 
 impl Widget for InspectorPanel {
@@ -67,8 +67,7 @@ impl Widget for InspectorPanel {
         // tree_view.nodes rebuild here.  Combined with TreeView's row
         // caching, this is what makes inspector window resizing cheap.
         let nodes_fingerprint = (nodes.as_ptr() as usize, nodes.len());
-        let pending_state =
-            self.pending_expanded.is_some() || self.pending_selected.is_some();
+        let pending_state = self.pending_expanded.is_some() || self.pending_selected.is_some();
         let nodes_unchanged = !pending_state
             && self.last_inspector_nodes_fingerprint == Some(nodes_fingerprint)
             && !self.tree_view.nodes.is_empty();
@@ -83,8 +82,7 @@ impl Widget for InspectorPanel {
                 old_expanded = pe;
             }
             if let Some(ps) = self.pending_selected.take() {
-                old_selected =
-                    vec![false; old_expanded.len().max(ps.map(|i| i + 1).unwrap_or(0))];
+                old_selected = vec![false; old_expanded.len().max(ps.map(|i| i + 1).unwrap_or(0))];
                 if let Some(i) = ps {
                     if i < old_selected.len() {
                         old_selected[i] = true;
@@ -113,8 +111,7 @@ impl Widget for InspectorPanel {
                     o
                 };
                 let b = &node.screen_bounds;
-                let label =
-                    format!("{}  {:.0}×{:.0}", node.type_name, b.width, b.height);
+                let label = format!("{}  {:.0}×{:.0}", node.type_name, b.width, b.height);
                 let tv_idx = self.tree_view.nodes.len();
                 self.tree_view
                     .nodes

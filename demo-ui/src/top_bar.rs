@@ -85,8 +85,7 @@ impl ThemeToggle {
                     .with_subtle()
                     .with_outlined()
                     .with_active_fn(move || {
-                        std::mem::discriminant(&pref_active.get())
-                            == std::mem::discriminant(&this)
+                        std::mem::discriminant(&pref_active.get()) == std::mem::discriminant(&this)
                     })
                     .on_click(move || {
                         pref_click.set(this);

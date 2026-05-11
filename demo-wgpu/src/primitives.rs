@@ -76,12 +76,7 @@ impl WgpuGfxCtx {
     }
 
     /// Dispatch tessellated fill triangles to the correct DrawCommand variant.
-    fn push_fill_tess(
-        &mut self,
-        verts: Vec<[f32; 3]>,
-        idx: Vec<u32>,
-        transform: &TransAffine,
-    ) {
+    fn push_fill_tess(&mut self, verts: Vec<[f32; 3]>, idx: Vec<u32>, transform: &TransAffine) {
         if let Some(gradient) = self.fill_linear_gradient.clone() {
             let resolution = [self.viewport.0, self.viewport.1];
             let uniforms = build_linear_gradient_uniforms(
@@ -126,12 +121,7 @@ impl WgpuGfxCtx {
     }
 
     /// Dispatch tessellated stroke triangles to the correct DrawCommand variant.
-    fn push_stroke_tess(
-        &mut self,
-        verts: Vec<[f32; 3]>,
-        idx: Vec<u32>,
-        transform: &TransAffine,
-    ) {
+    fn push_stroke_tess(&mut self, verts: Vec<[f32; 3]>, idx: Vec<u32>, transform: &TransAffine) {
         if let Some(gradient) = self.stroke_linear_gradient.clone() {
             let resolution = [self.viewport.0, self.viewport.1];
             let uniforms = build_linear_gradient_uniforms(

@@ -1,4 +1,4 @@
-﻿//! `Button` — a clickable button with hover, pressed, and focus states.
+//! `Button` — a clickable button with hover, pressed, and focus states.
 //!
 //! # Composition
 //!
@@ -218,12 +218,8 @@ impl Button {
         self.subtle = true;
         self.ghost = true;
         let theme_text = crate::theme::current_visuals().text_color;
-        self.children[0] = Self::build_label_with_color(
-            &self.label_text,
-            &self.font,
-            self.font_size,
-            theme_text,
-        );
+        self.children[0] =
+            Self::build_label_with_color(&self.label_text, &self.font, self.font_size, theme_text);
         self
     }
 
@@ -248,12 +244,8 @@ impl Button {
         // (the paint pass also retints each frame, so this just gives a
         // sensible first-paint colour before the visuals are queried).
         let theme_text = crate::theme::current_visuals().text_color;
-        self.children[0] = Self::build_label_with_color(
-            &self.label_text,
-            &self.font,
-            self.font_size,
-            theme_text,
-        );
+        self.children[0] =
+            Self::build_label_with_color(&self.label_text, &self.font, self.font_size, theme_text);
         self
     }
 
@@ -400,9 +392,7 @@ impl Widget for Button {
         let size = Size::new(width, height);
         let label_x = match self.label_align {
             LabelAlign::Left => self.label_pad_h.min(size.width),
-            LabelAlign::Right => {
-                (size.width - label_size.width - self.label_pad_h).max(0.0)
-            }
+            LabelAlign::Right => (size.width - label_size.width - self.label_pad_h).max(0.0),
             LabelAlign::Center => ((size.width - label_size.width) * 0.5).max(0.0),
         };
         let label_y = ((size.height - label_size.height) * 0.5).max(0.0);
@@ -512,7 +502,11 @@ impl Widget for Button {
         // through the dyn Widget keeps Button agnostic of the concrete
         // Label type — `set_label_color` is a default no-op that Label
         // overrides, see `Widget::set_label_color`.
-        let label_color = if muted { v.text_color } else { self.theme.label_color };
+        let label_color = if muted {
+            v.text_color
+        } else {
+            self.theme.label_color
+        };
         if let Some(child) = self.children.get_mut(0) {
             child.set_label_color(label_color);
         }

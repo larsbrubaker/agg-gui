@@ -87,8 +87,7 @@ pub fn render_app_frame(
         let nodes_empty = inspector_nodes.borrow().is_empty();
         let captured = app.has_captured_pointer();
         let should_refresh = nodes_empty
-            || (!captured
-                && INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.get() != Some(epoch)));
+            || (!captured && INSPECTOR_SNAPSHOT_EPOCH.with(|last| last.get() != Some(epoch)));
         if should_refresh {
             let t = web_time::Instant::now();
             *inspector_nodes.borrow_mut() = app.collect_inspector_nodes();

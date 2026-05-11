@@ -49,7 +49,10 @@ impl TableColumn {
         }
     }
     pub fn at_least(mut self, v: f64) -> Self {
-        if let ColumnSize::Remainder { ref mut at_least, .. } = self.size {
+        if let ColumnSize::Remainder {
+            ref mut at_least, ..
+        } = self.size
+        {
             *at_least = v;
         }
         self

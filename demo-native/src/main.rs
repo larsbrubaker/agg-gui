@@ -501,10 +501,7 @@ fn main() {
                 // post-exit `AboutToWait` tick doesn't double-spawn.
                 if relaunch_requested.get() {
                     relaunch_requested.set(false);
-                    let s = serialize_state(
-                        &state_accessor,
-                        (last_windowed_w, last_windowed_h),
-                    );
+                    let s = serialize_state(&state_accessor, (last_windowed_w, last_windowed_h));
                     save_state_to_disk(&s);
                     if let Ok(exe) = std::env::current_exe() {
                         let _ = std::process::Command::new(exe).spawn();
@@ -593,12 +590,9 @@ fn paint_frame(
     if screenshot_save_pending.replace(false) {
         let (rgba, sw, sh) = ctx.read_captured_screenshot();
         if !rgba.is_empty() {
-            if let Err(err) = agg_gui::screenshot::download_rgba_as_png(
-                &rgba,
-                sw,
-                sh,
-                "agg-gui-screenshot.png",
-            ) {
+            if let Err(err) =
+                agg_gui::screenshot::download_rgba_as_png(&rgba, sw, sh, "agg-gui-screenshot.png")
+            {
                 eprintln!("screenshot save failed: {err}");
             }
         }

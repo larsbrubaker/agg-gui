@@ -372,4 +372,3 @@ fn build_font_tab(font: Arc<Font>) -> Box<dyn Widget> {
 
     Box::new(ScrollView::new(Box::new(col)))
 }
-

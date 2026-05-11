@@ -153,7 +153,9 @@ impl WgpuGfxCtx {
 
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
 
         execute_prepared(
             &self.device,
@@ -203,8 +205,11 @@ fn execute_prepared<'a>(
     // After a PopLayer we must emit a composite quad at the start of the parent's
     // resumed pass — captured here between the closed layer pass and the reopened
     // parent pass.  The references point into `prepared`.
-    let mut pending_composite: Option<(&'a wgpu::Buffer, &'a wgpu::BindGroup, &'a wgpu::BindGroup)> =
-        None;
+    let mut pending_composite: Option<(
+        &'a wgpu::Buffer,
+        &'a wgpu::BindGroup,
+        &'a wgpu::BindGroup,
+    )> = None;
 
     let mut i = 0usize;
 
@@ -263,7 +268,11 @@ fn execute_prepared<'a>(
                     pending_composite = Some((vb, bg0, bg1));
                     i += 1;
                 }
-                Prepared::DrawBarGrid { renderer, screen_rect, parent_clip } => {
+                Prepared::DrawBarGrid {
+                    renderer,
+                    screen_rect,
+                    parent_clip,
+                } => {
                     // Render onto whatever target is current — surface when
                     // the cube widget is at top level, the active window's
                     // layer view when hosted in a window.  No stack change;
@@ -284,7 +293,11 @@ fn execute_prepared<'a>(
                     }
                     i += 1;
                 }
-                Prepared::Custom { renderer, screen_rect, parent_clip } => {
+                Prepared::Custom {
+                    renderer,
+                    screen_rect,
+                    parent_clip,
+                } => {
                     // Generic external render hook — see `custom_render` mod.
                     let target_size = (target_vp.0 as u32, target_vp.1 as u32);
                     let ctx = crate::custom_render::WgpuCustomRenderCtx {
@@ -319,7 +332,14 @@ fn execute_one(
         Prepared::Clear(_) => {
             // LoadOp::Clear was used at pass open; mid-frame Clears ignored.
         }
-        Prepared::Solid { vb, ib, index_count, bg0, clip, .. } => {
+        Prepared::Solid {
+            vb,
+            ib,
+            index_count,
+            bg0,
+            clip,
+            ..
+        } => {
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
@@ -329,7 +349,14 @@ fn execute_one(
             pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*index_count, 0, 0..1);
         }
-        Prepared::AaSolid { vb, ib, index_count, bg0, clip, .. } => {
+        Prepared::AaSolid {
+            vb,
+            ib,
+            index_count,
+            bg0,
+            clip,
+            ..
+        } => {
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
@@ -339,7 +366,15 @@ fn execute_one(
             pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*index_count, 0, 0..1);
         }
-        Prepared::Gradient { vb, ib, index_count, bg0, bg1, clip, .. } => {
+        Prepared::Gradient {
+            vb,
+            ib,
+            index_count,
+            bg0,
+            bg1,
+            clip,
+            ..
+        } => {
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
@@ -350,7 +385,9 @@ fn execute_one(
             pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*index_count, 0, 0..1);
         }
-        Prepared::Textured { vb, bg0, bg1, clip, .. } => {
+        Prepared::Textured {
+            vb, bg0, bg1, clip, ..
+        } => {
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
@@ -360,7 +397,14 @@ fn execute_one(
             pass.set_vertex_buffer(0, vb.slice(..));
             pass.draw(0..6, 0..1);
         }
-        Prepared::LcdMask { vb, ib, bg0s, bg1, clip, .. } => {
+        Prepared::LcdMask {
+            vb,
+            ib,
+            bg0s,
+            bg1,
+            clip,
+            ..
+        } => {
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
@@ -374,7 +418,14 @@ fn execute_one(
                 pass.draw_indexed(0..6, 0, 0..1);
             }
         }
-        Prepared::LcbMask { vb, ib, bg0s, bg1, clip, .. } => {
+        Prepared::LcbMask {
+            vb,
+            ib,
+            bg0s,
+            bg1,
+            clip,
+            ..
+        } => {
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
@@ -421,7 +472,10 @@ fn begin_pass<'a>(
             view,
             resolve_target: None,
             depth_slice: None,
-            ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
+            ops: wgpu::Operations {
+                load,
+                store: wgpu::StoreOp::Store,
+            },
         })],
         depth_stencil_attachment: None,
         timestamp_writes: None,
@@ -490,18 +544,27 @@ mod tests {
         // clip rect — a zero-height area.  Without skipping the draw,
         // wgpu's sticky scissor state lets children paint over the title
         // bar.  Regression test for that bug: ensure the clip is rejected.
-        assert!(!clip_yields_visible_pixels(Some([0, 0, 200, 0]), (400.0, 300.0)));
+        assert!(!clip_yields_visible_pixels(
+            Some([0, 0, 200, 0]),
+            (400.0, 300.0)
+        ));
     }
 
     #[test]
     fn zero_width_clip_skips_draw() {
         // Mirror case — a vertical zero-width clip should also be rejected.
-        assert!(!clip_yields_visible_pixels(Some([0, 0, 0, 100]), (400.0, 300.0)));
+        assert!(!clip_yields_visible_pixels(
+            Some([0, 0, 0, 100]),
+            (400.0, 300.0)
+        ));
     }
 
     #[test]
     fn ordinary_clip_passes() {
-        assert!(clip_yields_visible_pixels(Some([10, 10, 100, 50]), (400.0, 300.0)));
+        assert!(clip_yields_visible_pixels(
+            Some([10, 10, 100, 50]),
+            (400.0, 300.0)
+        ));
     }
 
     #[test]
@@ -513,6 +576,9 @@ mod tests {
     fn clip_entirely_outside_viewport_is_rejected() {
         // A scissor placed past the viewport's right edge has zero
         // intersection — should be rejected so the draw is skipped.
-        assert!(!clip_yields_visible_pixels(Some([400, 0, 50, 50]), (400.0, 300.0)));
+        assert!(!clip_yields_visible_pixels(
+            Some([400, 0, 50, 50]),
+            (400.0, 300.0)
+        ));
     }
 }

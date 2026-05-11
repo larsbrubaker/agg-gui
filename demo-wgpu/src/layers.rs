@@ -146,8 +146,7 @@ impl WgpuGfxCtx {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.surface_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -197,9 +196,8 @@ impl WgpuGfxCtx {
             self.alloc_layer_texture(w, h)
         };
 
-        let rounded_clip = retained_key.and_then(|k| {
-            self.retained_layers.get(&k).and_then(|l| l.rounded_clip)
-        });
+        let rounded_clip =
+            retained_key.and_then(|k| self.retained_layers.get(&k).and_then(|l| l.rounded_clip));
 
         self.layer_stack.push(WgpuLayerEntry {
             texture: Arc::clone(&texture),
@@ -254,14 +252,7 @@ impl WgpuGfxCtx {
         });
     }
 
-    pub(crate) fn set_layer_rounded_clip_impl(
-        &mut self,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-        r: f64,
-    ) {
+    pub(crate) fn set_layer_rounded_clip_impl(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
         if self.layer_stack.is_empty() {
             return;
         }

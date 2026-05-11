@@ -130,14 +130,8 @@ fn hover_after_release_switches_open_top_menu_on_desktop() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );
@@ -179,14 +173,8 @@ fn desktop_drag_and_release_on_sibling_keeps_new_menu_open() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );
@@ -223,14 +211,8 @@ fn desktop_drag_switch_then_release_off_closes() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );
@@ -266,14 +248,8 @@ fn desktop_press_press_press_neutral_closes_active_menu() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );
@@ -363,14 +339,8 @@ fn click_close_suppresses_hover_until_cursor_leaves() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );

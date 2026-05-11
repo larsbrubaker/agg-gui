@@ -13,8 +13,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use agg_gui::{
-    DrawCtx, Event, EventResult, HAnchor, Key, MenuEntry, MenuItem, MenuResponse,
-    Modifiers, MouseButton, Point, PopupMenu, Rect, Size, VAnchor, Widget, WidgetBase,
+    DrawCtx, Event, EventResult, HAnchor, Key, MenuEntry, MenuItem, MenuResponse, Modifiers,
+    MouseButton, Point, PopupMenu, Rect, Size, VAnchor, Widget, WidgetBase,
 };
 
 use crate::draw::{
@@ -322,7 +322,12 @@ impl Widget for NodeEditor {
             (h - self.canvas_offset[1]) * inv_scale,
         ];
 
-        draw_canvas_grid(ctx, (visible_min, visible_max), 40.0, self.palette.canvas_grid);
+        draw_canvas_grid(
+            ctx,
+            (visible_min, visible_max),
+            40.0,
+            self.palette.canvas_grid,
+        );
 
         let layouts = self.snapshot_layouts();
 
@@ -403,16 +408,23 @@ impl Widget for NodeEditor {
             }
         }
         match event {
-            Event::MouseDown { pos, button, modifiers } => {
-                self.on_mouse_down(*pos, *button, *modifiers)
-            }
-            Event::MouseUp { pos, button, modifiers } => {
-                self.on_mouse_up(*pos, *button, *modifiers)
-            }
+            Event::MouseDown {
+                pos,
+                button,
+                modifiers,
+            } => self.on_mouse_down(*pos, *button, *modifiers),
+            Event::MouseUp {
+                pos,
+                button,
+                modifiers,
+            } => self.on_mouse_up(*pos, *button, *modifiers),
             Event::MouseMove { pos } => self.on_mouse_move(*pos),
-            Event::MouseWheel { pos, delta_y, modifiers, .. } => {
-                self.on_wheel(*pos, *delta_y, *modifiers)
-            }
+            Event::MouseWheel {
+                pos,
+                delta_y,
+                modifiers,
+                ..
+            } => self.on_wheel(*pos, *delta_y, *modifiers),
             Event::KeyDown { key, modifiers } => self.on_key_down(key, *modifiers),
             Event::KeyUp { key, modifiers } => self.on_key_up(key, *modifiers),
             _ => EventResult::Ignored,
@@ -509,14 +521,21 @@ impl NodeEditor {
     fn on_mouse_move(&mut self, pos: Point) -> EventResult {
         let canvas_pos = self.local_to_canvas(pos);
         match &mut self.interaction {
-            CanvasState::PanningCanvas { start_offset, start_local } => {
+            CanvasState::PanningCanvas {
+                start_offset,
+                start_local,
+            } => {
                 self.canvas_offset = [
                     start_offset[0] + (pos.x - start_local.x),
                     start_offset[1] + (pos.y - start_local.y),
                 ];
                 EventResult::Consumed
             }
-            CanvasState::DraggingNode { ids, start_positions, start_canvas } => {
+            CanvasState::DraggingNode {
+                ids,
+                start_positions,
+                start_canvas,
+            } => {
                 let dx = canvas_pos[0] - start_canvas[0];
                 let dy = canvas_pos[1] - start_canvas[1];
                 let mut model = self.model.lock().unwrap();
@@ -530,7 +549,12 @@ impl NodeEditor {
                 EventResult::Consumed
             }
             CanvasState::DraggingProperty {
-                node_id, prop_name, start_value, start_local_x, min, max,
+                node_id,
+                prop_name,
+                start_value,
+                start_local_x,
+                min,
+                max,
             } => {
                 let dx = pos.x - *start_local_x;
                 let mut new_value = *start_value + dx;
@@ -564,39 +588,58 @@ impl NodeEditor {
         _modifiers: Modifiers,
     ) -> EventResult {
         let canvas_pos = self.local_to_canvas(pos);
-        match (button, std::mem::replace(&mut self.interaction, CanvasState::Idle)) {
-            (MouseButton::Left, CanvasState::DrawingConnection {
-                from_node, from_socket, from_socket_type, from_side, ..
-            })
-            | (MouseButton::Middle, CanvasState::DrawingConnection {
-                from_node, from_socket, from_socket_type, from_side, ..
-            }) => {
+        match (
+            button,
+            std::mem::replace(&mut self.interaction, CanvasState::Idle),
+        ) {
+            (
+                MouseButton::Left,
+                CanvasState::DrawingConnection {
+                    from_node,
+                    from_socket,
+                    from_socket_type,
+                    from_side,
+                    ..
+                },
+            )
+            | (
+                MouseButton::Middle,
+                CanvasState::DrawingConnection {
+                    from_node,
+                    from_socket,
+                    from_socket_type,
+                    from_side,
+                    ..
+                },
+            ) => {
                 let layouts = self.snapshot_layouts();
-                if let Some((target_node, target_socket)) =
-                    self.hit_socket(&layouts, canvas_pos)
-                {
+                if let Some((target_node, target_socket)) = self.hit_socket(&layouts, canvas_pos) {
                     let model = self.model.lock().unwrap();
-                    let compatible = model.sockets_compatible(from_socket_type, target_socket.socket_type);
+                    let compatible =
+                        model.sockets_compatible(from_socket_type, target_socket.socket_type);
                     drop(model);
                     if target_node != from_node && compatible {
-                        let (out_node, out_sock, in_node, in_sock) = match (from_side, target_socket.side) {
-                            (SocketSide::Output, SocketSide::Input) => (
-                                from_node,
-                                from_socket.clone(),
-                                target_node,
-                                target_socket.name.clone(),
-                            ),
-                            (SocketSide::Input, SocketSide::Output) => (
-                                target_node,
-                                target_socket.name.clone(),
-                                from_node,
-                                from_socket.clone(),
-                            ),
-                            _ => return EventResult::Consumed,
-                        };
-                        let _ = self.model.lock().unwrap().try_add_edge(
-                            out_node, &out_sock, in_node, &in_sock,
-                        );
+                        let (out_node, out_sock, in_node, in_sock) =
+                            match (from_side, target_socket.side) {
+                                (SocketSide::Output, SocketSide::Input) => (
+                                    from_node,
+                                    from_socket.clone(),
+                                    target_node,
+                                    target_socket.name.clone(),
+                                ),
+                                (SocketSide::Input, SocketSide::Output) => (
+                                    target_node,
+                                    target_socket.name.clone(),
+                                    from_node,
+                                    from_socket.clone(),
+                                ),
+                                _ => return EventResult::Consumed,
+                            };
+                        let _ = self
+                            .model
+                            .lock()
+                            .unwrap()
+                            .try_add_edge(out_node, &out_sock, in_node, &in_sock);
                     }
                 }
                 EventResult::Consumed
@@ -613,7 +656,11 @@ impl NodeEditor {
             return EventResult::Ignored;
         }
         let canvas_before = self.local_to_canvas(pos);
-        let factor = if delta_y > 0.0 { ZOOM_STEP } else { 1.0 / ZOOM_STEP };
+        let factor = if delta_y > 0.0 {
+            ZOOM_STEP
+        } else {
+            1.0 / ZOOM_STEP
+        };
         let new_scale = (self.canvas_scale * factor).clamp(ZOOM_MIN, ZOOM_MAX);
         if (new_scale - self.canvas_scale).abs() < 1e-9 {
             return EventResult::Consumed;
@@ -720,7 +767,13 @@ mod tests {
         fn remove_node(&mut self, id: NodeId) {
             self.nodes.retain(|n| n.id != id);
         }
-        fn try_add_edge(&mut self, from_node: NodeId, from_socket: &str, to_node: NodeId, to_socket: &str) -> EdgeResult {
+        fn try_add_edge(
+            &mut self,
+            from_node: NodeId,
+            from_socket: &str,
+            to_node: NodeId,
+            to_socket: &str,
+        ) -> EdgeResult {
             self.edges.push(EdgeView {
                 from_node,
                 from_socket: from_socket.into(),

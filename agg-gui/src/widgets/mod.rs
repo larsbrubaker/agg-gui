@@ -1,9 +1,9 @@
 pub mod button;
 pub mod checkbox;
 pub mod collapsing_header;
-pub mod conditional;
 pub mod color_picker;
 pub mod combo_box;
+pub mod conditional;
 pub mod container;
 pub mod drag_value;
 pub mod flex;
@@ -38,6 +38,7 @@ pub use checkbox::Checkbox;
 pub use collapsing_header::CollapsingHeader;
 pub use color_picker::ColorPicker;
 pub use combo_box::ComboBox;
+pub use conditional::Conditional;
 pub use container::Container;
 pub use drag_value::DragValue;
 pub use flex::{FlexColumn, FlexRow};
@@ -50,7 +51,6 @@ pub use menu::{
     MenuBar, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut, PopupMenu,
     ShortcutKey, TopMenu,
 };
-pub use conditional::Conditional;
 pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
 pub use progress_bar::ProgressBar;
 pub use radio_group::RadioGroup;
@@ -63,9 +63,8 @@ pub use slider::Slider;
 pub use splitter::Splitter;
 pub use tab_view::TabView;
 pub use table::{
-    clip_text_to_width as table_clip_text_to_width, CellInfo, CellPainter, ColumnSize,
-    HeaderClick, HeaderInfo, HeaderPainter, RowPredicate, Table, TableBuilder, TableColumn,
-    TableRows,
+    clip_text_to_width as table_clip_text_to_width, CellInfo, CellPainter, ColumnSize, HeaderClick,
+    HeaderInfo, HeaderPainter, RowPredicate, Table, TableBuilder, TableColumn, TableRows,
 };
 pub use text_area::TextArea;
 pub use text_field::TextField;

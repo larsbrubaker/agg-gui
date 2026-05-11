@@ -35,8 +35,7 @@ use std::sync::Arc;
 
 use agg_gui::{App, InspectorNode, InspectorOverlay, Key, Modifiers, MouseButton};
 use demo_wgpu::{
-    begin_frame, render_app_frame, MsaaFramebuffer, WgpuCubeWidget, WgpuGfxCtx,
-    CUBE_SCREEN_RECT,
+    begin_frame, render_app_frame, MsaaFramebuffer, WgpuCubeWidget, WgpuGfxCtx, CUBE_SCREEN_RECT,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -142,9 +141,7 @@ pub fn wasm_start() {
 struct WebDisplay;
 
 impl wgpu::rwh::HasDisplayHandle for WebDisplay {
-    fn display_handle(
-        &self,
-    ) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+    fn display_handle(&self) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
         Ok(wgpu::rwh::DisplayHandle::web())
     }
 }
@@ -171,8 +168,7 @@ async fn init_wgpu_async() -> Result<WgpuInit, String> {
     // bind to a window-like handle, not a display).  Workaround: hand the
     // instance a no-op `Web` display handle so the `(None, None)` branch
     // doesn't fire.  Cost is one zero-sized boxed shim.
-    let mut instance_desc =
-        wgpu::InstanceDescriptor::new_with_display_handle(Box::new(WebDisplay));
+    let mut instance_desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(WebDisplay));
     instance_desc.backends = wgpu::Backends::GL;
     let instance = wgpu::Instance::new(instance_desc);
 
@@ -192,11 +188,23 @@ async fn init_wgpu_async() -> Result<WgpuInit, String> {
     // Critical for WebGL2: pin limits so the device only requests what WebGL2
     // can deliver — otherwise device creation rejects on backends that report
     // higher native limits via the underlying GPU.
+    //
+    // Resolution caveat: the raw `downlevel_webgl2_defaults` pins
+    // `max_texture_dimension_2d = 2048`, which an Android phone's canvas
+    // routinely overshoots (a 411 × 731 CSS-px viewport at DPR 3 is
+    // 1233 × 2193 device px — already past 2048 on the long axis).  When the
+    // surface texture exceeds the device limit, `surface.configure` and the
+    // scene-framebuffer texture creation both fail validation and the canvas
+    // stays black.  `using_resolution(adapter.limits())` keeps every other
+    // conservative WebGL2 default but raises the texture-dimension caps to
+    // whatever the actual adapter advertises (typically 4096–16384 on
+    // mobile WebGL2).
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("demo-wasm-wgpu"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+            required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                .using_resolution(adapter.limits()),
             memory_hints: wgpu::MemoryHints::Performance,
             experimental_features: wgpu::ExperimentalFeatures::default(),
             trace: wgpu::Trace::Off,
@@ -212,10 +220,7 @@ async fn init_wgpu_async() -> Result<WgpuInit, String> {
         .find(|f| !f.is_srgb())
         .unwrap_or(caps.formats[0]);
 
-    let size = (
-        canvas.width().max(1),
-        canvas.height().max(1),
-    );
+    let size = (canvas.width().max(1), canvas.height().max(1));
     let config = wgpu::SurfaceConfiguration {
         // WebGL2 surfaces only advertise `COLOR_TARGET` (== RENDER_ATTACHMENT);
         // requesting `COPY_SRC` panics at `Surface::configure` validation.
@@ -258,10 +263,7 @@ fn ensure_demo_app() {
         if cell.borrow().is_none() {
             let font = default_font();
             let initial_state = load_state_wasm();
-            let running_msaa: u8 = initial_state
-                .as_ref()
-                .map(|s| s.msaa_samples)
-                .unwrap_or(0);
+            let running_msaa: u8 = initial_state.as_ref().map(|s| s.msaa_samples).unwrap_or(0);
             let platform = demo_ui::PlatformHooks::web(running_msaa, || {
                 if let Some(win) = web_sys::window() {
                     let _ = win.location().reload();
@@ -284,8 +286,7 @@ fn ensure_demo_app() {
             HOVERED_BOUNDS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.hovered_bounds)));
             BASE_EDITS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.base_edits)));
             #[cfg(feature = "reflect")]
-            INSPECTOR_EDITS
-                .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.inspector_edits)));
+            INSPECTOR_EDITS.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.inspector_edits)));
             SCREEN_SIZE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screen_size)));
             FRAME_HISTORY.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.frame_history)));
             RUN_MODE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.run_mode)));
@@ -474,9 +475,9 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                                 &hb,
                                 &base_edits,
                                 #[cfg(feature = "reflect")]
-                                inspector_edits_rc.as_ref().expect(
-                                    "INSPECTOR_EDITS must be initialised with reflect on",
-                                ),
+                                inspector_edits_rc
+                                    .as_ref()
+                                    .expect("INSPECTOR_EDITS must be initialised with reflect on"),
                             );
                         }
                     });
@@ -523,10 +524,18 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                     // round-trip pixels through `read_captured_screenshot`
                     // here, then hand the bytes to the cross-platform
                     // download / clipboard helpers.
-                    let save_pending = SCREENSHOT_SAVE_PENDING
-                        .with(|c| c.borrow().as_ref().map(|r| r.replace(false)).unwrap_or(false));
-                    let copy_pending = SCREENSHOT_COPY_PENDING
-                        .with(|c| c.borrow().as_ref().map(|r| r.replace(false)).unwrap_or(false));
+                    let save_pending = SCREENSHOT_SAVE_PENDING.with(|c| {
+                        c.borrow()
+                            .as_ref()
+                            .map(|r| r.replace(false))
+                            .unwrap_or(false)
+                    });
+                    let copy_pending = SCREENSHOT_COPY_PENDING.with(|c| {
+                        c.borrow()
+                            .as_ref()
+                            .map(|r| r.replace(false))
+                            .unwrap_or(false)
+                    });
                     if save_pending || copy_pending {
                         use agg_gui::DrawCtx;
                         let (rgba, sw, sh) = wgpu_ctx.read_captured_screenshot();
@@ -559,17 +568,11 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                     // through the shared 2-D textured-quad pipeline.
                     let device = Arc::clone(&wgpu_ctx.device());
                     let queue = Arc::clone(&wgpu_ctx.queue());
-                    let mut encoder = device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
+                    let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("scene_blit_to_surface"),
-                        },
-                    );
-                    let dst_rect = agg_gui::Rect::new(
-                        0.0,
-                        0.0,
-                        width as f64,
-                        height as f64,
-                    );
+                        });
+                    let dst_rect = agg_gui::Rect::new(0.0, 0.0, width as f64, height as f64);
                     scene_fb.blit_to(
                         &device,
                         &mut encoder,
@@ -698,7 +701,11 @@ pub fn on_mouse_leave() {
 pub fn on_touch_start(id: u32, x: f64, y: f64, force: f64) {
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
-            let f = if force > 0.0 { Some(force as f32) } else { None };
+            let f = if force > 0.0 {
+                Some(force as f32)
+            } else {
+                None
+            };
             app.on_touch_start(
                 agg_gui::TouchDeviceId(0),
                 agg_gui::TouchId(id as u64),
@@ -715,7 +722,11 @@ pub fn on_touch_start(id: u32, x: f64, y: f64, force: f64) {
 pub fn on_touch_move(id: u32, x: f64, y: f64, force: f64) {
     DEMO_APP.with(|cell| {
         if let Some(app) = cell.borrow_mut().as_mut() {
-            let f = if force > 0.0 { Some(force as f32) } else { None };
+            let f = if force > 0.0 {
+                Some(force as f32)
+            } else {
+                None
+            };
             app.on_touch_move(
                 agg_gui::TouchDeviceId(0),
                 agg_gui::TouchId(id as u64),
@@ -751,7 +762,12 @@ pub fn on_touch_cancel(id: u32) {
 #[wasm_bindgen]
 pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool, meta: bool) {
     if let Some(key) = parse_js_key(key_str) {
-        let mods = Modifiers { shift, ctrl, alt, meta };
+        let mods = Modifiers {
+            shift,
+            ctrl,
+            alt,
+            meta,
+        };
         DEMO_APP.with(|cell| {
             if let Some(app) = cell.borrow_mut().as_mut() {
                 app.on_key_down(key, mods);

@@ -15,7 +15,7 @@ use crate::text::Font;
 use crate::widget::InspectorNode;
 
 use super::inspector::{
-    c_border, c_dim_text, c_text, InsetsTarget, InsetsSide, PropHit, PropHitKind, FONT_SIZE,
+    c_border, c_dim_text, c_text, InsetsSide, InsetsTarget, PropHit, PropHitKind, FONT_SIZE,
 };
 
 pub(super) fn paint_properties(
@@ -68,14 +68,16 @@ pub(super) fn paint_properties(
     // ── static geometry rows ──────────────────────────────────────────────────
     let b = &node.screen_bounds;
     let geom_rows: &[(&str, String)] = &[
-        ("x",      format!("{:.1}", b.x)),
-        ("y",      format!("{:.1}", b.y)),
-        ("width",  format!("{:.1}", b.width)),
+        ("x", format!("{:.1}", b.x)),
+        ("y", format!("{:.1}", b.y)),
+        ("width", format!("{:.1}", b.width)),
         ("height", format!("{:.1}", b.height)),
-        ("depth",  format!("{}", node.depth)),
+        ("depth", format!("{}", node.depth)),
     ];
     for (label, value) in geom_rows {
-        if ry < 4.0 { break; }
+        if ry < 4.0 {
+            break;
+        }
         paint_row_static(ctx, w, ry, label, value, &v);
         ry -= row_h;
     }
@@ -83,16 +85,25 @@ pub(super) fn paint_properties(
     // ── editable margin rows (per side) ──────────────────────────────────────
     let m = &node.margin;
     let margin_sides: &[(&str, InsetsSide, f64)] = &[
-        ("margin.left",   InsetsSide::Left,   m.left),
-        ("margin.right",  InsetsSide::Right,  m.right),
-        ("margin.top",    InsetsSide::Top,    m.top),
+        ("margin.left", InsetsSide::Left, m.left),
+        ("margin.right", InsetsSide::Right, m.right),
+        ("margin.top", InsetsSide::Top, m.top),
         ("margin.bottom", InsetsSide::Bottom, m.bottom),
     ];
     for (label, side, val) in margin_sides {
-        if ry < 4.0 { break; }
+        if ry < 4.0 {
+            break;
+        }
         let step = (val.abs() * 0.5 + 0.5).min(4.0).max(0.5);
-        let hit = paint_row_editable(ctx, w, ry, label, &format!("{:.1}", val), &v,
-                                     Color::rgba(0.9, 0.55, 0.1, 0.15));
+        let hit = paint_row_editable(
+            ctx,
+            w,
+            ry,
+            label,
+            &format!("{:.1}", val),
+            &v,
+            Color::rgba(0.9, 0.55, 0.1, 0.15),
+        );
         hits.push(PropHit {
             rect: hit,
             field: (*label).to_string(),
@@ -110,15 +121,24 @@ pub(super) fn paint_properties(
     let p = &node.padding;
     if p.left != 0.0 || p.right != 0.0 || p.top != 0.0 || p.bottom != 0.0 {
         let pad_sides: &[(&str, f64)] = &[
-            ("pad.left",   p.left),
-            ("pad.right",  p.right),
-            ("pad.top",    p.top),
+            ("pad.left", p.left),
+            ("pad.right", p.right),
+            ("pad.top", p.top),
             ("pad.bottom", p.bottom),
         ];
         for (label, val) in pad_sides {
-            if ry < 4.0 { break; }
-            paint_row_tinted(ctx, w, ry, label, &format!("{:.1}", val), &v,
-                             Color::rgba(0.1, 0.75, 0.3, 0.12));
+            if ry < 4.0 {
+                break;
+            }
+            paint_row_tinted(
+                ctx,
+                w,
+                ry,
+                label,
+                &format!("{:.1}", val),
+                &v,
+                Color::rgba(0.1, 0.75, 0.3, 0.12),
+            );
             ry -= row_h;
         }
     }
@@ -127,23 +147,41 @@ pub(super) fn paint_properties(
     {
         let ha = node.h_anchor;
         if ry >= 4.0 {
-            let hit = paint_row_editable(ctx, w, ry, "h_anchor", ha.display_name(), &v,
-                                         Color::rgba(0.2, 0.4, 0.9, 0.12));
+            let hit = paint_row_editable(
+                ctx,
+                w,
+                ry,
+                "h_anchor",
+                ha.display_name(),
+                &v,
+                Color::rgba(0.2, 0.4, 0.9, 0.12),
+            );
             hits.push(PropHit {
                 rect: hit,
                 field: "h_anchor".to_string(),
-                kind: PropHitKind::HAnchorCycle { current_bits: ha.bits() },
+                kind: PropHitKind::HAnchorCycle {
+                    current_bits: ha.bits(),
+                },
             });
             ry -= row_h;
         }
         let va = node.v_anchor;
         if ry >= 4.0 {
-            let hit = paint_row_editable(ctx, w, ry, "v_anchor", va.display_name(), &v,
-                                         Color::rgba(0.2, 0.4, 0.9, 0.12));
+            let hit = paint_row_editable(
+                ctx,
+                w,
+                ry,
+                "v_anchor",
+                va.display_name(),
+                &v,
+                Color::rgba(0.2, 0.4, 0.9, 0.12),
+            );
             hits.push(PropHit {
                 rect: hit,
                 field: "v_anchor".to_string(),
-                kind: PropHitKind::VAnchorCycle { current_bits: va.bits() },
+                kind: PropHitKind::VAnchorCycle {
+                    current_bits: va.bits(),
+                },
             });
             ry -= row_h;
         }
@@ -151,7 +189,9 @@ pub(super) fn paint_properties(
 
     // ── widget-specific properties ────────────────────────────────────────────
     for (prop_label, prop_value) in &node.properties {
-        if ry < 4.0 { break; }
+        if ry < 4.0 {
+            break;
+        }
         let is_bool = *prop_value == "true" || *prop_value == "false";
         if is_bool {
             let color = if *prop_value == "true" {
@@ -164,7 +204,9 @@ pub(super) fn paint_properties(
             hits.push(PropHit {
                 rect: hit_rect,
                 field: (*prop_label).to_string(),
-                kind: PropHitKind::BoolToggle { current: *prop_value == "true" },
+                kind: PropHitKind::BoolToggle {
+                    current: *prop_value == "true",
+                },
             });
         } else if let Ok(parsed) = prop_value.parse::<f64>() {
             paint_row_static(ctx, w, ry, prop_label, prop_value, &v);
@@ -174,7 +216,10 @@ pub(super) fn paint_properties(
             hits.push(PropHit {
                 rect: hit_rect,
                 field: (*prop_label).to_string(),
-                kind: PropHitKind::NumericStep { current: parsed, step },
+                kind: PropHitKind::NumericStep {
+                    current: parsed,
+                    step,
+                },
             });
         } else {
             paint_row_static(ctx, w, ry, prop_label, prop_value, &v);
@@ -187,7 +232,11 @@ pub(super) fn paint_properties(
     if diag_h > 30.0 {
         let diag_y_top = diag_h - 4.0;
         let diag_w = w - 20.0;
-        let aspect = if b.height > 0.0 { b.width / b.height } else { 1.0 };
+        let aspect = if b.height > 0.0 {
+            b.width / b.height
+        } else {
+            1.0
+        };
         let box_h = (diag_h * 0.6).min(50.0);
         let box_w = (box_h * aspect).min(diag_w * 0.8);
         let box_x = 10.0 + (diag_w - box_w) * 0.5;

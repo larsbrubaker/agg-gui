@@ -69,10 +69,7 @@ impl WgpuGfxCtx {
     ///
     /// Called in `end_frame` when emitting each scissored draw command.
     #[inline]
-    pub(crate) fn yup_to_ydown_scissor(
-        scissor: [i32; 4],
-        viewport_h: u32,
-    ) -> (u32, u32, u32, u32) {
+    pub(crate) fn yup_to_ydown_scissor(scissor: [i32; 4], viewport_h: u32) -> (u32, u32, u32, u32) {
         let [x, y_bottom, w, h] = scissor;
         let y_top = (viewport_h as i32) - (y_bottom + h);
         (

@@ -5,8 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, DragValue, FlexColumn, FlexRow, Font, ScrollView, Separator, SizedBox, Slider,
-    Widget,
+    Button, DragValue, FlexColumn, FlexRow, Font, ScrollView, Separator, SizedBox, Slider, Widget,
 };
 
 use super::helpers::{

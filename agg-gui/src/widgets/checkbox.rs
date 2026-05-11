@@ -1,4 +1,4 @@
-﻿//! `Checkbox` — a boolean toggle with a label.
+//! `Checkbox` — a boolean toggle with a label.
 //!
 //! # Composition
 //!
@@ -239,8 +239,7 @@ impl Widget for Checkbox {
             box_slot_w + GAP
         };
         let ly = (h - s.height) * 0.5;
-        self.children[0]
-            .set_bounds(Rect::new(lx, ly, s.width, s.height));
+        self.children[0].set_bounds(Rect::new(lx, ly, s.width, s.height));
         let natural_w = if self.label_text.is_empty() {
             box_slot_w
         } else {

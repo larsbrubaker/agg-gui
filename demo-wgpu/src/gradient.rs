@@ -19,17 +19,17 @@ use agg_gui::TransAffine;
 pub(crate) struct GradientUniforms {
     pub resolution: [f32; 2],
     pub _pad0: [f32; 2],
-    pub line: [f32; 4],     // [x1, y1, x2, y2]
-    pub radial: [f32; 4],   // [cx, cy, r, 0]
-    pub focal: [f32; 2],    // [fx, fy]
+    pub line: [f32; 4],   // [x1, y1, x2, y2]
+    pub radial: [f32; 4], // [cx, cy, r, 0]
+    pub focal: [f32; 2],  // [fx, fy]
     pub _pad1: [f32; 2],
-    pub screen_inv_a: [f32; 4],  // affine [sx, shy, shx, sy]
-    pub screen_inv_b: [f32; 2],  // affine [tx, ty]
+    pub screen_inv_a: [f32; 4], // affine [sx, shy, shx, sy]
+    pub screen_inv_b: [f32; 2], // affine [tx, ty]
     pub _pad2: [f32; 2],
     pub gradient_inv_a: [f32; 4],
     pub gradient_inv_b: [f32; 2],
-    pub kind: u32,    // 0 = linear, 1 = radial
-    pub spread: u32,  // 0 = pad, 1 = reflect, 2 = repeat
+    pub kind: u32,   // 0 = linear, 1 = radial
+    pub spread: u32, // 0 = pad, 1 = reflect, 2 = repeat
     pub global_alpha: f32,
     /// Explicit padding to 144 bytes (vec3 alignment in WGSL would skip to 144).
     pub _pad3: [f32; 3],
@@ -46,7 +46,7 @@ pub(crate) fn gradient_ramp(stops: &[GradientStop]) -> Vec<u8> {
         let t = x as f64 / (RAMP_W - 1) as f64;
         let color = sample_stops(stops, t);
         let i = x * 4;
-        ramp[i]     = (color.r.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        ramp[i] = (color.r.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         ramp[i + 1] = (color.g.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         ramp[i + 2] = (color.b.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         ramp[i + 3] = (color.a.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;

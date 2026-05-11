@@ -219,50 +219,49 @@ impl WgpuPipelines {
         });
 
         // ── Shader modules ───────────────────────────────────────────────────
-        let solid_sm    = mk_shader(device, "solid",    SOLID_WGSL);
+        let solid_sm = mk_shader(device, "solid", SOLID_WGSL);
         let aa_solid_sm = mk_shader(device, "aa_solid", AA_SOLID_WGSL);
         let gradient_sm = mk_shader(device, "gradient", GRADIENT_WGSL);
-        let tex_sm      = mk_shader(device, "tex",      TEX_WGSL);
-        let layer_sm    = mk_shader(device, "layer",    LAYER_WGSL);
-        let lcd_sm      = mk_shader(device, "lcd",      LCD_WGSL);
-        let lcb_sm      = mk_shader(device, "lcb",      LCB_WGSL);
+        let tex_sm = mk_shader(device, "tex", TEX_WGSL);
+        let layer_sm = mk_shader(device, "layer", LAYER_WGSL);
+        let lcd_sm = mk_shader(device, "lcd", LCD_WGSL);
+        let lcb_sm = mk_shader(device, "lcb", LCB_WGSL);
 
         // ── Bind group layouts ───────────────────────────────────────────────
-        let solid_bgl    = mk_uniform_bgl(device, "solid",    size_of::<SolidUniforms>() as u64);
+        let solid_bgl = mk_uniform_bgl(device, "solid", size_of::<SolidUniforms>() as u64);
         let aa_solid_bgl = mk_uniform_bgl(device, "aa_solid", size_of::<SolidUniforms>() as u64);
         let gradient_bgl0 = mk_uniform_bgl(
-            device, "gradient0",
+            device,
+            "gradient0",
             size_of::<crate::gradient::GradientUniforms>() as u64,
         );
         let gradient_bgl1 = mk_tex1_bgl(device, "gradient1");
-        let tex_bgl0   = mk_uniform_bgl(device, "tex0",   size_of::<TexUniforms>() as u64);
-        let tex_bgl1   = mk_tex1_bgl(device, "tex1");
+        let tex_bgl0 = mk_uniform_bgl(device, "tex0", size_of::<TexUniforms>() as u64);
+        let tex_bgl1 = mk_tex1_bgl(device, "tex1");
         let layer_bgl0 = mk_uniform_bgl(device, "layer0", size_of::<LayerUniforms>() as u64);
         let layer_bgl1 = mk_tex1_bgl(device, "layer1");
-        let lcd_bgl0   = mk_uniform_bgl(device, "lcd0",   size_of::<LcdUniforms>() as u64);
-        let lcd_bgl1   = mk_tex1_bgl(device, "lcd1");
-        let lcb_bgl0   = mk_uniform_bgl(device, "lcb0",   size_of::<LcbUniforms>() as u64);
-        let lcb_bgl1   = mk_tex2_bgl(device, "lcb1");
+        let lcd_bgl0 = mk_uniform_bgl(device, "lcd0", size_of::<LcdUniforms>() as u64);
+        let lcd_bgl1 = mk_tex1_bgl(device, "lcd1");
+        let lcb_bgl0 = mk_uniform_bgl(device, "lcb0", size_of::<LcbUniforms>() as u64);
+        let lcb_bgl1 = mk_tex2_bgl(device, "lcb1");
 
         // ── Pipeline layouts ─────────────────────────────────────────────────
-        let solid_pl    = mk_layout(device, "solid",    &[&solid_bgl]);
+        let solid_pl = mk_layout(device, "solid", &[&solid_bgl]);
         let aa_solid_pl = mk_layout(device, "aa_solid", &[&aa_solid_bgl]);
         let gradient_pl = mk_layout(device, "gradient", &[&gradient_bgl0, &gradient_bgl1]);
-        let tex_pl      = mk_layout(device, "tex",      &[&tex_bgl0,      &tex_bgl1]);
-        let layer_pl    = mk_layout(device, "layer",    &[&layer_bgl0,    &layer_bgl1]);
-        let lcd_pl      = mk_layout(device, "lcd",      &[&lcd_bgl0,      &lcd_bgl1]);
-        let lcb_pl      = mk_layout(device, "lcb",      &[&lcb_bgl0,      &lcb_bgl1]);
+        let tex_pl = mk_layout(device, "tex", &[&tex_bgl0, &tex_bgl1]);
+        let layer_pl = mk_layout(device, "layer", &[&layer_bgl0, &layer_bgl1]);
+        let lcd_pl = mk_layout(device, "lcd", &[&lcd_bgl0, &lcd_bgl1]);
+        let lcb_pl = mk_layout(device, "lcb", &[&lcb_bgl0, &lcb_bgl1]);
 
         // ── Shared vertex attribute slices ───────────────────────────────────
         // Defined once here so that every VertexBufferLayout below can borrow them
         // without moving them (they outlive all the pipeline create calls below).
-        let pos2_attrs = [
-            wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x2,
-                offset: 0,
-                shader_location: 0,
-            },
-        ];
+        let pos2_attrs = [wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x2,
+            offset: 0,
+            shader_location: 0,
+        }];
         let pos2_alpha_attrs = [
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x2,
@@ -309,76 +308,148 @@ impl WgpuPipelines {
 
         // ── Render pipelines ─────────────────────────────────────────────────
         let solid_pipeline = build_pipeline(
-            device, "solid", &solid_pl, &solid_sm, &solid_sm,
+            device,
+            "solid",
+            &solid_pl,
+            &solid_sm,
+            &solid_sm,
             &[vbl_pos2()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
             sample_count,
         );
         let aa_solid_pipeline = build_pipeline(
-            device, "aa_solid", &aa_solid_pl, &aa_solid_sm, &aa_solid_sm,
+            device,
+            "aa_solid",
+            &aa_solid_pl,
+            &aa_solid_sm,
+            &aa_solid_sm,
             &[vbl_pos2_alpha()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
             sample_count,
         );
         let gradient_pipeline = build_pipeline(
-            device, "gradient", &gradient_pl, &gradient_sm, &gradient_sm,
+            device,
+            "gradient",
+            &gradient_pl,
+            &gradient_sm,
+            &gradient_sm,
             &[vbl_pos2_alpha()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
             sample_count,
         );
         let tex_pipeline = build_pipeline(
-            device, "tex", &tex_pl, &tex_sm, &tex_sm,
+            device,
+            "tex",
+            &tex_pl,
+            &tex_sm,
+            &tex_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
             sample_count,
         );
         let tex_ds4_sm = mk_shader(device, "tex_downsample_4x", TEX_DOWNSAMPLE_4X_WGSL);
         let tex_downsample_4x_pipeline = build_pipeline(
-            device, "tex_downsample_4x", &tex_pl, &tex_ds4_sm, &tex_ds4_sm,
+            device,
+            "tex_downsample_4x",
+            &tex_pl,
+            &tex_ds4_sm,
+            &tex_ds4_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::ALL,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
             sample_count,
         );
         let layer_pipeline = build_pipeline(
-            device, "layer", &layer_pl, &layer_sm, &layer_sm,
+            device,
+            "layer",
+            &layer_pl,
+            &layer_sm,
+            &layer_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::ALL,
+            surface_format,
+            Some(BLEND_PREMUL),
+            wgpu::ColorWrites::ALL,
             sample_count,
         );
         let lcd_r = build_pipeline(
-            device, "lcd_r", &lcd_pl, &lcd_sm, &lcd_sm,
+            device,
+            "lcd_r",
+            &lcd_pl,
+            &lcd_sm,
+            &lcd_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::RED,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::RED,
             sample_count,
         );
         let lcd_g = build_pipeline(
-            device, "lcd_g", &lcd_pl, &lcd_sm, &lcd_sm,
+            device,
+            "lcd_g",
+            &lcd_pl,
+            &lcd_sm,
+            &lcd_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::GREEN,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::GREEN,
             sample_count,
         );
         let lcd_b = build_pipeline(
-            device, "lcd_b", &lcd_pl, &lcd_sm, &lcd_sm,
+            device,
+            "lcd_b",
+            &lcd_pl,
+            &lcd_sm,
+            &lcd_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_STANDARD), wgpu::ColorWrites::BLUE,
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::BLUE,
             sample_count,
         );
         let lcb_r = build_pipeline(
-            device, "lcb_r", &lcb_pl, &lcb_sm, &lcb_sm,
+            device,
+            "lcb_r",
+            &lcb_pl,
+            &lcb_sm,
+            &lcb_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::RED,
+            surface_format,
+            Some(BLEND_PREMUL),
+            wgpu::ColorWrites::RED,
             sample_count,
         );
         let lcb_g = build_pipeline(
-            device, "lcb_g", &lcb_pl, &lcb_sm, &lcb_sm,
+            device,
+            "lcb_g",
+            &lcb_pl,
+            &lcb_sm,
+            &lcb_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::GREEN,
+            surface_format,
+            Some(BLEND_PREMUL),
+            wgpu::ColorWrites::GREEN,
             sample_count,
         );
         let lcb_b = build_pipeline(
-            device, "lcb_b", &lcb_pl, &lcb_sm, &lcb_sm,
+            device,
+            "lcb_b",
+            &lcb_pl,
+            &lcb_sm,
+            &lcb_sm,
             &[vbl_pos2_uv2()],
-            surface_format, Some(BLEND_PREMUL), wgpu::ColorWrites::BLUE,
+            surface_format,
+            Some(BLEND_PREMUL),
+            wgpu::ColorWrites::BLUE,
             sample_count,
         );
 

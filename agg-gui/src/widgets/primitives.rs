@@ -1,4 +1,4 @@
-﻿//! Primitive layout widgets: Stack, Padding, SizedBox, Spacer, Separator.
+//! Primitive layout widgets: Stack, Padding, SizedBox, Spacer, Separator.
 
 use crate::color::Color;
 use crate::device_scale::device_scale;
@@ -727,4 +727,3 @@ impl Widget for Separator {
         EventResult::Ignored
     }
 }
-

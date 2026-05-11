@@ -105,25 +105,24 @@ pub use theme::{
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
+#[cfg(feature = "reflect")]
+pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
     find_widget_by_id, find_widget_by_id_mut, find_widget_by_type, App, BackbufferKind,
     BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay, Widget, WidgetBaseEdit,
     WidgetBaseField,
 };
-#[cfg(feature = "reflect")]
-pub use widget::{
-    apply_inspector_edit, reflect_fields, InspectorEdit,
-};
 pub use widgets::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
-    Button, Checkbox, CollapsingHeader, ColorPicker, ComboBox, Conditional, Container, DragValue,
-    FlexColumn, FlexRow, Hyperlink, ImageView, InspectorPanel, InspectorSavedState, Label, LabelAlign,
-    MarkdownView, MenuBar, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
-    NodeIcon, Padding, PopupMenu, ProgressBar, RadioGroup, Resize, ScrollBarColor, ScrollBarKind,
-    ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, ShortcutKey, SizedBox, Slider,
-    CellInfo, HeaderInfo, Spacer, Splitter, Stack, TabView, Table, TableBuilder, TableColumn,
-    TableRows, TextArea, TextField, ToggleSwitch, Tooltip, TopMenu, TreeView, Window,
+    Button, CellInfo, Checkbox, CollapsingHeader, ColorPicker, ComboBox, Conditional, Container,
+    DragValue, FlexColumn, FlexRow, HeaderInfo, Hyperlink, ImageView, InspectorPanel,
+    InspectorSavedState, Label, LabelAlign, MarkdownView, MenuBar, MenuEntry, MenuItem,
+    MenuResponse, MenuSelection, MenuShortcut, NodeIcon, Padding, PopupMenu, ProgressBar,
+    RadioGroup, Resize, ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility,
+    ScrollView, Separator, ShortcutKey, SizedBox, Slider, Spacer, Splitter, Stack, TabView, Table,
+    TableBuilder, TableColumn, TableRows, TextArea, TextField, ToggleSwitch, Tooltip, TopMenu,
+    TreeView, Window,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

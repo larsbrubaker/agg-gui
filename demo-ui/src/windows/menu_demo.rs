@@ -173,8 +173,12 @@ impl Widget for MenuDemo {
     }
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        self.context_menu
-            .paint(ctx, self.active_font(), 14.0, agg_gui::widget::current_viewport());
+        self.context_menu.paint(
+            ctx,
+            self.active_font(),
+            14.0,
+            agg_gui::widget::current_viewport(),
+        );
     }
 }
 

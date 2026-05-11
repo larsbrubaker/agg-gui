@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use agg_gui::{
     Button, CellInfo, Checkbox, Color, Conditional, EventResult, FlexColumn, FlexRow, Font,
-    HeaderInfo, Label, RadioGroup, Separator, SizedBox, Size, Slider, Table, TableBuilder,
+    HeaderInfo, Label, RadioGroup, Separator, Size, SizedBox, Slider, Table, TableBuilder,
     TableColumn, TableRows, Widget,
 };
 
@@ -192,11 +192,7 @@ fn build_controls(font: Arc<Font>, st: Rc<DemoState>) -> Box<dyn Widget> {
     // wrapping the row in `Conditional` and toggling visibility from a
     // `VisibilitySync` widget that observes `demo_idx`.
     let num_rows_visible = Rc::new(Cell::new(st.demo_idx.get() != 0));
-    let num_rows_row = label_row(
-        Arc::clone(&f),
-        "Num rows",
-        Box::new(num_rows_slider),
-    );
+    let num_rows_row = label_row(Arc::clone(&f), "Num rows", Box::new(num_rows_slider));
     col = col.add(Box::new(Conditional::new(
         Rc::clone(&num_rows_visible),
         Box::new(num_rows_row),
@@ -343,8 +339,7 @@ fn make_cell_painter(state: Rc<DemoState>) -> Box<dyn FnMut(&CellInfo, &mut dyn 
                 ctx.fill_text(&lbl, label_x, baseline);
             }
             4 => {
-                let is_thick =
-                    !matches!(demo, DemoType::ManyHomogeneous) && thick_row(display_idx);
+                let is_thick = !matches!(demo, DemoType::ManyHomogeneous) && thick_row(display_idx);
                 let txt = if is_thick {
                     "Extra thick row"
                 } else {
@@ -364,7 +359,13 @@ fn make_cell_painter(state: Rc<DemoState>) -> Box<dyn FnMut(&CellInfo, &mut dyn 
 fn make_header_painter(
     state: Rc<DemoState>,
 ) -> Box<dyn FnMut(&HeaderInfo, &mut dyn agg_gui::DrawCtx)> {
-    let labels = ["Row", "Clipped text", "Expanding content", "Interaction", "Content"];
+    let labels = [
+        "Row",
+        "Clipped text",
+        "Expanding content",
+        "Interaction",
+        "Content",
+    ];
     Box::new(move |info: &HeaderInfo, ctx: &mut dyn agg_gui::DrawCtx| {
         let v = info.visuals;
         ctx.set_font(Arc::clone(info.font));
@@ -482,7 +483,10 @@ pub fn table_demo(font: Arc<Font>) -> Box<dyn Widget> {
             // All five columns are made resizable so users can grab any
             // edge — egui's demo behaves the same.
             TableColumn::auto(56.0).resizable(true),
-            TableColumn::remainder().at_least(40.0).clip(true).resizable(true),
+            TableColumn::remainder()
+                .at_least(40.0)
+                .clip(true)
+                .resizable(true),
             TableColumn::auto(72.0).resizable(true),
             TableColumn::remainder().resizable(true),
             TableColumn::remainder().resizable(true),

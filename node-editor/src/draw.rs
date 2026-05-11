@@ -191,8 +191,7 @@ impl CanvasPalette {
     /// Build the palette from agg-gui's current visuals — adapts to
     /// light or dark mode automatically.
     pub fn from_visuals(v: &agg_gui::theme::Visuals) -> Self {
-        let dark =
-            0.299 * v.bg_color.r + 0.587 * v.bg_color.g + 0.114 * v.bg_color.b < 0.5;
+        let dark = 0.299 * v.bg_color.r + 0.587 * v.bg_color.g + 0.114 * v.bg_color.b < 0.5;
         let canvas_bg = if dark {
             Color::rgb(0.13, 0.14, 0.16)
         } else {
@@ -289,7 +288,11 @@ pub fn draw_node<M: NodeGraphModel + ?Sized>(
 
     // Body (rounded rect) — agg-gui rect uses bottom-left origin in Y-up,
     // so we pass (x, y_bot, w, h).
-    ctx.set_fill_color(if selected { palette.node_body_selected } else { palette.node_body });
+    ctx.set_fill_color(if selected {
+        palette.node_body_selected
+    } else {
+        palette.node_body
+    });
     ctx.begin_path();
     ctx.rounded_rect(x, y_bot, w, h, NODE_RADIUS);
     ctx.fill();
@@ -300,13 +303,22 @@ pub fn draw_node<M: NodeGraphModel + ?Sized>(
     ctx.rounded_rect(x, y_top - TITLE_HEIGHT, w, TITLE_HEIGHT, NODE_RADIUS);
     ctx.fill();
     // Cover the bottom corners of the title bar so it only rounds at the top.
-    ctx.set_fill_color(if selected { palette.node_body_selected } else { palette.node_body });
+    ctx.set_fill_color(if selected {
+        palette.node_body_selected
+    } else {
+        palette.node_body
+    });
     ctx.begin_path();
     ctx.rect(x, y_top - TITLE_HEIGHT, w, NODE_RADIUS);
     ctx.fill();
     ctx.set_fill_color(title_color);
     ctx.begin_path();
-    ctx.rect(x, y_top - TITLE_HEIGHT + NODE_RADIUS, w, TITLE_HEIGHT - NODE_RADIUS);
+    ctx.rect(
+        x,
+        y_top - TITLE_HEIGHT + NODE_RADIUS,
+        w,
+        TITLE_HEIGHT - NODE_RADIUS,
+    );
     ctx.fill();
 
     // Border around the whole node.
@@ -323,9 +335,8 @@ pub fn draw_node<M: NodeGraphModel + ?Sized>(
     ctx.fill_text(&layout.display_name, x + 10.0, title_y);
 
     // Property rows — drawn before sockets so socket labels paint on top.
-    let body_lum = 0.299 * palette.node_body.r
-        + 0.587 * palette.node_body.g
-        + 0.114 * palette.node_body.b;
+    let body_lum =
+        0.299 * palette.node_body.r + 0.587 * palette.node_body.g + 0.114 * palette.node_body.b;
     let prop_bg = if body_lum < 0.5 {
         Color::rgba(0.15, 0.16, 0.20, 0.9)
     } else {
@@ -334,7 +345,12 @@ pub fn draw_node<M: NodeGraphModel + ?Sized>(
     for p in &layout.props {
         ctx.set_fill_color(prop_bg);
         ctx.begin_path();
-        ctx.rect(p.top_left[0], p.top_left[1] - p.size[1], p.size[0], p.size[1] - 2.0);
+        ctx.rect(
+            p.top_left[0],
+            p.top_left[1] - p.size[1],
+            p.size[0],
+            p.size[1] - 2.0,
+        );
         ctx.fill();
 
         // Name on the left.
@@ -393,7 +409,13 @@ fn format_value(v: &PropertyValue) -> String {
                 format!("{:.3}", n)
             }
         }
-        PropertyValue::Bool(b) => if *b { "true".into() } else { "false".into() },
+        PropertyValue::Bool(b) => {
+            if *b {
+                "true".into()
+            } else {
+                "false".into()
+            }
+        }
         PropertyValue::Other { display } => display.clone(),
     }
 }
@@ -455,8 +477,16 @@ mod tests {
         let info = layout_node(&make_node());
         assert_eq!(info.top_left, [100.0, 200.0]);
         assert_eq!(info.sockets.len(), 2);
-        let input = info.sockets.iter().find(|s| s.side == SocketSide::Input).unwrap();
-        let output = info.sockets.iter().find(|s| s.side == SocketSide::Output).unwrap();
+        let input = info
+            .sockets
+            .iter()
+            .find(|s| s.side == SocketSide::Input)
+            .unwrap();
+        let output = info
+            .sockets
+            .iter()
+            .find(|s| s.side == SocketSide::Output)
+            .unwrap();
         assert!((input.center[0] - 100.0).abs() < 1e-9);
         assert!((output.center[0] - (100.0 + NODE_WIDTH)).abs() < 1e-9);
         let expected_y = 200.0 - TITLE_HEIGHT - 0.5 * ROW_HEIGHT;
@@ -484,6 +514,8 @@ mod tests {
         assert!(info
             .socket_at([in_center[0] + 5.0, in_center[1] + 5.0])
             .is_some());
-        assert!(info.socket_at([in_center[0] + 50.0, in_center[1]]).is_none());
+        assert!(info
+            .socket_at([in_center[0] + 50.0, in_center[1]])
+            .is_none());
     }
 }

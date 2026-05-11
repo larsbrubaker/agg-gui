@@ -115,12 +115,10 @@ impl Widget for WindowTitleBar {
     fn layout(&mut self, available: Size) -> Size {
         // Position the title label at its final paint location so the
         // framework's child-paint walk lands it correctly.
-        let s = self.children[0]
-            .layout(Size::new(available.width - 48.0, available.height));
+        let s = self.children[0].layout(Size::new(available.width - 48.0, available.height));
         let lx = 24.0;
         let ly = (available.height - s.height) * 0.5;
-        self.children[0]
-            .set_bounds(Rect::new(lx, ly, s.width, s.height));
+        self.children[0].set_bounds(Rect::new(lx, ly, s.width, s.height));
         available
     }
 

@@ -46,24 +46,14 @@ impl WgpuGfxCtx {
     /// `(dst_x, dst_y, dst_w, dst_h)` in local coordinates, transformed through
     /// the current CTM.  UV `v` runs top→bottom (top of the destination quad
     /// samples `v=0`) to match the Y-down image convention used by callers.
-    fn build_image_verts(
-        &self,
-        dst_x: f64,
-        dst_y: f64,
-        dst_w: f64,
-        dst_h: f64,
-    ) -> [f32; 24] {
+    fn build_image_verts(&self, dst_x: f64, dst_y: f64, dst_w: f64, dst_h: f64) -> [f32; 24] {
         let bl = self.transform_pt(dst_x, dst_y);
         let br = self.transform_pt(dst_x + dst_w, dst_y);
         let tr = self.transform_pt(dst_x + dst_w, dst_y + dst_h);
         let tl = self.transform_pt(dst_x, dst_y + dst_h);
         [
-            bl[0], bl[1], 0.0, 1.0,
-            br[0], br[1], 1.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            bl[0], bl[1], 0.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            tl[0], tl[1], 0.0, 0.0,
+            bl[0], bl[1], 0.0, 1.0, br[0], br[1], 1.0, 1.0, tr[0], tr[1], 1.0, 0.0, bl[0], bl[1],
+            0.0, 1.0, tr[0], tr[1], 1.0, 0.0, tl[0], tl[1], 0.0, 0.0,
         ]
     }
 
@@ -99,7 +89,8 @@ impl WgpuGfxCtx {
             self.texture_cache_order.push_back(key);
             (entry.0, entry.1)
         } else {
-            let (texture, view) = upload_rgba_texture(&self.device, &self.queue, data, img_w, img_h);
+            let (texture, view) =
+                upload_rgba_texture(&self.device, &self.queue, data, img_w, img_h);
             self.texture_cache
                 .insert(key, (Arc::clone(&texture), view.clone(), img_w, img_h));
             self.texture_cache_order.push_back(key);
@@ -172,10 +163,9 @@ impl WgpuGfxCtx {
             .arc_texture_cache
             .get(&key)
             .and_then(|e| match e.weak.upgrade() {
-                Some(a) if Arc::ptr_eq(&a, data) && e.w == img_w && e.h == img_h => Some((
-                    Arc::clone(&e.texture),
-                    e.view.clone(),
-                )),
+                Some(a) if Arc::ptr_eq(&a, data) && e.w == img_w && e.h == img_h => {
+                    Some((Arc::clone(&e.texture), e.view.clone()))
+                }
                 _ => None,
             });
 

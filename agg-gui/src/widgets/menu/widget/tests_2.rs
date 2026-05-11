@@ -23,14 +23,8 @@ fn moving_across_top_menus_switches_open_popup() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );
@@ -268,14 +262,8 @@ fn mobile_tap_sequence_keeps_other_top_menu_open() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );
@@ -347,14 +335,8 @@ fn tap_on_other_top_menu_switches_open_popup() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );
@@ -429,14 +411,8 @@ fn arrow_keys_switch_open_top_menus() {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new(
-                "File",
-                vec![MenuItem::action("New", "file.new").into()],
-            ),
-            TopMenu::new(
-                "Edit",
-                vec![MenuItem::action("Copy", "edit.copy").into()],
-            ),
+            TopMenu::new("File", vec![MenuItem::action("New", "file.new").into()]),
+            TopMenu::new("Edit", vec![MenuItem::action("Copy", "edit.copy").into()]),
         ],
         |_| {},
     );

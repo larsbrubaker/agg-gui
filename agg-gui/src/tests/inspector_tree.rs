@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 /// InspectorPanel must build the TreeView with the correct nodes:
 /// - Two InspectorNodes (Root at depth 0, Child at depth 1) must produce two
@@ -758,4 +758,3 @@ fn test_treeview_click_collapses_when_flag_on() {
         "clicking root row body must collapse it when toggle_on_row_click = true"
     );
 }
-

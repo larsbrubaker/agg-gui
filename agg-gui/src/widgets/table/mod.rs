@@ -134,7 +134,10 @@ impl TableBuilder {
     }
     pub fn rows_cell(self, cell: Rc<RefCell<TableRows>>) -> Self {
         Self {
-            state: TableState { rows: cell, ..self.state },
+            state: TableState {
+                rows: cell,
+                ..self.state
+            },
             ..self
         }
     }
@@ -486,11 +489,7 @@ impl Widget for Table {
             for (col, &cw) in widths.iter().enumerate() {
                 let edge = acc + cw;
                 let last = col + 1 == widths.len();
-                let resizable = self
-                    .columns
-                    .get(col)
-                    .map(|c| c.resizable)
-                    .unwrap_or(false);
+                let resizable = self.columns.get(col).map(|c| c.resizable).unwrap_or(false);
                 if !last && resizable && (content_x - edge).abs() <= RESIZE_HIT_HALF {
                     return Some((col, cw));
                 }

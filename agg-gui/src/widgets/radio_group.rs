@@ -1,4 +1,4 @@
-﻿//! `RadioGroup` — a set of mutually exclusive radio buttons.
+//! `RadioGroup` — a set of mutually exclusive radio buttons.
 //!
 //! Each option label is rendered through a backbuffered [`Label`] child,
 //! so glyph rasterization is cached and only repeated when text or color changes.
@@ -61,9 +61,8 @@ impl RadioGroup {
         let children: Vec<Box<dyn Widget>> = opts
             .iter()
             .map(|text| {
-                Box::new(
-                    Label::new(text.as_str(), Arc::clone(&font)).with_font_size(font_size),
-                ) as Box<dyn Widget>
+                Box::new(Label::new(text.as_str(), Arc::clone(&font)).with_font_size(font_size))
+                    as Box<dyn Widget>
             })
             .collect();
         Self {
@@ -101,10 +100,8 @@ impl RadioGroup {
             .options
             .iter()
             .map(|text| {
-                Box::new(
-                    Label::new(text.as_str(), Arc::clone(&self.font))
-                        .with_font_size(size),
-                ) as Box<dyn Widget>
+                Box::new(Label::new(text.as_str(), Arc::clone(&self.font)).with_font_size(size))
+                    as Box<dyn Widget>
             })
             .collect();
         self

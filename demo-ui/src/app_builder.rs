@@ -34,8 +34,7 @@ pub fn build_demo_ui(
     ));
     let inspector_nodes = Rc::new(RefCell::new(Vec::<InspectorNode>::new()));
     let hovered_bounds = Rc::new(RefCell::new(None::<agg_gui::InspectorOverlay>));
-    let base_edits: Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>> =
-        Rc::new(RefCell::new(Vec::new()));
+    let base_edits: Rc<RefCell<Vec<agg_gui::WidgetBaseEdit>>> = Rc::new(RefCell::new(Vec::new()));
     #[cfg(feature = "reflect")]
     let inspector_edits: Rc<RefCell<Vec<agg_gui::InspectorEdit>>> =
         Rc::new(RefCell::new(Vec::new()));
@@ -737,25 +736,23 @@ pub fn build_demo_ui(
             let pos_cell = Rc::clone(&inspector_pos_cell);
             let max_cell = Rc::clone(&inspector_max_cell);
             Rc::new(move || {
-                cell.borrow()
-                    .as_ref()
-                    .map(|s| {
-                        let r = pos_cell.get();
-                        crate::state::InspectorPersist {
-                            expanded: s.expanded.clone(),
-                            selected: s.selected,
-                            props_h: s.props_h,
+                cell.borrow().as_ref().map(|s| {
+                    let r = pos_cell.get();
+                    crate::state::InspectorPersist {
+                        expanded: s.expanded.clone(),
+                        selected: s.selected,
+                        props_h: s.props_h,
+                        open: open_cell.get(),
+                        window: Some(crate::state::WindowState {
                             open: open_cell.get(),
-                            window: Some(crate::state::WindowState {
-                                open: open_cell.get(),
-                                x: r.x,
-                                y: r.y,
-                                w: r.width,
-                                h: r.height,
-                                maximized: max_cell.get(),
-                            }),
-                        }
-                    })
+                            x: r.x,
+                            y: r.y,
+                            w: r.width,
+                            h: r.height,
+                            maximized: max_cell.get(),
+                        }),
+                    }
+                })
             })
         },
         font_name: Rc::clone(&font_name_cell),

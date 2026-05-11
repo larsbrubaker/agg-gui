@@ -1,4 +1,4 @@
-﻿//! Widget inspector panel — uses the system `TreeView` for tree display.
+//! Widget inspector panel — uses the system `TreeView` for tree display.
 //!
 //! Layout (Y-up, panel fills its full bounds):
 //! ```text
@@ -357,10 +357,7 @@ impl InspectorPanel {
     /// [`crate::widget::apply_inspector_edit`] — doing it inline would
     /// violate the immutable-tree-during-event contract.
     #[cfg(feature = "reflect")]
-    pub fn with_edit_queue(
-        mut self,
-        cell: Rc<RefCell<Vec<crate::widget::InspectorEdit>>>,
-    ) -> Self {
+    pub fn with_edit_queue(mut self, cell: Rc<RefCell<Vec<crate::widget::InspectorEdit>>>) -> Self {
         self.edits = Some(cell);
         self
     }
@@ -457,20 +454,32 @@ impl InspectorPanel {
 
 fn next_h_anchor(bits: u8) -> HAnchor {
     // Cycle: FIT → STRETCH → LEFT → CENTER → RIGHT → FIT
-    if bits == HAnchor::FIT.bits()     { HAnchor::STRETCH }
-    else if bits == HAnchor::STRETCH.bits() { HAnchor::LEFT }
-    else if bits == HAnchor::LEFT.bits()    { HAnchor::CENTER }
-    else if bits == HAnchor::CENTER.bits()  { HAnchor::RIGHT }
-    else                                    { HAnchor::FIT }
+    if bits == HAnchor::FIT.bits() {
+        HAnchor::STRETCH
+    } else if bits == HAnchor::STRETCH.bits() {
+        HAnchor::LEFT
+    } else if bits == HAnchor::LEFT.bits() {
+        HAnchor::CENTER
+    } else if bits == HAnchor::CENTER.bits() {
+        HAnchor::RIGHT
+    } else {
+        HAnchor::FIT
+    }
 }
 
 fn next_v_anchor(bits: u8) -> VAnchor {
     // Cycle: FIT → STRETCH → BOTTOM → CENTER → TOP → FIT
-    if bits == VAnchor::FIT.bits()     { VAnchor::STRETCH }
-    else if bits == VAnchor::STRETCH.bits() { VAnchor::BOTTOM }
-    else if bits == VAnchor::BOTTOM.bits()  { VAnchor::CENTER }
-    else if bits == VAnchor::CENTER.bits()  { VAnchor::TOP }
-    else                                    { VAnchor::FIT }
+    if bits == VAnchor::FIT.bits() {
+        VAnchor::STRETCH
+    } else if bits == VAnchor::STRETCH.bits() {
+        VAnchor::BOTTOM
+    } else if bits == VAnchor::BOTTOM.bits() {
+        VAnchor::CENTER
+    } else if bits == VAnchor::CENTER.bits() {
+        VAnchor::TOP
+    } else {
+        VAnchor::FIT
+    }
 }
 
 // ── Widget impl ───────────────────────────────────────────────────────────────
@@ -581,7 +590,9 @@ impl InspectorPanel {
     /// painted last frame.  Returns true if the click produced a queued edit.
     #[cfg(feature = "reflect")]
     fn try_emit_edit_from_click(&self, pos: Point) -> bool {
-        let Some(queue) = &self.edits else { return false };
+        let Some(queue) = &self.edits else {
+            return false;
+        };
         let Some(sel_idx) = self.selected else {
             return false;
         };
@@ -589,14 +600,12 @@ impl InspectorPanel {
         let Some(node) = nodes.get(sel_idx) else {
             return false;
         };
-        let Some(hit) = self
-            .prop_hits
-            .iter()
-            .find(|h| pos.x >= h.rect.x
+        let Some(hit) = self.prop_hits.iter().find(|h| {
+            pos.x >= h.rect.x
                 && pos.x <= h.rect.x + h.rect.width
                 && pos.y >= h.rect.y
-                && pos.y <= h.rect.y + h.rect.height)
-        else {
+                && pos.y <= h.rect.y + h.rect.height
+        }) else {
             return false;
         };
 
@@ -626,4 +635,3 @@ impl InspectorPanel {
         true
     }
 }
-

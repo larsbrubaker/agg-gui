@@ -34,7 +34,9 @@ impl WgpuGfxCtx {
     ///   shared `GlyphCache` (XY triangles, no per-vertex alpha) and submits
     ///   them as solid-coloured triangles via `DrawCommand::Solid`.
     pub(crate) fn fill_text_impl(&mut self, text: &str, x: f64, y: f64) {
-        let Some(font) = self.font.clone() else { return };
+        let Some(font) = self.font.clone() else {
+            return;
+        };
 
         // Extract uniform scale from the CTM — used to render glyph outlines
         // at the *physical* font size on hi-DPI displays.
@@ -77,7 +79,11 @@ impl WgpuGfxCtx {
         for glyph in &shaped {
             let gx = pen_x + glyph.x_offset;
             let gy_raw = y + glyph.y_offset;
-            let gy = if hint_y { (gy_raw + 0.5).floor() } else { gy_raw };
+            let gy = if hint_y {
+                (gy_raw + 0.5).floor()
+            } else {
+                gy_raw
+            };
             let render_font = glyph.fallback_font.as_deref().unwrap_or(&font);
 
             if let Some(cached) =
@@ -152,8 +158,7 @@ impl WgpuGfxCtx {
         if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 {
             return;
         }
-        let (texture, view) =
-            self.lcd_arc_get_or_upload(mask, mask_w, mask_h);
+        let (texture, view) = self.lcd_arc_get_or_upload(mask, mask_w, mask_h);
         self.push_lcd_mask_command(texture, view, mask_w, mask_h, src_color, dst_x, dst_y);
     }
 
@@ -192,10 +197,22 @@ impl WgpuGfxCtx {
         // Cached planes are top-row-first (Y-down image storage), so v=1 at
         // bl (visually-bottom row of the quad samples the last row of data).
         let verts: [f32; 16] = [
-            bl_x as f32, bl_y as f32, 0.0, 1.0,
-            tr_x as f32, bl_y as f32, 1.0, 1.0,
-            tr_x as f32, tr_y as f32, 1.0, 0.0,
-            bl_x as f32, tr_y as f32, 0.0, 0.0,
+            bl_x as f32,
+            bl_y as f32,
+            0.0,
+            1.0,
+            tr_x as f32,
+            bl_y as f32,
+            1.0,
+            1.0,
+            tr_x as f32,
+            tr_y as f32,
+            1.0,
+            0.0,
+            bl_x as f32,
+            tr_y as f32,
+            0.0,
+            0.0,
         ];
         self.commands.push(DrawCommand::LcbMask {
             verts,
@@ -230,10 +247,22 @@ impl WgpuGfxCtx {
 
         // Mask rows are Y-up so v=0 maps to the bottom row.
         let verts: [f32; 16] = [
-            bl_x as f32, bl_y as f32, 0.0, 0.0,
-            tr_x as f32, bl_y as f32, 1.0, 0.0,
-            tr_x as f32, tr_y as f32, 1.0, 1.0,
-            bl_x as f32, tr_y as f32, 0.0, 1.0,
+            bl_x as f32,
+            bl_y as f32,
+            0.0,
+            0.0,
+            tr_x as f32,
+            bl_y as f32,
+            1.0,
+            0.0,
+            tr_x as f32,
+            tr_y as f32,
+            1.0,
+            1.0,
+            bl_x as f32,
+            tr_y as f32,
+            0.0,
+            1.0,
         ];
 
         // Pre-modulate the requested colour by the global alpha so the shader
@@ -280,8 +309,7 @@ impl WgpuGfxCtx {
 
         // Stale or missing — re-upload.
         self.lcd_arc_texture_cache.remove(&key);
-        let (texture, view) =
-            upload_lcd_texture(&self.device, &self.queue, data.as_slice(), w, h);
+        let (texture, view) = upload_lcd_texture(&self.device, &self.queue, data.as_slice(), w, h);
         self.lcd_arc_texture_cache.insert(
             key,
             ArcTextureEntry {

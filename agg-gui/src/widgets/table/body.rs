@@ -116,10 +116,7 @@ impl Widget for TableBody {
             }
             let h = rows.height_at(i);
             let row_y_yup = total_h - y_td - h;
-            let selected = selection_pred
-                .as_ref()
-                .map(|p| p(i))
-                .unwrap_or(false);
+            let selected = selection_pred.as_ref().map(|p| p(i)).unwrap_or(false);
 
             if selected {
                 ctx.set_fill_color(v.selection_bg);
@@ -137,12 +134,7 @@ impl Widget for TableBody {
             // so the selection colour wins when both apply (it would be
             // visually noisy to mix a hover tint into a selected row).
             if !selected && hovered_row == Some(i) {
-                ctx.set_fill_color(Color::rgba(
-                    v.accent.r,
-                    v.accent.g,
-                    v.accent.b,
-                    0.10,
-                ));
+                ctx.set_fill_color(Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.10));
                 ctx.begin_path();
                 ctx.rect(0.0, row_y_yup, total_w, h);
                 ctx.fill();
@@ -182,7 +174,12 @@ impl Widget for TableBody {
         }
 
         // Vertical column dividers spanning the visible band.
-        ctx.set_stroke_color(Color::rgba(v.separator.r, v.separator.g, v.separator.b, 0.4));
+        ctx.set_stroke_color(Color::rgba(
+            v.separator.r,
+            v.separator.g,
+            v.separator.b,
+            0.4,
+        ));
         ctx.set_line_width(1.0);
         let visible_top_yup = total_h - visible_bottom;
         let visible_bot_yup = total_h - visible_top;

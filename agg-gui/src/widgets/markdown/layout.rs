@@ -416,10 +416,9 @@ mod tests {
     #[test]
     fn newly_ready_image_layout_uses_image_dimensions() {
         crate::widget::set_current_viewport(Size::new(400.0, 200.0));
-        let mut view =
-            MarkdownView::new("![badge](https://example.com/badge.svg)", test_font())
-                .with_font_size(12.0)
-                .with_padding(8.0);
+        let mut view = MarkdownView::new("![badge](https://example.com/badge.svg)", test_font())
+            .with_font_size(12.0)
+            .with_padding(8.0);
 
         // First layout: image is still RemotePending — placeholder dims.
         view.layout_markdown(Size::new(400.0, 1000.0));

@@ -1,4 +1,4 @@
-﻿//! `Slider` — a horizontal range slider with a draggable thumb.
+//! `Slider` — a horizontal range slider with a draggable thumb.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -450,13 +450,13 @@ impl Widget for Slider {
             Event::KeyDown { key, .. } => {
                 let changed = match key {
                     Key::ArrowLeft => {
-                        self.props.value =
-                            (self.props.value - self.props.step).clamp(self.props.min, self.props.max);
+                        self.props.value = (self.props.value - self.props.step)
+                            .clamp(self.props.min, self.props.max);
                         true
                     }
                     Key::ArrowRight => {
-                        self.props.value =
-                            (self.props.value + self.props.step).clamp(self.props.min, self.props.max);
+                        self.props.value = (self.props.value + self.props.step)
+                            .clamp(self.props.min, self.props.max);
                         true
                     }
                     Key::ArrowDown => {

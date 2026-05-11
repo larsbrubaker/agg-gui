@@ -43,7 +43,13 @@ pub(crate) fn prepare_all(
                 }));
             }
 
-            DrawCommand::Solid { verts, indices, color, global_alpha, clip } => {
+            DrawCommand::Solid {
+                verts,
+                indices,
+                color,
+                global_alpha,
+                clip,
+            } => {
                 if verts.is_empty() || indices.is_empty() {
                     continue;
                 }
@@ -65,7 +71,13 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::AaSolid { verts, indices, color, global_alpha, clip } => {
+            DrawCommand::AaSolid {
+                verts,
+                indices,
+                color,
+                global_alpha,
+                clip,
+            } => {
                 if verts.is_empty() || indices.is_empty() {
                     continue;
                 }
@@ -87,7 +99,13 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::Gradient { verts, indices, uniforms, ramp, clip } => {
+            DrawCommand::Gradient {
+                verts,
+                indices,
+                uniforms,
+                ramp,
+                clip,
+            } => {
                 if verts.is_empty() || indices.is_empty() {
                     continue;
                 }
@@ -107,8 +125,7 @@ pub(crate) fn prepare_all(
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
                         format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_DST,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                         view_formats: &[],
                     },
                     wgpu::util::TextureDataOrder::LayerMajor,
@@ -143,7 +160,13 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::Textured { verts, texture, view, nearest, clip } => {
+            DrawCommand::Textured {
+                verts,
+                texture,
+                view,
+                nearest,
+                clip,
+            } => {
                 let uniforms = TexUniforms {
                     resolution: [cur_vp.0, cur_vp.1],
                     _pad: [0.0; 2],
@@ -181,7 +204,13 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::LcdMask { verts, texture, view, color, clip } => {
+            DrawCommand::LcdMask {
+                verts,
+                texture,
+                view,
+                color,
+                clip,
+            } => {
                 let ubs: [wgpu::Buffer; 3] = std::array::from_fn(|ch| {
                     let u = LcdUniforms {
                         resolution: [cur_vp.0, cur_vp.1],
@@ -271,7 +300,12 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::PushLayer { texture, view, width, height } => {
+            DrawCommand::PushLayer {
+                texture,
+                view,
+                width,
+                height,
+            } => {
                 size_stack.push((*width as f32, *height as f32));
                 out.push(Prepared::PushLayer {
                     _texture: Arc::clone(texture),
@@ -293,9 +327,7 @@ pub(crate) fn prepare_all(
                 size_stack.pop();
                 let parent_vp = *size_stack.last().unwrap_or(&viewport);
                 let (mask_rect, mask_radius, mask_enabled) = match rounded_clip {
-                    Some(LayerRoundedClip { x, y, w, h, r }) => {
-                        ([*x, *y, *w, *h], *r, 1u32)
-                    }
+                    Some(LayerRoundedClip { x, y, w, h, r }) => ([*x, *y, *w, *h], *r, 1u32),
                     None => ([0.0; 4], 0.0, 0u32),
                 };
                 let u = LayerUniforms {
@@ -309,7 +341,12 @@ pub(crate) fn prepare_all(
                 };
                 let ub = mk_uniform_buf(device, bytemuck::bytes_of(&u));
                 let bg0 = mk_bg(device, &pipelines.layer_bgl0, &ub);
-                let bg1 = layer_texture_bg(device, &pipelines.layer_bgl1, view, &pipelines.linear_sampler);
+                let bg1 = layer_texture_bg(
+                    device,
+                    &pipelines.layer_bgl1,
+                    view,
+                    &pipelines.linear_sampler,
+                );
                 let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
                 let vb = mk_vertex_buf(device, bytemuck::cast_slice(&verts));
                 out.push(Prepared::PopLayer {
@@ -333,9 +370,7 @@ pub(crate) fn prepare_all(
                 rounded_clip,
             } => {
                 let (mask_rect, mask_radius, mask_enabled) = match rounded_clip {
-                    Some(LayerRoundedClip { x, y, w, h, r }) => {
-                        ([*x, *y, *w, *h], *r, 1u32)
-                    }
+                    Some(LayerRoundedClip { x, y, w, h, r }) => ([*x, *y, *w, *h], *r, 1u32),
                     None => ([0.0; 4], 0.0, 0u32),
                 };
                 let u = LayerUniforms {
@@ -349,7 +384,12 @@ pub(crate) fn prepare_all(
                 };
                 let ub = mk_uniform_buf(device, bytemuck::bytes_of(&u));
                 let bg0 = mk_bg(device, &pipelines.layer_bgl0, &ub);
-                let bg1 = layer_texture_bg(device, &pipelines.layer_bgl1, view, &pipelines.linear_sampler);
+                let bg1 = layer_texture_bg(
+                    device,
+                    &pipelines.layer_bgl1,
+                    view,
+                    &pipelines.linear_sampler,
+                );
                 let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
                 let vb = mk_vertex_buf(device, bytemuck::cast_slice(&verts));
                 out.push(Prepared::CompositeLayer {
@@ -362,7 +402,11 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::DrawBarGrid { renderer, screen_rect, parent_clip } => {
+            DrawCommand::DrawBarGrid {
+                renderer,
+                screen_rect,
+                parent_clip,
+            } => {
                 // Renderer owns its own pipeline + buffers; nothing to allocate
                 // here.  Per-frame uniforms are built at execute time, when the
                 // active render target's size is known.
@@ -373,7 +417,11 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::Custom { renderer, screen_rect, parent_clip } => {
+            DrawCommand::Custom {
+                renderer,
+                screen_rect,
+                parent_clip,
+            } => {
                 // Identical structure to DrawBarGrid: pass-break + reopen.
                 out.push(Prepared::Custom {
                     renderer: std::rc::Rc::clone(renderer),
@@ -419,11 +467,7 @@ fn composite_quad_verts(origin_x: f32, origin_y: f32, layer_w: u32, layer_h: u32
     let x1 = x0 + layer_w as f32;
     let y1 = y0 + layer_h as f32;
     [
-        x0, y0, 0.0, 1.0,
-        x1, y0, 1.0, 1.0,
-        x1, y1, 1.0, 0.0,
-        x0, y0, 0.0, 1.0,
-        x1, y1, 1.0, 0.0,
+        x0, y0, 0.0, 1.0, x1, y0, 1.0, 1.0, x1, y1, 1.0, 0.0, x0, y0, 0.0, 1.0, x1, y1, 1.0, 0.0,
         x0, y1, 0.0, 0.0,
     ]
 }

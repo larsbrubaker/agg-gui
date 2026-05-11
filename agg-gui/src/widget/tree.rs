@@ -251,15 +251,14 @@ pub fn reflect_fields(reflected: &dyn bevy_reflect::Reflect) -> Vec<(&'static st
         // `Vec<(&'static str, String)>`.  Falling back to indexed names
         // ("field_0") for unrepresented info keeps the dump alive even on
         // tuple structs that don't carry named fields.
-        let names: Vec<&'static str> = if let Some(TypeInfo::Struct(info)) =
-            reflected.get_represented_type_info()
-        {
-            (0..s.field_len())
-                .map(|i| info.field_at(i).map(|f| f.name()).unwrap_or(""))
-                .collect()
-        } else {
-            vec![""; s.field_len()]
-        };
+        let names: Vec<&'static str> =
+            if let Some(TypeInfo::Struct(info)) = reflected.get_represented_type_info() {
+                (0..s.field_len())
+                    .map(|i| info.field_at(i).map(|f| f.name()).unwrap_or(""))
+                    .collect()
+            } else {
+                vec![""; s.field_len()]
+            };
         for i in 0..s.field_len() {
             let name = names.get(i).copied().unwrap_or("");
             if name.is_empty() {
@@ -301,10 +300,7 @@ fn format_reflect_value(value: &dyn bevy_reflect::PartialReflect) -> String {
         return format!("\"{v}\"");
     }
     if let Some(v) = value.try_downcast_ref::<crate::color::Color>() {
-        return format!(
-            "rgba({:.2}, {:.2}, {:.2}, {:.2})",
-            v.r, v.g, v.b, v.a
-        );
+        return format!("rgba({:.2}, {:.2}, {:.2}, {:.2})", v.r, v.g, v.b, v.a);
     }
     // Generic fallback: `Debug`-print the reflected value.
     format!("{value:?}")
@@ -512,10 +508,7 @@ fn collect_inspector_nodes_with_path(
 /// reachable widget as a mutable reference.  Returns `None` if the path
 /// indexes past the available children at any level — useful when the path
 /// is stale (e.g. the tree shape changed since the inspector snapshot).
-pub fn walk_path_mut<'a>(
-    root: &'a mut dyn Widget,
-    path: &[usize],
-) -> Option<&'a mut dyn Widget> {
+pub fn walk_path_mut<'a>(root: &'a mut dyn Widget, path: &[usize]) -> Option<&'a mut dyn Widget> {
     let mut node: &mut dyn Widget = root;
     for &idx in path {
         let children = node.children_mut();

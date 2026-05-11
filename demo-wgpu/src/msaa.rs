@@ -133,7 +133,13 @@ impl MsaaFramebuffer {
             blit_sampler,
         };
         if sample_count > 1 {
-            fb.msaa_color = Some(alloc_msaa(device, fb.width, fb.height, format, sample_count));
+            fb.msaa_color = Some(alloc_msaa(
+                device,
+                fb.width,
+                fb.height,
+                format,
+                sample_count,
+            ));
         }
         if with_depth {
             fb.depth = Some(alloc_depth(device, fb.width, fb.height, sample_count));
@@ -330,12 +336,8 @@ impl MsaaFramebuffer {
         let x1 = x0 + gl_w as f32;
         let y1 = y0 + gl_h as f32;
         let verts: [f32; 24] = [
-            x0, y0, 0.0, 1.0,
-            x1, y0, 1.0, 1.0,
-            x1, y1, 1.0, 0.0,
-            x0, y0, 0.0, 1.0,
-            x1, y1, 1.0, 0.0,
-            x0, y1, 0.0, 0.0,
+            x0, y0, 0.0, 1.0, x1, y0, 1.0, 1.0, x1, y1, 1.0, 0.0, x0, y0, 0.0, 1.0, x1, y1, 1.0,
+            0.0, x0, y1, 0.0, 0.0,
         ];
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("msaa_blit_vb"),
@@ -379,7 +381,14 @@ impl MsaaFramebuffer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_viewport(0.0, 0.0, target_size.0 as f32, target_size.1 as f32, 0.0, 1.0);
+        pass.set_viewport(
+            0.0,
+            0.0,
+            target_size.0 as f32,
+            target_size.1 as f32,
+            0.0,
+            1.0,
+        );
         pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &tex_bg0, &[]);
@@ -400,7 +409,11 @@ fn alloc_resolve(
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("msaa_resolve"),
-        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -430,7 +443,11 @@ fn alloc_msaa(
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("msaa_color"),
-        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count,
         dimension: wgpu::TextureDimension::D2,
@@ -450,7 +467,11 @@ fn alloc_depth(
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("msaa_depth"),
-        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count,
         dimension: wgpu::TextureDimension::D2,

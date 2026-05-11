@@ -172,14 +172,14 @@ impl HAnchor {
     /// Short display name for the inspector properties pane.
     pub fn display_name(self) -> &'static str {
         match self.0 {
-            b if b == Self::FIT.0               => "Fit",
-            b if b == Self::STRETCH.0           => "Stretch",
-            b if b == Self::LEFT.0              => "Left",
-            b if b == Self::CENTER.0            => "Center",
-            b if b == Self::RIGHT.0             => "Right",
+            b if b == Self::FIT.0 => "Fit",
+            b if b == Self::STRETCH.0 => "Stretch",
+            b if b == Self::LEFT.0 => "Left",
+            b if b == Self::CENTER.0 => "Center",
+            b if b == Self::RIGHT.0 => "Right",
             b if b == Self::MAX_FIT_OR_STRETCH.0 => "MaxFitStr",
             b if b == Self::MIN_FIT_OR_STRETCH.0 => "MinFitStr",
-            _                                   => "Abs",
+            _ => "Abs",
         }
     }
 }
@@ -255,14 +255,14 @@ impl VAnchor {
     /// Short display name for the inspector properties pane.
     pub fn display_name(self) -> &'static str {
         match self.0 {
-            b if b == Self::FIT.0               => "Fit",
-            b if b == Self::STRETCH.0           => "Stretch",
-            b if b == Self::BOTTOM.0            => "Bottom",
-            b if b == Self::CENTER.0            => "Center",
-            b if b == Self::TOP.0               => "Top",
+            b if b == Self::FIT.0 => "Fit",
+            b if b == Self::STRETCH.0 => "Stretch",
+            b if b == Self::BOTTOM.0 => "Bottom",
+            b if b == Self::CENTER.0 => "Center",
+            b if b == Self::TOP.0 => "Top",
             b if b == Self::MAX_FIT_OR_STRETCH.0 => "MaxFitStr",
             b if b == Self::MIN_FIT_OR_STRETCH.0 => "MinFitStr",
-            _                                   => "Abs",
+            _ => "Abs",
         }
     }
 }

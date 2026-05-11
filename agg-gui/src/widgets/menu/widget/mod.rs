@@ -313,8 +313,7 @@ impl Widget for MenuBar {
             // suppress the hover highlight until the cursor moves off
             // and back on, so the closed menu doesn't read as "still
             // selected".
-            let hovered = self.hover_index == Some(idx)
-                && self.suppress_hover_for != Some(idx);
+            let hovered = self.hover_index == Some(idx) && self.suppress_hover_for != Some(idx);
             paint_menu_bar_button(
                 ctx,
                 menu.rect,
@@ -489,7 +488,8 @@ impl Widget for MenuBar {
     }
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        self.popup.paint(ctx, self.active_font(), self.font_size, current_viewport());
+        self.popup
+            .paint(ctx, self.active_font(), self.font_size, current_viewport());
     }
 }
 

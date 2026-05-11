@@ -132,7 +132,12 @@ impl DrawCtx for WgpuGfxCtx {
             let ny2 = ny.saturating_add(nh).min(ey.saturating_add(eh));
             let rx2 = nx.max(ex);
             let ry2 = ny.max(ey);
-            [rx2, ry2, nx2.saturating_sub(rx2).max(0), ny2.saturating_sub(ry2).max(0)]
+            [
+                rx2,
+                ry2,
+                nx2.saturating_sub(rx2).max(0),
+                ny2.saturating_sub(ry2).max(0),
+            ]
         } else {
             [nx, ny, nw, nh]
         };
@@ -409,13 +414,7 @@ impl DrawCtx for WgpuGfxCtx {
         self.set_layer_rounded_clip_impl(x, y, w, h, r);
     }
 
-    fn composite_retained_layer(
-        &mut self,
-        key: u64,
-        width: f64,
-        height: f64,
-        alpha: f64,
-    ) -> bool {
+    fn composite_retained_layer(&mut self, key: u64, width: f64, height: f64, alpha: f64) -> bool {
         self.composite_retained_layer_impl(key, width, height, alpha)
     }
 
@@ -527,13 +526,7 @@ impl DrawCtx for WgpuGfxCtx {
         self.capture_texture.as_ref().map(|(_, _, w, h)| (*w, *h))
     }
 
-    fn draw_captured_screenshot(
-        &mut self,
-        dst_x: f64,
-        dst_y: f64,
-        dst_w: f64,
-        dst_h: f64,
-    ) -> bool {
+    fn draw_captured_screenshot(&mut self, dst_x: f64, dst_y: f64, dst_w: f64, dst_h: f64) -> bool {
         // The capture texture is sample_count=1 with TEXTURE_BINDING, so it
         // slots straight into the existing `Textured` deferred command —
         // same pipeline / sampler as `draw_image_rgba_arc`.  We pick the
@@ -556,12 +549,8 @@ impl DrawCtx for WgpuGfxCtx {
         // wgpu UV convention: v=0 is the top of the texture; bottom of
         // the destination quad samples v=1.  Same flip used by `image_blit`.
         let verts: [f32; 24] = [
-            bl[0], bl[1], 0.0, 1.0,
-            br[0], br[1], 1.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            bl[0], bl[1], 0.0, 1.0,
-            tr[0], tr[1], 1.0, 0.0,
-            tl[0], tl[1], 0.0, 0.0,
+            bl[0], bl[1], 0.0, 1.0, br[0], br[1], 1.0, 1.0, tr[0], tr[1], 1.0, 0.0, bl[0], bl[1],
+            0.0, 1.0, tr[0], tr[1], 1.0, 0.0, tl[0], tl[1], 0.0, 0.0,
         ];
         let clip = self.current_clip();
         self.commands.push(DrawCommand::Textured {

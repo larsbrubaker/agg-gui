@@ -26,8 +26,7 @@ use agg_rust::trans_affine::TransAffine;
 // `agg_gui::draw_ctx::{FillRule, RadialGradientPaint, …}` import paths keep
 // resolving unchanged.
 pub use crate::paints::{
-    FillRule, GradientSpread, GradientStop, LinearGradientPaint, PatternPaint,
-    RadialGradientPaint,
+    FillRule, GradientSpread, GradientStop, LinearGradientPaint, PatternPaint, RadialGradientPaint,
 };
 
 // ---------------------------------------------------------------------------

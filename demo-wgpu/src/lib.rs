@@ -452,9 +452,7 @@ impl WgpuGfxCtx {
     /// when none are stashed (typical non-capture frames).  Called by the
     /// `agg_gui::screenshot::run_frame_with_capture` read-back closure.
     pub fn take_pending_screenshot(&mut self) -> (Vec<u8>, u32, u32) {
-        self.pending_screenshot
-            .take()
-            .unwrap_or((Vec::new(), 0, 0))
+        self.pending_screenshot.take().unwrap_or((Vec::new(), 0, 0))
     }
 
     /// Read the current frame's rendered pixels back to CPU memory as a

@@ -26,10 +26,22 @@ pub(crate) fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> Mat4 
     let f = 1.0 / (fov_y * 0.5).tan();
     let nf = 1.0 / (near - far);
     [
-        f / aspect, 0.0, 0.0, 0.0,
-        0.0, f, 0.0, 0.0,
-        0.0, 0.0, far * nf, -1.0,
-        0.0, 0.0, far * near * nf, 0.0,
+        f / aspect,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        f,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        far * nf,
+        -1.0,
+        0.0,
+        0.0,
+        far * near * nf,
+        0.0,
     ]
 }
 
@@ -38,10 +50,22 @@ pub(crate) fn look_at(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Mat4 {
     let s = normalize3(cross3(f, up));
     let u = cross3(s, f);
     [
-        s[0], u[0], -f[0], 0.0,
-        s[1], u[1], -f[1], 0.0,
-        s[2], u[2], -f[2], 0.0,
-        -dot3(s, eye), -dot3(u, eye), dot3(f, eye), 1.0,
+        s[0],
+        u[0],
+        -f[0],
+        0.0,
+        s[1],
+        u[1],
+        -f[1],
+        0.0,
+        s[2],
+        u[2],
+        -f[2],
+        0.0,
+        -dot3(s, eye),
+        -dot3(u, eye),
+        dot3(f, eye),
+        1.0,
     ]
 }
 
