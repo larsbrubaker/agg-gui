@@ -454,6 +454,42 @@ pub trait DrawCtx {
         self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    /// Blit `data` as a textured quad whose four destination corners
+    /// are supplied explicitly. Caller is responsible for choosing the
+    /// corners (typically the projection of a 3-D rotated card onto
+    /// the 2-D viewport). `corners` is ordered **bottom-left,
+    /// bottom-right, top-right, top-left** in agg-gui's Y-up local
+    /// coordinate space, and is fed through the current CTM the same
+    /// way axis-aligned blits are.
+    ///
+    /// Backends that can't render a perspective-distorted quad
+    /// (software fallback) fall back on the axis-aligned bounding
+    /// rect of the four corners.
+    fn draw_image_rgba_corners(
+        &mut self,
+        data: &std::sync::Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        corners: [(f64, f64); 4],
+    ) {
+        // Default: bounding-rect fallback. The wgpu backend overrides
+        // with a real 4-corner textured-quad draw.
+        let (min_x, min_y, max_x, max_y) = corners
+            .iter()
+            .fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |a, c| {
+                (a.0.min(c.0), a.1.min(c.1), a.2.max(c.0), a.3.max(c.1))
+            });
+        self.draw_image_rgba_arc(
+            data,
+            img_w,
+            img_h,
+            min_x,
+            min_y,
+            (max_x - min_x).max(0.0),
+            (max_y - min_y).max(0.0),
+        );
+    }
+
     // ── LCD backbuffer blit ───────────────────────────────────────────────────
 
     /// Composite a two-plane `LcdCoverage`-mode backbuffer onto the active

@@ -42,6 +42,22 @@ pub(crate) fn texture_key(data: &[u8], w: u32, h: u32) -> u64 {
 }
 
 impl WgpuGfxCtx {
+    /// Build a 6-vertex textured-quad vertex buffer from four explicit
+    /// destination corners in local Y-up coordinates. Each corner is
+    /// run through the current CTM. Order: bottom-left, bottom-right,
+    /// top-right, top-left. UV mapping is fixed: BL=(0,1), BR=(1,1),
+    /// TR=(1,0), TL=(0,0).
+    pub(crate) fn build_image_verts_corners(&self, corners: [(f64, f64); 4]) -> [f32; 24] {
+        let bl = self.transform_pt(corners[0].0, corners[0].1);
+        let br = self.transform_pt(corners[1].0, corners[1].1);
+        let tr = self.transform_pt(corners[2].0, corners[2].1);
+        let tl = self.transform_pt(corners[3].0, corners[3].1);
+        [
+            bl[0], bl[1], 0.0, 1.0, br[0], br[1], 1.0, 1.0, tr[0], tr[1], 1.0, 0.0, bl[0], bl[1],
+            0.0, 1.0, tr[0], tr[1], 1.0, 0.0, tl[0], tl[1], 0.0, 0.0,
+        ]
+    }
+
     /// Build the 6-vertex (2 triangles) textured-quad vertex buffer for
     /// `(dst_x, dst_y, dst_w, dst_h)` in local coordinates, transformed through
     /// the current CTM.  UV `v` runs top→bottom (top of the destination quad
@@ -198,6 +214,79 @@ impl WgpuGfxCtx {
         //   uploaded; use the linear (trilinear-with-mipmaps) sampler so
         //   downsampling at draw time picks an appropriate mip level
         //   instead of point-aliasing at the base mip.
+        let use_nearest = !should_use_mipmaps(img_w, img_h);
+        self.commands.push(DrawCommand::Textured {
+            verts,
+            texture,
+            view,
+            nearest: use_nearest,
+            clip: self.current_clip(),
+        });
+    }
+
+    /// Blit `data` as a textured quad whose four destination corners
+    /// are supplied explicitly. Drives perspective-projected card
+    /// flip animations: the caller passes the four projected screen-
+    /// space corners of a 3-D rotated card, and we render it as a
+    /// real (potentially trapezoidal) textured quad rather than an
+    /// axis-aligned blit. Uses the Arc-pointer-keyed texture cache
+    /// so per-frame uploads don't recur.
+    pub(crate) fn draw_image_rgba_corners_impl(
+        &mut self,
+        data: &Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        corners: [(f64, f64); 4],
+    ) {
+        if img_w == 0 || img_h == 0 {
+            return;
+        }
+        if data.len() < (img_w as usize) * (img_h as usize) * 4 {
+            return;
+        }
+        let verts = self.build_image_verts_corners(corners);
+        let key = Arc::as_ptr(data) as *const u8 as usize;
+
+        let dead_keys: Vec<usize> = self
+            .arc_texture_cache
+            .iter()
+            .filter(|(_, e)| e.weak.strong_count() == 0)
+            .map(|(k, _)| *k)
+            .collect();
+        for k in dead_keys {
+            self.arc_texture_cache.remove(&k);
+        }
+
+        let existing = self
+            .arc_texture_cache
+            .get(&key)
+            .and_then(|e| match e.weak.upgrade() {
+                Some(a) if Arc::ptr_eq(&a, data) && e.w == img_w && e.h == img_h => {
+                    Some((Arc::clone(&e.texture), e.view.clone()))
+                }
+                _ => None,
+            });
+
+        let (texture, view) = match existing {
+            Some(t) => t,
+            None => {
+                self.arc_texture_cache.remove(&key);
+                let (texture, view) =
+                    upload_rgba_texture(&self.device, &self.queue, data.as_slice(), img_w, img_h);
+                self.arc_texture_cache.insert(
+                    key,
+                    ArcTextureEntry {
+                        weak: Arc::downgrade(data),
+                        texture: Arc::clone(&texture),
+                        view: view.clone(),
+                        w: img_w,
+                        h: img_h,
+                    },
+                );
+                (texture, view)
+            }
+        };
+
         let use_nearest = !should_use_mipmaps(img_w, img_h);
         self.commands.push(DrawCommand::Textured {
             verts,

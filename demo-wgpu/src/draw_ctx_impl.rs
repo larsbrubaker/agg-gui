@@ -293,6 +293,16 @@ impl DrawCtx for WgpuGfxCtx {
         self.draw_image_rgba_arc_impl(data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    fn draw_image_rgba_corners(
+        &mut self,
+        data: &std::sync::Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        corners: [(f64, f64); 4],
+    ) {
+        self.draw_image_rgba_corners_impl(data, img_w, img_h, corners);
+    }
+
     fn has_lcd_mask_composite(&self) -> bool {
         true
     }
