@@ -25,11 +25,14 @@ pub use compare::{
     DEFAULT_VISUAL_RGB_TOLERANCE,
 };
 
+pub type SvgTree = usvg::Tree;
+
 #[derive(Clone, Copy, Debug)]
 struct SvgRenderState {
     opacity: f32,
     layer_width: f64,
     layer_height: f64,
+    source_cull: Option<SvgSourceRect>,
 }
 
 impl Default for SvgRenderState {
@@ -38,7 +41,30 @@ impl Default for SvgRenderState {
             opacity: 1.0,
             layer_width: 1.0,
             layer_height: 1.0,
+            source_cull: None,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SvgSourceRect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+impl SvgSourceRect {
+    fn intersects(self, rect: SvgSourceRect) -> bool {
+        let ax0 = self.x;
+        let ay0 = self.y;
+        let ax1 = self.x + self.w;
+        let ay1 = self.y + self.h;
+        let bx0 = rect.x;
+        let by0 = rect.y;
+        let bx1 = rect.x + rect.w;
+        let by1 = rect.y + rect.h;
+        ax0 < bx1 && ax1 > bx0 && ay0 < by1 && ay1 > by0
     }
 }
 
@@ -301,6 +327,26 @@ pub fn render_svg_tree_to_framebuffer_at_size(
     Ok(fb)
 }
 
+/// Render a rectangular region of a parsed SVG tree into a newly allocated RGBA framebuffer.
+pub fn render_svg_tree_region_to_framebuffer_at_size(
+    tree: &usvg::Tree,
+    src_x: f64,
+    src_y: f64,
+    src_w: f64,
+    src_h: f64,
+    width: u32,
+    height: u32,
+) -> Result<Framebuffer, SvgRenderError> {
+    let width = width.max(1);
+    let height = height.max(1);
+    let mut fb = Framebuffer::new(width, height);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        render_svg_tree_region_at_size(tree, &mut ctx, src_x, src_y, src_w, src_h, width, height)?;
+    }
+    Ok(fb)
+}
+
 /// Parse an SVG document and render it into a newly allocated LCD coverage buffer.
 ///
 /// This is the library API the SVG regression tests and demo viewer should use
@@ -410,10 +456,67 @@ pub fn render_svg_tree_at_size(
     Ok(())
 }
 
+/// Render a parsed `usvg::Tree` region into `ctx`, mapping the SVG source
+/// rectangle `(src_x, src_y, src_w, src_h)` to the output viewport.
+#[allow(clippy::too_many_arguments)]
+pub fn render_svg_tree_region_at_size(
+    tree: &usvg::Tree,
+    ctx: &mut dyn DrawCtx,
+    src_x: f64,
+    src_y: f64,
+    src_w: f64,
+    src_h: f64,
+    width: u32,
+    height: u32,
+) -> Result<(), SvgRenderError> {
+    let width = width.max(1);
+    let height = height.max(1);
+    let src_w = src_w.max(1.0);
+    let src_h = src_h.max(1.0);
+    let saved_transform = ctx.transform();
+    let mut svg_to_ctx = saved_transform;
+    svg_to_ctx.premultiply(&svg_y_down_region_to_ctx_y_up(
+        src_x, src_y, src_w, src_h, width, height,
+    ));
+
+    ctx.save();
+    ctx.set_transform(svg_to_ctx);
+    render_group(
+        tree.root(),
+        ctx,
+        SvgRenderState {
+            layer_width: width as f64,
+            layer_height: height as f64,
+            source_cull: Some(SvgSourceRect {
+                x: src_x,
+                y: src_y,
+                w: src_w,
+                h: src_h,
+            }),
+            ..SvgRenderState::default()
+        },
+    )?;
+    ctx.restore();
+    Ok(())
+}
+
 fn svg_y_down_to_ctx_y_up(tree: &usvg::Tree, width: u32, height: u32) -> TransAffine {
     let sx = width.max(1) as f64 / tree.size().width().max(1.0) as f64;
     let sy = height.max(1) as f64 / tree.size().height().max(1.0) as f64;
     TransAffine::new_custom(sx, 0.0, 0.0, -sy, 0.0, height.max(1) as f64)
+}
+
+fn svg_y_down_region_to_ctx_y_up(
+    src_x: f64,
+    src_y: f64,
+    src_w: f64,
+    src_h: f64,
+    width: u32,
+    height: u32,
+) -> TransAffine {
+    let sx = width as f64 / src_w;
+    let sy = height as f64 / src_h;
+    TransAffine::new_custom(sx, 0.0, 0.0, -sy, -src_x * sx, height as f64 + src_y * sy)
 }
 
 fn render_group(
@@ -421,6 +524,15 @@ fn render_group(
     ctx: &mut dyn DrawCtx,
     parent_state: SvgRenderState,
 ) -> Result<(), SvgRenderError> {
+    if parent_state.source_cull.is_some_and(|cull| {
+        !cull.intersects(transformed_svg_rect(
+            group.bounding_box(),
+            group.abs_transform(),
+        ))
+    }) {
+        return Ok(());
+    }
+
     let group_opacity = group.opacity().get();
     if group_opacity < 1.0 && parent_state.opacity > 0.0 && ctx.supports_compositing_layers() {
         return render_isolated_group_with_opacity(group, ctx, parent_state, group_opacity);
@@ -523,6 +635,23 @@ fn render_text(
 
 fn render_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
     if !path.is_visible() {
+        return;
+    }
+    if state.source_cull.is_some_and(|cull| {
+        let fill_intersects = path.fill().is_some_and(|_| {
+            cull.intersects(transformed_svg_rect(
+                path.bounding_box(),
+                path.abs_transform(),
+            ))
+        });
+        let stroke_intersects = path.stroke().is_some_and(|_| {
+            cull.intersects(transformed_svg_rect(
+                path.stroke_bounding_box(),
+                path.abs_transform(),
+            ))
+        });
+        !fill_intersects && !stroke_intersects
+    }) {
         return;
     }
 
@@ -738,6 +867,32 @@ fn transformed_rect(transform: &TransAffine, width: f64, height: f64) -> (f64, f
     }
 
     (min_x, min_y, (max_x - min_x).abs(), (max_y - min_y).abs())
+}
+
+fn transformed_svg_rect(rect: usvg::Rect, transform: usvg::Transform) -> SvgSourceRect {
+    let transform = to_trans_affine(transform);
+    let x = rect.x() as f64;
+    let y = rect.y() as f64;
+    let w = rect.width() as f64;
+    let h = rect.height() as f64;
+    let corners = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)];
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (mut x, mut y) in corners {
+        transform.transform(&mut x, &mut y);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    SvgSourceRect {
+        x: min_x,
+        y: min_y,
+        w: (max_x - min_x).abs(),
+        h: (max_y - min_y).abs(),
+    }
 }
 
 fn map_line_cap(cap: usvg::LineCap) -> LineCap {
