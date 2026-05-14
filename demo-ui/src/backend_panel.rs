@@ -23,9 +23,14 @@ use std::sync::Arc;
 use agg_gui::widget::paint_subtree;
 use agg_gui::widgets::button::Button;
 use agg_gui::{
-    Color, DrawCtx, Event, EventResult, FlexColumn, Font, Insets, Label, Rect, Separator, Size,
-    SizedBox, Widget,
+    Color, DrawCtx, Event, EventResult, FlexColumn, Font, Insets, Label, PerformanceView, Rect,
+    Separator, SharedFrameHistory, Size, SizedBox, Widget,
 };
+
+// Re-export the shared frame-history container so other demo modules
+// (and external callers via `demo_ui::FrameHistory`) keep working
+// after the type moved into agg-gui's public API.
+pub use agg_gui::FrameHistory;
 
 // ── Run mode ──────────────────────────────────────────────────────────────────
 
@@ -35,64 +40,9 @@ pub enum RunMode {
     Continuous,
 }
 
-// ── Frame history (simple ring buffer) ────────────────────────────────────────
-
-/// Rolling FPS / frame-time display — stores the last N frame times in ms.
-pub struct FrameHistory {
-    times: Vec<f32>,
-    head: usize,
-    len: usize,
-}
-
-impl FrameHistory {
-    const CAP: usize = 60;
-
-    pub fn new() -> Self {
-        Self {
-            times: vec![0.0; Self::CAP],
-            head: 0,
-            len: 0,
-        }
-    }
-
-    pub fn push(&mut self, frame_ms: f32) {
-        self.times[self.head] = frame_ms;
-        self.head = (self.head + 1) % Self::CAP;
-        if self.len < Self::CAP {
-            self.len += 1;
-        }
-    }
-
-    pub fn mean_ms(&self) -> f32 {
-        if self.len == 0 {
-            return 0.0;
-        }
-        self.times[..self.len].iter().sum::<f32>() / self.len as f32
-    }
-
-    #[allow(dead_code)]
-    pub fn fps(&self) -> f32 {
-        let m = self.mean_ms();
-        if m < 0.001 {
-            0.0
-        } else {
-            1000.0 / m
-        }
-    }
-
-    /// Samples as a slice from oldest to newest (for sparkline rendering).
-    pub fn samples(&self) -> impl Iterator<Item = f32> + '_ {
-        let cap = Self::CAP;
-        (0..self.len).map(move |i| {
-            let idx = (self.head + cap - self.len + i) % cap;
-            self.times[idx]
-        })
-    }
-}
-
 mod widgets;
 pub(crate) use widgets::MsaaRow;
-use widgets::{FpsLabel, RunModeDesc, RunModeRow, ScreenSizeLabel, Sparkline, TogglePill};
+use widgets::{RunModeDesc, RunModeRow, ScreenSizeLabel, TogglePill};
 
 // ── Backend panel ─────────────────────────────────────────────────────────────
 
@@ -199,22 +149,20 @@ pub fn build_backend_panel(
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
 
-    // ── Mean CPU usage label (primary display, matches egui reference) ────────
-    col.push(
-        Box::new(FpsLabel::new(Arc::clone(&font), Rc::clone(&history))),
-        0.0,
-    );
-
-    // ── FPS sparkline (CPU history graph) ────────────────────────────────────
+    // ── Mean CPU usage label + sparkline (shared agg-gui widget) ─────────────
+    //
+    // `PerformanceView` bundles the "Mean CPU usage: X.XX ms / frame"
+    // label and the rolling-frame-time sparkline that this panel used to
+    // build out of two separate `FpsLabel` + `Sparkline` widgets.
+    // Solitaire reuses the same widget inside a popup window driven from
+    // its Debug menu, so keeping the implementation in agg-gui means
+    // both apps stay visually identical without duplicating the
+    // sparkline math or the live-label update path.
     col.push(
         Box::new(
-            SizedBox::new()
-                .with_margin(Insets::from_sides(12.0, 12.0, 4.0, 8.0))
-                .with_child(Box::new(Sparkline {
-                    bounds: Rect::default(),
-                    children: Vec::new(),
-                    history: Rc::clone(&history),
-                })),
+            PerformanceView::new(Arc::clone(&font), Rc::clone(&history))
+                .with_padding(12.0)
+                .with_sparkline_height(48.0),
         ),
         0.0,
     );
