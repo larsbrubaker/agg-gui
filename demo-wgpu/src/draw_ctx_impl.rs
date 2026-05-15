@@ -563,11 +563,13 @@ impl DrawCtx for WgpuGfxCtx {
             0.0, 1.0, tr[0], tr[1], 1.0, 0.0, tl[0], tl[1], 0.0, 0.0,
         ];
         let clip = self.current_clip();
+        let alpha = self.global_alpha as f32;
         self.commands.push(DrawCommand::Textured {
             verts,
             texture,
             view,
             nearest: false,
+            tint: [1.0, 1.0, 1.0, alpha],
             clip,
         });
         true

@@ -169,6 +169,7 @@ pub(crate) const TEX_WGSL: &str = "
 struct TexUniforms {
     resolution: vec2<f32>,
     pad: vec2<f32>,
+    tint: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: TexUniforms;
 @group(1) @binding(0) var u_tex: texture_2d<f32>;
@@ -188,7 +189,7 @@ struct VOut {
     return VOut(vec4<f32>(ndc, 0.0, 1.0), in.uv);
 }
 @fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
-    return textureSample(u_tex, u_sampler, in.v_uv);
+    return textureSample(u_tex, u_sampler, in.v_uv) * u.tint;
 }
 ";
 
@@ -211,6 +212,7 @@ pub(crate) const TEX_DOWNSAMPLE_4X_WGSL: &str = "
 struct TexUniforms {
     resolution: vec2<f32>,
     pad: vec2<f32>,
+    tint: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: TexUniforms;
 @group(1) @binding(0) var u_tex: texture_2d<f32>;

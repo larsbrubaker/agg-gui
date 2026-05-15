@@ -610,6 +610,11 @@ pub(crate) enum DrawCommand {
         texture: Arc<wgpu::Texture>,
         view: wgpu::TextureView,
         nearest: bool,
+        /// RGBA multiplier applied in the fragment shader. `[1, 1, 1, 1]`
+        /// is a straight blit; `[1, 1, 1, a]` fades the image to alpha
+        /// `a`. Snapshotted from the context's `global_alpha` at draw
+        /// time so fades follow the standard `set_global_alpha` knob.
+        tint: [f32; 4],
         clip: Option<[i32; 4]>,
     },
     /// LCD subpixel mask (3-pass write-mask blend).

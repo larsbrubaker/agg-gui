@@ -165,11 +165,13 @@ pub(crate) fn prepare_all(
                 texture,
                 view,
                 nearest,
+                tint,
                 clip,
             } => {
                 let uniforms = TexUniforms {
                     resolution: [cur_vp.0, cur_vp.1],
                     _pad: [0.0; 2],
+                    tint: *tint,
                 };
                 let ub = mk_uniform_buf(device, bytemuck::bytes_of(&uniforms));
                 let bg0 = mk_bg(device, &pipelines.tex_bgl0, &ub);

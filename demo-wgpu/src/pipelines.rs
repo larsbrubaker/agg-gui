@@ -33,14 +33,19 @@ pub(crate) struct SolidUniforms {
 }
 const _: () = assert!(size_of::<SolidUniforms>() == 32);
 
-/// 16-byte uniform block for the textured-quad pipeline.
+/// 32-byte uniform block for the textured-quad pipeline. `tint` is
+/// a per-draw RGBA multiplier so callers can fade image blits — set
+/// `[1.0, 1.0, 1.0, alpha]` for a straight alpha fade, or zero out
+/// channels for a quick recolor. The 4×4-box downsample pipeline
+/// reuses the same layout and simply doesn't read `tint`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub(crate) struct TexUniforms {
     pub resolution: [f32; 2],
     pub _pad: [f32; 2],
+    pub tint: [f32; 4],
 }
-const _: () = assert!(size_of::<TexUniforms>() == 16);
+const _: () = assert!(size_of::<TexUniforms>() == 32);
 
 /// 48-byte uniform block for the layer-composite pipeline.
 #[repr(C)]

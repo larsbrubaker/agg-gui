@@ -121,11 +121,13 @@ impl WgpuGfxCtx {
             (texture, view)
         };
 
+        let alpha = self.global_alpha as f32;
         self.commands.push(DrawCommand::Textured {
             verts,
             texture,
             view,
             nearest: false,
+            tint: [1.0, 1.0, 1.0, alpha],
             clip: self.current_clip(),
         });
     }
@@ -215,11 +217,13 @@ impl WgpuGfxCtx {
         //   downsampling at draw time picks an appropriate mip level
         //   instead of point-aliasing at the base mip.
         let use_nearest = !should_use_mipmaps(img_w, img_h);
+        let alpha = self.global_alpha as f32;
         self.commands.push(DrawCommand::Textured {
             verts,
             texture,
             view,
             nearest: use_nearest,
+            tint: [1.0, 1.0, 1.0, alpha],
             clip: self.current_clip(),
         });
     }
@@ -288,11 +292,13 @@ impl WgpuGfxCtx {
         };
 
         let use_nearest = !should_use_mipmaps(img_w, img_h);
+        let alpha = self.global_alpha as f32;
         self.commands.push(DrawCommand::Textured {
             verts,
             texture,
             view,
             nearest: use_nearest,
+            tint: [1.0, 1.0, 1.0, alpha],
             clip: self.current_clip(),
         });
     }

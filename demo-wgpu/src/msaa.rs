@@ -300,6 +300,7 @@ impl MsaaFramebuffer {
         let tex_uniforms = TexUniforms {
             resolution: [target_size.0 as f32, target_size.1 as f32],
             _pad: [0.0; 2],
+            tint: [1.0, 1.0, 1.0, 1.0],
         };
         let tex_ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("msaa_blit_uniforms"),
