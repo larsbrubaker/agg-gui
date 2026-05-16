@@ -10,7 +10,7 @@ use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::font_settings;
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
-use crate::widget::{current_viewport, Widget};
+use crate::widget::{current_viewport, BackbufferCache, Widget};
 
 use super::geometry::{contains, item_at_path, BAR_H};
 use super::model::MenuEntry;
@@ -144,6 +144,14 @@ pub struct MenuBar {
     /// shouldn't claim every spare pixel.
     fit_width: bool,
     orientation: MenuOrientation,
+    /// CPU backbuffer cache.  The bar's pixels rarely change — only when
+    /// hover/open state flips, a menu list is rebuilt, or the bar resizes
+    /// — so caching the rasterised result and blitting it as a textured
+    /// quad sidesteps the hardware glyph-outline path that otherwise
+    /// produces visibly aliased text on direct-to-surface backends.
+    /// Mutators below explicitly invalidate this on every visual state
+    /// change so the next paint re-rasters.
+    cache: BackbufferCache,
 }
 
 pub struct TopMenu {
@@ -181,6 +189,7 @@ impl MenuBar {
             suppress_hover_for: None,
             fit_width: false,
             orientation: MenuOrientation::Horizontal,
+            cache: BackbufferCache::new(),
         }
     }
 
@@ -247,6 +256,7 @@ impl MenuBar {
         self.popup.state.open_at(anchor, kind);
         self.open_index = Some(idx);
         self.hover_index = Some(idx);
+        self.cache.invalidate();
         crate::animation::request_draw();
     }
 
@@ -302,13 +312,24 @@ impl MenuBar {
             // is what `dispatch_event` reads to mark the ancestor path
             // dirty even when this MouseMove returns `Ignored`.
             crate::animation::request_draw();
+            // The bar itself is backbuffered too — invalidate so the
+            // next paint re-rasterises the hover-tinted bar item.
+            self.cache.invalidate();
         }
         // Cursor moved to a different top-menu (or off any) — clear
         // the post-close hover suppression so the next genuine hover
         // re-enters with the usual highlight.
         if self.suppress_hover_for != hover {
             self.suppress_hover_for = None;
+            self.cache.invalidate();
         }
+    }
+
+    /// Invalidate the bar's backbuffer cache. Called from every site that
+    /// mutates `open_index` so the next paint re-rasterises with the
+    /// updated bar-button appearance.
+    fn invalidate_paint_cache(&mut self) {
+        self.cache.invalidate();
     }
 }
 
@@ -322,6 +343,11 @@ impl Widget for MenuBar {
     }
 
     fn set_bounds(&mut self, bounds: Rect) {
+        if (bounds.width - self.bounds.width).abs() > 0.5
+            || (bounds.height - self.bounds.height).abs() > 0.5
+        {
+            self.cache.invalidate();
+        }
         self.bounds = bounds;
     }
 
@@ -331,6 +357,10 @@ impl Widget for MenuBar {
 
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
         &mut self.children
+    }
+
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
+        Some(&mut self.cache)
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -480,6 +510,7 @@ impl Widget for MenuBar {
                 {
                     self.popup.close();
                     self.open_index = None;
+                    self.invalidate_paint_cache();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -492,6 +523,7 @@ impl Widget for MenuBar {
                 (self.on_action)(&action);
                 if !self.popup.is_open() {
                     self.open_index = None;
+                    self.invalidate_paint_cache();
                 }
             } else if matches!(response, MenuResponse::Closed) {
                 self.open_index = None;
@@ -501,6 +533,7 @@ impl Widget for MenuBar {
                 // reads as "still selected".  Cleared once the cursor
                 // moves to a different top-menu (or off the bar).
                 self.suppress_hover_for = self.hover_index;
+                self.invalidate_paint_cache();
             }
             if result == EventResult::Consumed {
                 return result;
@@ -550,6 +583,7 @@ impl Widget for MenuBar {
             (self.on_action)(&action);
             if !self.popup.is_open() {
                 self.open_index = None;
+                self.invalidate_paint_cache();
             }
             EventResult::Consumed
         } else {
