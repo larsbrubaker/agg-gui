@@ -34,7 +34,7 @@ pub mod tree_view;
 pub mod window;
 pub mod window_title_bar;
 
-pub use button::Button;
+pub use button::{Button, ButtonIcon, ButtonTheme};
 pub use checkbox::Checkbox;
 pub use collapsing_header::CollapsingHeader;
 pub use color_picker::ColorPicker;

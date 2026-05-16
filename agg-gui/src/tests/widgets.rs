@@ -181,6 +181,31 @@ fn test_text_field_char_filter_strips_paste() {
 }
 
 #[test]
+fn test_button_with_icon_grows_to_fit_icon_plus_label() {
+    // Button with no icon has some natural width based on label
+    // text. Adding an icon should grow the natural width by the
+    // icon's advance + ICON_GAP, since layout reserves room for
+    // the (icon + gap + label) group.
+    use crate::text::Font;
+    use crate::widgets::Button;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut plain = Button::new("Play", Arc::clone(&font)).with_font_size(14.0);
+    let plain_size = plain.layout(Size::new(400.0, 100.0));
+    let mut with_icon = Button::new("Play", Arc::clone(&font))
+        .with_font_size(14.0)
+        .with_icon('\u{f04b}', Arc::clone(&font));
+    let icon_size = with_icon.layout(Size::new(400.0, 100.0));
+    assert!(
+        icon_size.width > plain_size.width,
+        "icon button should be wider: plain={}px icon={}px",
+        plain_size.width,
+        icon_size.width,
+    );
+}
+
+#[test]
 fn test_text_field_theme_overrides_visuals_palette() {
     // Confirm `with_theme` stores the overrides on the widget so
     // `paint` reads them instead of the ambient visuals. Locks the

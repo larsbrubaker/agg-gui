@@ -25,9 +25,22 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::Font;
+use crate::text::{measure_advance, Font};
 use crate::widget::Widget;
 use crate::widgets::label::{Label, LabelAlign};
+
+/// Icon glyph drawn at the leading edge of a [`Button`]'s label.
+/// The glyph is rendered with a separate font so callers can pair
+/// e.g. a Font Awesome glyph with a Latin-only text font.
+#[derive(Clone)]
+pub struct ButtonIcon {
+    pub glyph: char,
+    pub font: Arc<Font>,
+    pub font_size: f64,
+}
+
+/// Spacing between the icon glyph and the label text, in pixels.
+const ICON_GAP: f64 = 8.0;
 
 /// Default horizontal padding used to inset a left- or right-aligned label
 /// from the button edge.  Center-aligned labels ignore this and centre
@@ -116,6 +129,10 @@ pub struct Button {
     /// triangle.
     label_pad_h: f64,
 
+    /// Optional icon glyph painted at the leading edge of the label.
+    /// See [`with_icon`](Self::with_icon).
+    icon: Option<ButtonIcon>,
+
     hovered: bool,
     pressed: bool,
     focused: bool,
@@ -144,6 +161,7 @@ impl Button {
             outlined: false,
             label_align: LabelAlign::Center,
             label_pad_h: LEFT_LABEL_PAD,
+            icon: None,
             hovered: false,
             pressed: false,
             focused: false,
@@ -206,6 +224,37 @@ impl Button {
     /// the label past a group-marker triangle in sidebar rows.
     pub fn with_label_pad_h(mut self, pad: f64) -> Self {
         self.label_pad_h = pad;
+        self
+    }
+
+    /// Paint an icon glyph at the leading edge of the label.
+    /// `icon_font` carries the glyph (e.g. a Font Awesome face);
+    /// the label text continues to render in the button's main
+    /// font, so callers can pair a Latin text font with an
+    /// icon-only font without merging them.
+    ///
+    /// Defaults `font_size` to the button's current `font_size`.
+    /// Use [`with_icon_sized`](Self::with_icon_sized) to scale the
+    /// icon independently.
+    pub fn with_icon(mut self, glyph: char, icon_font: Arc<Font>) -> Self {
+        let font_size = self.font_size;
+        self.icon = Some(ButtonIcon {
+            glyph,
+            font: icon_font,
+            font_size,
+        });
+        self
+    }
+
+    /// Like [`with_icon`](Self::with_icon) but with an explicit
+    /// icon font size — useful when the icon font's glyphs read
+    /// larger or smaller than the text at the same point size.
+    pub fn with_icon_sized(mut self, glyph: char, icon_font: Arc<Font>, font_size: f64) -> Self {
+        self.icon = Some(ButtonIcon {
+            glyph,
+            font: icon_font,
+            font_size,
+        });
         self
     }
 
@@ -323,6 +372,28 @@ impl Button {
                 .with_align(LabelAlign::Center),
         )
     }
+
+    /// Render the configured icon glyph at the given (x, height)
+    /// in `color`. Centres the glyph vertically using the icon
+    /// font's metrics, so a 14 pt icon and 14 pt text line up on
+    /// the same baseline.
+    fn paint_icon(
+        ctx: &mut dyn DrawCtx,
+        icon: &Option<ButtonIcon>,
+        x: f64,
+        button_h: f64,
+        color: Color,
+    ) {
+        let Some(icon) = icon else { return };
+        ctx.set_font(Arc::clone(&icon.font));
+        ctx.set_font_size(icon.font_size);
+        ctx.set_fill_color(color);
+        let glyph_str = icon.glyph.to_string();
+        if let Some(m) = ctx.measure_text(&glyph_str) {
+            let ty = m.centered_baseline_y(button_h).max(0.0);
+            ctx.fill_text(&glyph_str, x, ty);
+        }
+    }
 }
 
 impl Widget for Button {
@@ -380,7 +451,14 @@ impl Widget for Button {
         //   - set `with_min_size(Size::new(width, _))` for a width floor.
         let pad_h = self.font_size * 1.2;
         let label_size = self.children[0].layout(Size::new(available.width, height));
-        let natural_w = (label_size.width + pad_h)
+        // Width contributed by the leading icon glyph (icon advance
+        // + spacing gap). Zero when no icon is configured.
+        let icon_block_w = self
+            .icon
+            .as_ref()
+            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + ICON_GAP)
+            .unwrap_or(0.0);
+        let natural_w = (label_size.width + icon_block_w + pad_h)
             .max(48.0)
             .max(self.base.min_size.width);
         let width = if self.base.h_anchor.is_stretch() {
@@ -390,11 +468,16 @@ impl Widget for Button {
         }
         .min(available.width);
         let size = Size::new(width, height);
-        let label_x = match self.label_align {
+        // The (icon + gap + label) group is positioned as a unit;
+        // align uses the COMBINED width so the icon stays directly
+        // left of the label for any alignment mode.
+        let group_w = label_size.width + icon_block_w;
+        let group_x = match self.label_align {
             LabelAlign::Left => self.label_pad_h.min(size.width),
-            LabelAlign::Right => (size.width - label_size.width - self.label_pad_h).max(0.0),
-            LabelAlign::Center => ((size.width - label_size.width) * 0.5).max(0.0),
+            LabelAlign::Right => (size.width - group_w - self.label_pad_h).max(0.0),
+            LabelAlign::Center => ((size.width - group_w) * 0.5).max(0.0),
         };
+        let label_x = group_x + icon_block_w;
         let label_y = ((size.height - label_size.height) * 0.5).max(0.0);
         self.children[0].set_bounds(Rect::new(
             label_x,
@@ -524,38 +607,70 @@ impl Widget for Button {
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        if self.is_enabled() {
-            return;
-        }
-
-        // The normal child Label was built for the enabled foreground color.
-        // Cover it and repaint the label with the disabled text color.
+        let enabled = self.is_enabled();
         let w = self.bounds.width;
         let h = self.bounds.height;
         let r = self.theme.border_radius;
         let v = ctx.visuals();
-        let (disabled_bg, disabled_stroke, disabled_text) = Self::disabled_colors(&v);
 
-        ctx.set_fill_color(disabled_bg);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, r);
-        ctx.fill();
+        if !enabled {
+            // The normal child Label was built for the enabled foreground
+            // colour. Cover it and repaint the label with the disabled
+            // text colour. Icon (if any) renders in the same disabled
+            // text colour at the same group_x as layout positioned it.
+            let (disabled_bg, disabled_stroke, disabled_text) = Self::disabled_colors(&v);
 
-        ctx.set_stroke_color(disabled_stroke);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rounded_rect(0.5, 0.5, (w - 1.0).max(0.0), (h - 1.0).max(0.0), r);
-        ctx.stroke();
+            ctx.set_fill_color(disabled_bg);
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, 0.0, w, h, r);
+            ctx.fill();
 
-        let font =
-            crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font));
-        ctx.set_font(font);
-        ctx.set_font_size(self.font_size * crate::font_settings::current_font_size_scale());
-        ctx.set_fill_color(disabled_text);
-        if let Some(m) = ctx.measure_text(&self.label_text) {
-            let tx = ((w - m.width) * 0.5).max(0.0);
-            let ty = m.centered_baseline_y(h).max(0.0);
-            ctx.fill_text(&self.label_text, tx, ty);
+            ctx.set_stroke_color(disabled_stroke);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            ctx.rounded_rect(0.5, 0.5, (w - 1.0).max(0.0), (h - 1.0).max(0.0), r);
+            ctx.stroke();
+
+            let font = crate::font_settings::current_system_font()
+                .unwrap_or_else(|| Arc::clone(&self.font));
+            let icon_block_w = self
+                .icon
+                .as_ref()
+                .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + ICON_GAP)
+                .unwrap_or(0.0);
+            ctx.set_font(font);
+            ctx.set_font_size(self.font_size * crate::font_settings::current_font_size_scale());
+            ctx.set_fill_color(disabled_text);
+            if let Some(m) = ctx.measure_text(&self.label_text) {
+                let group_w = m.width + icon_block_w;
+                let group_x = ((w - group_w) * 0.5).max(0.0);
+                let tx = group_x + icon_block_w;
+                let ty = m.centered_baseline_y(h).max(0.0);
+                ctx.fill_text(&self.label_text, tx, ty);
+                Self::paint_icon(ctx, &self.icon, group_x, h, disabled_text);
+            }
+            return;
+        }
+
+        // Enabled state — only paint the icon (label has already been
+        // drawn by the framework via the child Label's paint).
+        if let Some(icon) = self.icon.clone() {
+            let active = self.is_active();
+            let muted = self.subtle && !active;
+            let label_color = if muted {
+                v.text_color
+            } else {
+                self.theme.label_color
+            };
+            let label_x = self
+                .children
+                .first()
+                .map(|c| c.bounds().x)
+                .unwrap_or_default();
+            let icon_block_w =
+                measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size) + ICON_GAP;
+            let group_x = (label_x - icon_block_w).max(0.0);
+            Self::paint_icon(ctx, &Some(icon), group_x, h, label_color);
         }
     }
 
