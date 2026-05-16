@@ -63,11 +63,17 @@ thread_local! {
     /// text while preserving the relative hierarchy (body stays smaller
     /// than headings, etc.).
     static FONT_SIZE_SCALE: RefCell<f64>  = RefCell::new(1.0);
-    /// System-wide LCD-subpixel toggle.  When `true`, text-rendering widgets
-    /// should prefer LCD output whenever they can determine their background
-    /// colour (needed for correct per-channel compositing); fall back to
-    /// grayscale AA otherwise.
-    static LCD_ENABLED:     RefCell<bool> = RefCell::new(false);
+    /// System-wide LCD-subpixel override.  When `Some(true|false)`, text-
+    /// rendering widgets honour it directly.  When `None` (the default),
+    /// [`lcd_enabled`] derives the effective value from
+    /// [`crate::device_scale`]: LCD is enabled at standard DPI (scale ≤
+    /// 1.25) and disabled at HiDPI, because LCD subpixel rendering only
+    /// pays off when subpixels are roughly the size of a glyph stem; at
+    /// 2× scale the AA halo is already wide enough that grayscale wins on
+    /// chroma fringing while looking identical otherwise.  An explicit
+    /// [`set_lcd_enabled`] overrides the auto-derivation; apps that just
+    /// want the default should never need to call it.
+    static LCD_ENABLED:     RefCell<Option<bool>> = const { RefCell::new(None) };
     /// System-wide hinting toggle — forwarded to the font engine when the
     /// engine supports it.  `ttf-parser` does NOT run a hinting interpreter,
     /// so what we do is **Y-axis-only baseline hinting**: snap the glyph
@@ -145,12 +151,33 @@ pub fn set_font_size_scale(scale: f64) {
 // LCD subpixel toggle
 // ---------------------------------------------------------------------------
 
+/// Whether widgets should rasterise text through the LCD subpixel path.
+///
+/// Returns the explicit override set via [`set_lcd_enabled`] if one is
+/// present; otherwise auto-derives from [`crate::device_scale`] — LCD on
+/// at standard DPI (`scale ≤ 1.25`), off at HiDPI.  This is the default
+/// most apps want, so platform shells generally don't need to call
+/// [`set_lcd_enabled`] at all.
 pub fn lcd_enabled() -> bool {
-    LCD_ENABLED.with(|c| *c.borrow())
+    if let Some(explicit) = LCD_ENABLED.with(|c| *c.borrow()) {
+        return explicit;
+    }
+    crate::device_scale::device_scale() <= 1.25
 }
 
+/// Pin LCD subpixel rendering to a specific value, overriding the
+/// device-scale-derived default.  System-window toggles use this; apps
+/// that just want sensible default behaviour should not call it.
 pub fn set_lcd_enabled(on: bool) {
-    LCD_ENABLED.with(|c| *c.borrow_mut() = on);
+    LCD_ENABLED.with(|c| *c.borrow_mut() = Some(on));
+    bump_typography_epoch();
+}
+
+/// Drop any explicit override and return to device-scale-derived auto.
+/// Counterpart to [`set_lcd_enabled`]; used by tests and by System-
+/// window "reset to default" affordances.
+pub fn clear_lcd_enabled_override() {
+    LCD_ENABLED.with(|c| *c.borrow_mut() = None);
     bump_typography_epoch();
 }
 
@@ -238,14 +265,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lcd_flag_default_off() {
+    fn test_lcd_flag_explicit_override_round_trips() {
         // Reset to known state — other tests in the same thread may have
         // flipped it.  Use try-reset pattern.
         set_lcd_enabled(false);
         assert!(!lcd_enabled());
         set_lcd_enabled(true);
         assert!(lcd_enabled());
-        set_lcd_enabled(false);
+        clear_lcd_enabled_override();
+    }
+
+    #[test]
+    fn test_lcd_flag_auto_derives_from_device_scale_when_no_override() {
+        use crate::device_scale::set_device_scale;
+        clear_lcd_enabled_override();
+        set_device_scale(1.0);
+        assert!(lcd_enabled(), "standard DPI should default to LCD on");
+        set_device_scale(2.0);
+        assert!(!lcd_enabled(), "HiDPI should default to LCD off");
+        // Restore to a sane state for sibling tests.
+        set_device_scale(1.0);
     }
 
     #[test]
