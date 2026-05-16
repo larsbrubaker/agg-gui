@@ -13,9 +13,16 @@ use crate::text::Font;
 use crate::widget::{current_viewport, BackbufferCache, Widget};
 
 use super::geometry::{contains, item_at_path, BAR_H};
-use super::model::MenuEntry;
-use super::paint::{paint_menu_bar_button, paint_popup_stack, MenuStyle};
+use super::model::{MenuEntry, MenuSelection};
+use super::paint::{
+    bar_button_text_color, paint_item_row_bg, paint_menu_bar_button_bg, paint_panel,
+    paint_separator, MenuStyle,
+};
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
+
+use labels::{BarLabels, PopupLabels};
+
+mod labels;
 
 /// Layout direction for `MenuBar`. Horizontal is the desktop default — a
 /// strip of top-level menu buttons across a fixed-height bar with
@@ -53,6 +60,13 @@ pub struct PopupMenu {
     pub items: Vec<MenuEntry>,
     pub state: PopupMenuState,
     pub style: MenuStyle,
+    /// Cache of `Label` widgets used to render every row's display
+    /// text and shortcut.  Rebuilt lazily inside `paint(...)` whenever
+    /// the visible layout tree changes (open path or items mutate).
+    /// Stored on the popup so the per-Label backbuffer caches stay
+    /// warm across hovers — only the row whose colour actually flipped
+    /// re-rasterises, the rest blit.
+    labels: PopupLabels,
 }
 
 impl PopupMenu {
@@ -61,6 +75,7 @@ impl PopupMenu {
             items,
             state: PopupMenuState::default(),
             style: MenuStyle::default(),
+            labels: PopupLabels::new(),
         }
     }
 
@@ -105,17 +120,33 @@ impl PopupMenu {
         self.state.handle_shortcut(&mut self.items, key, modifiers)
     }
 
-    pub fn paint(&self, ctx: &mut dyn DrawCtx, font: Arc<Font>, font_size: f64, viewport: Size) {
+    pub fn paint(&mut self, ctx: &mut dyn DrawCtx, font: Arc<Font>, font_size: f64, viewport: Size) {
         let layouts = self.state.layouts(&self.items, viewport);
-        paint_popup_stack(
-            ctx,
-            font,
-            font_size,
-            &self.items,
-            &self.state,
-            &layouts,
-            &self.style,
-        );
+        // Refresh the per-row `Label` cache against the current open
+        // tree.  Cheap when nothing changed — `sync_to` only mutates
+        // entries whose text or font differs from the cached state.
+        self.labels.sync_to(&font, font_size, &self.items, &layouts);
+
+        // Set the popup's default font / size on the ctx for the
+        // inline glyphs we still paint directly (icons, check / radio
+        // marks, submenu chevron).  Label widgets push their own font
+        // through their internal `set_font` call so this only affects
+        // the inline glyphs.
+        ctx.set_font(Arc::clone(&font));
+        ctx.set_font_size(font_size);
+
+        for (level_idx, layout) in layouts.iter().enumerate() {
+            paint_panel(ctx, layout.rect, &self.style);
+            paint_popup_level(
+                ctx,
+                level_idx,
+                layout,
+                &self.items,
+                &self.state,
+                &self.style,
+                &mut self.labels,
+            );
+        }
     }
 }
 
@@ -152,6 +183,11 @@ pub struct MenuBar {
     /// Mutators below explicitly invalidate this on every visual state
     /// change so the next paint re-rasters.
     cache: BackbufferCache,
+    /// `Label` widgets for each top-menu bar button.  Painted from
+    /// `Widget::paint` via `paint_subtree` so glyphs flow through
+    /// Label's standard backbuffer + LCD path.  Kept in lock-step with
+    /// `self.menus` by `sync_bar_labels()`.
+    bar_labels: BarLabels,
 }
 
 pub struct TopMenu {
@@ -190,7 +226,19 @@ impl MenuBar {
             fit_width: false,
             orientation: MenuOrientation::Horizontal,
             cache: BackbufferCache::new(),
+            bar_labels: BarLabels::new(),
         }
+    }
+
+    /// Refresh the bar's per-button `Label` cache so it matches
+    /// `self.menus`.  Cheap when nothing changed.  Called at the top
+    /// of `Widget::layout` and `Widget::paint` so a runtime mutation
+    /// of `menus` (e.g. dynamic menu reload) propagates without an
+    /// explicit invalidate.
+    fn sync_bar_labels(&mut self) {
+        let labels: Vec<&str> = self.menus.iter().map(|m| m.label.as_str()).collect();
+        self.bar_labels
+            .sync_to(&self.active_font(), self.font_size, &labels);
     }
 
     /// Use a vertical layout — the bar stacks its menu buttons top-to-
@@ -373,6 +421,9 @@ impl Widget for MenuBar {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Keep the bar's Label cache in lock-step with `self.menus`
+        // before measuring — handles dynamic menu lists.
+        self.sync_bar_labels();
         match self.orientation {
             MenuOrientation::Horizontal | MenuOrientation::HorizontalBottom => {
                 let mut x = 0.0;
@@ -405,6 +456,10 @@ impl Widget for MenuBar {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        // Belt-and-suspenders: re-sync bar Labels in case `paint` runs
+        // without a preceding `layout` (e.g. cache-only repaint after
+        // a state flip).  Cheap when text already matches.
+        self.sync_bar_labels();
         ctx.set_font(self.active_font());
         ctx.set_font_size(self.font_size);
         let v = ctx.visuals();
@@ -416,6 +471,8 @@ impl Widget for MenuBar {
         };
         ctx.rect(0.0, 0.0, self.bounds.width, bg_h);
         ctx.fill();
+        // First pass: paint every button's chrome (hover / open
+        // background) so the rounded fills sit BENEATH the text.
         for (idx, menu) in self.menus.iter().enumerate() {
             // After a click-to-close-toggle, the cursor is still over
             // the bar item so `hover_index` still points at it —
@@ -423,13 +480,22 @@ impl Widget for MenuBar {
             // and back on, so the closed menu doesn't read as "still
             // selected".
             let hovered = self.hover_index == Some(idx) && self.suppress_hover_for != Some(idx);
-            paint_menu_bar_button(
-                ctx,
-                menu.rect,
-                &menu.label,
-                self.open_index == Some(idx),
-                hovered,
-            );
+            let open = self.open_index == Some(idx);
+            paint_menu_bar_button_bg(ctx, menu.rect, open, hovered);
+        }
+        // Second pass: paint each button's `Label` through
+        // `paint_subtree` so glyphs flow through Label's backbuffer +
+        // LCD path.  Done after backgrounds so the text composites on
+        // top of the hover fill.
+        let menu_rects: Vec<(Rect, bool)> = self
+            .menus
+            .iter()
+            .enumerate()
+            .map(|(idx, menu)| (menu.rect, self.open_index == Some(idx)))
+            .collect();
+        for (idx, (rect, open)) in menu_rects.into_iter().enumerate() {
+            let color = bar_button_text_color(ctx, open);
+            self.bar_labels.paint_in(ctx, idx, rect, color);
         }
     }
 
@@ -601,9 +667,113 @@ impl Widget for MenuBar {
     }
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        self.popup
-            .paint(ctx, self.active_font(), self.font_size, current_viewport());
+        let font = self.active_font();
+        self.popup.paint(ctx, font, self.font_size, current_viewport());
     }
+}
+
+/// Paint one popup panel: hover backgrounds, separators, icons,
+/// check / radio marks, submenu chevrons, AND each row's text via the
+/// shared `PopupLabels` cache.  Text colour is resolved per-row from
+/// the item's enabled / open / hovered state so a hover flip retints
+/// just one Label.
+fn paint_popup_level(
+    ctx: &mut dyn DrawCtx,
+    level_idx: usize,
+    layout: &super::geometry::PopupLayout,
+    items: &[MenuEntry],
+    state: &PopupMenuState,
+    style: &MenuStyle,
+    labels: &mut PopupLabels,
+) {
+    let level_items = items_for_layout(items, &layout.path_prefix);
+    for (row_idx, row_layout) in layout.rows.iter().enumerate() {
+        let Some(item_idx) = row_layout.item_index else {
+            // Separator row.
+            paint_separator(ctx, row_layout.rect);
+            continue;
+        };
+        let Some(MenuEntry::Item(item)) = level_items.get(item_idx) else {
+            continue;
+        };
+        let mut path = layout.path_prefix.clone();
+        path.push(item_idx);
+        let hovered = state.hover_path.as_ref() == Some(&path);
+        let open = state.open_path.starts_with(&path);
+
+        // Hover / open backdrop sits underneath the row's content.
+        paint_item_row_bg(ctx, row_layout.rect, hovered, open, item.enabled);
+
+        // Inline glyphs (icon / check / radio) — single chars that
+        // change infrequently; keeping them direct `fill_text` avoids
+        // a Label per glyph at the cost of a single rasterise call.
+        let inline_color =
+            super::paint::popup_row_text_color(ctx, item.enabled, open && item.enabled);
+        ctx.set_fill_color(inline_color);
+        if let Some(icon) = item.icon {
+            let icon = icon.to_string();
+            ctx.fill_text(&icon, row_layout.rect.x + style.icon_x, row_layout.rect.y + 7.0);
+        } else {
+            match item.selection {
+                MenuSelection::Check { selected: true } => {
+                    // U+2713 CHECK MARK — present in every general-purpose
+                    // font.  Was the Font Awesome `\u{f00c}` glyph, but
+                    // that requires bundling FA which not all consumers
+                    // do; Unicode keeps the menu working regardless.
+                    ctx.fill_text(
+                        "\u{2713}",
+                        row_layout.rect.x + style.icon_x,
+                        row_layout.rect.y + 7.0,
+                    );
+                }
+                MenuSelection::Radio { selected: true } => {
+                    // U+25CF BLACK CIRCLE — replaces FA `\u{f111}` for
+                    // the same plain-font reason.
+                    ctx.fill_text(
+                        "\u{25CF}",
+                        row_layout.rect.x + style.icon_x,
+                        row_layout.rect.y + 7.0,
+                    );
+                }
+                MenuSelection::None
+                | MenuSelection::Check { selected: false }
+                | MenuSelection::Radio { selected: false } => {}
+            }
+        }
+        if item.has_submenu() {
+            // U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE — Unicode-
+            // standard submenu indicator (FA replacement, same reason).
+            ctx.fill_text(
+                "\u{25B8}",
+                row_layout.rect.x + row_layout.rect.width - 18.0,
+                row_layout.rect.y + 7.0,
+            );
+        }
+
+        // Row text (label + shortcut) via the Label cache so glyph
+        // rendering routes through the backbuffer + LCD path.
+        labels.paint_row_with_state(
+            ctx,
+            level_idx,
+            row_idx,
+            row_layout.rect,
+            style.label_x,
+            style.shortcut_right,
+            item.enabled,
+            open && item.enabled,
+        );
+    }
+}
+
+fn items_for_layout<'a>(items: &'a [MenuEntry], path: &[usize]) -> &'a [MenuEntry] {
+    let mut current = items;
+    for &idx in path {
+        let Some(MenuEntry::Item(item)) = current.get(idx) else {
+            return current;
+        };
+        current = &item.submenu;
+    }
+    current
 }
 
 #[cfg(test)]

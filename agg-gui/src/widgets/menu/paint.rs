@@ -1,19 +1,22 @@
 //! Themed painting for popup menus and menu bars.
 //!
-//! The painter deliberately sets every fill and stroke it uses so menu colors
-//! never inherit accidental state from the widget that opened the popup.
-
-use std::sync::Arc;
+//! Text rendering is composed: the bar and popup widgets own `Label` widgets
+//! for every text-bearing element (bar button text, item labels, shortcut
+//! strings).  This module paints the chrome (backgrounds, hover panels,
+//! separators, submenu chevrons, check/radio glyphs) inline, and the bar /
+//! popup widgets paint their owned `Label` children through `paint_subtree`
+//! so the framework's backbuffer + LCD subpixel path renders every glyph.
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::Rect;
-use crate::text::Font;
 
-use super::geometry::{PopupLayout, SEP_H};
-use super::model::{MenuEntry, MenuSelection};
-use super::state::PopupMenuState;
+use super::geometry::SEP_H;
 
+/// Style values shared between the bar and popup painters.
+///
+/// Geometry only.  Text colors are resolved per-`Label` from
+/// `ctx.visuals()` or set explicitly when a row is hovered / opened.
 #[derive(Clone)]
 pub struct MenuStyle {
     pub radius: f64,
@@ -39,73 +42,71 @@ impl Default for MenuStyle {
     }
 }
 
-pub fn paint_popup_stack(
-    ctx: &mut dyn DrawCtx,
-    font: Arc<Font>,
-    font_size: f64,
-    items: &[MenuEntry],
-    state: &PopupMenuState,
-    layouts: &[PopupLayout],
-    style: &MenuStyle,
-) {
-    ctx.set_font(font);
-    ctx.set_font_size(font_size);
-    for layout in layouts {
-        paint_panel(ctx, layout.rect, style);
-        for (entry, row) in items_for_layout(items, &layout.path_prefix)
-            .iter()
-            .zip(&layout.rows)
-        {
-            match entry {
-                MenuEntry::Separator => paint_separator(ctx, row.rect),
-                MenuEntry::Item(item) => {
-                    let mut path = layout.path_prefix.clone();
-                    path.push(row.item_index.unwrap_or_default());
-                    let hovered = state.hover_path.as_ref() == Some(&path);
-                    let open = state.open_path.starts_with(&path);
-                    paint_item_row(ctx, row.rect, item, hovered, open, style);
-                }
-            }
-        }
-    }
-}
-
-pub fn paint_menu_bar_button(
+/// Paint the chrome (hover / open background fill) under a bar button.
+/// The button's text label is painted separately by the caller via
+/// `paint_subtree` on the bar's owned `Label`.
+pub fn paint_menu_bar_button_bg(
     ctx: &mut dyn DrawCtx,
     rect: Rect,
-    label: &str,
     open: bool,
     hovered: bool,
 ) {
-    let v = ctx.visuals();
-    // Subtle desktop hover: a translucent accent tint under the label, not
-    // the full accent.  Translucent because the underlying `top_bar_bg` is
-    // already a very light gray (≈0.88 in the light theme); a fully-opaque
-    // `widget_bg_hovered` panel reads as nothing — `widget_bg_hovered` is
-    // only ~0.04 brighter than the bar.  Translucent accent stays visible
-    // on either theme while reserving the FULL accent for the OPENED state.
-    if open || hovered {
-        let bg = if open {
-            v.accent
-        } else {
-            v.accent.with_alpha(0.18)
-        };
-        ctx.set_fill_color(bg);
-        ctx.begin_path();
-        ctx.rounded_rect(
-            rect.x + 1.0,
-            rect.y + 2.0,
-            rect.width - 2.0,
-            rect.height - 4.0,
-            4.0,
-        );
-        ctx.fill();
+    if !open && !hovered {
+        return;
     }
-    ctx.set_fill_color(if open { Color::white() } else { v.text_color });
-    ctx.fill_text(label, rect.x + 9.0, rect.y + 7.0);
+    let v = ctx.visuals();
+    // Subtle desktop hover: a translucent accent tint under the label,
+    // not the full accent.  Translucent because the underlying
+    // `top_bar_bg` is already a very light gray (≈0.88 in the light
+    // theme); a fully-opaque `widget_bg_hovered` panel reads as nothing
+    // — `widget_bg_hovered` is only ~0.04 brighter than the bar.
+    // Translucent accent stays visible on either theme while reserving
+    // the FULL accent for the OPENED state.
+    let bg = if open {
+        v.accent
+    } else {
+        v.accent.with_alpha(0.18)
+    };
+    ctx.set_fill_color(bg);
+    ctx.begin_path();
+    ctx.rounded_rect(
+        rect.x + 1.0,
+        rect.y + 2.0,
+        rect.width - 2.0,
+        rect.height - 4.0,
+        4.0,
+    );
+    ctx.fill();
 }
 
-fn paint_panel(ctx: &mut dyn DrawCtx, rect: Rect, style: &MenuStyle) {
+/// The text colour the bar button's `Label` should use for the given
+/// open / enabled state.  Returns `Color::white()` when the button is
+/// open (white text on the accent fill), the theme's `text_color`
+/// otherwise.
+pub fn bar_button_text_color(ctx: &dyn DrawCtx, open: bool) -> Color {
+    if open {
+        Color::white()
+    } else {
+        ctx.visuals().text_color
+    }
+}
+
+/// The text colour the popup row's `Label` should use for the given
+/// open / hovered / enabled state.  Mirrors the historical
+/// `paint_item_row` logic but exposed so the popup widget can push the
+/// resolved colour into its owned `Label`s.
+pub fn popup_row_text_color(ctx: &dyn DrawCtx, enabled: bool, open: bool) -> Color {
+    let v = ctx.visuals();
+    if !enabled {
+        v.text_color.with_alpha(0.45)
+    } else if open {
+        Color::white()
+    } else {
+        v.text_color
+    }
+}
+
+pub fn paint_panel(ctx: &mut dyn DrawCtx, rect: Rect, style: &MenuStyle) {
     let v = ctx.visuals();
     ctx.set_fill_color(Color::black().with_alpha(style.shadow_alpha));
     ctx.begin_path();
@@ -129,7 +130,7 @@ fn paint_panel(ctx: &mut dyn DrawCtx, rect: Rect, style: &MenuStyle) {
     ctx.stroke();
 }
 
-fn paint_separator(ctx: &mut dyn DrawCtx, rect: Rect) {
+pub fn paint_separator(ctx: &mut dyn DrawCtx, rect: Rect) {
     let v = ctx.visuals();
     ctx.set_stroke_color(v.widget_stroke.with_alpha(0.55));
     ctx.set_line_width(1.0);
@@ -139,98 +140,37 @@ fn paint_separator(ctx: &mut dyn DrawCtx, rect: Rect) {
     ctx.stroke();
 }
 
-fn paint_item_row(
+/// Paint the hover / open background of a popup item row.  The row's
+/// label text is painted separately via `paint_subtree` on the
+/// popup-owned `Label`; this only fills the rounded backdrop.
+pub fn paint_item_row_bg(
     ctx: &mut dyn DrawCtx,
     rect: Rect,
-    item: &super::model::MenuItem,
     hovered: bool,
     open: bool,
-    style: &MenuStyle,
+    enabled: bool,
 ) {
+    let hovered = hovered && enabled;
+    let open = open && enabled;
+    if !hovered && !open {
+        return;
+    }
+    // Same subtle/strong split as the bar button: hover hints with a
+    // translucent accent tint; open commits with full accent.
     let v = ctx.visuals();
-    let hovered = hovered && item.enabled;
-    let open = open && item.enabled;
-    // Same subtle/strong split as `paint_menu_bar_button`: hover hints
-    // with a translucent accent tint; open commits with full accent.
-    if hovered || open {
-        let bg = if open {
-            v.accent
-        } else {
-            v.accent.with_alpha(0.18)
-        };
-        ctx.set_fill_color(bg);
-        ctx.begin_path();
-        ctx.rounded_rect(
-            rect.x + 3.0,
-            rect.y + 2.0,
-            rect.width - 6.0,
-            rect.height - 4.0,
-            3.0,
-        );
-        ctx.fill();
-    }
-
-    let text_color = if !item.enabled {
-        v.text_color.with_alpha(0.45)
-    } else if open {
-        Color::white()
+    let bg = if open {
+        v.accent
     } else {
-        v.text_color
+        v.accent.with_alpha(0.18)
     };
-    ctx.set_fill_color(text_color);
-    if let Some(icon) = item.icon {
-        let icon = icon.to_string();
-        ctx.fill_text(&icon, rect.x + style.icon_x, rect.y + 7.0);
-    } else {
-        match item.selection {
-            MenuSelection::Check { selected: true } => {
-                // U+2713 CHECK MARK — present in every general-purpose
-                // font (CascadiaCode, Inter, system serif, etc.). Used
-                // to be the Font Awesome `\u{f00c}` glyph, but that
-                // requires bundling FA which not all consumers do; the
-                // FA codepoint then renders as a tofu box in plain
-                // fonts. Standard Unicode keeps the menu working
-                // regardless of which font the caller passes in.
-                ctx.fill_text("\u{2713}", rect.x + style.icon_x, rect.y + 7.0);
-            }
-            MenuSelection::Radio { selected: true } => {
-                // U+25CF BLACK CIRCLE — equivalent reasoning. Replaces
-                // FA `\u{f111}` so the radio dot renders in plain fonts.
-                ctx.fill_text("\u{25CF}", rect.x + style.icon_x, rect.y + 7.0);
-            }
-            MenuSelection::None
-            | MenuSelection::Check { selected: false }
-            | MenuSelection::Radio { selected: false } => {}
-        }
-    }
-    ctx.fill_text(&item.label, rect.x + style.label_x, rect.y + 7.0);
-    if let Some(shortcut) = &item.shortcut {
-        let width = ctx
-            .measure_text(shortcut)
-            .map(|metrics| metrics.width)
-            .unwrap_or(0.0);
-        ctx.fill_text(
-            shortcut,
-            rect.x + rect.width - style.shortcut_right - width,
-            rect.y + 7.0,
-        );
-    }
-    if item.has_submenu() {
-        // U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE — Unicode-standard
-        // submenu indicator. Replaces FA `\u{f105}` for the same reason
-        // as the check / radio glyphs above (FA isn't always available
-        // in the caller's font).
-        ctx.fill_text("\u{25B8}", rect.x + rect.width - 18.0, rect.y + 7.0);
-    }
-}
-
-fn items_for_layout<'a>(items: &'a [MenuEntry], path: &[usize]) -> &'a [MenuEntry] {
-    let mut current = items;
-    for &idx in path {
-        let Some(MenuEntry::Item(item)) = current.get(idx) else {
-            return current;
-        };
-        current = &item.submenu;
-    }
-    current
+    ctx.set_fill_color(bg);
+    ctx.begin_path();
+    ctx.rounded_rect(
+        rect.x + 3.0,
+        rect.y + 2.0,
+        rect.width - 6.0,
+        rect.height - 4.0,
+        3.0,
+    );
+    ctx.fill();
 }

@@ -167,15 +167,12 @@ impl MarkdownView {
         }
     }
 
-    pub(super) fn paint_context_menu(&self, ctx: &mut dyn DrawCtx) {
-        let Some(menu_state) = &self.context_menu else {
+    pub(super) fn paint_context_menu(&mut self, ctx: &mut dyn DrawCtx) {
+        let font = std::sync::Arc::clone(&self.active_font());
+        let font_size = self.font_size;
+        let Some(menu_state) = &mut self.context_menu else {
             return;
         };
-        menu_state.menu.paint(
-            ctx,
-            std::sync::Arc::clone(&self.active_font()),
-            self.font_size,
-            current_viewport(),
-        );
+        menu_state.menu.paint(ctx, font, font_size, current_viewport());
     }
 }
