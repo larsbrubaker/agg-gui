@@ -22,9 +22,13 @@ use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 /// popups opening DOWN. Vertical stacks the buttons in a tall+narrow
 /// strip (e.g. a left-side mobile sidebar) with popups opening to the
 /// RIGHT, at the same vertical level as the clicked button.
+/// HorizontalBottom matches Horizontal but flips popup direction so
+/// menus rise UPWARD — for bars pinned to the bottom of the
+/// viewport where opening downward would clip against the floor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuOrientation {
     Horizontal,
+    HorizontalBottom,
     Vertical,
 }
 
@@ -229,6 +233,12 @@ impl MenuBar {
         // viewport so we don't trail off the top.
         let (anchor, kind) = match self.orientation {
             MenuOrientation::Horizontal => (Point::new(rect.x, rect.y), MenuAnchorKind::Bar),
+            // Anchor at the bar item's TOP edge so the popup
+            // rises FROM it instead of hanging below.
+            MenuOrientation::HorizontalBottom => (
+                Point::new(rect.x, rect.y + rect.height),
+                MenuAnchorKind::BottomBar,
+            ),
             MenuOrientation::Vertical => (
                 Point::new(rect.x + rect.width, rect.y + rect.height),
                 MenuAnchorKind::Context,
@@ -325,7 +335,7 @@ impl Widget for MenuBar {
 
     fn layout(&mut self, available: Size) -> Size {
         match self.orientation {
-            MenuOrientation::Horizontal => {
+            MenuOrientation::Horizontal | MenuOrientation::HorizontalBottom => {
                 let mut x = 0.0;
                 for menu in &mut self.menus {
                     let width = (menu.label.chars().count() as f64 * 8.0 + 22.0).max(52.0);
@@ -362,7 +372,7 @@ impl Widget for MenuBar {
         ctx.set_fill_color(v.top_bar_bg);
         ctx.begin_path();
         let bg_h = match self.orientation {
-            MenuOrientation::Horizontal => BAR_H,
+            MenuOrientation::Horizontal | MenuOrientation::HorizontalBottom => BAR_H,
             MenuOrientation::Vertical => self.bounds.height,
         };
         ctx.rect(0.0, 0.0, self.bounds.width, bg_h);

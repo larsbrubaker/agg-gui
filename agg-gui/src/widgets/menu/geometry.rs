@@ -147,12 +147,18 @@ fn popup_rect(
     let x = anchor
         .x
         .clamp(MARGIN, (viewport.width - MENU_W - MARGIN).max(MARGIN));
-    let min_y = if anchor_kind == MenuAnchorKind::Bar {
-        -viewport.height
-    } else {
-        MARGIN
+    let (min_y, raw_y) = match anchor_kind {
+        // Top bar — popup hangs below the anchor (extends toward
+        // smaller y in Y-up). `Bar` allows negative-y clamp so a
+        // bar pushed flush against the viewport edge still places
+        // a popup correctly.
+        MenuAnchorKind::Bar => (-viewport.height, anchor.y - h),
+        // Bottom bar — popup rises ABOVE the anchor (extends
+        // toward larger y in Y-up). Popup rect's bottom = anchor.y.
+        MenuAnchorKind::BottomBar => (MARGIN, anchor.y),
+        MenuAnchorKind::Context => (MARGIN, anchor.y - h),
     };
-    let y = (anchor.y - h).clamp(min_y, (viewport.height - h - MARGIN).max(min_y));
+    let y = raw_y.clamp(min_y, (viewport.height - h - MARGIN).max(min_y));
     Rect::new(x, y, MENU_W, h)
 }
 

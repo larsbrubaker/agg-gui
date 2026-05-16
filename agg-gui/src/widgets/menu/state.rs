@@ -24,7 +24,15 @@ fn is_touch_synthesized() -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAnchorKind {
     Context,
+    /// Top menu bar — anchor is the bar item's BOTTOM edge; popup
+    /// opens DOWNWARD (extending toward smaller y in Y-up).
     Bar,
+    /// Bottom menu bar — anchor is the bar item's TOP edge; popup
+    /// opens UPWARD (extending toward larger y in Y-up). Used by
+    /// callers that position the menu bar across the bottom of
+    /// the viewport, where opening downward would clip the popup
+    /// against the viewport floor.
+    BottomBar,
 }
 
 #[derive(Clone, Debug)]
