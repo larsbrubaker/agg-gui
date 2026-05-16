@@ -40,6 +40,13 @@ pub fn begin_frame(ctx: &mut WgpuGfxCtx, view: wgpu::TextureView) {
     ctx.surface_view = Some(view);
     let bg = agg_gui::current_visuals().bg_color;
     ctx.commands.push(crate::DrawCommand::Clear(bg));
+    // Sync the per-ctx LCD flag from the global typography setting so
+    // any subsequent `fill_text` routes through the cached subpixel mask
+    // path when LCD is enabled (default at scale ≤ 1.25).  Without this
+    // shells that drive the loop via `begin_frame` instead of
+    // `paint_app_with_inspector` silently fall through to the aliased
+    // tessellated-outline path even when the global says LCD is on.
+    ctx.set_lcd_mode(agg_gui::font_settings::lcd_enabled());
 }
 
 /// Reset `ctx`, sync the inspector snapshot, lay out and paint `app`.

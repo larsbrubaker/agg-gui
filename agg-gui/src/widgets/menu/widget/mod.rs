@@ -325,12 +325,6 @@ impl MenuBar {
         }
     }
 
-    /// Invalidate the bar's backbuffer cache. Called from every site that
-    /// mutates `open_index` so the next paint re-rasterises with the
-    /// updated bar-button appearance.
-    fn invalidate_paint_cache(&mut self) {
-        self.cache.invalidate();
-    }
 }
 
 impl Widget for MenuBar {
@@ -361,6 +355,21 @@ impl Widget for MenuBar {
 
     fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
         Some(&mut self.cache)
+    }
+
+    fn backbuffer_mode(&self) -> crate::widget::BackbufferMode {
+        // Mirror Label: when the global LCD toggle is on (which the
+        // default rule wires to "scale ≤ 1.25"), use the per-channel LCD
+        // coverage cache so text on the bar is subpixel-rendered exactly
+        // like Label text.  Falls back to RGBA at HiDPI where LCD gains
+        // nothing.  MenuBar paints `top_bar_bg` as an opaque full-width
+        // fill before any other content, satisfying LcdCoverage's
+        // "widget must cover its bounds with opaque content" contract.
+        if crate::font_settings::lcd_enabled() {
+            crate::widget::BackbufferMode::LcdCoverage
+        } else {
+            crate::widget::BackbufferMode::Rgba
+        }
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -510,7 +519,7 @@ impl Widget for MenuBar {
                 {
                     self.popup.close();
                     self.open_index = None;
-                    self.invalidate_paint_cache();
+                    self.cache.invalidate();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -523,7 +532,7 @@ impl Widget for MenuBar {
                 (self.on_action)(&action);
                 if !self.popup.is_open() {
                     self.open_index = None;
-                    self.invalidate_paint_cache();
+                    self.cache.invalidate();
                 }
             } else if matches!(response, MenuResponse::Closed) {
                 self.open_index = None;
@@ -533,7 +542,7 @@ impl Widget for MenuBar {
                 // reads as "still selected".  Cleared once the cursor
                 // moves to a different top-menu (or off the bar).
                 self.suppress_hover_for = self.hover_index;
-                self.invalidate_paint_cache();
+                self.cache.invalidate();
             }
             if result == EventResult::Consumed {
                 return result;
@@ -583,7 +592,7 @@ impl Widget for MenuBar {
             (self.on_action)(&action);
             if !self.popup.is_open() {
                 self.open_index = None;
-                self.invalidate_paint_cache();
+                self.cache.invalidate();
             }
             EventResult::Consumed
         } else {
