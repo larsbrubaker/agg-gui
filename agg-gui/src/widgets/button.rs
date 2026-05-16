@@ -373,26 +373,35 @@ impl Button {
         )
     }
 
-    /// Render the configured icon glyph at the given (x, height)
-    /// in `color`. Centres the glyph vertically using the icon
-    /// font's metrics, so a 14 pt icon and 14 pt text line up on
-    /// the same baseline.
+    /// Render the configured icon glyph at the same baseline as
+    /// the button's text label. We deliberately use the LABEL
+    /// font's metrics for centring (not the icon font's) because
+    /// FA-style icon fonts report an em-box ascent much taller
+    /// than the actual glyph; using their metrics would float the
+    /// icon to the top of the button instead of aligning with text.
     fn paint_icon(
         ctx: &mut dyn DrawCtx,
         icon: &Option<ButtonIcon>,
+        label_font: &Arc<Font>,
+        label_font_size: f64,
         x: f64,
         button_h: f64,
         color: Color,
     ) {
         let Some(icon) = icon else { return };
+        // Measure label font ("Ag" gives ascender+descender) to
+        // pick the baseline, then switch to icon font for paint.
+        ctx.set_font(Arc::clone(label_font));
+        ctx.set_font_size(label_font_size);
+        let baseline_y = ctx
+            .measure_text("Ag")
+            .map(|m| m.centered_baseline_y(button_h))
+            .unwrap_or((button_h - label_font_size) * 0.5)
+            .max(0.0);
         ctx.set_font(Arc::clone(&icon.font));
         ctx.set_font_size(icon.font_size);
         ctx.set_fill_color(color);
-        let glyph_str = icon.glyph.to_string();
-        if let Some(m) = ctx.measure_text(&glyph_str) {
-            let ty = m.centered_baseline_y(button_h).max(0.0);
-            ctx.fill_text(&glyph_str, x, ty);
-        }
+        ctx.fill_text(&icon.glyph.to_string(), x, baseline_y);
     }
 }
 
@@ -647,7 +656,15 @@ impl Widget for Button {
                 let tx = group_x + icon_block_w;
                 let ty = m.centered_baseline_y(h).max(0.0);
                 ctx.fill_text(&self.label_text, tx, ty);
-                Self::paint_icon(ctx, &self.icon, group_x, h, disabled_text);
+                Self::paint_icon(
+                    ctx,
+                    &self.icon,
+                    &self.font,
+                    self.font_size,
+                    group_x,
+                    h,
+                    disabled_text,
+                );
             }
             return;
         }
@@ -670,7 +687,15 @@ impl Widget for Button {
             let icon_block_w =
                 measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size) + ICON_GAP;
             let group_x = (label_x - icon_block_w).max(0.0);
-            Self::paint_icon(ctx, &Some(icon), group_x, h, label_color);
+            Self::paint_icon(
+                ctx,
+                &Some(icon),
+                &self.font,
+                self.font_size,
+                group_x,
+                h,
+                label_color,
+            );
         }
     }
 
