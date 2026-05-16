@@ -137,6 +137,83 @@ fn test_read_only_text_field_rejects_paste() {
     assert_eq!(field.text(), "locked");
 }
 
+#[test]
+fn test_text_field_char_filter_rejects_disallowed_typing() {
+    use crate::text::Font;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut field = TextField::new(font)
+        // Digits + 'x'/'X' + hex letters only — the Solitaire
+        // "Play deal number" dialog's filter.
+        .with_char_filter(|c| c.is_ascii_hexdigit() || c == 'x' || c == 'X');
+    field.layout(Size::new(160.0, 32.0));
+    field.on_event(&crate::Event::FocusGained);
+
+    for c in ['1', '2', 'a', '!', '@', 'b', '\n'] {
+        field.on_event(&crate::Event::KeyDown {
+            key: Key::Char(c),
+            modifiers: Modifiers::default(),
+        });
+    }
+    assert_eq!(field.text(), "12ab");
+}
+
+#[test]
+fn test_text_field_char_filter_strips_paste() {
+    use crate::text::Font;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut field = TextField::new(font).with_char_filter(|c| c.is_ascii_digit());
+    field.layout(Size::new(160.0, 32.0));
+    field.on_event(&crate::Event::FocusGained);
+
+    crate::clipboard::set_text("12-3a4 5");
+    field.on_event(&crate::Event::KeyDown {
+        key: Key::Char('v'),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        },
+    });
+    assert_eq!(field.text(), "12345");
+}
+
+#[test]
+fn test_text_field_escape_ignored_without_selection() {
+    use crate::text::Font;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut field = TextField::new(font).with_text("hello");
+    field.layout(Size::new(160.0, 32.0));
+    field.on_event(&crate::Event::FocusGained);
+
+    // No selection — Escape should bubble up so dialog parents
+    // can use it to cancel themselves.
+    let r = field.on_event(&crate::Event::KeyDown {
+        key: Key::Escape,
+        modifiers: Modifiers::default(),
+    });
+    assert_eq!(r, crate::EventResult::Ignored);
+
+    // Now create a selection (Ctrl+A) and verify Escape is
+    // consumed to clear it.
+    field.on_event(&crate::Event::KeyDown {
+        key: Key::Char('a'),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        },
+    });
+    let r = field.on_event(&crate::Event::KeyDown {
+        key: Key::Escape,
+        modifiers: Modifiers::default(),
+    });
+    assert_eq!(r, crate::EventResult::Consumed);
+}
+
 /// Tab key advances focus through focusable widgets.
 #[test]
 fn test_tab_focus_advance() {

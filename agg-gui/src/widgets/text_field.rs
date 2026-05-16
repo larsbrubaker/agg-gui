@@ -42,6 +42,7 @@ use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 
 mod binding;
 mod clipboard;
+mod filter;
 mod widget_impl;
 
 use clipboard::{clipboard_get, clipboard_set};
@@ -109,6 +110,9 @@ pub struct TextField {
     on_edit_complete: Option<Box<dyn FnMut(&str)>>,
     text_cell: Option<Rc<RefCell<String>>>,
 
+    /// Per-character allow-list. See [`with_char_filter`].
+    char_filter: Option<Rc<dyn Fn(char) -> bool>>,
+
     // ── Backbuffer cache ─────────────────────────────────────────────
     //
     // Cache holds bg + text + selection + border.  Cursor draws in
@@ -167,6 +171,7 @@ impl TextField {
             on_enter: None,
             on_edit_complete: None,
             text_cell: None,
+            char_filter: None,
             cache: BackbufferCache::default(),
             last_sig: None,
         }
@@ -368,6 +373,12 @@ impl TextField {
     /// Insert `s` at cursor, replacing any selection.
     /// Consecutive single-char inserts are coalesced into one undo command.
     fn do_insert(&mut self, s: &str, is_single_char: bool) {
+        // Strip disallowed chars; bail when nothing survives.
+        let filtered = self.apply_char_filter(s);
+        if filtered.is_empty() {
+            return;
+        }
+        let s = filtered.as_str();
         let before = self.snap();
         let had_selection = before.cursor != before.anchor;
 
@@ -489,32 +500,7 @@ impl TextField {
         self.notify_change();
     }
 
-    // ── Callback dispatchers ─────────────────────────────────────────────────
-
-    fn notify_change(&mut self) {
-        let t = self.text();
-        if let Some(cell) = &self.text_cell {
-            *cell.borrow_mut() = t.clone();
-        }
-        if let Some(mut cb) = self.on_change.take() {
-            cb(&t);
-            self.on_change = Some(cb);
-        }
-    }
-    fn notify_enter(&mut self) {
-        if let Some(mut cb) = self.on_enter.take() {
-            let t = self.text();
-            cb(&t);
-            self.on_enter = Some(cb);
-        }
-    }
-    fn notify_edit_complete(&mut self) {
-        if let Some(mut cb) = self.on_edit_complete.take() {
-            let t = self.text();
-            cb(&t);
-            self.on_edit_complete = Some(cb);
-        }
-    }
+    // Callback dispatchers — see `text_field/filter.rs`.
 
     // ── Keyboard handler ─────────────────────────────────────────────────────
 
@@ -771,12 +757,20 @@ impl TextField {
                 EventResult::Consumed
             }
 
-            // ── Escape: clear selection ───────────────────────────────────
+            // Escape: clear selection if any, else let the parent
+            // (typically a modal dialog) handle it.
             Key::Escape => {
                 self.flush_pending();
-                let cur = self.edit.borrow().cursor;
-                self.edit.borrow_mut().anchor = cur;
-                EventResult::Consumed
+                let (cur, anc) = {
+                    let st = self.edit.borrow();
+                    (st.cursor, st.anchor)
+                };
+                if cur != anc {
+                    self.edit.borrow_mut().anchor = cur;
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
 
             _ => {
