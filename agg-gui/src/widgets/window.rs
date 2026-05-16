@@ -22,6 +22,23 @@
 //!   to toggle between maximised and restored size.
 //! - **Close** — click the × button; syncs with an optional shared `visible_cell`.
 //!
+//! # ⚠ Backbuffer caching gotcha — read before adding a custom Window
+//!
+//! `Window` retains its painted pixels in a GL FBO (or CPU bitmap) and only
+//! re-rasterises on widget setter mutations (`Label::set_text`, hover changes,
+//! etc.).  Custom paint code that reads from an `Rc<RefCell<…>>` model the
+//! framework can't observe — telemetry graphs, sensor streams, simulation
+//! views — will blit stale pixels forever unless you tell the window to
+//! invalidate.  Two ways:
+//!
+//! - `.with_live_content(true)` — Window self-invalidates every frame
+//!   (auto-skipped when collapsed or hidden).  Use for streaming data.
+//! - [`Window::invalidate_backbuffer`] — manual flag from the data-arrival
+//!   path.  Use when invalidation is sparse and you want frame-skip when
+//!   nothing changed.
+//!
+//! See [`Window::new`] for the full discussion.
+//!
 //! # Coordinate notes (Y-up)
 //!
 //! `bounds` stores the window's position in its **parent's** coordinate space.
@@ -208,6 +225,12 @@ pub struct Window {
     /// a foreground layer for body/title/children. The shadow stays outside.
     foreground_layer_active: Cell<bool>,
 
+    /// When `true`, the window's backbuffer is invalidated on every
+    /// frame the window is visible-and-expanded, forcing the content
+    /// widget's `paint()` to run fresh.  See [`with_live_content`] and
+    /// the constructor doc-comment for when to set this.
+    live_content: bool,
+
     /// Window title string — stored so external callers (z-order
     /// persistence, inspector display, etc.) can identify this window
     /// without going through the inner `title_bar` sub-widget.
@@ -225,6 +248,74 @@ impl Window {
     ///
     /// Default position: `(60, 60)` with `size = (360, 280)`. Call
     /// [`with_bounds`] to override.
+    ///
+    /// # ⚠ Live-data callers MUST invalidate manually
+    ///
+    /// **TL;DR:** Windows back-buffer.  Data changes outside widget setters
+    /// don't trigger redraws.  Either call [`Window::invalidate_backbuffer`]
+    /// from the data-arrival path, or use [`Window::with_live_content`] to
+    /// have the window self-invalidate every frame.
+    ///
+    /// ## Why
+    ///
+    /// `Window` retains its painted pixels in a backbuffer (a GL FBO on
+    /// the wgpu/GL backend, a CPU bitmap otherwise) and reuses them on
+    /// every subsequent frame.  The framework only re-rasterises when:
+    ///
+    /// - the window's own state changes (drag/resize/collapse/maximize),
+    /// - one of its descendant widgets invalidates **its** backbuffer
+    ///   (e.g. [`Label::set_text`](crate::widgets::Label) flipping the
+    ///   text, [`Button`](crate::widgets::Button) hover changing colour),
+    /// - a typography/visuals epoch changes globally,
+    /// - or someone explicitly calls [`Window::invalidate_backbuffer`]
+    ///   / sets [`with_live_content(true)`](Window::with_live_content).
+    ///
+    /// If your content widget paints **directly** to `DrawCtx` from
+    /// imperative code each frame — drawing a graph against a ring buffer
+    /// that the network thread is updating, plotting a live FPS curve,
+    /// rendering a custom inspector view — the framework has no way to
+    /// observe that the data changed.  The cached bitmap is *still
+    /// valid as far as the framework knows*, so it blits the stale pixels
+    /// and your custom paint code never runs.
+    ///
+    /// ## Wrong (silent failure)
+    ///
+    /// ```ignore
+    /// // Custom widget that draws a graph from a shared ring buffer.
+    /// // Model fills history from a network thread.  Window backbuffer
+    /// // is rasterised ONCE and then blitted forever — graphs freeze.
+    /// let diag = MyDiagnosticsWidget::new(model.clone());
+    /// let win = Window::new("Diagnostics", font, Box::new(diag))
+    ///     .with_visible_cell(vis);
+    /// ```
+    ///
+    /// ## Right — option A: declare the content live
+    ///
+    /// ```ignore
+    /// let win = Window::new("Diagnostics", font, Box::new(diag))
+    ///     .with_visible_cell(vis)
+    ///     .with_live_content(true);  // self-invalidate each frame
+    /// ```
+    ///
+    /// ## Right — option B: invalidate on data mutation
+    ///
+    /// ```ignore
+    /// // From the data-arrival path:
+    /// model.borrow_mut().record_sample(s);
+    /// diag_window.borrow_mut().invalidate_backbuffer();
+    /// ```
+    ///
+    /// ## Right — option C: compose from auto-invalidating widgets
+    ///
+    /// Build the live content out of `Label`s and call
+    /// [`Widget::set_label_text`](crate::widget::Widget::set_label_text)
+    /// /`set_label_color` on data change.  Setter calls bubble dirty
+    /// up to the window automatically.
+    ///
+    /// Failing to do any of these is the canonical "my widget updates
+    /// but nothing renders" agg-gui gotcha.  Audit any custom widget
+    /// that reads from a `Rc<RefCell<…>>` model and ask: where does its
+    /// invalidation come from?
     pub fn new(title: impl Into<String>, font: Arc<Font>, content: Box<dyn Widget>) -> Self {
         let font_size = 13.0;
         let title_str: String = title.into();
@@ -284,12 +375,54 @@ impl Window {
             foreground_layer_active: Cell::new(false),
             title: title_str,
             on_raised: None,
+            live_content: false,
         }
     }
 
     /// Returns the window title as it was passed to [`Window::new`].
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    /// Force the window's retained backbuffer to re-rasterise on the next
+    /// paint pass.  Use this when the content widget reads from a live
+    /// data source (network feed, animation curve, simulation state)
+    /// that the framework can't observe.  Otherwise the cached pixels
+    /// blit unchanged and your live data never reaches the screen.
+    ///
+    /// Pair with [`Window::with_live_content`] for streaming data that
+    /// changes every frame: that flag self-invalidates here automatically
+    /// (and skips when collapsed/hidden).
+    ///
+    /// See [`Window::new`] for the full discussion of when this matters
+    /// and the alternative ("compose live UI out of widgets that
+    /// invalidate on data change") that avoids needing to call this at
+    /// all.
+    pub fn invalidate_backbuffer(&mut self) {
+        self.backbuffer.invalidate();
+    }
+
+    /// Treat the window's content as live: invalidate the backbuffer
+    /// every frame so custom paint code reading from a mutating data
+    /// source (network feed, simulation state, sensor stream) is
+    /// rasterised fresh.  Automatically skipped when the window is
+    /// collapsed or hidden — no wasted work when the user can't see
+    /// the content.
+    ///
+    /// Use this for diagnostics graphs, telemetry views, or any widget
+    /// whose `paint()` reads from an `Rc<RefCell<…>>` model that the
+    /// framework can't observe.  The alternative — composing live UI
+    /// from widgets that auto-invalidate on setter calls
+    /// ([`Label::set_text`](crate::widgets::Label), etc.) — is preferred
+    /// when feasible, but for custom direct-to-`DrawCtx` widgets this
+    /// is the simplest correct fix.
+    ///
+    /// See [`Window::new`] for the full discussion of the back-buffer
+    /// invalidation contract and the canonical "stale pixels" gotcha
+    /// this flag solves.
+    pub fn with_live_content(mut self, live: bool) -> Self {
+        self.live_content = live;
+        self
     }
 
     /// Register a callback fired whenever this window requests a raise

@@ -136,6 +136,12 @@ impl Widget for Window {
             }
         }
 
+        // Live-content windows self-invalidate every frame, except when
+        // collapsed or hidden — no wasted work behind a folded title bar.
+        if self.live_content && !self.collapsed && self.requested_visible() {
+            self.backbuffer.invalidate();
+        }
+
         let requested_visible = self.requested_visible();
         self.visibility_anim
             .set_target(if requested_visible { 1.0 } else { 0.0 });
