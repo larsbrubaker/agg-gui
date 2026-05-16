@@ -115,7 +115,7 @@ impl Widget for TextField {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
-        let r = 6.0;
+        let r = self.theme.border_radius.unwrap_or(6.0);
         let pad = self.padding;
         let (raw_text, raw_cursor, raw_anchor) = {
             let st = self.edit.borrow();
@@ -136,9 +136,10 @@ impl Widget for TextField {
         };
 
         let v = ctx.visuals();
+        let t = &self.theme;
 
         // ── Background ────────────────────────────────────────────────────
-        ctx.set_fill_color(v.widget_bg);
+        ctx.set_fill_color(t.background.unwrap_or(v.widget_bg));
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.fill();
@@ -166,9 +167,9 @@ impl Widget for TextField {
                 let hl_bot = baseline_y - m.descent;
                 let hl_h = (m.ascent + m.descent) * 1.2;
                 ctx.set_fill_color(if self.focused {
-                    v.selection_bg
+                    t.selection_bg.unwrap_or(v.selection_bg)
                 } else {
-                    v.selection_bg_unfocused
+                    t.selection_bg_unfocused.unwrap_or(v.selection_bg_unfocused)
                 });
                 ctx.begin_path();
                 ctx.rect(sx, hl_bot - hl_h * 0.1, sw, hl_h);
@@ -178,10 +179,10 @@ impl Widget for TextField {
 
         // ── Text or placeholder ───────────────────────────────────────────
         if text.is_empty() && !self.focused {
-            ctx.set_fill_color(v.text_dim);
+            ctx.set_fill_color(t.placeholder_color.unwrap_or(v.text_dim));
             ctx.fill_text(&self.placeholder, text_x, baseline_y);
         } else {
-            ctx.set_fill_color(v.text_color);
+            ctx.set_fill_color(t.text_color.unwrap_or(v.text_color));
             ctx.fill_text(&text, text_x, baseline_y);
         }
 
@@ -192,11 +193,11 @@ impl Widget for TextField {
 
         // ── Border ────────────────────────────────────────────────────────
         let border_color = if self.focused {
-            v.accent
+            t.border_color_focused.unwrap_or(v.accent)
         } else if self.hovered {
-            v.widget_stroke_active
+            t.border_color_hovered.unwrap_or(v.widget_stroke_active)
         } else {
-            v.widget_stroke
+            t.border_color.unwrap_or(v.widget_stroke)
         };
         ctx.set_stroke_color(border_color);
         ctx.set_line_width(if self.focused { 2.0 } else { 1.0 });
@@ -270,7 +271,7 @@ impl Widget for TextField {
         // padding or the border.
         ctx.save();
         ctx.clip_rect(pad, 0.0, (self.bounds.width - pad * 2.0).max(0.0), h);
-        ctx.set_stroke_color(v.accent);
+        ctx.set_stroke_color(self.theme.cursor_color.unwrap_or(v.accent));
         ctx.set_line_width(1.5);
         ctx.begin_path();
         ctx.move_to(cx, bot);

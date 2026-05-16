@@ -71,7 +71,7 @@ pub use table::{
     HeaderInfo, HeaderPainter, RowPredicate, Table, TableBuilder, TableColumn, TableRows,
 };
 pub use text_area::TextArea;
-pub use text_field::TextField;
+pub use text_field::{TextField, TextFieldTheme};
 pub use toggle_switch::ToggleSwitch;
 pub use tooltip::Tooltip;
 pub use tree_view::{NodeIcon, TreeView};

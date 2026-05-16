@@ -181,6 +181,36 @@ fn test_text_field_char_filter_strips_paste() {
 }
 
 #[test]
+fn test_text_field_theme_overrides_visuals_palette() {
+    // Confirm `with_theme` stores the overrides on the widget so
+    // `paint` reads them instead of the ambient visuals. Locks the
+    // surface area against future refactors that might mistakenly
+    // drop the theme.
+    use crate::color::Color;
+    use crate::text::Font;
+    use crate::widgets::TextFieldTheme;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let theme = TextFieldTheme {
+        background: Some(Color::from_rgb8(0x0c, 0x1c, 0x12)),
+        text_color: Some(Color::from_rgb8(0xff, 0xff, 0xff)),
+        border_color_focused: Some(Color::from_rgb8(0xff, 0xd7, 0x00)),
+        border_radius: Some(8.0),
+        ..TextFieldTheme::default()
+    };
+    let field = TextField::new(font).with_theme(theme);
+    assert!(field.theme.background.is_some());
+    assert!(field.theme.text_color.is_some());
+    assert!(field.theme.border_color_focused.is_some());
+    assert_eq!(field.theme.border_radius, Some(8.0));
+    // Unset fields stay None — paint falls back to visuals() for
+    // those, which is the documented contract.
+    assert!(field.theme.placeholder_color.is_none());
+    assert!(field.theme.selection_bg.is_none());
+}
+
+#[test]
 fn test_text_field_escape_ignored_without_selection() {
     use crate::text::Font;
     use std::sync::Arc;

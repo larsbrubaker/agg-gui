@@ -28,6 +28,7 @@ use super::text_field_core::{
     byte_at_x, next_char_boundary, next_word_boundary, prev_char_boundary, prev_word_boundary,
     word_range_at, TextEditCommand, TextEditState,
 };
+use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Rect, Size};
@@ -43,9 +44,12 @@ use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 mod binding;
 mod clipboard;
 mod filter;
+mod theme;
 mod widget_impl;
 
 use clipboard::{clipboard_get, clipboard_set};
+pub use theme::TextFieldTheme;
+
 // ---------------------------------------------------------------------------
 // TextField
 // ---------------------------------------------------------------------------
@@ -113,6 +117,10 @@ pub struct TextField {
     /// Per-character allow-list. See [`with_char_filter`].
     char_filter: Option<Rc<dyn Fn(char) -> bool>>,
 
+    /// Per-widget colour overrides — `None` colours fall back to
+    /// the ambient `visuals()` palette. Set via [`with_theme`].
+    pub theme: TextFieldTheme,
+
     // ── Backbuffer cache ─────────────────────────────────────────────
     //
     // Cache holds bg + text + selection + border.  Cursor draws in
@@ -172,6 +180,7 @@ impl TextField {
             on_edit_complete: None,
             text_cell: None,
             char_filter: None,
+            theme: TextFieldTheme::default(),
             cache: BackbufferCache::default(),
             last_sig: None,
         }
