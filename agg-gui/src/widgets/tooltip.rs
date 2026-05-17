@@ -171,6 +171,64 @@ impl Tooltip {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::MouseButton;
+    use crate::text::Font;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+
+    struct ClickChild {
+        bounds: Rect,
+        children: Vec<Box<dyn Widget>>,
+        clicks: Arc<AtomicUsize>,
+    }
+
+    impl ClickChild {
+        fn new(clicks: Arc<AtomicUsize>) -> Self {
+            Self { bounds: Rect::default(), children: Vec::new(), clicks }
+        }
+    }
+
+    impl Widget for ClickChild {
+        fn bounds(&self) -> Rect { self.bounds }
+        fn set_bounds(&mut self, bounds: Rect) { self.bounds = bounds; }
+        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
+        fn type_name(&self) -> &'static str { "ClickChild" }
+        fn layout(&mut self, available: Size) -> Size {
+            self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+            available
+        }
+        fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, event: &Event) -> EventResult {
+            if let Event::MouseUp { button: MouseButton::Left, .. } = event {
+                self.clicks.fetch_add(1, Ordering::SeqCst);
+                EventResult::Consumed
+            } else {
+                EventResult::Ignored
+            }
+        }
+    }
+
+    #[test]
+    fn tooltip_forwards_clicks_to_wrapped_child() {
+        let clicks = Arc::new(AtomicUsize::new(0));
+        let font = Arc::new(Font::from_bytes(FONT_BYTES.to_vec()).expect("bundled font"));
+        let mut tooltip = Tooltip::new(Box::new(ClickChild::new(clicks.clone())), "tip", font);
+        tooltip.layout(Size::new(20.0, 20.0));
+        let event = Event::MouseUp {
+            pos: Point::new(10.0, 10.0),
+            button: MouseButton::Left,
+            modifiers: Default::default(),
+        };
+        assert_eq!(tooltip.on_event(&event), EventResult::Consumed);
+        assert_eq!(clicks.load(Ordering::SeqCst), 1);
+    }
+}
+
 impl Widget for Tooltip {
     fn type_name(&self) -> &'static str {
         "Tooltip"
@@ -270,14 +328,24 @@ impl Widget for Tooltip {
                 if self.hovered != was {
                     crate::animation::request_draw();
                 }
-                EventResult::Ignored
+                self.children
+                    .first_mut()
+                    .map(|child| child.on_event(event))
+                    .unwrap_or(EventResult::Ignored)
             }
             Event::MouseWheel { .. } => {
                 self.hovered = false;
                 self.hover_frames = 0;
-                EventResult::Ignored
+                self.children
+                    .first_mut()
+                    .map(|child| child.on_event(event))
+                    .unwrap_or(EventResult::Ignored)
             }
-            _ => EventResult::Ignored,
+            _ => self
+                .children
+                .first_mut()
+                .map(|child| child.on_event(event))
+                .unwrap_or(EventResult::Ignored),
         }
     }
 
