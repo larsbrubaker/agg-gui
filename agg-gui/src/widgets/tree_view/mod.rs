@@ -141,6 +141,12 @@ impl TreeView {
     /// — but not their bounds.  Used by `layout()` to skip rebuilding the
     /// row widget vec when the user is just resizing the parent (window
     /// resize, scroll, etc.) and the underlying node list hasn't moved.
+    ///
+    /// `hovered_row` is intentionally NOT part of the signature.  Hover
+    /// is painted by `TreeView::paint` from `self.hovered_row` directly,
+    /// without touching the per-row `TreeRow` widgets, so a hover flip
+    /// doesn't throw away the row vec (and with it every cached `Label`
+    /// backbuffer).
     fn row_content_signature(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -153,7 +159,6 @@ impl TreeView {
             n.is_selected.hash(&mut h);
             (n.icon as u8).hash(&mut h);
         }
-        self.hovered_row.hash(&mut h);
         self.focused.hash(&mut h);
         // Drag state affects which row to skip in the build.
         self.drag
@@ -347,6 +352,18 @@ impl TreeView {
     pub fn hovered_node_idx(&self) -> Option<usize> {
         self.hovered_row
             .and_then(|ri| self.row_metas.get(ri).map(|m| m.node_idx))
+    }
+
+    /// Clear the hover state — useful when the mouse leaves the area the
+    /// parent considers part of the tree (e.g. into the InspectorPanel's
+    /// header or property pane).  Bumps the invalidation epoch so the
+    /// previously-hovered row's background re-rasterises.
+    pub fn clear_hover(&mut self) {
+        if self.hovered_row.is_some() || self.hovered_scrollbar {
+            self.hovered_row = None;
+            self.hovered_scrollbar = false;
+            crate::animation::request_draw();
+        }
     }
 
     fn scroll_to_row(&mut self, flat_idx: usize) {

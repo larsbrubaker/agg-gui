@@ -39,6 +39,7 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.
 mod drawing;
+mod inspector_hover;
 mod inspector_tree;
 mod layer_compositing;
 mod layout_lcd;

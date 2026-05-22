@@ -407,8 +407,21 @@ fn main() {
                 event: WindowEvent::MouseWheel { delta, .. },
                 ..
             } => {
+                // DO NOT negate these values. winit's MouseScrollDelta is
+                // already in the OS's scroll-direction convention — on
+                // Windows the FlipFlopWheel registry setting (and any
+                // per-driver "natural scroll" toggle) flips the sign of
+                // WM_MOUSEWHEEL before winit sees it; on macOS NSEvent's
+                // scrollingDeltaY honours System Settings → Trackpad →
+                // Natural Scrolling. Passing the value straight through is
+                // what makes the app respect the OS preference for both
+                // old-school and natural-scroll users. This block has been
+                // regressed multiple times by contributors "fixing" how
+                // scrolling feels on their machine; if it feels backwards,
+                // the OS preference is the source of truth — don't add a
+                // sign flip here.
                 let (mut dx, mut dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (-(x as f64), -(y as f64)),
+                    MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
                     MouseScrollDelta::PixelDelta(d) => (d.x / 40.0, d.y / 40.0),
                 };
                 if current_mods.shift && dx == 0.0 {

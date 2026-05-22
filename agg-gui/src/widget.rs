@@ -367,6 +367,22 @@ pub trait Widget {
         Some((0.0, 0.0, b.width, b.height))
     }
 
+    /// Affine transform applied between this widget and its children during
+    /// inspector traversal.  Mirrors what `paint()` does — e.g. a widget
+    /// that pushes pan/zoom in `paint()` and pops it in `finish_paint()`
+    /// makes the framework recurse into its children with pan/zoom active,
+    /// so `collect_inspector_nodes` must apply the same transform when
+    /// accumulating descendant screen bounds.  Without this hook the
+    /// inspector hover overlay lands at the un-transformed canvas position
+    /// when the widget sits inside a panning/zooming container.
+    ///
+    /// Default: identity (most widgets translate their children only
+    /// through `child.bounds()`, which `collect_inspector_nodes` already
+    /// accumulates separately).
+    fn inspector_child_transform(&self) -> crate::TransAffine {
+        crate::TransAffine::new()
+    }
+
     // -------------------------------------------------------------------------
     // Layout properties (universal — every widget carries these)
     // -------------------------------------------------------------------------

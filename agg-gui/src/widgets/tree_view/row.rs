@@ -252,6 +252,12 @@ impl Widget for NodeIconWidget {
 /// **Event-routing note:** `TreeRow` and its children all return `EventResult::Ignored`.
 /// The containing `TreeView` handles all events (selection, expand/collapse) using its
 /// `row_metas: Vec<RowMeta>` which records each row's node_idx and toggle bounds.
+///
+/// **Hover painting** — the hover background is drawn by `TreeView::paint` from
+/// the parent's `hovered_row` state.  Keeping it out of `TreeRow` means a hover
+/// flip doesn't need to invalidate / rebuild the row's child label cache: only
+/// the `TreeView` body re-rasterises, and the framework re-uses each label's
+/// existing backbuffer.
 pub struct TreeRow {
     bounds: Rect,
     pub node_idx: usize,
@@ -260,7 +266,6 @@ pub struct TreeRow {
     /// and is never read — `TreeView` uses `None` for the corresponding `RowMeta::toggle_rect`.
     pub toggle_local_bounds: Rect,
     is_selected: bool,
-    is_hovered: bool,
     focused: bool,
     children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
@@ -274,7 +279,6 @@ impl TreeRow {
         has_children: bool,
         is_expanded: bool,
         is_selected: bool,
-        is_hovered: bool,
         focused: bool,
         icon: NodeIcon,
         label: impl Into<String>,
@@ -295,7 +299,6 @@ impl TreeRow {
             node_idx,
             toggle_local_bounds: Rect::default(),
             is_selected,
-            is_hovered,
             focused,
             children,
             base: WidgetBase::new(),
@@ -389,16 +392,6 @@ impl Widget for TreeRow {
                 Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.12)
             };
             ctx.set_fill_color(c);
-            ctx.begin_path();
-            ctx.rect(0.0, 0.0, w, h);
-            ctx.fill();
-        } else if self.is_hovered {
-            ctx.set_fill_color(Color::rgba(
-                v.text_color.r,
-                v.text_color.g,
-                v.text_color.b,
-                0.08,
-            ));
             ctx.begin_path();
             ctx.rect(0.0, 0.0, w, h);
             ctx.fill();

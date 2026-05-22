@@ -299,11 +299,17 @@ impl InspectorPanel {
         nodes: Rc<RefCell<Vec<InspectorNode>>>,
         hovered_bounds: Rc<RefCell<Option<InspectorOverlay>>>,
     ) -> Self {
+        // `hover_repaint(true)` (the TreeView default) lets a row-hover
+        // change return `Consumed`, which bumps the invalidation epoch
+        // and marks the inspector's parent Window backbuffer dirty so
+        // the new row's hover background actually appears on the next
+        // frame.  Decoupling `hovered_row` from `row_content_signature`
+        // means this no longer costs a row-widget rebuild, so the old
+        // `with_hover_repaint(false)` performance opt-out is obsolete.
         let tree_view = TreeView::new(Arc::clone(&font))
             .with_row_height(20.0)
             .with_font_size(12.0)
-            .with_indent_width(14.0)
-            .with_hover_repaint(false);
+            .with_indent_width(14.0);
         Self {
             bounds: Rect::default(),
             _children: vec![Box::new(InternalPresenceNode {

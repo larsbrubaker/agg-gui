@@ -24,6 +24,9 @@ use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::Label;
 
+mod run_mode;
+pub use run_mode::{shared_run_mode, RunMode, RunModeDesc, RunModeRow};
+
 // ── Frame history (rolling sample buffer) ─────────────────────────────────────
 
 /// Rolling buffer of recent frame times in milliseconds.  Apps push from
@@ -143,11 +146,12 @@ pub fn shared_frame_history() -> SharedFrameHistory {
 /// reference budget — same convention as the egui reference panel.
 pub struct PerformanceView {
     bounds: Rect,
-    /// Always exactly one child: the `Label` displaying "Mean CPU
-    /// usage".  Stored in `children` so the framework's tree walk
-    /// recurses into it; `paint()` refreshes the text via
-    /// `set_label_text` each frame and the Label's own glyph cache
-    /// invalidates only on text changes.
+    /// Children stored so the framework's tree walk recurses into them
+    /// (glyph caches, hover, hit-test).  Indices:
+    ///   `mean_idx`            — "Mean CPU usage" label (always present)
+    ///   `selector_idx..`      — optional "Mode" label + RunModeRow +
+    ///                           RunModeDesc (only when a run-mode cell
+    ///                           is wired via `with_run_mode_selector`)
     children: Vec<Box<dyn Widget>>,
     history: SharedFrameHistory,
     sparkline_height: f64,
@@ -157,13 +161,36 @@ pub struct PerformanceView {
     live_redraw: bool,
     redraw_on_history_change: bool,
     last_painted_revision: Cell<u64>,
+    font: Arc<Font>,
+    /// Layout offsets for the optional selector section.  Populated by
+    /// [`Self::with_run_mode_selector`]; zero when no selector is shown.
+    selector: Option<SelectorLayout>,
+    run_mode: Option<Rc<Cell<RunMode>>>,
+}
+
+/// Layout constants for the optional Reactive/Continuous selector group.
+/// Indices point into `PerformanceView::children`.
+struct SelectorLayout {
+    mode_label_idx: usize,
+    mode_row_idx: usize,
+    desc_idx: usize,
+    mode_label_height: f64,
+    row_height: f64,
+    desc_height: f64,
+    inner_gap: f64,
+    /// Separator stroke between selector group and CPU readout.  Drawn
+    /// directly in `paint()` rather than as a child widget — a plain
+    /// 1-px line doesn't need glyph caching or hit-testing.
+    separator_pad: f64,
 }
 
 impl PerformanceView {
     /// Build a new view bound to `history`.  `font` is used for the
-    /// "Mean CPU usage" label.
+    /// "Mean CPU usage" label and (if enabled) the run-mode selector
+    /// labels.
     pub fn new(font: Arc<Font>, history: SharedFrameHistory) -> Self {
-        let mut label = Label::new("Mean CPU usage: 0.00 ms / frame", font).with_font_size(11.0);
+        let mut label = Label::new("Mean CPU usage: 0.00 ms / frame", Arc::clone(&font))
+            .with_font_size(11.0);
         // Live counter — value changes every frame, so caching the
         // glyph bitmap to a backbuffer would invalidate every frame
         // anyway.  Direct rasterisation is cheaper here.
@@ -179,7 +206,56 @@ impl PerformanceView {
             live_redraw: false,
             redraw_on_history_change: false,
             last_painted_revision: Cell::new(0),
+            font,
+            selector: None,
+            run_mode: None,
         }
+    }
+
+    /// Mount a Reactive / Continuous selector at the top of the widget.
+    /// The two buttons read and write through `run_mode`, and a dynamic
+    /// description label below them mirrors the current mode (and shows
+    /// FPS in Continuous mode).  The host's main loop is expected to
+    /// read the same cell to decide whether to pump frames.
+    pub fn with_run_mode_selector(mut self, run_mode: Rc<Cell<RunMode>>) -> Self {
+        // Reuse the existing "Mean CPU usage" Label as child[0]; append
+        // the selector widgets so the visible order (top-down in Y-up)
+        // is: Mode label, button row, description, [separator], mean
+        // label, sparkline.
+        let mode_label = Label::new("Mode", Arc::clone(&self.font)).with_font_size(11.0);
+        let mode_row = RunModeRow::new(Arc::clone(&self.font), Rc::clone(&run_mode));
+        let desc = RunModeDesc::new(
+            Arc::clone(&self.font),
+            Rc::clone(&run_mode),
+            Rc::clone(&self.history),
+        );
+
+        let mean_idx = 0;
+        let _ = mean_idx; // reserved for clarity
+        let mode_label_idx = self.children.len();
+        self.children.push(Box::new(mode_label));
+        let mode_row_idx = self.children.len();
+        self.children.push(Box::new(mode_row));
+        let desc_idx = self.children.len();
+        self.children.push(Box::new(desc));
+
+        self.selector = Some(SelectorLayout {
+            mode_label_idx,
+            mode_row_idx,
+            desc_idx,
+            mode_label_height: 16.0,
+            row_height: RunModeRow::ROW_HEIGHT,
+            desc_height: 18.0,
+            inner_gap: 4.0,
+            separator_pad: 6.0,
+        });
+        self.run_mode = Some(run_mode);
+        self
+    }
+
+    /// Read the live run-mode cell, if a selector is wired.
+    pub fn run_mode(&self) -> Option<Rc<Cell<RunMode>>> {
+        self.run_mode.clone()
     }
 
     pub fn with_sparkline_height(mut self, h: f64) -> Self {
@@ -227,7 +303,17 @@ impl PerformanceView {
     }
 
     fn total_height(&self) -> f64 {
-        self.label_height + self.sparkline_height + self.padding * 3.0
+        let base = self.label_height + self.sparkline_height + self.padding * 3.0;
+        match &self.selector {
+            Some(s) => {
+                base + s.mode_label_height
+                    + s.row_height
+                    + s.desc_height
+                    + s.inner_gap * 3.0
+                    + s.separator_pad * 2.0
+            }
+            None => base,
+        }
     }
 }
 
@@ -252,18 +338,69 @@ impl Widget for PerformanceView {
         let w = available.width.max(1.0);
         let h = self.total_height();
         self.bounds = Rect::new(0.0, 0.0, w, h);
-        // Label sits at the TOP of the widget (Y-up: high local Y).
-        if let Some(child) = self.children.first_mut() {
-            let inner_w = (w - self.padding * 2.0).max(1.0);
-            let s = child.layout(Size::new(inner_w, self.label_height));
-            // Y-up: top of widget = h.  Place label so its top edge sits
-            // `padding` below the widget top, then centre vertically
-            // within the `label_height` row.
-            let row_top = h - self.padding;
-            let row_bottom = row_top - self.label_height;
-            let label_y = row_bottom + (self.label_height - s.height) * 0.5;
-            child.set_bounds(Rect::new(self.padding, label_y, s.width, s.height));
+        let inner_w = (w - self.padding * 2.0).max(1.0);
+
+        // Selector group sits at the top in Y-up (high local Y), in
+        // visual order: "Mode" label, RunModeRow, RunModeDesc.  When the
+        // selector is absent we fall straight through to the mean-label
+        // placement and the geometry matches the pre-selector layout
+        // exactly.
+        let mut cursor_top = h - self.padding;
+        if let Some(s) = &self.selector {
+            // "Mode" label.
+            let row_top = cursor_top;
+            let row_bottom = row_top - s.mode_label_height;
+            let label_size = self.children[s.mode_label_idx]
+                .layout(Size::new(inner_w, s.mode_label_height));
+            let label_y =
+                row_bottom + (s.mode_label_height - label_size.height) * 0.5;
+            self.children[s.mode_label_idx].set_bounds(Rect::new(
+                self.padding,
+                label_y,
+                label_size.width,
+                label_size.height,
+            ));
+            cursor_top = row_bottom - s.inner_gap;
+
+            // RunModeRow — full-width segmented control.
+            let row_bottom = cursor_top - s.row_height;
+            self.children[s.mode_row_idx].layout(Size::new(inner_w, s.row_height));
+            self.children[s.mode_row_idx].set_bounds(Rect::new(
+                self.padding,
+                row_bottom,
+                inner_w,
+                s.row_height,
+            ));
+            cursor_top = row_bottom - s.inner_gap;
+
+            // Description.  Let the desc widget self-size for wrap.
+            let desc_size = self.children[s.desc_idx].layout(Size::new(inner_w, s.desc_height));
+            let desc_h = desc_size.height.max(s.desc_height);
+            let desc_bottom = cursor_top - desc_h;
+            self.children[s.desc_idx].set_bounds(Rect::new(
+                self.padding,
+                desc_bottom,
+                inner_w,
+                desc_h,
+            ));
+            cursor_top = desc_bottom - s.separator_pad * 2.0 - s.inner_gap;
         }
+
+        // Mean-CPU label sits below the optional selector group, above
+        // the sparkline.  Without a selector this lands at exactly the
+        // original position (top of widget, padded).
+        let mean_row_top = cursor_top;
+        let mean_row_bottom = mean_row_top - self.label_height;
+        let mean_size =
+            self.children[0].layout(Size::new(inner_w, self.label_height));
+        let mean_y = mean_row_bottom + (self.label_height - mean_size.height) * 0.5;
+        self.children[0].set_bounds(Rect::new(
+            self.padding,
+            mean_y,
+            mean_size.width,
+            mean_size.height,
+        ));
+
         Size::new(w, h)
     }
 
@@ -289,15 +426,32 @@ impl Widget for PerformanceView {
             (hist.mean_ms(), hist.revision())
         };
         let text = format!("Mean CPU usage: {mean:.2} ms / frame");
-        if let Some(child) = self.children.first_mut() {
-            child.set_label_text(&text);
-            child.set_label_color(v.text_dim);
+        self.children[0].set_label_text(&text);
+        self.children[0].set_label_color(v.text_dim);
+
+        // Faint horizontal separator between the selector group and the
+        // mean-CPU readout, mirroring the divider in the backend panel.
+        if let Some(s) = &self.selector {
+            let desc_bottom = self.children[s.desc_idx].bounds().y;
+            let sep_y = desc_bottom - s.separator_pad;
+            if sep_y > self.padding {
+                ctx.set_stroke_color(v.separator);
+                ctx.set_line_width(1.0);
+                ctx.begin_path();
+                ctx.move_to(self.padding, sep_y);
+                ctx.line_to(w - self.padding, sep_y);
+                ctx.stroke();
+            }
+        }
+        if let Some(s) = &self.selector {
+            // Re-tint the "Mode" label each frame so a theme switch
+            // doesn't leave stale text colour on screen.
+            self.children[s.mode_label_idx].set_label_color(v.text_dim);
         }
 
-        // Sparkline area sits below the label row in Y-up:
-        //   x: [padding .. w - padding]
-        //   y: [padding .. padding + sparkline_height]
-        // (label occupies Y above this strip; widget bottom = y=0.)
+        // Sparkline area sits below the mean label.  Pin it to the bottom
+        // (Y-up: low local Y) so it stays at the foot of the widget
+        // regardless of whether the selector takes up vertical space.
         let sx = self.padding;
         let sy = self.padding;
         let sw = (w - self.padding * 2.0).max(1.0);
@@ -311,6 +465,21 @@ impl Widget for PerformanceView {
     }
 
     fn needs_draw(&self) -> bool {
+        // Reactive run-mode wins, period.  Hosts that wire the
+        // selector explicitly opt in to "the user gets to decide
+        // whether we loop"; in Reactive that means the widget must
+        // NOT claim redraws of its own — otherwise the shell's
+        // per-paint sample push turns `with_history_redraw(true)`
+        // into an infinite loop and AtomArtist (which defaults to
+        // Reactive) ends up painting continuously despite the user
+        // explicitly picking Reactive.  In Continuous the host loop
+        // pumps every frame anyway, so the internal claims here are
+        // redundant but harmless.
+        if let Some(rm) = &self.run_mode {
+            if rm.get() == RunMode::Reactive {
+                return false;
+            }
+        }
         // Default: passive. The agg-gui demo pushes a sample after each
         // paint, so making revision changes dirty by default would
         // turn Reactive mode into an accidental continuous loop.

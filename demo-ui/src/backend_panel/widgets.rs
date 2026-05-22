@@ -1,18 +1,17 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    Button, Color, DrawCtx, Event, EventResult, Font, HAnchor, Label, Rect, Size, Widget,
+    Button, DrawCtx, Event, EventResult, Font, HAnchor, Label, Rect, Size, Widget,
 };
 
-use super::{FrameHistory, RunMode};
-
-// The "Mean CPU usage" label + frame-time sparkline that used to live
-// here moved into `agg_gui::widgets::performance::PerformanceView` so
-// other apps (Solitaire's debug menu pop-up) can render the same
-// readout without duplicating the sparkline math.
+// The "Mean CPU usage" label + frame-time sparkline, the Mode header, the
+// Reactive/Continuous segmented selector, and the dynamic description label
+// all moved into `agg_gui::widgets::performance::PerformanceView` so other
+// apps (Solitaire's debug menu pop-up, AtomArtist's debug Performance
+// window) render the same readout + selector without duplicating the
+// sparkline math or the segmented-toggle composition.
 
 // ── Screen size label ─────────────────────────────────────────────────────────
 
@@ -76,97 +75,6 @@ impl Widget for ScreenSizeLabel {
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
-    }
-}
-
-// ── Run mode row ─────────────────────────────────────────────────────────────
-
-/// Reactive / Continuous selector built from two real `Button` children
-/// sharing a `Rc<Cell<RunMode>>`.  Each button uses
-/// [`Button::with_subtle`] + [`Button::with_active_fn`] — the inactive
-/// segment paints in muted theme colours and the selected segment flips
-/// to the accent surface.  The label glyph cache lives inside each
-/// Button's Label child, so font rendering stays backbuffered without
-/// any manual `paint_subtree` calls in this widget.
-pub(super) struct RunModeRow {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-}
-
-impl RunModeRow {
-    const BTN_W: f64 = 96.0;
-    const BTN_H: f64 = 24.0;
-
-    pub(super) fn new(font: Arc<Font>, run_mode: Rc<Cell<RunMode>>) -> Self {
-        let segments: [(&'static str, RunMode); 2] = [
-            ("Reactive", RunMode::Reactive),
-            ("Continuous", RunMode::Continuous),
-        ];
-        let children: Vec<Box<dyn Widget>> = segments
-            .iter()
-            .map(|(label, this_mode)| {
-                let mode_active = Rc::clone(&run_mode);
-                let mode_click = Rc::clone(&run_mode);
-                let this = *this_mode;
-                let btn = Button::new(*label, Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_subtle()
-                    .with_active_fn(move || mode_active.get() == this)
-                    .on_click(move || {
-                        if mode_click.get() != this {
-                            mode_click.set(this);
-                            agg_gui::animation::request_draw();
-                        }
-                    });
-                Box::new(btn) as Box<dyn Widget>
-            })
-            .collect();
-        Self {
-            bounds: Rect::default(),
-            children,
-        }
-    }
-}
-
-impl Widget for RunModeRow {
-    fn type_name(&self) -> &'static str {
-        "RunModeRow"
-    }
-    fn bounds(&self) -> Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, b: Rect) {
-        self.bounds = b;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-
-    fn layout(&mut self, available: Size) -> Size {
-        let row_h = Self::BTN_H + 8.0;
-        self.bounds = Rect::new(0.0, 0.0, available.width, row_h);
-        let gy = (row_h - Self::BTN_H) * 0.5;
-        for (i, child) in self.children.iter_mut().enumerate() {
-            child.layout(Size::new(Self::BTN_W, Self::BTN_H));
-            child.set_bounds(Rect::new(
-                12.0 + i as f64 * (Self::BTN_W + 4.0),
-                gy,
-                Self::BTN_W,
-                Self::BTN_H,
-            ));
-        }
-        Size::new(available.width, row_h)
-    }
-
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
-        // Buttons paint themselves through the framework's tree walk.
-    }
-
-    fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
     }
 }
@@ -382,100 +290,3 @@ impl Widget for MsaaRow {
     }
 }
 
-// ── Run mode description label ────────────────────────────────────────────────
-
-/// Dynamic label beneath the run-mode buttons.
-/// Reactive: "Only running UI code when there are animations or input."
-/// Continuous: "Repainting the UI each frame. FPS: X.X"
-pub(super) struct RunModeDesc {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-    run_mode: Rc<Cell<RunMode>>,
-    history: Rc<RefCell<FrameHistory>>,
-    label: Label,
-}
-
-impl RunModeDesc {
-    pub(super) fn new(
-        font: Arc<Font>,
-        run_mode: Rc<Cell<RunMode>>,
-        history: Rc<RefCell<FrameHistory>>,
-    ) -> Self {
-        let mut label = Label::new("", Arc::clone(&font))
-            .with_font_size(10.0)
-            .with_wrap(true);
-        label.buffered = false;
-        Self {
-            bounds: Rect::default(),
-            children: Vec::new(),
-            run_mode,
-            history,
-            label,
-        }
-    }
-}
-
-impl Widget for RunModeDesc {
-    fn type_name(&self) -> &'static str {
-        "RunModeDesc"
-    }
-    fn bounds(&self) -> Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, b: Rect) {
-        self.bounds = b;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-
-    fn layout(&mut self, available: Size) -> Size {
-        // Set the text first so wrapped height is measured correctly for the
-        // worst-case (reactive) string, then layout once within the available
-        // width minus the 12-px horizontal padding used at paint time.
-        self.label
-            .set_text("Only running UI code when there are animations or input.".to_owned());
-        let inner_w = (available.width - 24.0).max(1.0);
-        let s = self.label.layout(Size::new(inner_w, f64::MAX / 2.0));
-        self.label
-            .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
-        let h = (s.height + 8.0).max(18.0);
-        self.bounds = Rect::new(0.0, 0.0, available.width, h);
-        Size::new(available.width, h)
-    }
-
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let text = match self.run_mode.get() {
-            RunMode::Reactive => {
-                "Only running UI code when there are animations or input.".to_owned()
-            }
-            RunMode::Continuous => {
-                let hist = self.history.borrow();
-                let fps = if hist.mean_ms() < 0.001 {
-                    0.0
-                } else {
-                    1000.0 / hist.mean_ms()
-                };
-                format!("Running continuously as fast as possible. FPS: {fps:.1}")
-            }
-        };
-        self.label.set_text(text);
-        self.label.set_color(v.text_dim);
-
-        let lh = self.label.bounds().height;
-        let ly = ((self.bounds.height - lh) * 0.5).max(2.0);
-
-        ctx.save();
-        ctx.translate(12.0, ly);
-        agg_gui::widget::paint_subtree(&mut self.label, ctx);
-        ctx.restore();
-    }
-
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
-    }
-}

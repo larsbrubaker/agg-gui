@@ -14,6 +14,14 @@
 //! [`device_scale`](crate::device_scale::device_scale) factor to produce
 //! physical pixel values for use inside layout algorithms.
 //!
+//! # Coordinate system
+//!
+//! Layout produces positions in **logical Y-up** space, origin at the
+//! bottom-left. [`VAnchor::TOP`] anchors to the high-Y edge of the parent
+//! slot, [`VAnchor::BOTTOM`] to Y=0. The App handles the Y-flip against
+//! platform input coordinates at the event boundary (see `App::flip_y`),
+//! so anchor/margin math here is straight arithmetic in Y-up space.
+//!
 //! # Margin vs padding
 //!
 //! - **Margin** lives on the child and is read by the parent during layout.

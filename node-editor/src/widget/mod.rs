@@ -13,14 +13,16 @@
 
 mod events;
 pub mod nodes;
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use agg_gui::widget::paint_subtree;
+use agg_gui::widget::{BackbufferKind, BackbufferSpec, BackbufferState};
 use agg_gui::{
-    DrawCtx, Event, EventResult, HAnchor, MenuEntry, MenuItem, MenuResponse, PopupMenu, Rect, Size,
-    VAnchor, Widget, WidgetBase,
+    DrawCtx, Event, EventResult, HAnchor, Insets, MenuEntry, MenuItem, MenuResponse, PopupMenu,
+    Rect, Size, VAnchor, Widget, WidgetBase,
 };
 
 use crate::draw::{
@@ -82,7 +84,13 @@ enum CanvasState {
 /// The reusable node-editor widget.
 pub struct NodeEditor {
     bounds: Rect,
-    children: Vec<Box<dyn Widget>>, // unused — kept for the Widget trait
+    /// One `NodeWidget` per model node, rebuilt by `layout()` when the
+    /// model snapshot's fingerprint changes.  Bounds live in
+    /// **canvas-space**; `paint()` applies the pan/zoom transform and
+    /// leaves it active for the framework's child-paint pass, popping
+    /// it in `finish_paint()`.  Exposing children this way is what lets
+    /// the inspector see every node.
+    children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
     model: SharedModel,
     canvas_offset: [f64; 2],
@@ -99,6 +107,14 @@ pub struct NodeEditor {
     /// where the user clicked (used as the new node's position).
     popup: PopupMenu,
     popup_canvas_pos: [f64; 2],
+    /// Retained GL FBO state — `paint_subtree_gl_backbuffer` keys its
+    /// texture cache off this struct's `id()` and skips re-rasterising
+    /// while `dirty` is false.
+    backbuffer: BackbufferState,
+    /// Fingerprint of the data that drives the retained paint.  Updated
+    /// by `layout()`; a change invalidates `backbuffer` and rebuilds
+    /// `children`.
+    last_paint_fingerprint: Option<u64>,
 }
 
 impl NodeEditor {
@@ -123,6 +139,8 @@ impl NodeEditor {
             id: "node-editor",
             popup: PopupMenu::new(popup_items),
             popup_canvas_pos: [0.0, 0.0],
+            backbuffer: BackbufferState::new(),
+            last_paint_fingerprint: None,
         }
     }
 
@@ -238,6 +256,55 @@ impl NodeEditor {
         }
     }
 
+    /// Hash of every input that affects how the children's paint looks
+    /// across one frame.  Mismatch between the previous fingerprint and
+    /// the new one drives both the children rebuild and the GL FBO
+    /// invalidation — paint outputs change ⇒ the cached texture must
+    /// regenerate.
+    fn compute_fingerprint(&self, layouts: &[NodeLayoutInfo], ext_sel: Option<NodeId>) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        layouts.len().hash(&mut h);
+        for l in layouts {
+            l.node_id.0.hash(&mut h);
+            l.top_left[0].to_bits().hash(&mut h);
+            l.top_left[1].to_bits().hash(&mut h);
+            l.size[0].to_bits().hash(&mut h);
+            l.size[1].to_bits().hash(&mut h);
+            l.display_name.hash(&mut h);
+            l.category.hash(&mut h);
+            l.rows.len().hash(&mut h);
+            let sel = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
+            sel.hash(&mut h);
+        }
+        // Pan/zoom don't change WHICH NodeWidgets we build, only where
+        // the parent transform paints them, so they're left out of the
+        // children-rebuild signature.  The backbuffer is invalidated for
+        // pan/zoom changes via `request_draw()` → `dispatch_event` →
+        // `mark_dirty` from the event handlers.
+        h.finish()
+    }
+
+    /// Tear down `self.children` and build a fresh `Vec<NodeWidget>`
+    /// from `layouts`.  Bounds are in canvas-space; the editor's paint
+    /// path leaves the pan/zoom transform active so the framework's
+    /// per-child translate lands at the right screen position.
+    fn rebuild_children(&mut self, layouts: &[NodeLayoutInfo], ext_sel: Option<NodeId>) {
+        let visuals = agg_gui::current_visuals();
+        let palette = CanvasPalette::from_visuals(&visuals);
+        let model = self.model.lock().unwrap();
+        let node_ctx = NodePaintContext::from_model(palette, &*model);
+        drop(model);
+
+        let mut new_children: Vec<Box<dyn Widget>> = Vec::with_capacity(layouts.len());
+        for l in layouts {
+            let selected = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
+            let nw = NodeWidget::from_layout(l, selected, node_ctx.clone());
+            new_children.push(Box::new(nw));
+        }
+        self.children = new_children;
+    }
+
     fn begin_drag_node(&mut self, id: NodeId, canvas_start: [f64; 2]) {
         let mut drag_ids: Vec<NodeId> = self.selected.iter().copied().collect();
         if !drag_ids.contains(&id) {
@@ -300,7 +367,37 @@ impl Widget for NodeEditor {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+
+        // Snapshot once for both the fingerprint AND the (possible)
+        // children rebuild — avoids hitting the model twice.
+        let layouts = self.snapshot_layouts();
+        let ext_sel = self.model.lock().unwrap().primary_selection();
+        let sig = self.compute_fingerprint(&layouts, ext_sel);
+
+        if self.last_paint_fingerprint != Some(sig) {
+            self.rebuild_children(&layouts, ext_sel);
+            self.last_paint_fingerprint = Some(sig);
+            self.backbuffer.invalidate();
+        }
+
         available
+    }
+
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        // Framework recurses into children with the pan/zoom transform
+        // still active in the CTM (we leave it pushed across paint() →
+        // children → finish_paint()).  `ctx.clip_rect(...)` transforms
+        // its rect through the CTM, so we hand it the canvas-space
+        // pre-image of the editor's widget bounds — pan/zoom maps that
+        // back to (0, 0, w, h) in screen coords.
+        let w = self.bounds.width;
+        let h = self.bounds.height;
+        let s = self.canvas_scale.max(1e-9);
+        let cx = -self.canvas_offset[0] / s;
+        let cy = -self.canvas_offset[1] / s;
+        let cw = w / s;
+        let ch = h / s;
+        Some((cx, cy, cw, ch))
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -318,10 +415,9 @@ impl Widget for NodeEditor {
             ctx.set_font(f);
         }
 
-        // Outer save: clip + transform restore back to whatever the
-        // parent gave us. Without this, nodes drawn at canvas-y >
-        // self.bounds.height bleed into the sibling pane above when a
-        // splitter shrinks the canvas.
+        // Outer save: pinned by `finish_paint`.  Without it, nodes drawn
+        // at canvas-y > self.bounds.height bleed into the sibling pane
+        // above when a splitter shrinks the canvas.
         ctx.save();
         ctx.clip_rect(0.0, 0.0, w, h);
 
@@ -330,9 +426,18 @@ impl Widget for NodeEditor {
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
 
+        // Pan/zoom save — kept active across the framework's child paint
+        // pass.  Popped in `finish_paint`.
+        //
+        // Order matters: `ctx.scale` first, THEN `ctx.translate` —
+        // matches the canonical convention `screen = canvas * scale +
+        // offset` that `local_to_canvas` (and therefore every hit-test
+        // and zoom-around-cursor calculation) assumes.  Reversing the
+        // two would scale the offset too, sending nodes away from the
+        // cursor on every zoom step.
         ctx.save();
-        ctx.translate(self.canvas_offset[0], self.canvas_offset[1]);
         ctx.scale(self.canvas_scale, self.canvas_scale);
+        ctx.translate(self.canvas_offset[0], self.canvas_offset[1]);
 
         let inv_scale = 1.0 / self.canvas_scale;
         let visible_min = [
@@ -351,9 +456,11 @@ impl Widget for NodeEditor {
             self.palette.canvas_grid,
         );
 
+        // Edges (under nodes).  Re-snapshot here rather than caching the
+        // `layouts` from `layout()` so paint doesn't carry a hidden
+        // dependency on layout-time data — the backbuffer caches the
+        // result anyway, so paint runs once per real change.
         let layouts = self.snapshot_layouts();
-
-        // Edges first (under nodes).
         let model = self.model.lock().unwrap();
         let edges = model.edges();
         for edge in &edges {
@@ -383,31 +490,21 @@ impl Widget for NodeEditor {
             col.a *= 0.85;
             draw_bezier_connection(ctx, *from_canvas, *cursor_canvas, col, 2.0);
         }
-
-        let ext_sel = model.primary_selection();
-        // Build a fresh paint context (snapshots colours so the
-        // composed sub-widgets don't have to lock the model later).
-        let node_ctx =
-            NodePaintContext::from_model(CanvasPalette::from_visuals(&visuals), &*model);
         drop(model);
 
-        for l in &layouts {
-            let selected = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
-            let mut node_widget = NodeWidget::from_layout(l, selected, node_ctx.clone());
-            // `paint_subtree` expects the ctx already translated so that
-            // (0, 0) maps to the widget's bottom-left.  Our ctx is at
-            // canvas-space origin, so translate by the node widget's
-            // bounds (which are canvas-space) before recursing.
-            let b = node_widget.bounds();
-            ctx.save();
-            ctx.translate(b.x, b.y);
-            paint_subtree(&mut node_widget, ctx);
-            ctx.restore();
-        }
+        // Nodes themselves are children — the framework recurses into
+        // them after this paint returns, with the pan/zoom transform we
+        // left active and the canvas-space clip from `clip_children_rect`.
+    }
 
-        ctx.restore(); // pop pan/zoom transform
+    fn finish_paint(&mut self, ctx: &mut dyn DrawCtx) {
+        // Pop the pan/zoom save from paint().  After this, ctx is back
+        // in widget-local coords with the outer clip still active.
+        ctx.restore();
 
-        // Right-click popup paints last so it sits above nodes & edges.
+        // Right-click popup paints in widget-local coords so it sits
+        // above nodes & edges but inside the canvas clip — matches
+        // pre-refactor behaviour.
         if self.popup.is_open() {
             if let Some(font) = agg_gui::font_settings::current_system_font() {
                 let viewport = Size::new(self.bounds.width, self.bounds.height);
@@ -415,7 +512,22 @@ impl Widget for NodeEditor {
             }
         }
 
-        ctx.restore(); // pop clip rect
+        // Pop the outer clip save.
+        ctx.restore();
+    }
+
+    fn backbuffer_spec(&mut self) -> BackbufferSpec {
+        BackbufferSpec {
+            kind: BackbufferKind::GlFbo,
+            cached: true,
+            alpha: 1.0,
+            outsets: Insets::ZERO,
+            rounded_clip: None,
+        }
+    }
+
+    fn backbuffer_state_mut(&mut self) -> Option<&mut BackbufferState> {
+        Some(&mut self.backbuffer)
     }
 
     fn hit_test(&self, local_pos: agg_gui::Point) -> bool {
@@ -492,93 +604,3 @@ fn build_add_node_popup_items(model: &SharedModel) -> Vec<MenuEntry> {
     out
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{EdgeResult, EdgeView, NodeTypeView, NodeView, PropertyValue};
-    use agg_gui::Point;
-
-    /// Trivial in-memory model for unit tests.
-    #[derive(Default)]
-    struct Memory {
-        nodes: Vec<NodeView>,
-        edges: Vec<EdgeView>,
-        zoom: f64,
-        last_selection: Option<NodeId>,
-    }
-
-    impl NodeGraphModel for Memory {
-        fn nodes(&self) -> Vec<NodeView> {
-            self.nodes.clone()
-        }
-        fn edges(&self) -> Vec<EdgeView> {
-            self.edges.clone()
-        }
-        fn node_types_by_category(&self) -> Vec<(String, Vec<NodeTypeView>)> {
-            vec![]
-        }
-        fn set_node_position(&mut self, id: NodeId, pos: [f64; 2]) {
-            if let Some(n) = self.nodes.iter_mut().find(|n| n.id == id) {
-                n.position = pos;
-            }
-        }
-        fn add_node(&mut self, _type_id: &str, _pos: [f64; 2]) -> Option<NodeId> {
-            None
-        }
-        fn remove_node(&mut self, id: NodeId) {
-            self.nodes.retain(|n| n.id != id);
-        }
-        fn try_add_edge(
-            &mut self,
-            from_node: NodeId,
-            from_socket: &str,
-            to_node: NodeId,
-            to_socket: &str,
-        ) -> EdgeResult {
-            self.edges.push(EdgeView {
-                from_node,
-                from_socket: from_socket.into(),
-                to_node,
-                to_socket: to_socket.into(),
-            });
-            EdgeResult::Connected
-        }
-        fn set_property(&mut self, _id: NodeId, _name: &str, _value: PropertyValue) {}
-        fn on_canvas_zoom_changed(&mut self, zoom: f64) {
-            self.zoom = zoom;
-        }
-        fn on_primary_selection_changed(&mut self, id: Option<NodeId>) {
-            self.last_selection = id;
-        }
-    }
-
-    fn fixture() -> SharedModel {
-        Arc::new(Mutex::new(Memory::default()))
-    }
-
-    #[test]
-    fn local_to_canvas_round_trip_with_pan_and_zoom() {
-        let editor = {
-            let mut e = NodeEditor::new(fixture());
-            e.canvas_offset = [50.0, 30.0];
-            e.canvas_scale = 1.5;
-            e
-        };
-        let lp = Point::new(80.0, 60.0);
-        let cp = editor.local_to_canvas(lp);
-        assert!((cp[0] - (80.0 - 50.0) / 1.5).abs() < 1e-9);
-        assert!((cp[1] - (60.0 - 30.0) / 1.5).abs() < 1e-9);
-    }
-
-    #[test]
-    fn editor_has_default_id() {
-        let e = NodeEditor::new(fixture());
-        assert_eq!(e.id(), Some("node-editor"));
-    }
-
-    #[test]
-    fn with_id_overrides_default() {
-        let e = NodeEditor::new(fixture()).with_id("custom-canvas");
-        assert_eq!(e.id(), Some("custom-canvas"));
-    }
-}

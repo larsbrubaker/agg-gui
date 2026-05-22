@@ -1,3 +1,20 @@
+//! Widget-tree traversal helpers: dirty marking and hit-test path lookup.
+//!
+//! [`mark_subtree_dirty`] is called by the frame loop after off-event-path
+//! async work finishes (font load, image decode). The hit-test family —
+//! [`hit_test_subtree`], [`active_modal_path`], [`global_overlay_hit_path`]
+//! — returns a `Vec<usize>` path of child indices identifying the deepest
+//! widget that claims a position; the App event router uses that path to
+//! dispatch mouse events to the right subtree.
+//!
+//! # Coordinate system
+//!
+//! All positions in this module are **logical Y-up**, origin at the
+//! bottom-left, expressed in the receiving widget's own local space (the
+//! caller has already subtracted ancestor `bounds().x/y`). The App
+//! pre-converts platform Y-down input coordinates via `App::flip_y`
+//! before calling in — do not flip Y here.
+
 use super::*;
 
 /// Recursively call `mark_dirty` on `widget` and every visible
@@ -406,19 +423,73 @@ pub fn find_widget_by_type<'a>(widget: &'a dyn Widget, type_name: &str) -> Optio
 /// widget in DFS paint order (root first).
 ///
 /// `screen_origin` is the accumulated parent offset in screen Y-up coords.
+/// Widgets that apply additional transforms between themselves and their
+/// children (NodeEditor's pan/zoom, etc.) opt in via
+/// [`Widget::inspector_child_transform`]; the traversal composes those
+/// transforms so descendant `screen_bounds` reflect what the user sees.
 pub fn collect_inspector_nodes(
     widget: &dyn Widget,
     depth: usize,
     screen_origin: Point,
     out: &mut Vec<InspectorNode>,
 ) {
-    collect_inspector_nodes_with_path(widget, depth, screen_origin, &[], out);
+    let mut parent_to_screen = crate::TransAffine::new();
+    parent_to_screen.translate(screen_origin.x, screen_origin.y);
+    collect_inspector_nodes_with_path(widget, depth, &parent_to_screen, &[], out);
+}
+
+/// AABB of `rect`'s four corners after passing through `t` — equals
+/// `t(rect)` exactly for translation + uniform scale (no rotation), and
+/// is the right conservative bound otherwise.
+fn transform_rect_aabb(t: &crate::TransAffine, rect: Rect) -> Rect {
+    let corners = [
+        (rect.x, rect.y),
+        (rect.x + rect.width, rect.y),
+        (rect.x, rect.y + rect.height),
+        (rect.x + rect.width, rect.y + rect.height),
+    ];
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (mut x, mut y) in corners {
+        t.transform(&mut x, &mut y);
+        if x < min_x {
+            min_x = x;
+        }
+        if x > max_x {
+            max_x = x;
+        }
+        if y < min_y {
+            min_y = y;
+        }
+        if y > max_y {
+            max_y = y;
+        }
+    }
+    Rect::new(min_x, min_y, (max_x - min_x).max(0.0), (max_y - min_y).max(0.0))
+}
+
+/// Effective uniform scale extracted from `t` — used to scale logical
+/// margin / padding insets so the F12-style overlay bands stay
+/// visually proportional to the (scaled) widget bounds.  For pure
+/// translation + uniform scale this returns the scale exactly; under
+/// non-uniform scale it returns the geometric mean of the axes, which
+/// is the right "single number" for matching the visible band width.
+fn effective_scale(t: &crate::TransAffine) -> f64 {
+    let sx = (t.sx * t.sx + t.shy * t.shy).sqrt();
+    let sy = (t.shx * t.shx + t.sy * t.sy).sqrt();
+    if sx > 0.0 && sy > 0.0 {
+        (sx * sy).sqrt()
+    } else {
+        1.0
+    }
 }
 
 fn collect_inspector_nodes_with_path(
     widget: &dyn Widget,
     depth: usize,
-    screen_origin: Point,
+    parent_to_screen: &crate::TransAffine,
     path_prefix: &[usize],
     out: &mut Vec<InspectorNode>,
 ) {
@@ -433,12 +504,13 @@ fn collect_inspector_nodes_with_path(
     }
 
     let b = widget.bounds();
-    let abs = Rect::new(
-        screen_origin.x + b.x,
-        screen_origin.y + b.y,
-        b.width,
-        b.height,
-    );
+    // Transform the widget's parent-local bounds rect through the
+    // accumulated parent_to_screen transform.  For the common case
+    // (pure translation, no scale) this collapses to the old
+    // `screen_origin + b.x/y` math; under scale it now correctly
+    // reports the on-screen size.
+    let abs = transform_rect_aabb(parent_to_screen, b);
+    let scale = effective_scale(parent_to_screen);
     // Build the properties vec — include the universal `backbuffer` flag
     // first (so every widget shows it in a consistent location), then the
     // widget-specific properties.
@@ -468,11 +540,25 @@ fn collect_inspector_nodes_with_path(
             crate::layout_props::HAnchor::FIT,
             crate::layout_props::VAnchor::FIT,
         ));
+    let margin_logical = widget.margin();
+    let padding_logical = widget.padding();
+    let scaled_margin = crate::layout_props::Insets {
+        left: margin_logical.left * scale,
+        right: margin_logical.right * scale,
+        top: margin_logical.top * scale,
+        bottom: margin_logical.bottom * scale,
+    };
+    let scaled_padding = crate::layout_props::Insets {
+        left: padding_logical.left * scale,
+        right: padding_logical.right * scale,
+        top: padding_logical.top * scale,
+        bottom: padding_logical.bottom * scale,
+    };
     out.push(InspectorNode {
         type_name: widget.type_name(),
         screen_bounds: abs,
-        margin: widget.margin(),
-        padding: widget.padding(),
+        margin: scaled_margin,
+        padding: scaled_padding,
         h_anchor,
         v_anchor,
         depth,
@@ -488,7 +574,18 @@ fn collect_inspector_nodes_with_path(
         return;
     }
 
-    let child_origin = Point::new(abs.x, abs.y);
+    // Compose the transform for child traversal.  Order matches the
+    // paint pipeline: parent_to_screen ∘ translate(b.x, b.y) ∘
+    // widget.inspector_child_transform().  That is, applied to a point
+    // in child-local space, we first run the widget's own child
+    // transform (e.g. NodeEditor's pan/zoom), then translate by the
+    // widget's bounds offset (its position in its parent), then through
+    // the parent_to_screen chain.
+    let mut child_to_screen = *parent_to_screen;
+    child_to_screen.translate(b.x, b.y);
+    let extra = widget.inspector_child_transform();
+    child_to_screen.premultiply(&extra);
+
     let mut child_path: Vec<usize> = Vec::with_capacity(path_prefix.len() + 1);
     child_path.extend_from_slice(path_prefix);
     child_path.push(0);
@@ -497,7 +594,7 @@ fn collect_inspector_nodes_with_path(
         collect_inspector_nodes_with_path(
             child.as_ref(),
             depth + 1,
-            child_origin,
+            &child_to_screen,
             &child_path,
             out,
         );

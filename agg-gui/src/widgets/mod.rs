@@ -53,7 +53,8 @@ pub use menu::{
     ShortcutKey, TopMenu,
 };
 pub use performance::{
-    paint_sparkline, shared_frame_history, FrameHistory, PerformanceView, SharedFrameHistory,
+    paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView,
+    RunMode, RunModeDesc, RunModeRow, SharedFrameHistory,
 };
 pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
 pub use progress_bar::ProgressBar;

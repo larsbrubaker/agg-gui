@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Rect, Size};
@@ -247,6 +248,31 @@ impl Widget for InspectorPanel {
         }
     }
 
+    /// Chrome F12-style three-band highlight (margin / bounds / padding)
+    /// for the currently-hovered widget.  Runs from `paint_global_overlays`
+    /// AFTER the whole tree has painted, so it sits above any window/panel
+    /// the hovered widget lives inside.
+    ///
+    /// `hovered_bounds` is in logical root-space coordinates (Y-up); the
+    /// CTM at this point is local to the InspectorPanel, so we translate
+    /// the local origin back to root coords and offset the draw rect by
+    /// the inverse.  Strips the device-scale factor so logical inputs
+    /// stay logical under HiDPI.
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        let Some(overlay) = *self.hovered_bounds.borrow() else {
+            return;
+        };
+
+        let mut ox = 0.0;
+        let mut oy = 0.0;
+        ctx.root_transform().transform(&mut ox, &mut oy);
+        let scale = crate::device_scale::device_scale().max(1e-6);
+        let ox = ox / scale;
+        let oy = oy / scale;
+
+        paint_inspector_overlay(ctx, overlay, ox, oy);
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseDown {
@@ -281,11 +307,15 @@ impl Widget for InspectorPanel {
                 }
                 if self.pos_in_tree_area(*pos) {
                     let _ = self.forward_to_tree(event);
-                    self.update_hovered_bounds_from_tree();
-                } else if self.hovered_bounds.borrow().is_some() {
-                    *self.hovered_bounds.borrow_mut() = None;
-                    crate::animation::request_draw_without_invalidation();
+                } else {
+                    // Mouse left the tree area — clear the tree's own
+                    // hover state too so the previously-hovered row's
+                    // background goes away on the next frame.  Without
+                    // this the cached parent backbuffer would keep
+                    // showing the stale hover.
+                    self.tree_view.clear_hover();
                 }
+                self.update_hovered_bounds_from_tree();
                 EventResult::Ignored
             }
             Event::MouseUp {
@@ -309,4 +339,61 @@ impl Widget for InspectorPanel {
             _ => EventResult::Ignored,
         }
     }
+}
+
+/// Draw a Chrome-DevTools-style three-band overlay (margin / content / padding)
+/// plus a thin outline.  Inputs are in logical root coordinates; `(ox, oy)`
+/// is the position of `ctx`'s local origin in that same root frame, so the
+/// helper subtracts it from every coordinate to land at the right pixels.
+fn paint_inspector_overlay(ctx: &mut dyn DrawCtx, overlay: InspectorOverlay, ox: f64, oy: f64) {
+    let b = overlay.bounds;
+    let m = overlay.margin;
+    let p = overlay.padding;
+
+    let cx = b.x - ox;
+    let cy = b.y - oy;
+    let cw = b.width;
+    let ch = b.height;
+
+    // Margin band (orange-amber, painted as a frame outside the content rect)
+    let m_total = m.left + m.right + m.top + m.bottom;
+    if m_total > 0.0 {
+        let mx = cx - m.left;
+        let my = cy - m.bottom;
+        let mw = cw + m.left + m.right;
+        let mh = ch + m.top + m.bottom;
+        ctx.set_fill_color(Color::rgba(0.99, 0.61, 0.20, 0.30));
+        ctx.begin_path();
+        ctx.rect(mx, my, mw, mh);
+        ctx.fill();
+    }
+
+    // Content / bounds band (soft blue)
+    ctx.set_fill_color(Color::rgba(0.42, 0.66, 1.0, 0.30));
+    ctx.begin_path();
+    ctx.rect(cx, cy, cw, ch);
+    ctx.fill();
+
+    // Padding band (soft green, inset from the content rect)
+    let p_total = p.left + p.right + p.top + p.bottom;
+    if p_total > 0.0 {
+        let px = cx + p.left;
+        let py = cy + p.bottom;
+        let pw = (cw - p.left - p.right).max(0.0);
+        let ph = (ch - p.top - p.bottom).max(0.0);
+        if pw > 0.0 && ph > 0.0 {
+            ctx.set_fill_color(Color::rgba(0.55, 0.86, 0.55, 0.35));
+            ctx.begin_path();
+            ctx.rect(px, py, pw, ph);
+            ctx.fill();
+        }
+    }
+
+    // Crisp outline around the content rect — keeps the highlight legible
+    // when the widget sits over a busy background.
+    ctx.set_stroke_color(Color::rgba(0.10, 0.45, 0.95, 0.90));
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.rect(cx, cy, cw, ch);
+    ctx.stroke();
 }

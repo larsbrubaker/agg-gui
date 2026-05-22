@@ -133,7 +133,6 @@ impl Widget for TreeView {
                 flat.has_children,
                 node.is_expanded,
                 node.is_selected,
-                self.hovered_row == Some(i),
                 self.focused,
                 node.icon,
                 node.label.clone(),
@@ -201,6 +200,35 @@ impl Widget for TreeView {
         // Content clip — rows must not bleed into the scrollbar strip.
         // This clip is active during framework recursion into row_widgets (after paint() returns).
         ctx.clip_rect(0.0, 0.0, content_w, h);
+
+        // Hover background — painted here (not on the individual `TreeRow`
+        // widgets) so a hover flip doesn't have to invalidate the row's
+        // cached label backbuffers.  Framework recursion paints each row's
+        // content on top of this band.  Skip when the row is also
+        // selected (the selection tint already conveys focus).
+        if let Some(hi) = self.hovered_row {
+            if let (Some(meta), Some(row_widget)) =
+                (self.row_metas.get(hi), self.row_widgets.get(hi))
+            {
+                let is_sel = self
+                    .nodes
+                    .get(meta.node_idx)
+                    .map(|n| n.is_selected)
+                    .unwrap_or(false);
+                if !is_sel {
+                    let rb = row_widget.bounds();
+                    ctx.set_fill_color(crate::color::Color::rgba(
+                        v.text_color.r,
+                        v.text_color.g,
+                        v.text_color.b,
+                        0.08,
+                    ));
+                    ctx.begin_path();
+                    ctx.rect(rb.x, rb.y, rb.width, rb.height);
+                    ctx.fill();
+                }
+            }
+        }
 
         // Drop indicator and ghost (drag feedback)
         let rows = flatten_visible(&self.nodes);

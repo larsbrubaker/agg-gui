@@ -27,22 +27,15 @@ use agg_gui::{
     Separator, SharedFrameHistory, Size, SizedBox, Widget,
 };
 
-// Re-export the shared frame-history container so other demo modules
-// (and external callers via `demo_ui::FrameHistory`) keep working
-// after the type moved into agg-gui's public API.
-pub use agg_gui::FrameHistory;
-
-// ── Run mode ──────────────────────────────────────────────────────────────────
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum RunMode {
-    Reactive,
-    Continuous,
-}
+// Re-export the shared frame-history container and run-mode types so
+// other demo modules (and external callers via `demo_ui::FrameHistory` /
+// `demo_ui::RunMode`) keep working after the types moved into agg-gui's
+// public API.
+pub use agg_gui::{FrameHistory, RunMode};
 
 mod widgets;
 pub(crate) use widgets::MsaaRow;
-use widgets::{RunModeDesc, RunModeRow, ScreenSizeLabel, TogglePill};
+use widgets::{ScreenSizeLabel, TogglePill};
 
 // ── Backend panel ─────────────────────────────────────────────────────────────
 
@@ -120,49 +113,21 @@ pub fn build_backend_panel(
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
 
-    // ── Run mode toggle ───────────────────────────────────────────────────────
-    col.push(
-        Box::new(
-            Label::new("Mode", Arc::clone(&font))
-                .with_font_size(11.0)
-                .with_margin(Insets::from_sides(12.0, 12.0, 2.0, 0.0)),
-        ),
-        0.0,
-    );
-
-    col.push(
-        Box::new(RunModeRow::new(Arc::clone(&font), Rc::clone(&run_mode))),
-        0.0,
-    );
-
-    // Dynamic description: "Only running UI code..." (Reactive) or "FPS: X.X" (Continuous).
-    col.push(
-        Box::new(RunModeDesc::new(
-            Arc::clone(&font),
-            Rc::clone(&run_mode),
-            Rc::clone(&history),
-        )),
-        0.0,
-    );
-
-    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-
-    // ── Mean CPU usage label + sparkline (shared agg-gui widget) ─────────────
+    // ── Performance widget (Mode selector + Mean CPU usage + sparkline) ─────
     //
-    // `PerformanceView` bundles the "Mean CPU usage: X.XX ms / frame"
-    // label and the rolling-frame-time sparkline that this panel used to
-    // build out of two separate `FpsLabel` + `Sparkline` widgets.
-    // Solitaire reuses the same widget inside a popup window driven from
-    // its Debug menu, so keeping the implementation in agg-gui means
-    // both apps stay visually identical without duplicating the
-    // sparkline math or the live-label update path.
+    // `PerformanceView` bundles the "Mode" header + Reactive/Continuous
+    // segmented selector + dynamic description + "Mean CPU usage" label +
+    // rolling-frame-time sparkline.  Embedding the mode selector inside
+    // the widget means every app that hosts `PerformanceView` (Solitaire's
+    // Debug → Performance Window, AtomArtist's View → Debug → Performance
+    // Graph) shares the same control surface without duplicating the
+    // segmented-toggle composition.
     col.push(
         Box::new(
             PerformanceView::new(Arc::clone(&font), Rc::clone(&history))
                 .with_padding(12.0)
-                .with_sparkline_height(48.0),
+                .with_sparkline_height(48.0)
+                .with_run_mode_selector(Rc::clone(&run_mode)),
         ),
         0.0,
     );

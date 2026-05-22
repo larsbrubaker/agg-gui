@@ -1,3 +1,19 @@
+//! Paint orchestration for the widget tree.
+//!
+//! Owns the painting traversal: the thread-local `PAINT_CLIP_STACK` that
+//! lets descendants query the active clip, [`paint_subtree`] dispatch
+//! between direct paint and backbuffer-cached paint, and the GL/software
+//! backbuffer variants used by widgets that opt in via
+//! [`Widget::backbuffer_spec`](crate::widget::Widget::backbuffer_spec).
+//!
+//! # Coordinate system
+//!
+//! All paint coordinates are **logical Y-up**, origin at the bottom-left.
+//! Each subtree paints with its `DrawCtx` translated so that (0,0) maps to
+//! the widget's own bottom-left corner; child traversal applies further
+//! per-child translations. Platform input coordinates are Y-down and are
+//! converted at the App event boundary (see `App::flip_y`), not here.
+
 use std::sync::Arc;
 
 use crate::framebuffer::Framebuffer;
