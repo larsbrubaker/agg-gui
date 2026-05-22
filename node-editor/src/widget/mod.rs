@@ -22,8 +22,8 @@ use agg_gui::{
 };
 
 use crate::draw::{
-    draw_bezier_connection, draw_canvas_grid, draw_node, layout_node, CanvasPalette,
-    NodeLayoutInfo, PropLayout, SocketLayout, SocketSide,
+    draw_bezier_connection, draw_canvas_grid, draw_node, layout_node_with_connections,
+    CanvasPalette, NodeLayoutInfo, PropLayout, SocketLayout, SocketSide,
 };
 use crate::model::{NodeGraphModel, NodeId, SocketTypeId};
 
@@ -160,13 +160,28 @@ impl NodeEditor {
 
     /// Compute layouts for every node currently in the model. Layouts
     /// are returned in a deterministic order (selected last so they
-    /// paint on top).
+    /// paint on top). Bound-input editors are suppressed for sockets
+    /// that already have an incoming edge — that's the "data flowing
+    /// in" rule from NodeDesigner's row layout.
     fn snapshot_layouts(&self) -> Vec<NodeLayoutInfo> {
         let model = self.model.lock().unwrap();
         let nodes = model.nodes();
+        let edges = model.edges();
         let ext_sel = model.primary_selection();
         drop(model);
-        let mut layouts: Vec<NodeLayoutInfo> = nodes.iter().map(layout_node).collect();
+        // Index of connected input sockets keyed by `(node_id, socket_name)`.
+        let connected: std::collections::HashSet<(NodeId, String)> = edges
+            .iter()
+            .map(|e| (e.to_node, e.to_socket.clone()))
+            .collect();
+        let mut layouts: Vec<NodeLayoutInfo> = nodes
+            .iter()
+            .map(|n| {
+                layout_node_with_connections(n, |sock| {
+                    connected.contains(&(n.id, sock.to_string()))
+                })
+            })
+            .collect();
         layouts.sort_by_key(|l| {
             let local = self.selected.contains(&l.node_id) as u8;
             let external = (ext_sel == Some(l.node_id)) as u8;
@@ -342,11 +357,11 @@ impl Widget for NodeEditor {
             let from = layouts
                 .iter()
                 .find(|l| l.node_id == edge.from_node)
-                .and_then(|l| l.sockets.iter().find(|s| s.name == edge.from_socket));
+                .and_then(|l| l.sockets().find(|s| s.name == edge.from_socket));
             let to = layouts
                 .iter()
                 .find(|l| l.node_id == edge.to_node)
-                .and_then(|l| l.sockets.iter().find(|s| s.name == edge.to_socket));
+                .and_then(|l| l.sockets().find(|s| s.name == edge.to_socket));
             if let (Some(f), Some(t)) = (from, to) {
                 let col = model.socket_color(f.socket_type);
                 draw_bezier_connection(ctx, f.center, t.center, col, 2.0);

@@ -44,7 +44,10 @@ pub struct SocketTypeId(pub u32);
 pub enum PropertyValue {
     Number(f64),
     Bool(bool),
-    /// Anything not covered by `Number` / `Bool`. The host provides a
+    /// A 4-component RGBA color, components in 0..=1. The canvas paints
+    /// a swatch; richer pickers live in host-side panels.
+    Color([f32; 4]),
+    /// Anything not covered by the above variants. The host provides a
     /// short display string so the canvas can render the row's value
     /// area; clicking does nothing (hosts route richer editing
     /// elsewhere — typically an inspector pane).
@@ -56,6 +59,9 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
+    /// True when the value can be edited directly on the canvas (drag,
+    /// toggle, etc.). Color / Matrix / Path / Geometry round-trip
+    /// through richer host-side editors.
     pub fn is_editable_inline(&self) -> bool {
         matches!(self, Self::Number(_) | Self::Bool(_))
     }
@@ -76,15 +82,38 @@ pub struct SocketView {
     pub display_label: Option<String>,
 }
 
+impl SocketView {
+    /// Convenience: the label to show in the row — `display_label` if
+    /// set, otherwise `name`.
+    pub fn label(&self) -> &str {
+        self.display_label.as_deref().unwrap_or(&self.name)
+    }
+}
+
 /// One inline-editable property row on a node.
 #[derive(Clone, Debug)]
 pub struct PropertyView {
     pub name: String,
+    /// Optional display label — falls back to `name` when `None`.
+    pub display_label: Option<String>,
     pub current: PropertyValue,
     /// Numeric range — the canvas clamps drag deltas to `[min, max]`
     /// when editing. Ignored for non-numeric properties.
     pub min: Option<f64>,
     pub max: Option<f64>,
+    /// When `Some(socket_name)`, the property is rendered inline on
+    /// that input socket's row instead of getting its own row, and the
+    /// editor disappears once the socket is connected. Mirrors
+    /// NodeDesigner's per-input fallback editor.
+    pub bound_input: Option<String>,
+}
+
+impl PropertyView {
+    /// Convenience: the label to show in the row — `display_label` if
+    /// set, otherwise `name`.
+    pub fn label(&self) -> &str {
+        self.display_label.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// Snapshot of a node — what the widget needs for one paint frame.
