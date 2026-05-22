@@ -231,39 +231,17 @@ fn local_to_canvas_round_trip_with_pan_and_zoom() {
     assert!((cp[1] - (60.0 - 30.0) / 1.5).abs() < 1e-9);
 }
 
-/// The editor's `inspector_child_transform` must mirror the pan/zoom
-/// the canvas applies during paint — otherwise the inspector hover
-/// overlay lands at the un-transformed canvas position instead of the
-/// actual screen pixels.
-#[test]
-fn editor_inspector_child_transform_reflects_pan_zoom() {
-    let mut editor = NodeEditor::new(fixture());
-    editor.canvas_offset = [30.0, 50.0];
-    editor.canvas_scale = 2.0;
-
-    let t = editor.inspector_child_transform();
-    // Canvas-space (0, 0) should land at screen (offset_x, offset_y).
-    let mut x = 0.0;
-    let mut y = 0.0;
-    t.transform(&mut x, &mut y);
-    assert!((x - 30.0).abs() < 1e-6 && (y - 50.0).abs() < 1e-6, "got ({x},{y})");
-
-    // Canvas-space (10, 5) should land at screen (offset + scale * canvas).
-    let mut x = 10.0;
-    let mut y = 5.0;
-    t.transform(&mut x, &mut y);
-    assert!(
-        (x - (30.0 + 2.0 * 10.0)).abs() < 1e-6
-            && (y - (50.0 + 2.0 * 5.0)).abs() < 1e-6,
-        "got ({x},{y})"
-    );
-}
-
 /// End-to-end: with the editor positioned at non-zero screen origin AND
-/// pan/zoom active, a `collect_inspector_nodes` walk must report the
-/// child node's bounds at the correct screen pixels.
+/// pan/zoom active, a `collect_inspector_nodes` walk must report each
+/// NodeWidget's `screen_bounds` at the actual painted pixels.
+///
+/// The fix is to bake the canvas transform into the NodeWidget's
+/// bounds during `layout()` (rather than push `ctx.scale`/`ctx.translate`
+/// in `paint()`) — the framework's per-child translate composes
+/// additively in screen-space, so canvas-space child bounds can't be
+/// scaled by a parent transform reliably.
 #[test]
-fn collect_inspector_nodes_transforms_through_editor_pan_zoom() {
+fn collect_inspector_nodes_reports_pan_zoom_baked_bounds() {
     use agg_gui::widget::collect_inspector_nodes;
     use agg_gui::Point;
 
@@ -272,14 +250,14 @@ fn collect_inspector_nodes_transforms_through_editor_pan_zoom() {
     editor.set_bounds(Rect::new(100.0, 200.0, 800.0, 600.0));
     editor.canvas_offset = [25.0, 40.0];
     editor.canvas_scale = 1.5;
-    // Use a node at canvas-space (50, 60).  Default node layout
-    // produces a positive size; we read the resulting NodeWidget's
-    // canvas-space bounds back from `editor.children()` so the test
-    // doesn't have to bake the node-layout math.
+    // Canvas-space (50, 60) → screen-relative (25 + 50*1.5, 40 + (60 - h)*1.5)
+    // for the node's bottom-left.  We don't hard-code the node layout
+    // dimensions; we just verify that the editor's screen origin plus the
+    // child's editor-local bounds equals the inspector's reported
+    // screen_bounds.
     seed_nodes(&mut editor, &memory, vec![mk_node(1, "N", [50.0, 60.0])]);
 
-    let nw_canvas = editor.children()[0].bounds();
-
+    let nw_local = editor.children()[0].bounds();
     let mut nodes = Vec::new();
     collect_inspector_nodes(&editor, 0, Point::ORIGIN, &mut nodes);
     let node = nodes
@@ -287,20 +265,42 @@ fn collect_inspector_nodes_transforms_through_editor_pan_zoom() {
         .find(|n| n.type_name == "NodeWidget")
         .expect("NodeWidget missing from inspector snapshot");
 
-    let s = editor.canvas_scale;
-    let expected_x = editor.bounds().x + editor.canvas_offset[0] + nw_canvas.x * s;
-    let expected_y = editor.bounds().y + editor.canvas_offset[1] + nw_canvas.y * s;
-    let expected_w = nw_canvas.width * s;
-    let expected_h = nw_canvas.height * s;
+    let expected_x = editor.bounds().x + nw_local.x;
+    let expected_y = editor.bounds().y + nw_local.y;
+    let expected_w = nw_local.width;
+    let expected_h = nw_local.height;
     let b = node.screen_bounds;
     assert!(
         (b.x - expected_x).abs() < 1e-6
             && (b.y - expected_y).abs() < 1e-6
             && (b.width - expected_w).abs() < 1e-6
             && (b.height - expected_h).abs() < 1e-6,
-        "NodeWidget screen_bounds must be the editor's pan/zoom applied to canvas-space; \
+        "NodeWidget screen_bounds must equal editor screen origin + child's editor-local bounds; \
          expected x={expected_x} y={expected_y} w={expected_w} h={expected_h}; got {:?}",
         b
+    );
+
+    // Sanity: the editor-local bounds reflect the canvas transform.
+    let s = editor.canvas_scale;
+    let canvas_x = 50.0;
+    let canvas_top_y = 60.0;
+    let expected_nw_local_x = canvas_x * s + editor.canvas_offset[0];
+    assert!(
+        (nw_local.x - expected_nw_local_x).abs() < 1e-6,
+        "NodeWidget editor-local x must be canvas_x * scale + offset; expected \
+         {expected_nw_local_x}, got {}",
+        nw_local.x
+    );
+    // For y, the canvas top maps to (canvas_top_y - h) * scale + offset_y at
+    // the screen bottom.  We don't know h here, so verify via the child's
+    // height instead.
+    let nw_h = nw_local.height;
+    let expected_nw_local_y = (canvas_top_y - nw_h / s) * s + editor.canvas_offset[1];
+    assert!(
+        (nw_local.y - expected_nw_local_y).abs() < 1e-6,
+        "NodeWidget editor-local y must be (canvas_top - canvas_h) * scale + offset; \
+         expected {expected_nw_local_y}, got {}",
+        nw_local.y
     );
 }
 

@@ -103,7 +103,16 @@ impl NodeEditor {
 
     pub(super) fn on_mouse_move(&mut self, pos: Point) -> EventResult {
         let canvas_pos = self.local_to_canvas(pos);
-        match &mut self.interaction {
+        // Every non-Idle branch below mutates visible state — pan
+        // offset, dragged node positions, in-flight wire endpoint,
+        // or a property value displayed inside a node.  Reactive
+        // hosts (AtomArtist's native shell, the agg-gui demo) sleep
+        // the event loop until `animation::wants_draw()` returns
+        // true, so each handler must claim a redraw or its mutation
+        // will never appear on screen between mouse events.  Hover
+        // (`Idle`) deliberately does NOT claim — keeping plain
+        // pointer motion free of repaints matches agg-gui's demo.
+        let result = match &mut self.interaction {
             CanvasState::PanningCanvas {
                 start_offset,
                 start_local,
@@ -161,7 +170,11 @@ impl NodeEditor {
                 EventResult::Consumed
             }
             CanvasState::Idle => EventResult::Ignored,
+        };
+        if result == EventResult::Consumed {
+            agg_gui::animation::request_draw();
         }
+        result
     }
 
     pub(super) fn on_mouse_up(
@@ -251,6 +264,9 @@ impl NodeEditor {
         };
         let new_scale = (self.canvas_scale * factor).clamp(ZOOM_MIN, ZOOM_MAX);
         if (new_scale - self.canvas_scale).abs() < 1e-9 {
+            // Zoom clamped — nothing visible changed, so don't
+            // claim a redraw.  Still Consumed so the host's
+            // outer scroll handler doesn't bubble the wheel up.
             return EventResult::Consumed;
         }
         self.canvas_offset = [
@@ -259,6 +275,7 @@ impl NodeEditor {
         ];
         self.canvas_scale = new_scale;
         self.model.lock().unwrap().on_canvas_zoom_changed(new_scale);
+        agg_gui::animation::request_draw();
         EventResult::Consumed
     }
 

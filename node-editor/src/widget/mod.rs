@@ -261,6 +261,11 @@ impl NodeEditor {
     /// the new one drives both the children rebuild and the GL FBO
     /// invalidation — paint outputs change ⇒ the cached texture must
     /// regenerate.
+    ///
+    /// Pan/zoom IS part of the fingerprint: layout bakes them into the
+    /// child widgets' screen-space bounds (so the inspector tree picks
+    /// them up correctly via `collect_inspector_nodes`), which means a
+    /// pan/zoom change demands a children rebuild.
     fn compute_fingerprint(&self, layouts: &[NodeLayoutInfo], ext_sel: Option<NodeId>) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -277,18 +282,18 @@ impl NodeEditor {
             let sel = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
             sel.hash(&mut h);
         }
-        // Pan/zoom don't change WHICH NodeWidgets we build, only where
-        // the parent transform paints them, so they're left out of the
-        // children-rebuild signature.  The backbuffer is invalidated for
-        // pan/zoom changes via `request_draw()` → `dispatch_event` →
-        // `mark_dirty` from the event handlers.
+        self.canvas_offset[0].to_bits().hash(&mut h);
+        self.canvas_offset[1].to_bits().hash(&mut h);
+        self.canvas_scale.to_bits().hash(&mut h);
         h.finish()
     }
 
     /// Tear down `self.children` and build a fresh `Vec<NodeWidget>`
-    /// from `layouts`.  Bounds are in canvas-space; the editor's paint
-    /// path leaves the pan/zoom transform active so the framework's
-    /// per-child translate lands at the right screen position.
+    /// from `layouts`.  Bounds are in **screen-space** — the canvas
+    /// pan/zoom is baked into each NodeWidget's position and size so
+    /// the framework's per-child translate (which adds bounds in
+    /// screen-space, not in pre-transform space) lands at the right
+    /// pixels AND `collect_inspector_nodes` sees the on-screen rect.
     fn rebuild_children(&mut self, layouts: &[NodeLayoutInfo], ext_sel: Option<NodeId>) {
         let visuals = agg_gui::current_visuals();
         let palette = CanvasPalette::from_visuals(&visuals);
@@ -296,10 +301,13 @@ impl NodeEditor {
         let node_ctx = NodePaintContext::from_model(palette, &*model);
         drop(model);
 
+        let scale = self.canvas_scale;
+        let offset = self.canvas_offset;
         let mut new_children: Vec<Box<dyn Widget>> = Vec::with_capacity(layouts.len());
         for l in layouts {
             let selected = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
-            let nw = NodeWidget::from_layout(l, selected, node_ctx.clone());
+            let nw =
+                NodeWidget::from_layout_transformed(l, selected, node_ctx.clone(), scale, offset);
             new_children.push(Box::new(nw));
         }
         self.children = new_children;
@@ -383,23 +391,6 @@ impl Widget for NodeEditor {
         available
     }
 
-    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
-        // Framework recurses into children with the pan/zoom transform
-        // still active in the CTM (we leave it pushed across paint() →
-        // children → finish_paint()).  `ctx.clip_rect(...)` transforms
-        // its rect through the CTM, so we hand it the canvas-space
-        // pre-image of the editor's widget bounds — pan/zoom maps that
-        // back to (0, 0, w, h) in screen coords.
-        let w = self.bounds.width;
-        let h = self.bounds.height;
-        let s = self.canvas_scale.max(1e-9);
-        let cx = -self.canvas_offset[0] / s;
-        let cy = -self.canvas_offset[1] / s;
-        let cw = w / s;
-        let ch = h / s;
-        Some((cx, cy, cw, ch))
-    }
-
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -426,15 +417,13 @@ impl Widget for NodeEditor {
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
 
-        // Pan/zoom save — kept active across the framework's child paint
-        // pass.  Popped in `finish_paint`.
-        //
-        // Order matters: `ctx.scale` first, THEN `ctx.translate` —
-        // matches the canonical convention `screen = canvas * scale +
-        // offset` that `local_to_canvas` (and therefore every hit-test
-        // and zoom-around-cursor calculation) assumes.  Reversing the
-        // two would scale the offset too, sending nodes away from the
-        // cursor on every zoom step.
+        // Grid + edges live in canvas-space.  Push the canvas
+        // transform (`screen = canvas * scale + offset`) on `ctx` for
+        // those paints, but pop it BEFORE returning so the framework's
+        // child paint pass sees the editor's normal local space —
+        // NodeWidget bounds are already in screen-space (pre-baked by
+        // `layout`) so they don't want this transform composed on
+        // top.  Order matters: scale first, then translate.
         ctx.save();
         ctx.scale(self.canvas_scale, self.canvas_scale);
         ctx.translate(self.canvas_offset[0], self.canvas_offset[1]);
@@ -492,19 +481,15 @@ impl Widget for NodeEditor {
         }
         drop(model);
 
-        // Nodes themselves are children — the framework recurses into
-        // them after this paint returns, with the pan/zoom transform we
-        // left active and the canvas-space clip from `clip_children_rect`.
+        // Pop the canvas-space transform so the framework recurses into
+        // child NodeWidgets in widget-local space — their bounds are
+        // already in screen-space (pre-baked by layout()).
+        ctx.restore();
     }
 
     fn finish_paint(&mut self, ctx: &mut dyn DrawCtx) {
-        // Pop the pan/zoom save from paint().  After this, ctx is back
-        // in widget-local coords with the outer clip still active.
-        ctx.restore();
-
-        // Right-click popup paints in widget-local coords so it sits
-        // above nodes & edges but inside the canvas clip — matches
-        // pre-refactor behaviour.
+        // Popup paints in widget-local space, on top of nodes & edges
+        // but inside the canvas clip.
         if self.popup.is_open() {
             if let Some(font) = agg_gui::font_settings::current_system_font() {
                 let viewport = Size::new(self.bounds.width, self.bounds.height);

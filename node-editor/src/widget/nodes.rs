@@ -53,6 +53,13 @@ pub struct NodePaintContext {
     pub socket_colors: Arc<dyn Fn(crate::model::SocketTypeId) -> Color + Send + Sync>,
     /// Title-bar colour lookup by category.
     pub title_colors: Arc<dyn Fn(&str, Color) -> Color + Send + Sync>,
+    /// Active canvas zoom factor — multiplies every dimension (bounds,
+    /// font sizes, radii, padding) so the widget tree paints at the
+    /// right screen size.  We bake the scale into the widget tree
+    /// rather than push `ctx.scale` because the framework's per-child
+    /// translate composes additively in screen-space and doesn't
+    /// respect a parent's scale (the existing nested-translate limit).
+    pub scale: f64,
 }
 
 impl NodePaintContext {
@@ -60,6 +67,21 @@ impl NodePaintContext {
     /// socket / title colours by snapshotting the model into owned
     /// closures so the widgets don't reach back into the model later.
     pub fn from_model<M: NodeGraphModel + ?Sized>(palette: CanvasPalette, model: &M) -> Self {
+        Self::from_model_scaled(palette, model, 1.0)
+    }
+
+    /// Same as [`from_model`] with an explicit canvas zoom factor.
+    pub fn from_model_scaled<M: NodeGraphModel + ?Sized>(
+        palette: CanvasPalette,
+        model: &M,
+        scale: f64,
+    ) -> Self {
+        let mut ctx = Self::build_from_model(palette, model);
+        ctx.scale = scale;
+        ctx
+    }
+
+    fn build_from_model<M: NodeGraphModel + ?Sized>(palette: CanvasPalette, model: &M) -> Self {
         // Capture the model's colour data into a small owned table the
         // closures can read from without needing the borrow.  Sockets +
         // categories tend to be tiny (single digit count), so an alloc
@@ -97,6 +119,7 @@ impl NodePaintContext {
             palette: Arc::new(palette),
             socket_colors,
             title_colors,
+            scale: 1.0,
         }
     }
 }
@@ -153,19 +176,46 @@ pub struct NodeWidget {
 }
 
 impl NodeWidget {
-    /// Construct a fresh widget tree mirroring `layout`.  The returned
-    /// widget already carries its row children in the correct order.
+    /// Construct a fresh widget tree mirroring `layout`, with no canvas
+    /// pan/zoom applied — bounds land at canvas-space positions
+    /// directly.  Convenience for callers that don't have a live
+    /// canvas transform (tests, default render at scale=1).
     pub fn from_layout(layout: &NodeLayoutInfo, selected: bool, ctx: NodePaintContext) -> Self {
-        let w = layout.size[0];
-        let h = layout.size[1];
-        // Canvas top-left → widget bottom-left in agg-gui's Y-up frame.
-        let canvas_bottom_y = layout.top_left[1] - h;
-        let bounds = Rect::new(layout.top_left[0], canvas_bottom_y, w, h);
+        Self::from_layout_transformed(layout, selected, ctx, 1.0, [0.0, 0.0])
+    }
+
+    /// Construct a fresh widget tree with bounds baked in
+    /// **screen-space**.  `scale` and `canvas_offset` flatten the
+    /// canvas pan/zoom into every dimension (node bounds, row bounds,
+    /// socket radii, font sizes) so the framework's per-child translate
+    /// — which adds bounds additively in screen-space without
+    /// respecting a parent scale — lands at the right pixels.  This is
+    /// also what lets `collect_inspector_nodes` report on-screen rects
+    /// for the F12-style hover overlay.
+    pub fn from_layout_transformed(
+        layout: &NodeLayoutInfo,
+        selected: bool,
+        mut ctx: NodePaintContext,
+        scale: f64,
+        canvas_offset: [f64; 2],
+    ) -> Self {
+        ctx.scale = scale;
+        let canvas_w = layout.size[0];
+        let canvas_h = layout.size[1];
+        let screen_w = canvas_w * scale;
+        let screen_h = canvas_h * scale;
+        // Y-up: layout.top_left[1] is the canvas-space TOP of the node;
+        // widget bounds use the bottom-left corner.  Convert to screen
+        // by multiplying canvas position by scale then adding the
+        // canvas pan offset.
+        let screen_bottom_x = layout.top_left[0] * scale + canvas_offset[0];
+        let screen_bottom_y = (layout.top_left[1] - canvas_h) * scale + canvas_offset[1];
+        let bounds = Rect::new(screen_bottom_x, screen_bottom_y, screen_w, screen_h);
 
         let mut children: Vec<Box<dyn Widget>> = Vec::with_capacity(layout.rows.len() + 1);
         children.push(Box::new(NodeHeaderWidget::new(
-            w,
-            h,
+            screen_w,
+            screen_h,
             layout.display_name.clone(),
             layout.category.clone(),
             ctx.clone(),
@@ -175,8 +225,8 @@ impl NodeWidget {
             children.push(Box::new(NodeRowWidget::from_row(
                 row,
                 row_index,
-                w,
-                h,
+                screen_w,
+                screen_h,
                 ctx.clone(),
             )));
         }
@@ -263,16 +313,17 @@ impl Widget for NodeWidget {
         } else {
             self.ctx.palette.node_body
         };
+        let r = NODE_RADIUS * self.ctx.scale;
         // Body fill.
         ctx.set_fill_color(body_color);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, NODE_RADIUS);
+        ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.fill();
         // Border.
         ctx.set_stroke_color(self.ctx.palette.node_border);
         ctx.set_line_width(1.0);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, NODE_RADIUS);
+        ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.stroke();
     }
 
@@ -298,9 +349,11 @@ pub struct NodeHeaderWidget {
 
 impl NodeHeaderWidget {
     fn new(node_w: f64, node_h: f64, title: String, category: String, ctx: NodePaintContext) -> Self {
-        // Header sits at the very top of the node — bottom-left at
-        // (0, node_h - TITLE_HEIGHT) in NodeWidget-local Y-up coords.
-        let bounds = Rect::new(0.0, node_h - TITLE_HEIGHT, node_w, TITLE_HEIGHT);
+        // `node_w` and `node_h` are already in screen-space (the
+        // caller pre-scaled them); the header's logical height
+        // `TITLE_HEIGHT` needs the same treatment.
+        let title_h = TITLE_HEIGHT * ctx.scale;
+        let bounds = Rect::new(0.0, node_h - title_h, node_w, title_h);
         Self {
             bounds,
             base: WidgetBase::new(),
@@ -340,6 +393,8 @@ impl Widget for NodeHeaderWidget {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
+        let s = self.ctx.scale;
+        let r = NODE_RADIUS * s;
         let title_color =
             (self.ctx.title_colors)(&self.category, self.ctx.palette.node_title_fallback);
         // Rounded top corners by painting a rounded rect then masking
@@ -347,18 +402,18 @@ impl Widget for NodeHeaderWidget {
         // `draw_node_chrome`'s previous logic.
         ctx.set_fill_color(title_color);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, NODE_RADIUS);
+        ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.fill();
         ctx.set_fill_color(title_color);
         ctx.begin_path();
-        ctx.rect(0.0, 0.0, w, NODE_RADIUS);
+        ctx.rect(0.0, 0.0, w, r);
         ctx.fill();
 
         ctx.set_fill_color(self.ctx.palette.label_text);
-        ctx.set_font_size(TITLE_FONT_SIZE);
+        ctx.set_font_size(TITLE_FONT_SIZE * s);
         // Text baseline ~4px above the header's bottom, matching the
-        // previous procedural layout.
-        ctx.fill_text(&self.title, 10.0, h * 0.5 - 4.0);
+        // previous procedural layout (scaled).
+        ctx.fill_text(&self.title, 10.0 * s, h * 0.5 - 4.0 * s);
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
@@ -392,12 +447,18 @@ impl NodeRowWidget {
         node_h: f64,
         ctx: NodePaintContext,
     ) -> Self {
+        // `node_w`, `node_h` are already in screen-space (the caller
+        // pre-scaled them); the row's logical metrics need the same
+        // treatment so a scaled node's interior is visually consistent.
+        let s = ctx.scale;
+        let title_h = TITLE_HEIGHT * s;
+        let row_h = ROW_HEIGHT * s;
         // Row at `row_index` (0 = top, directly under the title) sits at
-        // y ∈ [node_h - TITLE_HEIGHT - (row_index+1)*ROW_HEIGHT,
-        //      node_h - TITLE_HEIGHT - row_index *ROW_HEIGHT].
-        let row_top = node_h - TITLE_HEIGHT - (row_index as f64) * ROW_HEIGHT;
-        let row_bot = row_top - ROW_HEIGHT;
-        let bounds = Rect::new(0.0, row_bot, node_w, ROW_HEIGHT);
+        // y ∈ [node_h - title_h - (row_index+1)*row_h,
+        //      node_h - title_h - row_index *row_h].
+        let row_top = node_h - title_h - (row_index as f64) * row_h;
+        let row_bot = row_top - row_h;
+        let bounds = Rect::new(0.0, row_bot, node_w, row_h);
 
         let (row_name, row_kind, children) = match row {
             NodeRow::Output(socket) => {
@@ -406,13 +467,13 @@ impl NodeRowWidget {
                     socket.clone(),
                     SocketSide::Output,
                     node_w,
-                    ROW_HEIGHT,
+                    row_h,
                     ctx.clone(),
                 )));
                 children.push(Box::new(RowLabelWidget::new_right(
                     socket.display_label.clone(),
                     node_w,
-                    ROW_HEIGHT,
+                    row_h,
                     ctx.clone(),
                 )));
                 (
@@ -427,13 +488,13 @@ impl NodeRowWidget {
                     socket.clone(),
                     SocketSide::Input,
                     node_w,
-                    ROW_HEIGHT,
+                    row_h,
                     ctx.clone(),
                 )));
                 children.push(Box::new(RowLabelWidget::new_left(
                     socket.display_label.clone(),
                     node_w,
-                    ROW_HEIGHT,
+                    row_h,
                     ctx.clone(),
                 )));
                 let has_editor = editor.is_some();
@@ -441,7 +502,7 @@ impl NodeRowWidget {
                     children.push(Box::new(ValueEditorWidget::new(
                         ed.clone(),
                         node_w,
-                        ROW_HEIGHT,
+                        row_h,
                         ctx.clone(),
                         /* show_label */ false,
                     )));
@@ -546,17 +607,14 @@ impl SocketDotWidget {
         row_h: f64,
         ctx: NodePaintContext,
     ) -> Self {
-        // The dot is drawn at `socket.center` in canvas-space, which the
-        // row layout puts at the row's vertical centre.  In row-local
-        // coordinates that's (0, row_h/2) for an input or (node_w, row_h/2)
-        // for an output.  The widget bounds are a small square centred on
-        // that point so the inspector outlines feel right.
+        // `node_w`, `row_h` are already in screen-space; SOCKET_RADIUS
+        // needs the same scale.
         let cx = match side {
             SocketSide::Input => 0.0,
             SocketSide::Output => node_w,
         };
         let cy = row_h * 0.5;
-        let r = SOCKET_RADIUS;
+        let r = SOCKET_RADIUS * ctx.scale;
         let bounds = Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r);
         Self {
             bounds,
@@ -654,8 +712,10 @@ pub struct RowLabelWidget {
 impl RowLabelWidget {
     fn new_left(text: String, node_w: f64, row_h: f64, ctx: NodePaintContext) -> Self {
         // Reserve from the dot's right edge to the right edge of the
-        // row.  Painting reads `text_x` from `side`.
-        let left = SOCKET_RADIUS * 2.0 + ROW_PADDING_X;
+        // row.  Painting reads `text_x` from `side`.  All horizontal
+        // metrics scale with the active canvas zoom.
+        let s = ctx.scale;
+        let left = (SOCKET_RADIUS * 2.0 + ROW_PADDING_X) * s;
         let bounds = Rect::new(left, 0.0, (node_w - left).max(0.0), row_h);
         Self {
             bounds,
@@ -668,7 +728,8 @@ impl RowLabelWidget {
     }
 
     fn new_right(text: String, node_w: f64, row_h: f64, ctx: NodePaintContext) -> Self {
-        let right_inset = SOCKET_RADIUS * 2.0 + ROW_PADDING_X;
+        let s = ctx.scale;
+        let right_inset = (SOCKET_RADIUS * 2.0 + ROW_PADDING_X) * s;
         let width = (node_w - right_inset).max(0.0);
         let bounds = Rect::new(0.0, 0.0, width, row_h);
         Self {
@@ -714,13 +775,14 @@ impl Widget for RowLabelWidget {
         if self.text.is_empty() {
             return;
         }
+        let s = self.ctx.scale;
         ctx.set_fill_color(self.ctx.palette.label_text);
-        ctx.set_font_size(LABEL_FONT_SIZE);
-        let baseline_y = self.bounds.height * 0.5 - 4.0;
+        ctx.set_font_size(LABEL_FONT_SIZE * s);
+        let baseline_y = self.bounds.height * 0.5 - 4.0 * s;
         let x = match self.side {
             LabelSide::Left => 0.0,
             LabelSide::Right => {
-                let est = (self.text.len() as f64) * 6.5;
+                let est = (self.text.len() as f64) * 6.5 * s;
                 (self.bounds.width - est).max(0.0)
             }
         };
@@ -755,20 +817,18 @@ impl ValueEditorWidget {
         ctx: NodePaintContext,
         show_label: bool,
     ) -> Self {
-        // The PropLayout carries canvas-space coords; convert to
-        // row-local by subtracting the row's left edge (node-local 0)
-        // and the row's bottom edge.  The simpler path is to read the
-        // PropLayout's own width and right-align inside the row.
-        let width = prop.size[0];
-        let row_left = node_w - width - SOCKET_RADIUS;
-        // For unbound property rows the editor spans the full inner
-        // width — detect via `show_label`.
+        // `node_w` / `row_h` are screen-space; the PropLayout still
+        // carries canvas-space metrics, so we scale them to match.
+        let s = ctx.scale;
+        let width = prop.size[0] * s;
+        let row_left = node_w - width - SOCKET_RADIUS * s;
+        let inset_px = 1.0 * s;
         let (x, w) = if show_label {
-            (1.0, node_w - 2.0)
+            (inset_px, node_w - 2.0 * inset_px)
         } else {
             (row_left, width)
         };
-        let bounds = Rect::new(x, 1.0, w, row_h - 2.0);
+        let bounds = Rect::new(x, inset_px, w, row_h - 2.0 * inset_px);
         Self {
             bounds,
             base: WidgetBase::new(),
@@ -817,6 +877,7 @@ impl Widget for ValueEditorWidget {
         if w <= 0.0 || h <= 0.0 {
             return;
         }
+        let s = self.ctx.scale;
         let body = self.ctx.palette.node_body;
         let body_lum = 0.299 * body.r + 0.587 * body.g + 0.114 * body.b;
         let pill_bg = if body_lum < 0.5 {
@@ -827,14 +888,14 @@ impl Widget for ValueEditorWidget {
 
         ctx.set_fill_color(pill_bg);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 3.0);
+        ctx.rounded_rect(0.0, 0.0, w, h, 3.0 * s);
         ctx.fill();
 
         if let PropertyValue::Color(c) = &self.prop.current {
-            let inset = 3.0;
+            let inset = 3.0 * s;
             ctx.set_fill_color(Color::rgba(c[0], c[1], c[2], c[3]));
             ctx.begin_path();
-            ctx.rounded_rect(inset, inset, (w - 2.0 * inset).max(0.0), (h - 2.0 * inset).max(0.0), 2.0);
+            ctx.rounded_rect(inset, inset, (w - 2.0 * inset).max(0.0), (h - 2.0 * inset).max(0.0), 2.0 * s);
             ctx.fill();
             return;
         }
@@ -842,8 +903,8 @@ impl Widget for ValueEditorWidget {
         // Optional left-aligned label (only for unbound property rows).
         if self.show_label {
             ctx.set_fill_color(self.ctx.palette.label_text);
-            ctx.set_font_size(LABEL_FONT_SIZE);
-            ctx.fill_text(&self.prop.name, ROW_PADDING_X, h * 0.5 - 4.0);
+            ctx.set_font_size(LABEL_FONT_SIZE * s);
+            ctx.fill_text(&self.prop.name, ROW_PADDING_X * s, h * 0.5 - 4.0 * s);
         }
 
         let value_str = format_value(&self.prop.current);
@@ -851,10 +912,10 @@ impl Widget for ValueEditorWidget {
             return;
         }
         ctx.set_fill_color(self.ctx.palette.label_text);
-        ctx.set_font_size(LABEL_FONT_SIZE);
-        let est = (value_str.len() as f64) * 6.0;
-        let x = (w - est - 6.0).max(0.0);
-        ctx.fill_text(&value_str, x, h * 0.5 - 4.0);
+        ctx.set_font_size(LABEL_FONT_SIZE * s);
+        let est = (value_str.len() as f64) * 6.0 * s;
+        let x = (w - est - 6.0 * s).max(0.0);
+        ctx.fill_text(&value_str, x, h * 0.5 - 4.0 * s);
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         // Drag-edit dispatch still happens through `NodeEditor` because
