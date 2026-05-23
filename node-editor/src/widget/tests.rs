@@ -219,6 +219,81 @@ fn unchanged_model_does_not_invalidate_the_backbuffer() {
 }
 
 #[test]
+fn dragging_with_snap_enabled_aligns_left_edge_to_neighbour() {
+    // End-to-end regression: with the framework's snap toggle ON,
+    // dragging a node within `SNAP_DEFAULT_THRESHOLD` of another
+    // node's left edge should pull the dragged node into alignment.
+    //
+    // Place A and B at the same X but very different Y so the only
+    // candidate snap is the LEFT edge — Y edges are 200 px apart
+    // and well outside the 8-px threshold.
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 800.0, 600.0));
+    seed_nodes(
+        &mut editor,
+        &memory,
+        vec![
+            mk_node(1, "A", [50.0, 300.0]),
+            mk_node(2, "B", [400.0, 100.0]),
+        ],
+    );
+
+    agg_gui::snap::set_enabled(true);
+    editor.interaction = CanvasState::DraggingNode {
+        ids: vec![NodeId(1)],
+        start_positions: vec![[50.0, 300.0]],
+        start_canvas: [50.0, 300.0],
+    };
+    // Move cursor so the un-snapped new position is x=403 — 3 px off
+    // node B's left edge (400).  Engine should pull node A's left
+    // edge into 400.
+    editor.on_mouse_move(Point::new(403.0, 300.0));
+
+    let pos = memory.lock().unwrap().nodes[0].position;
+    assert!(
+        (pos[0] - 400.0).abs() < 1e-6,
+        "snap should align A.left to B.left (400); got x={}",
+        pos[0]
+    );
+
+    // Leave the thread-local flag in the default off-state so
+    // sibling tests don't inherit our toggle.
+    agg_gui::snap::set_enabled(false);
+    agg_gui::snap::clear_guides();
+}
+
+#[test]
+fn dragging_with_snap_disabled_does_not_align() {
+    // Opposite control: with snap toggle OFF, the same drag must
+    // leave the node at the raw cursor position — no edge attraction.
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 800.0, 600.0));
+    seed_nodes(
+        &mut editor,
+        &memory,
+        vec![
+            mk_node(1, "A", [50.0, 300.0]),
+            mk_node(2, "B", [400.0, 100.0]),
+        ],
+    );
+    agg_gui::snap::set_enabled(false);
+    editor.interaction = CanvasState::DraggingNode {
+        ids: vec![NodeId(1)],
+        start_positions: vec![[50.0, 300.0]],
+        start_canvas: [50.0, 300.0],
+    };
+    editor.on_mouse_move(Point::new(403.0, 300.0));
+    let pos = memory.lock().unwrap().nodes[0].position;
+    assert!(
+        (pos[0] - 403.0).abs() < 1e-6,
+        "snap OFF must leave the raw drag position untouched; got x={}",
+        pos[0]
+    );
+}
+
+#[test]
 fn local_to_canvas_round_trip_with_pan_and_zoom() {
     let editor = {
         let mut e = NodeEditor::new(fixture());

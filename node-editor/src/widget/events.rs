@@ -124,6 +124,15 @@ impl NodeEditor {
         // will never appear on screen between mouse events.  Hover
         // (`Idle`) deliberately does NOT claim — keeping plain
         // pointer motion free of repaints matches agg-gui's demo.
+        //
+        // Snap-layout's drag path needs the full layout snapshot
+        // (every node's canvas rect) to compute alignment / spacing
+        // targets.  Grab it BEFORE the match's mutable borrow of
+        // `self.interaction` — the snapshot helper takes `&self` and
+        // borrow-checker can't see that the immutable read finishes
+        // before the closure body runs otherwise.  Cheap to take
+        // unconditionally (matches the snap-disabled path below).
+        let layouts_snapshot = self.snapshot_layouts();
         let result = match &mut self.interaction {
             CanvasState::PanningCanvas {
                 start_offset,
@@ -142,9 +151,24 @@ impl NodeEditor {
             } => {
                 let dx = canvas_pos[0] - start_canvas[0];
                 let dy = canvas_pos[1] - start_canvas[1];
+                // Raw new positions (before snap).  `position` is the
+                // node's top-left in canvas coords (Y-up: position[1]
+                // is the TOP edge).
+                let mut new_positions: Vec<[f64; 2]> = start_positions
+                    .iter()
+                    .map(|p0| [p0[0] + dx, p0[1] + dy])
+                    .collect();
+                // Snap pass — only for single-node drags.  Multi-node
+                // drag would need to snap the bounding box of the
+                // selection; that's a future extension.  Skipped
+                // entirely when the global snap toggle is off, which
+                // keeps the drag path cheap.
+                if ids.len() == 1 && agg_gui::snap::is_enabled() {
+                    snap_single_node(ids[0], &mut new_positions[0], &layouts_snapshot);
+                }
                 let mut model = self.model.lock().unwrap();
-                for (id, p0) in ids.iter().zip(start_positions.iter()) {
-                    model.set_node_position(*id, [p0[0] + dx, p0[1] + dy]);
+                for (id, p) in ids.iter().zip(new_positions.iter()) {
+                    model.set_node_position(*id, *p);
                 }
                 EventResult::Consumed
             }
@@ -252,8 +276,14 @@ impl NodeEditor {
                 }
                 EventResult::Consumed
             }
-            (_, CanvasState::DraggingNode { .. })
-            | (_, CanvasState::PanningCanvas { .. })
+            (_, CanvasState::DraggingNode { .. }) => {
+                // Drag ended — clear any snap guides the drag handler
+                // wrote during the move, so the overlay doesn't keep
+                // painting a stale alignment line.
+                agg_gui::snap::clear_guides();
+                EventResult::Consumed
+            }
+            (_, CanvasState::PanningCanvas { .. })
             | (_, CanvasState::DraggingProperty { .. }) => EventResult::Consumed,
             (_, _) => EventResult::Ignored,
         }
@@ -406,4 +436,54 @@ fn color_to_property(c: Option<Color>, original: [f32; 4]) -> PropertyValue {
         Some(col) => PropertyValue::Color([col.r, col.g, col.b, col.a]),
         None => PropertyValue::Color([original[0], original[1], original[2], 0.0]),
     }
+}
+
+/// Run a single-node drag through the snap engine and overwrite
+/// `position` with the snapped top-left corner.
+///
+/// Node positions are stored as `[x, y]` where `y` is the **top** edge
+/// in Y-up canvas coords; the snap engine works in `Rect`s whose `y`
+/// is the BOTTOM edge.  Conversion happens at the boundaries here so
+/// the rest of the drag path keeps thinking in the node convention.
+///
+/// Guides are written into the framework's thread-local snap
+/// registry; `NodeEditor::paint` reads them inside the canvas
+/// transform to render alignment / spacing lines.
+fn snap_single_node(
+    moving_id: NodeId,
+    position: &mut [f64; 2],
+    layouts: &[crate::draw::NodeLayoutInfo],
+) {
+    use agg_gui::{compute_snap, snap, Rect, SnapId, SnapMode};
+    let Some(moving_layout) = layouts.iter().find(|l| l.node_id == moving_id) else {
+        return;
+    };
+    let size = moving_layout.size;
+    let raw_top_left = *position;
+    let moving_rect = Rect::new(
+        raw_top_left[0],
+        raw_top_left[1] - size[1],
+        size[0],
+        size[1],
+    );
+    let targets: Vec<(SnapId, Rect)> = layouts
+        .iter()
+        .filter(|l| l.node_id != moving_id)
+        .map(|l| {
+            (
+                SnapId(l.node_id.0),
+                Rect::new(l.top_left[0], l.top_left[1] - l.size[1], l.size[0], l.size[1]),
+            )
+        })
+        .collect();
+    let result = compute_snap(
+        moving_rect,
+        SnapId(moving_id.0),
+        &targets,
+        snap::DEFAULT_THRESHOLD,
+        SnapMode::Move,
+    );
+    // Convert the snapped rect back to top-left position.
+    *position = [result.rect.x, result.rect.y + result.rect.height];
+    snap::set_guides(result.guides);
 }

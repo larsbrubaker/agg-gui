@@ -176,25 +176,88 @@ fn resize_east_snaps_right_edge_to_target_right() {
 }
 
 #[test]
-fn resize_suppresses_equal_spacing() {
-    // Two neighbours that would otherwise produce a spacing snap.
-    // Resize mode must NOT engage equal-spacing logic.
-    let l = (SnapId(2), rect(40.0, 50.0, 60.0, 40.0));
-    let r = (SnapId(3), rect(200.0, 50.0, 60.0, 40.0));
-    let moving = rect(132.0, 55.0, 40.0, 30.0);
+fn resize_east_spacing_matches_reference_gap() {
+    // Resize mode now supports equal-spacing snaps for the affected
+    // edge.  Scene: chain of three on a row with a 40-px gap between
+    // each.  Moving's right edge can be pulled to make the gap to
+    // its right neighbour (R) match the reference gap (P→Q).
+    //
+    //   P:  x∈[0..60]
+    //   Q:  x∈[100..160]   (gap P→Q = 40)
+    //   R:  x∈[260..320]   ← moving's right neighbour
+    //   moving:  x∈[180..217]   right edge dragged east; want gap
+    //   moving.right → R.left to equal 40 → want_right = 220
+    //   delta = +3 in threshold.
+    //
+    // Y values offset between rows so the move-cy doesn't trigger
+    // an incidental edge snap (which would suppress spacing).
+    let p = (SnapId(2), rect(0.0, 0.0, 60.0, 200.0));
+    let q = (SnapId(3), rect(100.0, 0.0, 60.0, 200.0));
+    let r = (SnapId(4), rect(260.0, 0.0, 60.0, 200.0));
+    let moving = rect(180.0, 80.0, 37.0, 30.0); // right at 217, target 220
     let result = compute_snap(
         moving,
         SnapId(1),
-        &[l, r],
+        &[p, q, r],
         8.0,
         SnapMode::Resize(ResizeEdge::East),
     );
     assert!(
-        !result
-            .guides
+        ((result.rect.x + result.rect.width) - 220.0).abs() < 1e-6,
+        "resize-east must snap moving.right so the gap to R matches P→Q; got right={}",
+        result.rect.x + result.rect.width
+    );
+    assert!(
+        (result.rect.x - 180.0).abs() < 1e-6,
+        "resize-east must leave moving.x untouched; got x={}",
+        result.rect.x
+    );
+    let spacing_guides = result
+        .guides
+        .iter()
+        .filter(|g| matches!(g, SnapGuide::HSpacing { .. }))
+        .count();
+    assert_eq!(
+        spacing_guides, 2,
+        "resize spacing must emit ref + matched HSpacing guides; got {spacing_guides}"
+    );
+}
+
+#[test]
+fn sandwich_spacing_emits_two_flanking_guides() {
+    // Regression for the user-reported visual bug: a sandwich match
+    // used to emit ONE HSpacing line running L.right..R.left, which
+    // visually passes through the moving rect.  It must now emit
+    // TWO short guides — one for the left gap, one for the right —
+    // so the indicator clearly straddles moving instead of
+    // crossing it.
+    let l = (SnapId(2), rect(40.0, 50.0, 60.0, 40.0));
+    let r = (SnapId(3), rect(200.0, 50.0, 60.0, 40.0));
+    let moving = rect(132.0, 55.0, 40.0, 30.0);
+    let m = horizontal_equal_spacing(moving, &rects_only(&[l, r]), 8.0)
+        .expect("sandwich match expected");
+    let h_guides: Vec<(f64, f64)> = m
+        .guides
+        .iter()
+        .filter_map(|g| match g {
+            SnapGuide::HSpacing { x0, x1, .. } => Some((*x0, *x1)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(h_guides.len(), 2, "sandwich must emit two flanking guides");
+    // Snapped moving.left = 130.  Expected ranges: [100..130] and
+    // [170..200].
+    assert!(
+        h_guides
             .iter()
-            .any(|g| matches!(g, SnapGuide::HSpacing { .. })),
-        "spacing detection must not fire in resize mode"
+            .any(|(x0, x1)| (x0 - 100.0).abs() < 1e-6 && (x1 - 130.0).abs() < 1e-6),
+        "expected left-gap guide 100..130; got {h_guides:?}"
+    );
+    assert!(
+        h_guides
+            .iter()
+            .any(|(x0, x1)| (x0 - 170.0).abs() < 1e-6 && (x1 - 200.0).abs() < 1e-6),
+        "expected right-gap guide 170..200; got {h_guides:?}"
     );
 }
 

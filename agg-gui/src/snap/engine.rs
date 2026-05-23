@@ -136,28 +136,55 @@ pub fn compute_snap(
         y_edge_engaged = true;
     }
 
-    // ── Phase 2: equal-spacing (Move only).
+    // ── Phase 2: equal-spacing.
     //
     // Precedence is PER AXIS: edge alignment on the X axis
     // suppresses horizontal spacing only — vertical spacing stays
     // free to engage independently, and vice versa.  An X-axis edge
     // snap and a Y-axis spacing snap are not competing explanations,
     // so they can co-exist.
-    if matches!(mode, SnapMode::Move) {
-        if !x_edge_engaged {
-            if let Some(spacing) = horizontal_equal_spacing(rect, &neighbours, threshold) {
-                rect.x += spacing.delta;
-                // Each helper picks the right number of dimension
-                // lines for the case it matched (one for sandwich,
-                // two for a chain extension showing both reference +
-                // matched gap).
-                guides.extend(spacing.guides);
+    match mode {
+        SnapMode::Move => {
+            if !x_edge_engaged {
+                if let Some(spacing) =
+                    horizontal_equal_spacing(rect, &neighbours, threshold)
+                {
+                    rect.x += spacing.delta;
+                    // Each helper picks the right number of dimension
+                    // lines for the case it matched (two for sandwich
+                    // flanking the moving rect, two for a chain
+                    // extension showing both reference + matched gap).
+                    guides.extend(spacing.guides);
+                }
+            }
+            if !y_edge_engaged {
+                if let Some(spacing) =
+                    vertical_equal_spacing(rect, &neighbours, threshold)
+                {
+                    rect.y += spacing.delta;
+                    guides.extend(spacing.guides);
+                }
             }
         }
-        if !y_edge_engaged {
-            if let Some(spacing) = vertical_equal_spacing(rect, &neighbours, threshold) {
-                rect.y += spacing.delta;
-                guides.extend(spacing.guides);
+        SnapMode::Resize(e) => {
+            // Resize spacing — match the dragged edge's gap to a
+            // reference gap somewhere in the scene.  Only the edge
+            // the active handle controls is allowed to move.
+            if !x_edge_engaged {
+                if let Some(s) =
+                    horizontal_resize_spacing(rect, &neighbours, threshold, e)
+                {
+                    apply_resize_x_spacing(&mut rect, e, s.delta);
+                    guides.extend(s.guides);
+                }
+            }
+            if !y_edge_engaged {
+                if let Some(s) =
+                    vertical_resize_spacing(rect, &neighbours, threshold, e)
+                {
+                    apply_resize_y_spacing(&mut rect, e, s.delta);
+                    guides.extend(s.guides);
+                }
             }
         }
     }
@@ -363,23 +390,35 @@ pub(super) fn horizontal_equal_spacing(
 ) -> Option<SpacingMatch> {
     let (left_n, right_n) = horizontal_neighbours(moving, targets);
 
-    // Sandwich case — symmetric placement between L and R.
+    // Sandwich case — symmetric placement between L and R.  Emits
+    // TWO dimension guides (one for each gap) rather than one
+    // spanning line, so the marker doesn't run THROUGH the moving
+    // rect — that visual reads as "this single gap exists" when the
+    // engine actually matched a left-gap-equals-right-gap pattern.
     if let (Some(l), Some(r)) = (left_n, right_n) {
         let lr_right = l.x + l.width;
         let rl_left = r.x;
         let total = rl_left - lr_right;
         if total > moving.width {
             let symmetric_left = lr_right + (total - moving.width) * 0.5;
+            let symmetric_right = symmetric_left + moving.width;
             let delta = symmetric_left - moving.x;
             if delta.abs() <= threshold {
                 let y = moving.y + moving.height * 0.5;
                 return Some(SpacingMatch {
                     delta,
-                    guides: vec![SnapGuide::HSpacing {
-                        y,
-                        x0: lr_right,
-                        x1: rl_left,
-                    }],
+                    guides: vec![
+                        SnapGuide::HSpacing {
+                            y,
+                            x0: lr_right,
+                            x1: symmetric_left,
+                        },
+                        SnapGuide::HSpacing {
+                            y,
+                            x0: symmetric_right,
+                            x1: rl_left,
+                        },
+                    ],
                 });
             }
         }
@@ -593,6 +632,198 @@ fn sq_center_distance(r: Rect, cx: f64, cy: f64) -> f64 {
     dx * dx + dy * dy
 }
 
+/// Horizontal resize spacing — find a reference gap and pull the
+/// dragged edge so the gap between that edge and its neighbour
+/// matches the reference.
+///
+/// East / South-East / North-East: the right edge is dragged; we
+/// look for a right neighbour `R` and a reference gap `g`, then
+/// snap `moving.right` to `R.left - g`.  The `delta` returned is
+/// the width delta (positive = grow east).
+///
+/// West / South-West / North-West: mirror — left edge moves.
+/// `delta` is `moving.x` delta (positive = shrink left; the caller
+/// also subtracts it from `width`).
+fn horizontal_resize_spacing(
+    moving: Rect,
+    targets: &[Rect],
+    threshold: f64,
+    edge: ResizeEdge,
+) -> Option<SpacingMatch> {
+    let (left_n, right_n) = horizontal_neighbours(moving, targets);
+    let moving_cy = moving.y + moving.height * 0.5;
+    let m_left = moving.x;
+    let m_right = moving.x + moving.width;
+    for &qi in targets_sorted_by_distance(moving, targets).iter() {
+        let q = targets[qi];
+        let Some(p) = horizontal_left_neighbour_of(q, targets, None) else {
+            continue;
+        };
+        let ref_gap = q.x - (p.x + p.width);
+        if ref_gap <= 0.0 {
+            continue;
+        }
+        let ref_guide = SnapGuide::HSpacing {
+            y: q.y + q.height * 0.5,
+            x0: p.x + p.width,
+            x1: q.x,
+        };
+        if edge.affects_right() {
+            if let Some(r) = right_n {
+                let want_right = r.x - ref_gap;
+                let delta = want_right - m_right;
+                if delta.abs() <= threshold && want_right > m_left {
+                    let matched_x0 = want_right;
+                    let matched_x1 = r.x;
+                    if !h_range_eq(p.x + p.width, q.x, matched_x0, matched_x1) {
+                        return Some(SpacingMatch {
+                            delta,
+                            guides: vec![
+                                ref_guide,
+                                SnapGuide::HSpacing {
+                                    y: moving_cy,
+                                    x0: matched_x0,
+                                    x1: matched_x1,
+                                },
+                            ],
+                        });
+                    }
+                }
+            }
+        }
+        if edge.affects_left() {
+            if let Some(l) = left_n {
+                let want_left = l.x + l.width + ref_gap;
+                let delta = want_left - m_left;
+                if delta.abs() <= threshold && want_left < m_right {
+                    let matched_x0 = l.x + l.width;
+                    let matched_x1 = want_left;
+                    if !h_range_eq(p.x + p.width, q.x, matched_x0, matched_x1) {
+                        return Some(SpacingMatch {
+                            delta,
+                            guides: vec![
+                                ref_guide,
+                                SnapGuide::HSpacing {
+                                    y: moving_cy,
+                                    x0: matched_x0,
+                                    x1: matched_x1,
+                                },
+                            ],
+                        });
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Mirror of [`horizontal_resize_spacing`] for the Y axis.
+fn vertical_resize_spacing(
+    moving: Rect,
+    targets: &[Rect],
+    threshold: f64,
+    edge: ResizeEdge,
+) -> Option<SpacingMatch> {
+    let (bottom_n, top_n) = vertical_neighbours(moving, targets);
+    let moving_cx = moving.x + moving.width * 0.5;
+    let m_bottom = moving.y;
+    let m_top = moving.y + moving.height;
+    for &qi in targets_sorted_by_distance(moving, targets).iter() {
+        let q = targets[qi];
+        let Some(p) = vertical_bottom_neighbour_of(q, targets, None) else {
+            continue;
+        };
+        let ref_gap = q.y - (p.y + p.height);
+        if ref_gap <= 0.0 {
+            continue;
+        }
+        let ref_guide = SnapGuide::VSpacing {
+            x: q.x + q.width * 0.5,
+            y0: p.y + p.height,
+            y1: q.y,
+        };
+        if edge.affects_top() {
+            if let Some(t) = top_n {
+                let want_top = t.y - ref_gap;
+                let delta = want_top - m_top;
+                if delta.abs() <= threshold && want_top > m_bottom {
+                    let matched_y0 = want_top;
+                    let matched_y1 = t.y;
+                    let ref_x = q.x + q.width * 0.5;
+                    let same_column = (ref_x - moving_cx).abs() < 1e-6;
+                    let degenerate =
+                        same_column && h_range_eq(p.y + p.height, q.y, matched_y0, matched_y1);
+                    if !degenerate {
+                        return Some(SpacingMatch {
+                            delta,
+                            guides: vec![
+                                ref_guide,
+                                SnapGuide::VSpacing {
+                                    x: moving_cx,
+                                    y0: matched_y0,
+                                    y1: matched_y1,
+                                },
+                            ],
+                        });
+                    }
+                }
+            }
+        }
+        if edge.affects_bottom() {
+            if let Some(b) = bottom_n {
+                let want_bottom = b.y + b.height + ref_gap;
+                let delta = want_bottom - m_bottom;
+                if delta.abs() <= threshold && want_bottom < m_top {
+                    let matched_y0 = b.y + b.height;
+                    let matched_y1 = want_bottom;
+                    let ref_x = q.x + q.width * 0.5;
+                    let same_column = (ref_x - moving_cx).abs() < 1e-6;
+                    let degenerate =
+                        same_column && h_range_eq(p.y + p.height, q.y, matched_y0, matched_y1);
+                    if !degenerate {
+                        return Some(SpacingMatch {
+                            delta,
+                            guides: vec![
+                                ref_guide,
+                                SnapGuide::VSpacing {
+                                    x: moving_cx,
+                                    y0: matched_y0,
+                                    y1: matched_y1,
+                                },
+                            ],
+                        });
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Apply a horizontal resize-spacing delta to `rect`.  East-side
+/// resizes grow `width`; west-side resizes shift `x` and shrink
+/// `width` by the same amount so the right edge stays put.
+fn apply_resize_x_spacing(rect: &mut Rect, edge: ResizeEdge, delta: f64) {
+    if edge.affects_right() {
+        rect.width += delta;
+    } else if edge.affects_left() {
+        rect.x += delta;
+        rect.width -= delta;
+    }
+}
+
+/// Apply a vertical resize-spacing delta to `rect`.  Mirrors
+/// [`apply_resize_x_spacing`] on the Y axis.
+fn apply_resize_y_spacing(rect: &mut Rect, edge: ResizeEdge, delta: f64) {
+    if edge.affects_top() {
+        rect.height += delta;
+    } else if edge.affects_bottom() {
+        rect.y += delta;
+        rect.height -= delta;
+    }
+}
+
 /// Mirror of [`horizontal_equal_spacing`] for the vertical axis.
 /// Sandwich case first, then reference-gap matching across every
 /// stationary (P, Q) neighbour pair on the Y axis.
@@ -603,23 +834,32 @@ pub(super) fn vertical_equal_spacing(
 ) -> Option<SpacingMatch> {
     let (bottom_n, top_n) = vertical_neighbours(moving, targets);
 
-    // Sandwich case.
+    // Sandwich case — two separate guides flanking moving (see
+    // horizontal sandwich docs for the rationale).
     if let (Some(b), Some(t)) = (bottom_n, top_n) {
         let b_top = b.y + b.height;
         let t_bottom = t.y;
         let total = t_bottom - b_top;
         if total > moving.height {
             let symmetric_bottom = b_top + (total - moving.height) * 0.5;
+            let symmetric_top = symmetric_bottom + moving.height;
             let delta = symmetric_bottom - moving.y;
             if delta.abs() <= threshold {
                 let x = moving.x + moving.width * 0.5;
                 return Some(SpacingMatch {
                     delta,
-                    guides: vec![SnapGuide::VSpacing {
-                        x,
-                        y0: b_top,
-                        y1: t_bottom,
-                    }],
+                    guides: vec![
+                        SnapGuide::VSpacing {
+                            x,
+                            y0: b_top,
+                            y1: symmetric_bottom,
+                        },
+                        SnapGuide::VSpacing {
+                            x,
+                            y0: symmetric_top,
+                            y1: t_bottom,
+                        },
+                    ],
                 });
             }
         }

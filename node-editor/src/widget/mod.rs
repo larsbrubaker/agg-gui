@@ -15,7 +15,10 @@ mod events;
 mod host_hooks;
 mod node_paint_context;
 pub mod nodes;
+mod snap_guides;
 mod value_editor_widget;
+
+use snap_guides::paint_snap_guides_canvas;
 #[cfg(test)]
 mod nodes_tests;
 #[cfg(test)]
@@ -598,6 +601,15 @@ impl Widget for NodeEditor {
             draw_bezier_connection(ctx, *from_canvas, *cursor_canvas, col, 2.0);
         }
         drop(model);
+
+        // Snap-guide overlay — only paints while a node drag is in
+        // progress.  Coordinates come from the thread-local snap
+        // registry in canvas-space, matching the current ctx
+        // transform, so guides land exactly on the moving node's
+        // would-be edges and reference rects.
+        if matches!(self.interaction, CanvasState::DraggingNode { .. }) {
+            paint_snap_guides_canvas(ctx);
+        }
 
         // Pop the canvas-space transform so the framework recurses into
         // child NodeWidgets in widget-local space — their bounds are
