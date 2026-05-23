@@ -175,8 +175,7 @@ impl Widget for MenuBarStrip {
             }
             Event::MouseMove { pos } if self.middle_dragging => {
                 let world_x = current_mouse_world().map(|p| p.x).unwrap_or(pos.x);
-                self.h_offset =
-                    self.middle_start_h_offset - (world_x - self.middle_start_world_x);
+                self.h_offset = self.middle_start_h_offset - (world_x - self.middle_start_world_x);
                 self.clamp_offset();
                 self.update_child_bounds();
                 crate::animation::request_draw();

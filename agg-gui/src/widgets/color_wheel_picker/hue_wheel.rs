@@ -208,15 +208,7 @@ impl Widget for HueWheel {
         };
         // Buffer is device-pixel resolution; blit at the widget's
         // *logical* size for 1:1 sampling on HiDPI displays.
-        ctx.draw_image_rgba_arc(
-            data,
-            w,
-            h,
-            0.0,
-            0.0,
-            self.bounds.width,
-            self.bounds.height,
-        );
+        ctx.draw_image_rgba_arc(data, w, h, 0.0, 0.0, self.bounds.width, self.bounds.height);
     }
     /// Paint-only: events fall through to the parent picker.
     fn hit_test(&self, _: Point) -> bool {
@@ -241,7 +233,10 @@ pub fn hue_from_local_point(
         // lose the cursor) — caller treats this as "ignore".
         return None;
     }
-    let mut deg = p_relative_to_center.y.atan2(p_relative_to_center.x).to_degrees();
+    let mut deg = p_relative_to_center
+        .y
+        .atan2(p_relative_to_center.x)
+        .to_degrees();
     if deg < 0.0 {
         deg += 360.0;
     }

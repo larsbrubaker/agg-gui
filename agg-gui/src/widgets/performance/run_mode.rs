@@ -124,12 +124,7 @@ impl Widget for RunModeRow {
         let btn_w = ((available.width - gap) * 0.5).max(40.0);
         for (i, child) in self.children.iter_mut().enumerate() {
             child.layout(Size::new(btn_w, Self::BTN_H));
-            child.set_bounds(Rect::new(
-                i as f64 * (btn_w + gap),
-                gy,
-                btn_w,
-                Self::BTN_H,
-            ));
+            child.set_bounds(Rect::new(i as f64 * (btn_w + gap), gy, btn_w, Self::BTN_H));
         }
         Size::new(available.width, row_h)
     }
@@ -197,7 +192,9 @@ impl Widget for RunModeDesc {
         // layout is stable when the user flips modes mid-run.
         self.label
             .set_text("Only running UI code when there are animations or input.".to_owned());
-        let s = self.label.layout(Size::new(available.width, f64::MAX / 2.0));
+        let s = self
+            .label
+            .layout(Size::new(available.width, f64::MAX / 2.0));
         self.label
             .set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
         let h = s.height.max(available.height).max(14.0);

@@ -173,6 +173,8 @@ impl MarkdownView {
         let Some(menu_state) = &mut self.context_menu else {
             return;
         };
-        menu_state.menu.paint(ctx, font, font_size, current_viewport());
+        menu_state
+            .menu
+            .paint(ctx, font, font_size, current_viewport());
     }
 }

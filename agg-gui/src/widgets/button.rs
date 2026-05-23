@@ -333,6 +333,33 @@ impl Button {
         }
     }
 
+    fn position_label(&mut self, size: Size, label_size: Size) {
+        // Width contributed by the leading icon glyph (icon advance
+        // + spacing gap). Zero when no icon is configured.
+        let icon_block_w = self
+            .icon
+            .as_ref()
+            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + ICON_GAP)
+            .unwrap_or(0.0);
+        // The (icon + gap + label) group is positioned as a unit;
+        // align uses the COMBINED width so the icon stays directly
+        // left of the label for any alignment mode.
+        let group_w = label_size.width + icon_block_w;
+        let group_x = match self.label_align {
+            LabelAlign::Left => self.label_pad_h.min(size.width),
+            LabelAlign::Right => (size.width - group_w - self.label_pad_h).max(0.0),
+            LabelAlign::Center => ((size.width - group_w) * 0.5).max(0.0),
+        };
+        let label_x = group_x + icon_block_w;
+        let label_y = ((size.height - label_size.height) * 0.5).max(0.0);
+        self.children[0].set_bounds(Rect::new(
+            label_x,
+            label_y,
+            label_size.width,
+            label_size.height,
+        ));
+    }
+
     fn disabled_colors(v: &crate::theme::Visuals) -> (Color, Color, Color) {
         let luma = v.bg_color.r * 0.299 + v.bg_color.g * 0.587 + v.bg_color.b * 0.114;
         if luma < 0.5 {
@@ -447,7 +474,12 @@ impl Widget for Button {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let height = (self.font_size * 1.7).max(24.0);
+        let natural_height = (self.font_size * 1.7).max(24.0);
+        let height = if available.height > 0.0 {
+            natural_height.min(available.height)
+        } else {
+            natural_height
+        };
         // Measure the label first so we can report a "fit" width — label
         // width plus horizontal padding — instead of stretching to the
         // whole available width.  This keeps Buttons polite siblings in a
@@ -457,8 +489,6 @@ impl Widget for Button {
         //   - set `with_min_size(Size::new(width, _))` for a width floor.
         let pad_h = self.font_size * 1.2;
         let label_size = self.children[0].layout(Size::new(available.width, height));
-        // Width contributed by the leading icon glyph (icon advance
-        // + spacing gap). Zero when no icon is configured.
         let icon_block_w = self
             .icon
             .as_ref()
@@ -474,23 +504,7 @@ impl Widget for Button {
         }
         .min(available.width);
         let size = Size::new(width, height);
-        // The (icon + gap + label) group is positioned as a unit;
-        // align uses the COMBINED width so the icon stays directly
-        // left of the label for any alignment mode.
-        let group_w = label_size.width + icon_block_w;
-        let group_x = match self.label_align {
-            LabelAlign::Left => self.label_pad_h.min(size.width),
-            LabelAlign::Right => (size.width - group_w - self.label_pad_h).max(0.0),
-            LabelAlign::Center => ((size.width - group_w) * 0.5).max(0.0),
-        };
-        let label_x = group_x + icon_block_w;
-        let label_y = ((size.height - label_size.height) * 0.5).max(0.0);
-        self.children[0].set_bounds(Rect::new(
-            label_x,
-            label_y,
-            label_size.width,
-            label_size.height,
-        ));
+        self.position_label(size, label_size);
         size
     }
 

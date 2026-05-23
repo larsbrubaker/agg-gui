@@ -168,15 +168,7 @@ impl Widget for PreviewSwatches {
             Some(d) => d,
             None => return,
         };
-        ctx.draw_image_rgba_arc(
-            data,
-            w,
-            h,
-            0.0,
-            0.0,
-            self.bounds.width,
-            self.bounds.height,
-        );
+        ctx.draw_image_rgba_arc(data, w, h, 0.0, 0.0, self.bounds.width, self.bounds.height);
     }
     fn hit_test(&self, _: Point) -> bool {
         false

@@ -1,4 +1,4 @@
-﻿//! `Tooltip` — a wrapper widget that shows egui-style hover help.
+//! `Tooltip` — a wrapper widget that shows egui-style hover help.
 //!
 //! Tooltips are submitted during the normal widget paint pass, but drawn at the
 //! end of the frame by [`crate::widget::App`].  That makes them true floating
@@ -223,23 +223,41 @@ mod tests {
 
     impl ClickChild {
         fn new(clicks: Arc<AtomicUsize>) -> Self {
-            Self { bounds: Rect::default(), children: Vec::new(), clicks }
+            Self {
+                bounds: Rect::default(),
+                children: Vec::new(),
+                clicks,
+            }
         }
     }
 
     impl Widget for ClickChild {
-        fn bounds(&self) -> Rect { self.bounds }
-        fn set_bounds(&mut self, bounds: Rect) { self.bounds = bounds; }
-        fn children(&self) -> &[Box<dyn Widget>] { &self.children }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> { &mut self.children }
-        fn type_name(&self) -> &'static str { "ClickChild" }
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, bounds: Rect) {
+            self.bounds = bounds;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn type_name(&self) -> &'static str {
+            "ClickChild"
+        }
         fn layout(&mut self, available: Size) -> Size {
             self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
             available
         }
         fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
         fn on_event(&mut self, event: &Event) -> EventResult {
-            if let Event::MouseUp { button: MouseButton::Left, .. } = event {
+            if let Event::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
                 self.clicks.fetch_add(1, Ordering::SeqCst);
                 EventResult::Consumed
             } else {

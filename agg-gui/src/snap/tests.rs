@@ -29,15 +29,12 @@ fn left_edge_snaps_to_target_left_within_threshold() {
     // Moving at x=103 (3 px right of target's x=100, threshold 8).
     let moving = rect(103.0, 50.0, 60.0, 40.0);
     let target = (SnapId(2), rect(100.0, 200.0, 80.0, 40.0));
-    let result = compute_snap(
-        moving,
-        SnapId(1),
-        &[target],
-        8.0,
-        SnapMode::Move,
-    );
+    let result = compute_snap(moving, SnapId(1), &[target], 8.0, SnapMode::Move);
     assert!((result.rect.x - 100.0).abs() < 1e-9);
-    assert!(result.guides.iter().any(|g| matches!(g, SnapGuide::VLine { x, .. } if (*x - 100.0).abs() < 1e-9)));
+    assert!(result
+        .guides
+        .iter()
+        .any(|g| matches!(g, SnapGuide::VLine { x, .. } if (*x - 100.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -193,7 +190,10 @@ fn resize_suppresses_equal_spacing() {
         SnapMode::Resize(ResizeEdge::East),
     );
     assert!(
-        !result.guides.iter().any(|g| matches!(g, SnapGuide::HSpacing { .. })),
+        !result
+            .guides
+            .iter()
+            .any(|g| matches!(g, SnapGuide::HSpacing { .. })),
         "spacing detection must not fire in resize mode"
     );
 }
@@ -306,12 +306,8 @@ fn closer_reference_pair_wins_when_multiple_match() {
     let near_q = (SnapId(5), rect(100.0, 50.0, 60.0, 40.0));
     let a = (SnapId(6), rect(200.0, 55.0, 60.0, 40.0));
     let moving = rect(303.0, 60.0, 40.0, 30.0);
-    let m = horizontal_equal_spacing(
-        moving,
-        &rects_only(&[far_p, far_q, near_p, near_q, a]),
-        8.0,
-    )
-    .expect("spacing match expected");
+    let m = horizontal_equal_spacing(moving, &rects_only(&[far_p, far_q, near_p, near_q, a]), 8.0)
+        .expect("spacing match expected");
     assert!((moving.x + m.delta - 300.0).abs() < 1e-9);
     let ref_y = m
         .guides

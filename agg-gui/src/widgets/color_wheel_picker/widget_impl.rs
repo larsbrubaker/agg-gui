@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use super::hsv_math::{
-    barycentric, format_hex, parse_hex, rgb_to_hsv, sv_triangle_vertices, sv_to_point,
+    barycentric, format_hex, parse_hex, rgb_to_hsv, sv_to_point, sv_triangle_vertices,
 };
 use super::*;
 use crate::animation::request_draw;
@@ -55,7 +55,10 @@ impl ColorWheelPicker {
     /// `self.bounds` after `layout()` runs.
     fn regions(&self) -> Regions {
         let assigned_w = self.bounds.width.max(picker_width());
-        let assigned_h = self.bounds.height.max(picker_height(self.allow_none, self.show_alpha));
+        let assigned_h = self
+            .bounds
+            .height
+            .max(picker_height(self.allow_none, self.show_alpha));
         let inner_w = picker_width();
         let inner_h = picker_height(self.allow_none, self.show_alpha);
         let origin_x = ((assigned_w - inner_w) * 0.5).max(0.0);
@@ -98,14 +101,29 @@ impl ColorWheelPicker {
             Rect::new(0.0, 0.0, 0.0, 0.0)
         };
 
-        let hex = Rect::new(origin_x + PAD, origin_y + y_top - HEX_H, w - PAD * 2.0, HEX_H);
+        let hex = Rect::new(
+            origin_x + PAD,
+            origin_y + y_top - HEX_H,
+            w - PAD * 2.0,
+            HEX_H,
+        );
         y_top -= HEX_H + ROW_GAP;
 
-        let preview = Rect::new(origin_x + PAD, origin_y + y_top - PREVIEW_H, w - PAD * 2.0, PREVIEW_H);
+        let preview = Rect::new(
+            origin_x + PAD,
+            origin_y + y_top - PREVIEW_H,
+            w - PAD * 2.0,
+            PREVIEW_H,
+        );
         y_top -= PREVIEW_H + ROW_GAP;
 
         let nocolor = if self.allow_none {
-            let r = Rect::new(origin_x + PAD, origin_y + y_top - NOCOLOR_H, w - PAD * 2.0, NOCOLOR_H);
+            let r = Rect::new(
+                origin_x + PAD,
+                origin_y + y_top - NOCOLOR_H,
+                w - PAD * 2.0,
+                NOCOLOR_H,
+            );
             y_top -= NOCOLOR_H + ROW_GAP;
             Some(r)
         } else {
@@ -217,11 +235,14 @@ impl ColorWheelPicker {
         self.wheel.set_bounds(r.wheel);
         self.wheel.layout(Size::new(r.wheel.width, r.wheel.height));
         self.triangle.set_bounds(r.triangle);
-        self.triangle.layout(Size::new(r.triangle.width, r.triangle.height));
+        self.triangle
+            .layout(Size::new(r.triangle.width, r.triangle.height));
         self.alpha_track.set_bounds(r.alpha);
-        self.alpha_track.layout(Size::new(r.alpha.width, r.alpha.height));
+        self.alpha_track
+            .layout(Size::new(r.alpha.width, r.alpha.height));
         self.preview.set_bounds(r.preview);
-        self.preview.layout(Size::new(r.preview.width, r.preview.height));
+        self.preview
+            .layout(Size::new(r.preview.width, r.preview.height));
 
         let placements: Vec<(usize, Rect)> = {
             let mut v = vec![
@@ -339,8 +360,11 @@ impl Widget for ColorWheelPicker {
         self.push_hex_text_if_idle();
 
         let want_w = picker_width().min(available.width.max(picker_width()));
-        let want_h = picker_height(self.allow_none, self.show_alpha)
-            .min(available.height.max(picker_height(self.allow_none, self.show_alpha)));
+        let want_h = picker_height(self.allow_none, self.show_alpha).min(
+            available
+                .height
+                .max(picker_height(self.allow_none, self.show_alpha)),
+        );
         self.bounds = Rect::new(0.0, 0.0, want_w, want_h);
 
         self.reposition_children_in_bounds();
@@ -382,8 +406,8 @@ impl Widget for ColorWheelPicker {
             let label = format!("{pct}%");
             if let Some(m) = ctx.measure_text(&label) {
                 let tx = r.alpha_pct.x + ((r.alpha_pct.width - m.width) * 0.5).max(0.0);
-                let ty = r.alpha_pct.y
-                    + ((r.alpha_pct.height - self.font_size) * 0.5 + 2.0).max(0.0);
+                let ty =
+                    r.alpha_pct.y + ((r.alpha_pct.height - self.font_size) * 0.5 + 2.0).max(0.0);
                 ctx.fill_text(&label, tx, ty);
             }
         }

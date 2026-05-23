@@ -662,8 +662,7 @@ pub(super) fn vertical_equal_spacing(
             let delta = want_bottom - moving.y;
             let matched_y0 = a.y + a.height;
             let matched_y1 = want_bottom;
-            let degenerate =
-                same_column && h_range_eq(ref_y0, ref_y1, matched_y0, matched_y1);
+            let degenerate = same_column && h_range_eq(ref_y0, ref_y1, matched_y0, matched_y1);
             if delta.abs() <= threshold && !degenerate {
                 best_for_q = Some(SpacingMatch {
                     delta,
@@ -685,8 +684,7 @@ pub(super) fn vertical_equal_spacing(
             let delta = want_bottom - moving.y;
             let matched_y0 = want_top;
             let matched_y1 = a.y;
-            let degenerate =
-                same_column && h_range_eq(ref_y0, ref_y1, matched_y0, matched_y1);
+            let degenerate = same_column && h_range_eq(ref_y0, ref_y1, matched_y0, matched_y1);
             if delta.abs() <= threshold
                 && !degenerate
                 && best_for_q
@@ -729,7 +727,11 @@ fn vertical_neighbours(moving: Rect, targets: &[Rect]) -> (Option<Rect>, Option<
         let t_top = t.y + t.height;
         let t_bottom = t.y;
         if t_top <= m_bottom {
-            if bot.as_ref().map(|b| (b.y + b.height) < t_top).unwrap_or(true) {
+            if bot
+                .as_ref()
+                .map(|b| (b.y + b.height) < t_top)
+                .unwrap_or(true)
+            {
                 bot = Some(*t);
             }
         } else if t_bottom >= m_top {
@@ -772,7 +774,6 @@ fn vertical_bottom_neighbour_of(of: Rect, targets: &[Rect], exclude: Option<Rect
     }
     best
 }
-
 
 // ── Span helpers for guide line endpoints ────────────────────────
 

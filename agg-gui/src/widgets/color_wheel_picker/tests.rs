@@ -127,9 +127,15 @@ fn sv_round_trip_through_triangle() {
         } else {
             0.0
         };
-        assert!((recovered_val - v).abs() < 1e-6, "val drift {v} -> {recovered_val}");
+        assert!(
+            (recovered_val - v).abs() < 1e-6,
+            "val drift {v} -> {recovered_val}"
+        );
         if v > 1e-6 {
-            assert!((recovered_sat - s).abs() < 1e-6, "sat drift {s} -> {recovered_sat}");
+            assert!(
+                (recovered_sat - s).abs() < 1e-6,
+                "sat drift {s} -> {recovered_sat}"
+            );
         }
         let weight_sum = w1 + w2 + w3;
         assert!((weight_sum - 1.0).abs() < 1e-6);

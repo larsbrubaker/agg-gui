@@ -120,7 +120,13 @@ impl PopupMenu {
         self.state.handle_shortcut(&mut self.items, key, modifiers)
     }
 
-    pub fn paint(&mut self, ctx: &mut dyn DrawCtx, font: Arc<Font>, font_size: f64, viewport: Size) {
+    pub fn paint(
+        &mut self,
+        ctx: &mut dyn DrawCtx,
+        font: Arc<Font>,
+        font_size: f64,
+        viewport: Size,
+    ) {
         let layouts = self.state.layouts(&self.items, viewport);
         // Refresh the per-row `Label` cache against the current open
         // tree.  Cheap when nothing changed — `sync_to` only mutates
@@ -400,7 +406,6 @@ impl MenuBar {
             self.cache.invalidate();
         }
     }
-
 }
 
 impl Widget for MenuBar {
@@ -696,7 +701,8 @@ impl Widget for MenuBar {
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let font = self.active_font();
-        self.popup.paint(ctx, font, self.font_size, current_viewport());
+        self.popup
+            .paint(ctx, font, self.font_size, current_viewport());
     }
 }
 
@@ -767,7 +773,11 @@ fn paint_popup_level(
             }
         } else if let Some(icon) = item.icon {
             let icon = icon.to_string();
-            ctx.fill_text(&icon, row_layout.rect.x + style.icon_x, row_layout.rect.y + 7.0);
+            ctx.fill_text(
+                &icon,
+                row_layout.rect.x + style.icon_x,
+                row_layout.rect.y + 7.0,
+            );
         }
         // Selection indicator.  Always paints `check_glyph` so check
         // and radio rows share a consistent right-edge mark; the radio

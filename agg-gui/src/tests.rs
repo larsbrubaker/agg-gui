@@ -35,6 +35,7 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 // Phase 1 — coordinate system invariants
 // ---------------------------------------------------------------------------
 
+mod color_wheel_picker;
 /// A point drawn at Y=10 in a 100×100 buffer must be near the BOTTOM of the
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.
@@ -46,10 +47,9 @@ mod layout_lcd;
 #[cfg(feature = "reflect")]
 mod reflect_roundtrip;
 mod retained_layers;
+mod scroll_view;
 mod touch_scroll;
 mod tree_view;
-mod color_wheel_picker;
-mod scroll_view;
 mod widgets;
 mod window_layout;
 mod window_maximize;

@@ -38,8 +38,7 @@ pub use engine::compute_snap;
 pub use model::{ResizeEdge, SnapGuide, SnapId, SnapMode, SnapResult, Snappable};
 pub use overlay::SnapOverlay;
 pub use registry::{
-    clear_guides, guides_snapshot, register_target, set_guides, targets_snapshot,
-    unregister_target,
+    clear_guides, guides_snapshot, register_target, set_guides, targets_snapshot, unregister_target,
 };
 
 /// Default pixel distance at which an alignment / spacing match

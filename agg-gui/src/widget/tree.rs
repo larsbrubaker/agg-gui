@@ -467,7 +467,12 @@ fn transform_rect_aabb(t: &crate::TransAffine, rect: Rect) -> Rect {
             max_y = y;
         }
     }
-    Rect::new(min_x, min_y, (max_x - min_x).max(0.0), (max_y - min_y).max(0.0))
+    Rect::new(
+        min_x,
+        min_y,
+        (max_x - min_x).max(0.0),
+        (max_y - min_y).max(0.0),
+    )
 }
 
 /// Effective uniform scale extracted from `t` — used to scale logical

@@ -66,8 +66,10 @@ fn test_color_wheel_picker_drag_hue_updates_color() {
     // Pick a point on the ring at 120° (Y-up).  Ring centre radius:
     //   outer = 100 × 85/95 ≈ 89.47,  inner = 100 × 60/95 ≈ 63.16
     //   ring_r = (outer + inner) / 2 ≈ 76.32
-    let ring_r = 0.5 * 200.0 * (crate::widgets::color_wheel_picker::WHEEL_OUTER_RATIO
-        + crate::widgets::color_wheel_picker::WHEEL_INNER_RATIO)
+    let ring_r = 0.5
+        * 200.0
+        * (crate::widgets::color_wheel_picker::WHEEL_OUTER_RATIO
+            + crate::widgets::color_wheel_picker::WHEEL_INNER_RATIO)
         * 0.5;
     let angle = 120.0_f64.to_radians();
     let target_x = cx + ring_r * angle.cos();
@@ -181,15 +183,27 @@ fn test_color_wheel_picker_cancel_restores_original() {
     let picker_h = crate::widgets::color_wheel_picker::picker_height(false, true);
     let cy_up = picker_h - 10.0 - 100.0;
     let cx = crate::widgets::color_wheel_picker::picker_width() * 0.5;
-    let ring_r = 0.5 * 200.0 * (crate::widgets::color_wheel_picker::WHEEL_OUTER_RATIO
-        + crate::widgets::color_wheel_picker::WHEEL_INNER_RATIO)
+    let ring_r = 0.5
+        * 200.0
+        * (crate::widgets::color_wheel_picker::WHEEL_OUTER_RATIO
+            + crate::widgets::color_wheel_picker::WHEEL_INNER_RATIO)
         * 0.5;
     let angle = 200.0_f64.to_radians();
     let drag_x = cx + ring_r * angle.cos();
     let drag_y = cy_up + ring_r * angle.sin();
     let drag_screen_y = flip(drag_y);
-    app.on_mouse_down(drag_x, drag_screen_y, MouseButton::Left, Modifiers::default());
-    app.on_mouse_up(drag_x, drag_screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        drag_x,
+        drag_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        drag_x,
+        drag_screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
 
     let after_drag = last.get();
     assert_ne!(
@@ -226,9 +240,8 @@ fn test_color_wheel_picker_cancel_restores_original() {
 
     assert!(cancel_fired.get(), "Cancel button must fire on_cancel");
     let restored = last.get();
-    let drift = (restored.r - start.r).abs()
-        + (restored.g - start.g).abs()
-        + (restored.b - start.b).abs();
+    let drift =
+        (restored.r - start.r).abs() + (restored.g - start.g).abs() + (restored.b - start.b).abs();
     assert!(
         drift < 1e-4,
         "Cancel must restore the starting colour via on_change (got {:?})",

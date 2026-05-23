@@ -124,8 +124,8 @@ impl PopupLabels {
         layouts: &[PopupLayout],
     ) {
         let font_ptr = Arc::as_ptr(font);
-        let font_changed = font_ptr != self.last_font_ptr
-            || (self.last_font_size - font_size).abs() > 0.01;
+        let font_changed =
+            font_ptr != self.last_font_ptr || (self.last_font_size - font_size).abs() > 0.01;
         if font_changed {
             self.rows.clear();
             self.last_font_ptr = font_ptr;

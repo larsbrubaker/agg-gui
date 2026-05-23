@@ -85,7 +85,12 @@ pub fn parse_hex(s: &str) -> Option<Color> {
     let pair = |a: char, b: char| -> Option<u8> { u8::from_str_radix(&format!("{a}{b}"), 16).ok() };
     let bytes: Vec<char> = s.chars().collect();
     let (r, g, b, a) = match bytes.len() {
-        3 => (expand(bytes[0])?, expand(bytes[1])?, expand(bytes[2])?, 255u8),
+        3 => (
+            expand(bytes[0])?,
+            expand(bytes[1])?,
+            expand(bytes[2])?,
+            255u8,
+        ),
         4 => (
             expand(bytes[0])?,
             expand(bytes[1])?,
@@ -168,13 +173,7 @@ pub fn sv_triangle_vertices(
 /// Inverse of the `val = w1 + w2`, `sat = w1 / val` mapping used in the
 /// SV widget's hit-test: the marker position is reconstructed so the
 /// crosshair lands on the right pixel after a hex / round-trip update.
-pub fn sv_to_point(
-    s: f32,
-    v: f32,
-    v1: (f64, f64),
-    v2: (f64, f64),
-    v3: (f64, f64),
-) -> (f64, f64) {
+pub fn sv_to_point(s: f32, v: f32, v1: (f64, f64), v2: (f64, f64), v3: (f64, f64)) -> (f64, f64) {
     let w1 = (s as f64) * (v as f64);
     let w2 = (1.0 - s as f64) * (v as f64);
     let w3 = 1.0 - w1 - w2;

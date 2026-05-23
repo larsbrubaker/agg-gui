@@ -189,8 +189,8 @@ impl PerformanceView {
     /// "Mean CPU usage" label and (if enabled) the run-mode selector
     /// labels.
     pub fn new(font: Arc<Font>, history: SharedFrameHistory) -> Self {
-        let mut label = Label::new("Mean CPU usage: 0.00 ms / frame", Arc::clone(&font))
-            .with_font_size(11.0);
+        let mut label =
+            Label::new("Mean CPU usage: 0.00 ms / frame", Arc::clone(&font)).with_font_size(11.0);
         // Live counter — value changes every frame, so caching the
         // glyph bitmap to a backbuffer would invalidate every frame
         // anyway.  Direct rasterisation is cheaper here.
@@ -350,10 +350,9 @@ impl Widget for PerformanceView {
             // "Mode" label.
             let row_top = cursor_top;
             let row_bottom = row_top - s.mode_label_height;
-            let label_size = self.children[s.mode_label_idx]
-                .layout(Size::new(inner_w, s.mode_label_height));
-            let label_y =
-                row_bottom + (s.mode_label_height - label_size.height) * 0.5;
+            let label_size =
+                self.children[s.mode_label_idx].layout(Size::new(inner_w, s.mode_label_height));
+            let label_y = row_bottom + (s.mode_label_height - label_size.height) * 0.5;
             self.children[s.mode_label_idx].set_bounds(Rect::new(
                 self.padding,
                 label_y,
@@ -391,8 +390,7 @@ impl Widget for PerformanceView {
         // original position (top of widget, padded).
         let mean_row_top = cursor_top;
         let mean_row_bottom = mean_row_top - self.label_height;
-        let mean_size =
-            self.children[0].layout(Size::new(inner_w, self.label_height));
+        let mean_size = self.children[0].layout(Size::new(inner_w, self.label_height));
         let mean_y = mean_row_bottom + (self.label_height - mean_size.height) * 0.5;
         self.children[0].set_bounds(Rect::new(
             self.padding,

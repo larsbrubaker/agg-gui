@@ -74,11 +74,7 @@ pub fn submenu_chevron_points(row: Rect) -> [(f64, f64); 3] {
     let cy = row.y + row.height * 0.5;
     let half_h = 4.0;
     let arm = 3.0;
-    [
-        (cx - arm, cy + half_h),
-        (cx, cy),
-        (cx - arm, cy - half_h),
-    ]
+    [(cx - arm, cy + half_h), (cx, cy), (cx - arm, cy - half_h)]
 }
 
 /// Paint the submenu-indicator chevron as a stroked `>` polyline.
@@ -99,12 +95,7 @@ pub fn paint_submenu_chevron(ctx: &mut dyn DrawCtx, row: Rect, color: Color) {
 /// Paint the chrome (hover / open background fill) under a bar button.
 /// The button's text label is painted separately by the caller via
 /// `paint_subtree` on the bar's owned `Label`.
-pub fn paint_menu_bar_button_bg(
-    ctx: &mut dyn DrawCtx,
-    rect: Rect,
-    open: bool,
-    hovered: bool,
-) {
+pub fn paint_menu_bar_button_bg(ctx: &mut dyn DrawCtx, rect: Rect, open: bool, hovered: bool) {
     if !open && !hovered {
         return;
     }

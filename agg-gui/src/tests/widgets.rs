@@ -206,6 +206,34 @@ fn test_button_with_icon_grows_to_fit_icon_plus_label() {
 }
 
 #[test]
+fn test_button_label_centers_when_height_is_constrained() {
+    // Sidebar demo rows give Button a shorter height than its natural
+    // 24 px layout height. The label must be centered in that constrained
+    // height so it does not ride high in the painted row.
+    use crate::text::Font;
+    use crate::widgets::{Button, LabelAlign};
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut button = Button::new("Demo", font)
+        .with_font_size(13.0)
+        .with_label_align(LabelAlign::Left);
+
+    let size = button.layout(Size::new(180.0, 20.0));
+
+    let label = button.children()[0].bounds();
+    let label_center_y = label.y + label.height * 0.5;
+    assert!(
+        label.width > 0.0 && label.height > 0.0,
+        "button label should keep non-empty bounds; label={label:?}"
+    );
+    assert!(
+        (label_center_y - size.height * 0.5).abs() < 0.01,
+        "button label should be vertically centered in constrained layout; size={size:?} label={label:?}"
+    );
+}
+
+#[test]
 fn test_text_field_theme_overrides_visuals_palette() {
     // Confirm `with_theme` stores the overrides on the widget so
     // `paint` reads them instead of the ambient visuals. Locks the
@@ -345,7 +373,6 @@ fn test_flex_row_distributes_space() {
         "second child should start at x≈100; got {x1}"
     );
 }
-
 
 mod combo_popup;
 
@@ -702,4 +729,3 @@ fn test_consumed_event_marks_widget_backbuffer_dirty() {
     );
     assert!(root.backbuffer_state_mut().unwrap().dirty);
 }
-

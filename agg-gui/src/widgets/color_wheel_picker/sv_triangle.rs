@@ -230,15 +230,7 @@ impl Widget for SvTriangle {
         // Buffer is in device pixels; blit at the widget's *logical*
         // size so the GPU samples one rasterised pixel per physical
         // pixel on HiDPI displays (no upscale blur).
-        ctx.draw_image_rgba_arc(
-            data,
-            w,
-            h,
-            0.0,
-            0.0,
-            self.bounds.width,
-            self.bounds.height,
-        );
+        ctx.draw_image_rgba_arc(data, w, h, 0.0, 0.0, self.bounds.width, self.bounds.height);
     }
     fn hit_test(&self, _: Point) -> bool {
         false
