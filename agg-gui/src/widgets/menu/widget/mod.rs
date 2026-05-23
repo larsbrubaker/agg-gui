@@ -768,29 +768,31 @@ fn paint_popup_level(
         } else if let Some(icon) = item.icon {
             let icon = icon.to_string();
             ctx.fill_text(&icon, row_layout.rect.x + style.icon_x, row_layout.rect.y + 7.0);
-        } else {
-            // Selection glyphs come from `MenuStyle` so hosts can swap
-            // the default Unicode marks for FA equivalents when they
-            // bundle the icon font — see `MenuStyle` docs for details.
-            match item.selection {
-                MenuSelection::Check { selected: true } => {
-                    ctx.fill_text(
-                        &style.check_glyph.to_string(),
-                        row_layout.rect.x + style.icon_x,
-                        row_layout.rect.y + 7.0,
-                    );
-                }
-                MenuSelection::Radio { selected: true } => {
-                    ctx.fill_text(
-                        &style.radio_glyph.to_string(),
-                        row_layout.rect.x + style.icon_x,
-                        row_layout.rect.y + 7.0,
-                    );
-                }
-                MenuSelection::None
-                | MenuSelection::Check { selected: false }
-                | MenuSelection::Radio { selected: false } => {}
-            }
+        }
+        // Selection indicator.  Always paints `check_glyph` so check
+        // and radio rows share a consistent right-edge mark; the radio
+        // semantic still lives in the model (mutex toggle behaviour)
+        // but its visual indicator is unified with check rows.  When
+        // the row already has a left-side marker (icon or swatch) the
+        // glyph paints at the right edge so the marker's identity
+        // stays visible; otherwise it occupies the icon slot.
+        let selected = matches!(
+            item.selection,
+            MenuSelection::Check { selected: true } | MenuSelection::Radio { selected: true }
+        );
+        if selected {
+            let has_left_marker = item.swatch.is_some() || item.icon.is_some();
+            let x = if has_left_marker {
+                // Right-aligned slot.  When the row has a submenu the
+                // chevron already lives at row.width - 18; shift the
+                // selection glyph further left so they don't overlap.
+                let right_offset = if item.has_submenu() { 36.0 } else { 18.0 };
+                row_layout.rect.x + row_layout.rect.width - right_offset
+            } else {
+                row_layout.rect.x + style.icon_x
+            };
+            ctx.set_fill_color(inline_color);
+            ctx.fill_text(&style.check_glyph.to_string(), x, row_layout.rect.y + 7.0);
         }
         if item.has_submenu() {
             ctx.fill_text(

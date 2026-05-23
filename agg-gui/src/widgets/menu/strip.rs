@@ -117,9 +117,16 @@ impl Widget for MenuBarStrip {
         ctx.begin_path();
         ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
         ctx.fill();
+    }
+
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         // Y-up: local y=0 is the BOTTOM edge of the strip, which is
         // exactly where the separator between the strip and the rest of
-        // the UI lives.  Drawn AFTER the bg so it sits on top.
+        // the UI lives.  Painted in `paint_overlay` so it sits on top of
+        // child widgets — `MenuBar` paints an opaque `top_bar_bg` fill
+        // across its full bounds (to satisfy LCD coverage), which would
+        // otherwise erase a separator drawn in `paint`.
+        let v = ctx.visuals();
         ctx.set_fill_color(v.separator);
         ctx.begin_path();
         ctx.rect(0.0, 0.0, self.bounds.width, 1.0);

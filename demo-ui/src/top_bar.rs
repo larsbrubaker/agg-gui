@@ -313,6 +313,9 @@ fn build_menus(
     theme_pref: ThemePreference,
     accent: AccentColor,
 ) -> Vec<TopMenu> {
+    // `.radio()` (mutex) over `.checked()` (toggle) so the popup's
+    // toggle handler clears sibling selections in-place when the user
+    // picks a new theme without closing the menu.
     let theme_submenu = vec![
         MenuItem::action("Light", "view.theme.light")
             .icon('\u{F185}')
