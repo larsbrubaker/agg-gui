@@ -20,6 +20,22 @@ impl Widget for TextField {
         true
     }
 
+    /// Composite parents (e.g. `ColorWheelPicker`) use this to push a live
+    /// value into the field without bypassing `set_text`'s cell sync and
+    /// cache invalidation.  Skipped while the field is focused so the user
+    /// isn't fighting the parent for cursor position mid-edit; the parent
+    /// is expected to read back via [`TextField::text`] after focus is
+    /// released to pick up any user-typed value.
+    fn set_label_text(&mut self, text: &str) {
+        if self.focused {
+            return;
+        }
+        if self.edit.borrow().text == text {
+            return;
+        }
+        self.set_text(text);
+    }
+
     /// While focused, the cursor blinks at 500 ms half-period.  The field
     /// itself drives its own repaint cadence: [`needs_draw`] reports dirty
     /// whenever wall-clock time has crossed a flip boundary since the last

@@ -8,10 +8,14 @@
 //! The state machine lives in [`super::CanvasState`]; transitions
 //! happen here on mouse down / move / up.
 
-use agg_gui::{EventResult, Key, Modifiers, MouseButton, Point};
+use std::cell::Cell;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use agg_gui::{Color, EventResult, Key, Modifiers, MouseButton, Point};
 
 use crate::draw::SocketSide;
-use crate::model::{NodeId, PropertyValue};
+use crate::model::{EditorHint, NodeId, PropertyValue};
 
 use super::{CanvasState, NodeEditor, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 
@@ -68,6 +72,14 @@ impl NodeEditor {
                             PropertyValue::Bool(!b),
                         );
                         return EventResult::Consumed;
+                    }
+                    // Color row with the `Color` editor hint opens the
+                    // ColorWheelPicker dialog as a floating overlay.
+                    if matches!(prop.editor, Some(EditorHint::Color)) {
+                        if let PropertyValue::Color(rgba) = prop.current {
+                            self.open_color_picker(node_id, prop.name.clone(), rgba);
+                            return EventResult::Consumed;
+                        }
                     }
                 }
                 if let Some(node_id) = self.hit_node(&layouts, canvas_pos) {
@@ -310,5 +322,77 @@ impl NodeEditor {
 
     pub(super) fn notify_primary_selection(&self, id: Option<NodeId>) {
         self.model.lock().unwrap().on_primary_selection_changed(id);
+    }
+
+    /// Spawn the [`agg_gui::ColorWheelPicker`] dialog as a floating
+    /// overlay over the canvas.  The picker's callbacks route writes
+    /// back through `set_property` for live preview / commit / cancel
+    /// and flip a shared close-flag that the editor drains on the next
+    /// event or layout pass.
+    pub(super) fn open_color_picker(
+        &mut self,
+        node_id: NodeId,
+        prop_name: String,
+        initial: [f32; 4],
+    ) {
+        let Some(font) = agg_gui::font_settings::current_system_font() else {
+            return;
+        };
+        let initial_color = Color::rgba(initial[0], initial[1], initial[2], initial[3]);
+        let original = initial; // captured for `on_cancel` revert
+
+        let model_change = Arc::clone(&self.model);
+        let model_select = Arc::clone(&self.model);
+        let model_cancel = Arc::clone(&self.model);
+        let name_change = prop_name.clone();
+        let name_select = prop_name.clone();
+        let name_cancel = prop_name;
+        let close_flag = Rc::new(Cell::new(false));
+        let close_select = Rc::clone(&close_flag);
+        let close_cancel = Rc::clone(&close_flag);
+
+        let picker = agg_gui::ColorWheelPicker::new(initial_color, font.clone())
+            .with_allow_none(false)
+            .with_show_alpha(true)
+            .on_change(move |c| {
+                let value = color_to_property(c, original);
+                model_change
+                    .lock()
+                    .unwrap()
+                    .set_property(node_id, &name_change, value);
+            })
+            .on_select(move |c| {
+                let value = color_to_property(c, original);
+                model_select
+                    .lock()
+                    .unwrap()
+                    .set_property(node_id, &name_select, value);
+                close_select.set(true);
+            })
+            .on_cancel(move || {
+                model_cancel.lock().unwrap().set_property(
+                    node_id,
+                    &name_cancel,
+                    PropertyValue::Color(original),
+                );
+                close_cancel.set(true);
+            });
+
+        let dialog = agg_gui::color_wheel_picker_dialog(picker, "Color Picker");
+        self.overlay = Some(dialog);
+        self.overlay_close_flag = Some(close_flag);
+        self.backbuffer.invalidate();
+        agg_gui::animation::request_draw();
+    }
+}
+
+/// Pack a picker-side `Option<Color>` back into a `PropertyValue::Color`,
+/// falling back to `original.a = 0.0` for the pass-through ("No Color")
+/// case so hosts that don't model pass-through still see a sensible
+/// zero-alpha colour.
+fn color_to_property(c: Option<Color>, original: [f32; 4]) -> PropertyValue {
+    match c {
+        Some(col) => PropertyValue::Color([col.r, col.g, col.b, col.a]),
+        None => PropertyValue::Color([original[0], original[1], original[2], 0.0]),
     }
 }

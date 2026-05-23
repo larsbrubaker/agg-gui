@@ -1003,6 +1003,7 @@ mod tests {
                 min: Some(0.0),
                 max: Some(40.0),
                 bound_input: None,
+                editor: None,
             }],
         }
     }

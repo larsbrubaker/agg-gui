@@ -15,9 +15,10 @@ use std::sync::Arc;
 
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    Button, Checkbox, CollapsingHeader, Color, ColorPicker, ComboBox, DragValue, DrawCtx, Event,
-    EventResult, FlexColumn, FlexRow, Font, Hyperlink, ImageView, Label, ProgressBar, RadioGroup,
-    Rect, ScrollView, Separator, Size, SizedBox, Slider, TextField, ToggleSwitch, Widget,
+    Button, Checkbox, CollapsingHeader, Color, ColorPicker, ColorWheelPicker, ComboBox, DragValue,
+    DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink, ImageView, Label,
+    ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox, Slider, TextField,
+    ToggleSwitch, Widget,
 };
 
 const EGUI_DOCS_URL: &str = "https://docs.rs/egui/";
@@ -326,6 +327,40 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
         ),
         0.0,
     );
+
+    {
+        // Inline `ColorWheelPicker` — circular hue ring + SV triangle,
+        // each surface hardware back-buffered.  Pushes its committed
+        // colour into the shared cell on Select so the standard
+        // `ColorPicker` row above reflects the change.
+        let wheel_cell = Rc::clone(&color);
+        let initial = wheel_cell.get();
+        let wheel = ColorWheelPicker::new(initial, Arc::clone(&font))
+            .with_allow_none(true)
+            .with_show_alpha(true)
+            .on_change({
+                let c = Rc::clone(&wheel_cell);
+                move |opt| {
+                    if let Some(col) = opt {
+                        c.set(col);
+                    }
+                }
+            })
+            .on_select({
+                let c = Rc::clone(&wheel_cell);
+                move |opt| match opt {
+                    Some(col) => c.set(col),
+                    None => c.set(Color::transparent()),
+                }
+            });
+        col.push(
+            grid_row(
+                doc_link("Color wheel", "color_wheel", &font),
+                Box::new(wheel),
+            ),
+            0.0,
+        );
+    }
 
     col.push(
         grid_row(

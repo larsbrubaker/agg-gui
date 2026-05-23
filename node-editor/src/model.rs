@@ -90,6 +90,21 @@ impl SocketView {
     }
 }
 
+/// Editor hint — surfaces the host's choice of rich editor for a
+/// property when the canvas's inline editor isn't enough.  Hosts forward
+/// their schema-side hint (e.g. AtomArtist's
+/// `atomartist_lib::registry::EditorKind`) into this enum so the canvas
+/// can decide to open a richer popup on a row click.  Variants are
+/// intentionally narrow — only the cases the canvas itself can act on
+/// (open a colour-wheel popup, etc.) appear here; everything else uses
+/// the canvas's default behaviour for the row's `PropertyValue`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorHint {
+    /// Open the agg-gui `ColorWheelPicker` popup on click.  Applies to
+    /// `PropertyValue::Color` rows only.
+    Color,
+}
+
 /// One inline-editable property row on a node.
 #[derive(Clone, Debug)]
 pub struct PropertyView {
@@ -106,6 +121,10 @@ pub struct PropertyView {
     /// editor disappears once the socket is connected. Mirrors
     /// NodeDesigner's per-input fallback editor.
     pub bound_input: Option<String>,
+    /// Optional host hint telling the canvas to use a richer popup
+    /// editor (e.g. a colour wheel) instead of the default inline
+    /// behaviour.  Hosts forward their schema's editor metadata here.
+    pub editor: Option<EditorHint>,
 }
 
 impl PropertyView {

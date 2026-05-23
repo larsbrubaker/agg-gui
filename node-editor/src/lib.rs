@@ -41,7 +41,7 @@ pub mod widget;
 
 pub use draw::CanvasPalette;
 pub use model::{
-    EdgeResult, EdgeView, NodeGraphModel, NodeId, NodeTypeView, NodeView, PropertyValue,
-    PropertyView, SocketTypeId, SocketView,
+    EdgeResult, EdgeView, EditorHint, NodeGraphModel, NodeId, NodeTypeView, NodeView,
+    PropertyValue, PropertyView, SocketTypeId, SocketView,
 };
 pub use widget::{NodeEditor, SharedModel};

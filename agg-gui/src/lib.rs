@@ -115,16 +115,16 @@ pub use widget::{
     WidgetBaseField,
 };
 pub use widgets::{
-    current_scroll_style, current_scroll_visibility, paint_sparkline, set_scroll_style,
-    set_scroll_visibility, shared_frame_history, shared_run_mode, Button, CellInfo, Checkbox,
-    CollapsingHeader, ColorPicker, ComboBox, Conditional, Container, DragValue, FlexColumn,
-    FlexRow, FrameHistory, HeaderInfo, Hyperlink, ImageView, InspectorPanel, InspectorSavedState,
-    Label, LabelAlign, MarkdownView, MenuBar, MenuEntry, MenuItem, MenuResponse, MenuSelection,
-    MenuShortcut, NodeIcon, Padding, PerformanceView, PopupMenu, ProgressBar, RadioGroup, Resize,
-    RunMode, RunModeDesc, RunModeRow, ScrollBarColor, ScrollBarKind, ScrollBarStyle,
-    ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey, SizedBox, Slider,
-    Spacer, Splitter, Stack, TabView, Table, TableBuilder, TableColumn, TableRows, TextArea,
-    TextField, ToggleSwitch, Tooltip, TopMenu, TreeView, Window,
+    color_wheel_picker_dialog, current_scroll_style, current_scroll_visibility, paint_sparkline,
+    set_scroll_style, set_scroll_visibility, shared_frame_history, shared_run_mode, Button,
+    CellInfo, Checkbox, CollapsingHeader, ColorPicker, ColorWheelPicker, ComboBox, Conditional,
+    Container, DragValue, FlexColumn, FlexRow, FrameHistory, HeaderInfo, Hyperlink, ImageView,
+    InspectorPanel, InspectorSavedState, Label, LabelAlign, MarkdownView, MenuBar, MenuEntry,
+    MenuItem, MenuResponse, MenuSelection, MenuShortcut, NodeIcon, Padding, PerformanceView,
+    PopupMenu, ProgressBar, RadioGroup, Resize, RunMode, RunModeDesc, RunModeRow, ScrollBarColor,
+    ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory,
+    ShortcutKey, SizedBox, Slider, Spacer, Splitter, Stack, TabView, Table, TableBuilder,
+    TableColumn, TableRows, TextArea, TextField, ToggleSwitch, Tooltip, TopMenu, TreeView, Window,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

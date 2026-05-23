@@ -16,10 +16,12 @@ pub mod nodes;
 #[cfg(test)]
 mod tests;
 
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use agg_gui::widget::{BackbufferKind, BackbufferSpec, BackbufferState};
+use agg_gui::widget::{paint_subtree, BackbufferKind, BackbufferSpec, BackbufferState};
 use agg_gui::{
     DrawCtx, Event, EventResult, HAnchor, Insets, MenuEntry, MenuItem, MenuResponse, PopupMenu,
     Rect, Size, VAnchor, Widget, WidgetBase,
@@ -115,6 +117,18 @@ pub struct NodeEditor {
     /// by `layout()`; a change invalidates `backbuffer` and rebuilds
     /// `children`.
     last_paint_fingerprint: Option<u64>,
+    /// Optional floating editor (today: the ColorWheelPicker dialog
+    /// spawned when a row with `EditorHint::Color` is clicked).  Painted
+    /// after the canvas in `finish_paint` so it sits above nodes and
+    /// edges, and consumes events first in `on_event`.  Outside the
+    /// children Vec because (a) the children Vec is rebuilt on every
+    /// fingerprint change and (b) Window-style overlays already manage
+    /// their own bounds and don't want pan/zoom baked in.
+    pub(crate) overlay: Option<Box<dyn Widget>>,
+    /// Set to `true` by overlay callbacks (Select / Cancel / window
+    /// close) to ask the editor to drop the overlay on the next event
+    /// or layout pass.  Cleared when the overlay is taken down.
+    pub(crate) overlay_close_flag: Option<Rc<Cell<bool>>>,
 }
 
 impl NodeEditor {
@@ -141,7 +155,34 @@ impl NodeEditor {
             popup_canvas_pos: [0.0, 0.0],
             backbuffer: BackbufferState::new(),
             last_paint_fingerprint: None,
+            overlay: None,
+            overlay_close_flag: None,
         }
+    }
+
+    /// Take the overlay down (if any) and clear its close-flag.  Called
+    /// when a close was requested or when external code wants to force
+    /// the floating editor closed.
+    pub(crate) fn close_overlay(&mut self) {
+        self.overlay = None;
+        self.overlay_close_flag = None;
+        self.backbuffer.invalidate();
+        agg_gui::animation::request_draw();
+    }
+
+    /// Check `overlay_close_flag` and tear the overlay down if it
+    /// fired.  Returns `true` when an overlay was actually closed
+    /// (callers can use this to claim a redraw).
+    pub(crate) fn drain_overlay_close(&mut self) -> bool {
+        let fired = self
+            .overlay_close_flag
+            .as_ref()
+            .map(|f| f.replace(false))
+            .unwrap_or(false);
+        if fired {
+            self.close_overlay();
+        }
+        fired
     }
 
     /// Override the widget id. Useful when multiple editors live in
@@ -388,6 +429,25 @@ impl Widget for NodeEditor {
             self.backbuffer.invalidate();
         }
 
+        // Floating overlay (e.g. ColorWheelPicker dialog).  Drain its
+        // close flag first so a Select / Cancel that fired during the
+        // last event pass takes the overlay down before we re-lay it.
+        self.drain_overlay_close();
+        if let Some(overlay) = self.overlay.as_mut() {
+            let desired = overlay.layout(Size::new(available.width, available.height));
+            let current = overlay.bounds();
+            // If the overlay has its own bounds (e.g. a `Window` with
+            // a saved position), respect them — only fall back to a
+            // centred top-of-canvas placement when bounds are empty.
+            if current.width <= 0.0 || current.height <= 0.0 {
+                let w = desired.width.max(1.0);
+                let h = desired.height.max(1.0);
+                let x = ((available.width - w) * 0.5).max(0.0);
+                let y = ((available.height - h) - 20.0).max(0.0);
+                overlay.set_bounds(Rect::new(x, y, w, h));
+            }
+        }
+
         available
     }
 
@@ -497,6 +557,18 @@ impl Widget for NodeEditor {
             }
         }
 
+        // Floating overlay (Window-wrapped color picker, etc.).  Painted
+        // last so it sits above nodes, edges, and the popup menu.
+        if let Some(overlay) = self.overlay.as_mut() {
+            let b = overlay.bounds();
+            if b.width > 0.0 && b.height > 0.0 {
+                ctx.save();
+                ctx.translate(b.x, b.y);
+                paint_subtree(overlay.as_mut(), ctx);
+                ctx.restore();
+            }
+        }
+
         // Pop the outer clip save.
         ctx.restore();
     }
@@ -527,6 +599,24 @@ impl Widget for NodeEditor {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // Overlay (color-picker dialog) consumes events first while it's
+        // up — it draws on top and needs to capture clicks before they
+        // reach the canvas underneath.  After dispatching, drain the
+        // close flag so a Select / Cancel / Window-close click takes
+        // the overlay down on this same event.
+        if let Some(overlay) = self.overlay.as_mut() {
+            let b = overlay.bounds();
+            let translated = translate_event_into(event, b.x, b.y);
+            let result = overlay.on_event(&translated);
+            // The picker's child Buttons may have set the close flag —
+            // drain it whether or not THIS event was consumed.  We also
+            // want to claim the redraw the close needs.
+            let closed = self.drain_overlay_close();
+            if result == EventResult::Consumed || closed {
+                agg_gui::animation::request_draw();
+                return EventResult::Consumed;
+            }
+        }
         if self.popup.is_open() {
             let viewport = Size::new(self.bounds.width, self.bounds.height);
             let (result, response) = self.popup.handle_event(event, viewport);
@@ -562,6 +652,49 @@ impl Widget for NodeEditor {
             Event::KeyUp { key, modifiers } => self.on_key_up(key, *modifiers),
             _ => EventResult::Ignored,
         }
+    }
+}
+
+/// Subtract `(dx, dy)` from any mouse-position field on `event` so an
+/// overlay positioned at `(dx, dy)` in editor-local space sees events
+/// in its own local space (mirrors what `dispatch_event` does for the
+/// children Vec).  Returns the original event for non-mouse variants.
+pub(crate) fn translate_event_into(event: &Event, dx: f64, dy: f64) -> Event {
+    use agg_gui::Point;
+    match event {
+        Event::MouseDown {
+            pos,
+            button,
+            modifiers,
+        } => Event::MouseDown {
+            pos: Point::new(pos.x - dx, pos.y - dy),
+            button: *button,
+            modifiers: *modifiers,
+        },
+        Event::MouseUp {
+            pos,
+            button,
+            modifiers,
+        } => Event::MouseUp {
+            pos: Point::new(pos.x - dx, pos.y - dy),
+            button: *button,
+            modifiers: *modifiers,
+        },
+        Event::MouseMove { pos } => Event::MouseMove {
+            pos: Point::new(pos.x - dx, pos.y - dy),
+        },
+        Event::MouseWheel {
+            pos,
+            delta_x,
+            delta_y,
+            modifiers,
+        } => Event::MouseWheel {
+            pos: Point::new(pos.x - dx, pos.y - dy),
+            delta_x: *delta_x,
+            delta_y: *delta_y,
+            modifiers: *modifiers,
+        },
+        other => other.clone(),
     }
 }
 

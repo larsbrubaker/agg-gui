@@ -81,6 +81,10 @@ pub struct PropLayout {
     pub min: Option<f64>,
     pub max: Option<f64>,
     pub current: PropertyValue,
+    /// Host's editor hint, copied from the model's `PropertyView`.
+    /// Drives richer popups (today: the ColorWheelPicker dialog on
+    /// `EditorHint::Color`).
+    pub editor: Option<crate::model::EditorHint>,
     /// Canvas-space top-left (y at the row top edge) + size of the
     /// hit-test rectangle. Y-up: `top_left.y` is the row's top edge,
     /// `top_left.y - size.y` is the bottom edge.
@@ -291,6 +295,7 @@ where
             min: p.min,
             max: p.max,
             current: p.current.clone(),
+            editor: p.editor,
             top_left: [top_left[0] + 1.0, row_top_y],
             size: [NODE_WIDTH - 2.0, ROW_HEIGHT],
         }));
@@ -315,6 +320,7 @@ fn input_editor_layout(top_left: [f64; 2], row_index: f64, p: &PropertyView) -> 
         min: p.min,
         max: p.max,
         current: p.current.clone(),
+        editor: p.editor,
         top_left: [editor_x, row_top_y],
         size: [EDITOR_WIDTH, ROW_HEIGHT],
     }
@@ -674,6 +680,7 @@ mod tests {
                 min: Some(0.0),
                 max: Some(10.0),
                 bound_input: None,
+                editor: None,
             }],
         }
     }
@@ -709,6 +716,7 @@ mod tests {
                 min: Some(0.1),
                 max: Some(40.0),
                 bound_input: Some("Height".into()),
+                editor: None,
             }],
         }
     }
