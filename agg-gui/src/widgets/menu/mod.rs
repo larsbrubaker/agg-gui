@@ -23,7 +23,9 @@ mod tests {
     use crate::geometry::{Point, Size};
 
     use super::geometry::{hit_test, stack_layout, MenuHit};
+    use super::paint::submenu_chevron_points;
     use super::*;
+    use crate::geometry::Rect;
 
     fn test_items() -> Vec<MenuEntry> {
         vec![
@@ -319,6 +321,34 @@ mod tests {
             viewport,
         );
         assert_eq!(response, MenuResponse::Action("open".to_string()));
+    }
+
+    #[test]
+    fn submenu_chevron_renders_as_vector_triangle_pointing_right() {
+        // Regression: the chevron used to be painted via `fill_text`
+        // with U+25B8.  Hosts whose font (and any icon fallback) lacked
+        // that code point — e.g. AtomArtist's NotoSans + Bootstrap Icons
+        // stack — drew an empty tofu box instead of the indicator.  The
+        // chevron is now a pure vector polyline so it renders correctly
+        // regardless of the host's font configuration.
+        let row = Rect::new(100.0, 50.0, 200.0, 24.0);
+        let [top, apex, bottom] = submenu_chevron_points(row);
+
+        // Apex points to the right of the two arms.
+        assert!(apex.0 > top.0);
+        assert!(apex.0 > bottom.0);
+
+        // Top and bottom arms share an x and straddle the apex's y.
+        assert!((top.0 - bottom.0).abs() < f64::EPSILON);
+        let mid_y = row.y + row.height * 0.5;
+        assert!((top.1 - mid_y - (mid_y - bottom.1)).abs() < f64::EPSILON);
+
+        // Chevron sits within the row's bounds (no leak into the
+        // shortcut column or off the right edge).
+        let right_edge = row.x + row.width;
+        assert!(apex.0 < right_edge);
+        assert!(top.1 <= row.y + row.height);
+        assert!(bottom.1 >= row.y);
     }
 
     #[test]

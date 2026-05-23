@@ -15,15 +15,18 @@ use super::geometry::SEP_H;
 
 /// Style values shared between the bar and popup painters.
 ///
-/// Geometry + the three inline-glyph characters (submenu chevron,
-/// check mark, radio mark).  Text colors are resolved per-`Label` from
-/// `ctx.visuals()` or set explicitly when a row is hovered / opened.
+/// Geometry + the two inline-glyph characters (check mark, radio mark).
+/// Text colors are resolved per-`Label` from `ctx.visuals()` or set
+/// explicitly when a row is hovered / opened.
 ///
-/// The glyph fields default to portable Unicode characters that are
+/// The submenu chevron is painted as a vector stroke — independent of
+/// the host's font, so it always renders regardless of whether the
+/// host bundles Font Awesome, Bootstrap Icons, or no icon font at all.
+///
+/// The remaining glyph fields default to portable Unicode characters
 /// present in every general-purpose font.  Hosts that bundle Font
-/// Awesome — or any other icon font — can swap them for the matching
-/// FA glyphs (`\u{F054}` chevron-right, `\u{F00C}` check, `\u{F111}`
-/// circle) so the menu indicators match the rest of the UI.
+/// Awesome can swap them for the matching FA glyphs (`\u{F00C}` check,
+/// `\u{F111}` circle) so the indicators match the rest of the UI.
 #[derive(Clone)]
 pub struct MenuStyle {
     pub radius: f64,
@@ -33,9 +36,6 @@ pub struct MenuStyle {
     pub icon_x: f64,
     pub label_x: f64,
     pub shortcut_right: f64,
-    /// Glyph painted at the right edge of any row whose item has a
-    /// submenu.  Default: U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE.
-    pub submenu_chevron: char,
     /// Glyph painted in the icon slot of a checked
     /// (`MenuSelection::Check { selected: true }`) row that has no
     /// explicit icon.  Default: U+2713 CHECK MARK.
@@ -56,11 +56,44 @@ impl Default for MenuStyle {
             icon_x: 14.0,
             label_x: 32.0,
             shortcut_right: 28.0,
-            submenu_chevron: '\u{25B8}',
             check_glyph: '\u{2713}',
             radio_glyph: '\u{25CF}',
         }
     }
+}
+
+/// Three points (apex on the right, top-left, bottom-left) of the
+/// submenu-indicator chevron painted at the right edge of a popup row.
+///
+/// Returned as a pure function so paint tests can verify the geometry
+/// without driving a `DrawCtx`. Coordinates are in the same Y-up space
+/// the row uses; the apex points to the right (toward where the
+/// submenu opens).
+pub fn submenu_chevron_points(row: Rect) -> [(f64, f64); 3] {
+    let cx = row.x + row.width - 11.0;
+    let cy = row.y + row.height * 0.5;
+    let half_h = 4.0;
+    let arm = 3.0;
+    [
+        (cx - arm, cy + half_h),
+        (cx, cy),
+        (cx - arm, cy - half_h),
+    ]
+}
+
+/// Paint the submenu-indicator chevron as a stroked `>` polyline.
+/// Font-independent — the previous implementation rendered a glyph
+/// from the popup's text font, which left a tofu box on hosts whose
+/// font (or icon fallback) lacked the configured code point.
+pub fn paint_submenu_chevron(ctx: &mut dyn DrawCtx, row: Rect, color: Color) {
+    let [a, b, c] = submenu_chevron_points(row);
+    ctx.set_stroke_color(color);
+    ctx.set_line_width(1.4);
+    ctx.begin_path();
+    ctx.move_to(a.0, a.1);
+    ctx.line_to(b.0, b.1);
+    ctx.line_to(c.0, c.1);
+    ctx.stroke();
 }
 
 /// Paint the chrome (hover / open background fill) under a bar button.

@@ -100,6 +100,7 @@ fn saved_state_with_backend_open() -> SavedState {
             maximized: false,
         },
         backend_open: true,
+        snap_enabled: false,
         theme_pref: ThemePreference::System,
         accent_color: AccentColor::Blue,
         window_w: None,
@@ -243,4 +244,38 @@ fn build_test_app(font: Arc<Font>) -> (agg_gui::App, DemoHandles) {
         Some(saved_state_with_backend_open()),
         PlatformHooks::native(0, || {}),
     )
+}
+
+#[test]
+fn snap_overlay_exists_in_widget_tree() {
+    // Phase 4 of the snap-layout feature: the demo wraps `demos_body`
+    // in a `Stack` that hosts a `SnapOverlay` on top.  This test
+    // pins that wiring so a future refactor that drops the overlay
+    // (and silently breaks the snap-guides UX) fails loudly.
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let (mut app, _handles) = build_test_app(font);
+    app.layout(Size::new(1200.0, 800.0));
+    assert!(
+        find_widget_by_type(app.root(), "SnapOverlay").is_some(),
+        "SnapOverlay must be present in the widget tree so snap guides have somewhere to paint"
+    );
+}
+
+#[test]
+fn snap_registry_populated_by_visible_window_layout() {
+    // Phase 2: every Window calls `snap::register_target` from its
+    // `layout()` when visible.  After a full app layout, at least
+    // one of the demo's visible windows must show up in the
+    // thread-local registry.  Guards against regressions where the
+    // registration call gets dropped by a future Window-internal
+    // refactor.
+    agg_gui::snap::clear_guides();
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let (mut app, _handles) = build_test_app(font);
+    app.layout(Size::new(1200.0, 800.0));
+    let targets = agg_gui::snap::targets_snapshot();
+    assert!(
+        !targets.is_empty(),
+        "snap registry should hold at least one visible Window after layout"
+    );
 }

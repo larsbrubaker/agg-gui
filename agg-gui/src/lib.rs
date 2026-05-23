@@ -45,6 +45,7 @@ pub mod persistence;
 pub mod pixel_bounds;
 pub mod platform;
 pub mod screenshot;
+pub mod snap;
 pub mod svg;
 pub mod text;
 pub mod theme;
@@ -83,6 +84,10 @@ pub use gfx_ctx::GfxCtx;
 pub use layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 pub use platform::{current_platform, platform_from_name, set_platform, Platform};
 pub use screenshot::ScreenshotHandle;
+pub use snap::{
+    compute_snap, next_snap_id, ResizeEdge as SnapResizeEdge, SnapGuide, SnapId, SnapMode,
+    SnapOverlay, SnapResult, Snappable, DEFAULT_THRESHOLD as SNAP_DEFAULT_THRESHOLD,
+};
 pub use svg::{
     compare_svg_rgba, parse_svg, render_svg, render_svg_at_size, render_svg_at_size_with_options,
     render_svg_at_size_with_resources, render_svg_to_framebuffer,

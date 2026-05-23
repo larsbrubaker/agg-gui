@@ -76,6 +76,19 @@ pub fn build_demo_ui(
         .map(|st| st.backend_open)
         .unwrap_or(false);
     let show_backend = Rc::new(Cell::new(backend_initially_open));
+    // Default ON — window snapping is the more useful state for a
+    // fresh demo session.  Saved state still wins for returning
+    // users; only the first-run fallback flips.
+    let snap_initially_enabled = initial_state
+        .as_ref()
+        .map(|st| st.snap_enabled)
+        .unwrap_or(true);
+    // Mirror the persisted value into the framework-wide thread-local
+    // so Snappable widgets pick it up before any drag fires.  The
+    // cell stays the source of truth for the UI checkbox, the global
+    // for the snap engine.
+    agg_gui::snap::set_enabled(snap_initially_enabled);
+    let snap_enabled = Rc::new(Cell::new(snap_initially_enabled));
     let run_mode = Rc::new(Cell::new(RunMode::Reactive));
     let mobile_menu_open = Rc::new(Cell::new(false));
     let frame_history = Rc::new(RefCell::new(FrameHistory::new()));
@@ -579,6 +592,13 @@ pub fn build_demo_ui(
             }
         }
     }
+    // Snap-guide overlay sits in the SAME `Stack` as the windows so
+    // its local coordinate space matches the rect coordinates the
+    // snap engine sees.  An overlay parked one level up would paint
+    // guides offset by however wide the backend pane and sidebar
+    // happen to be when the user drags.  Pushed last so it paints
+    // on top of every window in the canvas.
+    canvas.children_mut().push(Box::new(agg_gui::SnapOverlay::new()));
     let main_area = canvas;
     let on_reset_all = {
         let demo_open = demo_entries
@@ -672,7 +692,14 @@ pub fn build_demo_ui(
         Rc::clone(&mobile_menu_open),
         Rc::clone(&theme_pref),
         Rc::clone(&accent_color),
+        Rc::clone(&snap_enabled),
     );
+    // Snap-guide overlay lives inside the `canvas` Stack (pushed
+    // above), where the windows themselves live — that's the only
+    // place where the overlay's local coordinate space matches the
+    // rects the snap engine works in.  Wrapping the body in an
+    // outer Stack here would paint guides offset by however wide
+    // the backend pane + sidebar happen to be.
     let root = FlexColumn::new()
         .with_gap(0.0)
         .add(Box::new(MenuBarStrip::new(top_bar_inner)))
@@ -725,6 +752,7 @@ pub fn build_demo_ui(
         about_pos: about_pos_cell,
         about_maximized: about_max_cell,
         backend_open: Rc::clone(&show_backend),
+        snap_enabled: Rc::clone(&snap_enabled),
         theme_pref: Rc::clone(&theme_pref),
         accent_color: Rc::clone(&accent_color),
         window_size: Rc::clone(&screen_size),

@@ -16,7 +16,7 @@ use super::geometry::{contains, item_at_path, BAR_H};
 use super::model::{MenuEntry, MenuSelection};
 use super::paint::{
     bar_button_text_color, paint_item_row_bg, paint_menu_bar_button_bg, paint_panel,
-    paint_separator, MenuStyle,
+    paint_separator, paint_submenu_chevron, MenuStyle,
 };
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 
@@ -795,11 +795,7 @@ fn paint_popup_level(
             ctx.fill_text(&style.check_glyph.to_string(), x, row_layout.rect.y + 7.0);
         }
         if item.has_submenu() {
-            ctx.fill_text(
-                &style.submenu_chevron.to_string(),
-                row_layout.rect.x + row_layout.rect.width - 18.0,
-                row_layout.rect.y + 7.0,
-            );
+            paint_submenu_chevron(ctx, row_layout.rect, inline_color);
         }
 
         // Row text (label + shortcut) via the Label cache so glyph

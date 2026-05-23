@@ -418,6 +418,21 @@ impl Widget for Window {
             cell.set(self.maximized);
         }
 
+        // Snap-layout registration — every laid-out window declares
+        // itself as a snap target so peers dragging nearby can pull
+        // toward its edges.  Hidden / maximised windows opt out via
+        // `Snappable::is_snap_target` and are removed from the
+        // thread-local registry so their stale bounds don't yank
+        // anyone around.
+        {
+            use crate::snap::Snappable;
+            if self.is_snap_target() {
+                crate::snap::register_target(self.snap_id, self.bounds);
+            } else {
+                crate::snap::unregister_target(self.snap_id);
+            }
+        }
+
         Size::new(self.bounds.width, self.bounds.height)
     }
 
@@ -636,6 +651,12 @@ impl Widget for Window {
                         let dy = world.y - self.drag_start_world.y;
                         self.bounds.x = (self.drag_start_bounds.x + dx).round();
                         self.bounds.y = (self.drag_start_bounds.y + dy).round();
+                        // Snap pass — runs only when the global flag
+                        // is on.  Reads the thread-local target list
+                        // populated by every other window's `layout`
+                        // and writes the resulting visual guides for
+                        // `SnapOverlay` to render.
+                        self.apply_move_snap();
                         self.clamp_to_canvas();
                         self.hover_dir = None;
                         set_cursor_icon(CursorIcon::Grabbing);
@@ -645,6 +666,7 @@ impl Widget for Window {
                     DragMode::Resize(dir) => {
                         let world = Point::new(pos.x + self.bounds.x, pos.y + self.bounds.y);
                         self.apply_resize(world);
+                        self.apply_resize_snap(dir);
                         set_cursor_icon(resize_cursor(dir));
                         crate::animation::request_draw();
                         return EventResult::Consumed;
@@ -775,6 +797,10 @@ impl Widget for Window {
                 let was_dragging = self.drag_mode != DragMode::None;
                 self.drag_mode = DragMode::None;
                 if was_dragging {
+                    // Drag ended — wipe the snap guides so the
+                    // overlay clears.  Cheap no-op when snapping was
+                    // off (guide buffer was already empty).
+                    crate::snap::clear_guides();
                     crate::animation::request_draw();
                     EventResult::Consumed
                 } else {

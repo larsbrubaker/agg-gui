@@ -50,6 +50,11 @@ pub struct SavedState {
     pub about: WindowState,
     /// Whether the left-side Backend panel is open.
     pub backend_open: bool,
+    /// Whether window snapping (via the framework's snap-layout
+    /// engine) is enabled.  Toggled from the `View > Window
+    /// Snapping` menu item; mirrored into
+    /// `agg_gui::snap::set_enabled` on every change.
+    pub snap_enabled: bool,
     /// Top-bar theme selection.
     pub theme_pref: ThemePreference,
     /// Top-bar accent swatch selection.
@@ -159,6 +164,7 @@ impl SavedState {
             self.about.maximized as u8
         ));
         out.push_str(&format!("backend={}\n", self.backend_open as u8));
+        out.push_str(&format!("snap={}\n", self.snap_enabled as u8));
         out.push_str(&format!("theme={}\n", self.theme_pref.key()));
         out.push_str(&format!("accent={}\n", self.accent_color.key()));
         if let (Some(w), Some(h)) = (self.window_w, self.window_h) {
@@ -226,6 +232,7 @@ impl SavedState {
         let mut tests: Vec<Option<WindowState>> = Vec::new();
         let mut about = None::<WindowState>;
         let mut backend_open = false;
+        let mut snap_enabled = false;
         let mut theme_pref = ThemePreference::System;
         let mut accent_color = AccentColor::default();
         let mut window_w: Option<u32> = None;
@@ -275,6 +282,10 @@ impl SavedState {
                 "backend" => {
                     let v: u8 = val.parse().ok()?;
                     backend_open = v != 0;
+                }
+                "snap" => {
+                    let v: u8 = val.parse().ok()?;
+                    snap_enabled = v != 0;
                 }
                 "theme" => {
                     theme_pref = ThemePreference::from_key(val).unwrap_or(ThemePreference::System);
@@ -414,6 +425,7 @@ impl SavedState {
             tests: tests.into_iter().collect::<Option<Vec<_>>>()?,
             about: about?,
             backend_open,
+            snap_enabled,
             theme_pref,
             accent_color,
             window_w,
@@ -473,6 +485,8 @@ pub struct StateAccessor {
     pub about_pos: Rc<Cell<Rect>>,
     pub about_maximized: Rc<Cell<bool>>,
     pub backend_open: Rc<Cell<bool>>,
+    /// Window snapping toggle (mirror of `agg_gui::snap::is_enabled`).
+    pub snap_enabled: Rc<Cell<bool>>,
     /// Top-bar theme selection.
     pub theme_pref: Rc<Cell<ThemePreference>>,
     /// Top-bar accent swatch selection.
@@ -582,6 +596,7 @@ impl StateAccessor {
             tests,
             about,
             backend_open: self.backend_open.get(),
+            snap_enabled: self.snap_enabled.get(),
             theme_pref: self.theme_pref.get(),
             accent_color: self.accent_color.get(),
             window_w: if ww > 0 { Some(ww) } else { None },
@@ -688,6 +703,7 @@ mod tests {
                 maximized: false,
             },
             backend_open: false,
+            snap_enabled: false,
             theme_pref: ThemePreference::Dark,
             accent_color: AccentColor::Purple,
             window_w: None,
@@ -726,5 +742,60 @@ mod tests {
             back.demos[0].maximized,
             "per-window maximized state must survive round-trip"
         );
+    }
+
+    /// `snap_enabled` must survive a save / load round-trip so the
+    /// user's preference comes back after a restart.
+    #[test]
+    fn snap_enabled_round_trips_true_and_false() {
+        for value in [false, true] {
+            let saved = SavedState {
+                demos: vec![WindowState {
+                    open: true,
+                    x: 60.0,
+                    y: 60.0,
+                    w: 360.0,
+                    h: 280.0,
+                    maximized: false,
+                }],
+                tests: vec![],
+                about: WindowState {
+                    open: false,
+                    x: 80.0,
+                    y: 80.0,
+                    w: 440.0,
+                    h: 500.0,
+                    maximized: false,
+                },
+                backend_open: false,
+                snap_enabled: value,
+                theme_pref: ThemePreference::System,
+                accent_color: AccentColor::Blue,
+                window_w: None,
+                window_h: None,
+                window_fullscreen: false,
+                window_maximized: false,
+                inspector: None,
+                font_name: None,
+                font_size_scale: 1.0,
+                lcd_enabled: false,
+                hinting_enabled: false,
+                gamma: 1.0,
+                width_scale: 1.0,
+                interval: 0.0,
+                faux_weight: 0.0,
+                faux_italic: 0.0,
+                primary_weight: 1.0 / 3.0,
+                msaa_samples: 0,
+                system_tab: 0,
+                z_order: Vec::new(),
+            };
+            let text = saved.serialize();
+            let back = SavedState::deserialize(&text).expect("round-trip must parse");
+            assert_eq!(
+                back.snap_enabled, value,
+                "snap_enabled must round-trip for value {value}"
+            );
+        }
     }
 }

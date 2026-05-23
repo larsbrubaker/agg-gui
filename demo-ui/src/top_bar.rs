@@ -167,7 +167,8 @@ struct MenuChrome {
     show_backend: Rc<Cell<bool>>,
     theme_pref: Rc<Cell<ThemePreference>>,
     accent_color: Rc<Cell<AccentColor>>,
-    last_snapshot: Cell<Option<(bool, ThemePreference, AccentColor)>>,
+    snap_enabled: Rc<Cell<bool>>,
+    last_snapshot: Cell<Option<(bool, ThemePreference, AccentColor, bool)>>,
 }
 
 impl MenuChrome {
@@ -176,6 +177,7 @@ impl MenuChrome {
         show_backend: Rc<Cell<bool>>,
         theme_pref: Rc<Cell<ThemePreference>>,
         accent_color: Rc<Cell<AccentColor>>,
+        snap_enabled: Rc<Cell<bool>>,
     ) -> Self {
         // Action handler captures clones of every state cell so it can
         // mutate the canonical state without any borrow back to the bar
@@ -185,8 +187,15 @@ impl MenuChrome {
             let show_backend = Rc::clone(&show_backend);
             let theme_pref = Rc::clone(&theme_pref);
             let accent_color = Rc::clone(&accent_color);
+            let snap_enabled = Rc::clone(&snap_enabled);
             move |action: &str| {
-                handle_action(action, &show_backend, &theme_pref, &accent_color);
+                handle_action(
+                    action,
+                    &show_backend,
+                    &theme_pref,
+                    &accent_color,
+                    &snap_enabled,
+                );
                 agg_gui::animation::request_draw();
             }
         };
@@ -194,15 +203,16 @@ impl MenuChrome {
             show_backend.get(),
             theme_pref.get(),
             accent_color.get(),
+            snap_enabled.get(),
         );
         // CLAUDE.md mandates Font Awesome glyphs throughout the UI.
         // The framework's default `MenuStyle` ships portable Unicode
-        // characters (\u{25B8}, \u{2713}, \u{25CF}) for hosts that
-        // don't bundle FA; here we swap in the matching FA glyphs so
-        // the submenu chevron, checks, and radio marks visually
-        // belong with every other icon in the demo.
+        // characters (\u{2713}, \u{25CF}) for the check and radio
+        // marks; here we swap in the matching FA glyphs so they
+        // visually belong with every other icon in the demo.  The
+        // submenu chevron is painted as a vector stroke by agg-gui
+        // itself — no glyph override needed.
         let fa_menu_style = MenuStyle {
-            submenu_chevron: '\u{F054}',
             check_glyph: '\u{F00C}',
             radio_glyph: '\u{F111}',
             ..MenuStyle::default()
@@ -222,6 +232,7 @@ impl MenuChrome {
             show_backend,
             theme_pref,
             accent_color,
+            snap_enabled,
             last_snapshot: Cell::new(None),
         }
     }
@@ -233,12 +244,13 @@ impl MenuChrome {
             self.show_backend.get(),
             self.theme_pref.get(),
             self.accent_color.get(),
+            self.snap_enabled.get(),
         );
         if self.last_snapshot.get() == Some(snapshot) {
             return;
         }
         self.last_snapshot.set(Some(snapshot));
-        let menus = build_menus(snapshot.0, snapshot.1, snapshot.2);
+        let menus = build_menus(snapshot.0, snapshot.1, snapshot.2, snapshot.3);
         self.bar.set_menus(menus);
     }
 }
@@ -312,6 +324,7 @@ fn build_menus(
     backend_open: bool,
     theme_pref: ThemePreference,
     accent: AccentColor,
+    snap_enabled: bool,
 ) -> Vec<TopMenu> {
     // `.radio()` (mutex) over `.checked()` (toggle) so the popup's
     // toggle handler clears sibling selections in-place when the user
@@ -351,6 +364,13 @@ fn build_menus(
             .checked(backend_open)
             .keep_open()
             .into(),
+        MenuItem::action("Window Snapping", "view.snap")
+            // FA `\u{F076}` = th-large, the closest stock icon for a
+            // grid-aligned layout aid.
+            .icon('\u{F076}')
+            .checked(snap_enabled)
+            .keep_open()
+            .into(),
         MenuEntry::Separator,
         MenuItem::submenu("Theme", theme_submenu)
             .icon('\u{F042}')
@@ -381,10 +401,19 @@ fn handle_action(
     show_backend: &Rc<Cell<bool>>,
     theme_pref: &Rc<Cell<ThemePreference>>,
     accent_color: &Rc<Cell<AccentColor>>,
+    snap_enabled: &Rc<Cell<bool>>,
 ) {
     match action {
         "view.backend" => {
             show_backend.set(!show_backend.get());
+        }
+        "view.snap" => {
+            let new = !snap_enabled.get();
+            snap_enabled.set(new);
+            // Mirror into the framework's thread-local so every
+            // Snappable widget picks up the change on the next drag
+            // without having to thread the cell through their APIs.
+            agg_gui::snap::set_enabled(new);
         }
         "view.theme.light" => set_theme(theme_pref, accent_color, ThemePreference::Light),
         "view.theme.dark" => set_theme(theme_pref, accent_color, ThemePreference::Dark),
@@ -425,12 +454,14 @@ pub fn build_top_bar_inner(
     mobile_menu_open: Rc<Cell<bool>>,
     theme_pref: Rc<Cell<ThemePreference>>,
     accent_color: Rc<Cell<AccentColor>>,
+    snap_enabled: Rc<Cell<bool>>,
 ) -> Box<dyn Widget> {
     let menu_chrome = MenuChrome::new(
         Arc::clone(&font),
         show_backend,
         theme_pref,
         accent_color,
+        snap_enabled,
     );
     Box::new(
         FlexRow::new()
