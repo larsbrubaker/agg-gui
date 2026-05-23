@@ -12,7 +12,11 @@
 //! 800-line guardrail.
 
 mod events;
+mod node_paint_context;
 pub mod nodes;
+mod value_editor_widget;
+#[cfg(test)]
+mod nodes_tests;
 #[cfg(test)]
 mod tests;
 
