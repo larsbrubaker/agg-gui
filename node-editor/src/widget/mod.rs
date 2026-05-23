@@ -36,7 +36,7 @@ use crate::draw::{
     draw_bezier_connection, draw_canvas_grid, layout_node_with_connections, CanvasPalette,
     NodeLayoutInfo, PropLayout, SocketLayout, SocketSide,
 };
-use crate::model::{NodeGraphModel, NodeId, SocketTypeId};
+use crate::model::{NodeGraphModel, NodeId, NoodleView, SocketTypeId};
 use crate::widget::nodes::{NodePaintContext, NodeWidget};
 
 const ZOOM_MIN: f64 = 0.15;
@@ -86,6 +86,38 @@ enum CanvasState {
         min: Option<f64>,
         max: Option<f64>,
     },
+}
+
+/// Resolve a noodle's `(from, to)` endpoint sockets against the
+/// per-node layouts that paint just produced.
+///
+/// Looks up each endpoint side-restricted: `from` is the source-side
+/// socket of an output, `to` is the target-side socket of an input.
+/// This matters when a node carries both an input and an output that
+/// share a name — e.g. AtomArtist's unified `Output` node, whose
+/// adopted input slot and mirror output socket both take the source
+/// socket's name. Without the side filter, the name lookup hits the
+/// output-first row order and the noodle's `to` endpoint snaps to the
+/// wrong side of the node.
+pub(crate) fn resolve_noodle_endpoints<'a>(
+    layouts: &'a [NodeLayoutInfo],
+    noodle: &NoodleView,
+) -> Option<(&'a SocketLayout, &'a SocketLayout)> {
+    let from = layouts
+        .iter()
+        .find(|l| l.node_id == noodle.from_node)
+        .and_then(|l| {
+            l.sockets()
+                .find(|s| s.side == SocketSide::Output && s.name == noodle.from_socket)
+        })?;
+    let to = layouts
+        .iter()
+        .find(|l| l.node_id == noodle.to_node)
+        .and_then(|l| {
+            l.sockets()
+                .find(|s| s.side == SocketSide::Input && s.name == noodle.to_socket)
+        })?;
+    Some((from, to))
 }
 
 /// The reusable node-editor widget.
@@ -547,15 +579,7 @@ impl Widget for NodeEditor {
         let model = self.model.lock().unwrap();
         let noodles = model.noodles();
         for noodle in &noodles {
-            let from = layouts
-                .iter()
-                .find(|l| l.node_id == noodle.from_node)
-                .and_then(|l| l.sockets().find(|s| s.name == noodle.from_socket));
-            let to = layouts
-                .iter()
-                .find(|l| l.node_id == noodle.to_node)
-                .and_then(|l| l.sockets().find(|s| s.name == noodle.to_socket));
-            if let (Some(f), Some(t)) = (from, to) {
+            if let Some((f, t)) = resolve_noodle_endpoints(&layouts, noodle) {
                 let col = model.socket_color(f.socket_type);
                 draw_bezier_connection(ctx, f.center, t.center, col, 2.0);
             }

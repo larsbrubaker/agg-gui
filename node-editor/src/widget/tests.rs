@@ -4,7 +4,8 @@
 //! local_to_canvas) the way the inline tests did.
 
 use super::*;
-use crate::model::{NoodleResult, NoodleView, NodeTypeView, NodeView, PropertyValue};
+use crate::draw::{layout_node_with_connections, SocketSide};
+use crate::model::{NoodleResult, NoodleView, NodeTypeView, NodeView, PropertyValue, SocketView};
 use agg_gui::Point;
 
 /// Trivial in-memory model for unit tests.
@@ -396,4 +397,128 @@ fn open_color_picker_uses_local_overlay_when_no_sink() {
         editor.overlay_close_flag.is_some(),
         "without a sink the close flag is tracked locally so `drain_overlay_close` can tear the dialog down"
     );
+}
+
+// ---------------------------------------------------------------------------
+// resolve_noodle_endpoints — noodle endpoint side-disambiguation
+// ---------------------------------------------------------------------------
+
+/// Regression: when a target node has both an input and an output that
+/// share a name (the AtomArtist `Output` node's adopted slot + mirror
+/// output pattern), the inline name-only lookup the paint loop used
+/// originally would resolve the noodle's `to` endpoint to whichever
+/// row came first — outputs, since `layout_node_with_connections`
+/// emits output rows ahead of input rows. The visual result was a
+/// noodle landing on the wrong side of the node (see screenshot in the
+/// bug report). The resolver now side-restricts the lookup; this test
+/// pins both halves of that fix.
+#[test]
+fn resolve_noodle_endpoints_filters_by_socket_side_when_names_collide() {
+    let producer = NodeView {
+        id: NodeId(1),
+        type_id: "Producer".into(),
+        display_name: "Producer".into(),
+        category: "test".into(),
+        position: [0.0, 200.0],
+        inputs: vec![],
+        outputs: vec![SocketView {
+            name: "Geometry".into(),
+            socket_type: SocketTypeId(7),
+            display_label: None,
+        }],
+        properties: vec![],
+    };
+    // The target node has both an INPUT and an OUTPUT called
+    // "Geometry" — the same shape an AtomArtist `Output` node takes
+    // once the user wires a node's `Geometry` output into its trailing
+    // empty slot (the slot is renamed `Geometry`, and a mirror output
+    // also named `Geometry` is appended).
+    let ambiguous_target = NodeView {
+        id: NodeId(2),
+        type_id: "Output".into(),
+        display_name: "Output".into(),
+        category: "test".into(),
+        position: [300.0, 200.0],
+        inputs: vec![SocketView {
+            name: "Geometry".into(),
+            socket_type: SocketTypeId(7),
+            display_label: Some("Extrude - Geometry".into()),
+        }],
+        outputs: vec![SocketView {
+            name: "Geometry".into(),
+            socket_type: SocketTypeId(7),
+            display_label: None,
+        }],
+        properties: vec![],
+    };
+
+    let layouts = vec![
+        layout_node_with_connections(&producer, |_| false),
+        layout_node_with_connections(&ambiguous_target, |_| true),
+    ];
+
+    // Sanity: confirm the row order that triggered the original bug.
+    // Outputs come before inputs in the sockets() iterator, so a
+    // pre-fix `.find(|s| s.name == "Geometry")` on the target node
+    // would have returned the *Output*-side socket.
+    let pre_fix_first_hit = layouts[1]
+        .sockets()
+        .find(|s| s.name == "Geometry")
+        .expect("test fixture should expose at least one matching socket");
+    assert_eq!(
+        pre_fix_first_hit.side,
+        SocketSide::Output,
+        "pre-fix lookup hits the Output side first — this is what the screenshot showed; \
+         the resolver must NOT rely on naked-name lookup here",
+    );
+
+    // The fix: resolve_noodle_endpoints filters by side.
+    let noodle = NoodleView {
+        from_node: NodeId(1),
+        from_socket: "Geometry".into(),
+        to_node: NodeId(2),
+        to_socket: "Geometry".into(),
+    };
+    let (from, to) = resolve_noodle_endpoints(&layouts, &noodle)
+        .expect("both endpoints must resolve");
+    assert_eq!(from.side, SocketSide::Output, "source endpoint is an output");
+    assert_eq!(
+        to.side,
+        SocketSide::Input,
+        "target endpoint must resolve to the Input-side socket — not the same-named Output",
+    );
+    // The label on the input row carries the human-readable form;
+    // verify we got the *input* SocketLayout, not the bare mirror
+    // output (which has no display_label).
+    assert_eq!(to.display_label, "Extrude - Geometry");
+}
+
+/// `resolve_noodle_endpoints` returns `None` when one endpoint's node
+/// is missing from the layout list — defensive guard so a stale noodle
+/// (e.g. while the host's mutex is mid-update) doesn't panic the paint
+/// loop.
+#[test]
+fn resolve_noodle_endpoints_returns_none_for_missing_node() {
+    let producer = NodeView {
+        id: NodeId(1),
+        type_id: "Producer".into(),
+        display_name: "Producer".into(),
+        category: "test".into(),
+        position: [0.0, 0.0],
+        inputs: vec![],
+        outputs: vec![SocketView {
+            name: "out".into(),
+            socket_type: SocketTypeId(0),
+            display_label: None,
+        }],
+        properties: vec![],
+    };
+    let layouts = vec![layout_node_with_connections(&producer, |_| false)];
+    let dangling = NoodleView {
+        from_node: NodeId(1),
+        from_socket: "out".into(),
+        to_node: NodeId(42), // not in the layout list
+        to_socket: "in".into(),
+    };
+    assert!(resolve_noodle_endpoints(&layouts, &dangling).is_none());
 }
