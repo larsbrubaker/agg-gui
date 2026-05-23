@@ -124,11 +124,28 @@ pub struct NodeEditor {
     /// children Vec because (a) the children Vec is rebuilt on every
     /// fingerprint change and (b) Window-style overlays already manage
     /// their own bounds and don't want pan/zoom baked in.
+    ///
+    /// Stays `None` when an [`Self::overlay_sink`] is installed —
+    /// callers that supply a sink want the dialog hoisted to a
+    /// screen-level host (so it can be dragged outside the editor
+    /// pane), so the local fallback path is bypassed entirely.
     pub(crate) overlay: Option<Box<dyn Widget>>,
     /// Set to `true` by overlay callbacks (Select / Cancel / window
     /// close) to ask the editor to drop the overlay on the next event
     /// or layout pass.  Cleared when the overlay is taken down.
     pub(crate) overlay_close_flag: Option<Rc<Cell<bool>>>,
+    /// Optional host-supplied sink for floating dialogs. When set,
+    /// [`Self::open_color_picker`] hands the constructed
+    /// `(dialog_widget, close_flag)` pair to this callback instead
+    /// of storing the dialog in [`Self::overlay`].
+    ///
+    /// Use case: AtomArtist's app shell wants the color-picker dialog
+    /// to live at the top of the widget tree (alongside the debug
+    /// windows) so the user can drag it anywhere on screen — not just
+    /// within the node-editor pane. Other hosts that don't supply a
+    /// sink fall back to the in-editor overlay (the legacy default).
+    pub(crate) overlay_sink:
+        Option<Box<dyn FnMut(Box<dyn Widget>, Rc<Cell<bool>>)>>,
 }
 
 impl NodeEditor {
@@ -157,7 +174,29 @@ impl NodeEditor {
             last_paint_fingerprint: None,
             overlay: None,
             overlay_close_flag: None,
+            overlay_sink: None,
         }
+    }
+
+    /// Install a host-side sink that receives newly-constructed
+    /// floating dialogs (today: the `ColorWheelPicker` dialog) along
+    /// with their close-flag. When a sink is set the editor does NOT
+    /// keep the dialog as `self.overlay` — the host takes ownership
+    /// and is responsible for layout / paint / event dispatch.
+    ///
+    /// Designed for app shells (e.g. AtomArtist) that want the dialog
+    /// reparented to the top of the widget tree so the user can drag
+    /// it anywhere on screen rather than being confined to the
+    /// editor's pane. Without a sink the editor preserves its
+    /// historical "overlay-inside-the-editor" behaviour, which is
+    /// still the right default for the gallery demo and the
+    /// node-editor's own unit tests.
+    pub fn with_overlay_sink<F>(mut self, sink: F) -> Self
+    where
+        F: FnMut(Box<dyn Widget>, Rc<Cell<bool>>) + 'static,
+    {
+        self.overlay_sink = Some(Box::new(sink));
+        self
     }
 
     /// Take the overlay down (if any) and clear its close-flag.  Called

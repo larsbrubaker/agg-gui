@@ -379,8 +379,19 @@ impl NodeEditor {
             });
 
         let dialog = agg_gui::color_wheel_picker_dialog(picker, "Color Picker");
-        self.overlay = Some(dialog);
-        self.overlay_close_flag = Some(close_flag);
+
+        // If a host sink is installed (AtomArtist's app shell does
+        // this), hand the dialog off so it can live at the
+        // screen-level Stack — that's what lets the user drag the
+        // picker outside the editor pane. Otherwise fall back to the
+        // legacy in-editor overlay path (gallery demo + tests rely
+        // on this).
+        if let Some(sink) = self.overlay_sink.as_mut() {
+            sink(dialog, close_flag);
+        } else {
+            self.overlay = Some(dialog);
+            self.overlay_close_flag = Some(close_flag);
+        }
         self.backbuffer.invalidate();
         agg_gui::animation::request_draw();
     }
