@@ -48,6 +48,8 @@ mod reflect_roundtrip;
 mod retained_layers;
 mod touch_scroll;
 mod tree_view;
+mod color_wheel_picker;
+mod scroll_view;
 mod widgets;
 mod window_layout;
 mod window_maximize;
