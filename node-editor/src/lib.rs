@@ -36,6 +36,8 @@
 //! for the widget implementation.
 
 pub mod draw;
+#[cfg(test)]
+mod draw_tests;
 pub mod model;
 pub mod widget;
 

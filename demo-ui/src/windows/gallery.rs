@@ -21,7 +21,7 @@ use agg_gui::{
     ToggleSwitch, Widget,
 };
 
-const EGUI_DOCS_URL: &str = "https://docs.rs/egui/";
+const AGG_GUI_DOCS_URL: &str = "https://docs.rs/agg-gui/";
 const AGG_GUI_REPO_URL: &str = "https://github.com/larsbrubaker/agg-gui";
 
 /// ProgressBar wrapper that follows a shared scalar, matching egui's gallery
@@ -93,7 +93,7 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
 
     /// Left-column doc link label, following egui's gallery structure.
     fn doc_link(title: &str, search_term: &str, font: &Arc<Font>) -> Box<dyn Widget> {
-        let url = format!("https://docs.rs/egui?search={search_term}");
+        let url = format!("https://docs.rs/agg-gui?search={search_term}");
         Box::new(
             Hyperlink::new(title, Arc::clone(font))
                 .with_font_size(13.0)
@@ -439,13 +439,13 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
             FlexColumn::new()
                 .with_gap(4.0)
                 .add(Box::new(
-                    Hyperlink::new(EGUI_DOCS_URL, Arc::clone(&font))
+                    Hyperlink::new(AGG_GUI_DOCS_URL, Arc::clone(&font))
                         .with_font_size(12.0)
-                        .on_click(|| crate::url::open_url(EGUI_DOCS_URL)),
+                        .on_click(|| crate::url::open_url(AGG_GUI_DOCS_URL)),
                 ))
                 .add(Box::new(
                     Label::new(
-                        "Click widget names to search egui docs. agg-gui-only styling and demo widgets are preserved where they add coverage.",
+                        "Click widget names to search agg-gui docs.",
                         Arc::clone(&font),
                     )
                     .with_font_size(11.0)
