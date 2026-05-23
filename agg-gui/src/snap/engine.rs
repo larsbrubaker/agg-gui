@@ -90,6 +90,8 @@ pub fn compute_snap(
     let allow_cy = allow_top && allow_bottom;
 
     // X axis: collect candidate offsets, keep the smallest |delta|.
+    let mut x_edge_engaged = false;
+    let mut y_edge_engaged = false;
     if let Some(snap) = best_x_alignment(
         rect,
         &neighbours,
@@ -109,6 +111,7 @@ pub fn compute_snap(
             y0: y_span(rect, snap.target_rect).0,
             y1: y_span(rect, snap.target_rect).1,
         });
+        x_edge_engaged = true;
     }
 
     // Y axis: same shape, swap horizontal ↔ vertical.
@@ -130,20 +133,32 @@ pub fn compute_snap(
             x0: x_span(rect, snap.target_rect).0,
             x1: x_span(rect, snap.target_rect).1,
         });
+        y_edge_engaged = true;
     }
 
-    // ── Phase 2: equal-spacing (Move only) ───────────────────────
+    // ── Phase 2: equal-spacing (Move only).
+    //
+    // Precedence is PER AXIS: edge alignment on the X axis
+    // suppresses horizontal spacing only — vertical spacing stays
+    // free to engage independently, and vice versa.  An X-axis edge
+    // snap and a Y-axis spacing snap are not competing explanations,
+    // so they can co-exist.
     if matches!(mode, SnapMode::Move) {
-        if let Some(spacing) = horizontal_equal_spacing(rect, &neighbours, threshold) {
-            rect.x += spacing.delta;
-            // Each helper picks the right number of dimension lines
-            // for the case it matched (one for sandwich, two for a
-            // chain extension showing both reference + matched gap).
-            guides.extend(spacing.guides);
+        if !x_edge_engaged {
+            if let Some(spacing) = horizontal_equal_spacing(rect, &neighbours, threshold) {
+                rect.x += spacing.delta;
+                // Each helper picks the right number of dimension
+                // lines for the case it matched (one for sandwich,
+                // two for a chain extension showing both reference +
+                // matched gap).
+                guides.extend(spacing.guides);
+            }
         }
-        if let Some(spacing) = vertical_equal_spacing(rect, &neighbours, threshold) {
-            rect.y += spacing.delta;
-            guides.extend(spacing.guides);
+        if !y_edge_engaged {
+            if let Some(spacing) = vertical_equal_spacing(rect, &neighbours, threshold) {
+                rect.y += spacing.delta;
+                guides.extend(spacing.guides);
+            }
         }
     }
 
@@ -309,10 +324,15 @@ fn apply_resize_y(rect: &mut Rect, edge: MovingEdge, delta: f64, active: ResizeE
 /// its own set of dimension-line guides — chain extension wants TWO
 /// guides (the reference gap + the matched gap), the sandwich case
 /// only one (the spanning gap).
+///
+/// `pub(super)` so unit tests can exercise the spacing helpers
+/// directly without going through `compute_snap` (which would also
+/// engage edge alignment and suppress spacing per the precedence
+/// rule).  Production callers should still go through `compute_snap`.
 #[derive(Clone, Debug)]
-struct SpacingMatch {
-    delta: f64,
-    guides: Vec<SnapGuide>,
+pub(super) struct SpacingMatch {
+    pub(super) delta: f64,
+    pub(super) guides: Vec<SnapGuide>,
 }
 
 /// Detect any equal-spacing pattern the moving rect could fit into,
@@ -336,7 +356,7 @@ struct SpacingMatch {
 ///
 /// All candidate matches inside `threshold` are evaluated; the one
 /// with the smallest `|delta|` wins.
-fn horizontal_equal_spacing(
+pub(super) fn horizontal_equal_spacing(
     moving: Rect,
     targets: &[Rect],
     threshold: f64,
@@ -365,13 +385,21 @@ fn horizontal_equal_spacing(
         }
     }
 
-    // Reference-gap matching: enumerate every stationary (P, Q) pair
-    // where P is Q's left neighbour, take `gap(P→Q)` as the reference,
-    // and try to apply it from `left_n` (extending rightward) or
-    // `right_n` (extending leftward).  Smallest |delta| wins.
-    let mut best: Option<SpacingMatch> = None;
-    for q in targets {
-        let Some(p) = horizontal_left_neighbour_of(*q, targets, None) else {
+    // Reference-gap matching: enumerate every stationary `Q` (in
+    // order of proximity to the moving rect, see `targets_sorted_by_distance`)
+    // for which `Q` has its own left neighbour `P`.  Take `gap(P→Q)` as
+    // the reference and try to apply it from `left_n` (extending
+    // rightward) or `right_n` (extending leftward).
+    //
+    // **Visual-closeness rule**: as soon as a Q produces a candidate
+    // inside the threshold, USE IT and return — that's the reference
+    // closest to the moving rect, which is what the user's eye
+    // tracks.  Iterating in distance order makes "first match wins"
+    // the right policy, and skips the full O(n²) sweep the previous
+    // smallest-|delta|-across-all-Qs loop did.
+    for &qi in targets_sorted_by_distance(moving, targets).iter() {
+        let q = targets[qi];
+        let Some(p) = horizontal_left_neighbour_of(q, targets, None) else {
             continue;
         };
         let ref_gap = q.x - (p.x + p.width);
@@ -383,45 +411,83 @@ fn horizontal_equal_spacing(
             x0: p.x + p.width,
             x1: q.x,
         };
+        // Both extension directions (rightward via `left_n`, leftward
+        // via `right_n`) are evaluated for this Q; the one with the
+        // smaller |delta| wins within the same reference pair.  This
+        // resolves the rare case where the same gap could apply to
+        // either side of the moving rect — the closer fit reads as
+        // less surprising motion.
+        let mut best_for_q: Option<SpacingMatch> = None;
+        let ref_x0 = p.x + p.width;
+        let ref_x1 = q.x;
         if let Some(a) = left_n {
             let want_left = a.x + a.width + ref_gap;
             let delta = want_left - moving.x;
-            if delta.abs() <= threshold {
-                let matched_guide = SnapGuide::HSpacing {
-                    y: moving.y + moving.height * 0.5,
-                    x0: a.x + a.width,
-                    x1: want_left,
-                };
-                let cand = SpacingMatch {
+            let matched_x0 = a.x + a.width;
+            let matched_x1 = want_left;
+            // Skip the degenerate case where the matched gap exactly
+            // coincides with the reference gap.  That happens, e.g.,
+            // when P (Q's own left neighbour) equals A (moving's left
+            // neighbour): the "chain extension" math then collapses
+            // and the snap would place moving on top of Q.  The
+            // sandwich pass earlier in `compute_snap` covers the
+            // legitimate "moving between P and Q" case.
+            if delta.abs() <= threshold && !h_range_eq(ref_x0, ref_x1, matched_x0, matched_x1) {
+                best_for_q = Some(SpacingMatch {
                     delta,
-                    guides: vec![ref_guide, matched_guide],
-                };
-                if best.as_ref().map_or(true, |b| delta.abs() < b.delta.abs()) {
-                    best = Some(cand);
-                }
+                    guides: vec![
+                        ref_guide,
+                        SnapGuide::HSpacing {
+                            y: moving.y + moving.height * 0.5,
+                            x0: matched_x0,
+                            x1: matched_x1,
+                        },
+                    ],
+                });
             }
         }
         if let Some(a) = right_n {
             let want_right = a.x - ref_gap;
             let want_left = want_right - moving.width;
             let delta = want_left - moving.x;
-            if delta.abs() <= threshold {
-                let matched_guide = SnapGuide::HSpacing {
-                    y: moving.y + moving.height * 0.5,
-                    x0: want_right,
-                    x1: a.x,
-                };
-                let cand = SpacingMatch {
+            let matched_x0 = want_right;
+            let matched_x1 = a.x;
+            // Same degeneracy guard as the leftward case — fires when
+            // Q == A (moving's right neighbour); the matched gap then
+            // sits at exactly P.right..A.left, which is the reference
+            // gap itself.
+            if delta.abs() <= threshold
+                && !h_range_eq(ref_x0, ref_x1, matched_x0, matched_x1)
+                && best_for_q
+                    .as_ref()
+                    .map_or(true, |b| delta.abs() < b.delta.abs())
+            {
+                best_for_q = Some(SpacingMatch {
                     delta,
-                    guides: vec![ref_guide, matched_guide],
-                };
-                if best.as_ref().map_or(true, |b| delta.abs() < b.delta.abs()) {
-                    best = Some(cand);
-                }
+                    guides: vec![
+                        ref_guide,
+                        SnapGuide::HSpacing {
+                            y: moving.y + moving.height * 0.5,
+                            x0: matched_x0,
+                            x1: matched_x1,
+                        },
+                    ],
+                });
             }
         }
+        if best_for_q.is_some() {
+            return best_for_q;
+        }
     }
-    best
+    None
+}
+
+/// Equality check for the (x0, x1) extent of two horizontal gaps,
+/// with a small floating-point tolerance.  Used to detect the
+/// degenerate chain-extension case where the matched gap and the
+/// reference gap describe the same physical span.
+fn h_range_eq(ref_x0: f64, ref_x1: f64, m_x0: f64, m_x1: f64) -> bool {
+    (ref_x0 - m_x0).abs() < 1e-6 && (ref_x1 - m_x1).abs() < 1e-6
 }
 
 /// Closest vertically-overlapping neighbour of `moving` on each side.
@@ -497,10 +563,40 @@ fn rect_eq(a: Rect, b: Rect) -> bool {
         && (a.height - b.height).abs() < 1e-9
 }
 
+/// Return target indices sorted by euclidean centre-distance to the
+/// moving rect.  Lets the spacing helpers scan the visually closest
+/// reference Qs first and bail on the first in-threshold match — the
+/// reference that lands nearest the cursor is the one the user is
+/// actually trying to align against.
+///
+/// Returns a `Vec<usize>` of indices rather than reordered rects so
+/// the caller keeps stable identities (handy for any downstream
+/// debug printouts or test assertions).  Distance comparisons use
+/// squared distance to skip the unnecessary `sqrt`.
+fn targets_sorted_by_distance(moving: Rect, targets: &[Rect]) -> Vec<usize> {
+    let m_cx = moving.x + moving.width * 0.5;
+    let m_cy = moving.y + moving.height * 0.5;
+    let mut idx: Vec<usize> = (0..targets.len()).collect();
+    idx.sort_by(|&a, &b| {
+        let da = sq_center_distance(targets[a], m_cx, m_cy);
+        let db = sq_center_distance(targets[b], m_cx, m_cy);
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    idx
+}
+
+fn sq_center_distance(r: Rect, cx: f64, cy: f64) -> f64 {
+    let rcx = r.x + r.width * 0.5;
+    let rcy = r.y + r.height * 0.5;
+    let dx = rcx - cx;
+    let dy = rcy - cy;
+    dx * dx + dy * dy
+}
+
 /// Mirror of [`horizontal_equal_spacing`] for the vertical axis.
 /// Sandwich case first, then reference-gap matching across every
 /// stationary (P, Q) neighbour pair on the Y axis.
-fn vertical_equal_spacing(
+pub(super) fn vertical_equal_spacing(
     moving: Rect,
     targets: &[Rect],
     threshold: f64,
@@ -529,13 +625,14 @@ fn vertical_equal_spacing(
         }
     }
 
-    // Reference-gap matching across every stationary (P, Q) pair
-    // where P is Q's bottom neighbour (Y-up: P sits BELOW Q).  Tries
-    // both upward (moving above its bottom neighbour) and downward
-    // (moving below its top neighbour) placements.
-    let mut best: Option<SpacingMatch> = None;
-    for q in targets {
-        let Some(p) = vertical_bottom_neighbour_of(*q, targets, None) else {
+    // Reference-gap matching: iterate Qs in order of euclidean
+    // center-distance to the moving rect (see the horizontal helper
+    // for the rationale).  First Q that yields a candidate inside
+    // the threshold wins — that's the reference closest to the user's
+    // eye.
+    for &qi in targets_sorted_by_distance(moving, targets).iter() {
+        let q = targets[qi];
+        let Some(p) = vertical_bottom_neighbour_of(q, targets, None) else {
             continue;
         };
         let ref_gap = q.y - (p.y + p.height);
@@ -547,49 +644,73 @@ fn vertical_equal_spacing(
             y0: p.y + p.height,
             y1: q.y,
         };
+        let mut best_for_q: Option<SpacingMatch> = None;
+        let ref_y0 = p.y + p.height;
+        let ref_y1 = q.y;
+        // For VSpacing the lines are drawn vertically — distinct
+        // columns separate the reference and matched even when their
+        // y-range coincides (the legitimate cross-column chain).
+        // Only flag as degenerate when BOTH the x (column) AND the
+        // y-range match.
+        let ref_x = q.x + q.width * 0.5;
+        let moving_x = moving.x + moving.width * 0.5;
+        let same_column = (ref_x - moving_x).abs() < 1e-6;
         if let Some(a) = bottom_n {
             // moving sits above A; gap = moving.y - (A.y + A.height).
             // want_bottom = A.y + A.height + ref_gap.
             let want_bottom = a.y + a.height + ref_gap;
             let delta = want_bottom - moving.y;
-            if delta.abs() <= threshold {
-                let matched_guide = SnapGuide::VSpacing {
-                    x: moving.x + moving.width * 0.5,
-                    y0: a.y + a.height,
-                    y1: want_bottom,
-                };
-                let cand = SpacingMatch {
+            let matched_y0 = a.y + a.height;
+            let matched_y1 = want_bottom;
+            let degenerate =
+                same_column && h_range_eq(ref_y0, ref_y1, matched_y0, matched_y1);
+            if delta.abs() <= threshold && !degenerate {
+                best_for_q = Some(SpacingMatch {
                     delta,
-                    guides: vec![ref_guide, matched_guide],
-                };
-                if best.as_ref().map_or(true, |b| delta.abs() < b.delta.abs()) {
-                    best = Some(cand);
-                }
+                    guides: vec![
+                        ref_guide,
+                        SnapGuide::VSpacing {
+                            x: moving_x,
+                            y0: matched_y0,
+                            y1: matched_y1,
+                        },
+                    ],
+                });
             }
         }
         if let Some(a) = top_n {
-            // moving sits below A; gap = A.y - (moving.y + moving.height).
-            // want_top = A.y - ref_gap → want_y = want_top - moving.height.
+            // moving sits below A; want_top = A.y − ref_gap.
             let want_top = a.y - ref_gap;
             let want_bottom = want_top - moving.height;
             let delta = want_bottom - moving.y;
-            if delta.abs() <= threshold {
-                let matched_guide = SnapGuide::VSpacing {
-                    x: moving.x + moving.width * 0.5,
-                    y0: want_top,
-                    y1: a.y,
-                };
-                let cand = SpacingMatch {
+            let matched_y0 = want_top;
+            let matched_y1 = a.y;
+            let degenerate =
+                same_column && h_range_eq(ref_y0, ref_y1, matched_y0, matched_y1);
+            if delta.abs() <= threshold
+                && !degenerate
+                && best_for_q
+                    .as_ref()
+                    .map_or(true, |b| delta.abs() < b.delta.abs())
+            {
+                best_for_q = Some(SpacingMatch {
                     delta,
-                    guides: vec![ref_guide, matched_guide],
-                };
-                if best.as_ref().map_or(true, |b| delta.abs() < b.delta.abs()) {
-                    best = Some(cand);
-                }
+                    guides: vec![
+                        ref_guide,
+                        SnapGuide::VSpacing {
+                            x: moving_x,
+                            y0: matched_y0,
+                            y1: matched_y1,
+                        },
+                    ],
+                });
             }
         }
+        if best_for_q.is_some() {
+            return best_for_q;
+        }
     }
-    best
+    None
 }
 
 fn vertical_neighbours(moving: Rect, targets: &[Rect]) -> (Option<Rect>, Option<Rect>) {
