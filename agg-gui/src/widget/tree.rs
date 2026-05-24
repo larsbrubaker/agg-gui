@@ -165,6 +165,60 @@ pub fn dispatch_event(
     result
 }
 
+/// Variant of [`dispatch_event`] that accepts `&mut dyn Widget` as the
+/// root. Useful when a parent owns a sub-tree by concrete type (e.g.
+/// `Window`'s `title_bar: WindowTitleBar`) and wants to route an event
+/// into it via the framework's standard hit-test + bubble dispatch,
+/// instead of running coordinate hit-tests inline.
+pub fn dispatch_event_dyn(
+    root: &mut dyn Widget,
+    path: &[usize],
+    event: &Event,
+    pos_in_root: Point,
+) -> EventResult {
+    if path.is_empty() {
+        let before = crate::animation::invalidation_epoch();
+        let result = root.on_event(event);
+        if result == EventResult::Consumed || before != crate::animation::invalidation_epoch() {
+            root.mark_dirty();
+        }
+        return result;
+    }
+    let idx = path[0];
+    if idx >= root.children().len() {
+        return root.on_event(event);
+    }
+    let child_bounds = root.children()[idx].bounds();
+    let child_pos = Point::new(
+        pos_in_root.x - child_bounds.x,
+        pos_in_root.y - child_bounds.y,
+    );
+    let translated_event = translate_event(event, child_pos);
+
+    let before_child = crate::animation::invalidation_epoch();
+    // After the first hop we're inside the Vec<Box<dyn Widget>>, so we
+    // can fall back to the regular Box-based dispatcher.
+    let child_result = dispatch_event(
+        &mut root.children_mut()[idx],
+        &path[1..],
+        &translated_event,
+        child_pos,
+    );
+    if child_result == EventResult::Consumed {
+        root.mark_dirty();
+        return EventResult::Consumed;
+    }
+    if before_child != crate::animation::invalidation_epoch() {
+        root.mark_dirty();
+    }
+    let before_self = crate::animation::invalidation_epoch();
+    let result = root.on_event(event);
+    if result == EventResult::Consumed || before_self != crate::animation::invalidation_epoch() {
+        root.mark_dirty();
+    }
+    result
+}
+
 /// Give visible widgets a chance to handle a key ignored by the focused path.
 ///
 /// Traverses in reverse paint order so topmost windows/menu bars win.

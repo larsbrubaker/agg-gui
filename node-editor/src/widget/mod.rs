@@ -147,6 +147,12 @@ pub struct NodeEditor {
     /// sockets all anchor at the title-bar side-center so existing
     /// noodles still resolve to an endpoint.
     collapsed_nodes: HashSet<NodeId>,
+    /// "Chevron clicked" channel shared with every node header. The
+    /// header's [`agg_gui::widgets::ChevronWidget`] child writes the
+    /// node's id here when the user clicks it; `layout()` drains the
+    /// cell and toggles `collapsed_nodes`. Lets the chevron live as a
+    /// real composed child widget instead of a manual hit-rect.
+    pending_collapse: Rc<Cell<Option<NodeId>>>,
     /// Most recent left-click in widget-local coords + time, used to
     /// detect double-clicks on a node's title bar (toggle collapse).
     last_click: Option<(agg_gui::Point, web_time::Instant)>,
@@ -225,6 +231,7 @@ impl NodeEditor {
             canvas_scale: 1.0,
             selected: HashSet::new(),
             collapsed_nodes: HashSet::new(),
+            pending_collapse: Rc::new(Cell::new(None)),
             last_click: None,
             palette: CanvasPalette::dark(),
             interaction: CanvasState::Idle,
@@ -432,8 +439,14 @@ impl NodeEditor {
         let mut new_children: Vec<Box<dyn Widget>> = Vec::with_capacity(layouts.len());
         for l in layouts {
             let selected = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
-            let nw =
-                NodeWidget::from_layout_transformed(l, selected, node_ctx.clone(), scale, offset);
+            let nw = NodeWidget::from_layout_transformed(
+                l,
+                selected,
+                node_ctx.clone(),
+                scale,
+                offset,
+                Rc::clone(&self.pending_collapse),
+            );
             new_children.push(Box::new(nw));
         }
         self.children = new_children;
@@ -501,6 +514,14 @@ impl Widget for NodeEditor {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+
+        // Drain the chevron-click channel — header chevrons (real
+        // child widgets) write a NodeId here when consumed; the editor
+        // applies the toggle before laying out so the collapsed flag
+        // is visible to this frame's `snapshot_layouts`.
+        if let Some(id) = self.pending_collapse.take() {
+            self.toggle_collapsed(id);
+        }
 
         // Snapshot once for both the fingerprint AND the (possible)
         // children rebuild — avoids hitting the model twice.

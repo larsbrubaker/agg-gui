@@ -104,9 +104,12 @@ pub fn paint_chrome_body(ctx: &mut dyn DrawCtx, w: f64, h: f64, style: &ChromeSt
     ctx.fill();
 }
 
-/// Paint the title-bar fill + 1-px bottom separator + collapse
-/// chevron + title label.  Does not paint close / maximize buttons —
-/// callers that want those overlay them in their own paint pass.
+/// Paint the title-bar fill + 1-px bottom separator + title label.
+/// Does **not** paint the chevron or any buttons — those are real
+/// child widgets ([`crate::widgets::ChevronWidget`] et al.) the caller
+/// composes into the title bar's child list. This keeps interaction
+/// (click + hover + focus) flowing through the standard parent/child
+/// event dispatch instead of manual coordinate hit-tests.
 ///
 /// `bar_x`/`bar_y` are the bar's lower-left in the frame's local
 /// coordinate space; the bar's width is the frame's width and its
@@ -143,16 +146,11 @@ pub fn paint_chrome_title_bar(
         ctx.fill();
     }
 
-    // Collapse / expand chevron on the left side.
-    paint_chevron(ctx, bar_x + 12.0, bar_y + h * 0.5, collapsed, style.title_text_color);
-
-    // Title label.
+    // Title label. Inset to clear the chevron child slot on the left
+    // (chevron occupies ~24 px when composed by the caller).
     if !title.is_empty() {
         ctx.set_fill_color(style.title_text_color);
         ctx.set_font_size(font_size);
-        // Match WindowTitleBar's label placement: ~24 px from the left
-        // edge (past the chevron) and centred vertically with a small
-        // baseline nudge below the bar centre.
         ctx.fill_text(title, bar_x + 24.0, bar_y + h * 0.5 - 4.0);
     }
 }
@@ -167,31 +165,25 @@ pub fn paint_chrome_border(ctx: &mut dyn DrawCtx, w: f64, h: f64, style: &Chrome
 }
 
 /// Paint the collapse / expand chevron at `(cx, cy)` in the active
-/// `DrawCtx` space. Half-size 4 px; right-pointing when collapsed,
-/// down-pointing when expanded — same iconography as `Window`.
+/// `DrawCtx` space. Half-size 4 px. Iconography matches conventional
+/// UIs: ▸ when collapsed (click to expand), ▾ when expanded (click to
+/// collapse). agg-gui is Y-up, so "▾" has its apex at the LOWER y.
 pub fn paint_chevron(ctx: &mut dyn DrawCtx, cx: f64, cy: f64, collapsed: bool, color: Color) {
     let sz = 4.0;
     ctx.set_stroke_color(color);
     ctx.set_line_width(1.5);
     ctx.begin_path();
     if collapsed {
+        // ▸ pointing right.
         ctx.move_to(cx, cy - sz);
         ctx.line_to(cx + sz, cy);
         ctx.line_to(cx, cy + sz);
     } else {
-        ctx.move_to(cx - sz, cy - sz * 0.5);
-        ctx.line_to(cx, cy + sz * 0.5);
-        ctx.line_to(cx + sz, cy - sz * 0.5);
+        // ▾ pointing down — apex at the lower y in Y-up coords.
+        ctx.move_to(cx - sz, cy + sz * 0.5);
+        ctx.line_to(cx, cy - sz * 0.5);
+        ctx.line_to(cx + sz, cy + sz * 0.5);
     }
     ctx.stroke();
 }
 
-/// Hit-test the chevron click target on a title bar. `local_x`/
-/// `local_y` are relative to the bar's lower-left corner; `bar_h` is
-/// the bar's height (= `style.title_height`).
-pub fn chrome_chevron_hit(local_x: f64, local_y: f64, bar_h: f64) -> bool {
-    let cx = 12.0;
-    let cy = bar_h * 0.5;
-    let half = 8.0;
-    local_x >= cx - half && local_x <= cx + half && local_y >= cy - half && local_y <= cy + half
-}

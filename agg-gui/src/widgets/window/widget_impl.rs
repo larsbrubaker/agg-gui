@@ -200,6 +200,17 @@ impl Widget for Window {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Drain the title-bar chevron's click flag — the chevron is a
+        // real child widget that flips this `Rc<Cell<bool>>` when the
+        // framework dispatches its MouseDown.  Acting on the flag here
+        // (rather than in our own `on_event`) lets the child consume
+        // the event normally instead of forcing the parent to manual
+        // hit-test the chevron's coordinates.
+        if self.title_bar.take_chevron_click() {
+            self.toggle_collapse();
+            self.last_title_click = None;
+            crate::animation::request_draw();
+        }
         // Rising-edge visibility detection requests a parent raise.
         let now_visible = self.requested_visible();
         // First-layout fit (visibility-cell-managed windows only):
@@ -682,15 +693,48 @@ impl Widget for Window {
                     return EventResult::Consumed;
                 }
 
-                // Collapse / expand chevron.
-                if is_left_click && self.in_chevron_button(*pos) {
-                    self.toggle_collapse();
-                    // Null out the double-click timer so clicking the
-                    // chevron then quickly clicking the bar doesn't
-                    // trigger a maximize toggle.
-                    self.last_title_click = None;
-                    crate::animation::request_draw();
-                    return EventResult::Consumed;
+                // Route the click into the title-bar sub-tree FIRST so
+                // any child widget there (currently the chevron) gets a
+                // chance to consume it.  `WindowTitleBar` lives outside
+                // `Window.children` because the body content owns that
+                // slot, so the framework's normal hit-test pass never
+                // descends into it — we run the framework's hit-test
+                // + dispatch helpers manually on the sub-tree instead.
+                if is_left_click && self.in_title_bar(*pos) {
+                    let tb_bounds = self.title_bar.bounds();
+                    let tb_local = Point::new(pos.x - tb_bounds.x, pos.y - tb_bounds.y);
+                    if let Some(path) =
+                        crate::widget::hit_test_subtree(&self.title_bar, tb_local)
+                    {
+                        // Path could be empty (clicked the bar itself
+                        // but not a child) — skip in that case so the
+                        // title-drag handling further down still runs.
+                        if !path.is_empty() {
+                            // Preserve modifiers from the original event.
+                            let mods = match event {
+                                Event::MouseDown { modifiers, .. } => *modifiers,
+                                _ => Default::default(),
+                            };
+                            let translated = Event::MouseDown {
+                                pos: tb_local,
+                                button: *button,
+                                modifiers: mods,
+                            };
+                            let result = crate::widget::dispatch_event_dyn(
+                                &mut self.title_bar,
+                                &path,
+                                &translated,
+                                tb_local,
+                            );
+                            if result == EventResult::Consumed {
+                                // Chevron flag is drained in `layout`,
+                                // but we also want this frame to redraw
+                                // before that.
+                                crate::animation::request_draw();
+                                return EventResult::Consumed;
+                            }
+                        }
+                    }
                 }
 
                 // Resize edge — check before title bar to handle corner overlap.

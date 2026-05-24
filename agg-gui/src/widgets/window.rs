@@ -464,18 +464,6 @@ impl Window {
         dx * dx + dy * dy <= (CLOSE_R + 3.0) * (CLOSE_R + 3.0)
     }
 
-    /// Hit-box for the collapse / expand chevron on the LEFT of the title bar.
-    /// Kept in sync with the paint geometry in
-    /// `WindowTitleBar::paint` (chevron at `x = 12`, half-size 4).  A padded
-    /// square around that point gives users a click target big enough to
-    /// hit without pixel precision.
-    fn in_chevron_button(&self, local: Point) -> bool {
-        let cx = 12.0;
-        let cy = self.bounds.height - TITLE_H * 0.5;
-        let half = 8.0;
-        local.x >= cx - half && local.x <= cx + half && local.y >= cy - half && local.y <= cy + half
-    }
-
     /// Toggle collapsed <-> expanded, keeping the top edge of the window
     /// fixed in place.  Factored out of the event path so both the chevron
     /// click and any future keyboard shortcut go through the same math.
@@ -736,6 +724,6 @@ pub mod chrome;
 mod widget_impl;
 
 pub use chrome::{
-    chrome_chevron_hit, paint_chevron, paint_chrome_body, paint_chrome_border,
-    paint_chrome_shadow, paint_chrome_title_bar, ChromeStyle,
+    paint_chevron, paint_chrome_body, paint_chrome_border, paint_chrome_shadow,
+    paint_chrome_title_bar, ChromeStyle,
 };

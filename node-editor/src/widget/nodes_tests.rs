@@ -159,9 +159,23 @@ fn property_row_owns_value_editor() {
 fn scaled_layout_doubles_every_dimension() {
     let layout = layout_node(&make_node());
     let ctx_1x = NodePaintContext::from_model_scaled(CanvasPalette::dark(), &DummyModel, 1.0);
-    let nw_1x = NodeWidget::from_layout_transformed(&layout, false, ctx_1x, 1.0, [0.0, 0.0]);
+    let nw_1x = NodeWidget::from_layout_transformed(
+        &layout,
+        false,
+        ctx_1x,
+        1.0,
+        [0.0, 0.0],
+        std::rc::Rc::new(std::cell::Cell::new(None)),
+    );
     let ctx_2x = NodePaintContext::from_model_scaled(CanvasPalette::dark(), &DummyModel, 2.0);
-    let nw_2x = NodeWidget::from_layout_transformed(&layout, false, ctx_2x, 2.0, [0.0, 0.0]);
+    let nw_2x = NodeWidget::from_layout_transformed(
+        &layout,
+        false,
+        ctx_2x,
+        2.0,
+        [0.0, 0.0],
+        std::rc::Rc::new(std::cell::Cell::new(None)),
+    );
 
     assert!(
         (nw_2x.bounds().width - 2.0 * nw_1x.bounds().width).abs() < 1e-6
@@ -197,7 +211,14 @@ fn scaled_layout_doubles_every_dimension() {
 fn offset_translates_node_bounds() {
     let layout = layout_node(&make_node());
     let ctx = NodePaintContext::from_model_scaled(CanvasPalette::dark(), &DummyModel, 1.0);
-    let nw = NodeWidget::from_layout_transformed(&layout, false, ctx, 1.0, [25.0, 40.0]);
+    let nw = NodeWidget::from_layout_transformed(
+        &layout,
+        false,
+        ctx,
+        1.0,
+        [25.0, 40.0],
+        std::rc::Rc::new(std::cell::Cell::new(None)),
+    );
     // Node was at canvas (10, 50); with scale=1 and offset=(25, 40), the
     // bottom-left in screen-space is (10*1 + 25, (50 - h) * 1 + 40).
     assert!(

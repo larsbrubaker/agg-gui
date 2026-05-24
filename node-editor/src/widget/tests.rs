@@ -654,3 +654,106 @@ fn resolve_noodle_endpoints_returns_none_for_missing_node() {
     };
     assert!(resolve_noodle_endpoints(&layouts, &dangling).is_none());
 }
+
+#[test]
+fn chevron_click_in_title_bar_toggles_collapsed_state() {
+    // The chevron is a real `ChevronWidget` child of the node's
+    // header. Clicking it should set the editor's shared
+    // `pending_collapse` channel; the next `layout` pass drains it
+    // and toggles the collapsed set.
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 800.0, 600.0));
+    seed_nodes(&mut editor, &memory, vec![mk_node(1, "A", [50.0, 300.0])]);
+
+    assert!(
+        !editor.collapsed_nodes.contains(&NodeId(1)),
+        "fresh node must start expanded"
+    );
+
+    // Find the ChevronWidget child of NodeHeaderWidget.  Tree:
+    // NodeEditor → NodeWidget → NodeHeaderWidget (children[0]) →
+    // ChevronWidget (children[0]).  Directly fire its on_event so
+    // we exercise the real on_click closure that pumps the cell.
+    let chevron = editor.children_mut()[0]
+        .children_mut()[0]
+        .children_mut()[0]
+        .as_mut();
+    assert_eq!(chevron.type_name(), "ChevronWidget");
+    let event = agg_gui::Event::MouseDown {
+        pos: agg_gui::Point::new(8.0, 8.0),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    };
+    let consumed = chevron.on_event(&event);
+    assert_eq!(
+        consumed,
+        agg_gui::EventResult::Consumed,
+        "ChevronWidget must consume left-clicks inside its bounds"
+    );
+
+    // NodeEditor drains the pending channel on the next layout pass.
+    editor.layout(Size::new(800.0, 600.0));
+    assert!(
+        editor.collapsed_nodes.contains(&NodeId(1)),
+        "chevron click must have toggled the collapse set via the drain"
+    );
+
+    // Second click toggles back.
+    let chevron2 = editor.children_mut()[0]
+        .children_mut()[0]
+        .children_mut()[0]
+        .as_mut();
+    let _ = chevron2.on_event(&event);
+    editor.layout(Size::new(800.0, 600.0));
+    assert!(
+        !editor.collapsed_nodes.contains(&NodeId(1)),
+        "second chevron click must restore expanded state"
+    );
+}
+
+#[test]
+fn collapsed_node_layout_is_title_height_only() {
+    // A collapsed node carries no body rows — its layout height equals
+    // TITLE_HEIGHT exactly so the framework lays out a single title-bar
+    // strip plus the surrounding shadow halo.
+    use crate::draw::{layout_node_with_state, TITLE_HEIGHT};
+    let node = NodeView {
+        id: NodeId(7),
+        type_id: "T".into(),
+        display_name: "Collapsed".into(),
+        category: "test".into(),
+        position: [0.0, 0.0],
+        inputs: vec![SocketView {
+            name: "in".into(),
+            display_label: Some("In".into()),
+            socket_type: crate::model::SocketTypeId(0),
+        }],
+        outputs: vec![SocketView {
+            name: "out".into(),
+            display_label: Some("Out".into()),
+            socket_type: crate::model::SocketTypeId(0),
+        }],
+        properties: vec![],
+    };
+    let info = layout_node_with_state(&node, |_| false, true);
+    assert!(info.collapsed);
+    assert!(
+        (info.size[1] - TITLE_HEIGHT).abs() < 1e-9,
+        "collapsed layout height must be TITLE_HEIGHT exactly; got {}",
+        info.size[1]
+    );
+    // Sockets still exist for noodle endpoint resolution, anchored at
+    // the title-bar side-center.
+    assert_eq!(info.rows.len(), 2);
+    let center_y = -TITLE_HEIGHT * 0.5;
+    for row in &info.rows {
+        if let Some(s) = row.socket() {
+            assert!(
+                (s.center[1] - center_y).abs() < 1e-9,
+                "socket Y must land at title-bar centre; got {}",
+                s.center[1]
+            );
+        }
+    }
+}

@@ -26,14 +26,18 @@
 //! itself; the per-widget bounds give the inspector a real tree to walk
 //! without forcing a second event-routing rewrite.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use agg_gui::{
-    DrawCtx, Event, EventResult, HAnchor, Insets, Rect, Size, VAnchor, Widget, WidgetBase,
+    Color, DrawCtx, Event, EventResult, HAnchor, Insets, Rect, Size, VAnchor, Widget, WidgetBase,
 };
 
 use crate::draw::{
     NodeLayoutInfo, NodeRow, SocketLayout, SocketSide, NODE_RADIUS, ROW_HEIGHT, SOCKET_RADIUS,
     TITLE_HEIGHT,
 };
+use crate::model::NodeId;
 
 pub(super) const ROW_PADDING_X: f64 = 6.0;
 pub(super) const LABEL_FONT_SIZE: f64 = 11.0;
@@ -67,9 +71,11 @@ impl NodeWidget {
     /// Construct a fresh widget tree mirroring `layout`, with no canvas
     /// pan/zoom applied — bounds land at canvas-space positions
     /// directly.  Convenience for callers that don't have a live
-    /// canvas transform (tests, default render at scale=1).
+    /// canvas transform (tests, default render at scale=1).  The
+    /// chevron's pending-collapse channel is a fresh, throwaway cell —
+    /// `NodeEditor` never sees clicks on these test widgets.
     pub fn from_layout(layout: &NodeLayoutInfo, selected: bool, ctx: NodePaintContext) -> Self {
-        Self::from_layout_transformed(layout, selected, ctx, 1.0, [0.0, 0.0])
+        Self::from_layout_transformed(layout, selected, ctx, 1.0, [0.0, 0.0], Rc::new(Cell::new(None)))
     }
 
     /// Construct a fresh widget tree with bounds baked in
@@ -80,12 +86,18 @@ impl NodeWidget {
     /// respecting a parent scale — lands at the right pixels.  This is
     /// also what lets `collect_inspector_nodes` report on-screen rects
     /// for the F12-style hover overlay.
+    ///
+    /// `pending_collapse` is the editor-level "user clicked a chevron"
+    /// channel — the header's chevron child writes the node's id into
+    /// the cell when clicked; `NodeEditor` drains the cell each layout
+    /// pass and applies the toggle to its `collapsed_nodes` set.
     pub fn from_layout_transformed(
         layout: &NodeLayoutInfo,
         selected: bool,
         mut ctx: NodePaintContext,
         scale: f64,
         canvas_offset: [f64; 2],
+        pending_collapse: Rc<Cell<Option<NodeId>>>,
     ) -> Self {
         ctx.scale = scale;
         let canvas_w = layout.size[0];
@@ -107,6 +119,8 @@ impl NodeWidget {
             layout.display_name.clone(),
             layout.category.clone(),
             layout.collapsed,
+            layout.node_id,
+            pending_collapse,
             ctx.clone(),
         )));
 
@@ -180,6 +194,13 @@ impl Widget for NodeWidget {
     fn enforce_integer_bounds(&self) -> bool {
         false
     }
+    /// Allow sockets to render half-out past the body edge into the
+    /// shadow halo. Without this override the default clip rect is the
+    /// node body, and the outer half of each socket dot gets clipped.
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let r = SOCKET_RADIUS * self.ctx.scale;
+        Some((-r, 0.0, self.bounds.width + 2.0 * r, self.bounds.height))
+    }
     fn properties(&self) -> Vec<(&'static str, String)> {
         vec![
             ("node_id", format!("{}", self.node_id.0)),
@@ -242,12 +263,21 @@ impl Widget for NodeWidget {
 pub struct NodeHeaderWidget {
     bounds: Rect,
     base: WidgetBase,
+    /// `children[0]` is the [`agg_gui::widgets::ChevronWidget`]. The
+    /// title label paints inline for now (could be migrated to a real
+    /// `Label` child like `WindowTitleBar` uses, follow-up task).
     children: Vec<Box<dyn Widget>>,
     title: String,
     category: String,
     /// Matches `NodeWidget::collapsed`. The header chrome rounds all four
     /// corners + skips the bottom separator when collapsed.
     collapsed: bool,
+    /// Shared collapse cell handed to the chevron child so its glyph
+    /// orientation tracks the live state without per-frame setters.
+    chevron_collapsed: Rc<Cell<bool>>,
+    /// Shared chevron glyph colour cell — `paint` writes the active
+    /// theme colour here before the framework descends into the child.
+    chevron_color: Rc<Cell<Color>>,
     ctx: NodePaintContext,
 }
 
@@ -258,6 +288,8 @@ impl NodeHeaderWidget {
         title: String,
         category: String,
         collapsed: bool,
+        node_id: NodeId,
+        pending_collapse: Rc<Cell<Option<NodeId>>>,
         ctx: NodePaintContext,
     ) -> Self {
         // `node_w` and `node_h` are already in screen-space (the
@@ -265,13 +297,38 @@ impl NodeHeaderWidget {
         // `TITLE_HEIGHT` needs the same treatment.
         let title_h = TITLE_HEIGHT * ctx.scale;
         let bounds = Rect::new(0.0, node_h - title_h, node_w, title_h);
+
+        // Build the chevron child. Its on_click closure writes this
+        // node's id into the editor's shared `pending_collapse` cell;
+        // `NodeEditor::layout` drains the cell and toggles the
+        // collapsed set.
+        let chevron_collapsed = Rc::new(Cell::new(collapsed));
+        let chevron_color = Rc::new(Cell::new(ctx.palette.label_text));
+        let chevron = {
+            let pending = Rc::clone(&pending_collapse);
+            agg_gui::widgets::ChevronWidget::new(Rc::clone(&chevron_collapsed))
+                .with_color_cell(Rc::clone(&chevron_color))
+                .on_click(move || {
+                    pending.set(Some(node_id));
+                })
+        };
+        // Position chevron — centred vertically inside the title bar,
+        // with a small left inset matching `WindowTitleBar`.
+        let chev_size = agg_gui::widgets::CHEVRON_SIZE * ctx.scale;
+        let chev_x = 2.0 * ctx.scale;
+        let chev_y = (title_h - chev_size) * 0.5;
+        let mut chevron_box: Box<dyn Widget> = Box::new(chevron);
+        chevron_box.set_bounds(Rect::new(chev_x, chev_y, chev_size, chev_size));
+
         Self {
             bounds,
             base: WidgetBase::new(),
-            children: Vec::new(),
+            children: vec![chevron_box],
             title,
             category,
             collapsed,
+            chevron_collapsed,
+            chevron_color,
             ctx,
         }
     }
@@ -309,11 +366,9 @@ impl Widget for NodeHeaderWidget {
         let title_color =
             (self.ctx.title_colors)(&self.category, self.ctx.palette.node_title_fallback);
 
-        // Shared chrome title-bar paint: fill, chevron, label. We pass
-        // the bar's local (0, 0) origin since NodeHeaderWidget is drawn
-        // in its own translated space by the framework. The category
-        // colour overrides the visuals default, and the label uses the
-        // palette's label_text so it tracks the node-editor theme.
+        // Shared chrome title-bar paint: fill + label. The chevron is a
+        // real child widget on `self.children[0]` — framework descends
+        // into it after this paint pass.
         let v = ctx.visuals();
         let mut style = agg_gui::widgets::window::ChromeStyle::from_visuals(&v);
         style.corner_radius = NODE_RADIUS * s;
@@ -330,6 +385,9 @@ impl Widget for NodeHeaderWidget {
             &self.title,
             TITLE_FONT_SIZE * s,
         );
+        // Mirror live state into the cells the chevron child reads.
+        self.chevron_collapsed.set(self.collapsed);
+        self.chevron_color.set(self.ctx.palette.label_text);
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
@@ -346,6 +404,10 @@ pub struct NodeRowWidget {
     children: Vec<Box<dyn Widget>>,
     row_name: String,
     row_kind: RowKind,
+    /// Canvas zoom factor — needed only to scale the children clip-rect
+    /// overhang that lets socket dots paint past the row edge into the
+    /// node's shadow halo.
+    scale: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -444,6 +506,7 @@ impl NodeRowWidget {
             children,
             row_name,
             row_kind,
+            scale: ctx.scale,
         }
     }
 }
@@ -469,6 +532,14 @@ impl Widget for NodeRowWidget {
     }
     fn enforce_integer_bounds(&self) -> bool {
         false
+    }
+    /// Extend the children clip-rect horizontally so socket dots —
+    /// which straddle the row's left / right edges — can paint their
+    /// outer half into the surrounding shadow halo without getting
+    /// clipped at the row boundary.
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let r = SOCKET_RADIUS * self.scale;
+        Some((-r, 0.0, self.bounds.width + 2.0 * r, self.bounds.height))
     }
     fn properties(&self) -> Vec<(&'static str, String)> {
         vec![

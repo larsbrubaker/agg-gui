@@ -16,7 +16,7 @@
 //! into a shared `TitleBarView` every frame before `paint_subtree` descends
 //! into this widget.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -26,6 +26,7 @@ use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
 use crate::widget::Widget;
+use crate::widgets::chevron::{ChevronWidget, CHEVRON_SIZE};
 use crate::widgets::label::Label;
 
 // ── Button constants — kept in sync with `window.rs` so event hit-tests
@@ -62,28 +63,72 @@ impl TitleBarView {
 }
 
 /// Title bar strip painted on top of a Window body.  Hosts the collapse
-/// chevron, title label, maximize button, close button, and a 1-px
-/// separator below (when the window is expanded).
+/// chevron (real child widget), title label (real child widget), and
+/// paints the maximize / close buttons inline (Window owns their
+/// hit-tests for now — follow-up to migrate those to child widgets too).
+/// A 1-px separator paints below the bar when the window is expanded.
 pub(crate) struct WindowTitleBar {
     bounds: Rect,
-    /// `children[0]` is the title [`Label`] — framework paints it.
+    /// `children[0]` is the [`ChevronWidget`]; `children[1]` is the
+    /// title [`Label`]. The framework paints + hit-tests them through
+    /// the normal child walk.
     children: Vec<Box<dyn Widget>>,
     state: Rc<RefCell<TitleBarView>>,
+    /// Shared collapse flag — written by `Window` (whose `collapsed`
+    /// field is the source of truth), read by `ChevronWidget` to pick
+    /// its glyph orientation each paint.
+    collapsed: Rc<Cell<bool>>,
+    /// Shared chevron-glyph colour — written by [`paint`] from the
+    /// current visuals each frame; read by `ChevronWidget`.
+    chevron_color: Rc<Cell<Color>>,
+    /// Set by the chevron's `on_click` closure. `Window` drains it on
+    /// every `on_event` pass and runs the collapse toggle.
+    chevron_clicked: Rc<Cell<bool>>,
 }
 
 impl WindowTitleBar {
     pub fn new(title: &str, font: Arc<Font>, state: Rc<RefCell<TitleBarView>>) -> Self {
+        let collapsed = Rc::new(Cell::new(false));
+        let chevron_clicked = Rc::new(Cell::new(false));
+        let chevron_color = Rc::new(Cell::new(Color::white()));
+        let chevron = {
+            let flag = Rc::clone(&chevron_clicked);
+            ChevronWidget::new(Rc::clone(&collapsed))
+                .with_color_cell(Rc::clone(&chevron_color))
+                .on_click(move || {
+                    flag.set(true);
+                })
+        };
         let label = Label::new(title, Arc::clone(&font)).with_font_size(13.0);
         Self {
             bounds: Rect::default(),
-            children: vec![Box::new(label)],
+            children: vec![Box::new(chevron), Box::new(label)],
             state,
+            collapsed,
+            chevron_color,
+            chevron_clicked,
         }
+    }
+
+    /// Atomically read + clear the shared chevron-clicked flag.
+    /// `Window::layout` calls this each frame; when the chevron child
+    /// has consumed a `MouseDown` and set the flag, this returns true
+    /// and resets it for the next click cycle.
+    pub(crate) fn take_chevron_click(&self) -> bool {
+        self.chevron_clicked.replace(false)
+    }
+
+    /// Write the live collapse state into the shared cell so the
+    /// chevron child renders the correct glyph.
+    #[allow(dead_code)]
+    pub(crate) fn sync_collapsed(&self, collapsed: bool) {
+        self.collapsed.set(collapsed);
     }
 
     #[allow(dead_code)]
     pub fn set_title(&mut self, title: &str) {
-        self.children[0].set_label_text(title);
+        // children[1] is the label (children[0] is the chevron).
+        self.children[1].set_label_text(title);
     }
 }
 
@@ -106,19 +151,33 @@ impl Widget for WindowTitleBar {
         &mut self.children
     }
 
-    // Transparent to input — Window owns drag / double-click / button
-    // hit-testing.  This keeps all pointer state in one place.
-    fn hit_test(&self, _: Point) -> bool {
-        false
+    // Hit-tests inside the bar area so the framework can descend into
+    // the chevron + label children. On_event returns `Ignored` for any
+    // position not claimed by a child, which lets the event bubble up
+    // to `Window` for title-drag and close / maximize handling.
+    fn hit_test(&self, local: Point) -> bool {
+        local.x >= 0.0
+            && local.x <= self.bounds.width
+            && local.y >= 0.0
+            && local.y <= self.bounds.height
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        // Position the title label at its final paint location so the
-        // framework's child-paint walk lands it correctly.
-        let s = self.children[0].layout(Size::new(available.width - 48.0, available.height));
+        // Chevron on the left — centred vertically, fixed size from the
+        // widget's own CHEVRON_SIZE constant.
+        let chev_size = CHEVRON_SIZE;
+        let chev_x = 4.0;
+        let chev_y = (available.height - chev_size) * 0.5;
+        self.children[0].set_bounds(Rect::new(chev_x, chev_y, chev_size, chev_size));
+
+        // Title label — inset past the chevron, reserve right-side
+        // room for the inline close / max buttons (Window paints them
+        // directly until they're migrated to child widgets).
+        let label = &mut self.children[1];
+        let s = label.layout(Size::new(available.width - 24.0 - 48.0, available.height));
         let lx = 24.0;
         let ly = (available.height - s.height) * 0.5;
-        self.children[0].set_bounds(Rect::new(lx, ly, s.width, s.height));
+        label.set_bounds(Rect::new(lx, ly, s.width, s.height));
         available
     }
 
@@ -152,19 +211,12 @@ impl Widget for WindowTitleBar {
             ctx.fill();
         }
 
-        // Collapse / expand chevron on the left — shared helper so the
-        // chevron iconography stays in sync with NodeWidget's identical
-        // chevron in the node editor.
-        crate::widgets::window::chrome::paint_chevron(
-            ctx,
-            12.0,
-            h * 0.5,
-            st.collapsed,
-            v.window_title_text,
-        );
-
-        // Title label colour — child paints itself via the framework's tree walk.
-        self.children[0].set_label_color(st.title_color);
+        // Chevron + title label are real child widgets — the framework
+        // walks them after this paint pass.  Sync per-frame state into
+        // the shared cells the children read from.
+        self.chevron_color.set(v.window_title_text);
+        self.collapsed.set(st.collapsed);
+        self.children[1].set_label_color(st.title_color);
 
         // Maximize / restore button.
         let mc_x = w - MAX_PAD;

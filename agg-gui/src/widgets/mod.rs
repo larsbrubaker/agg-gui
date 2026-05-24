@@ -1,5 +1,6 @@
 pub mod button;
 pub mod checkbox;
+pub mod chevron;
 pub mod collapsing_header;
 pub mod color_picker;
 pub mod color_wheel_picker;
@@ -37,6 +38,7 @@ pub mod window_title_bar;
 
 pub use button::{Button, ButtonIcon, ButtonTheme};
 pub use checkbox::Checkbox;
+pub use chevron::{ChevronWidget, CHEVRON_SIZE};
 pub use collapsing_header::CollapsingHeader;
 pub use color_picker::ColorPicker;
 pub use color_wheel_picker::{color_wheel_picker_dialog, ColorWheelPicker};

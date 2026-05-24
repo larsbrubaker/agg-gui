@@ -88,15 +88,11 @@ impl NodeEditor {
                     }
                 }
                 if let Some(node_id) = self.hit_node(&layouts, canvas_pos) {
-                    // Chevron click on the title bar → toggle collapse
-                    // without starting a drag.  Also handle double-click
-                    // anywhere in the title bar (matches Window's
-                    // collapse gesture).
-                    if hit_chevron(&layouts, node_id, canvas_pos) {
-                        self.toggle_collapsed(node_id);
-                        self.last_click = None;
-                        return EventResult::Consumed;
-                    }
+                    // (Chevron click is consumed by `ChevronWidget` —
+                    // a real child of the node header — before it ever
+                    // reaches this canvas-space dispatcher.  The
+                    // resulting "collapse this node" signal is drained
+                    // in `NodeEditor::layout`.)
                     if hit_title_bar(&layouts, node_id, canvas_pos) {
                         let now = web_time::Instant::now();
                         let is_double = self
@@ -498,23 +494,6 @@ fn hit_title_bar(layouts: &[NodeLayoutInfo], node_id: NodeId, canvas_pos: [f64; 
     let y_top = l.top_left[1];
     let y_bot = y_top - TITLE_HEIGHT;
     canvas_pos[0] >= x0 && canvas_pos[0] <= x1 && canvas_pos[1] >= y_bot && canvas_pos[1] <= y_top
-}
-
-/// True when `canvas_pos` lands on the title bar's collapse / expand
-/// chevron. Mirrors [`agg_gui::widgets::window::chrome_chevron_hit`]
-/// but expressed in canvas-space and against the node's title strip.
-fn hit_chevron(layouts: &[NodeLayoutInfo], node_id: NodeId, canvas_pos: [f64; 2]) -> bool {
-    if !hit_title_bar(layouts, node_id, canvas_pos) {
-        return false;
-    }
-    let Some(l) = layouts.iter().find(|l| l.node_id == node_id) else {
-        return false;
-    };
-    // Convert to title-bar-local coords: x relative to bar's left edge,
-    // y relative to bar's bottom edge (Y-up).
-    let local_x = canvas_pos[0] - l.top_left[0];
-    let local_y = canvas_pos[1] - (l.top_left[1] - TITLE_HEIGHT);
-    agg_gui::widgets::window::chrome_chevron_hit(local_x, local_y, TITLE_HEIGHT)
 }
 
 impl NodeEditor {
