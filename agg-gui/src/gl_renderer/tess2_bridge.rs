@@ -31,23 +31,54 @@ use tess2_rust::{ElementType, Tessellator, WindingRule};
 // Panic-isolation + repro capture
 // ---------------------------------------------------------------------------
 //
-// tess2-rust still hits an unresolved porting bug on WASM where mesh
-// operations hand `INVALID` (`u32::MAX`) into a `Vec` index and trap with
-// "index out of bounds".  We can't reproduce it in native release builds
-// even with the lion stress harness, so we route every entry into tess2
-// through `try_tessellate` to:
+// tess2-rust still hits an unresolved porting bug on WASM where a sweep
+// region keeps a reference to an edge whose origin vertex was wiped by
+// `kill_vertex(_, INVALID)`, and the sweep then dereferences
+// `mesh.verts[INVALID as usize]` and traps with "index out of bounds".
+// We can't reproduce it natively even with the lion stress harness, so
+// the goal of this layer is to capture **the exact input contour set**
+// that triggers the panic on the deployed wasm build so we can paste it
+// back into a tess2 regression test and fix the real algorithm bug.
 //
-//   1. catch the panic so a single bad polygon doesn't crash the whole
-//      WASM page (which would otherwise poison the `DEMO_APP` `RefCell`
-//      and freeze every subsequent input event), and
-//   2. dump the exact input contour set + winding rule to the console so
-//      we can paste it back into a tess2 regression test and fix the real
-//      algorithm bug.
+// Two complementary mechanisms:
 //
-// Once the underlying tess2 bug is gone this layer becomes harmless dead
-// code; we keep it around as a defensive net since tess2 is C-port-style
-// and any future contract violation would otherwise present as a generic
-// "RuntimeError: unreachable" with no actionable input.
+//   1. `try_tessellate` runs the pipeline inside `catch_unwind`.  On
+//      native this catches the panic, dumps the input, and returns
+//      `None` so the caller degrades gracefully.  On
+//      `wasm32-unknown-unknown` `catch_unwind` is a no-op (no unwinder
+//      runtime), so this branch only protects native callers.
+//
+//   2. While `try_tessellate` is running it stashes `(contours,
+//      winding, label)` in a thread-local; if a panic fires before the
+//      function returns, the panic **hook** (installed by
+//      [`install_tess_panic_logger`]) reads that thread-local and
+//      dumps the same repro info to `console.error` *before* the WASM
+//      module aborts.  Panic hooks run regardless of unwind/abort, so
+//      this is what actually surfaces the failing input on wasm.
+//
+// Once the underlying tess2 bug is gone this layer becomes harmless
+// dead code; we keep it around because tess2 is a C-port-style library
+// and any future contract violation would otherwise present as a
+// generic `RuntimeError: unreachable` with no actionable input.
+
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+
+#[cfg(target_arch = "wasm32")]
+struct TessContext {
+    contours: Vec<Vec<[f32; 2]>>,
+    winding: WindingRule,
+    label: &'static str,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// Most recent `(contours, winding, label)` handed to
+    /// [`try_tessellate`].  Cleared on a clean return; left intact when
+    /// the call panics so the panic hook can dump it.  `RefCell` lets
+    /// the hook borrow it without taking ownership.
+    static LAST_TESS_CONTEXT: RefCell<Option<TessContext>> = const { RefCell::new(None) };
+}
 
 /// Best-effort dump of the contour set that triggered a tess2 panic.
 ///
@@ -56,13 +87,13 @@ use tess2_rust::{ElementType, Tessellator, WindingRule};
 /// goes to stderr so unit/integration tests still capture it.  The
 /// emitted format is intentionally `f64` literal-friendly so we can drop
 /// it straight into a Rust test as `&[(f64, f64)]`.
-fn log_tess_repro(contours: &[Vec<[f32; 2]>], winding: WindingRule, label: &'static str) {
+fn log_tess_repro(contours: &[Vec<[f32; 2]>], winding: WindingRule, label: &str) {
     use std::fmt::Write;
     let total: usize = contours.iter().map(|c| c.len()).sum();
     let mut buf = String::new();
     let _ = writeln!(
         buf,
-        "tess2 panic in {label} — winding={winding:?}, contours={}, points={}:",
+        "tess2 repro for {label} — winding={winding:?}, contours={}, points={}:",
         contours.len(),
         total
     );
@@ -86,11 +117,45 @@ fn log_tess_repro(contours: &[Vec<[f32; 2]>], winding: WindingRule, label: &'sta
     }
 }
 
-/// Run the tess2 pipeline for `contours` under `winding`, catching any
-/// panic from the underlying mesh ops.  On panic the contour set is
-/// dumped (see [`log_tess_repro`]) and `None` is returned so the caller
-/// can degrade gracefully (skip drawing this path) instead of crashing
-/// the whole frame.
+/// Install a panic hook that dumps the most recent tess2 input set
+/// (recorded by [`try_tessellate`]) before delegating to whatever hook
+/// was previously installed (typically `console_error_panic_hook`).
+///
+/// Call this **after** `console_error_panic_hook::set_once()` so that
+/// our hook chains through the panic-info logger instead of replacing
+/// it.  Safe to call multiple times — the previous hook is captured
+/// each call, so duplicate installs just stack.  Native builds also
+/// benefit (e.g. integration tests get the contour dump on `panic!`),
+/// though the `catch_unwind` path in `try_tessellate` already covers
+/// the common native case.
+pub fn install_tess_panic_logger() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            // Read the stashed input.  Borrowing rather than taking so a
+            // panic during repro logging doesn't lose the data on the
+            // next failed frame.
+            LAST_TESS_CONTEXT.with(|cell| {
+                if let Ok(borrow) = cell.try_borrow() {
+                    if let Some(ctx) = borrow.as_ref() {
+                        log_tess_repro(&ctx.contours, ctx.winding, ctx.label);
+                    }
+                }
+            });
+            prev(info);
+        }));
+    }
+}
+
+/// Run the tess2 pipeline for `contours` under `winding`.
+///
+/// On native, the call is wrapped in `catch_unwind` so a tess2 panic
+/// dumps the input and returns `None` instead of crashing the host.
+/// On wasm the same dump is produced via the panic hook installed by
+/// [`install_tess_panic_logger`] (catch_unwind can't unwind in
+/// wasm32-unknown-unknown), and the call still aborts the page —
+/// preventing that requires fixing the underlying tess2 bug.
 ///
 /// `extract` produces the caller-shaped result from the tessellator
 /// once it has finished without panicking; it never runs on the panic
@@ -110,6 +175,19 @@ where
         return None;
     }
 
+    // Stash a copy of the input so the wasm panic hook can dump it if
+    // the call below aborts.  Released on the clean-return paths and
+    // on the catch_unwind error path.  The clone is only paid on wasm
+    // (gating the cfg here keeps native zero-cost).
+    #[cfg(target_arch = "wasm32")]
+    LAST_TESS_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = Some(TessContext {
+            contours: contours.to_vec(),
+            winding,
+            label,
+        });
+    });
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let mut tess = Tessellator::new();
         for c in contours {
@@ -126,9 +204,17 @@ where
         extract(&tess)
     }));
 
+    #[cfg(target_arch = "wasm32")]
+    LAST_TESS_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+
     match result {
         Ok(v) => v,
         Err(_payload) => {
+            // Native catch_unwind hit — the panic hook also fires on
+            // wasm, but on native there's no panic hook installed for
+            // tess2, so log here too.
             log_tess_repro(contours, winding, label);
             None
         }

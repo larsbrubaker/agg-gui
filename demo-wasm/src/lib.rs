@@ -120,6 +120,14 @@ fn default_font() -> Arc<agg_gui::Font> {
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
     console_error_panic_hook::set_once();
+    // Chain a tess2 input-dumping hook on top of console_error_panic_hook
+    // so that when the unresolved tess2-rust mesh-op panics fire on this
+    // wasm build, the offending contour set is logged to console.error
+    // *before* the page aborts.  Native catch_unwind already covers the
+    // non-wasm side; this is the wasm-only path because
+    // wasm32-unknown-unknown has no unwinder runtime and panics always
+    // abort, making catch_unwind a no-op.
+    agg_gui::gl_renderer::install_tess_panic_logger();
     wasm_bindgen_futures::spawn_local(async {
         match init_wgpu_async().await {
             Ok(init) => WGPU_INIT.with(|c| *c.borrow_mut() = Some(init)),
