@@ -721,6 +721,7 @@ fn resize_cursor(dir: ResizeDir) -> CursorIcon {
 
 mod builder;
 pub mod chrome;
+mod paint;
 mod widget_impl;
 
 pub use chrome::{
