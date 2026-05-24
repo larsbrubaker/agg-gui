@@ -33,4 +33,4 @@
 
 mod editor;
 
-pub use editor::{EditorKind, NodeFieldAttrs, NumberAttrs};
+pub use editor::{EditorKind, NodeFieldAttrs, NumberAttrs, VisibleWhen};

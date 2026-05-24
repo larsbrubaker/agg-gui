@@ -168,6 +168,30 @@ impl NumberAttrs {
     }
 }
 
+/// Conditional visibility for a field — the data-driven analogue of
+/// MatterCAD's `IPropertyGridModifier.UpdateControls(change)` hook.
+///
+/// The host knows which sibling boolean property gates the
+/// `AdvancedOn` / `AdvancedOff` rows (typically a `bool` named
+/// `advanced`); the UI layer filters rows before rendering based on
+/// the live value of that toggle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VisibleWhen {
+    /// Always render (default).
+    #[default]
+    Always,
+    /// Render only when the node's `advanced` toggle is on. MatterCAD's
+    /// `IPropertyGridModifier.UpdateControls` pattern for advanced
+    /// rows.
+    AdvancedOn,
+    /// Render only when the node's `advanced` toggle is off. Used by
+    /// the easy-mode hint message that nudges the user toward
+    /// Advanced.
+    AdvancedOff,
+    /// Never render. MatterCAD's `[HideFromEditor]`.
+    Never,
+}
+
 /// Field-level metadata — declared once per reflected struct field and
 /// consumed both by the host's `PropDef`-style binding type (which
 /// folds these into the property store) and by the property panel
@@ -185,15 +209,10 @@ pub struct NodeFieldAttrs {
     /// Free-text description shown in tooltips / the property-panel
     /// detail view. MatterCAD's `[Description("…")]`.
     pub description: Option<Arc<str>>,
-    /// True when this field should appear only after the user has
-    /// expanded an "Advanced" section. The UI layer reads this flag
-    /// plus the host's live "Advanced" toggle value to decide
-    /// visibility — same pattern as MatterCAD's
-    /// `IPropertyGridModifier.UpdateControls`.
-    pub advanced: bool,
-    /// Hide this field from the property panel entirely. MatterCAD's
-    /// `[HideFromEditor]`.
-    pub hidden: bool,
+    /// Visibility gate — Always, AdvancedOn, AdvancedOff, or Never.
+    /// The UI filters rows by combining this with the live "advanced"
+    /// toggle value.
+    pub visible_when: VisibleWhen,
 }
 
 impl NodeFieldAttrs {
@@ -216,12 +235,28 @@ impl NodeFieldAttrs {
         self.description = Some(text.into());
         self
     }
-    pub fn advanced(mut self) -> Self {
-        self.advanced = true;
+    /// Set the conditional visibility gate. Same trio as MatterCAD's
+    /// `[HideFromEditor]` + `IPropertyGridModifier.UpdateControls`.
+    pub fn visible_when(mut self, when: VisibleWhen) -> Self {
+        self.visible_when = when;
         self
     }
+    /// Shorthand for `visible_when(VisibleWhen::AdvancedOn)` — the
+    /// common case of "this row is only relevant after the user opens
+    /// Advanced".
+    pub fn advanced(mut self) -> Self {
+        self.visible_when = VisibleWhen::AdvancedOn;
+        self
+    }
+    /// Shorthand for `visible_when(VisibleWhen::AdvancedOff)` — used
+    /// by easy-mode hint messages that disappear once Advanced is on.
+    pub fn easy_only(mut self) -> Self {
+        self.visible_when = VisibleWhen::AdvancedOff;
+        self
+    }
+    /// Shorthand for `visible_when(VisibleWhen::Never)`.
     pub fn hidden(mut self) -> Self {
-        self.hidden = true;
+        self.visible_when = VisibleWhen::Never;
         self
     }
 }
@@ -274,8 +309,15 @@ mod tests {
         assert_eq!(a.label.as_deref().map(|x| x.as_ref()), Some("Diameter"));
         assert!(matches!(a.editor, EditorKind::Slider(_)));
         assert!(a.description.as_deref().map(|x| x.contains("Width")).unwrap_or(false));
-        assert!(a.advanced);
-        assert!(!a.hidden);
+        assert_eq!(a.visible_when, VisibleWhen::AdvancedOn);
+    }
+
+    #[test]
+    fn visible_when_shorthands_set_expected_variant() {
+        assert_eq!(NodeFieldAttrs::new().visible_when, VisibleWhen::Always);
+        assert_eq!(NodeFieldAttrs::new().advanced().visible_when, VisibleWhen::AdvancedOn);
+        assert_eq!(NodeFieldAttrs::new().easy_only().visible_when, VisibleWhen::AdvancedOff);
+        assert_eq!(NodeFieldAttrs::new().hidden().visible_when, VisibleWhen::Never);
     }
 
     #[test]

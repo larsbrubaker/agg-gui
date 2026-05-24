@@ -98,6 +98,42 @@ impl Widget for ValueEditorWidget {
             Color::rgba(0.93, 0.93, 0.94, 0.9)
         };
 
+        // Bool rows get a toggle-switch pill — a rounded track with a
+        // circular thumb. Far more readable than the previous
+        // "true" / "false" text and matches the MatterCAD-inspired
+        // panel look.
+        if let PropertyValue::Bool(b) = &self.prop.current {
+            let track_h = (h * 0.7).min(h - 4.0 * s);
+            let track_y = (h - track_h) * 0.5;
+            // Track colour follows the on/off state: filled accent
+            // colour when on, neutral grey when off.
+            let track_off = if body_lum < 0.5 {
+                Color::rgba(0.30, 0.32, 0.36, 1.0)
+            } else {
+                Color::rgba(0.82, 0.83, 0.85, 1.0)
+            };
+            let track_on = Color::rgba(0.28, 0.55, 0.95, 1.0);
+            ctx.set_fill_color(if *b { track_on } else { track_off });
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, track_y, w, track_h, track_h * 0.5);
+            ctx.fill();
+
+            // Thumb — a white circle on the right when on, on the
+            // left when off. Slight inset from the track edge.
+            let thumb_d = (track_h - 4.0 * s).max(6.0 * s);
+            let thumb_y = (h - thumb_d) * 0.5;
+            let thumb_x = if *b {
+                (w - thumb_d - 2.0 * s).max(0.0)
+            } else {
+                2.0 * s
+            };
+            ctx.set_fill_color(Color::rgba(0.98, 0.98, 0.98, 1.0));
+            ctx.begin_path();
+            ctx.rounded_rect(thumb_x, thumb_y, thumb_d, thumb_d, thumb_d * 0.5);
+            ctx.fill();
+            return;
+        }
+
         ctx.set_fill_color(pill_bg);
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, 3.0 * s);
@@ -151,13 +187,10 @@ fn format_value(v: &PropertyValue) -> String {
                 format!("{:.3}", n)
             }
         }
-        PropertyValue::Bool(b) => {
-            if *b {
-                "true".into()
-            } else {
-                "false".into()
-            }
-        }
+        // Bool rows are drawn as a toggle-switch pill (see `paint`); the
+        // text formatter never gets called for Bool. Returning empty
+        // string keeps the contract simple if a caller does invoke it.
+        PropertyValue::Bool(_) => String::new(),
         PropertyValue::Color(_) => String::new(),
         PropertyValue::Other { display } => display.clone(),
     }
