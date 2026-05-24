@@ -28,6 +28,114 @@ use agg_rust::basics::{is_end_poly, is_move_to, is_stop, VertexSource};
 use tess2_rust::{ElementType, Tessellator, WindingRule};
 
 // ---------------------------------------------------------------------------
+// Panic-isolation + repro capture
+// ---------------------------------------------------------------------------
+//
+// tess2-rust still hits an unresolved porting bug on WASM where mesh
+// operations hand `INVALID` (`u32::MAX`) into a `Vec` index and trap with
+// "index out of bounds".  We can't reproduce it in native release builds
+// even with the lion stress harness, so we route every entry into tess2
+// through `try_tessellate` to:
+//
+//   1. catch the panic so a single bad polygon doesn't crash the whole
+//      WASM page (which would otherwise poison the `DEMO_APP` `RefCell`
+//      and freeze every subsequent input event), and
+//   2. dump the exact input contour set + winding rule to the console so
+//      we can paste it back into a tess2 regression test and fix the real
+//      algorithm bug.
+//
+// Once the underlying tess2 bug is gone this layer becomes harmless dead
+// code; we keep it around as a defensive net since tess2 is C-port-style
+// and any future contract violation would otherwise present as a generic
+// "RuntimeError: unreachable" with no actionable input.
+
+/// Best-effort dump of the contour set that triggered a tess2 panic.
+///
+/// On wasm32 this lands on `console.error` so it's visible to the user
+/// and to anyone we ask to copy-paste the failing input.  On native it
+/// goes to stderr so unit/integration tests still capture it.  The
+/// emitted format is intentionally `f64` literal-friendly so we can drop
+/// it straight into a Rust test as `&[(f64, f64)]`.
+fn log_tess_repro(contours: &[Vec<[f32; 2]>], winding: WindingRule, label: &'static str) {
+    use std::fmt::Write;
+    let total: usize = contours.iter().map(|c| c.len()).sum();
+    let mut buf = String::new();
+    let _ = writeln!(
+        buf,
+        "tess2 panic in {label} — winding={winding:?}, contours={}, points={}:",
+        contours.len(),
+        total
+    );
+    for (i, c) in contours.iter().enumerate() {
+        let _ = write!(buf, "  contour[{i}] (n={}) [", c.len());
+        for (j, pt) in c.iter().enumerate() {
+            if j > 0 {
+                buf.push_str(", ");
+            }
+            let _ = write!(buf, "({:.6}, {:.6})", pt[0], pt[1]);
+        }
+        let _ = writeln!(buf, "]");
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&buf));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        eprintln!("{buf}");
+    }
+}
+
+/// Run the tess2 pipeline for `contours` under `winding`, catching any
+/// panic from the underlying mesh ops.  On panic the contour set is
+/// dumped (see [`log_tess_repro`]) and `None` is returned so the caller
+/// can degrade gracefully (skip drawing this path) instead of crashing
+/// the whole frame.
+///
+/// `extract` produces the caller-shaped result from the tessellator
+/// once it has finished without panicking; it never runs on the panic
+/// path.
+fn try_tessellate<T, F>(
+    contours: &[Vec<[f32; 2]>],
+    winding: WindingRule,
+    label: &'static str,
+    extract: F,
+) -> Option<T>
+where
+    F: FnOnce(&Tessellator) -> Option<T>,
+{
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    if contours.is_empty() {
+        return None;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let mut tess = Tessellator::new();
+        for c in contours {
+            // Promote f32 → f64 at the boundary so the sweep's edge-sign
+            // predicates have the full f64 margin (rotation-stable
+            // topology).  See the Real-type comment in tess2-rust geom.rs.
+            let flat: Vec<f64> = c.iter().flat_map(|v| [v[0] as f64, v[1] as f64]).collect();
+            tess.add_contour(2, &flat);
+        }
+        let ok = tess.tessellate(winding, ElementType::Polygons, 3, 2, None);
+        if !ok || tess.vertex_count() == 0 {
+            return None;
+        }
+        extract(&tess)
+    }));
+
+    match result {
+        Ok(v) => v,
+        Err(_payload) => {
+            log_tess_repro(contours, winding, label);
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Universal AGG VertexSource → tess2 contours
 // ---------------------------------------------------------------------------
 
@@ -161,27 +269,18 @@ pub struct CachedTess {
 /// a degenerate shape tess2 can't handle).
 pub fn tessellate_interior<VS: VertexSource>(path: &mut VS) -> Option<CachedTess> {
     let contours = agg_path_to_contours(path);
-    if contours.is_empty() {
-        return None;
-    }
-
-    let mut tess = Tessellator::new();
-    for c in &contours {
-        // tess2 accepts f64 coordinates — promote our f32 contours at the
-        // boundary so the sweep's edge-sign predicates have the full f64
-        // margin to absorb floating-point noise.
-        let flat: Vec<f64> = c.iter().flat_map(|v| [v[0] as f64, v[1] as f64]).collect();
-        tess.add_contour(2, &flat);
-    }
-    let ok = tess.tessellate(WindingRule::Odd, ElementType::Polygons, 3, 2, None);
-    if !ok || tess.vertex_count() == 0 {
-        return None;
-    }
-    Some(CachedTess {
-        vertices: tess.vertices().iter().map(|&v| v as f32).collect(),
-        indices: tess.elements().to_vec(),
-        edge_flags: tess.edge_flags().to_vec(),
-    })
+    try_tessellate(
+        &contours,
+        WindingRule::Odd,
+        "tessellate_interior",
+        |tess| {
+            Some(CachedTess {
+                vertices: tess.vertices().iter().map(|&v| v as f32).collect(),
+                indices: tess.elements().to_vec(),
+                edge_flags: tess.edge_flags().to_vec(),
+            })
+        },
+    )
 }
 
 /// Given a pre-computed `CachedTess` whose vertices have already been
@@ -290,29 +389,19 @@ pub fn tessellate_path_aa<VS: VertexSource>(
         flags: Vec<u8>,
         vcount: usize,
     }
-    let out = {
-        let mut tess = Tessellator::new();
-        for c in &contours {
-            let flat: Vec<f64> = c.iter().flat_map(|v| [v[0] as f64, v[1] as f64]).collect();
-            tess.add_contour(2, &flat);
-        }
-        let ok = tess.tessellate(
-            to_tess_winding_rule(fill_rule),
-            ElementType::Polygons,
-            3,
-            2,
-            None,
-        );
-        if !ok || tess.vertex_count() == 0 {
-            return None;
-        }
-        TessOut {
-            verts: tess.vertices().iter().map(|&v| v as f32).collect(),
-            indices: tess.elements().to_vec(),
-            flags: tess.edge_flags().to_vec(),
-            vcount: tess.vertex_count(),
-        }
-    };
+    let out = try_tessellate(
+        &contours,
+        to_tess_winding_rule(fill_rule),
+        "tessellate_path_aa",
+        |tess| {
+            Some(TessOut {
+                verts: tess.vertices().iter().map(|&v| v as f32).collect(),
+                indices: tess.elements().to_vec(),
+                flags: tess.edge_flags().to_vec(),
+                vcount: tess.vertex_count(),
+            })
+        },
+    )?;
 
     let in_verts: &[f32] = &out.verts; // flat [x, y, x, y, …]
     let in_indices: &[u32] = &out.indices; // [i0, i1, i2, …]
@@ -427,62 +516,42 @@ pub fn tessellate_fill(contours: &[Vec<[f32; 2]>]) -> Option<(Vec<f32>, Vec<u32>
         return None;
     }
 
-    let mut tess = Tessellator::new();
-    let mut n_added = 0;
+    // Pre-clean every contour the same way `try_tessellate` would
+    // forward it to tess2: drop short / zero-area / dup-vertex rings so
+    // the tessellator never sees the obviously-degenerate cases that
+    // tend to surface latent porting bugs.
+    let cleaned: Vec<Vec<[f32; 2]>> = contours
+        .iter()
+        .filter_map(|contour| {
+            if contour.len() < 3 {
+                return None;
+            }
+            let c = deduplicate_contour(contour);
+            if c.len() < 3 {
+                return None;
+            }
+            // Any polygon with area < 0.5 px² is invisible anyway and
+            // tess2 panics on collinear faces instead of returning an
+            // error, so filter them out at the boundary.
+            if signed_area_2x(&c).abs() < 1.0 {
+                return None;
+            }
+            Some(c)
+        })
+        .collect();
 
-    for contour in contours {
-        if contour.len() < 3 {
-            continue;
-        }
-
-        // Remove consecutive duplicate vertices (tess2 can panic on zero-length edges).
-        let cleaned = deduplicate_contour(contour);
-        if cleaned.len() < 3 {
-            continue;
-        }
-
-        // Skip near-zero-area contours — tess2 panics on degenerate (collinear)
-        // faces rather than returning an error.  Any polygon with area < 0.5 px²
-        // is invisible anyway.
-        if signed_area_2x(&cleaned).abs() < 1.0 {
-            continue;
-        }
-
-        // Flatten to [x0, y0, x1, y1, …] — promote to f64 at the tess2
-        // boundary so the sweep's edge-sign predicates operate in double
-        // precision (required for rotation-stable topology).
-        let flat: Vec<f64> = cleaned
-            .iter()
-            .flat_map(|v| [v[0] as f64, v[1] as f64])
-            .collect();
-        tess.add_contour(2, &flat);
-        n_added += 1;
-    }
-
-    if n_added == 0 {
-        return None;
-    }
-
-    let ok = tess.tessellate(
-        WindingRule::Odd, // EvenOdd — NonZero panics in tess2-rust on some inputs
-        ElementType::Polygons,
-        3, // triangles
-        2, // 2-D vertices
-        None,
-    );
-
-    if !ok || tess.vertex_count() == 0 {
-        return None;
-    }
-
-    // out_vertices: flat [x, y, x, y, …] — demote back to f32 for the GL
-    // vertex buffer (which is f32 today).
-    let verts: Vec<f32> = tess.vertices().iter().map(|&v| v as f32).collect();
-
-    // out_elements: flat [i0, i1, i2, …] — triangle vertex indices
-    let indices: Vec<u32> = tess.elements().to_vec();
-
-    Some((verts, indices))
+    try_tessellate(
+        &cleaned,
+        // EvenOdd — NonZero panics in tess2-rust on some inputs.
+        WindingRule::Odd,
+        "tessellate_fill",
+        |tess| {
+            Some((
+                tess.vertices().iter().map(|&v| v as f32).collect(),
+                tess.elements().to_vec(),
+            ))
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
