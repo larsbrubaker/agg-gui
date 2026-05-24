@@ -15,18 +15,10 @@ use super::geometry::SEP_H;
 
 /// Style values shared between the bar and popup painters.
 ///
-/// Geometry + the two inline-glyph characters (check mark, radio mark).
-/// Text colors are resolved per-`Label` from `ctx.visuals()` or set
-/// explicitly when a row is hovered / opened.
-///
-/// The submenu chevron is painted as a vector stroke — independent of
-/// the host's font, so it always renders regardless of whether the
-/// host bundles Font Awesome, Bootstrap Icons, or no icon font at all.
-///
-/// The remaining glyph fields default to portable Unicode characters
-/// present in every general-purpose font.  Hosts that bundle Font
-/// Awesome can swap them for the matching FA glyphs (`\u{F00C}` check,
-/// `\u{F111}` circle) so the indicators match the rest of the UI.
+/// Geometry only — every chrome indicator (submenu chevron, check
+/// mark, radio dot) is painted as vector primitives by the menu
+/// widget, so the menu renders the same on every host regardless of
+/// which icon font (if any) it bundles.
 #[derive(Clone)]
 pub struct MenuStyle {
     pub radius: f64,
@@ -36,14 +28,6 @@ pub struct MenuStyle {
     pub icon_x: f64,
     pub label_x: f64,
     pub shortcut_right: f64,
-    /// Glyph painted in the icon slot of a checked
-    /// (`MenuSelection::Check { selected: true }`) row that has no
-    /// explicit icon.  Default: U+2713 CHECK MARK.
-    pub check_glyph: char,
-    /// Glyph painted in the icon slot of a selected
-    /// (`MenuSelection::Radio { selected: true }`) row that has no
-    /// explicit icon.  Default: U+25CF BLACK CIRCLE.
-    pub radio_glyph: char,
 }
 
 impl Default for MenuStyle {
@@ -56,8 +40,6 @@ impl Default for MenuStyle {
             icon_x: 14.0,
             label_x: 32.0,
             shortcut_right: 28.0,
-            check_glyph: '\u{2713}',
-            radio_glyph: '\u{25CF}',
         }
     }
 }
@@ -75,6 +57,23 @@ pub fn submenu_chevron_points(row: Rect) -> [(f64, f64); 3] {
     let half_h = 4.0;
     let arm = 3.0;
     [(cx - arm, cy + half_h), (cx, cy), (cx - arm, cy - half_h)]
+}
+
+/// Paint a check-mark indicator centred at `(cx, cy)` as a stroked
+/// polyline. Font-independent — used for both check and radio rows
+/// so the selection marker is identical regardless of the host's
+/// bundled icon font.
+pub fn paint_check_mark(ctx: &mut dyn DrawCtx, cx: f64, cy: f64, color: Color) {
+    // Three-point ✓ sized to fit comfortably in the menu's left icon
+    // slot (~12 px tall). Stroke width matches the chevron so the
+    // visual weight is consistent.
+    ctx.set_stroke_color(color);
+    ctx.set_line_width(1.6);
+    ctx.begin_path();
+    ctx.move_to(cx - 5.0, cy - 0.5);
+    ctx.line_to(cx - 1.5, cy - 4.0);
+    ctx.line_to(cx + 5.0, cy + 3.5);
+    ctx.stroke();
 }
 
 /// Paint the submenu-indicator chevron as a stroked `>` polyline.

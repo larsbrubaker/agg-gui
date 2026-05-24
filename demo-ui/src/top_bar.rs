@@ -20,7 +20,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::widget::{BackbufferCache, BackbufferMode};
-use agg_gui::widgets::menu::MenuStyle;
 use agg_gui::{
     set_visuals, AccentColor, DrawCtx, Event, EventResult, FlexRow, Font, Key, MenuBar, MenuEntry,
     MenuItem, Modifiers, Rect, Size, SizedBox, ThemePreference, TopMenu, Visuals, Widget,
@@ -204,21 +203,8 @@ impl MenuChrome {
             accent_color.get(),
             snap_enabled.get(),
         );
-        // CLAUDE.md mandates Font Awesome glyphs throughout the UI.
-        // The framework's default `MenuStyle` ships portable Unicode
-        // characters (\u{2713}, \u{25CF}) for the check and radio
-        // marks; here we swap in the matching FA glyphs so they
-        // visually belong with every other icon in the demo.  The
-        // submenu chevron is painted as a vector stroke by agg-gui
-        // itself — no glyph override needed.
-        let fa_menu_style = MenuStyle {
-            check_glyph: '\u{F00C}',
-            radio_glyph: '\u{F111}',
-            ..MenuStyle::default()
-        };
         let bar = MenuBar::new(Arc::clone(&font), initial_menus, on_action)
             .with_font_size(13.0)
-            .with_menu_style(fa_menu_style)
             // Tight width — the FlexRow that hosts us spans the whole
             // top bar and has a flexing spacer plus the mobile Demos
             // button on its right; without this the bar would claim

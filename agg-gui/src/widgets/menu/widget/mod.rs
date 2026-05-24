@@ -15,8 +15,8 @@ use crate::widget::{current_viewport, BackbufferCache, Widget};
 use super::geometry::{contains, item_at_path, BAR_H};
 use super::model::{MenuEntry, MenuSelection};
 use super::paint::{
-    bar_button_text_color, paint_item_row_bg, paint_menu_bar_button_bg, paint_panel,
-    paint_separator, paint_submenu_chevron, MenuStyle,
+    bar_button_text_color, paint_check_mark, paint_item_row_bg, paint_menu_bar_button_bg,
+    paint_panel, paint_separator, paint_submenu_chevron, MenuStyle,
 };
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 
@@ -737,30 +737,27 @@ fn paint_popup_level(
                 row_layout.rect.y + 7.0,
             );
         }
-        // Selection indicator.  Always paints `check_glyph` so check
-        // and radio rows share a consistent right-edge mark; the radio
-        // semantic still lives in the model (mutex toggle behaviour)
-        // but its visual indicator is unified with check rows.  When
-        // the row already has a left-side marker (icon or swatch) the
-        // glyph paints at the right edge so the marker's identity
-        // stays visible; otherwise it occupies the icon slot.
+        // Selection indicator. Vector-drawn check mark shared by both
+        // Check and Radio rows so the indicator looks identical
+        // regardless of the host's icon font (or lack of one). When
+        // the row already has a left-side marker (icon or swatch),
+        // the check paints at the right edge so the marker's
+        // identity stays visible; otherwise it occupies the icon
+        // slot.
         let selected = matches!(
             item.selection,
             MenuSelection::Check { selected: true } | MenuSelection::Radio { selected: true }
         );
         if selected {
             let has_left_marker = item.swatch.is_some() || item.icon.is_some();
-            let x = if has_left_marker {
-                // Right-aligned slot.  When the row has a submenu the
-                // chevron already lives at row.width - 18; shift the
-                // selection glyph further left so they don't overlap.
-                let right_offset = if item.has_submenu() { 36.0 } else { 18.0 };
+            let cx = if has_left_marker {
+                let right_offset = if item.has_submenu() { 30.0 } else { 12.0 };
                 row_layout.rect.x + row_layout.rect.width - right_offset
             } else {
                 row_layout.rect.x + style.icon_x
             };
-            ctx.set_fill_color(inline_color);
-            ctx.fill_text(&style.check_glyph.to_string(), x, row_layout.rect.y + 7.0);
+            let cy = row_layout.rect.y + row_layout.rect.height * 0.5;
+            paint_check_mark(ctx, cx, cy, inline_color);
         }
         if item.has_submenu() {
             paint_submenu_chevron(ctx, row_layout.rect, inline_color);

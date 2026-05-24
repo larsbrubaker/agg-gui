@@ -697,8 +697,12 @@ fn format_value(v: &PropertyValue) -> String {
 }
 
 /// Draw a cubic-bezier connection between two canvas-space socket centers.
-/// The control points offset horizontally so the curve always exits to the
-/// right of an output and enters from the left of an input.
+/// Control-point offsets follow NodeDesigner's `render-noodle.js`
+/// SPLINE_NOODLE formula: each tangent is horizontal (outputs exit
+/// right, inputs enter left) with length = 25% of the Euclidean
+/// distance between the two endpoints. The distance-proportional
+/// offset keeps short noodles tight and long noodles gracefully
+/// curved, matching the look users are familiar with.
 pub fn draw_bezier_connection(
     ctx: &mut dyn DrawCtx,
     from: [f64; 2],
@@ -706,9 +710,12 @@ pub fn draw_bezier_connection(
     color: Color,
     line_width: f64,
 ) {
-    let dx = (to[0] - from[0]).abs().max(60.0).min(220.0);
-    let cp1 = [from[0] + dx, from[1]];
-    let cp2 = [to[0] - dx, to[1]];
+    let dx_raw = to[0] - from[0];
+    let dy_raw = to[1] - from[1];
+    let dist = (dx_raw * dx_raw + dy_raw * dy_raw).sqrt();
+    let off = dist * 0.25;
+    let cp1 = [from[0] + off, from[1]];
+    let cp2 = [to[0] - off, to[1]];
     ctx.set_stroke_color(color);
     ctx.set_line_width(line_width);
     ctx.begin_path();
