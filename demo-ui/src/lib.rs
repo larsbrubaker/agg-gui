@@ -6,6 +6,7 @@ mod app_builder;
 mod app_builder_tests;
 mod backend_panel;
 mod content;
+mod font_init;
 mod font_picker;
 mod rendering_test;
 mod shell;

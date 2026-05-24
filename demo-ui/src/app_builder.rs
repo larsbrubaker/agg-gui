@@ -3,10 +3,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{
-    AccentColor, App, FlexColumn, FlexRow, Font, InspectorNode, InspectorPanel, Key, MenuBarStrip,
-    Modifiers, Rect, Size, Stack, ThemePreference, Widget, Window,
-};
 use crate::api::{DemoHandles, PlatformHooks};
 use crate::backend_panel::{build_backend_panel, FrameHistory, RunMode};
 use crate::content::build_demo_content;
@@ -16,6 +12,10 @@ use crate::specs::{find_cube_idx, tile_rect, DEMOS, TESTS};
 use crate::state::{SavedState, StateAccessor};
 use crate::top_bar::{self, build_top_bar_inner};
 use crate::windows;
+use agg_gui::{
+    AccentColor, App, FlexColumn, FlexRow, Font, InspectorNode, InspectorPanel, Key, MenuBarStrip,
+    Modifiers, Rect, Size, Stack, ThemePreference, Widget, Window,
+};
 
 pub fn build_demo_ui(
     font: Arc<Font>,
@@ -130,95 +130,21 @@ pub fn build_demo_ui(
             v.push(title.to_string());
         }
     };
-    let font_name_cell: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(
-        initial_state.as_ref().and_then(|s| s.font_name.clone()),
-    ));
-    let font_size_scale_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
-        initial_state
-            .as_ref()
-            .map(|s| s.font_size_scale)
-            .unwrap_or(1.0),
-    ));
-    let standard_dpi = agg_gui::device_scale() <= 1.25;
-    let lcd_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
-        initial_state
-            .as_ref()
-            .map(|s| s.lcd_enabled)
-            .unwrap_or(standard_dpi),
-    ));
-    let hinting_enabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(
-        initial_state
-            .as_ref()
-            .map(|s| s.hinting_enabled)
-            .unwrap_or(standard_dpi),
-    ));
-    let gamma_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.gamma).unwrap_or(1.0),
-    ));
-    let width_scale_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.width_scale).unwrap_or(1.0),
-    ));
-    let interval_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.interval).unwrap_or(0.0),
-    ));
-    let faux_weight_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.faux_weight).unwrap_or(0.0),
-    ));
-    let faux_italic_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.faux_italic).unwrap_or(0.0),
-    ));
-    let primary_weight_cell: Rc<Cell<f64>> = Rc::new(Cell::new(
-        initial_state
-            .as_ref()
-            .map(|s| s.primary_weight)
-            .unwrap_or(1.0 / 3.0),
-    ));
-    let msaa_samples_cell: Rc<Cell<u8>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.msaa_samples).unwrap_or(0),
-    ));
-    let system_tab_cell: Rc<Cell<usize>> = Rc::new(Cell::new(
-        initial_state.as_ref().map(|s| s.system_tab).unwrap_or(0),
-    ));
-    let font_index_cell: Rc<Cell<usize>> = Rc::new(Cell::new({
-        let name_lock = font_name_cell.borrow();
-        name_lock
-            .as_deref()
-            .and_then(windows::font_option_index)
-            .unwrap_or_else(windows::default_font_index)
-    }));
-    agg_gui::font_settings::set_font_size_scale(font_size_scale_cell.get());
-    agg_gui::font_settings::set_lcd_enabled(lcd_enabled_cell.get());
-    agg_gui::font_settings::set_hinting_enabled(hinting_enabled_cell.get());
-    agg_gui::font_settings::set_gamma(gamma_cell.get());
-    agg_gui::font_settings::set_width(width_scale_cell.get());
-    agg_gui::font_settings::set_interval(interval_cell.get());
-    agg_gui::font_settings::set_faux_weight(faux_weight_cell.get());
-    agg_gui::font_settings::set_faux_italic(faux_italic_cell.get());
-    agg_gui::font_settings::set_primary_weight(primary_weight_cell.get());
-    let resolved_font_idx = font_name_cell
-        .borrow()
-        .as_deref()
-        .and_then(windows::font_option_index)
-        .unwrap_or_else(|| font_index_cell.get());
-    windows::init_system_cells(windows::SystemCells {
-        font_name: Rc::clone(&font_name_cell),
-        font_index: Rc::clone(&font_index_cell),
-        font_size_scale: Rc::clone(&font_size_scale_cell),
-        lcd_enabled: Rc::clone(&lcd_enabled_cell),
-        hinting_enabled: Rc::clone(&hinting_enabled_cell),
-        gamma: Rc::clone(&gamma_cell),
-        width_scale: Rc::clone(&width_scale_cell),
-        interval: Rc::clone(&interval_cell),
-        faux_weight: Rc::clone(&faux_weight_cell),
-        faux_italic: Rc::clone(&faux_italic_cell),
-        primary_weight: Rc::clone(&primary_weight_cell),
-        system_tab: Rc::clone(&system_tab_cell),
-        platform: platform.clone(),
-    });
-    {
-        let cells = windows::system_cells();
-        windows::request_font_by_index(&cells, resolved_font_idx);
-    }
+    let crate::font_init::FontInitCells {
+        font_name: font_name_cell,
+        font_index: _,
+        font_size_scale: font_size_scale_cell,
+        lcd_enabled: lcd_enabled_cell,
+        hinting_enabled: hinting_enabled_cell,
+        gamma: gamma_cell,
+        width_scale: width_scale_cell,
+        interval: interval_cell,
+        faux_weight: faux_weight_cell,
+        faux_italic: faux_italic_cell,
+        primary_weight: primary_weight_cell,
+        msaa_samples: msaa_samples_cell,
+        system_tab: system_tab_cell,
+    } = crate::font_init::init(initial_state.as_ref(), platform.clone());
     let all_specs_count = DEMOS.len() + TESTS.len();
     let reset_cells: Vec<Rc<Cell<Option<Rect>>>> = (0..all_specs_count)
         .map(|_| Rc::new(Cell::new(None)))
@@ -580,7 +506,9 @@ pub fn build_demo_ui(
             }
         }
     }
-    canvas.children_mut().push(Box::new(agg_gui::SnapOverlay::new()));
+    canvas
+        .children_mut()
+        .push(Box::new(agg_gui::SnapOverlay::new()));
     let main_area = canvas;
     let on_reset_all = {
         let demo_open = demo_entries
