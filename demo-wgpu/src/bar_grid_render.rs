@@ -28,7 +28,7 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::bar_grid_math::{look_at, mat4_mul, normalize3, perspective};
-use crate::msaa::MsaaFramebuffer;
+use crate::ssaa::SsaaFramebuffer;
 
 // ---------------------------------------------------------------------------
 // Grid configuration + animation constants
@@ -236,11 +236,11 @@ pub struct BarGridWgpuRenderer {
     /// blits this onto the surface with a linear sampler, which performs the
     /// downsample for free at 2× minification (a single bilinear tap is the
     /// 2×2 box) and an approximation at 4× minification.
-    framebuffer: Option<MsaaFramebuffer>,
+    framebuffer: Option<SsaaFramebuffer>,
     surface_format: wgpu::TextureFormat,
     /// Linear scale of the off-screen framebuffer (1 = no AA, 2 = 4× SSAA,
-    /// 4 = 16× SSAA).  Driven by [`crate::msaa::ssaa_linear_scale`] from the
-    /// widget's UI-facing samples cell.
+    /// 3 = 9× SSAA, 4 = 16× SSAA).  Driven by [`crate::ssaa::ssaa_linear_scale`]
+    /// from the widget's UI-facing samples cell.
     ssaa_scale: u32,
     /// Animation start time — passed in by the widget so renderer
     /// rebuilds (e.g. an SSAA scale toggle) keep the bar wave phase continuous.
@@ -254,7 +254,7 @@ impl BarGridWgpuRenderer {
         ssaa_samples: u32,
         start: web_time::Instant,
     ) -> Self {
-        let ssaa_scale = crate::msaa::ssaa_linear_scale(ssaa_samples);
+        let ssaa_scale = crate::ssaa::ssaa_linear_scale(ssaa_samples);
         // Pipeline is single-sample regardless of SSAA factor.  AA happens
         // by the framebuffer being bigger than the screen rect, not by
         // hardware multisampling.
@@ -411,17 +411,16 @@ impl BarGridWgpuRenderer {
         device: &wgpu::Device,
         widget_w: u32,
         widget_h: u32,
-    ) -> &mut MsaaFramebuffer {
+    ) -> &mut SsaaFramebuffer {
         let scale = self.ssaa_scale.max(1);
         let w = widget_w.saturating_mul(scale).max(1);
         let h = widget_h.saturating_mul(scale).max(1);
         let needs_new = self.framebuffer.is_none();
         if needs_new {
-            self.framebuffer = Some(MsaaFramebuffer::new(
+            self.framebuffer = Some(SsaaFramebuffer::new(
                 device,
                 w,
                 h,
-                /* sample_count = */ 1,
                 self.surface_format,
                 /* with_depth = */ true,
             ));
@@ -518,7 +517,7 @@ impl BarGridWgpuRenderer {
                 label: Some("bar_grid_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: fb.render_view(),
-                    resolve_target: fb.resolve_target(),
+                    resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
                         // Clear to transparent — pixels the bars don't cover

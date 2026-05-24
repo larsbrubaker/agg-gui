@@ -36,7 +36,7 @@ use std::sync::Arc;
 
 use agg_gui::{App, InspectorNode, InspectorOverlay};
 use demo_wgpu::{
-    begin_frame, render_app_frame, MsaaFramebuffer, WgpuCubeWidget, WgpuGfxCtx, CUBE_SCREEN_RECT,
+    begin_frame, render_app_frame, SsaaFramebuffer, WgpuCubeWidget, WgpuGfxCtx, CUBE_SCREEN_RECT,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -94,7 +94,7 @@ thread_local! {
     /// (`copy_texture_to_texture(surface → capture)`) fails validation.
     /// The scene texture is `RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC`,
     /// so screenshots copy from it cleanly.
-    static SCENE_FB:          RefCell<Option<MsaaFramebuffer>> = RefCell::new(None);
+    static SCENE_FB:          RefCell<Option<SsaaFramebuffer>> = RefCell::new(None);
 }
 
 /// All wgpu state that survives the async init and lives for the lifetime of
@@ -354,11 +354,10 @@ fn ensure_scene_fb(width: u32, height: u32) {
             match fb_borrow.as_mut() {
                 Some(fb) => fb.ensure_size(&init.device, width, height),
                 None => {
-                    *fb_borrow = Some(MsaaFramebuffer::new(
+                    *fb_borrow = Some(SsaaFramebuffer::new(
                         &init.device,
                         width,
                         height,
-                        /* sample_count = */ 1,
                         init.surface_format,
                         /* with_depth = */ false,
                     ));

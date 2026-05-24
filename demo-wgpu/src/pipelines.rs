@@ -132,7 +132,7 @@ const BLEND_PREMUL: wgpu::BlendState = wgpu::BlendState {
 ///
 /// Created once per [`crate::WgpuGfxCtx`] and reused for the lifetime of the
 /// context.  The struct is publicly visible so library primitives like
-/// [`crate::msaa::MsaaFramebuffer::blit_to`] can take a reference and reuse
+/// [`crate::ssaa::SsaaFramebuffer::blit_to`] can take a reference and reuse
 /// the shared 2-D textured-quad pipeline; the fields themselves stay
 /// `pub(crate)` so external code can hold a `&WgpuPipelines` but cannot
 /// reach in and rebuild individual pipelines.

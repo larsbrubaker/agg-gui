@@ -46,8 +46,8 @@ pub use bar_grid::{BarGridWgpuRenderer, WgpuCubeWidget, CUBE_SCREEN_RECT};
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
 
-pub mod msaa;
-pub use msaa::MsaaFramebuffer;
+pub mod ssaa;
+pub use ssaa::{ssaa_linear_scale, SsaaFramebuffer};
 
 /// GPU handle passed to widgets via `DrawCtx::gl_paint` on the wgpu backend.
 ///
@@ -425,10 +425,10 @@ impl WgpuGfxCtx {
     }
 
     /// Borrow the shared 2-D pipeline collection.  Exposed so platform
-    /// shells (currently `demo-wasm`) can drive a [`MsaaFramebuffer::blit_to`]
+    /// shells (currently `demo-wasm`) can drive a [`SsaaFramebuffer::blit_to`]
     /// when they need to composite an intermediate scene texture onto the
     /// real swap-chain surface — see the comment on
-    /// [`MsaaFramebuffer::resolve_texture`] for the WebGL2 scene-buffer
+    /// [`SsaaFramebuffer::resolve_texture`] for the WebGL2 scene-buffer
     /// pattern.  The returned `&WgpuPipelines` only exposes the fields
     /// `pub(crate)` library code already uses; external callers can pass
     /// it back into other library APIs but cannot reach in directly.

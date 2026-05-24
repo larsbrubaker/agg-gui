@@ -212,7 +212,7 @@ impl Widget for RowList {
 /// real `Button` children — each segment uses `with_subtle()` +
 /// `with_active_fn()` so the inactive segments paint muted and the
 /// selected one flips to the accent surface.  Same pattern as
-/// `RunModeRow` / `MsaaRow` in the backend panel; lives here because
+/// `RunModeRow` / `SsaaRow` in the backend panel; lives here because
 /// the scrolling demos pre-date the consolidation.
 pub struct SegRow<T: Clone + Copy + PartialEq + 'static> {
     bounds: Rect,

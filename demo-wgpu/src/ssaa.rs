@@ -1,118 +1,123 @@
-//! Re-usable off-screen MSAA framebuffer for widgets that need 3-D / GPU
-//! rendering with hardware antialiasing.
+//! Re-usable off-screen **SSAA** framebuffer for widgets that need 3-D / GPU
+//! rendering with antialiasing.
 //!
-//! Pattern: a widget allocates an [`MsaaFramebuffer`] sized to its on-screen
-//! rect, renders into it via its own pipeline (configured for the same
-//! `sample_count`), then calls [`MsaaFramebuffer::blit_to`] which composites
-//! the resolved colour onto the active 2-D render target through the shared
-//! `tex_pipeline`.
+//! # Why SSAA, not MSAA
 //!
-//! This avoids the natural pitfall of using wgpu's automatic resolve onto
-//! the surface / layer view directly: the resolve covers the *full*
-//! attachment area, which would clobber any 2-D content outside the widget
-//! rect.  Instead we resolve into a private same-size texture and then
-//! alpha-blend that into the target through a textured quad — pixels the
-//! widget didn't render stay transparent and the underlying 2-D content
-//! shows through.
+//! WebGPU's spec only guarantees `{1, 4}` for hardware MSAA sample counts on
+//! arbitrary renderable formats; `8` / `16` need adapter-specific opt-in
+//! features and can be silently absent on the WebGL2 backend.  Supersampling
+//! sidesteps that: render into an oversized single-sample texture and
+//! bilinear-downsample on composite.  Works on every adapter, and the
+//! sample-count granularity is whatever linear-scale you can pay for in
+//! pixels (`2² = 4`, `3² = 9`, `4² = 16`, ...).
 //!
-//! `sample_count == 1` is supported as a no-MSAA fast path: there's no
-//! separate multisample buffer, the widget renders directly into the
-//! single-sample resolve texture, and `blit_to` works the same way.
+//! # Pattern
+//!
+//! A widget allocates an [`SsaaFramebuffer`] sized to **scale × on-screen**
+//! pixels, renders into it through its own pipeline (configured for
+//! `sample_count = 1`), then calls [`SsaaFramebuffer::blit_to`] which
+//! composites the downsampled colour onto the active 2-D render target via
+//! the shared `tex_pipeline`.
+//!
+//! Resolving into a private same-size texture and then alpha-blending it
+//! into the target through a textured quad means pixels the widget didn't
+//! render stay transparent and the underlying 2-D content shows through —
+//! the same property hardware MSAA's automatic resolve would clobber if
+//! aimed straight at the surface / layer view.
+//!
+//! # Minimal downstream usage
+//!
+//! ```ignore
+//! use agg_gui_demo_wgpu::{ssaa_linear_scale, SsaaFramebuffer};
+//!
+//! // UI knob: 1 = off, 4 / 9 / 16 = 2× / 3× / 4× linear supersampling.
+//! let samples = 9u32;
+//! let scale = ssaa_linear_scale(samples);
+//!
+//! // One-time alloc (logical size × scale).
+//! let mut fb = SsaaFramebuffer::new(
+//!     device,
+//!     widget_w * scale,
+//!     widget_h * scale,
+//!     surface_format,
+//!     /* with_depth = */ true,
+//! );
+//!
+//! // Each frame:
+//! fb.ensure_size(device, widget_w * scale, widget_h * scale);
+//! // ... begin_render_pass with fb.render_view() + fb.depth_view(), draw your 3-D scene ...
+//! fb.blit_to(device, encoder, target_view, target_size, dst_rect, parent_clip, pipelines);
+//! ```
 
 use agg_gui::geometry::Rect;
 use wgpu::util::DeviceExt;
 
 use crate::pipelines::{TexUniforms, WgpuPipelines};
 
-/// Clamp a requested MSAA sample count to a value the WebGPU specification
-/// guarantees works on any device without opting into
-/// `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`.
+/// Map a UI-facing "samples" choice to the linear render-target scale factor
+/// used when supersampling onto an oversized framebuffer.
 ///
-/// The spec mandates support for `1` (no MSAA) and `4` for every renderable
-/// color format.  Higher values like `8` and `16` are commonly available on
-/// desktop adapters but rejected by validation on others (and on most
-/// WebGL2 backends) — pipeline creation panics rather than silently
-/// degrading.  Callers building MSAA-aware widgets pass their saved /
-/// requested setting through this and rebuild on change.
-pub fn safe_sample_count(requested: u32) -> u32 {
-    match requested {
-        0 | 1 => 1,
-        _ => 4,
-    }
-}
-
-/// Map a UI-facing SSAA "samples" choice to the linear render-target scale
-/// factor used when supersampling onto an oversized framebuffer.
+/// Cell values are pixel multipliers (`1` / `4` / `9` / `16`); the linear
+/// scale is `sqrt(samples)`, so a 16-sample request allocates a 4× linear
+/// (= 16× pixel) backbuffer that gets bilinear-downsampled to the on-screen
+/// rect.
 ///
-/// Cell values are pixel multipliers (`1` / `4` / `16`); the linear scale is
-/// `sqrt(samples)`, so a 16-sample request allocates a 4× linear (= 16×
-/// pixel) backbuffer that gets bilinear-downsampled to the on-screen rect.
-/// Unlike hardware MSAA this works on any adapter — the framebuffer stays
-/// `sample_count = 1` and only the *size* changes, so the WebGPU
-/// `{1, 4}`-only guarantee for multisampled formats is irrelevant.
-///
-/// Saved values from the old MSAA-semantics era (`0` for off) are coerced
-/// to `1`.  Anything between supported steps is rounded to the nearest
-/// supported step so out-of-band saves don't fail loudly.
+/// Saved values from the old MSAA-semantics era (`0` for off) are coerced to
+/// `1`.  Anything between supported steps rounds to the nearest supported
+/// step so out-of-band saves don't fail loudly.
 pub fn ssaa_linear_scale(requested_samples: u32) -> u32 {
     match requested_samples {
         0 | 1 => 1,
-        2..=8 => 2,
+        2..=5 => 2,
+        6..=12 => 3,
         _ => 4,
     }
 }
 
-/// Off-screen framebuffer for widgets that drive their own GPU pipeline and
-/// composite the result onto the shared 2-D render target.
+/// Off-screen single-sample framebuffer for widgets that drive their own GPU
+/// pipeline and composite the result onto the shared 2-D render target.
+///
+/// SSAA happens via *size*: the caller allocates this at `scale × {w, h}`
+/// and bilinear-downsamples through [`Self::blit_to`].  This type holds no
+/// concept of "samples" — it's just an offscreen colour (+ optional depth)
+/// with a composite helper.
 ///
 /// Allocated lazily; call [`Self::ensure_size`] each frame to keep the
-/// attachments sized to the current widget rect.
-pub struct MsaaFramebuffer {
-    /// Multisample colour (`sample_count = N`), only allocated when `N > 1`.
-    /// When present, this is the colour attachment for the widget's render
-    /// pass and `resolve` is its resolve target.
-    msaa_color: Option<(wgpu::Texture, wgpu::TextureView)>,
-    /// Single-sample texture used as the **resolve target** (when MSAA is
-    /// on) or as the **direct render target** (when off), and as the source
-    /// of [`Self::blit_to`] in either case.
-    resolve: (wgpu::Texture, wgpu::TextureView),
-    /// Optional depth attachment, matched to `sample_count`.
+/// attachments sized to the current widget rect × scale.
+pub struct SsaaFramebuffer {
+    /// Single-sample texture used as the render target and as the source of
+    /// [`Self::blit_to`].
+    color: (wgpu::Texture, wgpu::TextureView),
+    /// Optional depth attachment, `sample_count = 1`.
     depth: Option<(wgpu::Texture, wgpu::TextureView)>,
-    sample_count: u32,
     format: wgpu::TextureFormat,
     with_depth: bool,
     width: u32,
     height: u32,
-    /// Linear sampler used by `blit_to`.  1:1 pixel mapping makes linear vs.
-    /// nearest indistinguishable; linear is more forgiving on fractional
-    /// alignment if the caller's coordinates aren't pixel-perfect.
+    /// Linear sampler used by `blit_to`.  Linear minification is the
+    /// downsample filter at < 4× linear; at exactly 4× linear (SSAA 16×)
+    /// use [`Self::blit_downsample_4x_to`] instead — a single bilinear tap
+    /// reads only 4 of the 16 source texels, losing half the AA benefit.
     blit_sampler: wgpu::Sampler,
 }
 
-impl MsaaFramebuffer {
-    /// Build a fresh framebuffer at `(w, h)` with the given `sample_count`
-    /// and surface `format`.  `with_depth = true` allocates a matching depth
-    /// buffer; widgets that only need colour can pass `false`.
+impl SsaaFramebuffer {
+    /// Build a fresh framebuffer at `(w, h)` with surface `format`.
+    /// `with_depth = true` allocates a matching depth buffer; widgets that
+    /// only need colour can pass `false`.
     ///
-    /// `sample_count` is clamped to the values the WebGPU spec guarantees
-    /// for any color format without opt-in features — `1` (no MSAA) and
-    /// `4`.  Higher values like `8` and `16` require the
-    /// `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` feature and can be
-    /// per-format unsupported on otherwise-MSAA-capable hardware; rather
-    /// than panic on pipeline creation, callers can request `8` and we
-    /// silently round to `4`.  Pass [`safe_sample_count`] up front if you
-    /// want a UI to display the actual count we'll use.
+    /// `(w, h)` is the **physical** size of the texture, already multiplied
+    /// by the desired linear SSAA scale.  Use [`ssaa_linear_scale`] to map
+    /// a samples-style UI value to that multiplier.
     pub fn new(
         device: &wgpu::Device,
         w: u32,
         h: u32,
-        sample_count: u32,
         format: wgpu::TextureFormat,
         with_depth: bool,
     ) -> Self {
-        let sample_count = safe_sample_count(sample_count);
         let blit_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("msaa_blit"),
+            label: Some("ssaa_blit"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -122,27 +127,16 @@ impl MsaaFramebuffer {
             ..Default::default()
         });
         let mut fb = Self {
-            msaa_color: None,
-            resolve: alloc_resolve(device, w.max(1), h.max(1), format),
+            color: alloc_color(device, w.max(1), h.max(1), format),
             depth: None,
-            sample_count,
             format,
             with_depth,
             width: w.max(1),
             height: h.max(1),
             blit_sampler,
         };
-        if sample_count > 1 {
-            fb.msaa_color = Some(alloc_msaa(
-                device,
-                fb.width,
-                fb.height,
-                format,
-                sample_count,
-            ));
-        }
         if with_depth {
-            fb.depth = Some(alloc_depth(device, fb.width, fb.height, sample_count));
+            fb.depth = Some(alloc_depth(device, fb.width, fb.height));
         }
         fb
     }
@@ -157,17 +151,10 @@ impl MsaaFramebuffer {
         }
         self.width = w;
         self.height = h;
-        self.resolve = alloc_resolve(device, w, h, self.format);
-        if self.sample_count > 1 {
-            self.msaa_color = Some(alloc_msaa(device, w, h, self.format, self.sample_count));
-        }
+        self.color = alloc_color(device, w, h, self.format);
         if self.with_depth {
-            self.depth = Some(alloc_depth(device, w, h, self.sample_count));
+            self.depth = Some(alloc_depth(device, w, h));
         }
-    }
-
-    pub fn sample_count(&self) -> u32 {
-        self.sample_count
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -176,38 +163,24 @@ impl MsaaFramebuffer {
 
     /// View to use as the **colour attachment** of the widget's render pass.
     pub fn render_view(&self) -> &wgpu::TextureView {
-        match &self.msaa_color {
-            Some((_, v)) => v,
-            None => &self.resolve.1,
-        }
+        &self.color.1
     }
 
-    /// `resolve_target` to set on the colour attachment.  `Some` when MSAA
-    /// is on, `None` when off (writing directly to the resolve texture, no
-    /// resolve step needed).
-    pub fn resolve_target(&self) -> Option<&wgpu::TextureView> {
-        if self.sample_count > 1 {
-            Some(&self.resolve.1)
-        } else {
-            None
-        }
-    }
-
-    /// Single-sample resolved view — sample this in `blit_to` or any other
-    /// post-render pass.
+    /// Same view, exposed under the historic name used by post-render
+    /// sampling sites (e.g. the screenshot path).
     pub fn resolve_view(&self) -> &wgpu::TextureView {
-        &self.resolve.1
+        &self.color.1
     }
 
-    /// Single-sample resolved texture handle.  Exposed so a platform shell
-    /// (currently `demo-wasm`) can use this `MsaaFramebuffer` as the
-    /// intermediate "scene" target — pass `resolve_texture().clone()` to
+    /// Colour texture handle.  Exposed so a platform shell (currently
+    /// `demo-wasm`) can use this `SsaaFramebuffer` as the intermediate
+    /// "scene" target — pass `resolve_texture().clone()` to
     /// [`crate::WgpuGfxCtx::set_surface_texture`] so the GPU-direct
     /// screenshot path copies from this scene texture instead of from the
     /// real swap-chain surface (which on WebGL2 cannot advertise
     /// `COPY_SRC` and so can't be the source of a `copy_texture_to_*`).
     pub fn resolve_texture(&self) -> &wgpu::Texture {
-        &self.resolve.0
+        &self.color.0
     }
 
     /// Depth attachment view, when one was requested at construction.
@@ -215,17 +188,16 @@ impl MsaaFramebuffer {
         self.depth.as_ref().map(|(_, v)| v)
     }
 
-    /// Composite the framebuffer's resolved colour onto `target_view`'s
-    /// `dst_rect` (Y-up screen-space pixels of the target).  Uses the shared
-    /// 2-D textured-quad pipeline with `BLEND_STANDARD` so transparent
-    /// pixels (where the widget didn't render) preserve the 2-D content
+    /// Composite the framebuffer's colour onto `target_view`'s `dst_rect`
+    /// (Y-up screen-space pixels of the target).  Uses the shared 2-D
+    /// textured-quad pipeline with `BLEND_STANDARD` so transparent pixels
+    /// (where the widget didn't render) preserve the 2-D content
     /// underneath.
     ///
     /// At ≥4× linear minification (e.g. SSAA 16×) a single bilinear tap
     /// only reads 4 of the 16 source texels per output pixel; in that case
-    /// the caller can dispatch through `tex_downsample_4x_pipeline` instead
-    /// by routing through this method's higher-level helper.  This base
-    /// `blit_to` always runs the single-tap pipeline — fine for 1×/2×
+    /// use [`Self::blit_downsample_4x_to`] instead.  This base `blit_to`
+    /// always runs the single-tap pipeline — fine for 1× / 2× / 3×
     /// minification (perfect 2×2 box at 2×).
     ///
     /// `parent_clip` is intersected with `dst_rect` to set the pass scissor —
@@ -303,12 +275,12 @@ impl MsaaFramebuffer {
             tint: [1.0, 1.0, 1.0, 1.0],
         };
         let tex_ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("msaa_blit_uniforms"),
+            label: Some("ssaa_blit_uniforms"),
             contents: bytemuck::bytes_of(&tex_uniforms),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let tex_bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("msaa_blit_bg0"),
+            label: Some("ssaa_blit_bg0"),
             layout: &pipelines.tex_bgl0,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -316,12 +288,12 @@ impl MsaaFramebuffer {
             }],
         });
         let tex_bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("msaa_blit_bg1"),
+            label: Some("ssaa_blit_bg1"),
             layout: &pipelines.tex_bgl1,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.resolve.1),
+                    resource: wgpu::BindingResource::TextureView(&self.color.1),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -341,7 +313,7 @@ impl MsaaFramebuffer {
             0.0, x0, y1, 0.0, 0.0,
         ];
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("msaa_blit_vb"),
+            label: Some("ssaa_blit_vb"),
             contents: bytemuck::cast_slice(&verts),
             usage: wgpu::BufferUsages::VERTEX,
         });
@@ -367,7 +339,7 @@ impl MsaaFramebuffer {
         }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("msaa_blit_pass"),
+            label: Some("ssaa_blit_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target_view,
                 resolve_target: None,
@@ -402,14 +374,14 @@ impl MsaaFramebuffer {
     }
 }
 
-fn alloc_resolve(
+fn alloc_color(
     device: &wgpu::Device,
     w: u32,
     h: u32,
     format: wgpu::TextureFormat,
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("msaa_resolve"),
+        label: Some("ssaa_color"),
         size: wgpu::Extent3d {
             width: w,
             height: h,
@@ -421,7 +393,7 @@ fn alloc_resolve(
         format,
         // `COPY_SRC` so this texture can serve as the source of a
         // `copy_texture_to_texture` / `copy_texture_to_buffer` —
-        // specifically when `demo-wasm` uses an `MsaaFramebuffer` as the
+        // specifically when `demo-wasm` uses an `SsaaFramebuffer` as the
         // intermediate scene buffer behind the screenshot path.  Cost is
         // a flag bit; backends that don't physically support COPY_SRC on
         // a non-swap-chain texture are extinct in practice (wgpu's
@@ -435,46 +407,16 @@ fn alloc_resolve(
     (tex, view)
 }
 
-fn alloc_msaa(
-    device: &wgpu::Device,
-    w: u32,
-    h: u32,
-    format: wgpu::TextureFormat,
-    sample_count: u32,
-) -> (wgpu::Texture, wgpu::TextureView) {
+fn alloc_depth(device: &wgpu::Device, w: u32, h: u32) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("msaa_color"),
+        label: Some("ssaa_depth"),
         size: wgpu::Extent3d {
             width: w,
             height: h,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-    (tex, view)
-}
-
-fn alloc_depth(
-    device: &wgpu::Device,
-    w: u32,
-    h: u32,
-    sample_count: u32,
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("msaa_depth"),
-        size: wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count,
+        sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth32Float,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -500,5 +442,17 @@ mod tests {
     fn pixel_rect_covers_fractional_physical_extent() {
         let rect = Rect::new(10.25, 20.5, 16.5, 10.25);
         assert_eq!(pixel_rect(rect), [10, 20, 17, 11]);
+    }
+
+    #[test]
+    fn ssaa_linear_scale_matches_segments() {
+        assert_eq!(ssaa_linear_scale(0), 1);
+        assert_eq!(ssaa_linear_scale(1), 1);
+        assert_eq!(ssaa_linear_scale(4), 2);
+        assert_eq!(ssaa_linear_scale(9), 3);
+        assert_eq!(ssaa_linear_scale(16), 4);
+        // Out-of-band rounds to nearest supported step.
+        assert_eq!(ssaa_linear_scale(7), 3);
+        assert_eq!(ssaa_linear_scale(100), 4);
     }
 }

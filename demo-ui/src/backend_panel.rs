@@ -34,7 +34,7 @@ use agg_gui::{
 pub use agg_gui::{FrameHistory, RunMode};
 
 mod widgets;
-pub(crate) use widgets::MsaaRow;
+pub(crate) use widgets::SsaaRow;
 use widgets::{ScreenSizeLabel, TogglePill};
 
 // ── Backend panel ─────────────────────────────────────────────────────────────

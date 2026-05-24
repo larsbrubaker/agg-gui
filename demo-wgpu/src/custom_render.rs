@@ -56,8 +56,8 @@ use crate::pipelines::WgpuPipelines;
 ///     Y-up coords** (agg-gui convention). Convert to wgpu's top-down
 ///     Y-down convention as needed when computing scissor / viewport.
 ///   - `pipelines` is the shared 2-D pipeline collection.  Implementors
-///     that own an [`crate::msaa::MsaaFramebuffer`] can call
-///     [`crate::msaa::MsaaFramebuffer::blit_to`] with this to composite
+///     that own an [`crate::ssaa::SsaaFramebuffer`] can call
+///     [`crate::ssaa::SsaaFramebuffer::blit_to`] with this to composite
 ///     their offscreen output onto `target_view` through the same
 ///     textured-quad pipeline the 2-D path uses.
 pub struct WgpuCustomRenderCtx<'a> {
@@ -75,7 +75,7 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// Shared 2-D pipeline collection — exposed so an offscreen-buffered
     /// custom renderer can blit its resolved framebuffer onto the active
     /// 2-D render target without rebuilding the textured-quad pipeline
-    /// itself.  See [`crate::msaa::MsaaFramebuffer::blit_to`].
+    /// itself.  See [`crate::ssaa::SsaaFramebuffer::blit_to`].
     pub pipelines: &'a WgpuPipelines,
 }
 

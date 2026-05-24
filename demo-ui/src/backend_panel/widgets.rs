@@ -158,32 +158,27 @@ impl Widget for TogglePill {
 
 // ── MSAA row ─────────────────────────────────────────────────────────────────
 
-/// MSAA sample-count selector — a row of segmented buttons composed from
-/// real `Button` children.  The set of segments is supplied at
-/// construction (`(label, sample_count)` pairs) so the same widget powers
-/// both the native shell's 5-way Off/2×/4×/8×/16× picker and the WASM
-/// shell's 2-way Off/On picker (browser WebGL only exposes a boolean
-/// `antialias` flag).  Each segment uses `with_subtle()` +
-/// `with_active_fn()` so the selected sample count flips to the accent
-/// surface and the others stay muted.
-///
-/// Exposed to other crate modules (the System window's Render tab uses
-/// the same widget) via `pub(crate)`.
-pub(crate) struct MsaaRow {
+/// SSAA pixel-multiplier selector — a row of segmented buttons composed
+/// from real `Button` children.  The set of segments is supplied at
+/// construction (`(label, samples)` pairs) so the same widget can power
+/// any AA picker that writes to an `Rc<Cell<u8>>`.  Each segment uses
+/// `with_subtle()` + `with_active_fn()` so the selected sample count
+/// flips to the accent surface and the others stay muted.
+pub(crate) struct SsaaRow {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
 
-impl MsaaRow {
+impl SsaaRow {
     const BTN_H: f64 = 24.0;
-    /// Cube-widget segments — these are SSAA pixel multipliers, not MSAA
-    /// sample counts.  The cube widget renders into an offscreen texture
-    /// at `sqrt(samples) × {w, h}` and downsamples to the surface, so
-    /// `Off / 4× / 16×` work identically on every adapter (no spec-only
-    /// `{1, 4}` MSAA limit, no per-format adapter feature dance).  Cell
-    /// values: `1` = no AA, `4` = 2× linear, `16` = 4× linear.
+    /// Cube-widget segments — SSAA pixel multipliers.  The cube widget
+    /// renders into an offscreen texture at `sqrt(samples) × {w, h}` and
+    /// downsamples to the surface, so `Off / 4× / 9× / 16×` work
+    /// identically on every adapter (no spec-only `{1, 4}` MSAA limit, no
+    /// per-format adapter feature dance).  Cell values: `1` = no AA,
+    /// `4` = 2× linear, `9` = 3× linear, `16` = 4× linear.
     pub(crate) const CUBE_SEGMENTS: &'static [(&'static str, u8)] =
-        &[("Off", 1), ("4×", 4), ("16×", 16)];
+        &[("Off", 1), ("4×", 4), ("9×", 9), ("16×", 16)];
 
     pub(crate) fn new(
         font: Arc<Font>,
@@ -234,9 +229,9 @@ impl MsaaRow {
     }
 }
 
-impl Widget for MsaaRow {
+impl Widget for SsaaRow {
     fn type_name(&self) -> &'static str {
-        "MsaaRow"
+        "SsaaRow"
     }
     fn bounds(&self) -> Rect {
         self.bounds

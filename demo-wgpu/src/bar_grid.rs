@@ -47,12 +47,12 @@ pub struct WgpuCubeWidget {
     /// `Rc` and reads the renderer back at execute time.
     renderer: Rc<RefCell<Option<BarGridWgpuRenderer>>>,
     /// Shared SSAA samples cell.  Values map to a linear framebuffer scale
-    /// via [`crate::msaa::ssaa_linear_scale`]: `1`/`0` → 1× (Off), `4` → 2×
-    /// (4× SSAA), `16` → 4× (16× SSAA).  The widget rebuilds the renderer
-    /// when the resulting linear scale changes.  UI controls (Off / 4× /
-    /// 16× toolbar at the top of the 3-D Animation window) write to the
-    /// same cell — same `Rc<Cell<u8>>` the demo-ui state layer persists,
-    /// so a tweak round-trips to disk for free.
+    /// via [`crate::ssaa::ssaa_linear_scale`]: `1`/`0` → 1× (Off), `4` → 2×
+    /// (4× SSAA), `9` → 3× (9× SSAA), `16` → 4× (16× SSAA).  The widget
+    /// rebuilds the renderer when the resulting linear scale changes.  UI
+    /// controls (Off / 4× / 9× / 16× toolbar at the top of the 3-D
+    /// Animation window) write to the same cell — same `Rc<Cell<u8>>` the
+    /// demo-ui state layer persists, so a tweak round-trips to disk for free.
     sample_count: Rc<Cell<u8>>,
     /// Animation start time — owned by the widget so it survives renderer
     /// rebuilds (the SSAA toggle drops + recreates the renderer to apply
@@ -71,11 +71,11 @@ impl Default for WgpuCubeWidget {
 impl WgpuCubeWidget {
     /// Build a new cube widget bound to a shared SSAA samples `Rc<Cell<u8>>`.
     /// The cell stores the UI-facing pixel multiplier (`0`/`1` = Off,
-    /// `4` = 4× SSAA, `16` = 16× SSAA).  Values get clamped on the read
-    /// side by [`crate::msaa::ssaa_linear_scale`], so an old saved MSAA
-    /// `8` (or any out-of-band value) maps to a sensible step instead of
-    /// panicking.  The cell itself preserves the user's raw choice for
-    /// state persistence.
+    /// `4` = 4× SSAA, `9` = 9× SSAA, `16` = 16× SSAA).  Values get clamped
+    /// on the read side by [`crate::ssaa::ssaa_linear_scale`], so an old
+    /// saved MSAA `8` (or any out-of-band value) maps to a sensible step
+    /// instead of panicking.  The cell itself preserves the user's raw
+    /// choice for state persistence.
     pub fn new(sample_count: Rc<Cell<u8>>) -> Self {
         Self {
             bounds: Rect::default(),
@@ -155,10 +155,10 @@ impl Widget for WgpuCubeWidget {
                 // Read the shared SSAA-samples cell and convert to the
                 // linear framebuffer scale.  Rebuild the renderer if the
                 // resulting scale no longer matches the active one.  The UI
-                // toolbar (Off / 4× / 16×) writes to this cell, so the
+                // toolbar (Off / 4× / 9× / 16×) writes to this cell, so the
                 // toggle takes effect on the next paint with no restart.
                 let raw = self.sample_count.get() as u32;
-                let desired_scale = crate::msaa::ssaa_linear_scale(raw);
+                let desired_scale = crate::ssaa::ssaa_linear_scale(raw);
                 {
                     let mut slot = self.renderer.borrow_mut();
                     let needs_rebuild = match slot.as_ref() {

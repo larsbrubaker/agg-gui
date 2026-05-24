@@ -289,10 +289,10 @@ pub fn cube_content(
 ) -> Box<dyn Widget> {
     use agg_gui::FlexColumn;
 
-    let toolbar = Box::new(crate::backend_panel::MsaaRow::new(
+    let toolbar = Box::new(crate::backend_panel::SsaaRow::new(
         Arc::clone(&font),
         msaa_cell,
-        crate::backend_panel::MsaaRow::CUBE_SEGMENTS,
+        crate::backend_panel::SsaaRow::CUBE_SEGMENTS,
     )) as Box<dyn Widget>;
 
     Box::new(
