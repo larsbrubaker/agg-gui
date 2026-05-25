@@ -28,7 +28,6 @@
 mod clipboard_exports;
 mod fonts;
 mod input;
-mod platform;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
