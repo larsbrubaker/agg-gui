@@ -127,9 +127,10 @@ pub(crate) fn split_label_editor(area: Rect, scale: f64) -> (Rect, Rect) {
     (label, editor)
 }
 
-/// Paint a label string left-aligned inside `area`. Truncates to the
-/// area width — no ellipsis pass yet; renderers can pre-trim if
-/// needed.
+/// Paint a label string left-aligned inside `area`. Vertical
+/// centring matches `RowLabelWidget`'s convention — `y = midpoint -
+/// 4·scale` — so labels painted by the row renderer line up with
+/// labels painted by sibling widgets on the same row.
 pub(crate) fn paint_label(ctx: &mut dyn DrawCtx, area: Rect, label: &str, scale: f64) {
     if label.is_empty() {
         return;
@@ -137,8 +138,7 @@ pub(crate) fn paint_label(ctx: &mut dyn DrawCtx, area: Rect, label: &str, scale:
     let visuals = ctx.visuals().clone();
     ctx.set_fill_color(visuals.text_color);
     ctx.set_font_size(11.0 * scale);
-    // Vertically centre using a typical x-height-ish offset.
-    let y = area.y + area.height * 0.5 + 4.0 * scale;
+    let y = area.y + area.height * 0.5 - 4.0 * scale;
     ctx.fill_text(label, area.x, y);
 }
 

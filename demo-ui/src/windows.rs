@@ -277,11 +277,14 @@ fn load_png(path: &std::path::Path) -> Option<(Vec<u8>, u32, u32)> {
 /// Wrap the platform-provided cube widget for placement inside a floating
 /// `Window`.  Stacks an MSAA segmented row above the cube — toggling it
 /// re-builds the bar-grid renderer with the new sample count on the next
-/// paint (no relaunch needed; MSAA is scoped to the bar-grid framebuffer).
+/// paint (no relaunch needed; SSAA is scoped to the bar-grid framebuffer).
 ///
-/// The segments are limited to the WebGPU-spec-guaranteed safe set
-/// (`Off` / `4×`); higher values like `8` and `16` require an opt-in
-/// adapter feature and aren't universally supported by the surface format.
+/// The toolbar surfaces actual backbuffer MB.  Rather than plumb a
+/// shared-cell signal back from the cube widget (which lives in a
+/// different crate), we wrap the cube in a small probe widget here in
+/// demo-ui that copies its own laid-out bounds into a `Cell<(u32, u32)>`
+/// on every layout pass.  The toolbar reads the same cell — no cross-crate
+/// API changes, no `WgpuCubeWidget::new` signature shift.
 pub fn cube_content(
     font: Arc<Font>,
     cube_widget: Box<dyn Widget>,
@@ -289,16 +292,83 @@ pub fn cube_content(
 ) -> Box<dyn Widget> {
     use agg_gui::FlexColumn;
 
+    let cube_pixel_size: std::rc::Rc<std::cell::Cell<(u32, u32)>> =
+        std::rc::Rc::new(std::cell::Cell::new((0, 0)));
     let toolbar = Box::new(crate::backend_panel::SsaaRow::new(
         Arc::clone(&font),
         msaa_cell,
         crate::backend_panel::SsaaRow::CUBE_SEGMENTS,
+        std::rc::Rc::clone(&cube_pixel_size),
     )) as Box<dyn Widget>;
+
+    let probe = Box::new(CubeSizeProbe::new(cube_widget, cube_pixel_size)) as Box<dyn Widget>;
 
     Box::new(
         FlexColumn::new()
             .with_gap(0.0)
             .add(toolbar)
-            .add_flex(cube_widget, 1.0),
+            .add_flex(probe, 1.0),
     )
+}
+
+/// One-child wrapper that snapshots its inner widget's laid-out bounds
+/// (in logical pixels) into a shared cell after every `layout()` pass.
+/// Used by `cube_content` so the SSAA toolbar can show the actual cube
+/// rect alongside the memory multiplier — no shared state added to
+/// `WgpuCubeWidget` itself.  Paint / events forward through the
+/// framework's child traversal: `inner` lives in `self.children[0]`.
+struct CubeSizeProbe {
+    bounds: agg_gui::Rect,
+    children: Vec<Box<dyn Widget>>,
+    size: std::rc::Rc<std::cell::Cell<(u32, u32)>>,
+}
+
+impl CubeSizeProbe {
+    fn new(inner: Box<dyn Widget>, size: std::rc::Rc<std::cell::Cell<(u32, u32)>>) -> Self {
+        Self {
+            bounds: agg_gui::Rect::default(),
+            children: vec![inner],
+            size,
+        }
+    }
+}
+
+impl Widget for CubeSizeProbe {
+    fn type_name(&self) -> &'static str {
+        "CubeSizeProbe"
+    }
+    fn bounds(&self) -> agg_gui::Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: agg_gui::Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+
+    fn layout(&mut self, available: agg_gui::Size) -> agg_gui::Size {
+        if let Some(child) = self.children.first_mut() {
+            let size = child.layout(available);
+            child.set_bounds(agg_gui::Rect::new(0.0, 0.0, size.width, size.height));
+            self.size
+                .set((size.width.round() as u32, size.height.round() as u32));
+            self.bounds = agg_gui::Rect::new(0.0, 0.0, size.width, size.height);
+            size
+        } else {
+            self.bounds = agg_gui::Rect::new(0.0, 0.0, available.width, available.height);
+            available
+        }
+    }
+
+    fn paint(&mut self, _ctx: &mut dyn agg_gui::DrawCtx) {
+        // Inner widget paints itself through the framework's child traversal.
+    }
+
+    fn on_event(&mut self, _event: &agg_gui::Event) -> agg_gui::EventResult {
+        agg_gui::EventResult::Ignored
+    }
 }

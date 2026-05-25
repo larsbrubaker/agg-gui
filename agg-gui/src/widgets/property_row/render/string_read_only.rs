@@ -28,7 +28,10 @@ pub(crate) fn paint_editor(
     let line_h = 14.0 * scale;
     let max_chars = ((editor_area.width / glyph_w).floor() as usize).max(1);
 
-    let mut y = editor_area.y + line_h;
+    // First baseline sits ~10·scale below the area top so a single
+    // line reads centred-ish in a typical row; later lines step down
+    // by `line_h`.
+    let mut y = editor_area.y + 10.0 * scale;
     let mut current = String::new();
     for word in text.split_whitespace() {
         let extra = if current.is_empty() { 0 } else { 1 };

@@ -2,7 +2,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::{Button, DrawCtx, Event, EventResult, Font, HAnchor, Label, Rect, Size, Widget};
+use agg_gui::{
+    Button, Color, DrawCtx, Event, EventResult, Font, HAnchor, Label, Rect, Size, Widget,
+};
 
 // The "Mean CPU usage" label + frame-time sparkline, the Mode header, the
 // Reactive/Continuous segmented selector, and the dynamic description label
@@ -167,10 +169,27 @@ impl Widget for TogglePill {
 pub(crate) struct SsaaRow {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
+    /// Shared selection cell.  `paint()` reads this each frame to compose
+    /// the status caption — kept as a field so the status line updates
+    /// live with the buttons' `with_active_fn`-driven highlight.
+    samples: Rc<Cell<u8>>,
+    /// Cube widget's current pixel size (physical, post-transform), written
+    /// by the cube each paint and read here to surface the actual GPU
+    /// backbuffer memory cost alongside the multiplier label.  `(0, 0)`
+    /// until the cube has painted at least once.
+    cube_pixel_size: Rc<Cell<(u32, u32)>>,
+    /// Font used for the status caption below the buttons.  The leading
+    /// "SSAA" label child carries its own clone; this is the one
+    /// `paint()` uses for the direct `ctx.fill_text` of the caption.
+    font: Arc<Font>,
 }
 
 impl SsaaRow {
     const BTN_H: f64 = 24.0;
+    /// Height reserved for the status caption below the segment buttons —
+    /// font_size 11 + a little leading.
+    const STATUS_H: f64 = 18.0;
+    const STATUS_FONT_SIZE: f64 = 11.0;
     /// Cube-widget segments — SSAA pixel multipliers.  The cube widget
     /// renders into an offscreen texture at `sqrt(samples) × {w, h}` and
     /// downsamples to the surface, so `Off / 4× / 9× / 16×` work
@@ -184,6 +203,7 @@ impl SsaaRow {
         font: Arc<Font>,
         samples: Rc<Cell<u8>>,
         segments: &'static [(&'static str, u8)],
+        cube_pixel_size: Rc<Cell<(u32, u32)>>,
     ) -> Self {
         // Leading "SSAA" label so the row reads as a labelled control set
         // instead of three free-floating buttons.  Treated as child[0] in
@@ -210,7 +230,42 @@ impl SsaaRow {
         Self {
             bounds: Rect::default(),
             children,
+            samples,
+            cube_pixel_size,
+            font,
         }
+    }
+
+    /// Status caption shown directly under the segment buttons — explains
+    /// the trade-off behind the selected sample count so the cost of the
+    /// "more pixels = more memory" knob is visible at a glance.  Pure
+    /// function of the cell values; safe to call every paint.
+    ///
+    /// Format: `<linear>× linear · <raw>× memory (<W> × <H> = <N.N> MB)`.
+    /// At the `Off` setting the prefix becomes `"Off — "` and the
+    /// multiplier is 1.  Memory is the framebuffer footprint a downstream
+    /// 3-D widget would pay: RGBA8 colour + Depth32 = 8 bytes / pixel,
+    /// scaled by the SSAA pixel multiplier (`raw`).
+    fn status_caption(&self) -> String {
+        let raw = self.samples.get().max(1) as u32;
+        let linear = match raw {
+            1 => 1,
+            2..=5 => 2,
+            6..=12 => 3,
+            _ => 4,
+        };
+        let (w, h) = self.cube_pixel_size.get();
+        let bytes = (w as u64) * (h as u64) * 8 * (raw as u64);
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        let prefix = if raw <= 1 {
+            "Off".to_string()
+        } else {
+            format!("{linear}× linear · {raw}× memory")
+        };
+        if w == 0 || h == 0 {
+            return prefix;
+        }
+        format!("{prefix}  ({w} × {h} = {mb:.1} MB)")
     }
 
     /// Per-segment button width — tighter for the 5-way native list,
@@ -247,13 +302,17 @@ impl Widget for SsaaRow {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let row_h = Self::BTN_H + 8.0;
+        let button_row_h = Self::BTN_H + 8.0;
+        let row_h = button_row_h + Self::STATUS_H;
         self.bounds = Rect::new(0.0, 0.0, available.width, row_h);
-        let gy = (row_h - Self::BTN_H) * 0.5;
+        let gy = (button_row_h - Self::BTN_H) * 0.5;
         let bw = self.btn_width();
 
         // Layout: 12 px gutter, "SSAA" label at child[0], 8 px gap, then
-        // segment buttons at child[1..].
+        // segment buttons at child[1..].  Status caption is painted
+        // directly in `paint()` in the strip from `button_row_h` to
+        // `row_h` — no child widget needed because the text is a pure
+        // function of the cell and changes every frame.
         const LABEL_W: f64 = 44.0;
         const LABEL_GAP: f64 = 8.0;
         if let Some(label) = self.children.first_mut() {
@@ -274,8 +333,27 @@ impl Widget for SsaaRow {
         Size::new(available.width, row_h)
     }
 
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         // Buttons paint themselves through the framework's tree walk.
+        // Here we just add the status caption directly under the buttons.
+        let button_row_h = Self::BTN_H + 8.0;
+        let strip_h = Self::STATUS_H;
+        let caption = self.status_caption();
+
+        ctx.set_font(Arc::clone(&self.font));
+        ctx.set_font_size(Self::STATUS_FONT_SIZE);
+        // Muted variant of theme text colour — caption is secondary info,
+        // not a control label, so it should sit visually under the buttons.
+        let base = ctx.visuals().text_color;
+        ctx.set_fill_color(Color::rgba(base.r, base.g, base.b, 0.65));
+
+        // Left-align under the leading "SSAA" label.  Use the same 12 px
+        // gutter as the label / button row.
+        let tx = 12.0;
+        if let Some(m) = ctx.measure_text(&caption) {
+            let ty = button_row_h + m.centered_baseline_y(strip_h);
+            ctx.fill_text(&caption, tx, ty);
+        }
     }
 
     fn on_event(&mut self, _event: &Event) -> EventResult {

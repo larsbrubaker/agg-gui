@@ -29,7 +29,7 @@ pub(crate) fn paint_editor(
     ctx.set_fill_color(visuals.text_color);
     ctx.set_font_size(11.0 * scale);
     let est_w = (value_text.len() as f64) * 6.5 * scale;
-    let text_x = (pill.x + pill.width - est_w - 6.0 * scale).max(pill.x + 4.0 * scale);
-    let text_y = pill.y + pill.height * 0.5 + 4.0 * scale;
+    let text_x = (pill.x + (pill.width - est_w) * 0.5).max(pill.x + 4.0 * scale);
+    let text_y = pill.y + pill.height * 0.5 - 4.0 * scale;
     ctx.fill_text(&value_text, text_x, text_y);
 }

@@ -158,7 +158,15 @@ canvas.addEventListener("wheel", (e) => {
   if (!wasmModule) return;
   e.preventDefault();
   const [x, y] = canvasPos(e);
-  const delta_y = e.deltaY / (e.deltaMode === 0 ? 40.0 : 1.0);
+  // Sign convention: app expects positive delta_y = wheel rotated forward =
+  // user wants content ABOVE (matches winit's MouseScrollDelta). Browser
+  // WheelEvent.deltaY is the opposite: positive = scroll DOWN. Negate to
+  // convert. Do NOT add a sign flip elsewhere "to make scrolling feel right" —
+  // OS-level "reverse / natural scroll" preferences (Windows FlipFlopWheel,
+  // macOS Natural Scrolling) are applied at the driver level before either
+  // browser or winit sees the event, so a single negation here mirrors the
+  // OS preference on both old-school and natural-scroll setups.
+  const delta_y = -e.deltaY / (e.deltaMode === 0 ? 40.0 : 1.0);
   (wasmModule["on_mouse_wheel"] as WheelFn)(x, y, delta_y);
 }, { passive: false });
 

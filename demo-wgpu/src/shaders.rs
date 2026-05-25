@@ -244,6 +244,63 @@ struct VOut {
 ";
 
 // ---------------------------------------------------------------------------
+// 3×3-box downsample pipeline — used by SSAA at 3× linear minification.
+//
+// The destination quad is 1/3 the linear size of the source texture.  A single
+// bilinear tap reads 4 texels of the 3×3 source region under each dst pixel —
+// the corner 2×2 block — and entirely skips the opposite row + column (5 of 9
+// texels never contribute), producing visible aliasing that looks close to no
+// AA at all.
+//
+// Instead we do 9 point-aligned taps at integer texel offsets {-1, 0, +1}² from
+// the centre.  With the bilinear sampler and centre-aligned UVs (centre of the
+// 3×3 cell falls on a source texel centre, so v_uv * dims is an integer + 0.5),
+// each tap returns exactly one source texel — equivalent to point sampling.
+// Averaging the 9 gives the correct 3×3 box: every source texel contributes
+// 1/9, no aliasing.
+//
+// Reuses the textured-quad bind groups + vertex shader from `TEX_WGSL`.
+// ---------------------------------------------------------------------------
+
+pub(crate) const TEX_DOWNSAMPLE_3X_WGSL: &str = "
+struct TexUniforms {
+    resolution: vec2<f32>,
+    pad: vec2<f32>,
+    tint: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> u: TexUniforms;
+@group(1) @binding(0) var u_tex: texture_2d<f32>;
+@group(1) @binding(1) var u_sampler: sampler;
+
+struct VIn {
+    @location(0) pos: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+}
+struct VOut {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) v_uv: vec2<f32>,
+}
+
+@vertex fn vs_main(in: VIn) -> VOut {
+    let ndc = (in.pos / u.resolution) * 2.0 - 1.0;
+    return VOut(vec4<f32>(ndc, 0.0, 1.0), in.uv);
+}
+
+@fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
+    let dims = vec2<f32>(textureDimensions(u_tex, 0));
+    let texel = vec2<f32>(1.0) / dims;
+    var sum = vec4<f32>(0.0);
+    for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {
+        for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {
+            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
+            sum = sum + textureSample(u_tex, u_sampler, in.v_uv + off);
+        }
+    }
+    return sum * (1.0 / 9.0);
+}
+";
+
+// ---------------------------------------------------------------------------
 // Layer composite pipeline
 // ---------------------------------------------------------------------------
 // Reuses the TEX_WGSL vertex shader.

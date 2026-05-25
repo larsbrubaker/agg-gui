@@ -41,9 +41,9 @@ use agg_gui::{
 
 use crate::draw::{
     draw_bezier_connection, draw_canvas_grid, layout_node_with_state, CanvasPalette,
-    NodeLayoutInfo, PropLayout, SocketLayout, SocketSide,
+    NodeLayoutInfo, NodeRow, PropLayout, SocketLayout, SocketSide,
 };
-use crate::model::{NodeGraphModel, NodeId, NoodleView, SocketTypeId};
+use crate::model::{NodeGraphModel, NodeId, NoodleView, PropertyValue, SocketTypeId};
 use crate::widget::nodes::{NodePaintContext, NodeWidget};
 
 const ZOOM_MIN: f64 = 0.15;
@@ -411,6 +411,13 @@ impl NodeEditor {
             l.display_name.hash(&mut h);
             l.category.hash(&mut h);
             l.rows.len().hash(&mut h);
+            // Row content must participate in the fingerprint — without
+            // it, dragging a slider mutates the underlying value but
+            // the cached child widgets keep their stale `PropLayout`
+            // and the value pill never repaints with the new number.
+            for row in &l.rows {
+                hash_row(row, &mut h);
+            }
             let sel = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
             sel.hash(&mut h);
             l.collapsed.hash(&mut h);
@@ -771,6 +778,53 @@ impl Widget for NodeEditor {
                 }
             }
             _ => EventResult::Ignored,
+        }
+    }
+}
+
+/// Hash a single composed row's user-visible state into the
+/// canvas's paint fingerprint. Property values must participate so
+/// that drag-mutating a slider invalidates the cached child widget
+/// tree and the pill repaints with the fresh number.
+fn hash_row<H: std::hash::Hasher>(row: &NodeRow, h: &mut H) {
+    use std::hash::Hash;
+    match row {
+        NodeRow::Output(s) | NodeRow::Input { socket: s, .. } => {
+            s.name.hash(h);
+            s.display_label.hash(h);
+            s.socket_type.0.hash(h);
+            if let NodeRow::Input { editor: Some(e), .. } = row {
+                hash_prop_layout(e, h);
+            }
+        }
+        NodeRow::Property(p) => {
+            hash_prop_layout(p, h);
+        }
+    }
+}
+
+fn hash_prop_layout<H: std::hash::Hasher>(p: &PropLayout, h: &mut H) {
+    use std::hash::Hash;
+    p.name.hash(h);
+    p.display_label.hash(h);
+    match &p.current {
+        PropertyValue::Number(n) => {
+            0u8.hash(h);
+            n.to_bits().hash(h);
+        }
+        PropertyValue::Bool(b) => {
+            1u8.hash(h);
+            b.hash(h);
+        }
+        PropertyValue::Color(c) => {
+            2u8.hash(h);
+            for v in c.iter() {
+                v.to_bits().hash(h);
+            }
+        }
+        PropertyValue::Other { display } => {
+            3u8.hash(h);
+            display.hash(h);
         }
     }
 }

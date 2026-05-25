@@ -559,15 +559,20 @@ impl BarGridWgpuRenderer {
         //   • scale 1 (Off):  no minification, bilinear is identity-equivalent
         //   • scale 2 (4×):   2× minification — single bilinear tap is the
         //                     exact 2×2 box average, no shader work needed
+        //   • scale 3 (9×):   3× minification — single bilinear would only
+        //                     average the corner 2×2 (4 of 9 texels) and
+        //                     skip an entire row + column.  Switch to
+        //                     `blit_downsample_3x_to` (9 point taps →
+        //                     exact 3×3 box).
         //   • scale 4 (16×):  4× minification — single bilinear would only
         //                     average 4 of 16 source texels.  Switch to
         //                     `blit_downsample_4x_to` (4 bilinear taps in a
         //                     2×2 quadrant grid → exact 4×4 box).
-        // Both methods alpha-blend through `BLEND_STANDARD` so transparent
-        // pixels (where bars aren't covered) preserve the 2-D content
-        // underneath.
-        if self.ssaa_scale >= 4 {
-            fb.blit_downsample_4x_to(
+        // All three methods alpha-blend through `BLEND_STANDARD` so
+        // transparent pixels (where bars aren't covered) preserve the 2-D
+        // content underneath.
+        match self.ssaa_scale {
+            0 | 1 | 2 => fb.blit_to(
                 device,
                 encoder,
                 target_view,
@@ -575,9 +580,8 @@ impl BarGridWgpuRenderer {
                 screen_rect,
                 parent_clip,
                 pipelines,
-            );
-        } else {
-            fb.blit_to(
+            ),
+            3 => fb.blit_downsample_3x_to(
                 device,
                 encoder,
                 target_view,
@@ -585,7 +589,16 @@ impl BarGridWgpuRenderer {
                 screen_rect,
                 parent_clip,
                 pipelines,
-            );
+            ),
+            _ => fb.blit_downsample_4x_to(
+                device,
+                encoder,
+                target_view,
+                target_size,
+                screen_rect,
+                parent_clip,
+                pipelines,
+            ),
         }
 
         let _ = (bar_ub, bar_bind_group);

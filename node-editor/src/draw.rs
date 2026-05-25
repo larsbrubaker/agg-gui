@@ -304,16 +304,34 @@ where
         };
     }
 
-    // Partition properties by bound input.
+    // Partition properties by bound input. A property whose
+    // `bound_input` names an input socket that doesn't exist on this
+    // node falls back to being treated as unbound — the property still
+    // renders as its own row instead of vanishing. This handles two
+    // common cases gracefully:
+    //   1. Cached instances minted under an older schema that didn't
+    //      yet have the matching sockets.
+    //   2. Schema declares a default `bound_input` but the host node
+    //      type opted out of adding the socket.
+    let input_names: std::collections::HashSet<&str> =
+        node.inputs.iter().map(|s| s.name.as_str()).collect();
     let bound_properties: std::collections::HashMap<&str, &PropertyView> = node
         .properties
         .iter()
-        .filter_map(|p| p.bound_input.as_deref().map(|s| (s, p)))
+        .filter_map(|p| {
+            p.bound_input
+                .as_deref()
+                .filter(|name| input_names.contains(name))
+                .map(|s| (s, p))
+        })
         .collect();
     let unbound_props: Vec<&PropertyView> = node
         .properties
         .iter()
-        .filter(|p| p.bound_input.is_none())
+        .filter(|p| match p.bound_input.as_deref() {
+            None => true,
+            Some(name) => !input_names.contains(name),
+        })
         .collect();
 
     let output_rows = node.outputs.len();

@@ -25,7 +25,7 @@ pub(crate) fn paint_editor(
     ctx.set_font_size(11.0 * scale);
     let est_w = (text.len() as f64) * 6.5 * scale;
     let text_x = (pill.x + (pill.width - est_w) * 0.5).max(pill.x + 4.0 * scale);
-    let text_y = pill.y + pill.height * 0.5 + 4.0 * scale;
+    let text_y = pill.y + pill.height * 0.5 - 4.0 * scale;
     ctx.fill_text(text, text_x, text_y);
 }
 

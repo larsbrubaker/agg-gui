@@ -225,6 +225,36 @@ impl SsaaFramebuffer {
         );
     }
 
+    /// 3×3-box downsample variant of [`Self::blit_to`].  Use when the
+    /// framebuffer is exactly 3× the linear size of `dst_rect` (SSAA 9×):
+    /// runs `tex_downsample_3x_pipeline` so all 9 source texels under each
+    /// output pixel contribute equally.  A single bilinear tap at 3×
+    /// minification reads only the corner 2×2 block (4 of 9 texels) and
+    /// entirely skips one row + one column — visually close to no AA at
+    /// all — so 3× SSAA *needs* this dedicated pipeline to be worth its
+    /// pixel cost.
+    pub fn blit_downsample_3x_to(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+        dst_rect: Rect,
+        parent_clip: Option<[i32; 4]>,
+        pipelines: &WgpuPipelines,
+    ) {
+        self.blit_to_inner(
+            device,
+            encoder,
+            target_view,
+            target_size,
+            dst_rect,
+            parent_clip,
+            &pipelines.tex_downsample_3x_pipeline,
+            pipelines,
+        );
+    }
+
     /// 4×4-box downsample variant of [`Self::blit_to`].  Use when the
     /// framebuffer is exactly 4× the linear size of `dst_rect` (SSAA 16×):
     /// runs `tex_downsample_4x_pipeline` so all 16 source texels under each

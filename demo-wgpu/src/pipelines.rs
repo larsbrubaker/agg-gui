@@ -16,7 +16,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::shaders::{
     AA_SOLID_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_WGSL, LCD_WGSL, SOLID_WGSL,
-    TEX_DOWNSAMPLE_4X_WGSL, TEX_WGSL,
+    TEX_DOWNSAMPLE_3X_WGSL, TEX_DOWNSAMPLE_4X_WGSL, TEX_WGSL,
 };
 
 // ---------------------------------------------------------------------------
@@ -154,6 +154,14 @@ pub struct WgpuPipelines {
     pub tex_pipeline: wgpu::RenderPipeline,
     pub tex_bgl0: wgpu::BindGroupLayout,
     pub tex_bgl1: wgpu::BindGroupLayout,
+
+    // ── 3×3-box downsample (SSAA at 3× linear) ─────────────────────────────
+    /// Same vertex / bind groups as `tex_pipeline`; fragment shader runs
+    /// 9 point-aligned taps at {-1, 0, +1}² texel offsets for an exact 3×3
+    /// box average.  Used by the cube widget at the 9× SSAA setting where
+    /// a single bilinear minification would drop 5 of 9 source texels per
+    /// output pixel (visually indistinguishable from no AA).
+    pub tex_downsample_3x_pipeline: wgpu::RenderPipeline,
 
     // ── 4×4-box downsample (SSAA at 4× linear) ─────────────────────────────
     /// Same vertex / bind groups as `tex_pipeline`; fragment shader runs
@@ -360,6 +368,19 @@ impl WgpuPipelines {
             wgpu::ColorWrites::ALL,
             sample_count,
         );
+        let tex_ds3_sm = mk_shader(device, "tex_downsample_3x", TEX_DOWNSAMPLE_3X_WGSL);
+        let tex_downsample_3x_pipeline = build_pipeline(
+            device,
+            "tex_downsample_3x",
+            &tex_pl,
+            &tex_ds3_sm,
+            &tex_ds3_sm,
+            &[vbl_pos2_uv2()],
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
+            sample_count,
+        );
         let tex_ds4_sm = mk_shader(device, "tex_downsample_4x", TEX_DOWNSAMPLE_4X_WGSL);
         let tex_downsample_4x_pipeline = build_pipeline(
             device,
@@ -469,6 +490,7 @@ impl WgpuPipelines {
             tex_pipeline,
             tex_bgl0,
             tex_bgl1,
+            tex_downsample_3x_pipeline,
             tex_downsample_4x_pipeline,
             layer_pipeline,
             layer_bgl0,
