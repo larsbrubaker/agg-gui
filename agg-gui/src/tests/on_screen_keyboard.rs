@@ -23,6 +23,17 @@ fn fresh_state() {
     test_hook::reset();
     crate::widgets::on_screen_keyboard::events::clear();
     crate::widget::keyboard_scroll::reset_lift_for_test();
+    crate::ux_scale::set_ux_scale(1.0);
+}
+
+/// Set the mobile profile for a keyboard test, then immediately pin
+/// `ux_scale` back to 1.0. Without this, `set_input_profile` would
+/// apply the recommended 1.7× mobile UX zoom and break layout
+/// arithmetic the tests do in physical-pixel terms. Production code
+/// wants the auto-bump; tests don't.
+fn set_mobile_profile_for_test() {
+    set_input_profile(InputProfile::MobileIOS);
+    crate::ux_scale::set_ux_scale(1.0);
 }
 
 #[test]
@@ -215,7 +226,7 @@ fn focusing_field_below_keyboard_scrolls_parent_view() {
     // the bottom of the content).  Without auto-scroll the field
     // would sit at screen Y ~ 0 — behind the keyboard panel.
     fresh_state();
-    set_input_profile(InputProfile::MobileIOS);
+    set_mobile_profile_for_test();
     set_enabled(true);
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
@@ -259,7 +270,7 @@ fn focusing_field_with_no_scrollable_ancestor_requests_global_lift() {
     // the keyboard panel.  Reproduce here with a TextField placed
     // near viewport bottom inside a non-scrollable column.
     fresh_state();
-    set_input_profile(InputProfile::MobileIOS);
+    set_mobile_profile_for_test();
     set_enabled(true);
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
@@ -298,7 +309,7 @@ fn focusing_already_visible_field_does_not_scroll() {
     // user with a jump-scroll on a casual focus change would feel
     // worse than the keyboard issue we're solving.
     fresh_state();
-    set_input_profile(InputProfile::MobileIOS);
+    set_mobile_profile_for_test();
     set_enabled(true);
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
@@ -332,7 +343,7 @@ fn text_field_with_keyboard_mode_propagates_through_focus() {
     // focus through the normal App focus flow — proving the
     // `Widget::text_input_mode` plumbing reaches the keyboard.
     fresh_state();
-    set_input_profile(InputProfile::MobileIOS);
+    set_mobile_profile_for_test();
     set_enabled(true);
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
@@ -356,7 +367,7 @@ fn text_field_with_keyboard_mode_propagates_through_focus() {
 #[test]
 fn synthetic_key_queue_drains_to_focused_field() {
     fresh_state();
-    set_input_profile(InputProfile::MobileIOS);
+    set_mobile_profile_for_test();
     set_enabled(true);
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());

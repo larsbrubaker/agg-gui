@@ -138,7 +138,10 @@ impl App {
     /// widget tree lays out in logical (device-independent) units.  Call once
     /// per frame before [`paint`][Self::paint].
     pub fn layout(&mut self, viewport: Size) {
-        let scale = crate::device_scale::device_scale().max(1e-6);
+        // Effective scale combines hardware DPR with the UX zoom
+        // factor — mobile platforms set ux_scale ≈ 1.7 so widgets at
+        // their natural logical size read comfortably at arm's length.
+        let scale = crate::ux_scale::effective_scale().max(1e-6);
         let logical = Size::new(viewport.width / scale, viewport.height / scale);
         self.viewport_height = logical.height;
         self.viewport_size = logical;
@@ -188,7 +191,10 @@ impl App {
         // soft-keyboard panel; the panel itself paints unlifted so
         // it always sits at the bottom of the viewport.
         let lift = super::keyboard_scroll::tick_lift();
-        let scale = crate::device_scale::device_scale();
+        // Use the combined device-DPR × UX-zoom scale so widgets at
+        // their natural logical size render at the right physical pixel
+        // count *and* at a comfortable on-screen footprint.
+        let scale = crate::ux_scale::effective_scale();
         if (scale - 1.0).abs() > 1e-6 {
             ctx.save();
             ctx.scale(scale, scale);
@@ -677,7 +683,9 @@ impl App {
     /// [`keyboard_scroll::lift_to_world`](super::keyboard_scroll::lift_to_world)
     /// to drop into the lifted frame.
     fn flip_y(&self, x: f64, y_down: f64) -> Point {
-        let scale = crate::device_scale::device_scale().max(1e-6);
+        // Same effective scale used for layout / paint so event coords
+        // arrive in the same logical space the widget tree was laid out in.
+        let scale = crate::ux_scale::effective_scale().max(1e-6);
         let lx = x / scale;
         let ly_down = y_down / scale;
         Point::new(lx, self.viewport_height - ly_down)

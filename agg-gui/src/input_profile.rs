@@ -51,14 +51,37 @@ impl InputProfile {
             InputProfile::MobileIOS | InputProfile::MobileAndroid | InputProfile::MobileOther
         )
     }
+
+    /// Recommended [`crate::ux_scale`] multiplier for this profile.
+    /// `1.0` for desktop; ~`1.7` for mobile touch (phones held at
+    /// arm's length need ~44 px touch targets and ~17 px body text,
+    /// which is roughly 1.7× what reads well on a desktop monitor).
+    ///
+    /// Apps that want a different feel can override with
+    /// [`crate::ux_scale::set_ux_scale`] *after* the profile is
+    /// applied — accessibility settings, for example.
+    pub fn recommended_ux_scale(self) -> f64 {
+        match self {
+            InputProfile::Desktop => 1.0,
+            InputProfile::MobileIOS
+            | InputProfile::MobileAndroid
+            | InputProfile::MobileOther => 1.7,
+        }
+    }
 }
 
 static CURRENT: AtomicU8 = AtomicU8::new(profile_code(InputProfile::Desktop));
 
 /// Replace the global input profile. Call once at startup from the
 /// platform shell after detecting the device.
+///
+/// Also applies the profile's [`InputProfile::recommended_ux_scale`]
+/// as the global [`crate::ux_scale`]. Apps that want a different
+/// scale (accessibility, very small phones, tablets) can call
+/// `ux_scale::set_ux_scale` *after* this returns to override.
 pub fn set_input_profile(profile: InputProfile) {
     CURRENT.store(profile_code(profile), Ordering::Relaxed);
+    crate::ux_scale::set_ux_scale(profile.recommended_ux_scale());
 }
 
 /// Read the global input profile.

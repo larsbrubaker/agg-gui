@@ -53,6 +53,7 @@ pub mod theme;
 pub mod timestep;
 pub mod touch_state;
 pub mod undo;
+pub mod ux_scale;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_clipboard;
 pub mod widget;
