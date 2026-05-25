@@ -63,16 +63,27 @@ impl NodeEditor {
                 if to_remove.is_empty() {
                     return;
                 }
-                let mut model = self.model.lock().unwrap();
-                for id in to_remove {
-                    model.remove_node(id);
+                {
+                    let mut model = self.model.lock().unwrap();
+                    for id in to_remove {
+                        model.remove_node(id);
+                    }
                 }
+                // Removing nodes changes the layout & cached widget
+                // tree — neither updates without an explicit
+                // invalidate + request_draw.
+                self.backbuffer.invalidate();
+                agg_gui::animation::request_draw();
             }
             other => {
                 if let Some(type_id) = other.strip_prefix("add.") {
                     let pos = self.popup_canvas_pos;
-                    let mut model = self.model.lock().unwrap();
-                    let _ = model.add_node(type_id, pos);
+                    {
+                        let mut model = self.model.lock().unwrap();
+                        let _ = model.add_node(type_id, pos);
+                    }
+                    self.backbuffer.invalidate();
+                    agg_gui::animation::request_draw();
                 }
             }
         }

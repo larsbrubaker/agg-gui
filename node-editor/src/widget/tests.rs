@@ -53,6 +53,22 @@ impl NodeGraphModel for Memory {
         });
         NoodleResult::Connected
     }
+    fn remove_noodle(
+        &mut self,
+        from_node: NodeId,
+        from_socket: &str,
+        to_node: NodeId,
+        to_socket: &str,
+    ) -> bool {
+        let before = self.noodles.len();
+        self.noodles.retain(|n| {
+            !(n.from_node == from_node
+                && n.from_socket == from_socket
+                && n.to_node == to_node
+                && n.to_socket == to_socket)
+        });
+        self.noodles.len() < before
+    }
     fn set_property(&mut self, _id: NodeId, _name: &str, _value: PropertyValue) {}
     fn on_canvas_zoom_changed(&mut self, zoom: f64) {
         self.zoom = zoom;

@@ -33,6 +33,9 @@ impl NodeGraphModel for DummyModel {
     ) -> crate::model::NoodleResult {
         crate::model::NoodleResult::Rejected
     }
+    fn remove_noodle(&mut self, _: NodeId, _: &str, _: NodeId, _: &str) -> bool {
+        false
+    }
     fn set_property(&mut self, _: NodeId, _: &str, _: PropertyValue) {}
 }
 

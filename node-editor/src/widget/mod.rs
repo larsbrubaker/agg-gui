@@ -15,6 +15,7 @@
 mod events;
 mod fingerprint;
 mod host_hooks;
+mod hover;
 mod node_paint_context;
 pub mod nodes;
 mod popup;
@@ -98,37 +99,7 @@ enum CanvasState {
     },
 }
 
-/// Resolve a noodle's `(from, to)` endpoint sockets against the
-/// per-node layouts that paint just produced.
-///
-/// Looks up each endpoint side-restricted: `from` is the source-side
-/// socket of an output, `to` is the target-side socket of an input.
-/// This matters when a node carries both an input and an output that
-/// share a name — e.g. AtomArtist's unified `Output` node, whose
-/// adopted input slot and mirror output socket both take the source
-/// socket's name. Without the side filter, the name lookup hits the
-/// output-first row order and the noodle's `to` endpoint snaps to the
-/// wrong side of the node.
-pub(crate) fn resolve_noodle_endpoints<'a>(
-    layouts: &'a [NodeLayoutInfo],
-    noodle: &NoodleView,
-) -> Option<(&'a SocketLayout, &'a SocketLayout)> {
-    let from = layouts
-        .iter()
-        .find(|l| l.node_id == noodle.from_node)
-        .and_then(|l| {
-            l.sockets()
-                .find(|s| s.side == SocketSide::Output && s.name == noodle.from_socket)
-        })?;
-    let to = layouts
-        .iter()
-        .find(|l| l.node_id == noodle.to_node)
-        .and_then(|l| {
-            l.sockets()
-                .find(|s| s.side == SocketSide::Input && s.name == noodle.to_socket)
-        })?;
-    Some((from, to))
-}
+pub(crate) use hover::resolve_noodle_endpoints;
 
 /// The reusable node-editor widget.
 pub struct NodeEditor {
@@ -494,6 +465,19 @@ impl Widget for NodeEditor {
         &mut self.children
     }
 
+    /// The canvas accepts Delete/Backspace even when it isn't the
+    /// focused widget — the user expects to click a node and tap
+    /// Delete without first clicking into the canvas to take focus.
+    /// agg-gui's `on_key_down` runs `dispatch_unconsumed_key` after
+    /// the focused-widget path; this is where we pick up the key.
+    fn on_unconsumed_key(
+        &mut self,
+        key: &agg_gui::Key,
+        modifiers: agg_gui::Modifiers,
+    ) -> EventResult {
+        self.on_key_down(key, modifiers)
+    }
+
     fn type_name(&self) -> &'static str {
         "NodeEditor"
     }
@@ -619,23 +603,61 @@ impl Widget for NodeEditor {
         let model = self.model.lock().unwrap();
         let noodles = model.noodles();
         for noodle in &noodles {
-            if let Some((f, t)) = resolve_noodle_endpoints(&layouts, noodle) {
+            if let Some((f, t)) = hover::resolve_noodle_endpoints(&layouts, noodle) {
                 let col = model.socket_color(f.socket_type);
                 draw_bezier_connection(ctx, f.center, t.center, col, 2.0);
             }
         }
 
-        // Live in-progress connection.
+        // Live in-progress connection — the dangling end snaps to a
+        // compatible socket under the cursor when one is in reach. The
+        // snapped socket also gets a halo ring so the user has clear
+        // feedback that a release here will land.
         if let CanvasState::DrawingConnection {
             from_canvas,
             cursor_canvas,
             from_socket_type,
+            from_node,
+            from_side,
             ..
         } = &self.interaction
         {
+            let hover = hover::find_compatible_socket_near(
+                &layouts,
+                &*model,
+                *cursor_canvas,
+                *from_node,
+                *from_side,
+                *from_socket_type,
+            );
+            let endpoint = match &hover {
+                Some(s) => s.center,
+                None => *cursor_canvas,
+            };
             let mut col = model.socket_color(*from_socket_type);
             col.a *= 0.85;
-            draw_bezier_connection(ctx, *from_canvas, *cursor_canvas, col, 2.0);
+            // `draw_bezier_connection` assumes `from` is the Output
+            // side (control point extends right) and `to` is the
+            // Input side (control point extends left). When the user
+            // drags FROM an Input socket, swap the args so the bezier
+            // leaves the input going outward (left) and approaches
+            // the cursor as if the cursor were the output side.
+            // Mirrors the standard output→input curve shape.
+            let (line_from, line_to) = match from_side {
+                SocketSide::Output => (*from_canvas, endpoint),
+                SocketSide::Input => (endpoint, *from_canvas),
+            };
+            draw_bezier_connection(ctx, line_from, line_to, col, 2.0);
+            if let Some(s) = &hover {
+                // Halo ring at the prospective drop target.
+                let halo = model.socket_color(s.socket_type);
+                ctx.set_stroke_color(halo);
+                ctx.set_line_width(2.0);
+                ctx.begin_path();
+                let r = crate::draw::SOCKET_RADIUS * 2.0;
+                ctx.circle(s.center[0], s.center[1], r);
+                ctx.stroke();
+            }
         }
         drop(model);
 

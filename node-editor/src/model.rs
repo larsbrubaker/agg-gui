@@ -268,6 +268,19 @@ pub trait NodeGraphModel {
         to_socket: &str,
     ) -> NoodleResult;
 
+    /// Remove the noodle whose endpoints match exactly. Used by the
+    /// disconnect-by-drag flow: the user clicks a connected input
+    /// socket and drags away — the widget pops the existing noodle
+    /// off and starts a re-attach drag from the source side.
+    /// Returns `true` if a matching noodle was found + removed.
+    fn remove_noodle(
+        &mut self,
+        from_node: NodeId,
+        from_socket: &str,
+        to_node: NodeId,
+        to_socket: &str,
+    ) -> bool;
+
     /// Update a property value (only invoked for `Number` / `Bool`).
     fn set_property(&mut self, id: NodeId, name: &str, value: PropertyValue);
 
