@@ -19,6 +19,7 @@ mod interaction;
 mod lion;
 mod menu_demo;
 mod misc;
+mod mobile_keyboard;
 mod screenshot_demo;
 mod scrolling;
 mod system;
@@ -38,6 +39,7 @@ pub use interaction::{drag_and_drop, panels_demo, popups_demo, scene_demo};
 pub use lion::lion_demo;
 pub use menu_demo::menu_demo;
 pub use misc::{extra_viewport, highlighting, interactive_container, misc_demos};
+pub use mobile_keyboard::{mobile_keyboard, TITLE as MOBILE_KEYBOARD_TITLE};
 pub use screenshot_demo::screenshot_demo;
 pub use scrolling::scrolling_demo;
 pub use system::{

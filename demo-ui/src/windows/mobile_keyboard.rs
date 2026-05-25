@@ -1,0 +1,156 @@
+//! Mobile keyboard demo.
+//!
+//! Lets the user toggle the global [`InputProfile`](agg_gui::input_profile::InputProfile)
+//! between Desktop, iPhone, and Android and watch the on-screen software
+//! keyboard slide up under a focused TextField. The same demo doubles as
+//! the test bench for the keyboard during development.
+//!
+//! Switching profiles flips a few globals:
+//! - [`agg_gui::input_profile::set_input_profile`] — picks the visual
+//!   style (iOS light-gray chrome vs. Android Material dark vs. neutral
+//!   fallback).
+//! - [`agg_gui::widgets::on_screen_keyboard::set_enabled`] — turns the
+//!   keyboard module on (mobile profiles) or off (desktop).
+//!
+//! When the user taps the demo's TextField with `Enabled = true` the
+//! keyboard auto-raises because TextField overrides
+//! `Widget::accepts_text_input`. Picking "Desktop" both disables the
+//! keyboard and dismisses it.
+
+use std::sync::Arc;
+
+use agg_gui::input_profile::{
+    current_input_profile, set_input_profile, InputProfile,
+};
+use agg_gui::widgets::on_screen_keyboard;
+use agg_gui::{
+    Color, FlexColumn, Font, Label, RadioGroup, ScrollView, SizedBox, TextField, Widget,
+};
+
+/// Returns the title used to look this demo up from the dispatcher in
+/// `content.rs` and to label it in the sidebar. Kept centralised so the
+/// `DEMOS` table entry and the dispatcher match without typo risk.
+pub const TITLE: &str = "\u{F11C} Mobile Keyboard";
+
+/// Build the Mobile Keyboard demo widget tree.
+pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
+    let initial = match current_input_profile() {
+        InputProfile::Desktop => 0,
+        InputProfile::MobileIOS => 1,
+        InputProfile::MobileAndroid => 2,
+        InputProfile::MobileOther => 0,
+    };
+
+    let mut col = FlexColumn::new()
+        .with_gap(12.0)
+        .with_padding(16.0)
+        .with_panel_bg();
+
+    col.push(
+        Box::new(
+            Label::new("Input profile", Arc::clone(&font))
+                .with_font_size(13.0)
+                .with_color(Color::from_rgb8(0xE0, 0xE0, 0xEC)),
+        ),
+        0.0,
+    );
+
+    let profiles: Vec<&str> = vec!["Desktop (no keyboard)", "iPhone", "Android"];
+    let radio = RadioGroup::new(profiles, initial, Arc::clone(&font))
+        .with_font_size(13.0)
+        .on_change(|idx| apply_profile_choice(idx));
+    col.push(Box::new(radio), 0.0);
+
+    col.push(
+        Box::new(
+            Label::new(
+                "Picking iPhone or Android flips the global agg-gui input \
+                 profile and enables the on-screen keyboard. Tap the field \
+                 below — the keyboard slides up and types into it.",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.0)
+            .with_color(Color::from_rgb8(0xA8, 0xA8, 0xB8)),
+        ),
+        0.0,
+    );
+
+    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
+
+    col.push(
+        Box::new(
+            Label::new("Type here", Arc::clone(&font))
+                .with_font_size(12.0)
+                .with_color(Color::from_rgb8(0xC8, 0xC8, 0xD8)),
+        ),
+        0.0,
+    );
+    col.push(
+        Box::new(
+            SizedBox::new().with_height(34.0).with_child(Box::new(
+                TextField::new(Arc::clone(&font))
+                    .with_font_size(14.0)
+                    .with_placeholder("Tap to focus, then type / tap keys…"),
+            )),
+        ),
+        0.0,
+    );
+
+    col.push(
+        Box::new(
+            Label::new("And here", Arc::clone(&font))
+                .with_font_size(12.0)
+                .with_color(Color::from_rgb8(0xC8, 0xC8, 0xD8)),
+        ),
+        0.0,
+    );
+    col.push(
+        Box::new(
+            SizedBox::new().with_height(34.0).with_child(Box::new(
+                TextField::new(Arc::clone(&font))
+                    .with_font_size(14.0)
+                    .with_placeholder("A second field — Tab between them"),
+            )),
+        ),
+        0.0,
+    );
+
+    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
+    col.push(
+        Box::new(
+            Label::new(
+                "Tip: try Shift, the 123 / ABC mode switch, and the \
+                 down-chevron in the bottom-left of the keyboard to dismiss \
+                 without changing focus.",
+                Arc::clone(&font),
+            )
+            .with_font_size(10.0)
+            .with_color(Color::from_rgb8(0x90, 0x90, 0xA0)),
+        ),
+        0.0,
+    );
+
+    // Wrap in a ScrollView so the window content stays usable even when
+    // the keyboard slides up and covers the bottom half — once the
+    // scroll-into-view milestone lands, this will auto-shift to keep
+    // the focused field visible.
+    Box::new(ScrollView::new(Box::new(col)))
+}
+
+/// Map the radio-button index to an [`InputProfile`] and apply it
+/// globally. Index `0` (Desktop) also dismisses any currently-raised
+/// keyboard so the demo doesn't leave it hanging.
+fn apply_profile_choice(idx: usize) {
+    let profile = match idx {
+        1 => InputProfile::MobileIOS,
+        2 => InputProfile::MobileAndroid,
+        _ => InputProfile::Desktop,
+    };
+    set_input_profile(profile);
+    let enable = profile.is_mobile_touch();
+    on_screen_keyboard::set_enabled(enable);
+    if !enable {
+        on_screen_keyboard::dismiss();
+    }
+    agg_gui::animation::request_draw();
+}

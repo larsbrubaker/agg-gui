@@ -82,6 +82,14 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         win_h: WIN_H,
     },
     DemoSpec {
+        title: "\u{F11C} Mobile Keyboard",
+        label: "\u{F11C} Mobile Keyboard",
+        group: "Widgets",
+        open: false,
+        win_w: 420.0,
+        win_h: 380.0,
+    },
+    DemoSpec {
         title: "\u{F086} Tooltips",
         label: "\u{F086} Tooltips",
         group: "Widgets",

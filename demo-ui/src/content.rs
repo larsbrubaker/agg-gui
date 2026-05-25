@@ -27,6 +27,8 @@ pub(crate) fn build_demo_content(
         "\u{F1DE} Sliders" => windows::sliders(font),
         "\u{F040} TextEdit" => windows::text_edit(font),
         "\u{F086} Tooltips" => windows::tooltips(font),
+        // mobile_keyboard.rs — on-screen software keyboard testbed.
+        t if t == windows::MOBILE_KEYBOARD_TITLE => windows::mobile_keyboard(font),
         // code_example.rs
         "\u{F1C9} Code Example" => windows::code_example(font),
         // gallery.rs
