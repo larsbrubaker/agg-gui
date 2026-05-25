@@ -129,6 +129,29 @@ impl Font {
         total * size / self.units_per_em as f64
     }
 
+    /// Actual vertical extent of a single glyph in pixels (Y-up), relative
+    /// to the baseline. Returns `(y_min, y_max)` where `y_min` is how far
+    /// the glyph dips below the baseline (negative for descenders, near
+    /// zero for upright glyphs) and `y_max` is how far it rises above.
+    ///
+    /// Use this for *visually* centring an icon glyph in a button —
+    /// `ascender_px`/`descender_px` describe the FONT's worst-case
+    /// extents and are too generous for most icon fonts (Font Awesome
+    /// glyphs sit in a sub-rectangle of the design space, so centring
+    /// by the font metric leaves them noticeably high). Returns `None`
+    /// when the glyph has no outline (e.g. a space) or isn't in the
+    /// font.
+    pub fn glyph_visual_bounds(&self, glyph: char, size: f64) -> Option<(f64, f64)> {
+        self.with_ttf_face(|face| {
+            let gid = face.glyph_index(glyph)?;
+            let bbox = face.glyph_bounding_box(gid)?;
+            let scale = size / self.units_per_em as f64;
+            // ttf_parser reports y_min / y_max in font units relative to
+            // baseline, Y-up — convert directly.
+            Some((bbox.y_min as f64 * scale, bbox.y_max as f64 * scale))
+        })
+    }
+
     /// Run `f` with a `rustybuzz::Face` borrowed from the internal data.
     ///
     /// The face has the same lifetime as the closure invocation, so it cannot

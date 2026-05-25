@@ -384,16 +384,14 @@ impl Button {
     }
 
     /// Render the configured icon glyph centred vertically in the
-    /// button. Icon-only fonts (FA Free Solid in particular)
-    /// report a font-wide ascender close to the full em-size, so
-    /// neither the icon font's nor the label font's
-    /// `centered_baseline_y` lands the glyph at the visual midline.
-    ///
-    /// Treat the icon as occupying its em-box (`font_size` tall,
-    /// glyph sitting on the baseline) and centre that box in the
-    /// button: `baseline = (button_h - icon.font_size) * 0.5`. FA
-    /// glyphs paint almost flush to the baseline so this matches
-    /// what the eye reads as centred.
+    /// button using the glyph's *actual* outline bounding box — not
+    /// the font's worst-case ascender/descender. Icon fonts (Font
+    /// Awesome especially) place each glyph in a sub-rectangle of
+    /// the design space; centring by the font metric leaves the glyph
+    /// visibly high on the button (the "icons floating to the top"
+    /// regression we've hit repeatedly). With the per-glyph bbox we
+    /// solve for the baseline that puts the glyph's vertical midpoint
+    /// at `button_h / 2`.
     fn paint_icon(
         ctx: &mut dyn DrawCtx,
         icon: &Option<ButtonIcon>,
@@ -404,7 +402,18 @@ impl Button {
         color: Color,
     ) {
         let Some(icon) = icon else { return };
-        let baseline_y = ((button_h - icon.font_size) * 0.5).max(0.0);
+        // (y_min, y_max) is the glyph's actual extent in pixels
+        // relative to baseline, Y-up. y_min is usually negative
+        // (descender region) or ~0, y_max is the cap-height of the
+        // glyph. Pick the baseline so that
+        //   baseline + (y_min + y_max) / 2  ==  button_h / 2
+        // i.e. the glyph's midpoint sits at the button's midpoint.
+        // Fall back to the font metric only if the glyph has no
+        // outline (e.g. a space or a missing glyph).
+        let baseline_y = match icon.font.glyph_visual_bounds(icon.glyph, icon.font_size) {
+            Some((y_min, y_max)) => (button_h * 0.5 - (y_min + y_max) * 0.5).max(0.0),
+            None => ((button_h - icon.font_size) * 0.5).max(0.0),
+        };
         ctx.set_font(Arc::clone(&icon.font));
         ctx.set_font_size(icon.font_size);
         ctx.set_fill_color(color);

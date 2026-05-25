@@ -288,6 +288,45 @@ fn test_flatten_glyph_at_origin_space_returns_none() {
     );
 }
 
+/// `glyph_visual_bounds` must return the actual glyph extent, not the
+/// font's worst-case ascender/descender. For Font Awesome's "crosshairs"
+/// glyph at 14 pt the real height should be noticeably less than the
+/// font ascender — that's what makes the per-glyph bbox useful for
+/// vertically-centring icons in buttons. If this test stops finding a
+/// gap, the centring fix in `Button::paint_icon` will silently regress
+/// back to "icon floats to the top".
+#[test]
+fn glyph_visual_bounds_is_tighter_than_font_metric_for_fa_icon() {
+    let fa = Font::from_slice(FA_BYTES).expect("parse fa.ttf");
+    let size = 14.0;
+    let (y_min, y_max) = fa
+        .glyph_visual_bounds('\u{F05B}', size)
+        .expect("FA crosshairs glyph must have an outline");
+    let glyph_height = y_max - y_min;
+    let font_height = fa.ascender_px(size) + fa.descender_px(size);
+    assert!(glyph_height > 0.0, "glyph height should be positive");
+    assert!(
+        glyph_height < font_height,
+        "glyph height ({glyph_height}) must be tighter than font ascender+descender ({font_height})"
+    );
+    // Glyph extent shouldn't exceed the em-size by more than a hair
+    // (FA glyphs live inside the design space).
+    assert!(
+        glyph_height <= size * 1.05,
+        "glyph height should fit inside the em-box, got {glyph_height} at size {size}"
+    );
+}
+
+/// Glyphs absent from the font (or with no outline, like a space) must
+/// return `None` so callers can fall back to a font-metric estimate
+/// without panicking.
+#[test]
+fn glyph_visual_bounds_returns_none_for_outlineless_glyph() {
+    let font = test_font();
+    // ASCII space — has an advance but no outline.
+    assert!(font.glyph_visual_bounds(' ', 14.0).is_none());
+}
+
 /// Verify that all contour points are in screen-pixel range for the
 /// given font size (not left in raw font units).
 #[test]
