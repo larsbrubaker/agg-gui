@@ -24,7 +24,9 @@
 //! [`is_enabled`] and [`set_enabled`].  Drag handlers should check
 //! `is_enabled()` first and skip the engine entirely when off — keeps
 //! the gate at the call site so individual widgets don't pay any cost
-//! when snapping is disabled.
+//! when snapping is disabled.  The flag defaults to `true` so any
+//! consumer of agg-gui gets window/node snapping out of the box;
+//! call [`set_enabled(false)`] to opt out.
 
 mod engine;
 mod model;
@@ -59,7 +61,8 @@ pub fn next_snap_id() -> SnapId {
 use std::cell::Cell;
 
 thread_local! {
-    static ENABLED: Cell<bool> = const { Cell::new(false) };
+    // On by default — see the module-level "Global enable flag" docs.
+    static ENABLED: Cell<bool> = const { Cell::new(true) };
 }
 
 /// `true` if snapping should run during drag/resize operations.

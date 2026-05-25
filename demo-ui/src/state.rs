@@ -228,7 +228,10 @@ impl SavedState {
         let mut tests: Vec<Option<WindowState>> = Vec::new();
         let mut about = None::<WindowState>;
         let mut backend_open = false;
-        let mut snap_enabled = false;
+        // Snapping is on by default; saved files predating the `snap`
+        // key come back with the feature enabled rather than silently
+        // off.
+        let mut snap_enabled = true;
         let mut theme_pref = ThemePreference::System;
         let mut accent_color = AccentColor::default();
         let mut window_w: Option<u32> = None;

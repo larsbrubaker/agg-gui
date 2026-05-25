@@ -11,10 +11,10 @@ use crate::input_profile::{set_input_profile, InputProfile};
 use crate::text::Font;
 use crate::widgets::on_screen_keyboard::{
     self, drain_synthetic_keys, is_enabled, is_visible, set_enabled, set_text_input_focused,
-    test_hook,
+    test_hook, KeyboardInputMode,
 };
-use crate::widgets::TextField;
-use crate::{App, Modifiers, MouseButton, Size};
+use crate::widgets::{ScrollView, TextField};
+use crate::{App, FlexColumn, Modifiers, MouseButton, Size, SizedBox};
 
 use super::TEST_FONT;
 
@@ -22,6 +22,7 @@ fn fresh_state() {
     on_screen_keyboard::dismiss();
     test_hook::reset();
     crate::widgets::on_screen_keyboard::events::clear();
+    crate::widget::keyboard_scroll::reset_lift_for_test();
 }
 
 #[test]
@@ -44,7 +45,7 @@ fn enabling_keyboard_does_not_make_it_visible_alone() {
 fn focusing_text_input_raises_keyboard() {
     fresh_state();
     set_enabled(true);
-    set_text_input_focused(true, Some(""));
+    set_text_input_focused(true, Some(""), KeyboardInputMode::Text);
     // Animation hasn't ticked yet, but `is_visible` only requires the
     // tween value > 0.001. With a 0.22 s slide we should already be in
     // motion (start > 0) on the first paint. The keyboard module
@@ -59,7 +60,7 @@ fn focusing_text_input_raises_keyboard() {
 fn auto_cap_on_empty_field() {
     fresh_state();
     set_enabled(true);
-    set_text_input_focused(true, Some(""));
+    set_text_input_focused(true, Some(""), KeyboardInputMode::Text);
     use crate::widgets::on_screen_keyboard::state::with_state_ref;
     use crate::widgets::on_screen_keyboard::layouts::Layer;
     assert_eq!(
@@ -73,7 +74,7 @@ fn auto_cap_on_empty_field() {
 fn auto_cap_after_sentence_terminator() {
     fresh_state();
     set_enabled(true);
-    set_text_input_focused(true, Some("Hello world."));
+    set_text_input_focused(true, Some("Hello world."), KeyboardInputMode::Text);
     use crate::widgets::on_screen_keyboard::state::with_state_ref;
     use crate::widgets::on_screen_keyboard::layouts::Layer;
     assert_eq!(
@@ -87,7 +88,7 @@ fn auto_cap_after_sentence_terminator() {
 fn double_tap_shift_engages_caps_lock() {
     fresh_state();
     set_enabled(true);
-    set_text_input_focused(true, Some("hello"));
+    set_text_input_focused(true, Some("hello"), KeyboardInputMode::Text);
     use crate::widgets::on_screen_keyboard::layouts::Layer;
 
     // Two shift taps in quick succession → caps lock on, layer Shifted.
@@ -109,7 +110,7 @@ fn double_tap_shift_engages_caps_lock() {
 fn single_shift_tap_does_not_engage_caps_lock() {
     fresh_state();
     set_enabled(true);
-    set_text_input_focused(true, Some("hello"));
+    set_text_input_focused(true, Some("hello"), KeyboardInputMode::Text);
     test_hook::simulate_shift_tap();
     assert!(!test_hook::caps_lock(), "one tap is one-shot shift");
 }
@@ -118,7 +119,7 @@ fn single_shift_tap_does_not_engage_caps_lock() {
 fn no_auto_cap_mid_sentence() {
     fresh_state();
     set_enabled(true);
-    set_text_input_focused(true, Some("Hello world"));
+    set_text_input_focused(true, Some("Hello world"), KeyboardInputMode::Text);
     use crate::widgets::on_screen_keyboard::state::with_state_ref;
     use crate::widgets::on_screen_keyboard::layouts::Layer;
     assert_eq!(
@@ -163,6 +164,192 @@ fn pointer_outside_panel_falls_through() {
     assert!(
         app.has_focus(),
         "mouse-down above the keyboard should still reach the text field"
+    );
+}
+
+#[test]
+fn numeric_mode_opens_on_numbers_layer() {
+    // Focusing a field that declares itself Numeric must skip the
+    // letter / sentence-start path entirely and slide the keyboard
+    // up directly on the digit pad — the iOS / Android `numberPad`
+    // convention.
+    fresh_state();
+    set_enabled(true);
+    set_text_input_focused(true, Some(""), KeyboardInputMode::Numeric);
+    use crate::widgets::on_screen_keyboard::layouts::Layer;
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
+    assert_eq!(
+        with_state_ref(|s| s.current_layer),
+        Layer::Numbers,
+        "Numeric mode must open the keyboard on the digit layer, not Letters/Shifted"
+    );
+}
+
+#[test]
+fn numeric_mode_clears_residual_caps_lock() {
+    // If a previous Text-mode field engaged caps lock, focusing a
+    // Numeric field must wipe that state so the user doesn't see the
+    // shift glyph lit while typing digits.  Re-focusing the original
+    // Text field would then start a fresh shift state machine.
+    fresh_state();
+    set_enabled(true);
+    set_text_input_focused(true, Some(""), KeyboardInputMode::Text);
+    test_hook::simulate_shift_tap();
+    test_hook::simulate_shift_tap();
+    assert!(test_hook::caps_lock(), "precondition: caps-lock engaged");
+
+    set_text_input_focused(true, Some(""), KeyboardInputMode::Numeric);
+    assert!(
+        !test_hook::caps_lock(),
+        "switching focus into a Numeric field must drop the stale caps-lock state"
+    );
+}
+
+#[test]
+fn focusing_field_below_keyboard_scrolls_parent_view() {
+    // Build content tall enough to overflow the viewport with a text
+    // field anchored near the BOTTOM of the content (FlexColumn lays
+    // out top-to-bottom in document order, but content-Y in Y-up
+    // means top-of-content = high Y, bottom = low Y; with a 600 px
+    // spacer pushed FIRST and the field SECOND, the field lands near
+    // the bottom of the content).  Without auto-scroll the field
+    // would sit at screen Y ~ 0 — behind the keyboard panel.
+    fresh_state();
+    set_input_profile(InputProfile::MobileIOS);
+    set_enabled(true);
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut col = FlexColumn::new();
+    col.push(Box::new(SizedBox::new().with_height(600.0)), 0.0);
+    let field = TextField::new(Arc::clone(&font)).with_placeholder("type here");
+    col.push(Box::new(field), 0.0);
+    let offset_cell = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
+    let scroll = ScrollView::new(Box::new(col)).with_offset_cell(std::rc::Rc::clone(&offset_cell));
+    let mut app = App::new(Box::new(scroll));
+    app.layout(Size::new(400.0, 400.0));
+
+    let panel_h = on_screen_keyboard::target_panel_height(400.0);
+    assert!(panel_h > 0.0, "keyboard layout must report a positive panel height");
+
+    let scroll_before = offset_cell.get();
+    app.on_key_down(crate::Key::Tab, Modifiers::default());
+    assert!(app.has_focus(), "TextField should be focused after Tab");
+    assert_eq!(app.focused_widget_type_name(), Some("TextField"));
+    // A second layout pass runs the new offset through the scroll
+    // view's layout so the cell reflects the post-scroll value.
+    app.layout(Size::new(400.0, 400.0));
+    let scroll_after = offset_cell.get();
+    assert!(
+        scroll_after > scroll_before + 1.0,
+        "scroll offset must increase to lift the focused field above the keyboard \
+         (before={:.1}, after={:.1}, panel_h={:.1})",
+        scroll_before,
+        scroll_after,
+        panel_h,
+    );
+}
+
+#[test]
+fn focusing_field_with_no_scrollable_ancestor_requests_global_lift() {
+    // The demo's mobile-keyboard window is a static Window whose
+    // content fits without overflow — its ScrollView has zero
+    // max_scroll, so `try_scroll_to_lift` can't absorb anything.
+    // In that case the auto-scroll must fall back to the
+    // App-level "global lift" so the focused field still clears
+    // the keyboard panel.  Reproduce here with a TextField placed
+    // near viewport bottom inside a non-scrollable column.
+    fresh_state();
+    set_input_profile(InputProfile::MobileIOS);
+    set_enabled(true);
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut col = FlexColumn::new();
+    // Spacer pushes the field down so its bottom edge falls inside
+    // the keyboard-panel area (low Y in Y-up).
+    col.push(Box::new(SizedBox::new().with_height(360.0)), 0.0);
+    let field = TextField::new(Arc::clone(&font)).with_placeholder("at the bottom");
+    col.push(Box::new(field), 0.0);
+    // No ScrollView wrapper — directly use the column so there's no
+    // scrollable ancestor that can absorb the deficit.
+    let mut app = App::new(Box::new(col));
+    app.layout(Size::new(400.0, 400.0));
+
+    let lift_before = crate::widget::keyboard_scroll::current_lift();
+    app.on_key_down(crate::Key::Tab, Modifiers::default());
+    assert!(app.has_focus());
+    // Lift target was set via `request_lift`; tween starts moving.
+    // Pump one paint frame to advance the tween off zero (the tween
+    // is animated, not instant, but starting it bumps the start
+    // value immediately).
+    // We can't easily paint here without a real DrawCtx; instead,
+    // verify the algorithm decided to lift by checking that the
+    // tween reports it's animating.
+    assert!(
+        crate::widget::keyboard_scroll::is_lift_animating()
+            || crate::widget::keyboard_scroll::current_lift() > lift_before + 0.5,
+        "auto-scroll must engage the global lift when no ScrollView can absorb the deficit",
+    );
+}
+
+#[test]
+fn focusing_already_visible_field_does_not_scroll() {
+    // Opposite control: when the focused field is already above the
+    // keyboard panel, auto-scroll must do nothing — surprising the
+    // user with a jump-scroll on a casual focus change would feel
+    // worse than the keyboard issue we're solving.
+    fresh_state();
+    set_input_profile(InputProfile::MobileIOS);
+    set_enabled(true);
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut col = FlexColumn::new();
+    let field = TextField::new(Arc::clone(&font)).with_placeholder("type here");
+    col.push(Box::new(field), 0.0);
+    col.push(Box::new(SizedBox::new().with_height(600.0)), 0.0);
+    let offset_cell = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
+    let scroll = ScrollView::new(Box::new(col)).with_offset_cell(std::rc::Rc::clone(&offset_cell));
+    let mut app = App::new(Box::new(scroll));
+    app.layout(Size::new(400.0, 400.0));
+
+    let scroll_before = offset_cell.get();
+    app.on_key_down(crate::Key::Tab, Modifiers::default());
+    assert!(app.has_focus());
+    app.layout(Size::new(400.0, 400.0));
+    let scroll_after = offset_cell.get();
+    assert!(
+        (scroll_after - scroll_before).abs() < 0.5,
+        "scroll offset must be unchanged when the focused field is already visible \
+         (before={:.1}, after={:.1})",
+        scroll_before,
+        scroll_after,
+    );
+}
+
+#[test]
+fn text_field_with_keyboard_mode_propagates_through_focus() {
+    // End-to-end: a TextField configured via `.with_keyboard_mode`
+    // should drive the keyboard to the Numbers layer when it gains
+    // focus through the normal App focus flow — proving the
+    // `Widget::text_input_mode` plumbing reaches the keyboard.
+    fresh_state();
+    set_input_profile(InputProfile::MobileIOS);
+    set_enabled(true);
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let field = TextField::new(Arc::clone(&font))
+        .with_keyboard_mode(KeyboardInputMode::Numeric);
+    let mut app = App::new(Box::new(field));
+    app.layout(Size::new(400.0, 800.0));
+
+    app.on_key_down(crate::Key::Tab, Modifiers::default());
+    assert!(app.has_focus(), "TextField should be focused after Tab");
+
+    use crate::widgets::on_screen_keyboard::layouts::Layer;
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
+    assert_eq!(
+        with_state_ref(|s| s.current_layer),
+        Layer::Numbers,
+        "focusing a Numeric TextField must raise the keyboard on the digit layer"
     );
 }
 

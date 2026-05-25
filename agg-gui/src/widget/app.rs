@@ -182,29 +182,21 @@ impl App {
         // `paint` without an explicit `&App` reference.
         self.touch_state.update_gesture();
         crate::touch_state::set_current(self.touch_state.current());
+        // Tick the keyboard-driven lift once per paint.  Translates
+        // the widget tree (and its global overlays) upward by `lift`
+        // pixels so a focused field doesn't disappear behind the
+        // soft-keyboard panel; the panel itself paints unlifted so
+        // it always sits at the bottom of the viewport.
+        let lift = super::keyboard_scroll::tick_lift();
         let scale = crate::device_scale::device_scale();
         if (scale - 1.0).abs() > 1e-6 {
             ctx.save();
             ctx.scale(scale, scale);
-            paint_subtree(self.root.as_mut(), ctx);
-            crate::widgets::combo_box::paint_global_combo_popups(ctx);
-            crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
-            paint_global_overlays(self.root.as_mut(), ctx);
-            // Modal/global overlays can contain ComboBox widgets. They submit
-            // their popups while `paint_global_overlays` runs, so drain once
-            // more to draw those popups above the modal body.
-            crate::widgets::combo_box::paint_global_combo_popups(ctx);
-            // On-screen keyboard sits above absolutely everything so a
-            // raised keyboard is never occluded by floating windows /
-            // tooltips / combo popups.
+            super::keyboard_scroll::paint_lifted_tree(self.root.as_mut(), ctx, viewport, lift);
             crate::widgets::on_screen_keyboard::paint_software_keyboard(ctx, viewport);
             ctx.restore();
         } else {
-            paint_subtree(self.root.as_mut(), ctx);
-            crate::widgets::combo_box::paint_global_combo_popups(ctx);
-            crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
-            paint_global_overlays(self.root.as_mut(), ctx);
-            crate::widgets::combo_box::paint_global_combo_popups(ctx);
+            super::keyboard_scroll::paint_lifted_tree(self.root.as_mut(), ctx, viewport, lift);
             crate::widgets::on_screen_keyboard::paint_software_keyboard(ctx, viewport);
         }
     }
@@ -222,6 +214,7 @@ impl App {
         self.root.needs_draw()
             || crate::animation::wants_draw()
             || crate::widgets::on_screen_keyboard::needs_draw()
+            || super::keyboard_scroll::is_lift_animating()
     }
 
     /// Pump every key the on-screen keyboard has synthesised since the
@@ -258,14 +251,13 @@ impl App {
     pub fn on_mouse_move(&mut self, screen_x: f64, screen_y: f64) {
         // Reset cursor so the hovered widget can set it; Default if nothing sets it.
         crate::cursor::reset_cursor_icon();
-        let pos = self.flip_y(screen_x, screen_y);
-        set_current_mouse_world(pos);
-        // On-screen keyboard wins pointer routing while a key is held
-        // (and consumes hovers over the panel).
-        if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_move(pos) {
+        let screen = self.flip_y(screen_x, screen_y);
+        if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_move(screen) {
             self.drain_keyboard_synthetic_keys();
             return;
         }
+        let pos = super::keyboard_scroll::lift_to_world(screen);
+        set_current_mouse_world(pos);
         if let Some(path) = active_modal_path(self.root.as_ref()) {
             let event = Event::MouseMove { pos };
             dispatch_event(&mut self.root, &path, &event, pos);
@@ -283,17 +275,18 @@ impl App {
         button: MouseButton,
         mods: Modifiers,
     ) {
-        let pos = self.flip_y(screen_x, screen_y);
-        set_current_mouse_world(pos);
+        let screen = self.flip_y(screen_x, screen_y);
         // On-screen keyboard captures pointer events on its panel area
         // before anything in the tree gets a look. Returning here also
         // means the focused widget keeps focus (so the keyboard does
         // not dismiss itself by stealing focus on every key tap).
         if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_down(
-            pos, button, mods,
+            screen, button, mods,
         ) {
             return;
         }
+        let pos = super::keyboard_scroll::lift_to_world(screen);
+        set_current_mouse_world(pos);
         let modal_path = active_modal_path(self.root.as_ref());
         let event = Event::MouseDown {
             pos,
@@ -344,18 +337,20 @@ impl App {
         button: MouseButton,
         mods: Modifiers,
     ) {
-        let pos = self.flip_y(screen_x, screen_y);
-        set_current_mouse_world(pos);
+        let screen = self.flip_y(screen_x, screen_y);
         // On-screen keyboard owns release events on its panel; releases
         // here commit a key tap and synthesize a `KeyDown`. After
         // consumption we drain the synthetic-key queue so the focused
         // text widget receives the character in the same frame.
-        if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_up(pos, button, mods)
-        {
+        if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_up(
+            screen, button, mods,
+        ) {
             self.captured = None;
             self.drain_keyboard_synthetic_keys();
             return;
         }
+        let pos = super::keyboard_scroll::lift_to_world(screen);
+        set_current_mouse_world(pos);
         let event = Event::MouseUp {
             pos,
             button,
@@ -440,7 +435,7 @@ impl App {
         delta_y: f64,
         modifiers: Modifiers,
     ) {
-        let pos = self.flip_y(screen_x, screen_y);
+        let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         set_current_mouse_world(pos);
         let hit = active_modal_path(self.root.as_ref()).or_else(|| self.compute_hit(pos));
         let event = Event::MouseWheel {
@@ -532,7 +527,7 @@ impl App {
         if paths.is_empty() {
             return;
         }
-        let pos = self.flip_y(screen_x, screen_y);
+        let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         let event = Event::FileDropped { pos, paths };
         let hit = self.compute_hit(pos);
         if let Some(path) = hit {
@@ -562,7 +557,7 @@ impl App {
         screen_y: f64,
         force: Option<f32>,
     ) {
-        let pos = self.flip_y(screen_x, screen_y);
+        let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         self.touch_state.on_start(device, id, pos, force);
         crate::touch_state::note_touch_event();
     }
@@ -574,7 +569,7 @@ impl App {
         screen_y: f64,
         force: Option<f32>,
     ) {
-        let pos = self.flip_y(screen_x, screen_y);
+        let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         self.touch_state.on_move(device, id, pos, force);
         crate::touch_state::note_touch_event();
     }
@@ -676,9 +671,11 @@ impl App {
 
     #[inline]
     /// Convert a platform-supplied physical Y-down coordinate into the
-    /// logical Y-up space the widget tree works in.  Divides by the current
-    /// device scale factor (so mouse coords line up with the scaled paint
-    /// transform) and flips Y against the cached logical viewport height.
+    /// logical Y-up SCREEN space (unlifted).  Global overlays such as
+    /// the on-screen keyboard panel test against this; widget-tree
+    /// dispatch then calls
+    /// [`keyboard_scroll::lift_to_world`](super::keyboard_scroll::lift_to_world)
+    /// to drop into the lifted frame.
     fn flip_y(&self, x: f64, y_down: f64) -> Point {
         let scale = crate::device_scale::device_scale().max(1e-6);
         let lx = x / scale;
@@ -733,20 +730,20 @@ impl App {
         if let Some(new) = new_path.clone() {
             dispatch_event(&mut self.root, &new, &Event::FocusGained, Point::ORIGIN);
         }
-        // Push the newly-focused widget's text-input affordance into the
-        // on-screen keyboard so it slides up / down. Also forward the
-        // current text so the keyboard can apply the sentence-start
-        // auto-capitalize heuristic.
-        let (accepts, existing_text) = new_path
-            .as_ref()
-            .map(|p| {
-                let w = widget_at_path(&mut self.root, p);
-                (w.accepts_text_input(), w.text_input_value())
-            })
-            .unwrap_or((false, None));
-        crate::widgets::on_screen_keyboard::set_text_input_focused(
-            accepts,
-            existing_text.as_deref(),
+        super::keyboard_scroll::notify_focus_change(
+            new_path.as_deref(),
+            self.viewport_size.width,
+            self.root.as_mut(),
+        );
+    }
+
+    /// Lift the focused widget above the on-screen keyboard panel so
+    /// typing never disappears behind it.  No-op when already visible.
+    pub fn ensure_focused_visible_above_keyboard(&mut self) {
+        super::keyboard_scroll::ensure_focused_visible_above_keyboard(
+            self.focus.as_deref(),
+            self.viewport_size.width,
+            self.root.as_mut(),
         );
     }
 

@@ -273,8 +273,9 @@ fn dragging_with_snap_enabled_aligns_left_edge_to_neighbour() {
         pos[0]
     );
 
-    // Leave the thread-local flag in the default off-state so
-    // sibling tests don't inherit our toggle.
+    // Reset the thread-local flag so sibling tests within this
+    // thread don't inherit our toggle.  (Other snap-aware tests in
+    // this file are defensive and explicitly set the flag they need.)
     agg_gui::snap::set_enabled(false);
     agg_gui::snap::clear_guides();
 }

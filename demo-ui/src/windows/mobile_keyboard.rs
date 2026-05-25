@@ -16,13 +16,22 @@
 //! keyboard auto-raises because TextField overrides
 //! `Widget::accepts_text_input`. Picking "Desktop" both disables the
 //! keyboard and dismisses it.
+//!
+//! The demo also exposes a per-field "Input mode" radio (Text /
+//! Numeric).  Picking Numeric shares a single
+//! [`KeyboardInputMode`](agg_gui::widgets::on_screen_keyboard::KeyboardInputMode)
+//! cell with the first text field; the next time that field receives
+//! focus, the keyboard opens directly on the digit pad — the same
+//! convention as iOS `numberPad` / HTML `<input type="number">`.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::input_profile::{
     current_input_profile, set_input_profile, InputProfile,
 };
-use agg_gui::widgets::on_screen_keyboard;
+use agg_gui::widgets::on_screen_keyboard::{self, KeyboardInputMode};
 use agg_gui::{
     Color, FlexColumn, Font, Label, RadioGroup, ScrollView, SizedBox, TextField, Widget,
 };
@@ -77,9 +86,47 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
 
     col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
 
+    // Shared cell driving the first text field's keyboard mode. The
+    // RadioGroup below mutates it on selection; the TextField re-reads
+    // it on every focus event, so picking "Numeric" then tapping the
+    // field raises the digit pad instead of the letter row.
+    let primary_mode = Rc::new(Cell::new(KeyboardInputMode::Text));
+
     col.push(
         Box::new(
-            Label::new("Type here", Arc::clone(&font))
+            Label::new("First field input mode", Arc::clone(&font))
+                .with_font_size(13.0)
+                .with_color(Color::from_rgb8(0xE0, 0xE0, 0xEC)),
+        ),
+        0.0,
+    );
+    let mode_radio = {
+        let cell = Rc::clone(&primary_mode);
+        RadioGroup::new(vec!["Text (letters)", "Numeric (digit pad)"], 0, Arc::clone(&font))
+            .with_font_size(13.0)
+            .on_change(move |idx| apply_mode_choice(&cell, idx))
+    };
+    col.push(Box::new(mode_radio), 0.0);
+
+    col.push(
+        Box::new(
+            Label::new(
+                "Picking Numeric routes the first field below to the \
+                 numbers layer the next time it gains focus. Tap the \
+                 field again after switching to see the new layer.",
+                Arc::clone(&font),
+            )
+            .with_font_size(11.0)
+            .with_color(Color::from_rgb8(0xA8, 0xA8, 0xB8)),
+        ),
+        0.0,
+    );
+
+    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
+
+    col.push(
+        Box::new(
+            Label::new("Type here (mode follows radio)", Arc::clone(&font))
                 .with_font_size(12.0)
                 .with_color(Color::from_rgb8(0xC8, 0xC8, 0xD8)),
         ),
@@ -90,7 +137,8 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
             SizedBox::new().with_height(34.0).with_child(Box::new(
                 TextField::new(Arc::clone(&font))
                     .with_font_size(14.0)
-                    .with_placeholder("Tap to focus, then type / tap keys…"),
+                    .with_placeholder("Tap to focus, then type / tap keys…")
+                    .with_keyboard_mode_cell(Rc::clone(&primary_mode)),
             )),
         ),
         0.0,
@@ -98,7 +146,7 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
 
     col.push(
         Box::new(
-            Label::new("And here", Arc::clone(&font))
+            Label::new("Numeric-only field (digit pad)", Arc::clone(&font))
                 .with_font_size(12.0)
                 .with_color(Color::from_rgb8(0xC8, 0xC8, 0xD8)),
         ),
@@ -109,7 +157,8 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
             SizedBox::new().with_height(34.0).with_child(Box::new(
                 TextField::new(Arc::clone(&font))
                     .with_font_size(14.0)
-                    .with_placeholder("A second field — Tab between them"),
+                    .with_placeholder("Always opens on the numbers layer")
+                    .with_keyboard_mode(KeyboardInputMode::Numeric),
             )),
         ),
         0.0,
@@ -152,5 +201,19 @@ fn apply_profile_choice(idx: usize) {
     if !enable {
         on_screen_keyboard::dismiss();
     }
+    agg_gui::animation::request_draw();
+}
+
+/// Stamp the radio-button index into the shared keyboard-mode cell.
+/// The bound TextField re-reads the cell on each focus event, so a
+/// re-focus (tap the field again) is enough to swap the keyboard
+/// layer.  Kept out of the radio's closure so the mapping is testable
+/// in isolation.
+fn apply_mode_choice(cell: &Rc<Cell<KeyboardInputMode>>, idx: usize) {
+    let mode = match idx {
+        1 => KeyboardInputMode::Numeric,
+        _ => KeyboardInputMode::Text,
+    };
+    cell.set(mode);
     agg_gui::animation::request_draw();
 }

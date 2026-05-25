@@ -194,6 +194,38 @@ pub trait Widget {
         None
     }
 
+    /// Preferred keyboard input mode for this widget — used by the
+    /// on-screen software keyboard to pick the initial layer when this
+    /// widget gains focus.  Default is
+    /// [`KeyboardInputMode::Text`](crate::widgets::on_screen_keyboard::KeyboardInputMode::Text);
+    /// numeric fields override to
+    /// [`Numeric`](crate::widgets::on_screen_keyboard::KeyboardInputMode::Numeric)
+    /// so the digit pad slides up instead of the letter row.
+    ///
+    /// Only consulted when [`accepts_text_input`](Self::accepts_text_input)
+    /// also returns `true`.
+    fn text_input_mode(&self) -> crate::widgets::on_screen_keyboard::KeyboardInputMode {
+        crate::widgets::on_screen_keyboard::KeyboardInputMode::Text
+    }
+
+    /// Try to lift this widget's visible content upward by `amount`
+    /// pixels.  Used by the on-screen-keyboard auto-scroll so a
+    /// focused text field doesn't end up hidden behind the keyboard
+    /// panel: the App walks UP the focus path and asks each ancestor
+    /// to absorb some of the deficit.
+    ///
+    /// Scrolling containers (notably
+    /// [`ScrollView`](crate::widgets::ScrollView)) override this and
+    /// increase their vertical scroll offset by up to `amount`,
+    /// returning how much they actually applied (clamped to their
+    /// remaining slack).  Negative `amount` reverses the operation
+    /// (used to restore scroll when focus leaves a text-input).
+    /// Default returns `0.0` — non-scrolling widgets contribute
+    /// nothing.
+    fn try_scroll_to_lift(&mut self, _amount: f64) -> f64 {
+        0.0
+    }
+
     /// If this widget is text-bearing (e.g. `Label`), update its foreground
     /// colour.  Default is a no-op.  Composite widgets call this on their
     /// children to retint labels without rebuilding them — used by `Button`
@@ -585,6 +617,7 @@ pub trait Widget {
 
 mod app;
 mod backbuffer;
+pub(crate) mod keyboard_scroll;
 mod paint;
 mod tree;
 

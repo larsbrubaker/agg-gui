@@ -16,7 +16,7 @@
 //! - Placeholder text, read-only mode, SelectAllOnFocus
 //! - Callbacks: on_change, on_enter, on_edit_complete
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -44,6 +44,8 @@ use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 mod binding;
 mod clipboard;
 mod filter;
+mod keyboard_mode;
+mod layout_builders;
 mod theme;
 mod widget_impl;
 
@@ -117,6 +119,13 @@ pub struct TextField {
     /// Per-character allow-list. See [`with_char_filter`].
     char_filter: Option<Rc<dyn Fn(char) -> bool>>,
 
+    /// Preferred on-screen-keyboard layer when this field is focused.
+    /// `Rc<Cell<_>>` so external code (e.g. a settings radio in the
+    /// demo) can swap the mode without rebuilding the widget tree —
+    /// the next focus event picks up the new value.  See
+    /// `text_field/keyboard_mode.rs` for the builders.
+    keyboard_mode: Rc<Cell<crate::widgets::on_screen_keyboard::KeyboardInputMode>>,
+
     /// Per-widget colour overrides — `None` colours fall back to
     /// the ambient `visuals()` palette. Set via [`with_theme`].
     pub theme: TextFieldTheme,
@@ -180,6 +189,9 @@ impl TextField {
             on_edit_complete: None,
             text_cell: None,
             char_filter: None,
+            keyboard_mode: Rc::new(Cell::new(
+                crate::widgets::on_screen_keyboard::KeyboardInputMode::default(),
+            )),
             theme: TextFieldTheme::default(),
             cache: BackbufferCache::default(),
             last_sig: None,
@@ -245,26 +257,9 @@ impl TextField {
         self
     }
 
-    pub fn with_margin(mut self, m: Insets) -> Self {
-        self.base.margin = m;
-        self
-    }
-    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
-        self.base.h_anchor = h;
-        self
-    }
-    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
-        self.base.v_anchor = v;
-        self
-    }
-    pub fn with_min_size(mut self, s: Size) -> Self {
-        self.base.min_size = s;
-        self
-    }
-    pub fn with_max_size(mut self, s: Size) -> Self {
-        self.base.max_size = s;
-        self
-    }
+    // Layout-trait builders (with_margin / with_h_anchor / with_v_anchor /
+    // with_min_size / with_max_size) live in `text_field/layout_builders.rs`
+    // so this file stays under the project's 800-line cap.
 
     // ── Getters ──────────────────────────────────────────────────────────────
 

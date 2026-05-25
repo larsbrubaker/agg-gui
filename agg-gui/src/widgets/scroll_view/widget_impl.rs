@@ -26,6 +26,33 @@ impl Widget for ScrollView {
             || self.children().iter().any(|c| c.needs_draw())
     }
 
+    /// Absorb part of a keyboard-driven "lift content upward by N
+    /// pixels" request from `App::ensure_focused_visible_above_keyboard`.
+    ///
+    /// In Y-up screen space, increasing `v.offset` by `D` shifts this
+    /// scroll view's child upward by `D` pixels (see the formula
+    /// `child_y = vh - content + offset` in [`layout`]).  We clamp by
+    /// the remaining slack so we never scroll past the bottom of the
+    /// content, and a negative `amount` reverses (used to release
+    /// the auto-scroll when focus leaves the text field).
+    fn try_scroll_to_lift(&mut self, amount: f64) -> f64 {
+        if !self.v.enabled || amount.abs() < 0.5 {
+            return 0.0;
+        }
+        let (_, vh) = self.viewport();
+        let max = self.v.max_scroll(vh);
+        let before = self.v.offset;
+        let target = (before + amount).clamp(0.0, max);
+        let applied = target - before;
+        if applied.abs() < 0.5 {
+            return 0.0;
+        }
+        self.v.offset = target;
+        self.publish_offsets();
+        crate::animation::request_draw();
+        applied
+    }
+
     fn margin(&self) -> Insets {
         self.base.margin
     }

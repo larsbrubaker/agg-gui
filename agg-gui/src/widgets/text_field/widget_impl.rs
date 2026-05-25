@@ -28,6 +28,10 @@ impl Widget for TextField {
         Some(self.text())
     }
 
+    fn text_input_mode(&self) -> crate::widgets::on_screen_keyboard::KeyboardInputMode {
+        self.keyboard_mode()
+    }
+
     /// Composite parents (e.g. `ColorWheelPicker`) use this to push a live
     /// value into the field without bypassing `set_text`'s cell sync and
     /// cache invalidation.  Skipped while the field is focused so the user

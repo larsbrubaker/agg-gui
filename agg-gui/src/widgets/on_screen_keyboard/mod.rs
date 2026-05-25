@@ -65,6 +65,28 @@ use style::Style;
 // Public API
 // ---------------------------------------------------------------------------
 
+/// What kind of input the focused widget wants from the on-screen
+/// keyboard.  Drives the initial layer the keyboard slides up into so
+/// numeric fields see the digit pad instead of the letter row — same
+/// hint browsers and native OSes derive from `<input type="number">` /
+/// `UIKeyboardType.numberPad`.
+///
+/// Independent of input-validation: a field set to [`Numeric`] still
+/// receives whatever the user actually types (the keyboard's mode-switch
+/// keys remain available).  Pair with [`crate::widgets::TextField::with_char_filter`]
+/// if you also want to reject non-digits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyboardInputMode {
+    /// Regular text — opens the letter layer (or Shifted if the
+    /// auto-cap heuristic fires).  The historical default.
+    #[default]
+    Text,
+    /// Numbers + common punctuation — opens directly into
+    /// [`KeyboardLayer::Numbers`] so the user can start typing digits
+    /// without tapping the `123` mode switch first.
+    Numeric,
+}
+
 /// Enable / disable the on-screen keyboard globally. Disabled keyboards
 /// never paint or capture events. The platform shell calls this once at
 /// startup; defaults to `false` so apps that haven't opted in (or
@@ -107,6 +129,39 @@ pub fn occluded_height(viewport_height: f64) -> f64 {
     .min(viewport_height)
 }
 
+/// Height the keyboard panel WILL occupy when fully open, regardless
+/// of the current slide-animation state.  Returned in logical pixels
+/// (Y-up); the panel sits at the bottom of the viewport so its top
+/// edge lies at `y = target_panel_height(...)`.
+///
+/// Computed deterministically from the active input profile + layer,
+/// so callers (notably the keyboard-aware focus auto-scroll) get a
+/// useful answer on the very first focus event — *before* the panel
+/// has ever painted.  Falls back to the most-recent painted height
+/// when the layout subsystem isn't ready (no font / no profile);
+/// returns `0.0` when the keyboard is disabled, so call sites need
+/// no extra `is_enabled` check.
+pub fn target_panel_height(viewport_width: f64) -> f64 {
+    with_state_ref(|s| {
+        if !s.enabled {
+            return 0.0;
+        }
+        let style = Style::for_profile(current_input_profile());
+        let layer = s.current_layer;
+        let layout = Layout::for_layer(layer);
+        let computed = layout.compute_panel_height(viewport_width, &style);
+        // Fall back to the last painted height in the (theoretical)
+        // case where the layout function returns a degenerate 0 —
+        // keeps the auto-scroll robust even if a future profile ships
+        // an empty layout by mistake.
+        if computed > 0.0 {
+            computed
+        } else {
+            s.last_panel_height.unwrap_or(0.0)
+        }
+    })
+}
+
 /// Called by [`App`](crate::widget::App) when the focused widget changes.
 /// Causes the keyboard to slide up / down by retargeting the slide tween.
 ///
@@ -117,7 +172,16 @@ pub fn occluded_height(viewport_height: f64) -> f64 {
 /// reverts to lowercase (one-shot shift), matching what every mobile
 /// OS does for sentence-start capitalization. `None` (no value
 /// available) is treated as "don't change the layer".
-pub fn set_text_input_focused(focused: bool, existing_text: Option<&str>) {
+///
+/// `mode` lets the focused widget opt into the numeric layer — e.g.
+/// a quantity field that wants the digit pad up first.  When
+/// [`KeyboardInputMode::Numeric`] is passed the auto-cap heuristic is
+/// skipped and the keyboard opens on [`Layer::Numbers`].
+pub fn set_text_input_focused(
+    focused: bool,
+    existing_text: Option<&str>,
+    mode: KeyboardInputMode,
+) {
     with_state_mut(|s| {
         if !s.enabled {
             return;
@@ -126,18 +190,31 @@ pub fn set_text_input_focused(focused: bool, existing_text: Option<&str>) {
         let target = if focused { 1.0 } else { 0.0 };
         s.slide.set_target(target);
         if focused {
-            if let Some(text) = existing_text {
-                let last_non_space = text.trim_end().chars().last();
-                let sentence_start = match last_non_space {
-                    None => true, // empty
-                    Some(c) if c == '.' || c == '!' || c == '?' || c == '\n' => true,
-                    _ => false,
-                };
-                s.current_layer = if sentence_start {
-                    Layer::Shifted
-                } else {
-                    Layer::Letters
-                };
+            match mode {
+                KeyboardInputMode::Numeric => {
+                    // Numeric fields skip the sentence-start heuristic;
+                    // open directly on the digit pad. Caps-lock is also
+                    // reset so a leftover shift toggle from a previous
+                    // letter-mode field doesn't carry into the digits.
+                    s.current_layer = Layer::Numbers;
+                    s.caps_lock = false;
+                    s.last_shift_tap = None;
+                }
+                KeyboardInputMode::Text => {
+                    if let Some(text) = existing_text {
+                        let last_non_space = text.trim_end().chars().last();
+                        let sentence_start = match last_non_space {
+                            None => true, // empty
+                            Some(c) if c == '.' || c == '!' || c == '?' || c == '\n' => true,
+                            _ => false,
+                        };
+                        s.current_layer = if sentence_start {
+                            Layer::Shifted
+                        } else {
+                            Layer::Letters
+                        };
+                    }
+                }
             }
         }
         crate::animation::request_draw();
