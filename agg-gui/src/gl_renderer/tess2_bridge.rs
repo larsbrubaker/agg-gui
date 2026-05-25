@@ -373,10 +373,8 @@ pub fn tessellate_interior<VS: VertexSource>(path: &mut VS) -> Option<CachedTess
 /// transformed into screen space, emit `(x, y, alpha)` vertices + triangle
 /// indices for the halo-AA solid pipeline.  Interior triangles get
 /// alpha = 1.0 on every vertex; every boundary edge additionally spawns a
-/// `halo_px`-wide feather quad **centred on the polygon edge** (inner
-/// endpoint half-width inside at alpha = 1.0, outer endpoint half-width
-/// outside at alpha = 0.0), giving analytic 1-pixel edge coverage that
-/// tiles correctly against adjacent shapes.
+/// `halo_px`-wide outward quad with the outer pair at alpha = 0.0, giving
+/// analytic 1-pixel edge coverage.
 ///
 /// The outward normal is taken in screen space (`(dy, -dx)` of each edge
 /// direction, Y-up CCW → right = outside), so the halo is always exactly
@@ -434,8 +432,7 @@ pub fn expand_aa_halo(
             }
             // Right-hand perpendicular, flipped if it points into the
             // triangle (toward `c`).  See `tessellate_path_aa` for the
-            // full explanation, including why the feather is split
-            // bidirectionally around the original edge.
+            // full explanation.
             let mut nx = dy / len * halo_px;
             let mut ny = -dx / len * halo_px;
             let dot_c = nx * (c[0] - a[0]) + ny * (c[1] - a[1]);
@@ -443,15 +440,11 @@ pub fn expand_aa_halo(
                 nx = -nx;
                 ny = -ny;
             }
-            let inner_nx = -nx * 0.5;
-            let inner_ny = -ny * 0.5;
-            let outer_nx = nx * 0.5;
-            let outer_ny = ny * 0.5;
             let base = out_verts.len() as u32;
-            out_verts.push([a[0] + inner_nx, a[1] + inner_ny, 1.0]);
-            out_verts.push([b[0] + inner_nx, b[1] + inner_ny, 1.0]);
-            out_verts.push([a[0] + outer_nx, a[1] + outer_ny, 0.0]);
-            out_verts.push([b[0] + outer_nx, b[1] + outer_ny, 0.0]);
+            out_verts.push([a[0], a[1], 1.0]);
+            out_verts.push([b[0], b[1], 1.0]);
+            out_verts.push([a[0] + nx, a[1] + ny, 0.0]);
+            out_verts.push([b[0] + nx, b[1] + ny, 0.0]);
             out_indices.extend_from_slice(&[
                 base,
                 base + 1,
@@ -566,35 +559,11 @@ pub fn tessellate_path_aa<VS: VertexSource>(
                 ny = -ny;
             }
 
-            // Bidirectional feathering (mirrors epaint's tessellator):
-            // the polygon's nominal edge sits at the alpha=0.5 midpoint of
-            // a `halo_px`-wide feather strip — inner endpoint half-width
-            // INSIDE the polygon at alpha=1, outer endpoint half-width
-            // OUTSIDE at alpha=0.
-            //
-            // The previous outward-only halo (inner at the edge, outer at
-            // +halo_px) bled into adjacent shapes' interiors: a polygon at
-            // x∈[1,2] had its left halo painting alpha 1→0 across the
-            // [0,1] neighbor, mixing colors. With bidirectional feathering
-            // adjacent polygons' feather strips overlap exactly with
-            // complementary alpha (A: 1→0.5→0; B: 0→0.5→1), so each
-            // polygon's contribution outside its own area trails off to
-            // zero at the half-pixel mark instead of contaminating the
-            // neighbor.
-            //
-            // The strip overlaps the tess2 interior triangles by half a
-            // pixel inward, but both carry the same fill colour at
-            // alpha=1 — the duplicate coverage is harmless.
-            let inner_nx = -nx * 0.5;
-            let inner_ny = -ny * 0.5;
-            let outer_nx = nx * 0.5;
-            let outer_ny = ny * 0.5;
-
             let base = out_verts.len() as u32;
-            out_verts.push([a[0] + inner_nx, a[1] + inner_ny, 1.0]); // 0: inner a
-            out_verts.push([b[0] + inner_nx, b[1] + inner_ny, 1.0]); // 1: inner b
-            out_verts.push([a[0] + outer_nx, a[1] + outer_ny, 0.0]); // 2: outer a
-            out_verts.push([b[0] + outer_nx, b[1] + outer_ny, 0.0]); // 3: outer b
+            out_verts.push([a[0], a[1], 1.0]); // 0: inner a
+            out_verts.push([b[0], b[1], 1.0]); // 1: inner b
+            out_verts.push([a[0] + nx, a[1] + ny, 0.0]); // 2: outer a
+            out_verts.push([b[0] + nx, b[1] + ny, 0.0]); // 3: outer b
             out_indices.extend_from_slice(&[
                 base,
                 base + 1,

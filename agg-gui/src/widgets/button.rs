@@ -30,31 +30,7 @@ const ICON_GAP: f64 = 8.0;
 /// inside the button bounds.
 const LEFT_LABEL_PAD: f64 = 8.0;
 
-/// A theme for [`Button`] visual states.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ButtonTheme {
-    pub background: Color,
-    pub background_hovered: Color,
-    pub background_pressed: Color,
-    pub label_color: Color,
-    pub border_radius: f64,
-    pub focus_ring_color: Color,
-    pub focus_ring_width: f64,
-}
-
-impl Default for ButtonTheme {
-    fn default() -> Self {
-        Self {
-            background: Color::rgb(0.22, 0.45, 0.88),
-            background_hovered: Color::rgb(0.30, 0.52, 0.92),
-            background_pressed: Color::rgb(0.16, 0.36, 0.72),
-            label_color: Color::white(),
-            border_radius: 6.0,
-            focus_ring_color: Color::rgba(0.22, 0.45, 0.88, 0.55),
-            focus_ring_width: 2.5,
-        }
-    }
-}
+pub use super::button_theme::ButtonTheme;
 
 /// A clickable button.
 ///

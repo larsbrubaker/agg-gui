@@ -13,17 +13,10 @@
 //! Modelled after the MatterCAD agg-sharp `Graphics2DGpu` / `AARenderTesselator`
 //! pipeline: shapes are tessellated to triangle meshes, then uploaded as VBOs
 //! and rendered with a simple colour-fill shader.  Anti-aliased edge expansion
-//! uses a **bidirectional** 1-pixel feather centred on the polygon edge
-//! (inner endpoint half-width inside at α=1, outer endpoint half-width
-//! outside at α=0) — same shape as epaint's tessellator — so adjacent
-//! polygons' feather strips overlap with complementary alpha and tile
-//! without bleeding into each other.
+//! (one-pixel outward quad + coverage ramp) follows `AARenderTesselator.cs`.
 
 pub mod glyph_cache;
 pub mod tess2_bridge;
-
-#[cfg(test)]
-mod aa_feather_tests;
 
 pub use glyph_cache::GlyphCache;
 pub use tess2_bridge::{

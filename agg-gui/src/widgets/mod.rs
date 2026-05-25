@@ -1,4 +1,5 @@
 pub mod button;
+pub mod button_theme;
 pub mod checkbox;
 pub mod chevron;
 pub mod collapsing_header;
