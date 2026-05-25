@@ -16,6 +16,7 @@ mod inspector_props;
 pub mod label;
 pub mod markdown;
 pub mod menu;
+pub mod on_screen_keyboard;
 pub mod performance;
 pub mod primitives;
 pub mod progress_bar;

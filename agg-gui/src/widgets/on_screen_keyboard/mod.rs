@@ -1,0 +1,381 @@
+//! # On-screen software keyboard
+//!
+//! agg-gui's own touch-input keyboard. Replaces the native iOS / Android
+//! soft keyboard with one we control end-to-end so the user gets:
+//!
+//! - a consistent visual that matches the rest of the agg-gui app (no
+//!   browser-chrome reflow, no surprise auto-correct rules, no native
+//!   keyboard hiding the focused field at random),
+//! - taps that synthesize the same [`Event::KeyDown`] events a physical
+//!   keyboard would produce (so [`TextField`](crate::widgets::TextField),
+//!   [`TextArea`](crate::widgets::TextArea), and any future text-bearing
+//!   widget Just Works),
+//! - per-OS chrome (iOS / Android / generic) that approximates the
+//!   user's muscle memory.
+//!
+//! ## Architecture (follows the combo-popup pattern)
+//!
+//! - The keyboard is **not** a child widget in the tree. It lives in
+//!   module-level thread-local state and is painted by [`App::paint`]
+//!   after every other global overlay so it always sits on top.
+//! - Mouse / touch events pass through
+//!   [`handle_software_keyboard_mouse_down`] /
+//!   [`handle_software_keyboard_mouse_move`] /
+//!   [`handle_software_keyboard_mouse_up`] *before* the normal hit-test
+//!   path; the keyboard either consumes them (a key tap) or returns
+//!   `false` so they continue to the widget tree.
+//! - Key taps push synthesized `(Key, Modifiers)` pairs into a queue;
+//!   [`App`] drains the queue after each event handler and dispatches
+//!   them through the normal [`App::on_key_down`] code path. The
+//!   focused [`TextField`] receives `KeyDown { Key::Char('a') }` exactly
+//!   like a physical key press.
+//! - Show / hide is driven by the focused widget — when the App's focus
+//!   changes to a widget whose [`Widget::accepts_text_input`] returns
+//!   `true`, the keyboard slides up. Losing focus slides it down.
+//! - The chrome style follows [`crate::input_profile::current_input_profile`]
+//!   so an iPad and a Pixel see different keyboards from the same Rust
+//!   binary.
+//!
+//! ## Scope of this first cut
+//!
+//! - Single US-QWERTY letter layout + a numbers / symbols layer.
+//! - Tap-to-type (no long-press, no hold-to-repeat, no predictive bar
+//!   yet — the module is structured to grow into those without a
+//!   rewrite).
+//! - Layout-driven painting via [`layouts::Layout`] so adding a new
+//!   layer or layout is a data change, not a code change.
+
+use crate::draw_ctx::DrawCtx;
+use crate::event::{Key, Modifiers, MouseButton};
+use crate::geometry::{Point, Rect};
+use crate::input_profile::current_input_profile;
+
+pub mod events;
+pub mod key;
+pub mod layouts;
+pub mod state;
+pub mod style;
+
+use events::push_synthetic_key;
+use layouts::{Layer, Layout};
+use state::{with_state_mut, with_state_ref};
+use style::Style;
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Enable / disable the on-screen keyboard globally. Disabled keyboards
+/// never paint or capture events. The platform shell calls this once at
+/// startup; defaults to `false` so apps that haven't opted in (or
+/// desktop builds) see no behavior change.
+///
+/// Recommended pattern in a platform shell:
+/// ```ignore
+/// let profile = input_profile_from_hint(&user_agent, pointer_coarse);
+/// set_input_profile(profile);
+/// set_enabled(profile.is_mobile_touch());
+/// ```
+pub fn set_enabled(on: bool) {
+    with_state_mut(|s| s.enabled = on);
+}
+
+/// Read the global enabled flag.
+pub fn is_enabled() -> bool {
+    with_state_ref(|s| s.enabled)
+}
+
+/// Whether the keyboard is currently visible (visible-fraction > 0 in the
+/// slide animation). The host shell uses this to (a) skip the native
+/// keyboard hack, and (b) potentially reserve safe-area space.
+pub fn is_visible() -> bool {
+    with_state_ref(|s| s.visible_fraction() > 0.001)
+}
+
+/// Top edge of the keyboard panel in viewport coordinates (Y-up). When
+/// the keyboard is hidden this returns the viewport bottom (i.e. zero
+/// keyboard intrusion). Useful for the App layout to shrink the safe
+/// area so the focused widget doesn't sit under the keyboard.
+pub fn occluded_height(viewport_height: f64) -> f64 {
+    with_state_ref(|s| {
+        if !s.enabled {
+            return 0.0;
+        }
+        let target_h = s.last_panel_height.unwrap_or(0.0);
+        target_h * s.visible_fraction()
+    })
+    .min(viewport_height)
+}
+
+/// Called by [`App`](crate::widget::App) when the focused widget changes.
+/// Causes the keyboard to slide up / down by retargeting the slide tween.
+pub fn set_text_input_focused(focused: bool) {
+    with_state_mut(|s| {
+        if !s.enabled {
+            return;
+        }
+        s.text_input_focused = focused;
+        let target = if focused { 1.0 } else { 0.0 };
+        s.slide.set_target(target);
+        crate::animation::request_draw();
+    });
+}
+
+/// Programmatic dismiss — used e.g. by the "Done" key tap inside the
+/// keyboard, or by host code that wants to hide the keyboard without
+/// changing focus (rare).
+pub fn dismiss() {
+    with_state_mut(|s| {
+        s.text_input_focused = false;
+        s.slide.set_target(0.0);
+        crate::animation::request_draw();
+    });
+}
+
+/// `true` if the keyboard wants another frame this paint cycle (slide
+/// animation in flight). [`App::wants_draw`] consults this so the
+/// rAF / event loop keeps pumping during the slide.
+pub fn needs_draw() -> bool {
+    with_state_ref(|s| s.slide.is_animating())
+}
+
+// ---------------------------------------------------------------------------
+// Paint
+// ---------------------------------------------------------------------------
+
+/// Paint the keyboard panel and its keys. Called by [`App::paint`] last,
+/// after all other global-overlay drains, so the keyboard always sits on
+/// top of normal content, combo popups, tooltips, and modal overlays.
+///
+/// `viewport` is the logical (pre-`device_scale`) viewport size — the
+/// caller is responsible for any `ctx.scale(device_scale, …)` save/restore
+/// wrap (mirrors how combo popups are drained).
+pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry::Size) {
+    let visible_fraction = with_state_mut(|s| s.slide.tick());
+    if visible_fraction <= 0.001 {
+        // Hidden — also clear cached key hit-rects so a stale layout
+        // doesn't leak into the next show cycle.
+        with_state_mut(|s| s.last_painted_keys.clear());
+        return;
+    }
+
+    let style = Style::for_profile(current_input_profile());
+    let layer = with_state_ref(|s| s.current_layer);
+    let layout = Layout::for_layer(layer);
+
+    // Compute panel rect. The fully-extended height is determined by the
+    // layout (rows + paddings); we then slide it up from off-screen by
+    // (1 - visible_fraction) * height.
+    let panel_height = layout.compute_panel_height(viewport.width, &style);
+    let panel_width = viewport.width;
+    with_state_mut(|s| s.last_panel_height = Some(panel_height));
+
+    // Y-up coordinates: panel bottom edge sits at `bottom_y`, panel
+    // ranges [bottom_y, bottom_y + panel_height].
+    let hidden_offset = panel_height * (1.0 - visible_fraction);
+    let bottom_y = -hidden_offset;
+    let panel = Rect::new(0.0, bottom_y, panel_width, panel_height);
+
+    paint_panel_background(ctx, panel, &style);
+
+    // Lay out + paint keys, caching their hit rects for tap dispatch.
+    let painted_keys = layout.paint(ctx, panel, &style, layer);
+    with_state_mut(|s| s.last_painted_keys = painted_keys);
+}
+
+fn paint_panel_background(ctx: &mut dyn DrawCtx, panel: Rect, style: &Style) {
+    ctx.set_fill_color(style.panel_bg);
+    ctx.begin_path();
+    ctx.rect(panel.x, panel.y, panel.width, panel.height);
+    ctx.fill();
+
+    // Top accent line so the keyboard reads as a distinct surface from
+    // whatever the app is painting behind it.
+    ctx.set_stroke_color(style.panel_top_border);
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    let top_y = panel.y + panel.height;
+    ctx.move_to(panel.x, top_y);
+    ctx.line_to(panel.x + panel.width, top_y);
+    ctx.stroke();
+}
+
+// ---------------------------------------------------------------------------
+// Pointer routing
+// ---------------------------------------------------------------------------
+
+/// `true` when the keyboard panel currently occupies `pos` and would
+/// consume an event there.
+pub fn contains_point(pos: Point) -> bool {
+    if !is_visible() {
+        return false;
+    }
+    with_state_ref(|s| {
+        let frac = s.slide.value();
+        if frac <= 0.001 {
+            return false;
+        }
+        let panel_height = s.last_panel_height.unwrap_or(0.0);
+        let panel_top = panel_height * frac;
+        // Panel occupies [0, panel_top] in Y-up viewport coords.
+        pos.y >= 0.0 && pos.y <= panel_top
+    })
+}
+
+/// Handle a pointer-down inside the keyboard. Returns `true` if consumed
+/// (the [`App`](crate::widget::App) skips its normal tree dispatch).
+pub fn handle_software_keyboard_mouse_down(
+    pos: Point,
+    button: MouseButton,
+    _modifiers: Modifiers,
+) -> bool {
+    if button != MouseButton::Left {
+        return contains_point(pos);
+    }
+    if !contains_point(pos) {
+        return false;
+    }
+    let hit = find_key_at(pos);
+    with_state_mut(|s| {
+        s.pressed_key_index = hit;
+        s.captured_pointer = true;
+    });
+    if hit.is_some() {
+        crate::animation::request_draw();
+    }
+    true
+}
+
+/// Handle a pointer-move while the keyboard is interactive. Returns
+/// `true` if the keyboard wants to keep the pointer captured.
+pub fn handle_software_keyboard_mouse_move(pos: Point) -> bool {
+    let (captured, _) = with_state_ref(|s| (s.captured_pointer, s.pressed_key_index));
+    if !captured {
+        return false;
+    }
+    // Track hover for visual feedback on a drag inside the keyboard.
+    let new_hit = find_key_at(pos);
+    with_state_mut(|s| {
+        if s.pressed_key_index != new_hit {
+            s.pressed_key_index = new_hit;
+            crate::animation::request_draw();
+        }
+    });
+    true
+}
+
+/// Handle a pointer-up. If the release lands on the same key as the
+/// press, that key fires (`push_synthetic_key`).
+pub fn handle_software_keyboard_mouse_up(
+    pos: Point,
+    button: MouseButton,
+    modifiers: Modifiers,
+) -> bool {
+    let captured = with_state_ref(|s| s.captured_pointer);
+    if !captured {
+        return false;
+    }
+    let pressed = with_state_mut(|s| {
+        let p = s.pressed_key_index.take();
+        s.captured_pointer = false;
+        p
+    });
+    if button != MouseButton::Left {
+        crate::animation::request_draw();
+        return true;
+    }
+    let on_panel = contains_point(pos);
+    let final_hit = if on_panel { find_key_at(pos) } else { None };
+    if let (Some(start), Some(end)) = (pressed, final_hit) {
+        if start == end {
+            commit_key_press(end, modifiers);
+        }
+    }
+    crate::animation::request_draw();
+    true
+}
+
+fn find_key_at(pos: Point) -> Option<usize> {
+    with_state_ref(|s| {
+        s.last_painted_keys
+            .iter()
+            .enumerate()
+            .find(|(_, k)| k.rect.contains(pos))
+            .map(|(i, _)| i)
+    })
+}
+
+fn commit_key_press(index: usize, modifiers: Modifiers) {
+    let painted = with_state_ref(|s| s.last_painted_keys.get(index).cloned());
+    let Some(painted) = painted else {
+        return;
+    };
+    match painted.action {
+        key::KeyAction::Char(c) => {
+            // Apply shift state to letter / symbol selection if the
+            // layout didn't already render the uppercase variant. For
+            // letters the layout emits the upper-case glyph when
+            // `current_layer` is `Shifted`, so we just synthesize as-is.
+            let mut mods = modifiers;
+            if with_state_ref(|s| s.current_layer == Layer::Shifted) {
+                mods.shift = true;
+            }
+            push_synthetic_key(Key::Char(c), mods);
+            with_state_mut(|s| {
+                if s.current_layer == Layer::Shifted {
+                    // One-shot shift: drop back to base layer.
+                    s.current_layer = Layer::Letters;
+                }
+            });
+        }
+        key::KeyAction::Backspace => push_synthetic_key(Key::Backspace, modifiers),
+        key::KeyAction::Enter => {
+            push_synthetic_key(Key::Enter, modifiers);
+        }
+        key::KeyAction::Space => push_synthetic_key(Key::Char(' '), modifiers),
+        key::KeyAction::Switch(layer) => with_state_mut(|s| s.current_layer = layer),
+        key::KeyAction::Dismiss => dismiss(),
+    }
+    crate::animation::request_draw();
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic key drain (called from App after each pointer event)
+// ---------------------------------------------------------------------------
+
+pub use events::drain_synthetic_keys;
+
+// Re-export common types for ergonomics.
+pub use key::{KeyAction, KeyCap};
+pub use layouts::Layer as KeyboardLayer;
+
+// ---------------------------------------------------------------------------
+// Internal — invoked by App through `crate::widgets::on_screen_keyboard::test_hook`
+// in tests only.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+pub(crate) mod test_hook {
+    use super::*;
+    use crate::animation::Tween;
+    use state::KeyboardState;
+
+    pub fn force_layer(layer: Layer) {
+        with_state_mut(|s| s.current_layer = layer);
+    }
+
+    pub fn force_visible() {
+        with_state_mut(|s| {
+            s.enabled = true;
+            s.text_input_focused = true;
+            s.slide = Tween::new(1.0, 0.0);
+            s.last_panel_height = Some(240.0);
+        });
+    }
+
+    pub fn reset() {
+        with_state_mut(|s| {
+            *s = KeyboardState::default();
+        });
+    }
+}

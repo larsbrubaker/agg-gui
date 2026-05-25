@@ -37,6 +37,7 @@ pub mod framebuffer;
 pub mod geometry;
 pub mod gfx_ctx;
 pub mod gl_renderer;
+pub mod input_profile;
 pub mod layout_props;
 pub mod lcd_coverage;
 pub mod lcd_gfx_ctx;

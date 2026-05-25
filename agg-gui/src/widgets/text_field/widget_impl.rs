@@ -20,6 +20,10 @@ impl Widget for TextField {
         true
     }
 
+    fn accepts_text_input(&self) -> bool {
+        !self.read_only
+    }
+
     /// Composite parents (e.g. `ColorWheelPicker`) use this to push a live
     /// value into the field without bypassing `set_text`'s cell sync and
     /// cache invalidation.  Skipped while the field is focused so the user

@@ -164,6 +164,22 @@ pub trait Widget {
         vec![]
     }
 
+    /// `true` when this widget accepts free-form character input (typing
+    /// arbitrary letters, numbers, punctuation). Used by the on-screen
+    /// software keyboard (`crate::widgets::on_screen_keyboard`) to decide
+    /// whether to slide up when this widget gains focus.
+    ///
+    /// Default is `false`. `TextField` and `TextArea` override to `true`.
+    /// `DragValue` and similar numeric editors should override to `true`
+    /// only when they are in their full-text-edit mode; otherwise the
+    /// keyboard would appear for transient drag interactions.
+    ///
+    /// This is independent of [`is_focusable`](Self::is_focusable) — a
+    /// `Button` is focusable but doesn't accept typed text.
+    fn accepts_text_input(&self) -> bool {
+        false
+    }
+
     /// If this widget is text-bearing (e.g. `Label`), update its foreground
     /// colour.  Default is a no-op.  Composite widgets call this on their
     /// children to retint labels without rebuilding them — used by `Button`

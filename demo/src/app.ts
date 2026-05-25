@@ -16,7 +16,7 @@ type BoolFn        = () => boolean;
 type StringFn      = () => string;
 type OptionalStringFn = () => string | null;
 type InstallFontFn = (name: string, primary: Uint8Array, icons: Uint8Array, emoji: Uint8Array) => boolean;
-type SetPlatformFn = (platform: string) => void;
+type SetPlatformFn = (platform: string, pointerCoarse: boolean) => void;
 
 let wasmModule: Record<string, unknown> | null = null;
 const fontFetchCache = new Map<string, Promise<Uint8Array>>();
@@ -74,12 +74,25 @@ function updateCanvasSize(): boolean {
 }
 
 function detectClientPlatform(): string {
+  // Pass the full UA string when available — both the OS-family detector
+  // (Cmd vs. Ctrl) and the input-profile detector (mobile-touch
+  // keyboard) live in agg-gui and parse the same string.
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  const platform = nav.userAgentData?.platform || navigator.platform || navigator.userAgent || "";
-  if (/mac|iphone|ipad/i.test(platform)) return "macos";
-  if (/win/i.test(platform)) return "windows";
-  if (/linux|x11|android/i.test(platform)) return "linux";
-  return platform || "other";
+  return (
+    nav.userAgentData?.platform ||
+    navigator.userAgent ||
+    navigator.platform ||
+    "other"
+  );
+}
+
+function detectPointerCoarse(): boolean {
+  // `(pointer: coarse)` is true on touch-primary devices (phones,
+  // tablets), false on mouse / trackpad. iPad-mode Safari hides "iPad"
+  // from the UA, so this is the only reliable signal there.
+  return typeof window.matchMedia === "function"
+    ? window.matchMedia("(pointer: coarse)").matches
+    : false;
 }
 
 // --- Render ---
@@ -231,6 +244,18 @@ mobileTextInput.addEventListener("input", () => {
 
 function syncMobileKeyboard() {
   if (!wasmModule) return;
+  // If the agg-gui on-screen keyboard is taking over, get out of the
+  // way: blur the hidden textarea so the native iOS / Android keyboard
+  // does not also pop up.
+  const aggKeyboardActive =
+    (wasmModule["software_keyboard_visible"] as BoolFn | undefined)?.() ?? false;
+  if (aggKeyboardActive) {
+    if (document.activeElement === mobileTextInput) {
+      mobileTextInput.blur();
+      canvas.focus();
+    }
+    return;
+  }
   const textFocused = (wasmModule["text_input_focused"] as BoolFn | undefined)?.() ?? false;
   if (textFocused) {
     mobileTextInput.value = "";
@@ -501,7 +526,10 @@ async function init() {
     await wasm.default({ module_or_path: wasmUrl });
 
     const module = wasm as unknown as Record<string, unknown>;
-    (module["set_client_platform"] as SetPlatformFn | undefined)?.(detectClientPlatform());
+    (module["set_client_platform"] as SetPlatformFn | undefined)?.(
+      detectClientPlatform(),
+      detectPointerCoarse(),
+    );
     setLoadingText("Loading fonts…");
     await installFontRequest(module, (module["default_font_request"] as StringFn)());
 

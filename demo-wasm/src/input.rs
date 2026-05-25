@@ -61,6 +61,28 @@ pub fn set_device_pixel_ratio(dpr: f64) {
     mark_dirty();
 }
 
+/// Hand the JS-side platform / `pointer: coarse` detection result to
+/// agg-gui. Sets both `Platform` (so Ctrl/Cmd shortcut labels match)
+/// and `InputProfile` (so the on-screen keyboard auto-activates on
+/// touch devices). Idempotent — safe to call repeatedly if the host
+/// shell wants to refresh the profile (e.g. on viewport rotation).
+#[wasm_bindgen]
+pub fn set_client_platform(name: &str, pointer_coarse: bool) {
+    agg_gui::set_platform(agg_gui::platform_from_name(name));
+    let profile = agg_gui::input_profile::input_profile_from_hint(name, pointer_coarse);
+    agg_gui::input_profile::set_input_profile(profile);
+    agg_gui::widgets::on_screen_keyboard::set_enabled(profile.is_mobile_touch());
+    mark_dirty();
+}
+
+/// Whether the on-screen keyboard wants to be visible right now. The JS
+/// shell uses this to skip its old "focus the hidden HTML textarea"
+/// workaround when the agg-gui keyboard has taken over.
+#[wasm_bindgen]
+pub fn software_keyboard_visible() -> bool {
+    agg_gui::widgets::on_screen_keyboard::is_visible()
+}
+
 #[wasm_bindgen]
 pub fn on_mouse_move(x: f64, y: f64) {
     with_app_mut(|app| app.on_mouse_move(x, y));

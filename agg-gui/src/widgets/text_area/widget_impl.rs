@@ -21,6 +21,10 @@ impl Widget for TextArea {
         true
     }
 
+    fn accepts_text_input(&self) -> bool {
+        true
+    }
+
     fn margin(&self) -> Insets {
         self.base.margin
     }
