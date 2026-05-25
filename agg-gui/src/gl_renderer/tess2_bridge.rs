@@ -160,7 +160,7 @@ pub fn install_tess_panic_logger() {
 /// `extract` produces the caller-shaped result from the tessellator
 /// once it has finished without panicking; it never runs on the panic
 /// path.
-fn try_tessellate<T, F>(
+pub(crate) fn try_tessellate<T, F>(
     contours: &[Vec<[f32; 2]>],
     winding: WindingRule,
     label: &'static str,
@@ -578,7 +578,7 @@ pub fn tessellate_path_aa<VS: VertexSource>(
     Some((out_verts, out_indices))
 }
 
-fn to_tess_winding_rule(fill_rule: FillRule) -> WindingRule {
+pub(crate) fn to_tess_winding_rule(fill_rule: FillRule) -> WindingRule {
     match fill_rule {
         FillRule::NonZero => WindingRule::NonZero,
         FillRule::EvenOdd => WindingRule::Odd,

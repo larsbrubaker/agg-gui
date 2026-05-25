@@ -24,9 +24,22 @@ use wgpu::util::DeviceExt;
 use crate::buffer_arena::FrameArenas;
 use crate::end_frame::{Prepared, PreparedSlice};
 use crate::pipelines::{
-    LayerUniforms, LcbUniforms, LcdUniforms, SolidUniforms, TexUniforms, WgpuPipelines,
+    AaTexUniforms, LayerUniforms, LcbUniforms, LcdUniforms, SolidUniforms, TexUniforms,
+    WgpuPipelines,
 };
 use crate::{DrawCommand, LayerRoundedClip};
+
+/// Reinterpret a slice of `AaTexVertex` as raw bytes for upload.  The
+/// type is `#[repr(C)]` with only `f32` fields (pos:vec2 + uv:vec2 =
+/// 16 bytes, no padding, no Drop), so a flat byte view is sound.  We
+/// hand-roll this rather than pulling `bytemuck` into the agg-gui crate
+/// just for one type.
+fn aa_tex_verts_as_bytes(verts: &[agg_gui::gl_renderer::AaTexVertex]) -> &[u8] {
+    let ptr = verts.as_ptr() as *const u8;
+    let len = std::mem::size_of_val(verts);
+    // SAFETY: see doc above.
+    unsafe { std::slice::from_raw_parts(ptr, len) }
+}
 
 pub(crate) fn prepare_all(
     device: &wgpu::Device,
@@ -35,6 +48,7 @@ pub(crate) fn prepare_all(
     arenas: &mut FrameArenas,
     commands: &[DrawCommand],
     viewport: (f32, f32),
+    aa_step_bg1: &Arc<wgpu::BindGroup>,
 ) -> Vec<Prepared> {
     let mut size_stack: Vec<(f32, f32)> = vec![viewport];
     let mut out: Vec<Prepared> = Vec::with_capacity(commands.len());
@@ -126,6 +140,41 @@ pub(crate) fn prepare_all(
                     ib,
                     index_count: indices.len() as u32,
                     bg0,
+                    clip: *clip,
+                });
+            }
+
+            DrawCommand::AaTexture {
+                verts,
+                indices,
+                color,
+                global_alpha,
+                clip,
+            } => {
+                if verts.is_empty() || indices.is_empty() {
+                    continue;
+                }
+                let a = (color.a * global_alpha).clamp(0.0, 1.0);
+                let uniforms = AaTexUniforms {
+                    resolution: [cur_vp.0, cur_vp.1],
+                    _pad: [0.0; 2],
+                    color: [color.r, color.g, color.b, a],
+                };
+                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&uniforms));
+                let bg0 = mk_uniform_bg(device, &pipelines.aa_texture_bgl0, &ub);
+                let vb = alloc_vertex(device, queue, arenas, aa_tex_verts_as_bytes(verts));
+                let ib = alloc_index(
+                    device,
+                    queue,
+                    arenas,
+                    bytemuck::cast_slice(indices.as_slice()),
+                );
+                out.push(Prepared::AaTexture {
+                    vb,
+                    ib,
+                    index_count: indices.len() as u32,
+                    bg0,
+                    bg1: Arc::clone(aa_step_bg1),
                     clip: *clip,
                 });
             }

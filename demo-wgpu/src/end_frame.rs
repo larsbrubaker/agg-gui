@@ -80,6 +80,17 @@ pub(crate) enum Prepared {
         bg0: wgpu::BindGroup,
         clip: Option<[i32; 4]>,
     },
+    /// AA via texture lookup — agg-sharp `Graphics2DGpu` port.
+    /// `bg1` is the cached alpha-step texture binding owned by
+    /// `WgpuGfxCtx::aa_step_bg1`.
+    AaTexture {
+        vb: PreparedSlice,
+        ib: PreparedSlice,
+        index_count: u32,
+        bg0: wgpu::BindGroup,
+        bg1: Arc<wgpu::BindGroup>,
+        clip: Option<[i32; 4]>,
+    },
     /// Linear or radial gradient.
     Gradient {
         _ramp_tex: wgpu::Texture,
@@ -192,6 +203,7 @@ impl WgpuGfxCtx {
             &mut self.frame_arenas,
             &commands,
             self.viewport,
+            &self.aa_step_bg1,
         );
         let prepare_us = t_prepare.elapsed().as_micros().min(u32::MAX as u128) as u32;
 
@@ -415,6 +427,24 @@ fn execute_one(
             }
             pass.set_pipeline(&pipelines.aa_solid_pipeline);
             pass.set_bind_group(0, bg0, &[]);
+            pass.set_vertex_buffer(0, vb.wgpu_slice());
+            pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..*index_count, 0, 0..1);
+        }
+        Prepared::AaTexture {
+            vb,
+            ib,
+            index_count,
+            bg0,
+            bg1,
+            clip,
+        } => {
+            if !apply_clip(pass, *clip, vp) {
+                return;
+            }
+            pass.set_pipeline(&pipelines.aa_texture_pipeline);
+            pass.set_bind_group(0, bg0, &[]);
+            pass.set_bind_group(1, &**bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*index_count, 0, 0..1);

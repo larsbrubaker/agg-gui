@@ -67,6 +67,53 @@ struct VOut {
 ";
 
 // ---------------------------------------------------------------------------
+// AA-texture pipeline — direct port of agg-sharp `Graphics2DGpu` AA.
+// ---------------------------------------------------------------------------
+//
+// Vertex format: pos:vec2 + uv:vec2 (16 bytes). The U coordinate
+// indexes into a 1024-wide alpha-step texture (col 0 α=0, cols 1+
+// α=opaque) sampled LINEAR — the agg-sharp scheme described in
+// `aa_texture_mesh.rs`. The fragment outputs PREMULTIPLIED colour
+// (`color * α, α`) and the pipeline blends with One / OMSA so
+// per-pixel coverage is correctly composited without bleed into
+// neighbouring shapes.
+//
+// group(0) binding(0): AaTexUniforms { resolution, pad, color }
+// group(1) binding(0): alpha-step texture
+// group(1) binding(1): linear sampler
+
+pub(crate) const AA_TEXTURE_WGSL: &str = "
+struct AaTexUniforms {
+    resolution: vec2<f32>,
+    pad: vec2<f32>,
+    color: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> u: AaTexUniforms;
+@group(1) @binding(0) var step_tex: texture_2d<f32>;
+@group(1) @binding(1) var step_sampler: sampler;
+
+struct VIn {
+    @location(0) pos: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+}
+struct VOut {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) v_uv: vec2<f32>,
+}
+
+@vertex fn vs_main(in: VIn) -> VOut {
+    let ndc = (in.pos / u.resolution) * 2.0 - 1.0;
+    return VOut(vec4<f32>(ndc, 0.0, 1.0), in.uv);
+}
+
+@fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
+    let tex_a = textureSample(step_tex, step_sampler, in.v_uv).a;
+    let a = u.color.a * tex_a;
+    return vec4<f32>(u.color.rgb * a, a);
+}
+";
+
+// ---------------------------------------------------------------------------
 // Gradient pipeline (linear + radial, SVG spread modes)
 // ---------------------------------------------------------------------------
 // group(0) binding(0): GradientUniforms (see pipelines.rs)

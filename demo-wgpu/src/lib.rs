@@ -286,6 +286,19 @@ pub struct WgpuGfxCtx {
     /// against the per-command `create_buffer_init` cost.
     pub(crate) frame_arenas: buffer_arena::FrameArenas,
 
+    /// 1024×1 RGBA8 alpha-step texture for the AA-texture pipeline.
+    /// Column 0 = `(255, 255, 255, 0)`, columns 1..1023 =
+    /// `(255, 255, 255, 255)`.  Sampled LINEAR — produces the
+    /// sub-texel-wide AA transition right on the polygon edge, exactly
+    /// like agg-sharp's `aATextureImages[255]`.  See
+    /// `agg_gui::gl_renderer::aa_texture_mesh` for the texcoord scheme
+    /// that drives it.
+    #[allow(dead_code)]
+    pub(crate) aa_step_texture: Arc<wgpu::Texture>,
+    #[allow(dead_code)]
+    pub(crate) aa_step_view: wgpu::TextureView,
+    pub(crate) aa_step_bg1: Arc<wgpu::BindGroup>,
+
     /// Per-phase wall-clock timings from the most recent `end_frame`. Populated
     /// inside `flush_to_surface` so platform shells (atomartist, marbles) can
     /// surface a true breakdown of where wgpu-side time goes without needing
@@ -332,6 +345,29 @@ impl WgpuGfxCtx {
         // attachments and resolves into the active 1-sample target view.
         let pipelines = WgpuPipelines::new(&device, surface_format, 1);
         let frame_arenas = buffer_arena::FrameArenas::new(&device);
+
+        // Build the 1024×1 RGBA8 alpha-step texture once and stash a
+        // ready-to-bind bind group on the context — every AA-texture
+        // draw can reuse this exact `bg1` without ever rebuilding it,
+        // since the texture itself is immutable.
+        let aa_step_texture = build_aa_step_texture(&device, &queue);
+        let aa_step_view = aa_step_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let aa_step_bg1 = Arc::new(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("aa_step_bg1"),
+            layout: &pipelines.aa_texture_bgl1,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&aa_step_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&pipelines.linear_sampler),
+                },
+            ],
+        }));
+        let aa_step_texture = Arc::new(aa_step_texture);
+
         Self {
             device,
             queue,
@@ -370,6 +406,9 @@ impl WgpuGfxCtx {
             pending_screenshot: None,
             capture_texture: None,
             frame_arenas,
+            aa_step_texture,
+            aa_step_view,
+            aa_step_bg1,
             last_end_frame_stats: LastEndFrameStats::default(),
         }
     }
@@ -636,6 +675,18 @@ pub(crate) enum DrawCommand {
         global_alpha: f32,
         clip: Option<[i32; 4]>,
     },
+    /// Texture-based AA solid fill/stroke — direct port of agg-sharp's
+    /// `Graphics2DGpu` pipeline.  `verts` carries `(pos.xy, uv.xy)` from
+    /// `agg_gui::gl_renderer::tessellate_path_aa_texture`; the fragment
+    /// shader samples the 1024-wide alpha-step texture (`ctx.aa_step_view`)
+    /// to recover the per-pixel coverage.
+    AaTexture {
+        verts: Vec<agg_gui::gl_renderer::AaTexVertex>,
+        indices: Vec<u32>,
+        color: Color,
+        global_alpha: f32,
+        clip: Option<[i32; 4]>,
+    },
     /// Linear or radial gradient fill.
     Gradient {
         verts: Vec<[f32; 3]>,
@@ -725,4 +776,58 @@ pub(crate) enum DrawCommand {
         screen_rect: agg_gui::Rect,
         parent_clip: Option<[i32; 4]>,
     },
+}
+
+/// Build the 1024×1 RGBA8 alpha-step texture used by the AA-texture
+/// pipeline.  Direct port of `Graphics2DGpu::CheckLineImageCache` in
+/// agg-sharp (we only need the α=255 variant since the shader
+/// multiplies in the polygon's colour alpha as a uniform).
+///
+/// Pixel layout:
+/// - Column 0:        `(255, 255, 255, 0)`  ← fully transparent
+/// - Columns 1..1023: `(255, 255, 255, 255)` ← fully opaque
+///
+/// Sampled LINEAR, the boundary between texel 0 and texel 1 produces a
+/// sub-texel α ramp — that's the AA edge.  See
+/// `agg_gui::gl_renderer::aa_texture_mesh` for the texcoord scheme.
+fn build_aa_step_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
+    const W: u32 = 1024;
+    let mut pixels = vec![255u8; (W as usize) * 4];
+    // Column 0: zero out the alpha byte (offset 3 in RGBA).
+    pixels[3] = 0;
+
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("aa_step"),
+        size: wgpu::Extent3d {
+            width: W,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(W * 4),
+            rows_per_image: Some(1),
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    tex
 }

@@ -15,7 +15,7 @@ use std::mem::size_of;
 use bytemuck::{Pod, Zeroable};
 
 use crate::shaders::{
-    AA_SOLID_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_WGSL, LCD_WGSL, SOLID_WGSL,
+    AA_SOLID_WGSL, AA_TEXTURE_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_WGSL, LCD_WGSL, SOLID_WGSL,
     TEX_DOWNSAMPLE_3X_WGSL, TEX_DOWNSAMPLE_4X_WGSL, TEX_WGSL,
 };
 
@@ -32,6 +32,18 @@ pub(crate) struct SolidUniforms {
     pub color: [f32; 4],
 }
 const _: () = assert!(size_of::<SolidUniforms>() == 32);
+
+/// 32-byte uniform block for the AA-texture pipeline (agg-sharp port).
+/// Same layout as `SolidUniforms` but kept as a separate type so the
+/// pipeline plumbing can read intent at a glance.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub(crate) struct AaTexUniforms {
+    pub resolution: [f32; 2],
+    pub _pad: [f32; 2],
+    pub color: [f32; 4],
+}
+const _: () = assert!(size_of::<AaTexUniforms>() == 32);
 
 /// 32-byte uniform block for the textured-quad pipeline. `tint` is
 /// a per-draw RGBA multiplier so callers can fade image blits — set
@@ -145,6 +157,11 @@ pub struct WgpuPipelines {
     pub aa_solid_pipeline: wgpu::RenderPipeline,
     pub aa_solid_bgl: wgpu::BindGroupLayout,
 
+    // ── AA texture (agg-sharp `Graphics2DGpu` port; 1024-wide α-step texture).
+    pub aa_texture_pipeline: wgpu::RenderPipeline,
+    pub aa_texture_bgl0: wgpu::BindGroupLayout,
+    pub aa_texture_bgl1: wgpu::BindGroupLayout,
+
     // ── Gradient (linear + radial, SVG spread modes) ──────────────────────────
     pub gradient_pipeline: wgpu::RenderPipeline,
     pub gradient_bgl0: wgpu::BindGroupLayout,
@@ -235,6 +252,7 @@ impl WgpuPipelines {
         let solid_sm = mk_shader(device, "solid", SOLID_WGSL);
         let aa_solid_sm = mk_shader(device, "aa_solid", AA_SOLID_WGSL);
         let gradient_sm = mk_shader(device, "gradient", GRADIENT_WGSL);
+        let aa_texture_sm = mk_shader(device, "aa_texture", AA_TEXTURE_WGSL);
         let tex_sm = mk_shader(device, "tex", TEX_WGSL);
         let layer_sm = mk_shader(device, "layer", LAYER_WGSL);
         let lcd_sm = mk_shader(device, "lcd", LCD_WGSL);
@@ -249,6 +267,9 @@ impl WgpuPipelines {
             size_of::<crate::gradient::GradientUniforms>() as u64,
         );
         let gradient_bgl1 = mk_tex1_bgl(device, "gradient1");
+        let aa_texture_bgl0 =
+            mk_uniform_bgl(device, "aa_texture0", size_of::<AaTexUniforms>() as u64);
+        let aa_texture_bgl1 = mk_tex1_bgl(device, "aa_texture1");
         let tex_bgl0 = mk_uniform_bgl(device, "tex0", size_of::<TexUniforms>() as u64);
         let tex_bgl1 = mk_tex1_bgl(device, "tex1");
         let layer_bgl0 = mk_uniform_bgl(device, "layer0", size_of::<LayerUniforms>() as u64);
@@ -262,6 +283,8 @@ impl WgpuPipelines {
         let solid_pl = mk_layout(device, "solid", &[&solid_bgl]);
         let aa_solid_pl = mk_layout(device, "aa_solid", &[&aa_solid_bgl]);
         let gradient_pl = mk_layout(device, "gradient", &[&gradient_bgl0, &gradient_bgl1]);
+        let aa_texture_pl =
+            mk_layout(device, "aa_texture", &[&aa_texture_bgl0, &aa_texture_bgl1]);
         let tex_pl = mk_layout(device, "tex", &[&tex_bgl0, &tex_bgl1]);
         let layer_pl = mk_layout(device, "layer", &[&layer_bgl0, &layer_bgl1]);
         let lcd_pl = mk_layout(device, "lcd", &[&lcd_bgl0, &lcd_bgl1]);
@@ -341,6 +364,22 @@ impl WgpuPipelines {
             &[vbl_pos2_alpha()],
             surface_format,
             Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
+            sample_count,
+        );
+        // Premultiplied blend matches agg-sharp's
+        // `gl.BlendFunc(One, OneMinusSrcAlpha)` in `Graphics2DGpu.PreRender`
+        // — the shader emits `(color * α, α)` and the blend composites it
+        // correctly into the surface.
+        let aa_texture_pipeline = build_pipeline(
+            device,
+            "aa_texture",
+            &aa_texture_pl,
+            &aa_texture_sm,
+            &aa_texture_sm,
+            &[vbl_pos2_uv2()],
+            surface_format,
+            Some(BLEND_PREMUL),
             wgpu::ColorWrites::ALL,
             sample_count,
         );
@@ -484,6 +523,9 @@ impl WgpuPipelines {
             solid_bgl,
             aa_solid_pipeline,
             aa_solid_bgl,
+            aa_texture_pipeline,
+            aa_texture_bgl0,
+            aa_texture_bgl1,
             gradient_pipeline,
             gradient_bgl0,
             gradient_bgl1,
