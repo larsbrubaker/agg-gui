@@ -72,6 +72,13 @@ pub fn set_client_platform(name: &str, pointer_coarse: bool) {
     let profile = agg_gui::input_profile::input_profile_from_hint(name, pointer_coarse);
     agg_gui::input_profile::set_input_profile(profile);
     agg_gui::widgets::on_screen_keyboard::set_enabled(profile.is_mobile_touch());
+    // Apply the recommended UX zoom only here — at the platform-shell
+    // boundary where we genuinely know whether the user is on a real
+    // mobile device. `set_input_profile` no longer auto-applies the
+    // scale, so demos that flip the profile programmatically (the
+    // mobile-keyboard demo's radio) don't accidentally resize the
+    // whole UI.
+    agg_gui::ux_scale::set_ux_scale(profile.recommended_ux_scale());
     mark_dirty();
 }
 

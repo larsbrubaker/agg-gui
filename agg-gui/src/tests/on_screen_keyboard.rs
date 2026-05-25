@@ -23,17 +23,17 @@ fn fresh_state() {
     test_hook::reset();
     crate::widgets::on_screen_keyboard::events::clear();
     crate::widget::keyboard_scroll::reset_lift_for_test();
+    // `ux_scale` is now only changed by platform shells, never by
+    // `set_input_profile`. Pin to 1.0 anyway so tests don't depend on
+    // whatever an earlier test happened to set.
     crate::ux_scale::set_ux_scale(1.0);
 }
 
-/// Set the mobile profile for a keyboard test, then immediately pin
-/// `ux_scale` back to 1.0. Without this, `set_input_profile` would
-/// apply the recommended 1.7× mobile UX zoom and break layout
-/// arithmetic the tests do in physical-pixel terms. Production code
-/// wants the auto-bump; tests don't.
+/// Historically did "set mobile profile + pin ux_scale". Now that
+/// `set_input_profile` no longer touches `ux_scale`, this is just a
+/// readability shim for "this test exercises the mobile keyboard".
 fn set_mobile_profile_for_test() {
     set_input_profile(InputProfile::MobileIOS);
-    crate::ux_scale::set_ux_scale(1.0);
 }
 
 #[test]

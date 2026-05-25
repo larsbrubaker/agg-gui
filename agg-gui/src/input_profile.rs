@@ -73,15 +73,19 @@ impl InputProfile {
 static CURRENT: AtomicU8 = AtomicU8::new(profile_code(InputProfile::Desktop));
 
 /// Replace the global input profile. Call once at startup from the
-/// platform shell after detecting the device.
+/// platform shell after detecting the device, and at most once more
+/// if the device changes (e.g. a tablet docked into a desktop mode).
 ///
-/// Also applies the profile's [`InputProfile::recommended_ux_scale`]
-/// as the global [`crate::ux_scale`]. Apps that want a different
-/// scale (accessibility, very small phones, tablets) can call
-/// `ux_scale::set_ux_scale` *after* this returns to override.
+/// **Deliberately does NOT change [`crate::ux_scale`].** Earlier
+/// drafts auto-applied [`InputProfile::recommended_ux_scale`] here,
+/// but that meant programmatic profile changes (e.g. a demo's
+/// "preview as iPhone" radio) silently resized the entire UI, which
+/// is a surprise. The platform shell is the only place that knows
+/// whether the user is really on a touch device; it calls
+/// `set_ux_scale` explicitly. Demos / sandboxes can flip
+/// `InputProfile` without affecting on-screen UI scale.
 pub fn set_input_profile(profile: InputProfile) {
     CURRENT.store(profile_code(profile), Ordering::Relaxed);
-    crate::ux_scale::set_ux_scale(profile.recommended_ux_scale());
 }
 
 /// Read the global input profile.
