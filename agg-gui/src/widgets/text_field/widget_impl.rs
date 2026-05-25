@@ -24,6 +24,10 @@ impl Widget for TextField {
         !self.read_only
     }
 
+    fn text_input_value(&self) -> Option<String> {
+        Some(self.text())
+    }
+
     /// Composite parents (e.g. `ColorWheelPicker`) use this to push a live
     /// value into the field without bypassing `set_text`'s cell sync and
     /// cache invalidation.  Skipped while the field is focused so the user

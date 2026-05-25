@@ -7,6 +7,8 @@
 //! struct owned by the App; we don't ship that yet.
 
 use std::cell::RefCell;
+use std::time::Duration;
+use web_time::Instant;
 
 use crate::animation::Tween;
 
@@ -51,7 +53,48 @@ pub struct KeyboardState {
     /// `true` between MouseDown and MouseUp on the panel — used by
     /// the move/up handlers to know they should keep consuming events.
     pub captured_pointer: bool,
+    /// `true` if the user has toggled caps lock on (via double-tap
+    /// shift). Holds the keyboard in the `Shifted` layer until shift
+    /// is tapped again.
+    pub caps_lock: bool,
+    /// Most recent shift-key tap, used to detect double-tap → caps lock.
+    /// Cleared after a non-shift key press or after the double-tap
+    /// window expires.
+    pub last_shift_tap: Option<Instant>,
+    /// State machine for the held key (currently only Backspace). When
+    /// set we keep firing the key every `repeat_period` after an
+    /// initial delay, until the pointer releases / leaves.
+    pub key_repeat: Option<KeyRepeatState>,
 }
+
+/// Hold-to-repeat state captured the moment the user presses a
+/// repeat-eligible key (currently Backspace only). Polled from
+/// [`super::paint_software_keyboard`] every frame so the firing cadence
+/// happens in lockstep with the animation loop — no separate timer
+/// thread, fully WASM-friendly.
+#[derive(Debug, Clone, Copy)]
+pub struct KeyRepeatState {
+    /// Index into `last_painted_keys`. We re-check the key still exists
+    /// and is still under the pointer each tick.
+    pub key_index: usize,
+    /// When the user pressed the key down. `held_for` = now - pressed_at.
+    pub pressed_at: Instant,
+    /// When we last fired a synthetic key for this hold. `None` = never
+    /// fired; the first fire happens after `initial_delay` elapses.
+    pub last_fired_at: Option<Instant>,
+}
+
+impl KeyRepeatState {
+    /// How long the user must hold before the first repeat fires.
+    pub const INITIAL_DELAY: Duration = Duration::from_millis(450);
+    /// Period between subsequent repeats. Constant for now; we could
+    /// ramp it down for an accelerating delete-line feel later.
+    pub const REPEAT_PERIOD: Duration = Duration::from_millis(70);
+}
+
+/// Maximum gap between two Shift taps to count as a double-tap →
+/// caps lock toggle.
+pub const SHIFT_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(350);
 
 impl Default for KeyboardState {
     fn default() -> Self {
@@ -64,6 +107,9 @@ impl Default for KeyboardState {
             last_panel_height: None,
             pressed_key_index: None,
             captured_pointer: false,
+            caps_lock: false,
+            last_shift_tap: None,
+            key_repeat: None,
         }
     }
 }

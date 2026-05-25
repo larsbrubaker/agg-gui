@@ -44,7 +44,7 @@ fn enabling_keyboard_does_not_make_it_visible_alone() {
 fn focusing_text_input_raises_keyboard() {
     fresh_state();
     set_enabled(true);
-    set_text_input_focused(true);
+    set_text_input_focused(true, Some(""));
     // Animation hasn't ticked yet, but `is_visible` only requires the
     // tween value > 0.001. With a 0.22 s slide we should already be in
     // motion (start > 0) on the first paint. The keyboard module
@@ -53,6 +53,79 @@ fn focusing_text_input_raises_keyboard() {
     // using the test hook so visibility flips deterministically.
     test_hook::force_visible();
     assert!(is_visible(), "keyboard should be visible after force_visible");
+}
+
+#[test]
+fn auto_cap_on_empty_field() {
+    fresh_state();
+    set_enabled(true);
+    set_text_input_focused(true, Some(""));
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
+    use crate::widgets::on_screen_keyboard::layouts::Layer;
+    assert_eq!(
+        with_state_ref(|s| s.current_layer),
+        Layer::Shifted,
+        "empty field should auto-cap the first letter"
+    );
+}
+
+#[test]
+fn auto_cap_after_sentence_terminator() {
+    fresh_state();
+    set_enabled(true);
+    set_text_input_focused(true, Some("Hello world."));
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
+    use crate::widgets::on_screen_keyboard::layouts::Layer;
+    assert_eq!(
+        with_state_ref(|s| s.current_layer),
+        Layer::Shifted,
+        "field ending in '.' should auto-cap the next letter"
+    );
+}
+
+#[test]
+fn double_tap_shift_engages_caps_lock() {
+    fresh_state();
+    set_enabled(true);
+    set_text_input_focused(true, Some("hello"));
+    use crate::widgets::on_screen_keyboard::layouts::Layer;
+
+    // Two shift taps in quick succession → caps lock on, layer Shifted.
+    test_hook::simulate_shift_tap();
+    test_hook::simulate_shift_tap();
+    assert!(test_hook::caps_lock(), "double-tap should engage caps lock");
+    assert_eq!(test_hook::current_layer(), Layer::Shifted);
+
+    // Third tap while caps-locked → release lock + drop to lowercase.
+    test_hook::simulate_shift_tap();
+    assert!(
+        !test_hook::caps_lock(),
+        "third tap should release caps lock"
+    );
+    assert_eq!(test_hook::current_layer(), Layer::Letters);
+}
+
+#[test]
+fn single_shift_tap_does_not_engage_caps_lock() {
+    fresh_state();
+    set_enabled(true);
+    set_text_input_focused(true, Some("hello"));
+    test_hook::simulate_shift_tap();
+    assert!(!test_hook::caps_lock(), "one tap is one-shot shift");
+}
+
+#[test]
+fn no_auto_cap_mid_sentence() {
+    fresh_state();
+    set_enabled(true);
+    set_text_input_focused(true, Some("Hello world"));
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
+    use crate::widgets::on_screen_keyboard::layouts::Layer;
+    assert_eq!(
+        with_state_ref(|s| s.current_layer),
+        Layer::Letters,
+        "field with mid-sentence text should not auto-cap"
+    );
 }
 
 #[test]
@@ -105,7 +178,7 @@ fn synthetic_key_queue_drains_to_focused_field() {
     app.layout(Size::new(400.0, 800.0));
 
     // Tab so the TextField gets focus → triggers
-    // `set_text_input_focused(true)` inside set_focus.
+    // `set_text_input_focused(true, Some(""))` inside set_focus.
     app.on_key_down(crate::Key::Tab, Modifiers::default());
     assert!(app.has_focus(), "TextField should be focused after Tab");
 

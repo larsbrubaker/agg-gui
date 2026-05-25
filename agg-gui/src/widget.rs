@@ -180,6 +180,20 @@ pub trait Widget {
         false
     }
 
+    /// Current text contents of this widget if it is text-bearing.
+    /// Used by the on-screen software keyboard to apply the
+    /// sentence-start auto-capitalize heuristic: an empty field (or one
+    /// ending in `.`, `!`, `?`, newline) opens the keyboard with Shift
+    /// active.
+    ///
+    /// Default is `None`. `TextField` and `TextArea` override to return
+    /// their current text. Callers that only need to know *whether* the
+    /// widget accepts text input should use
+    /// [`accepts_text_input`](Self::accepts_text_input).
+    fn text_input_value(&self) -> Option<String> {
+        None
+    }
+
     /// If this widget is text-bearing (e.g. `Label`), update its foreground
     /// colour.  Default is a no-op.  Composite widgets call this on their
     /// children to retint labels without rebuilding them — used by `Button`

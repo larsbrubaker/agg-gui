@@ -734,16 +734,20 @@ impl App {
             dispatch_event(&mut self.root, &new, &Event::FocusGained, Point::ORIGIN);
         }
         // Push the newly-focused widget's text-input affordance into the
-        // on-screen keyboard so it slides up / down. Cheap: at most one
-        // call to `accepts_text_input` on the focused widget.
-        let accepts = new_path
+        // on-screen keyboard so it slides up / down. Also forward the
+        // current text so the keyboard can apply the sentence-start
+        // auto-capitalize heuristic.
+        let (accepts, existing_text) = new_path
             .as_ref()
             .map(|p| {
                 let w = widget_at_path(&mut self.root, p);
-                w.accepts_text_input()
+                (w.accepts_text_input(), w.text_input_value())
             })
-            .unwrap_or(false);
-        crate::widgets::on_screen_keyboard::set_text_input_focused(accepts);
+            .unwrap_or((false, None));
+        crate::widgets::on_screen_keyboard::set_text_input_focused(
+            accepts,
+            existing_text.as_deref(),
+        );
     }
 
     /// Move focus to the next (or previous) focusable widget in paint order.

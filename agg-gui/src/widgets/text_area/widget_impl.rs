@@ -25,6 +25,10 @@ impl Widget for TextArea {
         true
     }
 
+    fn text_input_value(&self) -> Option<String> {
+        Some(self.text())
+    }
+
     fn margin(&self) -> Insets {
         self.base.margin
     }
