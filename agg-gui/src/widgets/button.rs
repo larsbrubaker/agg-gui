@@ -92,6 +92,12 @@ pub struct Button {
     /// See [`with_icon`](Self::with_icon).
     icon: Option<ButtonIcon>,
 
+    /// When true, drop the 48 px touch-target width floor and shrink
+    /// the horizontal padding. Right for icon-only toolbar buttons
+    /// that want to sit tightly next to each other; defaults false
+    /// so regular buttons keep the comfortable touch target.
+    compact: bool,
+
     hovered: bool,
     pressed: bool,
     focused: bool,
@@ -121,6 +127,7 @@ impl Button {
             label_align: LabelAlign::Center,
             label_pad_h: LEFT_LABEL_PAD,
             icon: None,
+            compact: false,
             hovered: false,
             pressed: false,
             focused: false,
@@ -183,6 +190,17 @@ impl Button {
     /// the label past a group-marker triangle in sidebar rows.
     pub fn with_label_pad_h(mut self, pad: f64) -> Self {
         self.label_pad_h = pad;
+        self
+    }
+
+    /// Compact mode: drop the 48 px width floor and use a tighter
+    /// horizontal padding. Use for icon-only toolbar buttons where
+    /// you want them packed close to the glyph; the 48 px touch-
+    /// target default is right for stand-alone buttons but wastes
+    /// horizontal space when 5+ icon buttons need to sit next to
+    /// each other on a narrow mobile bar.
+    pub fn with_compact(mut self) -> Self {
+        self.compact = true;
         self
     }
 
@@ -455,15 +473,24 @@ impl Widget for Button {
         //   - wrap it in a `SizedBox` with an explicit width, or
         //   - apply `HAnchor::STRETCH`, or
         //   - set `with_min_size(Size::new(width, _))` for a width floor.
-        let pad_h = self.font_size * 1.2;
+        // Compact mode tightens the horizontal pad and drops the
+        // 48 px touch-target floor — icon-only toolbar buttons that
+        // need to sit next to each other on a narrow bar would
+        // otherwise eat all the row width.
+        let pad_h = if self.compact {
+            self.font_size * 0.7
+        } else {
+            self.font_size * 1.2
+        };
         let label_size = self.children[0].layout(Size::new(available.width, height));
         let icon_block_w = self
             .icon
             .as_ref()
             .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + ICON_GAP)
             .unwrap_or(0.0);
+        let min_w = if self.compact { 0.0 } else { 48.0 };
         let natural_w = (label_size.width + icon_block_w + pad_h)
-            .max(48.0)
+            .max(min_w)
             .max(self.base.min_size.width);
         let width = if self.base.h_anchor.is_stretch() {
             available.width.max(natural_w)

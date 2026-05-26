@@ -206,6 +206,43 @@ fn test_button_with_icon_grows_to_fit_icon_plus_label() {
 }
 
 #[test]
+fn test_button_compact_drops_48px_floor() {
+    // An icon-only Button (empty label, icon set) defaults to the
+    // 48 px touch-target width floor. `with_compact()` should drop
+    // that so the natural width tracks icon + minimal pad — used by
+    // mobile toolbar rows where 5+ icon buttons need to sit next to
+    // each other without overflowing.
+    use crate::text::Font;
+    use crate::widgets::Button;
+    use std::sync::Arc;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let mut plain = Button::new("", Arc::clone(&font))
+        .with_font_size(14.0)
+        .with_icon('\u{f04b}', Arc::clone(&font));
+    let plain_size = plain.layout(Size::new(400.0, 100.0));
+    assert_eq!(
+        plain_size.width as i64, 48,
+        "non-compact icon-only button should hit the 48 px floor"
+    );
+    let mut compact = Button::new("", Arc::clone(&font))
+        .with_font_size(14.0)
+        .with_icon('\u{f04b}', Arc::clone(&font))
+        .with_compact();
+    let compact_size = compact.layout(Size::new(400.0, 100.0));
+    assert!(
+        compact_size.width < 48.0,
+        "compact icon-only button should be < 48 px, got {}px",
+        compact_size.width
+    );
+    assert!(
+        compact_size.width >= 16.0,
+        "compact button should still leave room for the glyph, got {}px",
+        compact_size.width
+    );
+}
+
+#[test]
 fn test_button_label_centers_when_height_is_constrained() {
     // Sidebar demo rows give Button a shorter height than its natural
     // 24 px layout height. The label must be centered in that constrained
