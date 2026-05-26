@@ -193,6 +193,35 @@ fn adding_a_node_invalidates_the_backbuffer() {
     assert_eq!(editor.children().len(), 3);
 }
 
+/// Regression: switching the global theme (light ↔ dark) must
+/// invalidate the cached children-widget tree so the next layout
+/// rebuilds every NodeWidget against the fresh `CanvasPalette`.
+/// Without this the chrome (body fill, border, label colours,
+/// connector socket strokes) stays at the old palette's colours
+/// after a theme flip — visually the nodes "stay light in dark
+/// mode" even though `current_visuals()` has already swapped.
+#[test]
+fn theme_change_invalidates_paint_fingerprint() {
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+    seed_nodes(
+        &mut editor,
+        &memory,
+        vec![mk_node(1, "Extrude", [50.0, 50.0])],
+    );
+
+    let layouts = editor.snapshot_layouts();
+    agg_gui::set_visuals(agg_gui::Visuals::light());
+    let fp_light = editor.compute_fingerprint(&layouts, None);
+    agg_gui::set_visuals(agg_gui::Visuals::dark());
+    let fp_dark = editor.compute_fingerprint(&layouts, None);
+    assert_ne!(
+        fp_light, fp_dark,
+        "compute_fingerprint must include the theme epoch — otherwise a light↔dark switch reuses the cached node-widget tree built against the old palette and the canvas paints stale colours",
+    );
+}
+
 #[test]
 fn moving_a_node_invalidates_the_backbuffer() {
     let (model, memory) = fixture_with_typed_handle();

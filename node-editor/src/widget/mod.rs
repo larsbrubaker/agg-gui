@@ -389,6 +389,13 @@ impl NodeEditor {
         self.canvas_offset[0].to_bits().hash(&mut h);
         self.canvas_offset[1].to_bits().hash(&mut h);
         self.canvas_scale.to_bits().hash(&mut h);
+        // Theme epoch participates: every child NodeWidget bakes the
+        // active `CanvasPalette` into its `NodePaintContext` at
+        // rebuild time, so a light↔dark flip with no other model
+        // change must still trigger `rebuild_children` — otherwise
+        // the cached chrome (body, border, labels, sockets) keeps
+        // painting in the old theme's colours.
+        agg_gui::current_visuals_epoch().hash(&mut h);
         h.finish()
     }
 
