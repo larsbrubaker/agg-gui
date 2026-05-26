@@ -107,6 +107,14 @@ pub fn reset_lift_for_test() {
     LIFT.with(|c| *c.borrow_mut() = Tween::new(0.0, LIFT_DURATION_SECS));
 }
 
+/// Where the lift tween is travelling toward (last value passed to
+/// `request_lift`).  Useful for asserting that focus loss did in fact
+/// retarget the lift back to 0 without waiting on the animation.
+#[cfg(test)]
+pub fn lift_target_for_test() -> f64 {
+    LIFT.with(|c| c.borrow().target())
+}
+
 /// Drop a screen-space position into the lifted widget-tree frame
 /// (subtract the active keyboard-driven lift).  Cheap no-op when the
 /// keyboard isn't lifting anything.  Mouse handlers call this AFTER

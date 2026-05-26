@@ -155,6 +155,60 @@ fn dismiss_lowers_keyboard() {
     assert!(!is_visible());
 }
 
+/// Tapping the keyboard's close key must (1) drop the keyboard,
+/// (2) clear focus on the text field that was open, and (3) retarget
+/// the screen lift back to 0 so the tree slides down with the
+/// keyboard.  Before the fix, dismiss() only handled (1) and (3) was
+/// stuck because focus never changed.
+#[test]
+fn dismiss_clears_text_field_focus_and_drops_lift() {
+    fresh_state();
+    set_mobile_profile_for_test();
+    set_enabled(true);
+
+    // A bare TextField fills the viewport — its bottom sits at y=0
+    // (Y-up), under the keyboard panel, so focusing it raises the
+    // keyboard AND retargets the lift to clear the field.
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let field = TextField::new(Arc::clone(&font)).with_text("hi");
+    let mut app = App::new(Box::new(field));
+    app.layout(Size::new(400.0, 800.0));
+
+    // Click anywhere inside the field — small `y` (Y-down screen
+    // pixels) maps to the top of the viewport in Y-up, well above the
+    // keyboard panel which sits at the bottom.
+    app.on_mouse_down(50.0, 50.0, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(50.0, 50.0, MouseButton::Left, Modifiers::default());
+    assert!(app.has_focus(), "TextField should be focused after tap");
+    // The keyboard's slide tween hasn't ticked yet, so `is_visible()`
+    // (value-threshold) reports false here — but `text_input_focused`
+    // is the conceptual "keyboard is up" flag and is set immediately.
+    assert!(
+        crate::widgets::on_screen_keyboard::state::with_state_ref(|s| s.text_input_focused),
+        "keyboard should be tracking a focused text input",
+    );
+    assert!(
+        crate::widget::keyboard_scroll::lift_target_for_test() > 0.0,
+        "lift target should be positive (focused field is below the keyboard panel)",
+    );
+
+    // Simulate tapping the keyboard's close key by calling dismiss()
+    // (which is what KeyAction::Dismiss invokes internally) and then
+    // pumping the event drain the App runs after every pointer event.
+    on_screen_keyboard::dismiss();
+    app.drain_keyboard_events_for_test();
+
+    assert!(
+        !app.has_focus(),
+        "dismiss must clear focus on the text field so the next focus event lands cleanly",
+    );
+    assert_eq!(
+        crate::widget::keyboard_scroll::lift_target_for_test(),
+        0.0,
+        "dismiss must retarget the screen lift back to 0 so the tree comes back down",
+    );
+}
+
 #[test]
 fn pointer_outside_panel_falls_through() {
     fresh_state();

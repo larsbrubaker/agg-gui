@@ -295,6 +295,14 @@ impl Tween {
         self.current
     }
 
+    /// Where the tween is animating *towards* — i.e. the value last
+    /// passed to [`Self::set_target`].  Lets tests assert intent
+    /// (`request_lift(0.0)` was called) without waiting for the
+    /// animation to settle, which is otherwise wall-clock-dependent.
+    pub fn target(&self) -> f64 {
+        self.target
+    }
+
     /// Whether the tween still needs frames to reach its target.
     pub fn is_animating(&self) -> bool {
         self.start_time.is_some()

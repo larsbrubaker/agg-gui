@@ -221,15 +221,35 @@ pub fn set_text_input_focused(
     });
 }
 
-/// Programmatic dismiss — used e.g. by the "Done" key tap inside the
-/// keyboard, or by host code that wants to hide the keyboard without
-/// changing focus (rare).
+/// Programmatic dismiss — used by the keyboard's close key, and by
+/// host code that wants to hide the keyboard.
+///
+/// Sets a one-shot `dismiss_requested` flag the App drains every
+/// event loop iteration via [`take_dismiss_request`] / `App::drain_keyboard_events`,
+/// which clears focus on the previously-focused text field.  That
+/// `FocusLost` is what retargets the keyboard-aware lift back to 0
+/// so the tree slides down alongside the keyboard panel — without
+/// it the panel falls but the lifted tree stays parked above an
+/// empty band where the keyboard used to sit.
 pub fn dismiss() {
     with_state_mut(|s| {
         s.text_input_focused = false;
         s.slide.set_target(0.0);
+        s.dismiss_requested = true;
         crate::animation::request_draw();
     });
+}
+
+/// Atomically read-and-clear the dismiss-request flag set by
+/// [`dismiss`].  Called once per event loop iteration by the App so
+/// the focused text field gets a `FocusLost` and the screen-lift
+/// tween retargets back to 0.  Returns `true` if a dismiss was pending.
+pub fn take_dismiss_request() -> bool {
+    with_state_mut(|s| {
+        let pending = s.dismiss_requested;
+        s.dismiss_requested = false;
+        pending
+    })
 }
 
 /// `true` if the keyboard wants another frame this paint cycle (slide

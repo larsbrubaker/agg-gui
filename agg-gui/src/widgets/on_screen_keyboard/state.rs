@@ -65,6 +65,14 @@ pub struct KeyboardState {
     /// set we keep firing the key every `repeat_period` after an
     /// initial delay, until the pointer releases / leaves.
     pub key_repeat: Option<KeyRepeatState>,
+    /// Set by [`super::dismiss`] when the user taps the keyboard's
+    /// close key.  Drained once per event-loop iteration by the App
+    /// (see `App::drain_keyboard_events`), which calls
+    /// `set_focus(None)` so the previously-focused text field gets a
+    /// `FocusLost` and the keyboard-aware lift retargets back to 0 —
+    /// otherwise the keyboard panel slides down but the tree stays
+    /// lifted, leaving an empty band where the keyboard used to be.
+    pub dismiss_requested: bool,
 }
 
 /// Hold-to-repeat state captured the moment the user presses a
@@ -110,6 +118,7 @@ impl Default for KeyboardState {
             caps_lock: false,
             last_shift_tap: None,
             key_repeat: None,
+            dismiss_requested: false,
         }
     }
 }

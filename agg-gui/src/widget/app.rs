@@ -223,19 +223,24 @@ impl App {
             || super::keyboard_scroll::is_lift_animating()
     }
 
-    /// Pump every key the on-screen keyboard has synthesised since the
-    /// last drain back through [`Self::on_key_down`] so the focused
-    /// widget sees them exactly as if they had come from a physical
-    /// keyboard. Idempotent / cheap when the queue is empty.
+    /// Pump pending synthetic keys back through [`Self::on_key_down`]
+    /// AND apply any pending dismiss request — the close key on the
+    /// keyboard panel clears focus, which then drops the
+    /// keyboard-aware screen lift via `notify_focus_change`.
     fn drain_keyboard_synthetic_keys(&mut self) {
         let pending = crate::widgets::on_screen_keyboard::drain_synthetic_keys();
         for (key, mods) in pending {
-            // Re-enter on_key_down so all the normal modal / focus /
-            // global-key-handler plumbing applies. No risk of loops:
-            // the keyboard only enqueues from pointer events, and
-            // on_key_down does not produce pointer events.
             self.on_key_down(key, mods);
         }
+        if crate::widgets::on_screen_keyboard::take_dismiss_request() {
+            self.set_focus(None);
+        }
+    }
+
+    /// Test-only mirror of the end-of-event-loop drain.
+    #[cfg(test)]
+    pub fn drain_keyboard_events_for_test(&mut self) {
+        self.drain_keyboard_synthetic_keys();
     }
 
     /// Earliest scheduled draw deadline across the visible widget tree.
