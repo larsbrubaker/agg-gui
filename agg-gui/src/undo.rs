@@ -30,13 +30,31 @@
 /// Implement this trait to participate in the shared undo/redo stack.
 /// The `do_it` / `undo_it` methods are called by [`UndoBuffer`] on redo and
 /// undo respectively.
-pub trait UndoRedoCommand {
+///
+/// `as_any_mut` is the escape hatch for in-stroke coalescing — see
+/// [`UndoBuffer::try_coalesce_last`]. Implementations downcast the
+/// top-of-stack command back to their concrete type and merge a fresh
+/// same-stroke action into the existing one (replacing its `after`
+/// snapshot) instead of pushing a new command. Required so multi-event
+/// strokes — slider drag, node drag, typing into a number field — land
+/// as a single undo step.
+///
+/// Every implementor must provide `as_any_mut` — typically the one-liner
+/// `{ self }`. Commands that don't want coalescing leave the method
+/// alone; their `try_coalesce_last` predicate just returns `false` and
+/// `add_and_do` runs the usual path.
+pub trait UndoRedoCommand: 'static {
     /// Short human-readable description, e.g. `"insert text"`.
     fn name(&self) -> &str;
     /// Re-apply the operation (called on Redo).
     fn do_it(&mut self);
     /// Reverse the operation (called on Undo).
     fn undo_it(&mut self);
+    /// Downcast hook for in-stroke coalescing. Implementors forward
+    /// `self`; the predicate passed to [`UndoBuffer::try_coalesce_last`]
+    /// runs `cmd.as_any_mut().downcast_mut::<ConcreteType>()` to inspect
+    /// the top of the stack.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +150,38 @@ impl UndoBuffer {
         self.undo_stack.clear();
         self.redo_stack.clear();
     }
+
+    /// In-stroke coalescing. Pass a closure that inspects the top of
+    /// the undo stack and decides whether the action that just
+    /// occurred is part of the same logical stroke:
+    ///
+    /// * `f` downcasts the top command via `cmd.as_any_mut()` to its
+    ///   concrete type and, if the keys match (same node + same
+    ///   property, same node drag, etc.), updates the command's
+    ///   `after` snapshot to reflect the latest value and applies the
+    ///   change to the document — returning `true`.
+    /// * If the top command is a different kind or targets different
+    ///   state, the closure returns `false` and the caller falls back
+    ///   to `add_and_do` to push a fresh command.
+    ///
+    /// Implementations of `do_it` are NOT re-run when coalescing
+    /// succeeds — the closure is responsible for any document-side
+    /// mutation. The redo stack is cleared on a successful merge,
+    /// matching the semantics of `add` / `add_and_do`.
+    ///
+    /// Returns `true` when coalescing succeeded.
+    pub fn try_coalesce_last<F>(&mut self, mut f: F) -> bool
+    where
+        F: FnMut(&mut dyn UndoRedoCommand) -> bool,
+    {
+        if let Some(top) = self.undo_stack.last_mut() {
+            if f(top.as_mut()) {
+                self.redo_stack.clear();
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl Default for UndoBuffer {
@@ -182,5 +232,8 @@ impl UndoRedoCommand for DoUndoActions {
     }
     fn undo_it(&mut self) {
         (self.undo_fn)()
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

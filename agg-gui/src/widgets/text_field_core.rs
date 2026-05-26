@@ -183,4 +183,7 @@ impl UndoRedoCommand for TextEditCommand {
     fn undo_it(&mut self) {
         *self.target.borrow_mut() = self.before.clone();
     }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
