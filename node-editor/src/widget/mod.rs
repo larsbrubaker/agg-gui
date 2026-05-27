@@ -29,6 +29,12 @@ use popup::{build_add_node_popup_items, translate_event_into};
 mod nodes_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_common;
+#[cfg(test)]
+mod tests_noodle;
+#[cfg(test)]
+mod tests_overlay;
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -46,8 +52,8 @@ use crate::draw::{
 };
 use crate::model::{NodeGraphModel, NodeId, SocketTypeId};
 
-use fingerprint::hash_row;
 use crate::widget::nodes::{NodePaintContext, NodeWidget};
+use fingerprint::hash_row;
 
 const ZOOM_MIN: f64 = 0.15;
 const ZOOM_MAX: f64 = 3.0;
@@ -650,4 +656,3 @@ impl Widget for NodeEditor {
         }
     }
 }
-
