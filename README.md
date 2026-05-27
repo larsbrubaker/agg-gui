@@ -13,7 +13,6 @@ Y-up coordinates throughout.
 [![docs.rs](https://docs.rs/agg-gui/badge.svg)](https://docs.rs/agg-gui)
 [![CI](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml)
 [![Demo](https://github.com/larsbrubaker/agg-gui/actions/workflows/deploy-demo.yml/badge.svg?branch=main&event=push)](https://larsbrubaker.github.io/agg-gui/)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/larsbrubaker)
 
 ## Live Demo
 
@@ -200,6 +199,19 @@ Local path overrides for underlying libraries (uncomment in workspace `Cargo.tom
 agg-rust       = { path = "../../agg-rust" }
 clipper2-rust  = { path = "../../clipper2-rust" }
 ```
+
+## Support the Project
+
+<a href="https://buymeacoffee.com/larsbrubaker"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="210"></a>
+
+agg-gui is open-source and free to use, maintained in spare time as a labor of love.
+
+If you find it useful, here are a few ways to help keep development going:
+
+- **Donations:** [Buy Me a Coffee](https://buymeacoffee.com/larsbrubaker) — every coffee helps.
+- **Star the repo:** Costs nothing and helps others find the project.
+- **Report issues:** [Open an issue](https://github.com/larsbrubaker/agg-gui/issues) for bugs or feature ideas.
+- **Contribute:** PRs welcome — open an issue first to discuss larger changes.
 
 ## License
 
