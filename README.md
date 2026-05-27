@@ -13,6 +13,7 @@ Y-up coordinates throughout.
 [![docs.rs](https://docs.rs/agg-gui/badge.svg)](https://docs.rs/agg-gui)
 [![CI](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml)
 [![Demo](https://github.com/larsbrubaker/agg-gui/actions/workflows/deploy-demo.yml/badge.svg?branch=main&event=push)](https://larsbrubaker.github.io/agg-gui/)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/larsbrubaker)
 
 ## Live Demo
 
