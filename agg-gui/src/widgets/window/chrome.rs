@@ -88,7 +88,13 @@ pub fn paint_chrome_shadow(ctx: &mut dyn DrawCtx, w: f64, h: f64, style: &Chrome
 /// title-bar strip at the top is excluded (the caller paints that
 /// separately so the top corner radius reads as one shape, no
 /// overlapping fills).
-pub fn paint_chrome_body(ctx: &mut dyn DrawCtx, w: f64, h: f64, style: &ChromeStyle, collapsed: bool) {
+pub fn paint_chrome_body(
+    ctx: &mut dyn DrawCtx,
+    w: f64,
+    h: f64,
+    style: &ChromeStyle,
+    collapsed: bool,
+) {
     if collapsed {
         return;
     }
@@ -160,7 +166,13 @@ pub fn paint_chrome_border(ctx: &mut dyn DrawCtx, w: f64, h: f64, style: &Chrome
     ctx.set_stroke_color(style.border_color);
     ctx.set_line_width(1.0);
     ctx.begin_path();
-    ctx.rounded_rect(0.5, 0.5, (w - 1.0).max(0.0), (h - 1.0).max(0.0), style.corner_radius);
+    ctx.rounded_rect(
+        0.5,
+        0.5,
+        (w - 1.0).max(0.0),
+        (h - 1.0).max(0.0),
+        style.corner_radius,
+    );
     ctx.stroke();
 }
 
@@ -186,4 +198,3 @@ pub fn paint_chevron(ctx: &mut dyn DrawCtx, cx: f64, cy: f64, collapsed: bool, c
     }
     ctx.stroke();
 }
-

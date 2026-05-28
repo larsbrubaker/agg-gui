@@ -139,7 +139,11 @@ pub fn on_mouse_leave() {
 
 #[wasm_bindgen]
 pub fn on_touch_start(id: u32, x: f64, y: f64, force: f64) {
-    let f = if force > 0.0 { Some(force as f32) } else { None };
+    let f = if force > 0.0 {
+        Some(force as f32)
+    } else {
+        None
+    };
     with_app_mut(|app| {
         app.on_touch_start(
             agg_gui::TouchDeviceId(0),
@@ -154,7 +158,11 @@ pub fn on_touch_start(id: u32, x: f64, y: f64, force: f64) {
 
 #[wasm_bindgen]
 pub fn on_touch_move(id: u32, x: f64, y: f64, force: f64) {
-    let f = if force > 0.0 { Some(force as f32) } else { None };
+    let f = if force > 0.0 {
+        Some(force as f32)
+    } else {
+        None
+    };
     with_app_mut(|app| {
         app.on_touch_move(
             agg_gui::TouchDeviceId(0),

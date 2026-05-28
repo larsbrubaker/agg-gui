@@ -177,11 +177,7 @@ pub fn target_panel_height(viewport_width: f64) -> f64 {
 /// a quantity field that wants the digit pad up first.  When
 /// [`KeyboardInputMode::Numeric`] is passed the auto-cap heuristic is
 /// skipped and the keyboard opens on [`Layer::Numbers`].
-pub fn set_text_input_focused(
-    focused: bool,
-    existing_text: Option<&str>,
-    mode: KeyboardInputMode,
-) {
+pub fn set_text_input_focused(focused: bool, existing_text: Option<&str>, mode: KeyboardInputMode) {
     with_state_mut(|s| {
         if !s.enabled {
             return;

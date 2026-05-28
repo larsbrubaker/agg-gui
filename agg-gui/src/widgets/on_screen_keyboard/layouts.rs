@@ -181,7 +181,11 @@ fn letters_layer(shifted: bool) -> Layout {
     row3.push(KeySpec {
         width_units: 1.5,
         cap: KeyCap::Glyph(KeyGlyph::Shift),
-        action: KeyAction::Switch(if shifted { Layer::Letters } else { Layer::Shifted }),
+        action: KeyAction::Switch(if shifted {
+            Layer::Letters
+        } else {
+            Layer::Shifted
+        }),
         kind: KeyKind::Utility,
     });
     row3.extend(row_keys(&[
@@ -201,7 +205,11 @@ fn letters_layer(shifted: bool) -> Layout {
     });
     rows.push(row3);
 
-    rows.push(action_row(if shifted { Layer::Shifted } else { Layer::Letters }));
+    rows.push(action_row(if shifted {
+        Layer::Shifted
+    } else {
+        Layer::Letters
+    }));
     Layout { rows }
 }
 
@@ -214,8 +222,18 @@ fn numbers_layer() -> Layout {
     };
 
     let mut rows = Vec::with_capacity(4);
-    rows.push(['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].iter().map(|c| digit(*c)).collect());
-    rows.push(['-', '/', ':', ';', '(', ')', '$', '&', '@', '"'].iter().map(|c| digit(*c)).collect());
+    rows.push(
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+            .iter()
+            .map(|c| digit(*c))
+            .collect(),
+    );
+    rows.push(
+        ['-', '/', ':', ';', '(', ')', '$', '&', '@', '"']
+            .iter()
+            .map(|c| digit(*c))
+            .collect(),
+    );
 
     let mut row3 = Vec::with_capacity(9);
     row3.push(KeySpec {
@@ -248,8 +266,18 @@ fn symbols_layer() -> Layout {
     };
 
     let mut rows = Vec::with_capacity(4);
-    rows.push(['[', ']', '{', '}', '#', '%', '^', '*', '+', '='].iter().map(|c| sym(*c)).collect());
-    rows.push(['_', '\\', '|', '~', '<', '>', '€', '£', '¥', '·'].iter().map(|c| sym(*c)).collect());
+    rows.push(
+        ['[', ']', '{', '}', '#', '%', '^', '*', '+', '=']
+            .iter()
+            .map(|c| sym(*c))
+            .collect(),
+    );
+    rows.push(
+        ['_', '\\', '|', '~', '<', '>', '€', '£', '¥', '·']
+            .iter()
+            .map(|c| sym(*c))
+            .collect(),
+    );
 
     let mut row3 = Vec::with_capacity(9);
     row3.push(KeySpec {

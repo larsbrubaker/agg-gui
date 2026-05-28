@@ -355,18 +355,13 @@ pub struct CachedTess {
 /// a degenerate shape tess2 can't handle).
 pub fn tessellate_interior<VS: VertexSource>(path: &mut VS) -> Option<CachedTess> {
     let contours = agg_path_to_contours(path);
-    try_tessellate(
-        &contours,
-        WindingRule::Odd,
-        "tessellate_interior",
-        |tess| {
-            Some(CachedTess {
-                vertices: tess.vertices().iter().map(|&v| v as f32).collect(),
-                indices: tess.elements().to_vec(),
-                edge_flags: tess.edge_flags().to_vec(),
-            })
-        },
-    )
+    try_tessellate(&contours, WindingRule::Odd, "tessellate_interior", |tess| {
+        Some(CachedTess {
+            vertices: tess.vertices().iter().map(|&v| v as f32).collect(),
+            indices: tess.elements().to_vec(),
+            edge_flags: tess.edge_flags().to_vec(),
+        })
+    })
 }
 
 /// Given a pre-computed `CachedTess` whose vertices have already been

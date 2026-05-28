@@ -28,9 +28,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::input_profile::{
-    current_input_profile, set_input_profile, InputProfile,
-};
+use agg_gui::input_profile::{current_input_profile, set_input_profile, InputProfile};
 use agg_gui::widgets::on_screen_keyboard::{self, KeyboardInputMode};
 use agg_gui::{
     Color, FlexColumn, Font, Label, RadioGroup, ScrollView, SizedBox, TextField, Widget,
@@ -102,9 +100,13 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
     );
     let mode_radio = {
         let cell = Rc::clone(&primary_mode);
-        RadioGroup::new(vec!["Text (letters)", "Numeric (digit pad)"], 0, Arc::clone(&font))
-            .with_font_size(13.0)
-            .on_change(move |idx| apply_mode_choice(&cell, idx))
+        RadioGroup::new(
+            vec!["Text (letters)", "Numeric (digit pad)"],
+            0,
+            Arc::clone(&font),
+        )
+        .with_font_size(13.0)
+        .on_change(move |idx| apply_mode_choice(&cell, idx))
     };
     col.push(Box::new(mode_radio), 0.0);
 

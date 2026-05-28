@@ -16,10 +16,7 @@
 /// We only need the α=255 variant (agg-sharp builds 256 of them, one
 /// per polygon-alpha value); the shader multiplies in the polygon's
 /// colour alpha as a uniform instead.
-pub(crate) fn build_aa_step_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> wgpu::Texture {
+pub(crate) fn build_aa_step_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
     const W: u32 = 1024;
     let mut pixels = vec![255u8; (W as usize) * 4];
     // Column 0: zero out the alpha byte (offset 3 in RGBA).

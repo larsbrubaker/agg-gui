@@ -63,9 +63,9 @@ impl InputProfile {
     pub fn recommended_ux_scale(self) -> f64 {
         match self {
             InputProfile::Desktop => 1.0,
-            InputProfile::MobileIOS
-            | InputProfile::MobileAndroid
-            | InputProfile::MobileOther => 1.7,
+            InputProfile::MobileIOS | InputProfile::MobileAndroid | InputProfile::MobileOther => {
+                1.7
+            }
         }
     }
 }
@@ -159,16 +159,25 @@ mod tests {
         // iPad-mode Safari reports macOS in the UA but the pointer-coarse
         // hint pulls us back to MobileIOS.
         assert_eq!(
-            input_profile_from_hint("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit", true),
+            input_profile_from_hint(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit",
+                true
+            ),
             InputProfile::MobileIOS
         );
         // Same UA without a coarse pointer = desktop Mac.
         assert_eq!(
-            input_profile_from_hint("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit", false),
+            input_profile_from_hint(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit",
+                false
+            ),
             InputProfile::Desktop
         );
         // Unknown touch device.
-        assert_eq!(input_profile_from_hint("CrOS x86_64", true), InputProfile::MobileOther);
+        assert_eq!(
+            input_profile_from_hint("CrOS x86_64", true),
+            InputProfile::MobileOther
+        );
     }
 
     #[test]

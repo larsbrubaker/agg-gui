@@ -10,12 +10,7 @@ use crate::{DrawCtx, Rect};
 
 use super::super::value::RowValue;
 
-pub(crate) fn paint_editor(
-    ctx: &mut dyn DrawCtx,
-    editor_area: Rect,
-    value: RowValue,
-    scale: f64,
-) {
+pub(crate) fn paint_editor(ctx: &mut dyn DrawCtx, editor_area: Rect, value: RowValue, scale: f64) {
     let text = match value {
         RowValue::Text(s) | RowValue::Display(s) => s,
         _ => return,

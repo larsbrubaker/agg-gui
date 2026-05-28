@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl Widget for Window {
     fn type_name(&self) -> &'static str {
@@ -552,9 +552,7 @@ impl Widget for Window {
                 if is_left_click && self.in_title_bar(*pos) {
                     let tb_bounds = self.title_bar.bounds();
                     let tb_local = Point::new(pos.x - tb_bounds.x, pos.y - tb_bounds.y);
-                    if let Some(path) =
-                        crate::widget::hit_test_subtree(&self.title_bar, tb_local)
-                    {
+                    if let Some(path) = crate::widget::hit_test_subtree(&self.title_bar, tb_local) {
                         // Path could be empty (clicked the bar itself
                         // but not a child) — skip in that case so the
                         // title-drag handling further down still runs.

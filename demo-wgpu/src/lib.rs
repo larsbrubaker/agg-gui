@@ -778,4 +778,3 @@ pub(crate) enum DrawCommand {
         parent_clip: Option<[i32; 4]>,
     },
 }
-

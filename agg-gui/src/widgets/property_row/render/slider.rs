@@ -64,13 +64,7 @@ pub(crate) fn paint_editor_drag(
 /// Shared value-text paint used by both slider and drag variants —
 /// horizontally centred in `pill`, vertically centred using the
 /// label-baseline convention.
-fn paint_centred_value(
-    ctx: &mut dyn DrawCtx,
-    pill: Rect,
-    n: f64,
-    attrs: &NumberAttrs,
-    scale: f64,
-) {
+fn paint_centred_value(ctx: &mut dyn DrawCtx, pill: Rect, n: f64, attrs: &NumberAttrs, scale: f64) {
     let s = format_number(n, Some(attrs));
     let visuals = ctx.visuals().clone();
     ctx.set_fill_color(visuals.text_color);

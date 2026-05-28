@@ -75,7 +75,14 @@ impl NodeWidget {
     /// chevron's pending-collapse channel is a fresh, throwaway cell —
     /// `NodeEditor` never sees clicks on these test widgets.
     pub fn from_layout(layout: &NodeLayoutInfo, selected: bool, ctx: NodePaintContext) -> Self {
-        Self::from_layout_transformed(layout, selected, ctx, 1.0, [0.0, 0.0], Rc::new(Cell::new(None)))
+        Self::from_layout_transformed(
+            layout,
+            selected,
+            ctx,
+            1.0,
+            [0.0, 0.0],
+            Rc::new(Cell::new(None)),
+        )
     }
 
     /// Construct a fresh widget tree with bounds baked in

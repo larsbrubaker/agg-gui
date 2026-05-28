@@ -39,7 +39,10 @@ fn set_mobile_profile_for_test() {
 #[test]
 fn keyboard_disabled_by_default() {
     fresh_state();
-    assert!(!is_enabled(), "keyboard must start disabled so desktop apps see no behavior change");
+    assert!(
+        !is_enabled(),
+        "keyboard must start disabled so desktop apps see no behavior change"
+    );
     assert!(!is_visible());
 }
 
@@ -64,7 +67,10 @@ fn focusing_text_input_raises_keyboard() {
     // loop would tick. For the test we force the tween to fully open
     // using the test hook so visibility flips deterministically.
     test_hook::force_visible();
-    assert!(is_visible(), "keyboard should be visible after force_visible");
+    assert!(
+        is_visible(),
+        "keyboard should be visible after force_visible"
+    );
 }
 
 #[test]
@@ -72,8 +78,8 @@ fn auto_cap_on_empty_field() {
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some(""), KeyboardInputMode::Text);
-    use crate::widgets::on_screen_keyboard::state::with_state_ref;
     use crate::widgets::on_screen_keyboard::layouts::Layer;
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
     assert_eq!(
         with_state_ref(|s| s.current_layer),
         Layer::Shifted,
@@ -86,8 +92,8 @@ fn auto_cap_after_sentence_terminator() {
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some("Hello world."), KeyboardInputMode::Text);
-    use crate::widgets::on_screen_keyboard::state::with_state_ref;
     use crate::widgets::on_screen_keyboard::layouts::Layer;
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
     assert_eq!(
         with_state_ref(|s| s.current_layer),
         Layer::Shifted,
@@ -131,8 +137,8 @@ fn no_auto_cap_mid_sentence() {
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some("Hello world"), KeyboardInputMode::Text);
-    use crate::widgets::on_screen_keyboard::state::with_state_ref;
     use crate::widgets::on_screen_keyboard::layouts::Layer;
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
     assert_eq!(
         with_state_ref(|s| s.current_layer),
         Layer::Letters,
@@ -294,7 +300,10 @@ fn focusing_field_below_keyboard_scrolls_parent_view() {
     app.layout(Size::new(400.0, 400.0));
 
     let panel_h = on_screen_keyboard::target_panel_height(400.0);
-    assert!(panel_h > 0.0, "keyboard layout must report a positive panel height");
+    assert!(
+        panel_h > 0.0,
+        "keyboard layout must report a positive panel height"
+    );
 
     let scroll_before = offset_cell.get();
     app.on_key_down(crate::Key::Tab, Modifiers::default());
@@ -401,8 +410,7 @@ fn text_field_with_keyboard_mode_propagates_through_focus() {
     set_enabled(true);
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
-    let field = TextField::new(Arc::clone(&font))
-        .with_keyboard_mode(KeyboardInputMode::Numeric);
+    let field = TextField::new(Arc::clone(&font)).with_keyboard_mode(KeyboardInputMode::Numeric);
     let mut app = App::new(Box::new(field));
     app.layout(Size::new(400.0, 800.0));
 

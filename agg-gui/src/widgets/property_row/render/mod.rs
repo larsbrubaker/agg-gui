@@ -98,11 +98,15 @@ fn dispatch_editor(
 ) {
     match editor {
         EditorKind::Slider(attrs) => slider::paint_editor(ctx, editor_area, value, attrs, scale),
-        EditorKind::NumberDrag(attrs) => slider::paint_editor_drag(ctx, editor_area, value, attrs, scale),
+        EditorKind::NumberDrag(attrs) => {
+            slider::paint_editor_drag(ctx, editor_area, value, attrs, scale)
+        }
         EditorKind::Toggle => toggle::paint_editor(ctx, editor_area, value, scale),
         EditorKind::ColorPicker => color::paint_editor(ctx, editor_area, value, scale),
         EditorKind::Matrix => matrix::paint_editor(ctx, editor_area, value, scale),
-        EditorKind::StringReadOnly => string_read_only::paint_editor(ctx, editor_area, value, scale),
+        EditorKind::StringReadOnly => {
+            string_read_only::paint_editor(ctx, editor_area, value, scale)
+        }
         // Other variants currently fall through to the default
         // painter — they'll get dedicated renderers in follow-up
         // work (single-/multi-line text editors, enum dropdown /

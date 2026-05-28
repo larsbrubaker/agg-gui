@@ -308,16 +308,29 @@ mod tests {
             .advanced();
         assert_eq!(a.label.as_deref().map(|x| x.as_ref()), Some("Diameter"));
         assert!(matches!(a.editor, EditorKind::Slider(_)));
-        assert!(a.description.as_deref().map(|x| x.contains("Width")).unwrap_or(false));
+        assert!(a
+            .description
+            .as_deref()
+            .map(|x| x.contains("Width"))
+            .unwrap_or(false));
         assert_eq!(a.visible_when, VisibleWhen::AdvancedOn);
     }
 
     #[test]
     fn visible_when_shorthands_set_expected_variant() {
         assert_eq!(NodeFieldAttrs::new().visible_when, VisibleWhen::Always);
-        assert_eq!(NodeFieldAttrs::new().advanced().visible_when, VisibleWhen::AdvancedOn);
-        assert_eq!(NodeFieldAttrs::new().easy_only().visible_when, VisibleWhen::AdvancedOff);
-        assert_eq!(NodeFieldAttrs::new().hidden().visible_when, VisibleWhen::Never);
+        assert_eq!(
+            NodeFieldAttrs::new().advanced().visible_when,
+            VisibleWhen::AdvancedOn
+        );
+        assert_eq!(
+            NodeFieldAttrs::new().easy_only().visible_when,
+            VisibleWhen::AdvancedOff
+        );
+        assert_eq!(
+            NodeFieldAttrs::new().hidden().visible_when,
+            VisibleWhen::Never
+        );
     }
 
     #[test]

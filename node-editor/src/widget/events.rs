@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use agg_gui::{Color, EventResult, Key, Modifiers, MouseButton, Point};
 
-use crate::draw::{SocketSide, NodeLayoutInfo, TITLE_HEIGHT};
+use crate::draw::{NodeLayoutInfo, SocketSide, TITLE_HEIGHT};
 use crate::model::{EditorHint, NodeId, PropertyValue};
 
 /// Window for double-click detection in milliseconds — matches the
@@ -68,8 +68,7 @@ impl NodeEditor {
                                 .find(|l| l.node_id == noodle.from_node)
                                 .and_then(|l| {
                                     l.sockets().find(|s| {
-                                        s.side == SocketSide::Output
-                                            && s.name == noodle.from_socket
+                                        s.side == SocketSide::Output && s.name == noodle.from_socket
                                     })
                                 })
                                 .cloned();
@@ -154,9 +153,7 @@ impl NodeEditor {
                             .last_click
                             .as_ref()
                             .map(|(prev_pos, prev_time)| {
-                                let dt = now
-                                    .duration_since(*prev_time)
-                                    .as_millis();
+                                let dt = now.duration_since(*prev_time).as_millis();
                                 let dx = (pos.x - prev_pos.x).abs();
                                 let dy = (pos.y - prev_pos.y).abs();
                                 dt <= DBL_CLICK_MS && dx < 6.0 && dy < 6.0

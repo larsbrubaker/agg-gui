@@ -16,12 +16,7 @@ const TRACK_W: f64 = 36.0;
 /// Track height at scale=1.
 const TRACK_H: f64 = 16.0;
 
-pub(crate) fn paint_editor(
-    ctx: &mut dyn DrawCtx,
-    editor_area: Rect,
-    value: RowValue,
-    scale: f64,
-) {
+pub(crate) fn paint_editor(ctx: &mut dyn DrawCtx, editor_area: Rect, value: RowValue, scale: f64) {
     let track_w = TRACK_W * scale;
     let track_h = TRACK_H * scale;
     // Anchor pill at the right edge of the editor area.

@@ -67,7 +67,7 @@ impl Style {
 
 fn ios() -> Style {
     Style {
-        panel_bg: Color::from_rgb8(0xD1, 0xD5, 0xDB),         // iOS light gray tray
+        panel_bg: Color::from_rgb8(0xD1, 0xD5, 0xDB), // iOS light gray tray
         panel_top_border: Color::from_rgba8(0, 0, 0, 0x33),
         panel_padding_horizontal: 4.0,
         panel_padding_top: 8.0,

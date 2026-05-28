@@ -283,8 +283,7 @@ impl WgpuPipelines {
         let solid_pl = mk_layout(device, "solid", &[&solid_bgl]);
         let aa_solid_pl = mk_layout(device, "aa_solid", &[&aa_solid_bgl]);
         let gradient_pl = mk_layout(device, "gradient", &[&gradient_bgl0, &gradient_bgl1]);
-        let aa_texture_pl =
-            mk_layout(device, "aa_texture", &[&aa_texture_bgl0, &aa_texture_bgl1]);
+        let aa_texture_pl = mk_layout(device, "aa_texture", &[&aa_texture_bgl0, &aa_texture_bgl1]);
         let tex_pl = mk_layout(device, "tex", &[&tex_bgl0, &tex_bgl1]);
         let layer_pl = mk_layout(device, "layer", &[&layer_bgl0, &layer_bgl1]);
         let lcd_pl = mk_layout(device, "lcd", &[&lcd_bgl0, &lcd_bgl1]);

@@ -36,7 +36,6 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 // ---------------------------------------------------------------------------
 
 mod color_wheel_picker;
-mod on_screen_keyboard;
 /// A point drawn at Y=10 in a 100×100 buffer must be near the BOTTOM of the
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.
@@ -45,6 +44,7 @@ mod inspector_hover;
 mod inspector_tree;
 mod layer_compositing;
 mod layout_lcd;
+mod on_screen_keyboard;
 #[cfg(feature = "reflect")]
 mod reflect_roundtrip;
 mod retained_layers;

@@ -7,12 +7,7 @@ use crate::{DrawCtx, Rect};
 use super::super::value::RowValue;
 use super::{editor_pill_rect, format_number, paint_pill_bg};
 
-pub(crate) fn paint_editor(
-    ctx: &mut dyn DrawCtx,
-    editor_area: Rect,
-    value: RowValue,
-    scale: f64,
-) {
+pub(crate) fn paint_editor(ctx: &mut dyn DrawCtx, editor_area: Rect, value: RowValue, scale: f64) {
     let pill = editor_pill_rect(editor_area, scale);
     paint_pill_bg(ctx, pill, scale);
 

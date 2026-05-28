@@ -6,12 +6,7 @@ use crate::{Color, DrawCtx, Rect};
 use super::super::value::RowValue;
 use super::editor_pill_rect;
 
-pub(crate) fn paint_editor(
-    ctx: &mut dyn DrawCtx,
-    editor_area: Rect,
-    value: RowValue,
-    scale: f64,
-) {
+pub(crate) fn paint_editor(ctx: &mut dyn DrawCtx, editor_area: Rect, value: RowValue, scale: f64) {
     let swatch = editor_pill_rect(editor_area, scale);
 
     // Checker underlay reads through any transparent swatch.

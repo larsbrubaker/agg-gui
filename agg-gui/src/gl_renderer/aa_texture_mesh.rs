@@ -216,8 +216,8 @@ fn draw_1_edge_triangle(
 
     // PerpendicularRight in agg-sharp Vector2 convention: (x, y) → (y, -x).
     let mut normal = [edge_n[1], -edge_n[0]];
-    let dot_n_third = normal[0] * (non_aa_point[0] - aa_p0[0])
-        + normal[1] * (non_aa_point[1] - aa_p0[1]);
+    let dot_n_third =
+        normal[0] * (non_aa_point[0] - aa_p0[0]) + normal[1] * (non_aa_point[1] - aa_p0[1]);
     let edge_dot_p3 = if dot_n_third < 0.0 {
         -dot_n_third
     } else {
@@ -293,10 +293,7 @@ fn draw_2_edge_triangle(
     p1: [f32; 2],
     p2: [f32; 2],
 ) {
-    let centroid = [
-        (p0[0] + p1[0] + p2[0]) / 3.0,
-        (p0[1] + p1[1] + p2[1]) / 3.0,
-    ];
+    let centroid = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0];
     let mid_p0p1 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
     let mid_p1p2 = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
     // Same `.001` fudge agg-sharp uses so the inner point isn't
@@ -324,10 +321,7 @@ fn draw_3_edge_triangle(
     p1: [f32; 2],
     p2: [f32; 2],
 ) {
-    let centroid = [
-        (p0[0] + p1[0] + p2[0]) / 3.0,
-        (p0[1] + p1[1] + p2[1]) / 3.0,
-    ];
+    let centroid = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0];
     draw_1_edge_triangle(verts, indices, p0, p1, centroid);
     draw_1_edge_triangle(verts, indices, p1, p2, centroid);
     draw_1_edge_triangle(verts, indices, p2, p0, centroid);

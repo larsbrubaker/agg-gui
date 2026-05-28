@@ -179,7 +179,11 @@ pub(crate) fn notify_focus_change(
     let (accepts, existing_text, mode) = match new_path {
         Some(p) => {
             let w = mutable_widget_at_path(root, p);
-            (w.accepts_text_input(), w.text_input_value(), w.text_input_mode())
+            (
+                w.accepts_text_input(),
+                w.text_input_value(),
+                w.text_input_mode(),
+            )
         }
         None => (false, None, KeyboardInputMode::Text),
     };
@@ -251,10 +255,7 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
 /// (e.g. the node editor's pan/zoom canvas) aren't accounted for.
 /// That's deliberate — text input inside a panned canvas isn't a
 /// supported pattern for the software keyboard yet.
-pub(crate) fn focused_widget_screen_bounds(
-    root: &dyn Widget,
-    path: &[usize],
-) -> Option<Rect> {
+pub(crate) fn focused_widget_screen_bounds(root: &dyn Widget, path: &[usize]) -> Option<Rect> {
     // Accumulate translation from root frame down to the focused leaf.
     // The root's own bounds.origin() is always (0,0) in practice
     // (App::layout sets it that way) but we include it for symmetry.
