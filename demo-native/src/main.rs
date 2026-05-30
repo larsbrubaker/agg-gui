@@ -622,13 +622,82 @@ fn paint_frame(
     frame.present();
 }
 
-/// Acquire the next surface texture, returning `None` (skip frame) for any
-/// non-success case so the caller doesn't paint into a stale view.
+/// How to handle the result of `Surface::get_current_texture`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SurfaceAcquire {
+    /// Texture is usable — render into it.
+    Present,
+    /// Surface configuration is stale (`Outdated`/`Lost`): reconfigure with
+    /// the current config and try once more THIS frame.
+    Reconfigure,
+    /// Transient (`Timeout`/`Occluded`/`Validation`): skip the frame.
+    Skip,
+}
+
+/// Decide how to handle a surface-acquire status.  Split out as a pure
+/// function so the resize-recovery policy is unit-testable without a live GPU
+/// surface (the no-payload variants are constructible in tests).
+///
+/// The key case is `Outdated`/`Lost`.  These fire right after a window resize
+/// reconfigures the swapchain — the previously acquired textures no longer
+/// match.  The old code lumped them into the catch-all `None` skip, so the
+/// frame was dropped and the freshly-resized surface stayed BLACK until some
+/// unrelated event (mouse move, hover) happened to request another redraw.
+/// Reconfiguring and retrying in the same frame paints the new swapchain
+/// immediately, so the resize lands a visible frame on the first try.
+fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAcquire {
+    use wgpu::CurrentSurfaceTexture as T;
+    match status {
+        T::Success(_) | T::Suboptimal(_) => SurfaceAcquire::Present,
+        T::Outdated | T::Lost => SurfaceAcquire::Reconfigure,
+        T::Timeout | T::Occluded | T::Validation => SurfaceAcquire::Skip,
+    }
+}
+
+/// Acquire the next surface texture, recovering from a stale swapchain by
+/// reconfiguring and retrying once.  Returns `None` (skip frame) only for
+/// genuinely transient failures so the caller never paints into a stale view.
 fn acquire_frame(gpu: &Gpu) -> Option<wgpu::SurfaceTexture> {
-    match gpu.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => {
-            Some(f)
+    use wgpu::CurrentSurfaceTexture as T;
+    let first = gpu.surface.get_current_texture();
+    match surface_acquire_action(&first) {
+        SurfaceAcquire::Present => match first {
+            T::Success(f) | T::Suboptimal(f) => Some(f),
+            _ => None,
+        },
+        SurfaceAcquire::Skip => None,
+        SurfaceAcquire::Reconfigure => {
+            // `configure` takes `&self`; the config is unchanged (the resize
+            // handler already updated width/height) — we just re-bind it.
+            gpu.surface.configure(&gpu.device, &gpu.config);
+            match gpu.surface.get_current_texture() {
+                T::Success(f) | T::Suboptimal(f) => Some(f),
+                _ => None,
+            }
         }
-        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{surface_acquire_action, SurfaceAcquire};
+    use wgpu::CurrentSurfaceTexture as T;
+
+    #[test]
+    fn stale_swapchain_reconfigures_instead_of_skipping() {
+        // This is the resize-black-screen regression: Outdated/Lost must drive
+        // a reconfigure-and-retry, NOT a silent skip.
+        assert_eq!(
+            surface_acquire_action(&T::Outdated),
+            SurfaceAcquire::Reconfigure
+        );
+        assert_eq!(surface_acquire_action(&T::Lost), SurfaceAcquire::Reconfigure);
+    }
+
+    #[test]
+    fn transient_failures_skip_the_frame() {
+        assert_eq!(surface_acquire_action(&T::Timeout), SurfaceAcquire::Skip);
+        assert_eq!(surface_acquire_action(&T::Occluded), SurfaceAcquire::Skip);
+        assert_eq!(surface_acquire_action(&T::Validation), SurfaceAcquire::Skip);
     }
 }

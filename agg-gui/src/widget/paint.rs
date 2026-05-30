@@ -354,10 +354,23 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     ctx.snap_to_pixel();
 
     let b = widget.bounds();
-    let dps = crate::device_scale::device_scale().max(1e-6);
+    // Rasterise at the CURRENT CTM scale, not the bare device-pixel ratio.
+    // The on-screen footprint of this widget is `bounds × ctm_scale`, where
+    // `ctm_scale = device_scale × ux_scale` at the top level (and may be just
+    // `device_scale` inside an offscreen layer that reset its transform).
+    // Sizing the offscreen bitmap to `device_scale` only — as this code used
+    // to — left the cached bitmap at `1/ux_scale` of its destination quad, so
+    // on mobile (ux_scale ≈ 1.7) every CPU-backbuffered widget (the menu bar,
+    // Labels) rendered shrunken inside its layout slot while sibling
+    // GL-FBO widgets (Windows), which allocate their layer via
+    // `layer_scale_from_transform`, scaled correctly.  Matching the CTM scale
+    // here puts both paths on the same footing and gives a true 1:1 blit.
+    let (sx, sy) = ctx.transform().scaling_abs();
+    let dps_x = sx.max(1e-6);
+    let dps_y = sy.max(1e-6);
     // Physical pixel dimensions of the offscreen render target.
-    let w_phys = (b.width * dps).ceil().max(1.0) as u32;
-    let h_phys = (b.height * dps).ceil().max(1.0) as u32;
+    let w_phys = (b.width * dps_x).ceil().max(1.0) as u32;
+    let h_phys = (b.height * dps_y).ceil().max(1.0) as u32;
     // Logical dimensions used as the blit destination rect.  **Must** be
     // derived from `w_phys / dps` rather than `b.width` so the quad the
     // bitmap is drawn into matches the bitmap's actual pixel extent.  If
@@ -367,8 +380,8 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     // which reads as a faint fade along the top / bottom of the glyph.
     // Pre-HiDPI the blit used the bitmap's integer pixel size directly;
     // this restores that contract for the logical-units pipeline.
-    let w_logical = w_phys as f64 / dps;
-    let h_logical = h_phys as f64 / dps;
+    let w_logical = w_phys as f64 / dps_x;
+    let h_logical = h_phys as f64 / dps_y;
 
     // Decide whether to re-raster.  Size change invalidates; so does a
     // mode swap — if the cache holds `Rgba` bytes but the widget now
@@ -420,10 +433,10 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                 {
                     let mut sub = GfxCtx::new(&mut fb);
                     sub.set_lcd_mode(false); // RGBA mode never uses LCD text
-                    if (dps - 1.0).abs() > 1e-6 {
+                    if (dps_x - 1.0).abs() > 1e-6 || (dps_y - 1.0).abs() > 1e-6 {
                         // Widgets paint in logical coords — scale the sub ctx
                         // so their drawing lands on the physical pixel grid.
-                        sub.scale(dps, dps);
+                        sub.scale(dps_x, dps_y);
                     }
                     paint_subtree_direct_no_overlay(widget, &mut sub);
                 }
@@ -458,11 +471,11 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                 let mut buf = LcdBuffer::new(w_phys, h_phys);
                 {
                     let mut sub = crate::lcd_gfx_ctx::LcdGfxCtx::new(&mut buf);
-                    if (dps - 1.0).abs() > 1e-6 {
+                    if (dps_x - 1.0).abs() > 1e-6 || (dps_y - 1.0).abs() > 1e-6 {
                         // Match the RGBA branch: widgets paint in logical
                         // coords; the sub ctx's scale transforms them into
                         // the physical-pixel LCD buffer.
-                        sub.scale(dps, dps);
+                        sub.scale(dps_x, dps_y);
                     }
                     paint_subtree_direct_no_overlay(widget, &mut sub);
                 }
@@ -496,9 +509,11 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     //     cache round-trip (grayscale AA on backends that fall back
     //     to the default trait impl).
     let cache = widget.backbuffer_cache_mut().unwrap();
-    // Image is physical-sized; dst is logical.  The outer CTM already has
-    // `scale(dps, dps)` active, so logical dst × dps == physical dst ==
-    // bitmap size, giving a 1:1 texel-to-pixel blit (no up/downscale blur).
+    // Image is physical-sized; dst is logical.  The bitmap was rasterised at
+    // the current CTM scale (`dps_x`/`dps_y`), and the outer CTM applies that
+    // same scale to the logical dst rect, so logical dst × ctm_scale ==
+    // physical dst == bitmap size, giving a 1:1 texel-to-pixel blit (no
+    // up/downscale blur).
     let img_w = cache.width;
     let img_h = cache.height;
     match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {

@@ -48,91 +48,39 @@ pub fn apply_theme_visuals(pref: ThemePreference, accent: AccentColor) {
     set_visuals(base.with_accent_color(accent));
 }
 
-// ── Mobile-only "Demos" hamburger button ─────────────────────────────────────
+// ── Demos menu data ──────────────────────────────────────────────────────────
 //
-// Identical in behaviour to the prior `MenuButton` (same name, same
-// breakpoint, same toggle target).  Kept as a separate inline widget
-// instead of being folded into the menu bar because mobile users expect
-// a one-tap hamburger to reveal the demos sidebar — burying it under a
-// menu would add a step every time they switch demos.
+// The "Demos" top-level menu mirrors the sidebar: one submenu per group, one
+// leaf per demo.  The host (`app_builder`) hands us the same grouped
+// (label, open-cell) pairs the sidebar is built from, so the two launchers
+// stay in lock-step.  Earlier this slot held a mobile-only hamburger that
+// toggled the sidebar drawer; it's been replaced by this real dropdown so a
+// phone user can open any demo directly from the menu bar instead of paging
+// through a drawer.
+pub type DemoMenuGroups = Vec<(&'static str, Vec<(String, Rc<Cell<bool>>)>)>;
 
-struct MenuButton {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-    visible: bool,
-}
-
-impl MenuButton {
-    const W: f64 = 92.0;
-    const H: f64 = 24.0;
-    const MOBILE_BREAKPOINT: f64 = 720.0;
-
-    fn new(font: Arc<Font>, open: Rc<Cell<bool>>) -> Self {
-        let open_active = Rc::clone(&open);
-        let open_click = open;
-        let btn = agg_gui::Button::new("\u{F0C9} Demos", font)
-            .with_font_size(12.0)
-            .with_subtle()
-            .with_outlined()
-            .with_active_fn(move || open_active.get())
-            .on_click(move || {
-                open_click.set(!open_click.get());
-                agg_gui::animation::request_draw();
-            });
-        Self {
-            bounds: Rect::default(),
-            children: vec![Box::new(btn)],
-            visible: false,
+/// Build the `Demos` top-level menu's entries from the grouped demo list, plus
+/// a flat index → open-cell table the action handler uses to open the picked
+/// demo.  Action ids are `demo.<flat-index>`; the index is just this demo's
+/// position in the returned `cells` vector.
+fn build_demos_menu(groups: &DemoMenuGroups) -> (Vec<MenuEntry>, Vec<Rc<Cell<bool>>>) {
+    let mut cells: Vec<Rc<Cell<bool>>> = Vec::new();
+    let mut top_items: Vec<MenuEntry> = Vec::new();
+    for (group_name, demos) in groups {
+        if demos.is_empty() {
+            continue;
         }
-    }
-}
-
-impl Widget for MenuButton {
-    fn type_name(&self) -> &'static str {
-        "MenuButton"
-    }
-    fn is_visible(&self) -> bool {
-        self.visible
-    }
-    fn bounds(&self) -> Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, b: Rect) {
-        self.bounds = b;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-    fn layout(&mut self, available: Size) -> Size {
-        // Report the button's INTRINSIC height (button H + a couple of
-        // pixels of breathing room), not `available.height`.  Reporting
-        // `available.height` made the row claim the parent's full
-        // height — fine when the parent capped that at 36, but
-        // `MenuBarStrip` passes the full window height down, and a
-        // button claiming the whole window would push the strip's
-        // size-to-content logic to fill the screen.
-        let intrinsic_h = Self::H + 4.0;
-        let slot_h = available.height.min(intrinsic_h);
-        self.visible = available.width > 0.0 && available.width < Self::MOBILE_BREAKPOINT;
-        if !self.visible {
-            self.bounds = Rect::new(0.0, 0.0, 0.0, intrinsic_h);
-            return Size::new(0.0, intrinsic_h);
+        let mut sub: Vec<MenuEntry> = Vec::with_capacity(demos.len());
+        for (label, cell) in demos {
+            let idx = cells.len();
+            cells.push(Rc::clone(cell));
+            // Labels already carry their Font Awesome glyph prefix, so the
+            // text column renders the icon inline — no separate `.icon()`.
+            sub.push(MenuItem::action(label.clone(), format!("demo.{idx}")).into());
         }
-        let w = Self::W + 8.0;
-        self.bounds = Rect::new(0.0, 0.0, w, intrinsic_h);
-        let gy = ((slot_h - Self::H) * 0.5).max(0.0);
-        let child = &mut self.children[0];
-        child.layout(Size::new(Self::W, Self::H));
-        child.set_bounds(Rect::new(4.0, gy, Self::W, Self::H));
-        Size::new(w, intrinsic_h)
+        top_items.push(MenuItem::submenu(*group_name, sub).icon('\u{F009}').into());
     }
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-    fn on_event(&mut self, _event: &Event) -> EventResult {
-        EventResult::Ignored
-    }
+    (top_items, cells)
 }
 
 // ── Menu chrome wrapper ──────────────────────────────────────────────────────
@@ -166,6 +114,10 @@ struct MenuChrome {
     theme_pref: Rc<Cell<ThemePreference>>,
     accent_color: Rc<Cell<AccentColor>>,
     snap_enabled: Rc<Cell<bool>>,
+    /// Prebuilt `Demos` menu entries (one submenu per group).  The demo set is
+    /// fixed for the app's lifetime, so this is cloned into a fresh `TopMenu`
+    /// on every `refresh_menus` rather than rebuilt.
+    demos_items: Vec<MenuEntry>,
     last_snapshot: Cell<Option<(bool, ThemePreference, AccentColor, bool)>>,
 }
 
@@ -176,7 +128,9 @@ impl MenuChrome {
         theme_pref: Rc<Cell<ThemePreference>>,
         accent_color: Rc<Cell<AccentColor>>,
         snap_enabled: Rc<Cell<bool>>,
+        demo_menu_groups: DemoMenuGroups,
     ) -> Self {
+        let (demos_items, demo_cells) = build_demos_menu(&demo_menu_groups);
         // Action handler captures clones of every state cell so it can
         // mutate the canonical state without any borrow back to the bar
         // itself.  The visual refresh (radio marks etc.) happens on the
@@ -187,21 +141,29 @@ impl MenuChrome {
             let accent_color = Rc::clone(&accent_color);
             let snap_enabled = Rc::clone(&snap_enabled);
             move |action: &str| {
-                handle_action(
-                    action,
-                    &show_backend,
-                    &theme_pref,
-                    &accent_color,
-                    &snap_enabled,
-                );
+                if let Some(idx) = action.strip_prefix("demo.") {
+                    // Demos menu: open the picked demo's window directly.
+                    if let Some(cell) = idx.parse::<usize>().ok().and_then(|i| demo_cells.get(i)) {
+                        cell.set(true);
+                    }
+                } else {
+                    handle_action(
+                        action,
+                        &show_backend,
+                        &theme_pref,
+                        &accent_color,
+                        &snap_enabled,
+                    );
+                }
                 agg_gui::animation::request_draw();
             }
         };
-        let initial_menus = build_menus(
+        let initial_menus = compose_menus(
             show_backend.get(),
             theme_pref.get(),
             accent_color.get(),
             snap_enabled.get(),
+            &demos_items,
         );
         let bar = MenuBar::new(Arc::clone(&font), initial_menus, on_action)
             .with_font_size(13.0)
@@ -218,6 +180,7 @@ impl MenuChrome {
             theme_pref,
             accent_color,
             snap_enabled,
+            demos_items,
             last_snapshot: Cell::new(None),
         }
     }
@@ -235,7 +198,13 @@ impl MenuChrome {
             return;
         }
         self.last_snapshot.set(Some(snapshot));
-        let menus = build_menus(snapshot.0, snapshot.1, snapshot.2, snapshot.3);
+        let menus = compose_menus(
+            snapshot.0,
+            snapshot.1,
+            snapshot.2,
+            snapshot.3,
+            &self.demos_items,
+        );
         self.bar.set_menus(menus);
     }
 }
@@ -375,6 +344,24 @@ fn build_menus(
     ]
 }
 
+/// Assemble the full bar: `Demos` (data-driven, prebuilt) followed by the
+/// state-driven `View` / `Help` menus.  `Demos` is leftmost because it's the
+/// primary navigation — opening a demo is the most common bar action.
+fn compose_menus(
+    backend_open: bool,
+    theme_pref: ThemePreference,
+    accent: AccentColor,
+    snap_enabled: bool,
+    demos_items: &[MenuEntry],
+) -> Vec<TopMenu> {
+    let mut menus = Vec::with_capacity(3);
+    if !demos_items.is_empty() {
+        menus.push(TopMenu::new("\u{F009} Demos", demos_items.to_vec()));
+    }
+    menus.extend(build_menus(backend_open, theme_pref, accent, snap_enabled));
+    menus
+}
+
 /// Dispatch a menu action id back into a mutation of the relevant state
 /// cell.  Unknown ids are ignored — the menu list is the only producer
 /// of these strings, so any miss is a build error rather than a runtime
@@ -426,18 +413,20 @@ fn set_theme(
 
 /// Build the FlexRow child for `TopMenuBar`.
 ///
-/// Layout: `[MenuChrome (View / Help)] [flex(1.0) spacer] [Demos hamburger on mobile]`.
+/// Layout: `[MenuChrome (Demos / View / Help)] [flex(1.0) spacer]`.
 /// All chrome that used to live inline (Backend toggle, theme segmented
-/// control, "View on GitHub" link, accent dropdown) is now inside the
-/// View / Help menus.  The mobile Demos hamburger stays inline — it's a
-/// nav drawer trigger, not chrome.
+/// control, "View on GitHub" link, accent dropdown) is inside the View / Help
+/// menus, and the mobile demos hamburger is now the `Demos` dropdown inside
+/// the bar (see [`build_demos_menu`]).  `mobile_menu_open` is retained in the
+/// signature for the sidebar drawer state but no longer toggled from here.
 pub fn build_top_bar_inner(
     font: Arc<Font>,
     show_backend: Rc<Cell<bool>>,
-    mobile_menu_open: Rc<Cell<bool>>,
+    _mobile_menu_open: Rc<Cell<bool>>,
     theme_pref: Rc<Cell<ThemePreference>>,
     accent_color: Rc<Cell<AccentColor>>,
     snap_enabled: Rc<Cell<bool>>,
+    demo_menu_groups: DemoMenuGroups,
 ) -> Box<dyn Widget> {
     let menu_chrome = MenuChrome::new(
         Arc::clone(&font),
@@ -445,12 +434,89 @@ pub fn build_top_bar_inner(
         theme_pref,
         accent_color,
         snap_enabled,
+        demo_menu_groups,
     );
     Box::new(
         FlexRow::new()
             .with_gap(0.0)
             .add(Box::new(menu_chrome))
-            .add_flex(Box::new(SizedBox::new()), 1.0)
-            .add(Box::new(MenuButton::new(font, mobile_menu_open))),
+            .add_flex(Box::new(SizedBox::new()), 1.0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cell(v: bool) -> Rc<Cell<bool>> {
+        Rc::new(Cell::new(v))
+    }
+
+    fn item(entry: &MenuEntry) -> &MenuItem {
+        match entry {
+            MenuEntry::Item(it) => it,
+            MenuEntry::Separator => panic!("expected a menu item, found a separator"),
+        }
+    }
+
+    #[test]
+    fn demos_menu_groups_and_indexes_every_demo() {
+        let (a, b, c) = (cell(false), cell(false), cell(false));
+        let groups: DemoMenuGroups = vec![
+            (
+                "Widgets",
+                vec![("Button".into(), Rc::clone(&a)), ("Slider".into(), Rc::clone(&b))],
+            ),
+            ("Empty", vec![]), // skipped — no leaves
+            ("Layout", vec![("Flex".into(), Rc::clone(&c))]),
+        ];
+
+        let (items, cells) = build_demos_menu(&groups);
+
+        // Empty groups are dropped; the flat cell table follows group-then-entry
+        // order so `demo.<i>` indexes straight into it.
+        assert_eq!(items.len(), 2, "only non-empty groups become submenus");
+        assert_eq!(cells.len(), 3);
+        assert!(Rc::ptr_eq(&cells[0], &a));
+        assert!(Rc::ptr_eq(&cells[1], &b));
+        assert!(Rc::ptr_eq(&cells[2], &c));
+
+        let widgets = item(&items[0]);
+        assert_eq!(widgets.label, "Widgets");
+        assert_eq!(widgets.submenu.len(), 2);
+        assert_eq!(item(&widgets.submenu[0]).action.as_deref(), Some("demo.0"));
+        assert_eq!(item(&widgets.submenu[1]).action.as_deref(), Some("demo.1"));
+
+        let layout = item(&items[1]);
+        assert_eq!(layout.label, "Layout");
+        assert_eq!(item(&layout.submenu[0]).action.as_deref(), Some("demo.2"));
+    }
+
+    #[test]
+    fn compose_menus_puts_demos_before_view_and_help() {
+        let groups: DemoMenuGroups = vec![("Widgets", vec![("Button".into(), cell(false))])];
+        let (items, _cells) = build_demos_menu(&groups);
+        let menus = compose_menus(
+            false,
+            ThemePreference::Dark,
+            AccentColor::ALL[0],
+            false,
+            &items,
+        );
+        let labels: Vec<&str> = menus.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(labels.len(), 3);
+        assert!(
+            labels[0].contains("Demos"),
+            "Demos must be the leftmost menu, got {labels:?}"
+        );
+        assert!(labels.iter().any(|l| *l == "View"));
+        assert!(labels.iter().any(|l| *l == "Help"));
+    }
+
+    #[test]
+    fn compose_menus_omits_demos_when_empty() {
+        let menus = compose_menus(false, ThemePreference::Dark, AccentColor::ALL[0], false, &[]);
+        let labels: Vec<&str> = menus.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(labels, vec!["View", "Help"]);
+    }
 }

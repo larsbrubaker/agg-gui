@@ -268,6 +268,19 @@ pub fn build_demo_ui(
             SidebarGroup { name, entries }
         })
         .collect();
+    // Mirror the sidebar's grouped entries into the top bar's `Demos` menu so
+    // both launchers open the same windows from one source of truth.
+    let demo_menu_groups: top_bar::DemoMenuGroups = sidebar_groups
+        .iter()
+        .map(|g| {
+            let demos = g
+                .entries
+                .iter()
+                .map(|e| (e.label.to_string(), Rc::clone(&e.open)))
+                .collect();
+            (g.name, demos)
+        })
+        .collect();
     let sidebar_widget = build_sidebar(
         Arc::clone(&font),
         Rc::clone(&about_open),
@@ -602,6 +615,7 @@ pub fn build_demo_ui(
         Rc::clone(&theme_pref),
         Rc::clone(&accent_color),
         Rc::clone(&snap_enabled),
+        demo_menu_groups,
     );
     let root = FlexColumn::new()
         .with_gap(0.0)

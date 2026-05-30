@@ -187,52 +187,33 @@ fn top_bar_height_matches_menu_bar_natural_height() {
 }
 
 #[test]
-fn mobile_top_bar_places_demos_button_after_menu_chrome() {
-    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
-    let (mut app, _handles) = build_test_app(font);
-    app.layout(Size::new(360.0, 640.0));
+fn top_bar_uses_menu_chrome_not_a_hamburger() {
+    // The mobile "Demos" hamburger button was replaced by a real `Demos`
+    // dropdown inside the menu bar (see `top_bar::build_demos_menu`).  The top
+    // bar should now host only `MenuChrome` — no standalone `MenuButton` — at
+    // any viewport width.
+    for (w, h) in [(360.0, 640.0), (720.0, 640.0), (1200.0, 800.0)] {
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+        let (mut app, _handles) = build_test_app(font);
+        app.layout(Size::new(w, h));
 
-    let top_bar = find_widget_by_type(app.root(), "MenuBarStrip").expect("top bar must exist");
-    let row = top_bar.children()[0].as_ref();
-    let row_children = row.children();
-    let menus = row_children
-        .iter()
-        .find(|child| child.type_name() == "MenuChrome")
-        .expect("menu chrome must exist");
-    let demos = row_children
-        .iter()
-        .find(|child| child.type_name() == "MenuButton")
-        .expect("demos button must exist");
-
-    assert!(
-        menus.bounds().x < demos.bounds().x,
-        "mobile top bar should place Demos to the right of the View/Help menu bar"
-    );
-}
-
-#[test]
-fn desktop_top_bar_hides_demos_button() {
-    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
-    let (mut app, _handles) = build_test_app(font);
-    app.layout(Size::new(720.0, 640.0));
-
-    let top_bar = find_widget_by_type(app.root(), "MenuBarStrip").expect("top bar must exist");
-    let row = top_bar.children()[0].as_ref();
-    let demos = row
-        .children()
-        .iter()
-        .find(|child| child.type_name() == "MenuButton")
-        .expect("demos button must exist");
-
-    assert_eq!(
-        demos.bounds().width,
-        0.0,
-        "desktop top bar should hide Demos when the sidebar is visible"
-    );
-    assert!(
-        !demos.is_visible(),
-        "desktop top bar should not paint Demos when the sidebar is visible"
-    );
+        let top_bar = find_widget_by_type(app.root(), "MenuBarStrip").expect("top bar must exist");
+        let row = top_bar.children()[0].as_ref();
+        let row_children = row.children();
+        assert!(
+            row_children
+                .iter()
+                .any(|child| child.type_name() == "MenuChrome"),
+            "top bar must host the MenuChrome menu bar at {w}x{h}"
+        );
+        assert!(
+            !row_children
+                .iter()
+                .any(|child| child.type_name() == "MenuButton"),
+            "the standalone Demos hamburger must be gone at {w}x{h} — \
+             Demos now lives inside the menu bar"
+        );
+    }
 }
 
 fn build_test_app(font: Arc<Font>) -> (agg_gui::App, DemoHandles) {
