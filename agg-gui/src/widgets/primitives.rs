@@ -12,13 +12,25 @@ use crate::widget::Widget;
 // Stack — overlays children at the same position (first = back, last = front)
 // ---------------------------------------------------------------------------
 
-/// Stacks children on top of each other, each sized to fill the stack's area.
+/// Stacks children on top of each other.
 ///
 /// Paint order: first child is drawn first (furthest back). The last child
 /// appears on top. Hit testing also follows paint order (reverse).
+///
+/// Children added with [`add`](Stack::add) are stretched to fill the stack's
+/// area (the classic behaviour). Children added with
+/// [`add_aligned`](Stack::add_aligned) are laid out at their *natural* size
+/// and positioned within the stack using their own `h_anchor` / `v_anchor`
+/// (plus margin) — like a floating overlay panel. Because an aligned child's
+/// bounds only cover the panel itself, pointer events outside it fall through
+/// to the stretched layer(s) beneath, so an aligned control panel doesn't
+/// block interaction with a full-bleed background child.
 pub struct Stack {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
+    /// Parallel to `children`: `true` = placed at natural size by anchor
+    /// (overlay), `false` = stretched to fill (default).
+    aligned: Vec<bool>,
     base: WidgetBase,
 }
 
@@ -27,12 +39,24 @@ impl Stack {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
+            aligned: Vec::new(),
             base: WidgetBase::new(),
         }
     }
 
+    /// Add a child stretched to fill the stack's full area.
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
+        self.aligned.push(false);
+        self
+    }
+
+    /// Add a floating child laid out at its natural size and positioned by
+    /// its `h_anchor` / `v_anchor` (respecting margin). Points outside the
+    /// child fall through to lower layers.
+    pub fn add_aligned(mut self, child: Box<dyn Widget>) -> Self {
+        self.children.push(child);
+        self.aligned.push(true);
         self
     }
 
@@ -104,9 +128,47 @@ impl Widget for Stack {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        for child in &mut self.children {
-            child.layout(available);
-            child.set_bounds(Rect::new(0.0, 0.0, available.width, available.height));
+        for idx in 0..self.children.len() {
+            if self.aligned.get(idx).copied().unwrap_or(false) {
+                let child = &mut self.children[idx];
+                // Measure natural size, then re-layout at that size so nested
+                // content (e.g. a FlexColumn) places its children within the
+                // box we actually assign rather than the full stack height.
+                let desired = child.layout(available);
+                let m = child.margin().scale(device_scale());
+                let w = desired
+                    .width
+                    .clamp(child.min_size().width, child.max_size().width);
+                let h = desired
+                    .height
+                    .clamp(child.min_size().height, child.max_size().height);
+                child.layout(Size::new(w, h));
+
+                let ha = child.h_anchor();
+                let x = if ha.contains(HAnchor::RIGHT) && !ha.contains(HAnchor::LEFT) {
+                    (available.width - m.right - w).max(0.0)
+                } else if ha.contains(HAnchor::CENTER) && !ha.is_stretch() {
+                    m.left + (available.width - m.left - m.right - w) * 0.5
+                } else {
+                    m.left
+                };
+
+                // Y-up: BOTTOM = low Y, TOP = high Y.
+                let va = child.v_anchor();
+                let y = if va.contains(VAnchor::TOP) && !va.contains(VAnchor::BOTTOM) {
+                    (available.height - m.top - h).max(0.0)
+                } else if va.contains(VAnchor::CENTER) && !va.is_stretch() {
+                    m.bottom + (available.height - m.bottom - m.top - h) * 0.5
+                } else {
+                    m.bottom
+                };
+
+                child.set_bounds(Rect::new(x, y, w, h));
+            } else {
+                let child = &mut self.children[idx];
+                child.layout(available);
+                child.set_bounds(Rect::new(0.0, 0.0, available.width, available.height));
+            }
         }
 
         // Bring-to-front pass — **after** children.layout on purpose.
@@ -128,17 +190,20 @@ impl Widget for Stack {
         // arrives, which is what the user reported (sidebar-opened windows
         // appearing in the back).
         let mut i = 0;
-        let mut raised: Vec<Box<dyn Widget>> = Vec::new();
+        let mut raised: Vec<(Box<dyn Widget>, bool)> = Vec::new();
         while i < self.children.len() {
             if self.children[i].take_raise_request() {
-                raised.push(self.children.remove(i));
+                let child = self.children.remove(i);
+                let aligned = self.aligned.remove(i);
+                raised.push((child, aligned));
                 // Don't advance `i` — the list just shortened.
             } else {
                 i += 1;
             }
         }
-        for r in raised {
+        for (r, a) in raised {
             self.children.push(r);
+            self.aligned.push(a);
         }
 
         available

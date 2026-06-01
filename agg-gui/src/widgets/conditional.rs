@@ -37,6 +37,19 @@ impl Conditional {
     pub fn visibility_cell(&self) -> Rc<Cell<bool>> {
         Rc::clone(&self.visible)
     }
+
+    pub fn with_margin(mut self, m: Insets) -> Self {
+        self.base.margin = m;
+        self
+    }
+    pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
+        self.base.h_anchor = h;
+        self
+    }
+    pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
+        self.base.v_anchor = v;
+        self
+    }
 }
 
 impl Widget for Conditional {
