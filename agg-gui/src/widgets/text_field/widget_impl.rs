@@ -228,9 +228,17 @@ impl Widget for TextField {
             t.border_color.unwrap_or(v.widget_stroke)
         };
         ctx.set_stroke_color(border_color);
-        ctx.set_line_width(if self.focused { 2.0 } else { 1.0 });
+        let border_w = if self.focused { 2.0 } else { 1.0 };
+        ctx.set_line_width(border_w);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, r);
+        let inset = border_w * 0.5;
+        ctx.rounded_rect(
+            inset,
+            inset,
+            (w - border_w).max(0.0),
+            (h - border_w).max(0.0),
+            r,
+        );
         ctx.stroke();
     }
 

@@ -545,6 +545,13 @@ pub struct FlexRow {
     pub gap: f64,
     pub inner_padding: Insets,
     pub background: Color,
+    /// When `true`, `layout` reports the row's natural content width
+    /// (sum of fixed children + gaps + horizontal padding) instead of the
+    /// full `available.width`. Mirrors [`FlexColumn::fit_width`] — needed
+    /// when the row is floated by an auto-sized ancestor (e.g. a `Stack`
+    /// `add_aligned` overlay) that must hug the content rather than span
+    /// the whole stack. Off by default for backward compatibility.
+    pub fit_width: bool,
 }
 
 impl FlexRow {
@@ -557,11 +564,18 @@ impl FlexRow {
             gap: 0.0,
             inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
+            fit_width: false,
         }
     }
 
     pub fn with_gap(mut self, gap: f64) -> Self {
         self.gap = gap;
+        self
+    }
+
+    /// Opt into content-fit width — see [`FlexRow::fit_width`].
+    pub fn with_fit_width(mut self, fit: bool) -> Self {
+        self.fit_width = fit;
         self
     }
     pub fn with_padding(mut self, p: f64) -> Self {
@@ -761,11 +775,22 @@ impl Widget for FlexRow {
             );
 
             // Round to integers — same reason as FlexColumn (pixel-perfect blits).
+            let final_w = content_w.round();
+            let final_h = child_h.round();
+            // Re-layout at the final assigned box. The measure pass above used
+            // the full slot height, so a fit-content child (e.g. a shorter
+            // FlexColumn) top-anchored its own children for that taller slot.
+            // Without this, those grandchildren keep their tall-slot positions
+            // and fall outside the child's now-shorter bounds → clipped away
+            // (the "flyout opens but its buttons never paint" bug).
+            if (final_h - slot_h).abs() > 0.5 || (final_w - content_w).abs() > 0.5 {
+                self.children[i].layout(Size::new(final_w, final_h));
+            }
             self.children[i].set_bounds(Rect::new(
                 cursor_x.round(),
                 child_y.round(),
-                content_w.round(),
-                child_h.round(),
+                final_w,
+                final_h,
             ));
             max_slot_h = max_slot_h.max(child_h + m.vertical());
 
@@ -776,7 +801,14 @@ impl Widget for FlexRow {
         // Return the natural (intrinsic) height to avoid propagating huge
         // heights from ScrollView (which passes f64::MAX/2) through fixed rows.
         let natural_h = max_slot_h + pad_t + pad_b;
-        Size::new(available.width, natural_h)
+        // Width: full available by default (legacy). `fit_width` reports the
+        // content extent so an auto-sized parent can hug the row.
+        let reported_w = if self.fit_width {
+            pad_l + pad_r + total_fixed_with_margins + total_gap
+        } else {
+            available.width
+        };
+        Size::new(reported_w, natural_h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
