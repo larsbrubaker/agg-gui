@@ -43,9 +43,17 @@ impl Button {
                     crate::animation::request_draw();
                 }
                 self.pressed = true;
+                // Note: we deliberately do NOT set `hovered` here. Touch has
+                // no hover phase, and nothing clears `hovered` on a
+                // touchscreen (no MouseMove/MouseLeave after a tap), so
+                // setting it would leave the button stuck in its hovered
+                // style. The press visual is covered by `pressed`, and the
+                // click test in MouseUp checks `hit_test(*pos)` directly so
+                // hover-less taps still fire.
                 EventResult::Consumed
             }
             Event::MouseUp {
+                pos,
                 button: MouseButton::Left,
                 ..
             } => {
@@ -54,7 +62,12 @@ impl Button {
                 if was_pressed {
                     crate::animation::request_draw();
                 }
-                if was_pressed && self.hovered {
+                // Fire when the release lands within the button. Checking
+                // the release position (rather than only the cached hover
+                // flag) makes taps work on touch, where no MouseMove ever
+                // sets `hovered`, while still cancelling a press that drags
+                // off the button before release.
+                if was_pressed && (self.hovered || self.hit_test(*pos)) {
                     self.fire_click();
                     // Clear the focus ring after a mouse click — the ring is a
                     // keyboard-navigation aid and should not persist after a
