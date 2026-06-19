@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, MouseButton};
+use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{measure_advance, Font};
@@ -290,6 +290,18 @@ impl Button {
         self.active_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
 
+    /// Spacing reserved between the leading icon glyph and the label.
+    /// Collapses to zero for icon-only buttons (empty label) so the glyph
+    /// centres in the button instead of being shoved left by a gap that
+    /// precedes no text.
+    fn icon_gap(&self) -> f64 {
+        if self.label_text.is_empty() {
+            0.0
+        } else {
+            ICON_GAP
+        }
+    }
+
     pub fn with_margin(mut self, m: Insets) -> Self {
         self.base.margin = m;
         self
@@ -323,7 +335,7 @@ impl Button {
         let icon_block_w = self
             .icon
             .as_ref()
-            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + ICON_GAP)
+            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap())
             .unwrap_or(0.0);
         // The (icon + gap + label) group is positioned as a unit;
         // align uses the COMBINED width so the icon stays directly
@@ -467,7 +479,13 @@ impl Widget for Button {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let natural_height = (self.font_size * 1.7).max(24.0);
+        // Honour an explicit `min_size.height` floor (symmetric with the
+        // `min_size.width` handling below) so callers can force uniform
+        // square icon buttons. Defaults to `Size::ZERO`, so unset buttons
+        // keep the font-derived natural height.
+        let natural_height = (self.font_size * 1.7)
+            .max(24.0)
+            .max(self.base.min_size.height);
         let height = if available.height > 0.0 {
             natural_height.min(available.height)
         } else {
@@ -493,7 +511,7 @@ impl Widget for Button {
         let icon_block_w = self
             .icon
             .as_ref()
-            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + ICON_GAP)
+            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap())
             .unwrap_or(0.0);
         let min_w = if self.compact { 0.0 } else { 48.0 };
         let natural_w = (label_size.width + icon_block_w + pad_h)
@@ -658,7 +676,7 @@ impl Widget for Button {
             let icon_block_w = self
                 .icon
                 .as_ref()
-                .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + ICON_GAP)
+                .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap())
                 .unwrap_or(0.0);
             ctx.set_font(font);
             ctx.set_font_size(self.font_size * crate::font_settings::current_font_size_scale());
@@ -698,7 +716,7 @@ impl Widget for Button {
                 .map(|c| c.bounds().x)
                 .unwrap_or_default();
             let icon_block_w =
-                measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size) + ICON_GAP;
+                measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size) + self.icon_gap();
             let group_x = (label_x - icon_block_w).max(0.0);
             Self::paint_icon(
                 ctx,

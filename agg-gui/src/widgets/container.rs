@@ -194,43 +194,72 @@ impl Widget for Container {
         let pad_t = self.props.inner_padding.top;
         let pad_b = self.props.inner_padding.bottom;
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
-
-        // Stack children top-to-bottom (first child = visually highest).
-        // In Y-up coordinates, "top" = higher Y values.
-        // Start cursor at the top of the inner area; move it downward each step.
-        // Child margins are additive: top margin pushes the cursor down before
-        // placing the child; bottom margin is consumed after it.
         let scale = device_scale();
-        let start_cursor = available.height - pad_t;
-        let mut cursor_y = start_cursor;
 
-        for child in self.children.iter_mut() {
-            let m = child.margin().scale(scale);
-            let avail_w = (inner_w - m.left - m.right).max(0.0);
-            let avail_h = (cursor_y - pad_b - m.top - m.bottom).max(0.0);
-            let desired = child.layout(Size::new(avail_w, avail_h));
+        fn layout_children(
+            children: &mut [Box<dyn Widget>],
+            inner_w: f64,
+            pad_l: f64,
+            pad_t: f64,
+            pad_b: f64,
+            scale: f64,
+            height: f64,
+        ) -> f64 {
+            // Stack children top-to-bottom (first child = visually highest).
+            // In Y-up coordinates, "top" = higher Y values.
+            let start_cursor = height - pad_t;
+            let mut cursor_y = start_cursor;
 
-            // Top margin moves the cursor down before the child is placed.
-            cursor_y -= m.top;
-            let child_y = cursor_y - desired.height;
-            let child_bounds = Rect::new(
-                pad_l + m.left,
-                child_y,
-                desired.width.min(avail_w),
-                desired.height,
-            );
-            child.set_bounds(child_bounds);
-            // Bottom margin is consumed below the child.
-            cursor_y = child_y - m.bottom;
+            for child in children.iter_mut() {
+                let m = child.margin().scale(scale);
+                let avail_w = (inner_w - m.left - m.right).max(0.0);
+                let avail_h = (cursor_y - pad_b - m.top - m.bottom).max(0.0);
+                let desired = child.layout(Size::new(avail_w, avail_h));
+
+                cursor_y -= m.top;
+                let child_y = cursor_y - desired.height;
+                child.set_bounds(Rect::new(
+                    pad_l + m.left,
+                    child_y,
+                    desired.width.min(avail_w),
+                    desired.height,
+                ));
+                cursor_y = child_y - m.bottom;
+            }
+
+            (start_cursor - cursor_y).max(0.0)
         }
+
+        let consumed_h = layout_children(
+            &mut self.children,
+            inner_w,
+            pad_l,
+            pad_t,
+            pad_b,
+            scale,
+            available.height,
+        );
 
         // Default: fill the full available area (legacy — many demo
         // sites use `Container` as a decorated wrapper around content
         // that should stretch).  Opt in to content-fit via
         // `with_fit_height(true)` — matches egui `Frame` semantics.
         if self.props.fit_height {
-            let consumed_h = (start_cursor - cursor_y).max(0.0);
             let natural_h = (consumed_h + pad_t + pad_b).min(available.height);
+            // The first pass measured content from the parent-provided height.
+            // A fit-height container paints at `natural_h`, so lay children out
+            // again in that tight height to keep their bounds inside the frame.
+            if (available.height - natural_h).abs() > 0.5 {
+                layout_children(
+                    &mut self.children,
+                    inner_w,
+                    pad_l,
+                    pad_t,
+                    pad_b,
+                    scale,
+                    natural_h,
+                );
+            }
             Size::new(available.width, natural_h)
         } else {
             Size::new(available.width, available.height)

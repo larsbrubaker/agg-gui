@@ -1,5 +1,7 @@
 use super::*;
 
+mod button_touch;
+
 /// ColorPicker: clicking the swatch opens the panel; dragging the hue
 /// slider writes a new colour into the bound cell.
 #[test]
