@@ -133,6 +133,21 @@ pub trait Widget {
         false
     }
 
+    /// Stable identifier for the programmatic focus channel
+    /// ([`crate::focus::request_focus`]).
+    ///
+    /// App code can't reach the [`App`](crate::widget::App)'s private focus
+    /// path to focus a widget the moment it appears (e.g. a search field
+    /// that should grab the keyboard when its overlay opens). A widget that
+    /// returns `Some(id)` here can be focused by calling
+    /// [`crate::focus::request_focus(id)`](crate::focus::request_focus); the
+    /// `App` services the request on its next `layout`, moving focus to the
+    /// matching focusable widget (which dispatches `FocusGained` and raises
+    /// the on-screen keyboard for text inputs). Default: `None`.
+    fn focus_id(&self) -> Option<crate::focus::FocusId> {
+        None
+    }
+
     /// A static name for this widget type, used by the inspector. Default: "Widget".
     fn type_name(&self) -> &'static str {
         "Widget"

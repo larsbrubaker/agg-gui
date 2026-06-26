@@ -149,6 +149,27 @@ impl App {
         self.root
             .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);
+        self.apply_pending_focus();
+    }
+
+    /// Service a pending programmatic focus request
+    /// ([`crate::focus::request_focus`]). Runs at the end of [`layout`] so the
+    /// tree (and thus the set of focusable widgets) reflects any visibility
+    /// change made in the same handler that requested focus. Moves focus to
+    /// the focusable widget whose [`Widget::focus_id`] matches; no-op when
+    /// there's no request or no match.
+    fn apply_pending_focus(&mut self) {
+        let Some(id) = crate::focus::take_focus_request() else {
+            return;
+        };
+        let mut all: Vec<Vec<usize>> = Vec::new();
+        collect_focusable(self.root.as_ref(), &mut Vec::new(), &mut all);
+        let target = all
+            .into_iter()
+            .find(|p| widget_at_path_ref(self.root.as_ref(), p).focus_id() == Some(id));
+        if let Some(path) = target {
+            self.set_focus(Some(path));
+        }
     }
 
     /// Paint the entire widget tree into `ctx`. Call after [`layout`][Self::layout].

@@ -119,6 +119,11 @@ pub struct TextField {
     /// Per-character allow-list. See [`with_char_filter`].
     char_filter: Option<Rc<dyn Fn(char) -> bool>>,
 
+    /// Stable id for the programmatic focus channel
+    /// ([`crate::focus::request_focus`]). `None` opts out. See
+    /// [`with_focus_id`](Self::with_focus_id).
+    focus_request_id: Option<crate::focus::FocusId>,
+
     /// Preferred on-screen-keyboard layer when this field is focused.
     /// `Rc<Cell<_>>` so external code (e.g. a settings radio in the
     /// demo) can swap the mode without rebuilding the widget tree —
@@ -189,6 +194,7 @@ impl TextField {
             on_edit_complete: None,
             text_cell: None,
             char_filter: None,
+            focus_request_id: None,
             keyboard_mode: Rc::new(Cell::new(
                 crate::widgets::on_screen_keyboard::KeyboardInputMode::default(),
             )),
@@ -222,6 +228,15 @@ impl TextField {
     }
     pub fn with_select_all_on_focus(mut self, v: bool) -> Self {
         self.select_all_on_focus = v;
+        self
+    }
+
+    /// Assign a stable id for the programmatic focus channel. App code can
+    /// then call [`crate::focus::request_focus(id)`](crate::focus::request_focus)
+    /// to move keyboard focus here (and raise the on-screen keyboard) the
+    /// next frame — e.g. to auto-focus a search field when its overlay opens.
+    pub fn with_focus_id(mut self, id: crate::focus::FocusId) -> Self {
+        self.focus_request_id = Some(id);
         self
     }
     pub fn with_password_mode(mut self, v: bool) -> Self {
