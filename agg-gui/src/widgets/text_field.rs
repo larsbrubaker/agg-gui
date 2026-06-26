@@ -231,14 +231,6 @@ impl TextField {
         self
     }
 
-    /// Assign a stable id for the programmatic focus channel. App code can
-    /// then call [`crate::focus::request_focus(id)`](crate::focus::request_focus)
-    /// to move keyboard focus here (and raise the on-screen keyboard) the
-    /// next frame — e.g. to auto-focus a search field when its overlay opens.
-    pub fn with_focus_id(mut self, id: crate::focus::FocusId) -> Self {
-        self.focus_request_id = Some(id);
-        self
-    }
     pub fn with_password_mode(mut self, v: bool) -> Self {
         self.password_mode = v;
         self

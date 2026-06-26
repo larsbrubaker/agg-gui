@@ -41,6 +41,7 @@ mod color_wheel_picker;
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.
 mod drawing;
+mod focus;
 mod inspector_hover;
 mod inspector_tree;
 mod layer_compositing;
