@@ -19,6 +19,15 @@ use super::TextField;
 use crate::widgets::on_screen_keyboard::KeyboardInputMode;
 
 impl TextField {
+    /// Assign a stable id for the programmatic focus channel. App code can
+    /// then call [`crate::focus::request_focus(id)`](crate::focus::request_focus)
+    /// to move keyboard focus here (and raise the on-screen keyboard) the
+    /// next frame — e.g. to auto-focus a search field when its overlay opens.
+    pub fn with_focus_id(mut self, id: crate::focus::FocusId) -> Self {
+        self.focus_request_id = Some(id);
+        self
+    }
+
     /// Set the preferred keyboard input mode for this field — picks
     /// which layer the on-screen software keyboard slides up into the
     /// next time this field gains focus.  Defaults to

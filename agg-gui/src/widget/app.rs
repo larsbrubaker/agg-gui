@@ -1,38 +1,7 @@
 use super::*;
 
-/// Collect all focusable widgets in paint order (DFS root → leaves).
-/// Returns their paths as `Vec<Vec<usize>>`.
-fn collect_focusable(
-    widget: &dyn Widget,
-    current_path: &mut Vec<usize>,
-    out: &mut Vec<Vec<usize>>,
-) {
-    if widget.is_focusable() {
-        out.push(current_path.clone());
-    }
-    for (i, child) in widget.children().iter().enumerate() {
-        current_path.push(i);
-        collect_focusable(child.as_ref(), current_path, out);
-        current_path.pop();
-    }
-}
-
-/// Get a mutable reference to the widget at the given path.
-fn widget_at_path<'a>(root: &'a mut Box<dyn Widget>, path: &[usize]) -> &'a mut dyn Widget {
-    if path.is_empty() {
-        return root.as_mut();
-    }
-    let idx = path[0];
-    widget_at_path(&mut root.children_mut()[idx], &path[1..])
-}
-
-fn widget_at_path_ref<'a>(root: &'a dyn Widget, path: &[usize]) -> &'a dyn Widget {
-    if path.is_empty() {
-        return root;
-    }
-    let idx = path[0];
-    widget_at_path_ref(root.children()[idx].as_ref(), &path[1..])
-}
+mod tree_paths;
+use tree_paths::{collect_focusable, widget_at_path, widget_at_path_ref};
 
 // ---------------------------------------------------------------------------
 // App — top-level owner of the widget tree
@@ -149,6 +118,27 @@ impl App {
         self.root
             .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);
+        self.apply_pending_focus();
+    }
+
+    /// Service a pending programmatic focus request
+    /// ([`crate::focus::request_focus`]). Runs at the end of [`layout`] so the
+    /// tree (and thus the set of focusable widgets) reflects any visibility
+    /// change made in the same handler that requested focus. Moves focus to
+    /// the focusable widget whose [`Widget::focus_id`] matches; no-op when
+    /// there's no request or no match.
+    fn apply_pending_focus(&mut self) {
+        let Some(id) = crate::focus::take_focus_request() else {
+            return;
+        };
+        let mut all: Vec<Vec<usize>> = Vec::new();
+        collect_focusable(self.root.as_ref(), &mut Vec::new(), &mut all);
+        let target = all
+            .into_iter()
+            .find(|p| widget_at_path_ref(self.root.as_ref(), p).focus_id() == Some(id));
+        if let Some(path) = target {
+            self.set_focus(Some(path));
+        }
     }
 
     /// Paint the entire widget tree into `ctx`. Call after [`layout`][Self::layout].

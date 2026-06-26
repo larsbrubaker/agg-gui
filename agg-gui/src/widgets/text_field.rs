@@ -119,6 +119,11 @@ pub struct TextField {
     /// Per-character allow-list. See [`with_char_filter`].
     char_filter: Option<Rc<dyn Fn(char) -> bool>>,
 
+    /// Stable id for the programmatic focus channel
+    /// ([`crate::focus::request_focus`]). `None` opts out. See
+    /// [`with_focus_id`](Self::with_focus_id).
+    focus_request_id: Option<crate::focus::FocusId>,
+
     /// Preferred on-screen-keyboard layer when this field is focused.
     /// `Rc<Cell<_>>` so external code (e.g. a settings radio in the
     /// demo) can swap the mode without rebuilding the widget tree —
@@ -189,6 +194,7 @@ impl TextField {
             on_edit_complete: None,
             text_cell: None,
             char_filter: None,
+            focus_request_id: None,
             keyboard_mode: Rc::new(Cell::new(
                 crate::widgets::on_screen_keyboard::KeyboardInputMode::default(),
             )),
@@ -224,6 +230,7 @@ impl TextField {
         self.select_all_on_focus = v;
         self
     }
+
     pub fn with_password_mode(mut self, v: bool) -> Self {
         self.password_mode = v;
         self

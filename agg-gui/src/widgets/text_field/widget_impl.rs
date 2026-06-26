@@ -20,6 +20,10 @@ impl Widget for TextField {
         true
     }
 
+    fn focus_id(&self) -> Option<crate::focus::FocusId> {
+        self.focus_request_id
+    }
+
     fn accepts_text_input(&self) -> bool {
         !self.read_only
     }
