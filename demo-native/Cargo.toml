@@ -30,6 +30,8 @@ webrtc = "0.11"
 serde_json = "1"
 rand = "0.8"
 local-ip-address = "0.6"
+# gzip the large web assets (8.7 MB wasm) for the Screen Share phone server.
+flate2 = "1"
 
 [build-dependencies]
 winresource = "0.1.31"

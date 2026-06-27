@@ -124,14 +124,36 @@ function render() {
 // so the WebGL drawing buffer is still intact when we snapshot it.
 let shareCapture: ((now: number) => void) | null = null;
 
+// Cap the sender's render+capture rate.  In sender mode every render() also does
+// a full-canvas GPU readback + frame-diff encode (in the wasm), which is far too
+// expensive to run at the ~60fps rAF cadence on a phone — back-to-back readbacks
+// saturate the main thread, the browser never composites, and the page looks
+// frozen on the loading overlay.  ~15fps is plenty for a shared UI view and lets
+// the loop yield between readbacks so the page stays responsive.
+const SENDER_CAPTURE_INTERVAL_MS = 66;
+let lastSenderCapture = 0;
+let senderFrameCount = 0;
+
 function animationLoop(now: number) {
   if (wasmModule) {
     void drainPendingFontRequests();
     if (shareCapture) {
-      // Sender mode: keep the canvas fresh every frame so the streamed view
-      // stays live even when the app would otherwise idle, then capture.
-      render();
-      shareCapture(now);
+      // Sender mode: keep the streamed view live, but throttled — see above.
+      if (now - lastSenderCapture >= SENDER_CAPTURE_INTERVAL_MS) {
+        lastSenderCapture = now;
+        // Instrument the first few sender frames so we can tell a hang (begin
+        // with no done = the in-render GPU readback never returns) from mere
+        // slowness (done with a big ms).  console.log is captured even when the
+        // renderer is otherwise blocked.
+        const trace = senderFrameCount < 3;
+        if (trace) console.log(`SENDER frame ${senderFrameCount} begin`);
+        const t = performance.now();
+        render();
+        shareCapture(now);
+        const ms = Math.round(performance.now() - t);
+        if (trace || ms > 400) console.log(`SENDER frame ${senderFrameCount} done ${ms}ms`);
+        senderFrameCount++;
+      }
     } else {
       const needs = (wasmModule["needs_draw"] as (() => boolean) | undefined);
       if (!needs || needs()) {
@@ -499,15 +521,41 @@ function fallbackFontPaths(module: Record<string, unknown>): [string, string] {
   return parseFontRequest((module["fallback_font_paths"] as StringFn)());
 }
 
+// ---------------------------------------------------------------------------
+// Load diagnostics
+// ---------------------------------------------------------------------------
+// The phone's own console isn't visible while we debug Screen Share, so beacon
+// each load milestone back to the LAN server as a fire-and-forget GET to
+// `/__diag/<msg>`.  `phone_server` logs these to the demo-native terminal, so a
+// stalled phase shows up as a "begin" with no matching "done".
+const DIAG_T0 = performance.now();
+function diag(msg: string) {
+  const t = Math.round(performance.now() - DIAG_T0);
+  try {
+    void fetch("/__diag/" + encodeURIComponent(t + "ms " + msg)).catch(() => {});
+  } catch {
+    /* diagnostics must never break the load */
+  }
+}
+
 async function installFontRequest(module: Record<string, unknown>, request: string) {
   const [name, path] = parseFontRequest(request);
   const [iconsPath, emojiPath] = fallbackFontPaths(module);
+  const fetchTimed = async (label: string, p: string): Promise<Uint8Array> => {
+    diag(`font ${label} begin ${p}`);
+    const t = performance.now();
+    const bytes = await fetchFontBytes(p);
+    diag(`font ${label} done ${bytes.length}B ${Math.round(performance.now() - t)}ms`);
+    return bytes;
+  };
   const [primary, icons, emoji] = await Promise.all([
-    fetchFontBytes(path),
-    fetchFontBytes(iconsPath),
-    fetchFontBytes(emojiPath),
+    fetchTimed("primary", path),
+    fetchTimed("icons", iconsPath),
+    fetchTimed("emoji", emojiPath),
   ]);
+  const ti = performance.now();
   const ok = (module["install_loaded_font"] as InstallFontFn)(name, primary, icons, emoji);
+  diag(`install ${name} ${Math.round(performance.now() - ti)}ms ok=${ok}`);
   if (!ok) throw new Error(`WASM rejected font ${name}`);
 }
 
@@ -532,10 +580,29 @@ async function drainPendingFontRequests() {
 
 async function init() {
   try {
+    diag("init start");
     setLoadingText("Loading WASM…");
     const wasm    = await import("../public/pkg/demo_wasm.js");
+    diag("glue imported");
     const wasmUrl = new URL("./public/pkg/demo_wasm_bg.wasm", location.href);
+    const tw = performance.now();
     await wasm.default({ module_or_path: wasmUrl });
+    diag(`wasm instantiated ${Math.round(performance.now() - tw)}ms`);
+    // Split transfer vs. compile so we know whether the wasm cost is the network
+    // (fixable with gzip) or the phone's CPU compiling 8.7 MB.
+    try {
+      const e = performance
+        .getEntriesByType("resource")
+        .find((r) => r.name.includes("demo_wasm_bg.wasm")) as PerformanceResourceTiming | undefined;
+      if (e) {
+        diag(
+          `wasm transfer ${Math.round(e.responseEnd - e.requestStart)}ms ` +
+            `enc=${e.encodedBodySize}B dec=${e.decodedBodySize}B`,
+        );
+      }
+    } catch {
+      /* resource timing is best-effort */
+    }
 
     const module = wasm as unknown as Record<string, unknown>;
     (module["set_client_platform"] as SetPlatformFn | undefined)?.(
@@ -543,21 +610,43 @@ async function init() {
       detectPointerCoarse(),
     );
     setLoadingText("Loading fonts…");
+    diag("fonts begin");
+    const tf = performance.now();
     await installFontRequest(module, (module["default_font_request"] as StringFn)());
+    diag(`fonts done ${Math.round(performance.now() - tf)}ms`);
 
     wasmModule = module;
     // Expose on window so Playwright tests can access WASM functions directly.
     (window as unknown as Record<string, unknown>).__wasm = wasmModule;
-    setLoadingText("Drawing first frame…");
-    render();
+
+    // Everything the app needs is loaded — drop the HTML overlay now and let the
+    // browser actually paint it gone BEFORE the first wasm render, which can be
+    // heavy on a phone.  Otherwise a slow/looping render keeps the main thread
+    // busy and the overlay's removal never composites, so the page looks frozen
+    // on "loading" even though JS has finished.
     loadingEl.classList.add("hidden");
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const tr = performance.now();
+    render();
+    diag(`first frame ${Math.round(performance.now() - tr)}ms`);
 
     setupScreenShare(module);
 
     // Start the reactive animation loop.
     requestAnimationFrame(animationLoop);
+    diag("ready");
+    // Report the actual overlay state now and 2s later — if the phone still
+    // shows "Loading fonts…" while this says hidden=true, the visible page is a
+    // different (re)load, not this one.
+    const overlayState = () =>
+      `overlay hidden=${loadingEl.classList.contains("hidden")} ` +
+      `text="${document.getElementById("loading-text")?.textContent ?? ""}"`;
+    diag(overlayState());
+    setTimeout(() => diag(`+2s ${overlayState()}`), 2000);
   } catch (e) {
     setLoadingText(`Error loading WASM: ${e}`);
+    diag(`ERROR ${e}`);
     console.error(e);
   }
 }

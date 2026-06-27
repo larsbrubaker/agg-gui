@@ -50,19 +50,29 @@ pub(crate) fn maybe_capture(ctx: &mut demo_wgpu::WgpuGfxCtx) {
         return;
     }
     use agg_gui::DrawCtx;
-    if !ctx.capture_screenshot() {
-        return;
+
+    // 1. Harvest a readback started on an earlier frame.  On the web the GPU→CPU
+    //    map only completes once the event loop turns, so a blocking read here
+    //    (as the native Save/Copy path does) would deadlock the single JS thread
+    //    — the freeze that left the phone stuck on the loading screen.  Instead
+    //    we poll: when the pixels are ready, frame-diff encode them.
+    if let Some((rgba, w, h)) = ctx.poll_capture_readback() {
+        if !rgba.is_empty() && w != 0 && h != 0 {
+            SCREEN_ENCODER.with(|c| {
+                let mut enc = c.borrow_mut();
+                let enc = enc.get_or_insert_with(FrameEncoder::new);
+                let packet = enc.encode(&rgba, w, h);
+                SCREEN_OUT.with(|o| *o.borrow_mut() = packet);
+            });
+        }
     }
-    let (rgba, w, h) = ctx.read_captured_screenshot();
-    if rgba.is_empty() || w == 0 || h == 0 {
-        return;
+
+    // 2. With no readback in flight, snapshot this just-rendered frame (GPU-only
+    //    texture copy) and start a new async readback.  The encoded packet for it
+    //    lands a frame or two later — imperceptible for a live shared view.
+    if !ctx.has_pending_readback() && ctx.capture_screenshot() {
+        ctx.begin_capture_readback();
     }
-    SCREEN_ENCODER.with(|c| {
-        let mut enc = c.borrow_mut();
-        let enc = enc.get_or_insert_with(FrameEncoder::new);
-        let packet = enc.encode(&rgba, w, h);
-        SCREEN_OUT.with(|o| *o.borrow_mut() = packet);
-    });
 }
 
 /// Inject a real transport into the demo's screen-share seam. Called once from

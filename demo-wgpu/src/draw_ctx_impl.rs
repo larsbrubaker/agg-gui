@@ -664,3 +664,128 @@ impl DrawCtx for WgpuGfxCtx {
         (out, w, h)
     }
 }
+
+// ── Non-blocking capture readback (web screen-share sender) ────────────────────
+//
+// The trait's `read_captured_screenshot` blocks the thread on `poll(Wait)`, which
+// deadlocks on the single-threaded web build.  These inherent methods split that
+// into start-now / harvest-later so `render()` never blocks.  See
+// [`crate::PendingReadback`].
+impl WgpuGfxCtx {
+    /// Whether a capture readback is already in flight.
+    pub fn has_pending_readback(&self) -> bool {
+        self.pending_readback.is_some()
+    }
+
+    /// Kick off an async readback of the current capture texture.  Returns false
+    /// if nothing is captured or a readback is already in flight.  Pure GPU
+    /// submit + `map_async`; never blocks.
+    pub fn begin_capture_readback(&mut self) -> bool {
+        if self.pending_readback.is_some() {
+            return false;
+        }
+        let Some((texture, _, w, h)) = self.capture_texture.as_ref() else {
+            return false;
+        };
+        let (w, h) = (*w, *h);
+        if w == 0 || h == 0 {
+            return false;
+        }
+        let texture = std::sync::Arc::clone(texture);
+
+        const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bpr = (w * 4).div_ceil(ALIGN) * ALIGN;
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("capture_readback_async"),
+            size: (padded_bpr as u64) * (h as u64),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("capture_readback_async_copy"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bpr),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        staging.slice(..).map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        self.pending_readback = Some(crate::PendingReadback {
+            staging,
+            w,
+            h,
+            padded_bpr,
+            done: rx,
+        });
+        true
+    }
+
+    /// Harvest a completed readback's pixels, or `None` if still pending / none
+    /// in flight.  Never blocks: on the web the map resolves on a later event
+    /// loop turn; the cheap non-blocking `poll` keeps native progressing too.
+    pub fn poll_capture_readback(&mut self) -> Option<(Vec<u8>, u32, u32)> {
+        let _ = self.device.poll(wgpu::PollType::Poll);
+        match self.pending_readback.as_ref()?.done.try_recv() {
+            Ok(Ok(())) => {}
+            Err(std::sync::mpsc::TryRecvError::Empty) => return None, // not ready yet
+            Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending_readback = None; // failed map — drop it
+                return None;
+            }
+        }
+
+        let crate::PendingReadback {
+            staging,
+            w,
+            h,
+            padded_bpr,
+            ..
+        } = self.pending_readback.take().unwrap();
+
+        let bgra = matches!(
+            self.surface_format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
+        let unpadded_bpr = (w * 4) as usize;
+        let mut out = Vec::with_capacity((w as usize) * (h as usize) * 4);
+        {
+            let view = staging.slice(..).get_mapped_range();
+            for row in 0..h as usize {
+                let start = row * padded_bpr as usize;
+                let src = &view[start..start + unpadded_bpr];
+                if bgra {
+                    for px in src.chunks_exact(4) {
+                        out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+                    }
+                } else {
+                    out.extend_from_slice(src);
+                }
+            }
+        }
+        staging.unmap();
+        Some((out, w, h))
+    }
+}

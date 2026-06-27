@@ -11,6 +11,7 @@ mod bridge;
 mod chunk;
 mod peer_id;
 mod phone_server;
+mod web_build;
 
 use std::sync::{Arc, Mutex};
 
@@ -34,6 +35,11 @@ pub fn start(
     wake: Arc<dyn Fn() + Send + Sync>,
 ) -> ScreenShare {
     let peer_id = peer_id::generate();
+
+    // Make sure the served web build matches the current sources before the LAN
+    // server comes up — otherwise the phone loads a stale wasm/bundle.  Returns
+    // immediately; a needed wasm rebuild runs in the background and hot-swaps in.
+    web_build::ensure_current();
 
     // Bring up the LAN server first so the QR can encode its URL.
     let server_url = match runtime.block_on(phone_server::start()) {

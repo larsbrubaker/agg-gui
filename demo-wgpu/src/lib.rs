@@ -194,6 +194,21 @@ pub(crate) struct RetainedWgpuLayer {
 /// [`render_app_frame`] (which calls [`reset`][WgpuGfxCtx::reset] and
 /// `app.paint(ctx)`), then call [`end_frame`][WgpuGfxCtx::end_frame] with the
 /// current surface texture view to flush all deferred draw commands.
+/// An in-flight, non-blocking readback of the capture texture for the **web**
+/// screen-share sender.  A blocking `map_async` + `poll(Wait)` (as
+/// [`DrawCtx::read_captured_screenshot`] does for native Save/Copy) deadlocks the
+/// single-threaded browser: the map can only complete once control returns to the
+/// JS event loop, but the blocking wait never yields.  So the sender starts a
+/// readback one frame and harvests it a later frame via
+/// [`WgpuGfxCtx::poll_capture_readback`].
+pub(crate) struct PendingReadback {
+    staging: wgpu::Buffer,
+    w: u32,
+    h: u32,
+    padded_bpr: u32,
+    done: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+}
+
 pub struct WgpuGfxCtx {
     // ── wgpu core ────────────────────────────────────────────────────────────
     pub(crate) device: Arc<wgpu::Device>,
@@ -280,6 +295,10 @@ pub struct WgpuGfxCtx {
     /// Pixels are pulled back to system memory only when the user clicks
     /// Save or Copy — see [`DrawCtx::read_captured_screenshot`].
     pub(crate) capture_texture: Option<(Arc<wgpu::Texture>, wgpu::TextureView, u32, u32)>,
+
+    /// In-flight async capture readback for the web screen-share sender.
+    /// See [`PendingReadback`].
+    pub(crate) pending_readback: Option<PendingReadback>,
 
     /// Per-frame chunked buffer pool — see [`buffer_arena`] module docs.
     /// All `DrawCommand`s in a single flush share these three buffers
@@ -406,6 +425,7 @@ impl WgpuGfxCtx {
             surface_texture: None,
             pending_screenshot: None,
             capture_texture: None,
+            pending_readback: None,
             frame_arenas,
             aa_step_texture,
             aa_step_view,
