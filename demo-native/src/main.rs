@@ -33,6 +33,8 @@ use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Icon, Window, WindowAttributes};
 
+mod screen_share;
+
 const STATE_FILE_NAME: &str = ".agg-gui-demo-state";
 
 const APP_ICON_SIZE: u32 = 256;
@@ -179,6 +181,15 @@ impl Gpu {
 #[allow(deprecated)]
 fn main() {
     let event_loop = EventLoop::new().expect("event loop");
+    // Proxy lets the screen-share bridge (a background tokio thread) wake the
+    // winit loop when a phone connects or a new frame arrives, so the demo
+    // repaints even while otherwise idle.
+    let wake_proxy = event_loop.create_proxy();
+    // Shared multi-thread runtime for the LAN phone server + WebRTC signaling.
+    let screen_share_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
 
     let default_font_asset = demo_ui::font_asset_by_name(demo_ui::DEFAULT_FONT_NAME)
         .expect("default demo font asset is registered");
@@ -255,6 +266,16 @@ fn main() {
         initial_state,
         platform,
     );
+
+    // Screen Share demo: bring up the LAN phone server + WebRTC bridge and
+    // inject the live transport into the demo's screen-share seam. Held for the
+    // process lifetime (the runtime owns the detached signaling tasks).
+    let wake: Arc<dyn Fn() + Send + Sync> =
+        Arc::new(move || {
+            let _ = wake_proxy.send_event(());
+        });
+    let _screen_share = screen_share::start(&screen_share_runtime, &handles.screen_share, wake);
+
     let show_inspector = Rc::clone(&handles.show_inspector);
     let inspector_nodes = Rc::clone(&handles.inspector_nodes);
     let hovered_bounds = Rc::clone(&handles.hovered_bounds);

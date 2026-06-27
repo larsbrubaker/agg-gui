@@ -268,6 +268,14 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         win_h: WIN_H,
     },
     DemoSpec {
+        title: "\u{F029} Screen Share",
+        label: "\u{F029} Screen Share",
+        group: "Graphics",
+        open: false,
+        win_w: 380.0,
+        win_h: 420.0,
+    },
+    DemoSpec {
         title: "\u{F0D0} Highlighting",
         label: "\u{F0D0} Highlighting",
         group: "Graphics",

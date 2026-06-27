@@ -28,6 +28,7 @@
 mod clipboard_exports;
 mod fonts;
 mod input;
+mod screen_share;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -311,6 +312,7 @@ fn ensure_demo_app() {
                 .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_copy_pending)));
             SCREENSHOT_CAPTURE_SEQ
                 .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_capture_seq)));
+            screen_share::install(&handles.screen_share);
             STATE_ACCESSOR.with(|c| *c.borrow_mut() = Some(handles.state));
             *cell.borrow_mut() = Some(app);
         }

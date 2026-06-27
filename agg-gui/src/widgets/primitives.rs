@@ -194,7 +194,18 @@ impl Widget for Stack {
         while i < self.children.len() {
             if self.children[i].take_raise_request() {
                 let child = self.children.remove(i);
-                let aligned = self.aligned.remove(i);
+                // `aligned` can be shorter than `children` when the tree is
+                // mutated through `children_mut()` (e.g. the app pushes a
+                // full-canvas overlay directly, or reorders windows for
+                // z-order restore). Mirror the read path's tolerance above
+                // (`self.aligned.get(idx).unwrap_or(false)`) instead of
+                // assuming a strict 1:1 length — otherwise a raise landing on
+                // the overhang index panics in `Vec::remove`.
+                let aligned = if i < self.aligned.len() {
+                    self.aligned.remove(i)
+                } else {
+                    false
+                };
                 raised.push((child, aligned));
                 // Don't advance `i` — the list just shortened.
             } else {

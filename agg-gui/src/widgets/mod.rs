@@ -22,6 +22,7 @@ pub mod on_screen_keyboard;
 pub mod performance;
 pub mod primitives;
 pub mod progress_bar;
+pub mod qr_view;
 pub mod property_row;
 pub mod radio_group;
 pub mod resize;
@@ -67,6 +68,7 @@ pub use performance::{
 };
 pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
 pub use progress_bar::ProgressBar;
+pub use qr_view::QrView;
 pub use property_row::{
     paint_editor_only, paint_row, EditorKind, NodeFieldAttrs, NumberAttrs, RowValue, VisibleWhen,
 };

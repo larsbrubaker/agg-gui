@@ -119,12 +119,24 @@ function render() {
 // Matches the native harness's Wait / WaitUntil behaviour so idle windows
 // don't burn CPU / GPU for no reason.
 
-function animationLoop() {
+// When this page is opened as a screen-share *sender* (?host=<id>), the capture
+// hook is installed here. It must run inside the rAF tick, right after render(),
+// so the WebGL drawing buffer is still intact when we snapshot it.
+let shareCapture: ((now: number) => void) | null = null;
+
+function animationLoop(now: number) {
   if (wasmModule) {
     void drainPendingFontRequests();
-    const needs = (wasmModule["needs_draw"] as (() => boolean) | undefined);
-    if (!needs || needs()) {
+    if (shareCapture) {
+      // Sender mode: keep the canvas fresh every frame so the streamed view
+      // stays live even when the app would otherwise idle, then capture.
       render();
+      shareCapture(now);
+    } else {
+      const needs = (wasmModule["needs_draw"] as (() => boolean) | undefined);
+      if (!needs || needs()) {
+        render();
+      }
     }
   }
   requestAnimationFrame(animationLoop);
@@ -540,11 +552,245 @@ async function init() {
     render();
     loadingEl.classList.add("hidden");
 
+    setupScreenShare(module);
+
     // Start the reactive animation loop.
     requestAnimationFrame(animationLoop);
   } catch (e) {
     setLoadingText(`Error loading WASM: ${e}`);
     console.error(e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Screen Share (WebRTC) — one page, two roles
+// ---------------------------------------------------------------------------
+//
+// Opened with `?host=<id>` the page is a *sender*: it still runs the agg-gui
+// app, and additionally streams this canvas (full resolution) to the desktop
+// that owns <id>. Opened normally it is a *receiver*: it registers its own peer
+// id (the QR encodes this page's URL + ?host=<id>), accepts a phone's frames,
+// and hands the decoded pixels to the demo's Screen Share window.
+//
+// Frames are chunked over the reliable, ordered data channel (full-res images
+// exceed the per-message limit). Header is 12 bytes LE — must match the Rust
+// `screen_share::chunk` module: u32 frame_seq, u16 chunk_index, u16 chunk_count,
+// u32 total_len, then the payload.
+
+const SHARE_CHUNK_PAYLOAD = 16 * 1024;
+const SHARE_FPS = 12;
+const SHARE_QUALITY = 0.92; // full resolution; high quality for debugging
+const SHARE_STALE_MS = 2500;
+const SHARE_BACKPRESSURE = 8 * 1024 * 1024;
+
+type PeerLike = {
+  on(ev: string, cb: (arg: unknown) => void): void;
+  connect(id: string, opts: unknown): ConnLike;
+};
+type ConnLike = {
+  open: boolean;
+  dataChannel?: RTCDataChannel;
+  on(ev: string, cb: (arg: unknown) => void): void;
+  send(data: Uint8Array): void;
+};
+
+function getPeerCtor(): (new (id?: string | object, opts?: object) => PeerLike) | null {
+  const ctor = (window as unknown as Record<string, unknown>)["Peer"];
+  return typeof ctor === "function"
+    ? (ctor as new (id?: string | object, opts?: object) => PeerLike)
+    : null;
+}
+
+function setupScreenShare(module: Record<string, unknown>) {
+  const Peer = getPeerCtor();
+  if (!Peer) {
+    console.warn("screen-share: PeerJS not loaded; skipping");
+    return;
+  }
+  const host = new URLSearchParams(location.search).get("host");
+  if (host) {
+    startSender(Peer, host);
+  } else {
+    startReceiver(Peer, module);
+  }
+}
+
+function chunkAndSend(conn: ConnLike, seq: number, bytes: Uint8Array) {
+  const total = bytes.length;
+  const count = Math.max(1, Math.ceil(total / SHARE_CHUNK_PAYLOAD));
+  for (let i = 0; i < count; i++) {
+    const start = i * SHARE_CHUNK_PAYLOAD;
+    const slice = bytes.subarray(start, Math.min(start + SHARE_CHUNK_PAYLOAD, total));
+    const msg = new Uint8Array(12 + slice.length);
+    const dv = new DataView(msg.buffer);
+    dv.setUint32(0, seq >>> 0, true);
+    dv.setUint16(4, i, true);
+    dv.setUint16(6, count, true);
+    dv.setUint32(8, total, true);
+    msg.set(slice, 12);
+    conn.send(msg);
+  }
+}
+
+function dataUrlToBytes(url: string): Uint8Array {
+  const comma = url.indexOf(",");
+  const bin = atob(url.slice(comma + 1));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function startSender(Peer: new (id?: string | object, opts?: object) => PeerLike, host: string) {
+  const peer = new Peer({ debug: 1 });
+  let conn: ConnLike | null = null;
+  let seq = 0;
+  let lastSent = 0;
+
+  peer.on("open", () => {
+    // serialization "none" → raw bytes reach the desktop (native webrtc-rs or
+    // the browser receiver) verbatim, with no BinaryPack wrapping.
+    conn = peer.connect(host, { reliable: true, serialization: "none" });
+    conn.on("open", () => console.log(`screen-share: streaming to ${host}`));
+    conn.on("close", () => { conn = null; });
+    conn.on("error", (err) => console.warn("screen-share: conn error", err));
+  });
+  peer.on("error", (err) => console.warn("screen-share: peer error", err));
+
+  shareCapture = (now: number) => {
+    if (!conn || conn.open === false) return;
+    if (now - lastSent < 1000 / SHARE_FPS) return;
+    const dc = conn.dataChannel;
+    if (dc && dc.bufferedAmount > SHARE_BACKPRESSURE) return; // let the link drain
+    lastSent = now;
+    // `toDataURL` is synchronous, so it snapshots the WebGL buffer in this same
+    // rAF tick (before the browser composites and clears it) — `toBlob` is
+    // async and can capture a blank buffer on a non-preserved WebGL canvas.
+    let url: string;
+    try {
+      url = canvas.toDataURL("image/jpeg", SHARE_QUALITY);
+    } catch (e) {
+      console.warn("screen-share: capture failed", e);
+      return;
+    }
+    try {
+      chunkAndSend(conn, seq, dataUrlToBytes(url));
+      seq = (seq + 1) >>> 0;
+    } catch {
+      /* drop frame */
+    }
+  };
+}
+
+function startReceiver(
+  Peer: new (id?: string | object, opts?: object) => PeerLike,
+  module: Record<string, unknown>,
+) {
+  const id = (module["screen_peer_id"] as StringFn | undefined)?.();
+  if (!id) {
+    console.warn("screen-share: no peer id from wasm; receiver disabled");
+    return;
+  }
+  const setConnected = module["set_screen_connected"] as ((b: boolean) => void) | undefined;
+  const pushFrame = module["push_screen_frame"] as
+    | ((rgba: Uint8Array, w: number, h: number) => void)
+    | undefined;
+
+  // Tell the wasm QR widget which URL to encode: this same page + ?host=<id>.
+  const setPhoneUrl = module["set_phone_url"] as ((url: string) => void) | undefined;
+  setPhoneUrl?.(`${location.origin}${location.pathname}?host=${id}`);
+
+  const peer = new Peer(id, { debug: 1 });
+  peer.on("open", () => console.log(`screen-share: receiver registered as ${id}`));
+  peer.on("error", (err) => console.warn("screen-share: peer error", err));
+  peer.on("connection", (connRaw) => {
+    const conn = connRaw as ConnLike;
+    setConnected?.(true);
+    let lastMsg = performance.now();
+
+    // Chunk reassembly (ordered, reliable channel → in-order chunks).
+    let active = false;
+    let curSeq = 0;
+    let curCount = 0;
+    let received = 0;
+    let parts: Uint8Array[] = [];
+
+    const onChunk = (data: Uint8Array) => {
+      if (data.length < 12) return;
+      const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      const seq = dv.getUint32(0, true);
+      const idx = dv.getUint16(4, true);
+      const count = dv.getUint16(6, true);
+      const payload = data.subarray(12);
+      if (idx === 0) {
+        active = true;
+        curSeq = seq;
+        curCount = count;
+        received = 0;
+        parts = [];
+      }
+      if (!active || seq !== curSeq) return;
+      parts.push(payload);
+      received++;
+      if (curCount === 0 || received >= curCount) {
+        active = false;
+        void decodeAndPush(concatBytes(parts), pushFrame);
+      }
+    };
+
+    conn.on("data", (raw) => {
+      lastMsg = performance.now();
+      onChunk(toUint8(raw));
+    });
+    conn.on("close", () => setConnected?.(false));
+    conn.on("error", () => setConnected?.(false));
+
+    const timer = window.setInterval(() => {
+      if (performance.now() - lastMsg > SHARE_STALE_MS) setConnected?.(false);
+    }, 500);
+    conn.on("close", () => window.clearInterval(timer));
+  });
+}
+
+function toUint8(raw: unknown): Uint8Array {
+  if (raw instanceof Uint8Array) return raw;
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  if (ArrayBuffer.isView(raw)) {
+    const v = raw as ArrayBufferView;
+    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  }
+  return new Uint8Array(0);
+}
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  let len = 0;
+  for (const p of parts) len += p.length;
+  const out = new Uint8Array(len);
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
+async function decodeAndPush(
+  bytes: Uint8Array,
+  pushFrame?: (rgba: Uint8Array, w: number, h: number) => void,
+) {
+  if (!pushFrame) return;
+  try {
+    const bmp = await createImageBitmap(new Blob([bytes]));
+    const off = document.createElement("canvas");
+    off.width = bmp.width;
+    off.height = bmp.height;
+    const octx = off.getContext("2d");
+    if (!octx) return;
+    octx.drawImage(bmp, 0, 0);
+    const img = octx.getImageData(0, 0, bmp.width, bmp.height);
+    pushFrame(new Uint8Array(img.data.buffer), bmp.width, bmp.height);
+    bmp.close?.();
+  } catch (e) {
+    console.warn("screen-share: frame decode failed", e);
   }
 }
 

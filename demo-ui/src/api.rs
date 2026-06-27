@@ -147,5 +147,9 @@ pub struct DemoHandles {
     /// performance bounded: only the screenshot Window invalidates,
     /// not every retained Window in the app.
     pub screenshot_capture_seq: Rc<Cell<u64>>,
+    /// Screen-share transport + QR url + latest-frame seam. The platform shell
+    /// swaps a real WebRTC-backed transport into `screen_share.transport` and
+    /// fills `screen_share.phone_url` once its server / peer id is known.
+    pub screen_share: crate::screen_share::ScreenShareHandles,
     pub state: StateAccessor,
 }

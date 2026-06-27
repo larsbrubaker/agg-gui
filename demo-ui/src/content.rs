@@ -5,6 +5,7 @@ use std::sync::Arc;
 use agg_gui::{Font, Widget};
 
 use crate::rendering_test;
+use crate::screen_share::ScreenShareHandles;
 use crate::windows;
 
 // ── Demo content dispatcher ────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ pub(crate) fn build_demo_content(
     screenshot_copy_pending: Rc<Cell<bool>>,
     screenshot_continuous: Rc<Cell<bool>>,
     screenshot_capture_seq: Rc<Cell<u64>>,
+    screen_share: ScreenShareHandles,
 ) -> Box<dyn Widget> {
     match title {
         // basic.rs
@@ -68,6 +70,7 @@ pub(crate) fn build_demo_content(
             screenshot_continuous,
             screenshot_capture_seq,
         ),
+        "\u{F029} Screen Share" => windows::screen_share_demo(font, screen_share),
         // text_demos.rs
         "\u{F0C9} Strip" => windows::strip_demo(font),
         "\u{F0CE} Table" => windows::table_demo(font),

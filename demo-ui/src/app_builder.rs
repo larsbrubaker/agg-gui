@@ -59,6 +59,7 @@ pub fn build_demo_ui(
     let screenshot_copy_pending = Rc::new(Cell::new(false));
     let screenshot_continuous = Rc::new(Cell::new(false));
     let screenshot_capture_seq: Rc<Cell<u64>> = Rc::new(Cell::new(0));
+    let screen_share = crate::screen_share::ScreenShareHandles::new();
     let initial_theme = initial_state
         .as_ref()
         .map(|s| s.theme_pref)
@@ -312,6 +313,7 @@ pub fn build_demo_ui(
                 Rc::clone(&screenshot_copy_pending),
                 Rc::clone(&screenshot_continuous),
                 Rc::clone(&screenshot_capture_seq),
+                screen_share.clone(),
             )
         };
         let auto_size = spec.title == "\u{F096} Frame";
@@ -735,6 +737,7 @@ pub fn build_demo_ui(
         screenshot_copy_pending: Rc::clone(&screenshot_copy_pending),
         screenshot_continuous: Rc::clone(&screenshot_continuous),
         screenshot_capture_seq: Rc::clone(&screenshot_capture_seq),
+        screen_share: screen_share.clone(),
         state: state_accessor,
     };
     (app, handles)
