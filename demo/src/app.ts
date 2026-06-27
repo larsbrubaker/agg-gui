@@ -132,7 +132,6 @@ let shareCapture: ((now: number) => void) | null = null;
 // the loop yield between readbacks so the page stays responsive.
 const SENDER_CAPTURE_INTERVAL_MS = 66;
 let lastSenderCapture = 0;
-let senderFrameCount = 0;
 
 function animationLoop(now: number) {
   if (wasmModule) {
@@ -141,18 +140,8 @@ function animationLoop(now: number) {
       // Sender mode: keep the streamed view live, but throttled — see above.
       if (now - lastSenderCapture >= SENDER_CAPTURE_INTERVAL_MS) {
         lastSenderCapture = now;
-        // Instrument the first few sender frames so we can tell a hang (begin
-        // with no done = the in-render GPU readback never returns) from mere
-        // slowness (done with a big ms).  console.log is captured even when the
-        // renderer is otherwise blocked.
-        const trace = senderFrameCount < 3;
-        if (trace) console.log(`SENDER frame ${senderFrameCount} begin`);
-        const t = performance.now();
         render();
         shareCapture(now);
-        const ms = Math.round(performance.now() - t);
-        if (trace || ms > 400) console.log(`SENDER frame ${senderFrameCount} done ${ms}ms`);
-        senderFrameCount++;
       }
     } else {
       const needs = (wasmModule["needs_draw"] as (() => boolean) | undefined);
@@ -521,41 +510,15 @@ function fallbackFontPaths(module: Record<string, unknown>): [string, string] {
   return parseFontRequest((module["fallback_font_paths"] as StringFn)());
 }
 
-// ---------------------------------------------------------------------------
-// Load diagnostics
-// ---------------------------------------------------------------------------
-// The phone's own console isn't visible while we debug Screen Share, so beacon
-// each load milestone back to the LAN server as a fire-and-forget GET to
-// `/__diag/<msg>`.  `phone_server` logs these to the demo-native terminal, so a
-// stalled phase shows up as a "begin" with no matching "done".
-const DIAG_T0 = performance.now();
-function diag(msg: string) {
-  const t = Math.round(performance.now() - DIAG_T0);
-  try {
-    void fetch("/__diag/" + encodeURIComponent(t + "ms " + msg)).catch(() => {});
-  } catch {
-    /* diagnostics must never break the load */
-  }
-}
-
 async function installFontRequest(module: Record<string, unknown>, request: string) {
   const [name, path] = parseFontRequest(request);
   const [iconsPath, emojiPath] = fallbackFontPaths(module);
-  const fetchTimed = async (label: string, p: string): Promise<Uint8Array> => {
-    diag(`font ${label} begin ${p}`);
-    const t = performance.now();
-    const bytes = await fetchFontBytes(p);
-    diag(`font ${label} done ${bytes.length}B ${Math.round(performance.now() - t)}ms`);
-    return bytes;
-  };
   const [primary, icons, emoji] = await Promise.all([
-    fetchTimed("primary", path),
-    fetchTimed("icons", iconsPath),
-    fetchTimed("emoji", emojiPath),
+    fetchFontBytes(path),
+    fetchFontBytes(iconsPath),
+    fetchFontBytes(emojiPath),
   ]);
-  const ti = performance.now();
   const ok = (module["install_loaded_font"] as InstallFontFn)(name, primary, icons, emoji);
-  diag(`install ${name} ${Math.round(performance.now() - ti)}ms ok=${ok}`);
   if (!ok) throw new Error(`WASM rejected font ${name}`);
 }
 
@@ -580,29 +543,10 @@ async function drainPendingFontRequests() {
 
 async function init() {
   try {
-    diag("init start");
     setLoadingText("Loading WASM…");
     const wasm    = await import("../public/pkg/demo_wasm.js");
-    diag("glue imported");
     const wasmUrl = new URL("./public/pkg/demo_wasm_bg.wasm", location.href);
-    const tw = performance.now();
     await wasm.default({ module_or_path: wasmUrl });
-    diag(`wasm instantiated ${Math.round(performance.now() - tw)}ms`);
-    // Split transfer vs. compile so we know whether the wasm cost is the network
-    // (fixable with gzip) or the phone's CPU compiling 8.7 MB.
-    try {
-      const e = performance
-        .getEntriesByType("resource")
-        .find((r) => r.name.includes("demo_wasm_bg.wasm")) as PerformanceResourceTiming | undefined;
-      if (e) {
-        diag(
-          `wasm transfer ${Math.round(e.responseEnd - e.requestStart)}ms ` +
-            `enc=${e.encodedBodySize}B dec=${e.decodedBodySize}B`,
-        );
-      }
-    } catch {
-      /* resource timing is best-effort */
-    }
 
     const module = wasm as unknown as Record<string, unknown>;
     (module["set_client_platform"] as SetPlatformFn | undefined)?.(
@@ -610,10 +554,7 @@ async function init() {
       detectPointerCoarse(),
     );
     setLoadingText("Loading fonts…");
-    diag("fonts begin");
-    const tf = performance.now();
     await installFontRequest(module, (module["default_font_request"] as StringFn)());
-    diag(`fonts done ${Math.round(performance.now() - tf)}ms`);
 
     wasmModule = module;
     // Expose on window so Playwright tests can access WASM functions directly.
@@ -627,26 +568,14 @@ async function init() {
     loadingEl.classList.add("hidden");
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-    const tr = performance.now();
     render();
-    diag(`first frame ${Math.round(performance.now() - tr)}ms`);
 
     setupScreenShare(module);
 
     // Start the reactive animation loop.
     requestAnimationFrame(animationLoop);
-    diag("ready");
-    // Report the actual overlay state now and 2s later — if the phone still
-    // shows "Loading fonts…" while this says hidden=true, the visible page is a
-    // different (re)load, not this one.
-    const overlayState = () =>
-      `overlay hidden=${loadingEl.classList.contains("hidden")} ` +
-      `text="${document.getElementById("loading-text")?.textContent ?? ""}"`;
-    diag(overlayState());
-    setTimeout(() => diag(`+2s ${overlayState()}`), 2000);
   } catch (e) {
     setLoadingText(`Error loading WASM: ${e}`);
-    diag(`ERROR ${e}`);
     console.error(e);
   }
 }
@@ -734,47 +663,26 @@ function startSender(
   let seq = 0;
 
   peer.on("open", () => {
-    diag("tx peer open → connecting to host");
     // serialization "none" → raw bytes reach the desktop (native webrtc-rs or
     // the browser receiver) verbatim, with no BinaryPack wrapping.
     conn = peer.connect(host, { reliable: true, serialization: "none" });
-    conn.on("open", () => { diag(`tx conn OPEN to ${host}`); console.log(`screen-share: streaming to ${host}`); });
-    conn.on("close", () => { diag("tx conn CLOSE"); conn = null; });
-    conn.on("error", (err) => { diag(`tx conn ERROR ${err}`); console.warn("screen-share: conn error", err); });
+    conn.on("open", () => console.log(`screen-share: streaming to ${host}`));
+    conn.on("close", () => { conn = null; });
+    conn.on("error", (err) => console.warn("screen-share: conn error", err));
   });
-  peer.on("error", (err) => { diag(`tx peer ERROR ${err}`); console.warn("screen-share: peer error", err); });
+  peer.on("error", (err) => console.warn("screen-share: peer error", err));
 
-  // Transmission counters, beaconed once a second so the terminal shows whether
-  // frames actually leave the phone or stall (no conn / empty packets / backpressure).
-  let txSent = 0, txBytes = 0, txNoConn = 0, txEmpty = 0, txBackpressure = 0, lastTxDiag = 0;
-  shareCapture = (now: number) => {
-    if (!conn || conn.open === false || !takePacket) txNoConn++;
-    else {
-      const dc = conn.dataChannel;
-      if (dc && dc.bufferedAmount > SHARE_BACKPRESSURE) {
-        txBackpressure++;
-      } else {
-        const packet = takePacket();
-        if (!packet || packet.length === 0) {
-          txEmpty++;
-        } else {
-          try {
-            chunkAndSend(conn, seq, packet);
-            seq = (seq + 1) >>> 0;
-            txSent++;
-            txBytes += packet.length;
-          } catch (e) {
-            diag(`tx send threw ${e}`);
-          }
-        }
-      }
-    }
-    if (now - lastTxDiag >= 1000) {
-      lastTxDiag = now;
-      diag(
-        `tx sent=${txSent}(${txBytes}B) noConn=${txNoConn} empty=${txEmpty} ` +
-          `backpressure=${txBackpressure} connOpen=${!!conn && conn.open !== false}`,
-      );
+  shareCapture = () => {
+    if (!conn || conn.open === false || !takePacket) return;
+    const dc = conn.dataChannel;
+    if (dc && dc.bufferedAmount > SHARE_BACKPRESSURE) return; // let the link drain
+    const packet = takePacket();
+    if (!packet || packet.length === 0) return; // nothing new this frame
+    try {
+      chunkAndSend(conn, seq, packet);
+      seq = (seq + 1) >>> 0;
+    } catch {
+      /* drop frame */
     }
   };
 }

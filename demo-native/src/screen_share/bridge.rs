@@ -19,7 +19,9 @@ use tokio_tungstenite::tungstenite::Message;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
@@ -164,6 +166,7 @@ async fn handle_envelope(
                 .ok_or("OFFER missing connectionId")?
                 .to_string();
 
+            eprintln!("screen-share signaling: OFFER from {src} (cid {connection_id})");
             let pc =
                 build_peer_connection(src.clone(), connection_id.clone(), out.clone(), channels)
                     .await?;
@@ -192,6 +195,7 @@ async fn handle_envelope(
             });
             out.send(envelope.to_string())
                 .map_err(|e| format!("send answer: {e}"))?;
+            eprintln!("screen-share signaling: ANSWER sent to {src}");
 
             *active_pc.lock().unwrap() = Some(pc);
             Ok(())
@@ -223,6 +227,8 @@ async fn handle_envelope(
                 pc.add_ice_candidate(init)
                     .await
                     .map_err(|e| format!("add_ice: {e}"))?;
+            } else {
+                eprintln!("screen-share signaling: CANDIDATE dropped — no active pc yet");
             }
             Ok(())
         }
@@ -261,6 +267,17 @@ async fn build_peer_connection(
             .await
             .map_err(|e| format!("new_peer_connection: {e}"))?,
     );
+
+    // Connection / ICE state tracing so we can see exactly where a failing
+    // handshake stalls (the phone only reports its own conn-open=false).
+    pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
+        eprintln!("screen-share signaling: pc state → {s}");
+        Box::pin(async {})
+    }));
+    pc.on_ice_connection_state_change(Box::new(move |s: RTCIceConnectionState| {
+        eprintln!("screen-share signaling: ice state → {s}");
+        Box::pin(async {})
+    }));
 
     // Our own ICE candidates → peerjs CANDIDATE envelopes back to the phone.
     let out_for_ice = out.clone();

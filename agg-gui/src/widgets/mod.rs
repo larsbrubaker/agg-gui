@@ -21,6 +21,7 @@ pub mod menu;
 pub mod on_screen_keyboard;
 pub mod performance;
 pub mod primitives;
+pub mod spacers;
 pub mod progress_bar;
 pub mod qr_view;
 pub mod property_row;
@@ -66,7 +67,8 @@ pub use performance::{
     paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView, RunMode,
     RunModeDesc, RunModeRow, SharedFrameHistory,
 };
-pub use primitives::{Padding, Separator, SizedBox, Spacer, Stack};
+pub use primitives::{Padding, SizedBox, Stack};
+pub use spacers::{Separator, Spacer};
 pub use progress_bar::ProgressBar;
 pub use qr_view::QrView;
 pub use property_row::{

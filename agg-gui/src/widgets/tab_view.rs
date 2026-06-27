@@ -15,7 +15,7 @@ use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
-use crate::widgets::primitives::Spacer;
+use crate::widgets::spacers::Spacer;
 
 const ACTION_BTN_W: f64 = 100.0;
 const DIVIDER_W: f64 = 6.0;
