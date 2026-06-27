@@ -534,6 +534,11 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                         }
                     }
 
+                    // Screen Share sender: capture + frame-diff encode this
+                    // frame for the TS sender to transmit (no-op unless this
+                    // page was opened with ?host=).
+                    screen_share::maybe_capture(wgpu_ctx);
+
                     // Drain deferred Save / Copy.  Click handlers can't
                     // read pixels themselves (no `DrawCtx` access in event
                     // dispatch); they flip a pending flag and we

@@ -327,21 +327,30 @@ async fn build_peer_connection(
             }));
 
             // Full-resolution frames exceed the data channel's per-message
-            // limit, so the phone splits each encoded image into ordered
-            // chunks (see `chunk` module). Reassemble per channel.
+            // limit, so the phone splits each codec packet into ordered chunks
+            // (see `chunk`). Reassemble, then run the frame-diff decoder.
             let on_msg = channels.clone();
             let reasm = Arc::new(Mutex::new(chunk::Reassembler::default()));
+            let decoder = Arc::new(Mutex::new(demo_ui::FrameDecoder::new()));
             dc.on_message(Box::new(move |msg: DataChannelMessage| {
                 let channels = on_msg.clone();
                 let reasm = reasm.clone();
+                let decoder = decoder.clone();
                 Box::pin(async move {
                     let complete = reasm.lock().ok().and_then(|mut r| r.push(&msg.data));
-                    if let Some(image_bytes) = complete {
-                        decode_and_store(&image_bytes, &channels);
-                    } else {
-                        // A chunk arrived; keep the connection marked live so
-                        // the stale-timeout doesn't trip mid-frame.
-                        *channels.connected.lock().unwrap() = true;
+                    // Any inbound chunk means the phone is alive — keep
+                    // connected so the stale-timeout doesn't trip mid-frame.
+                    *channels.connected.lock().unwrap() = true;
+                    if let Some(packet) = complete {
+                        let decoded = decoder.lock().ok().and_then(|mut d| d.decode(&packet));
+                        if let Some((rgba, w, h)) = decoded {
+                            if let Ok(mut slot) = channels.latest.lock() {
+                                *slot = Some((rgba, w, h));
+                            }
+                            (channels.wake)();
+                        }
+                        // `None` = a delta that arrived before its keyframe
+                        // (e.g. we joined mid-stream); wait for the next key.
                     }
                 })
             }));
@@ -349,24 +358,4 @@ async fn build_peer_connection(
     }));
 
     Ok(pc)
-}
-
-/// Decode one fully-reassembled image (JPEG or PNG) to RGBA8 and drop it into
-/// the mailbox. Bad frames are logged and skipped so a single corrupt frame
-/// never wedges the view.
-fn decode_and_store(bytes: &[u8], channels: &BridgeChannels) {
-    match image::load_from_memory(bytes) {
-        Ok(img) => {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            if let Ok(mut slot) = channels.latest.lock() {
-                *slot = Some((rgba.into_raw(), w, h));
-            }
-            *channels.connected.lock().unwrap() = true;
-            (channels.wake)();
-        }
-        Err(err) => {
-            eprintln!("screen-share dc: dropped undecodable frame ({} bytes): {err}", bytes.len());
-        }
-    }
 }

@@ -578,8 +578,6 @@ async function init() {
 // u32 total_len, then the payload.
 
 const SHARE_CHUNK_PAYLOAD = 16 * 1024;
-const SHARE_FPS = 12;
-const SHARE_QUALITY = 0.92; // full resolution; high quality for debugging
 const SHARE_STALE_MS = 2500;
 const SHARE_BACKPRESSURE = 8 * 1024 * 1024;
 
@@ -609,7 +607,7 @@ function setupScreenShare(module: Record<string, unknown>) {
   }
   const host = new URLSearchParams(location.search).get("host");
   if (host) {
-    startSender(Peer, host);
+    startSender(Peer, host, module);
   } else {
     startReceiver(Peer, module);
   }
@@ -632,19 +630,19 @@ function chunkAndSend(conn: ConnLike, seq: number, bytes: Uint8Array) {
   }
 }
 
-function dataUrlToBytes(url: string): Uint8Array {
-  const comma = url.indexOf(",");
-  const bin = atob(url.slice(comma + 1));
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
+function startSender(
+  Peer: new (id?: string | object, opts?: object) => PeerLike,
+  host: string,
+  module: Record<string, unknown>,
+) {
+  // Enable in-wasm capture+encode: each render(), the wasm side grabs the
+  // canvas via the screenshot GPU-readback path and frame-diff encodes it.
+  (module["screen_share_set_sender"] as ((b: boolean) => void) | undefined)?.(true);
+  const takePacket = module["screen_share_take_packet"] as (() => Uint8Array) | undefined;
 
-function startSender(Peer: new (id?: string | object, opts?: object) => PeerLike, host: string) {
   const peer = new Peer({ debug: 1 });
   let conn: ConnLike | null = null;
   let seq = 0;
-  let lastSent = 0;
 
   peer.on("open", () => {
     // serialization "none" → raw bytes reach the desktop (native webrtc-rs or
@@ -656,24 +654,14 @@ function startSender(Peer: new (id?: string | object, opts?: object) => PeerLike
   });
   peer.on("error", (err) => console.warn("screen-share: peer error", err));
 
-  shareCapture = (now: number) => {
-    if (!conn || conn.open === false) return;
-    if (now - lastSent < 1000 / SHARE_FPS) return;
+  shareCapture = () => {
+    if (!conn || conn.open === false || !takePacket) return;
     const dc = conn.dataChannel;
     if (dc && dc.bufferedAmount > SHARE_BACKPRESSURE) return; // let the link drain
-    lastSent = now;
-    // `toDataURL` is synchronous, so it snapshots the WebGL buffer in this same
-    // rAF tick (before the browser composites and clears it) — `toBlob` is
-    // async and can capture a blank buffer on a non-preserved WebGL canvas.
-    let url: string;
+    const packet = takePacket();
+    if (!packet || packet.length === 0) return; // nothing new this frame
     try {
-      url = canvas.toDataURL("image/jpeg", SHARE_QUALITY);
-    } catch (e) {
-      console.warn("screen-share: capture failed", e);
-      return;
-    }
-    try {
-      chunkAndSend(conn, seq, dataUrlToBytes(url));
+      chunkAndSend(conn, seq, packet);
       seq = (seq + 1) >>> 0;
     } catch {
       /* drop frame */
@@ -691,9 +679,9 @@ function startReceiver(
     return;
   }
   const setConnected = module["set_screen_connected"] as ((b: boolean) => void) | undefined;
-  const pushFrame = module["push_screen_frame"] as
-    | ((rgba: Uint8Array, w: number, h: number) => void)
-    | undefined;
+  // The wasm side decodes each reassembled codec packet (frame-diff) and writes
+  // it to the live-view slot.
+  const pushEncoded = module["push_screen_encoded"] as ((packet: Uint8Array) => void) | undefined;
 
   // Tell the wasm QR widget which URL to encode: this same page + ?host=<id>.
   const setPhoneUrl = module["set_phone_url"] as ((url: string) => void) | undefined;
@@ -733,7 +721,7 @@ function startReceiver(
       received++;
       if (curCount === 0 || received >= curCount) {
         active = false;
-        void decodeAndPush(concatBytes(parts), pushFrame);
+        pushEncoded?.(concatBytes(parts));
       }
     };
 
@@ -771,27 +759,6 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
     off += p.length;
   }
   return out;
-}
-
-async function decodeAndPush(
-  bytes: Uint8Array,
-  pushFrame?: (rgba: Uint8Array, w: number, h: number) => void,
-) {
-  if (!pushFrame) return;
-  try {
-    const bmp = await createImageBitmap(new Blob([bytes]));
-    const off = document.createElement("canvas");
-    off.width = bmp.width;
-    off.height = bmp.height;
-    const octx = off.getContext("2d");
-    if (!octx) return;
-    octx.drawImage(bmp, 0, 0);
-    const img = octx.getImageData(0, 0, bmp.width, bmp.height);
-    pushFrame(new Uint8Array(img.data.buffer), bmp.width, bmp.height);
-    bmp.close?.();
-  } catch (e) {
-    console.warn("screen-share: frame decode failed", e);
-  }
 }
 
 init();

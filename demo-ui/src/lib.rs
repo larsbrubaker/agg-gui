@@ -9,6 +9,7 @@ mod content;
 mod font_init;
 mod font_picker;
 mod rendering_test;
+mod screen_codec;
 mod screen_share;
 mod shell;
 mod sidebar;
@@ -20,6 +21,7 @@ mod windows;
 
 pub use api::{DemoHandles, PlatformHooks, PlatformKind};
 pub use app_builder::build_demo_ui;
+pub use screen_codec::{FrameDecoder, FrameEncoder};
 pub use screen_share::{
     NullScreenTransport, QueuedScreenTransport, ScreenFrame, ScreenShareHandles,
     ScreenShareTransport,
