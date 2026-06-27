@@ -72,8 +72,8 @@ pub fn ensure_current() {
         std::thread::spawn(move || rebuild_wasm_and_bundle(&root));
     } else if bundle_stale {
         // wasm is already current, so the current sources' bundle matches it —
-        // a standalone bundle rebuild stays consistent.  It's fast; do it inline.
-        rebuild_bundle_in_place(&root);
+        // a standalone bundle rebuild stays consistent.
+        rebuild_bundle(&root);
     }
 }
 
@@ -124,21 +124,35 @@ fn scan_newest(dir: &Path, exts: &[&str], newest: &mut Option<SystemTime>) {
     }
 }
 
-/// Background path: rebuild the wasm package and the JS bundle into staging
-/// locations, then swap both over the live ones.  Anything that fails leaves
+// The build STAGES under `target/` — which file-watchers (cargo-watch and the
+// like) ignore — and only the final atomic swap touches the watched
+// `demo/public/`.  This is essential: a watcher that restarts demo-native on any
+// `demo/public/` write would otherwise kill the slow (~1 min) wasm build before
+// it finished swapping, leaving the wasm "stale" so the next launch rebuilds
+// again — an endless rebuild/restart loop.  Staging in `target/` lets the build
+// run to completion; the lone swap causes at most one restart, after which the
+// freshness check sees current assets and stops.
+fn stage_dir(root: &Path) -> PathBuf {
+    root.join("target").join("web-build")
+}
+
+/// Background path: rebuild the wasm package and the JS bundle into the unwatched
+/// staging dir, then swap both over the live ones.  Anything that fails leaves
 /// the existing assets untouched.
 fn rebuild_wasm_and_bundle(root: &Path) {
     eprintln!("screen-share: web sources changed — rebuilding wasm in the background…");
     let public = root.join("demo").join("public");
     let pkg = public.join("pkg");
-    let pkg_next = public.join("pkg.next");
-    let dist = public.join("dist");
-    let bundle = dist.join("bundle.js");
-    let bundle_next = dist.join("bundle.js.next");
+    let bundle = public.join("dist").join("bundle.js");
+    let stage = stage_dir(root);
+    let pkg_stage = stage.join("pkg");
+    let bundle_stage = stage.join("bundle.js");
 
-    let _ = std::fs::remove_dir_all(&pkg_next);
+    let _ = std::fs::create_dir_all(&stage);
+    let _ = std::fs::remove_dir_all(&pkg_stage);
     // wasm-pack resolves --out-dir relative to the crate dir (demo-wasm), hence
-    // the `../demo/...` prefix — mirrors demo/build-wasm.ps1.
+    // the `../target/...` prefix.  target/ is unwatched, so this slow build runs
+    // to completion instead of being killed by a watcher restart.
     if !run_in(
         "wasm-pack",
         root,
@@ -148,45 +162,52 @@ fn rebuild_wasm_and_bundle(root: &Path) {
             "--target",
             "web",
             "--out-dir",
-            "../demo/public/pkg.next",
+            "../target/web-build/pkg",
             "--no-typescript",
         ],
     ) {
-        let _ = std::fs::remove_dir_all(&pkg_next);
+        let _ = std::fs::remove_dir_all(&pkg_stage);
         return;
     }
 
     // Swap the new wasm package in BEFORE bundling: `bun` inlines the glue from
     // the *live* `public/pkg/demo_wasm.js`, so the bundle must see the new glue
-    // to match the new wasm.  (Brief window here where the live pkg is new but
-    // the bundle is still old — the bundle build below is ~sub-second and closes
-    // it; a phone connecting in between just retries.)
-    if let Err(e) = swap_dir(&pkg, &pkg_next) {
+    // to match the new wasm.
+    if let Err(e) = swap_dir(&pkg, &pkg_stage) {
         eprintln!("screen-share: wasm built but swap failed ({e}); keeping previous pkg");
         return;
     }
-    if !build_bundle(root, "public/dist/bundle.js.next") {
+    if !build_bundle(root, "../target/web-build/bundle.js") {
         eprintln!(
             "screen-share: wasm updated but bundle rebuild failed; the served bundle's glue \
              now mismatches the wasm — run `bun run build` to refresh it"
         );
-        let _ = std::fs::remove_file(&bundle_next);
+        let _ = std::fs::remove_file(&bundle_stage);
         return;
     }
-    if let Err(e) = swap_file(&bundle, &bundle_next) {
+    if let Err(e) = swap_file(&bundle, &bundle_stage) {
         eprintln!("screen-share: bundle built but swap failed ({e}); run `bun run build`");
         return;
     }
     eprintln!("screen-share: web assets updated — reload the phone to pick them up");
 }
 
-/// Fast path: the bundle is the only stale artifact and the wasm already
-/// matches the sources, so write the bundle straight to its live location.
-fn rebuild_bundle_in_place(root: &Path) {
+/// Fast path: the bundle is the only stale artifact.  Still build into the
+/// unwatched staging dir and swap, so a watcher doesn't restart mid-write.
+fn rebuild_bundle(root: &Path) {
     eprintln!("screen-share: rebuilding JS bundle…");
-    if build_bundle(root, "public/dist/bundle.js") {
-        eprintln!("screen-share: JS bundle updated");
+    let stage = stage_dir(root);
+    let bundle = root.join("demo").join("public").join("dist").join("bundle.js");
+    let bundle_stage = stage.join("bundle.js");
+    let _ = std::fs::create_dir_all(&stage);
+    if !build_bundle(root, "../target/web-build/bundle.js") {
+        return;
     }
+    if let Err(e) = swap_file(&bundle, &bundle_stage) {
+        eprintln!("screen-share: bundle built but swap failed ({e}); run `bun run build`");
+        return;
+    }
+    eprintln!("screen-share: JS bundle updated");
 }
 
 fn build_bundle(root: &Path, outfile: &str) -> bool {
@@ -225,8 +246,15 @@ fn run_in(program: &str, cwd: &Path, args: &[&str]) -> bool {
 
 /// Replace directory `target` with `staging` as atomically as the platform
 /// allows (Windows can't rename onto an existing dir), restoring on failure.
+///
+/// The temporary `prev` is kept next to `staging` (under the unwatched
+/// `target/` dir), never next to `target` (the watched, but gitignored,
+/// `demo/public/`).  A `demo/public/pkg.prev` would NOT match the
+/// `demo/public/pkg/` gitignore entry, so a gitignore-respecting watcher would
+/// see it and restart us — re-creating the rebuild loop this whole module
+/// exists to avoid.
 fn swap_dir(target: &Path, staging: &Path) -> std::io::Result<()> {
-    let prev = target.with_extension("prev");
+    let prev = staging.with_extension("prev");
     let _ = std::fs::remove_dir_all(&prev);
     if target.exists() {
         std::fs::rename(target, &prev)?;
