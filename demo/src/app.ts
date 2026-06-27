@@ -734,26 +734,47 @@ function startSender(
   let seq = 0;
 
   peer.on("open", () => {
+    diag("tx peer open → connecting to host");
     // serialization "none" → raw bytes reach the desktop (native webrtc-rs or
     // the browser receiver) verbatim, with no BinaryPack wrapping.
     conn = peer.connect(host, { reliable: true, serialization: "none" });
-    conn.on("open", () => console.log(`screen-share: streaming to ${host}`));
-    conn.on("close", () => { conn = null; });
-    conn.on("error", (err) => console.warn("screen-share: conn error", err));
+    conn.on("open", () => { diag(`tx conn OPEN to ${host}`); console.log(`screen-share: streaming to ${host}`); });
+    conn.on("close", () => { diag("tx conn CLOSE"); conn = null; });
+    conn.on("error", (err) => { diag(`tx conn ERROR ${err}`); console.warn("screen-share: conn error", err); });
   });
-  peer.on("error", (err) => console.warn("screen-share: peer error", err));
+  peer.on("error", (err) => { diag(`tx peer ERROR ${err}`); console.warn("screen-share: peer error", err); });
 
-  shareCapture = () => {
-    if (!conn || conn.open === false || !takePacket) return;
-    const dc = conn.dataChannel;
-    if (dc && dc.bufferedAmount > SHARE_BACKPRESSURE) return; // let the link drain
-    const packet = takePacket();
-    if (!packet || packet.length === 0) return; // nothing new this frame
-    try {
-      chunkAndSend(conn, seq, packet);
-      seq = (seq + 1) >>> 0;
-    } catch {
-      /* drop frame */
+  // Transmission counters, beaconed once a second so the terminal shows whether
+  // frames actually leave the phone or stall (no conn / empty packets / backpressure).
+  let txSent = 0, txBytes = 0, txNoConn = 0, txEmpty = 0, txBackpressure = 0, lastTxDiag = 0;
+  shareCapture = (now: number) => {
+    if (!conn || conn.open === false || !takePacket) txNoConn++;
+    else {
+      const dc = conn.dataChannel;
+      if (dc && dc.bufferedAmount > SHARE_BACKPRESSURE) {
+        txBackpressure++;
+      } else {
+        const packet = takePacket();
+        if (!packet || packet.length === 0) {
+          txEmpty++;
+        } else {
+          try {
+            chunkAndSend(conn, seq, packet);
+            seq = (seq + 1) >>> 0;
+            txSent++;
+            txBytes += packet.length;
+          } catch (e) {
+            diag(`tx send threw ${e}`);
+          }
+        }
+      }
+    }
+    if (now - lastTxDiag >= 1000) {
+      lastTxDiag = now;
+      diag(
+        `tx sent=${txSent}(${txBytes}B) noConn=${txNoConn} empty=${txEmpty} ` +
+          `backpressure=${txBackpressure} connOpen=${!!conn && conn.open !== false}`,
+      );
     }
   };
 }
