@@ -46,6 +46,7 @@ mod inspector_hover;
 mod inspector_tree;
 mod layer_compositing;
 mod layout_lcd;
+mod menu_hidpi_scale;
 mod on_screen_keyboard;
 #[cfg(feature = "reflect")]
 mod reflect_roundtrip;

@@ -39,7 +39,7 @@ impl BarLabels {
             // Resize first (cheap to recreate; bar entries rarely change).
             self.labels = labels
                 .iter()
-                .map(|text| make_label(text, font, font_size))
+                .map(|text| make_bar_label(text, font, font_size))
                 .collect();
             return;
         }
@@ -283,6 +283,22 @@ fn make_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
         .with_align(LabelAlign::Left)
 }
 
+/// Build a menu-**bar** button label.
+///
+/// Identical to [`make_label`] except the Label is created *non-buffered*
+/// (`with_has_backbuffer(false)`).  The `MenuBar` is itself a backbuffered
+/// widget that rasterises into an `LcdGfxCtx` (when LCD is on); a *buffered*
+/// child Label would rasterise into its own `LcdCoverage` cache and then
+/// composite back through the default `draw_lcd_backbuffer_arc`, which
+/// collapses per-channel coverage to a single alpha — making the bar text
+/// grayscale while the popup (painted onto the real ctx) stays subpixel.
+/// Painting the bar label directly via `LcdGfxCtx::fill_text` preserves LCD
+/// chroma.  No caching is lost: the bar's own backbuffer holds the composited
+/// pixels, so the label only re-rasterises when the bar does.
+fn make_bar_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
+    make_label(text, font, font_size).with_has_backbuffer(false)
+}
+
 fn make_shortcut_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
     Label::new(text, Arc::clone(font))
         .with_font_size(font_size)
@@ -298,4 +314,68 @@ fn items_for_layout<'a>(items: &'a [MenuEntry], path: &[usize]) -> &'a [MenuEntr
         current = &item.submenu;
     }
     current
+}
+
+#[cfg(test)]
+mod lcd_tests {
+    use super::BarLabels;
+    use crate::color::Color;
+    use crate::draw_ctx::DrawCtx;
+    use crate::font_settings::{clear_lcd_enabled_override, set_lcd_enabled};
+    use crate::geometry::Rect;
+    use crate::lcd_coverage::LcdBuffer;
+    use crate::lcd_gfx_ctx::LcdGfxCtx;
+    use crate::text::Font;
+    use std::sync::Arc;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../../../demo/assets/CascadiaCode.ttf");
+
+    fn font() -> Arc<Font> {
+        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    /// True when any pixel's R/G/B coverage channels differ — the
+    /// signature of LCD subpixel rendering.  A grayscale (collapsed)
+    /// raster has `R == G == B` for every pixel.
+    fn has_subpixel(buf: &LcdBuffer) -> bool {
+        buf.color_plane()
+            .chunks_exact(3)
+            .any(|p| p[0] != p[1] || p[1] != p[2])
+    }
+
+    /// Regression: a menu-bar button label, painted into the bar's own
+    /// `LcdCoverage` backbuffer (an [`LcdGfxCtx`]), must keep its LCD
+    /// subpixel coverage.
+    ///
+    /// The bug: bar labels were *buffered*, so each rasterised into its
+    /// own `LcdCoverage` cache and was then composited into the bar's
+    /// `LcdGfxCtx` via the default `draw_lcd_backbuffer_arc`, which
+    /// collapses per-channel coverage to a single alpha
+    /// (`a = ra.max(ga).max(ba)`).  That left the bar text grayscale
+    /// while every other (real-ctx) label rendered LCD — exactly the
+    /// "top menu is blurry / not subpixel" report.  Painting the label
+    /// *directly* (non-buffered) routes through `LcdGfxCtx::fill_text`,
+    /// preserving subpixel chroma.
+    #[test]
+    fn bar_label_keeps_lcd_subpixel_inside_backbuffer_ctx() {
+        set_lcd_enabled(true);
+        let font = font();
+        let mut bar = BarLabels::new();
+        bar.sync_to(&font, 14.0, &["File"]);
+
+        let mut buf = LcdBuffer::new(120, 28);
+        {
+            let mut ctx = LcdGfxCtx::new(&mut buf);
+            ctx.clear(Color::white());
+            bar.paint_in(&mut ctx, 0, Rect::new(0.0, 0.0, 80.0, 28.0), Color::black());
+        }
+        let subpixel = has_subpixel(&buf);
+        clear_lcd_enabled_override();
+
+        assert!(
+            subpixel,
+            "menu-bar label lost LCD subpixel coverage when painted into the \
+             bar's LcdCoverage backbuffer (nested-backbuffer collapse regression)"
+        );
+    }
 }

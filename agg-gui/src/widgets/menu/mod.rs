@@ -210,6 +210,85 @@ mod tests {
     }
 
     #[test]
+    fn touch_synth_move_does_not_open_submenu() {
+        // Root cause of "tapping a submenu parent activates its first child on
+        // mobile": a touch tap synthesises a MouseMove at the tap point before
+        // the MouseDown.  `update_hover` used to OPEN the submenu (`open_path`)
+        // on that move; the follow-up MouseDown then hit-tested the freshly
+        // opened submenu and — on a narrow viewport where the submenu overlaps
+        // its parent — landed on (and activated) the first child.  On touch,
+        // submenus must open only on the explicit tap in `handle_left_down`,
+        // never on the synth move.
+        let items = test_items();
+        let mut state = PopupMenuState::default();
+        state.open_at(Point::new(20.0, 200.0), MenuAnchorKind::Context);
+        let viewport = Size::new(400.0, 300.0);
+        // Row 3 is the "More" submenu parent in `test_items`.
+        let more_row = state.layouts(&items, viewport)[0].rows[3].rect;
+
+        crate::touch_state::clear_last_touch_event_for_testing();
+        crate::touch_state::note_touch_event();
+
+        state.update_hover(
+            &items,
+            Point::new(more_row.x + 10.0, more_row.y + more_row.height * 0.5),
+            viewport,
+        );
+        assert!(
+            state.open_path.is_empty(),
+            "a touch-synth MouseMove must not open a submenu (open_path = {:?})",
+            state.open_path
+        );
+
+        crate::touch_state::clear_last_touch_event_for_testing();
+    }
+
+    #[test]
+    fn touch_tap_on_submenu_parent_opens_it_without_activating_child() {
+        // End-to-end symptom: on a NARROW viewport the "More" submenu clamps
+        // back over its parent, so the first child lands under the finger.  A
+        // touch tap (synth MouseMove → MouseDown at the same point) on the
+        // submenu parent must OPEN the submenu and must NOT activate a child.
+        let mut items = test_items();
+        let mut state = PopupMenuState::default();
+        // Narrow enough that the submenu (MENU_W = 224) can't sit beside the
+        // parent and gets clamped over it.
+        let viewport = Size::new(300.0, 320.0);
+        state.open_at(Point::new(20.0, 250.0), MenuAnchorKind::Context);
+        let more_row = state.layouts(&items, viewport)[0].rows[3].rect;
+        // Tap toward the right of the parent row, where the clamped submenu's
+        // first child overlaps.
+        let tap = Point::new(more_row.x + more_row.width - 20.0, more_row.y + more_row.height * 0.5);
+
+        crate::touch_state::clear_last_touch_event_for_testing();
+        crate::touch_state::note_touch_event();
+
+        // Synth MouseMove (touchstart), then MouseDown at the same point.
+        state.handle_event(&mut items, &Event::MouseMove { pos: tap }, viewport);
+        let (_, response) = state.handle_event(
+            &mut items,
+            &Event::MouseDown {
+                pos: tap,
+                button: MouseButton::Left,
+                modifiers: Modifiers::default(),
+            },
+            viewport,
+        );
+
+        assert!(
+            !matches!(response, MenuResponse::Action(_)),
+            "tapping a submenu parent must not activate a child (got {response:?})"
+        );
+        assert_eq!(
+            state.open_path,
+            vec![3],
+            "tapping the submenu parent should open its submenu"
+        );
+
+        crate::touch_state::clear_last_touch_event_for_testing();
+    }
+
+    #[test]
     fn disabled_rows_do_not_become_hovered() {
         let items = test_items();
         let mut state = PopupMenuState::default();

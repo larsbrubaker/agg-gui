@@ -184,6 +184,17 @@ impl PopupMenuState {
     }
 
     pub fn update_hover(&mut self, items: &[MenuEntry], pos: Point, viewport: Size) -> bool {
+        // Touch has no hover concept: a tap synthesises a MouseMove at the tap
+        // point right before the MouseDown.  Doing hover work here — especially
+        // OPENING a submenu via `open_path` — means the follow-up MouseDown
+        // hit-tests against the just-opened submenu and, on a narrow viewport
+        // where the submenu overlaps its parent, lands on (and activates) the
+        // submenu's first child instead of opening the submenu.  On touch,
+        // submenus open only on the explicit tap in `handle_left_down`; leave
+        // `hover_path`/`open_path` untouched here (clear any stale hover).
+        if is_touch_synthesized() {
+            return self.set_hover_path(None);
+        }
         let layouts = self.layouts(items, viewport);
         let next_hover = match hit_test(&layouts, pos) {
             Some(MenuHit::Item(path)) => {
@@ -204,14 +215,8 @@ impl PopupMenuState {
             }
             _ => None,
         };
-        // Touch-synth MouseMove arrives during a tap; treat hover as None
-        // so the dropped finger doesn't leave a hover panel behind on the
-        // popup row after the tap closes the menu.
-        let next_hover = if is_touch_synthesized() {
-            None
-        } else {
-            next_hover
-        };
+        // (Touch is handled by the early return above — only desktop hover
+        // reaches here.)
         if self.hover_path != next_hover {
             self.hover_path = next_hover;
             true

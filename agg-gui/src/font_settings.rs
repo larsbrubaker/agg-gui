@@ -153,16 +153,31 @@ pub fn set_font_size_scale(scale: f64) {
 
 /// Whether widgets should rasterise text through the LCD subpixel path.
 ///
-/// Returns the explicit override set via [`set_lcd_enabled`] if one is
-/// present; otherwise auto-derives from [`crate::device_scale`] — LCD on
-/// at standard DPI (`scale ≤ 1.25`), off at HiDPI.  This is the default
-/// most apps want, so platform shells generally don't need to call
-/// [`set_lcd_enabled`] at all.
+/// Whether widgets should rasterise text through the LCD subpixel path.
+///
+/// **Hard cap first:** LCD is NEVER used above standard density.  The gate
+/// keys on the *effective* scale ([`crate::ux_scale::effective_scale`] =
+/// device DPR × UX zoom), because LCD subpixel rendering only pays off when
+/// individual physical pixels are large enough to resolve the R/G/B
+/// sub-stripes — and "small pixels" come from a high UX zoom (mobile /
+/// accessibility) just as much as from a HiDPI panel.  Above `1.25×` it is
+/// pure overhead with no visible benefit, so we force the cheaper grayscale
+/// path *regardless of any explicit override*.  This also keeps
+/// CPU-backbuffered widgets (the menu bar) off the LCD blit at high scale,
+/// where they would otherwise shrink.
+///
+/// At standard density the explicit override set via [`set_lcd_enabled`]
+/// wins if present; otherwise LCD defaults on.  So platform shells generally
+/// don't need to call [`set_lcd_enabled`] at all.
 pub fn lcd_enabled() -> bool {
+    // Never LCD at high effective density — overrides included.
+    if crate::ux_scale::effective_scale() > 1.25 {
+        return false;
+    }
     if let Some(explicit) = LCD_ENABLED.with(|c| *c.borrow()) {
         return explicit;
     }
-    crate::device_scale::device_scale() <= 1.25
+    true
 }
 
 /// Pin LCD subpixel rendering to a specific value, overriding the
@@ -266,8 +281,11 @@ mod tests {
 
     #[test]
     fn test_lcd_flag_explicit_override_round_trips() {
-        // Reset to known state — other tests in the same thread may have
-        // flipped it.  Use try-reset pattern.
+        // Reset to known state — thread-locals can leak across tests reusing
+        // the same worker thread.  Standard density so the high-scale cap in
+        // `lcd_enabled` doesn't mask the override under test.
+        crate::device_scale::set_device_scale(1.0);
+        crate::ux_scale::set_ux_scale(1.0);
         set_lcd_enabled(false);
         assert!(!lcd_enabled());
         set_lcd_enabled(true);
@@ -284,6 +302,44 @@ mod tests {
         set_device_scale(2.0);
         assert!(!lcd_enabled(), "HiDPI should default to LCD off");
         // Restore to a sane state for sibling tests.
+        set_device_scale(1.0);
+    }
+
+    #[test]
+    fn test_lcd_auto_disabled_at_high_effective_scale_from_ux_zoom() {
+        // LCD subpixel rendering is pointless overhead once the on-screen
+        // pixel density is high — and "high density" can come from the UX
+        // zoom (mobile / accessibility) just as much as from the device DPR.
+        // A device at 1.0 DPR with ux_scale 1.7 renders everything at 1.7×;
+        // LCD must auto-disable there, exactly as it does at 1.7× DPR.
+        // Regression: the auto-derivation keyed on `device_scale` alone, so a
+        // ux-zoomed standard-DPI display kept LCD on, which routed the
+        // CPU-backbuffered menu bar through the LCD blit and rendered it tiny.
+        use crate::device_scale::set_device_scale;
+        use crate::ux_scale::set_ux_scale;
+        clear_lcd_enabled_override();
+        set_device_scale(1.0);
+        set_ux_scale(1.0);
+        assert!(lcd_enabled(), "standard DPI + no zoom should default to LCD on");
+        set_ux_scale(1.7);
+        assert!(
+            !lcd_enabled(),
+            "high effective scale via ux zoom should default to LCD off"
+        );
+        // The high-scale gate is a HARD CAP: it wins even over an explicit
+        // override, so "force LCD on" can't reintroduce the overhead (and the
+        // tiny-menu blit) at high density.
+        set_lcd_enabled(true);
+        assert!(
+            !lcd_enabled(),
+            "explicit LCD-on override must still be capped off at high effective scale"
+        );
+        // ...but at standard density the explicit override is honoured.
+        set_ux_scale(1.0);
+        assert!(lcd_enabled(), "override LCD-on must apply at standard density");
+        // Restore sane state for sibling tests.
+        clear_lcd_enabled_override();
+        set_ux_scale(1.0);
         set_device_scale(1.0);
     }
 

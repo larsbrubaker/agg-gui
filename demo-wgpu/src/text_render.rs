@@ -186,13 +186,19 @@ impl WgpuGfxCtx {
         let (color_tex, color_view) = self.lcd_arc_get_or_upload(color, w, h);
         let (alpha_tex, alpha_view) = self.lcd_arc_get_or_upload(alpha, w, h);
 
-        // Snap origin to integer pixel grid — subpixel phase pattern only valid
-        // at 1:1 texel-to-pixel mapping.
+        // Snap both corners to the integer pixel grid — subpixel phase pattern
+        // only valid at 1:1 texel-to-pixel mapping.  BOTH corners must run
+        // through the CTM: `dst_w`/`dst_h` are LOGICAL units, so the far corner
+        // has to be transformed (not just `bl + dst_w`) or the quad collapses
+        // to logical size and the bitmap renders shrunk by `1/ctm_scale` at any
+        // scale > 1 (e.g. 110–125% desktop scaling, where LCD is still on).
         let ctm = *self.ctm();
+        let far_x = dst_x + dst_w;
+        let far_y = dst_y + dst_h;
         let bl_x = (dst_x * ctm.sx + dst_y * ctm.shx + ctm.tx).round();
         let bl_y = (dst_x * ctm.shy + dst_y * ctm.sy + ctm.ty).round();
-        let tr_x = bl_x + dst_w;
-        let tr_y = bl_y + dst_h;
+        let tr_x = (far_x * ctm.sx + far_y * ctm.shx + ctm.tx).round();
+        let tr_y = (far_x * ctm.shy + far_y * ctm.sy + ctm.ty).round();
 
         // Cached planes are top-row-first (Y-down image storage), so v=1 at
         // bl (visually-bottom row of the quad samples the last row of data).
