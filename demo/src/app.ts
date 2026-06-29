@@ -4,6 +4,8 @@
 // render() returns void — GL writes to the canvas; we no longer use 2D ctx.
 // A requestAnimationFrame loop drives the cube animation continuously.
 
+import { setupScreenShare, tickScreenShare } from "./screen_share";
+
 type RenderFn      = (width: number, height: number, frame_ms: number) => void;
 type MouseXYFn     = (x: number, y: number) => void;
 type MouseXYBFn    = (x: number, y: number, button: number) => void;
@@ -119,31 +121,16 @@ function render() {
 // Matches the native harness's Wait / WaitUntil behaviour so idle windows
 // don't burn CPU / GPU for no reason.
 
-// When this page is opened as a screen-share *sender* (?host=<id>), the capture
-// hook is installed here. It must run inside the rAF tick, right after render(),
-// so the WebGL drawing buffer is still intact when we snapshot it.
-let shareCapture: ((now: number) => void) | null = null;
-
-// Cap the sender's render+capture rate.  In sender mode every render() also does
-// a full-canvas GPU readback + frame-diff encode (in the wasm), which is far too
-// expensive to run at the ~60fps rAF cadence on a phone — back-to-back readbacks
-// saturate the main thread, the browser never composites, and the page looks
-// frozen on the loading overlay.  ~15fps is plenty for a shared UI view and lets
-// the loop yield between readbacks so the page stays responsive.
-const SENDER_CAPTURE_INTERVAL_MS = 66;
-let lastSenderCapture = 0;
+// Screen-share state and the WebRTC transport live in `./screen_share.ts`.
+// `tickScreenShare` runs the receiver's command pump and, in sender-streaming
+// mode, owns the throttled render+capture for this tick.
 
 function animationLoop(now: number) {
   if (wasmModule) {
     void drainPendingFontRequests();
-    if (shareCapture) {
-      // Sender mode: keep the streamed view live, but throttled — see above.
-      if (now - lastSenderCapture >= SENDER_CAPTURE_INTERVAL_MS) {
-        lastSenderCapture = now;
-        render();
-        shareCapture(now);
-      }
-    } else {
+    // In sender-streaming mode screen share renders itself (throttled) and
+    // returns true; otherwise fall through to the normal reactive render.
+    if (!tickScreenShare(now, render)) {
       const needs = (wasmModule["needs_draw"] as (() => boolean) | undefined);
       if (!needs || needs()) {
         render();
@@ -267,18 +254,29 @@ mobileTextInput.addEventListener("input", () => {
 
 function syncMobileKeyboard() {
   if (!wasmModule) return;
-  // If the agg-gui on-screen keyboard is taking over, get out of the
-  // way: blur the hidden textarea so the native iOS / Android keyboard
-  // does not also pop up.
-  const aggKeyboardActive =
-    (wasmModule["software_keyboard_visible"] as BoolFn | undefined)?.() ?? false;
-  if (aggKeyboardActive) {
+  // On any device where the agg-gui on-screen keyboard is enabled (i.e.
+  // mobile-touch), the emulated keyboard owns ALL text entry and we must
+  // NEVER focus the hidden textarea: focusing it is exactly what summons
+  // the native iOS / Android keyboard — the terrible experience the
+  // emulated keyboard exists to replace.
+  //
+  // Gate on *enabled*, not *visible*: at the instant a field is tapped the
+  // emulated panel has only just been targeted to slide up, so its visible
+  // fraction is still ~0. A visibility check would fall through here and
+  // race the native keyboard open for a frame. `enabled` is a static
+  // device-class flag with no such race.
+  const aggKeyboardEnabled =
+    (wasmModule["software_keyboard_enabled"] as BoolFn | undefined)?.() ?? false;
+  if (aggKeyboardEnabled) {
     if (document.activeElement === mobileTextInput) {
       mobileTextInput.blur();
       canvas.focus();
     }
     return;
   }
+  // Desktop only: the hidden textarea backs IME / dead-key composition.
+  // Focus it while a text widget is focused so composed input flows
+  // through the beforeinput / input handlers; blur it otherwise.
   const textFocused = (wasmModule["text_input_focused"] as BoolFn | undefined)?.() ?? false;
   if (textFocused) {
     mobileTextInput.value = "";
@@ -578,205 +576,6 @@ async function init() {
     setLoadingText(`Error loading WASM: ${e}`);
     console.error(e);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Screen Share (WebRTC) — one page, two roles
-// ---------------------------------------------------------------------------
-//
-// Opened with `?host=<id>` the page is a *sender*: it still runs the agg-gui
-// app, and additionally streams this canvas (full resolution) to the desktop
-// that owns <id>. Opened normally it is a *receiver*: it registers its own peer
-// id (the QR encodes this page's URL + ?host=<id>), accepts a phone's frames,
-// and hands the decoded pixels to the demo's Screen Share window.
-//
-// Frames are chunked over the reliable, ordered data channel (full-res images
-// exceed the per-message limit). Header is 12 bytes LE — must match the Rust
-// `screen_share::chunk` module: u32 frame_seq, u16 chunk_index, u16 chunk_count,
-// u32 total_len, then the payload.
-
-const SHARE_CHUNK_PAYLOAD = 16 * 1024;
-const SHARE_STALE_MS = 2500;
-const SHARE_BACKPRESSURE = 8 * 1024 * 1024;
-
-type PeerLike = {
-  on(ev: string, cb: (arg: unknown) => void): void;
-  connect(id: string, opts: unknown): ConnLike;
-};
-type ConnLike = {
-  open: boolean;
-  dataChannel?: RTCDataChannel;
-  on(ev: string, cb: (arg: unknown) => void): void;
-  send(data: Uint8Array): void;
-};
-
-function getPeerCtor(): (new (id?: string | object, opts?: object) => PeerLike) | null {
-  const ctor = (window as unknown as Record<string, unknown>)["Peer"];
-  return typeof ctor === "function"
-    ? (ctor as new (id?: string | object, opts?: object) => PeerLike)
-    : null;
-}
-
-function setupScreenShare(module: Record<string, unknown>) {
-  const Peer = getPeerCtor();
-  if (!Peer) {
-    console.warn("screen-share: PeerJS not loaded; skipping");
-    return;
-  }
-  const host = new URLSearchParams(location.search).get("host");
-  if (host) {
-    startSender(Peer, host, module);
-  } else {
-    startReceiver(Peer, module);
-  }
-}
-
-function chunkAndSend(conn: ConnLike, seq: number, bytes: Uint8Array) {
-  const total = bytes.length;
-  const count = Math.max(1, Math.ceil(total / SHARE_CHUNK_PAYLOAD));
-  for (let i = 0; i < count; i++) {
-    const start = i * SHARE_CHUNK_PAYLOAD;
-    const slice = bytes.subarray(start, Math.min(start + SHARE_CHUNK_PAYLOAD, total));
-    const msg = new Uint8Array(12 + slice.length);
-    const dv = new DataView(msg.buffer);
-    dv.setUint32(0, seq >>> 0, true);
-    dv.setUint16(4, i, true);
-    dv.setUint16(6, count, true);
-    dv.setUint32(8, total, true);
-    msg.set(slice, 12);
-    conn.send(msg);
-  }
-}
-
-function startSender(
-  Peer: new (id?: string | object, opts?: object) => PeerLike,
-  host: string,
-  module: Record<string, unknown>,
-) {
-  // Enable in-wasm capture+encode: each render(), the wasm side grabs the
-  // canvas via the screenshot GPU-readback path and frame-diff encodes it.
-  (module["screen_share_set_sender"] as ((b: boolean) => void) | undefined)?.(true);
-  const takePacket = module["screen_share_take_packet"] as (() => Uint8Array) | undefined;
-
-  const peer = new Peer({ debug: 1 });
-  let conn: ConnLike | null = null;
-  let seq = 0;
-
-  peer.on("open", () => {
-    // serialization "none" → raw bytes reach the desktop (native webrtc-rs or
-    // the browser receiver) verbatim, with no BinaryPack wrapping.
-    conn = peer.connect(host, { reliable: true, serialization: "none" });
-    conn.on("open", () => console.log(`screen-share: streaming to ${host}`));
-    conn.on("close", () => { conn = null; });
-    conn.on("error", (err) => console.warn("screen-share: conn error", err));
-  });
-  peer.on("error", (err) => console.warn("screen-share: peer error", err));
-
-  shareCapture = () => {
-    if (!conn || conn.open === false || !takePacket) return;
-    const dc = conn.dataChannel;
-    if (dc && dc.bufferedAmount > SHARE_BACKPRESSURE) return; // let the link drain
-    const packet = takePacket();
-    if (!packet || packet.length === 0) return; // nothing new this frame
-    try {
-      chunkAndSend(conn, seq, packet);
-      seq = (seq + 1) >>> 0;
-    } catch {
-      /* drop frame */
-    }
-  };
-}
-
-function startReceiver(
-  Peer: new (id?: string | object, opts?: object) => PeerLike,
-  module: Record<string, unknown>,
-) {
-  const id = (module["screen_peer_id"] as StringFn | undefined)?.();
-  if (!id) {
-    console.warn("screen-share: no peer id from wasm; receiver disabled");
-    return;
-  }
-  const setConnected = module["set_screen_connected"] as ((b: boolean) => void) | undefined;
-  // The wasm side decodes each reassembled codec packet (frame-diff) and writes
-  // it to the live-view slot.
-  const pushEncoded = module["push_screen_encoded"] as ((packet: Uint8Array) => void) | undefined;
-
-  // Tell the wasm QR widget which URL to encode: this same page + ?host=<id>.
-  const setPhoneUrl = module["set_phone_url"] as ((url: string) => void) | undefined;
-  setPhoneUrl?.(`${location.origin}${location.pathname}?host=${id}`);
-
-  const peer = new Peer(id, { debug: 1 });
-  peer.on("open", () => console.log(`screen-share: receiver registered as ${id}`));
-  peer.on("error", (err) => console.warn("screen-share: peer error", err));
-  peer.on("connection", (connRaw) => {
-    const conn = connRaw as ConnLike;
-    setConnected?.(true);
-    let lastMsg = performance.now();
-
-    // Chunk reassembly (ordered, reliable channel → in-order chunks).
-    let active = false;
-    let curSeq = 0;
-    let curCount = 0;
-    let received = 0;
-    let parts: Uint8Array[] = [];
-
-    const onChunk = (data: Uint8Array) => {
-      if (data.length < 12) return;
-      const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-      const seq = dv.getUint32(0, true);
-      const idx = dv.getUint16(4, true);
-      const count = dv.getUint16(6, true);
-      const payload = data.subarray(12);
-      if (idx === 0) {
-        active = true;
-        curSeq = seq;
-        curCount = count;
-        received = 0;
-        parts = [];
-      }
-      if (!active || seq !== curSeq) return;
-      parts.push(payload);
-      received++;
-      if (curCount === 0 || received >= curCount) {
-        active = false;
-        pushEncoded?.(concatBytes(parts));
-      }
-    };
-
-    conn.on("data", (raw) => {
-      lastMsg = performance.now();
-      onChunk(toUint8(raw));
-    });
-    conn.on("close", () => setConnected?.(false));
-    conn.on("error", () => setConnected?.(false));
-
-    const timer = window.setInterval(() => {
-      if (performance.now() - lastMsg > SHARE_STALE_MS) setConnected?.(false);
-    }, 500);
-    conn.on("close", () => window.clearInterval(timer));
-  });
-}
-
-function toUint8(raw: unknown): Uint8Array {
-  if (raw instanceof Uint8Array) return raw;
-  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
-  if (ArrayBuffer.isView(raw)) {
-    const v = raw as ArrayBufferView;
-    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
-  }
-  return new Uint8Array(0);
-}
-
-function concatBytes(parts: Uint8Array[]): Uint8Array {
-  let len = 0;
-  for (const p of parts) len += p.length;
-  const out = new Uint8Array(len);
-  let off = 0;
-  for (const p of parts) {
-    out.set(p, off);
-    off += p.length;
-  }
-  return out;
 }
 
 init();

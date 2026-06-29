@@ -90,9 +90,15 @@ pub struct Label {
     text: String,
     font: Arc<Font>,
     font_size: f64,
-    /// `None` → use `ctx.visuals().text_color` at paint time.
-    /// `Some(c)` → explicit override (e.g. accent-coloured or dimmed text).
+    /// `None` → use a theme colour at paint time (`text_dim` when `dim`,
+    /// else `text_color`).
+    /// `Some(c)` → explicit override (e.g. accent-coloured text).
     color: Option<Color>,
+    /// When `true` and no explicit `color` is set, follow the theme's
+    /// dimmed/secondary text colour (`visuals().text_dim`) for hints and
+    /// captions.  Resolves at paint time like the `text_color` default, so
+    /// it tracks live dark/light switches.
+    dim: bool,
     align: LabelAlign,
     /// When `true` (the default), this Label owns a CPU backbuffer
     /// that's re-rasterised on dirty and blitted every frame.  Set to
@@ -151,6 +157,7 @@ impl Label {
             font,
             font_size: 14.0,
             color: None, // resolved from ctx.visuals() at paint time
+            dim: false,
             align: LabelAlign::Left,
             // Default: backbuffer only when grayscale.  Rationale:
             //   - Grayscale on GL direct-to-surface goes through
@@ -191,6 +198,16 @@ impl Label {
     /// theme's `text_color` automatically.
     pub fn with_color(mut self, color: Color) -> Self {
         self.color = Some(color);
+        self
+    }
+    /// Follow the theme's *dimmed* text colour (`visuals().text_dim`)
+    /// instead of the primary `text_color` — for secondary / hint /
+    /// caption text.  Has no effect when an explicit
+    /// [`with_color`](Label::with_color) is also set.  Like the default
+    /// `text_color` path this resolves at paint time, so it stays readable
+    /// across live dark/light theme switches (unlike a hard-coded grey).
+    pub fn with_dim(mut self, dim: bool) -> Self {
+        self.dim = dim;
         self
     }
     pub fn with_align(mut self, align: LabelAlign) -> Self {
@@ -453,8 +470,16 @@ impl Widget for Label {
 
         ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(size);
-        // If no explicit colour was set, follow the active theme.
-        let color = self.color.unwrap_or_else(|| ctx.visuals().text_color);
+        // If no explicit colour was set, follow the active theme — the
+        // dimmed secondary colour for hint labels, otherwise body text.
+        let color = self.color.unwrap_or_else(|| {
+            let v = ctx.visuals();
+            if self.dim {
+                v.text_dim
+            } else {
+                v.text_color
+            }
+        });
 
         let is_wrapped = self.wrap && !self.wrapped_lines.is_empty();
 

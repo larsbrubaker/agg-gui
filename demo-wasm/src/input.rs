@@ -90,6 +90,22 @@ pub fn software_keyboard_visible() -> bool {
     agg_gui::widgets::on_screen_keyboard::is_visible()
 }
 
+/// Whether the on-screen keyboard is enabled for this device class at all
+/// (true on mobile-touch devices — see `set_client_platform`).
+///
+/// The JS shell gates its native-keyboard fallback on THIS rather than on
+/// [`software_keyboard_visible`]: on a device the emulated keyboard owns,
+/// the hidden HTML textarea must *never* be focused, because focusing it
+/// is exactly what pops up the native OS keyboard the emulated one
+/// replaces. Visibility can't be used for that gate — it tracks the
+/// slide-up animation, which is still at fraction 0 at the instant a field
+/// is tapped, so the fallback would race the native keyboard open for a
+/// frame. `enabled` is a static device-class flag with no such race.
+#[wasm_bindgen]
+pub fn software_keyboard_enabled() -> bool {
+    agg_gui::widgets::on_screen_keyboard::is_enabled()
+}
+
 #[wasm_bindgen]
 pub fn on_mouse_move(x: f64, y: f64) {
     with_app_mut(|app| app.on_mouse_move(x, y));

@@ -10,6 +10,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::runtime::Runtime;
@@ -31,11 +32,29 @@ use super::chunk;
 /// Top-down RGBA8 + width + height. Matches `demo_ui::ScreenFrame`.
 type ScreenFrame = (Vec<u8>, u32, u32);
 
+/// Holds the live data channel so the desktop can push Stream On/Off commands
+/// back to the phone over the same (bidirectional) channel it receives frames on.
+pub type DataChannelSlot = Arc<Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>>;
+
+/// Wire format for the desktop→phone Stream switch: a 3-byte command the phone
+/// tells apart from frame chunks (which it never receives) by the `SS` prefix.
+/// Byte 2 is `b'1'` (start) or `b'0'` (stop). Mirrors the bytes the TS receiver
+/// sends in the web build, and what the TS sender parses.
+pub fn stream_command_bytes(on: bool) -> Bytes {
+    Bytes::from_static(if on { b"SS1" } else { b"SS0" })
+}
+
 /// Shared cells the bridge writes into; the widget reads them via
 /// `QueuedScreenTransport`.
 pub struct BridgeChannels {
     pub latest: Arc<Mutex<Option<ScreenFrame>>>,
     pub connected: Arc<Mutex<bool>>,
+    /// Desktop's Stream On/Off intent. Read when a phone connects so a freshly
+    /// joined phone immediately honours the current switch.
+    pub streaming: Arc<Mutex<bool>>,
+    /// The active data channel, published on open / cleared on close so the
+    /// UI's control sink can transmit Stream commands.
+    pub data_channel: DataChannelSlot,
     /// Nudges the winit event loop so a connect / new frame is painted even
     /// when the app is otherwise idle.
     pub wake: Arc<dyn Fn() + Send + Sync>,
@@ -46,6 +65,8 @@ impl Clone for BridgeChannels {
         Self {
             latest: self.latest.clone(),
             connected: self.connected.clone(),
+            streaming: self.streaming.clone(),
+            data_channel: self.data_channel.clone(),
             wake: self.wake.clone(),
         }
     }
@@ -235,6 +256,7 @@ async fn handle_envelope(
         "LEAVE" | "EXPIRE" => {
             *active_pc.lock().unwrap() = None;
             *channels.connected.lock().unwrap() = false;
+            *channels.data_channel.lock().unwrap() = None;
             (channels.wake)();
             Ok(())
         }
@@ -324,12 +346,23 @@ async fn build_peer_connection(
             eprintln!("screen-share signaling: data channel opening ({})", dc.label());
 
             let on_open = channels.clone();
+            let dc_for_open = dc.clone();
             dc.on_open(Box::new(move || {
                 let channels = on_open.clone();
+                let dc = dc_for_open.clone();
                 Box::pin(async move {
                     *channels.connected.lock().unwrap() = true;
+                    // Publish the channel for the UI's control sink, then send
+                    // the current Stream switch so the phone starts in the state
+                    // the desktop already shows (default Off → no capture).
+                    *channels.data_channel.lock().unwrap() = Some(dc.clone());
+                    let on = *channels.streaming.lock().unwrap();
+                    if let Err(err) = dc.send(&stream_command_bytes(on)).await {
+                        eprintln!("screen-share signaling: initial stream command failed: {err}");
+                    }
                     (channels.wake)();
-                    eprintln!("screen-share signaling: data channel open");
+                    eprintln!("screen-share signaling: data channel open (stream {})",
+                        if on { "on" } else { "off" });
                 })
             }));
 
@@ -338,6 +371,7 @@ async fn build_peer_connection(
                 let channels = on_close.clone();
                 Box::pin(async move {
                     *channels.connected.lock().unwrap() = false;
+                    *channels.data_channel.lock().unwrap() = None;
                     (channels.wake)();
                     eprintln!("screen-share signaling: data channel closed");
                 })

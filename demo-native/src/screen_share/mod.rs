@@ -60,12 +60,35 @@ pub fn start(
 
     let latest: Arc<Mutex<Option<demo_ui::ScreenFrame>>> = Arc::new(Mutex::new(None));
     let connected: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    // Desktop's Stream On/Off switch (default Off) and the live data channel the
+    // control sink transmits over. Shared between the transport, the UI's
+    // control closure, and the signaling bridge.
+    let streaming: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let data_channel: bridge::DataChannelSlot = Arc::new(Mutex::new(None));
 
-    *handles.transport.borrow_mut() = Box::new(demo_ui::QueuedScreenTransport::new(
-        latest.clone(),
-        connected.clone(),
-        peer_id.clone(),
-    ));
+    // Control sink: when the UI flips Stream On/Off, transmit the command to the
+    // phone over the current data channel (if any). The bridge also sends the
+    // current state on connect, so a command issued while disconnected is not
+    // lost — it's reapplied when the next phone joins.
+    let control_handle = runtime.handle().clone();
+    let control_dc = data_channel.clone();
+    let control: Arc<dyn Fn(bool) + Send + Sync> = Arc::new(move |on: bool| {
+        let dc_slot = control_dc.clone();
+        control_handle.spawn(async move {
+            let dc = dc_slot.lock().unwrap().clone();
+            if let Some(dc) = dc {
+                if let Err(err) = dc.send(&bridge::stream_command_bytes(on)).await {
+                    eprintln!("screen-share: stream command send failed: {err}");
+                }
+            }
+        });
+    });
+
+    *handles.transport.borrow_mut() = Box::new(
+        demo_ui::QueuedScreenTransport::new(latest.clone(), connected.clone(), peer_id.clone())
+            .with_streaming_flag(streaming.clone())
+            .with_control(control),
+    );
     *handles.phone_url.borrow_mut() = phone_url;
 
     let signaling = bridge::spawn(
@@ -74,6 +97,8 @@ pub fn start(
         BridgeChannels {
             latest,
             connected,
+            streaming,
+            data_channel,
             wake,
         },
     );

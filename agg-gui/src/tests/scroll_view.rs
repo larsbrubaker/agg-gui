@@ -224,3 +224,50 @@ fn test_scroll_fade_uses_window_background() {
         "scroll fade should blend toward the window background, got {p:?}"
     );
 }
+
+/// `ScrollView::measure_min_height` forwards to its content's required
+/// height, so a `Window::with_tight_content_fit` ancestor sizes itself to
+/// fully contain the scroll content (no overflow → no visible scrollbar)
+/// instead of collapsing to the trait-default `min_size` height of zero.
+/// This is what lets the Mobile Keyboard window hug its content while still
+/// keeping a ScrollView in the tree for the keyboard-driven focus lift.
+#[test]
+fn test_scroll_view_measure_min_height_forwards_to_content() {
+    use crate::{DrawCtx, Event, EventResult, Rect};
+
+    /// Leaf whose `measure_min_height` is a fixed, known value regardless
+    /// of width — isolates the forwarding from any real widget's metrics.
+    struct FixedHeight(f64);
+    impl Widget for FixedHeight {
+        fn type_name(&self) -> &'static str {
+            "FixedHeight"
+        }
+        fn bounds(&self) -> Rect {
+            Rect::default()
+        }
+        fn set_bounds(&mut self, _b: Rect) {}
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &[]
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            panic!("FixedHeight has no children")
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
+        fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+        fn measure_min_height(&self, _available_w: f64) -> f64 {
+            self.0
+        }
+    }
+
+    let scroll = ScrollView::new(Box::new(FixedHeight(347.0)));
+    assert_eq!(
+        scroll.measure_min_height(280.0),
+        347.0,
+        "ScrollView must report its content's required height for tight-fit"
+    );
+}

@@ -30,9 +30,7 @@ use std::sync::Arc;
 
 use agg_gui::input_profile::{current_input_profile, set_input_profile, InputProfile};
 use agg_gui::widgets::on_screen_keyboard::{self, KeyboardInputMode};
-use agg_gui::{
-    Color, FlexColumn, Font, Label, RadioGroup, ScrollView, SizedBox, TextField, Widget,
-};
+use agg_gui::{FlexColumn, Font, Label, RadioGroup, ScrollView, SizedBox, TextField, Widget};
 
 /// Returns the title used to look this demo up from the dispatcher in
 /// `content.rs` and to label it in the sidebar. Kept centralised so the
@@ -48,17 +46,18 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
         InputProfile::MobileOther => 0,
     };
 
+    // Tight, even vertical rhythm: an 8 px inter-item gap (down from 12)
+    // and 12 px padding keeps the whole demo visible without scrolling at
+    // the default window height.  All text colours follow the active theme
+    // (see the `Label` calls below) so the demo stays readable in light
+    // mode, not just dark.
     let mut col = FlexColumn::new()
-        .with_gap(12.0)
-        .with_padding(16.0)
+        .with_gap(8.0)
+        .with_padding(12.0)
         .with_panel_bg();
 
     col.push(
-        Box::new(
-            Label::new("Input profile", Arc::clone(&font))
-                .with_font_size(13.0)
-                .with_color(Color::from_rgb8(0xE0, 0xE0, 0xEC)),
-        ),
+        Box::new(Label::new("Input profile", Arc::clone(&font)).with_font_size(13.0)),
         0.0,
     );
 
@@ -77,12 +76,11 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
                 Arc::clone(&font),
             )
             .with_font_size(11.0)
-            .with_color(Color::from_rgb8(0xA8, 0xA8, 0xB8)),
+            .with_dim(true)
+            .with_wrap(true),
         ),
         0.0,
     );
-
-    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
 
     // Shared cell driving the first text field's keyboard mode. The
     // RadioGroup below mutates it on selection; the TextField re-reads
@@ -91,11 +89,7 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
     let primary_mode = Rc::new(Cell::new(KeyboardInputMode::Text));
 
     col.push(
-        Box::new(
-            Label::new("First field input mode", Arc::clone(&font))
-                .with_font_size(13.0)
-                .with_color(Color::from_rgb8(0xE0, 0xE0, 0xEC)),
-        ),
+        Box::new(Label::new("First field input mode", Arc::clone(&font)).with_font_size(13.0)),
         0.0,
     );
     let mode_radio = {
@@ -119,19 +113,14 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
                 Arc::clone(&font),
             )
             .with_font_size(11.0)
-            .with_color(Color::from_rgb8(0xA8, 0xA8, 0xB8)),
+            .with_dim(true)
+            .with_wrap(true),
         ),
         0.0,
     );
 
-    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
-
     col.push(
-        Box::new(
-            Label::new("Type here (mode follows radio)", Arc::clone(&font))
-                .with_font_size(12.0)
-                .with_color(Color::from_rgb8(0xC8, 0xC8, 0xD8)),
-        ),
+        Box::new(Label::new("Type here (mode follows radio)", Arc::clone(&font)).with_font_size(12.0)),
         0.0,
     );
     col.push(
@@ -147,11 +136,7 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
     );
 
     col.push(
-        Box::new(
-            Label::new("Numeric-only field (digit pad)", Arc::clone(&font))
-                .with_font_size(12.0)
-                .with_color(Color::from_rgb8(0xC8, 0xC8, 0xD8)),
-        ),
+        Box::new(Label::new("Numeric-only field (digit pad)", Arc::clone(&font)).with_font_size(12.0)),
         0.0,
     );
     col.push(
@@ -166,7 +151,6 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
-    col.push(Box::new(SizedBox::new().with_height(4.0)), 0.0);
     col.push(
         Box::new(
             Label::new(
@@ -176,7 +160,8 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
                 Arc::clone(&font),
             )
             .with_font_size(10.0)
-            .with_color(Color::from_rgb8(0x90, 0x90, 0xA0)),
+            .with_dim(true)
+            .with_wrap(true),
         ),
         0.0,
     );

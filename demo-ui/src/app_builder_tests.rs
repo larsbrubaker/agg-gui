@@ -260,3 +260,44 @@ fn snap_registry_populated_by_visible_window_layout() {
         "snap registry should hold at least one visible Window after layout"
     );
 }
+
+#[test]
+fn mobile_keyboard_window_fits_content_without_scrollbar() {
+    // Repro: the Mobile Keyboard window must grow to its content height
+    // (tight-fit) so its inner ScrollView shows no scrollable overflow.
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let content = crate::windows::mobile_keyboard(Arc::clone(&font));
+    let mut win = agg_gui::Window::new("kbd", Arc::clone(&font), content)
+        .with_bounds(Rect::new(0.0, 0.0, 420.0, 540.0))
+        .with_tight_content_fit(true)
+        .with_resizable(false);
+    // A few passes: tight-fit snaps height on layout; the ScrollView sets
+    // its content height on layout too.
+    for _ in 0..3 {
+        win.layout(Size::new(1200.0, 900.0));
+    }
+    let sv = find_widget_by_type(&win, "ScrollView").expect("ScrollView present");
+    let props = sv.properties();
+    let get = |k: &str| -> f64 {
+        props
+            .iter()
+            .find(|(key, _)| *key == k)
+            .and_then(|(_, v)| v.parse().ok())
+            .unwrap_or(f64::NAN)
+    };
+    let max_scroll = get("max_scroll");
+    let v_content = get("v_content");
+    let win_h = win.bounds().height;
+    // No scrollable overflow — the content fully fits.
+    assert!(
+        max_scroll <= 0.5,
+        "window should hug content with no scroll; max_scroll={max_scroll}, \
+         v_content={v_content}, win_h={win_h}"
+    );
+    // …and it hugged the CONTENT, not grew to the 900px canvas: the window
+    // is the content height plus a title bar (well under 100px of chrome).
+    assert!(
+        win_h >= v_content && win_h <= v_content + 100.0,
+        "window height should track content height; v_content={v_content}, win_h={win_h}"
+    );
+}

@@ -454,6 +454,26 @@ impl Widget for SizedBox {
         self.base.max_size
     }
 
+    /// Mirror the height [`layout`] resolves to, so an ancestor
+    /// `Window::with_tight_content_fit` measures the box correctly instead
+    /// of the trait-default `0`:
+    /// - explicit `with_height` → that height;
+    /// - else a child → the child's required height plus its vertical margin;
+    /// - else (a pure horizontal spacer) → `0`.
+    fn measure_min_height(&self, available_w: f64) -> f64 {
+        if let Some(h) = self.height {
+            return h;
+        }
+        if let Some(child) = self.children.first() {
+            let m = child.margin().scale(device_scale());
+            let w = self.width.unwrap_or(available_w);
+            let slot_w = (w - m.left - m.right).max(0.0);
+            return (child.measure_min_height(slot_w) + m.vertical())
+                .clamp(self.base.min_size.height, self.base.max_size.height);
+        }
+        self.base.min_size.height
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         // Fall back to the available axis only for dimensions that haven't been
         // explicitly set AND don't have a child to size to; otherwise use the

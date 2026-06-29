@@ -223,6 +223,14 @@ impl Widget for RadioGroup {
         self.base.max_size
     }
 
+    /// One [`ROW_H`]-tall row per option — matches the height [`layout`]
+    /// produces.  Without this override the trait default returns `0`, and
+    /// an ancestor `Window::with_tight_content_fit` would size the window
+    /// too short by the radio's full height.
+    fn measure_min_height(&self, _available_w: f64) -> f64 {
+        self.options.len() as f64 * ROW_H
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         // Pick up external-cell writes every frame (e.g. the System
         // window's typeface radio driving this demo's radio).

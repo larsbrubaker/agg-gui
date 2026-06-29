@@ -44,6 +44,7 @@ mod drawing;
 mod focus;
 mod inspector_hover;
 mod inspector_tree;
+mod label_theme;
 mod layer_compositing;
 mod layout_lcd;
 mod menu_hidpi_scale;

@@ -543,6 +543,17 @@ fn main() {
                     elwt.exit();
                 }
             }
+            Event::UserEvent(()) => {
+                // The screen-share bridge (a background tokio thread) pinged the
+                // loop via the wake proxy because a new frame / connection change
+                // landed.  Bump the invalidation epoch so the next paint re-runs
+                // layout: `ScreenShareView::sync` pulls the newest frame and
+                // swaps QR↔live view from `layout()`, which `render_app_frame`
+                // skips while the epoch is unchanged.  Without this the wake only
+                // forces a repaint that reuses the stale layout — mirrors the
+                // wasm `push_screen_encoded` fix.
+                agg_gui::animation::request_draw();
+            }
             _ => {}
         })
         .expect("event loop");

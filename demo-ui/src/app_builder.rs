@@ -317,7 +317,12 @@ pub fn build_demo_ui(
             )
         };
         let auto_size = spec.title == "\u{F096} Frame";
-        let win = Window::new(spec.title, Arc::clone(&font), content)
+        // The Mobile Keyboard window is a fixed-layout testbench: lock its
+        // height to its content (no scroll, no empty band below the tip) and
+        // disable user resize. Its inner ScrollView stays in the tree so the
+        // keyboard-driven focus lift still works.
+        let tight_fit = spec.title == windows::MOBILE_KEYBOARD_TITLE;
+        let mut win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(
                 initial.x,
                 initial.y,
@@ -330,6 +335,9 @@ pub fn build_demo_ui(
             .with_maximized_cell(Rc::clone(&demo_max_cells[i]))
             .with_auto_size(auto_size)
             .on_raised(make_on_raised());
+        if tight_fit {
+            win = win.with_tight_content_fit(true).with_resizable(false);
+        }
         canvas = canvas.add(Box::new(win));
     }
     {

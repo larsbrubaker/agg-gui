@@ -87,7 +87,11 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         group: "Widgets",
         open: false,
         win_w: 420.0,
-        win_h: 380.0,
+        // Seed height only — the window is built with `with_tight_content_fit`
+        // (see app_builder.rs), so it snaps to its content height on the first
+        // layout. Kept close to the real content height to avoid a first-frame
+        // oversize before that snap.
+        win_h: 540.0,
     },
     DemoSpec {
         title: "\u{F086} Tooltips",

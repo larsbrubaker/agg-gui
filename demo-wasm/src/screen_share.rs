@@ -30,6 +30,10 @@ thread_local! {
 
     // ── Receiver: frame-diff decoder ───────────────────────────────────────
     static SCREEN_DECODER: RefCell<Option<FrameDecoder>> = const { RefCell::new(None) };
+    /// Receiver: pending Stream On/Off command for the TS receiver to transmit
+    /// to the phone. `Some(true|false)` once the user flips the switch; drained
+    /// to `None` by [`screen_share_take_control`].
+    static SCREEN_CONTROL_OUT: RefCell<Option<bool>> = const { RefCell::new(None) };
 
     // ── Sender (?host= mode): capture + frame-diff encoder ─────────────────
     /// True when this page is a screen-share sender; `render` then captures and
@@ -81,12 +85,20 @@ pub(crate) fn install(handles: &demo_ui::ScreenShareHandles) {
     let peer_id = gen_peer_id();
     let latest: Arc<Mutex<Option<demo_ui::ScreenFrame>>> = Arc::new(Mutex::new(None));
     let connected: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let streaming: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
 
-    *handles.transport.borrow_mut() = Box::new(demo_ui::QueuedScreenTransport::new(
-        latest.clone(),
-        connected.clone(),
-        peer_id.clone(),
-    ));
+    // Control sink: queue the command for the TS receiver to send to the phone
+    // over the data channel (drained via `screen_share_take_control`).
+    let control: Arc<dyn Fn(bool) + Send + Sync> = Arc::new(|on: bool| {
+        SCREEN_CONTROL_OUT.with(|c| *c.borrow_mut() = Some(on));
+        mark_dirty();
+    });
+
+    *handles.transport.borrow_mut() = Box::new(
+        demo_ui::QueuedScreenTransport::new(latest.clone(), connected.clone(), peer_id.clone())
+            .with_streaming_flag(streaming.clone())
+            .with_control(control),
+    );
 
     SCREEN_LATEST.with(|c| *c.borrow_mut() = Some(latest));
     SCREEN_CONNECTED.with(|c| *c.borrow_mut() = Some(connected));
@@ -141,7 +153,14 @@ pub fn push_screen_encoded(packet: &[u8]) {
             }
         });
     }
+    // The live view is refreshed by `ScreenShareView::sync`, which pulls the
+    // newest frame from `layout()`.  `render_app_frame` (demo-wgpu) only re-runs
+    // layout when the invalidation epoch changes — so `mark_dirty` alone forces
+    // a *repaint* that reuses the old layout and never pulls the new frame, and
+    // the view updates only when something else happens to invalidate. Bump the
+    // epoch so layout (and the frame pull) actually runs each received frame.
     mark_dirty();
+    agg_gui::animation::request_draw();
 }
 
 /// Enable sender mode (page opened with `?host=`). `render` then captures and
@@ -166,6 +185,17 @@ pub fn screen_share_take_packet() -> Vec<u8> {
     SCREEN_OUT.with(|o| std::mem::take(&mut *o.borrow_mut()))
 }
 
+/// Drain a pending Stream On/Off command for the TS receiver to transmit to the
+/// phone. Returns `1` (start), `0` (stop), or `-1` when nothing is pending.
+#[wasm_bindgen]
+pub fn screen_share_take_control() -> i32 {
+    SCREEN_CONTROL_OUT.with(|c| match c.borrow_mut().take() {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    })
+}
+
 /// The TS receiver computes the QR URL (page origin + `?host=<id>`) and sets it
 /// here so the demo's QR widget can render it.
 #[wasm_bindgen]
@@ -188,5 +218,9 @@ pub fn set_screen_connected(yes: bool) {
             }
         }
     });
+    // Connect/disconnect swaps the QR for the live view — a `Conditional`, which
+    // zeroes its bounds in `layout()`.  Bump the epoch so that swap actually
+    // re-lays-out; a bare repaint would keep the stale geometry.
     mark_dirty();
+    agg_gui::animation::request_draw();
 }

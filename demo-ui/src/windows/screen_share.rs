@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Conditional, DrawCtx, Event, EventResult, FlexColumn, Font, ImageView, QrView, Rect, Size,
-    Stack, Widget,
+    Button, Conditional, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, ImageView, Label,
+    QrView, Rect, Size, Stack, Widget,
 };
 
 use crate::screen_share::ScreenShareHandles;
@@ -43,10 +43,18 @@ pub fn screen_share_demo(font: Arc<Font>, handles: ScreenShareHandles) -> Box<dy
         .add(Box::new(qr))
         .add(Box::new(image_gated));
 
+    // Stream On/Off — a segmented control the desktop owns. The transport's
+    // streaming flag is the single source of truth: the buttons read it for
+    // their highlight (`with_active_fn`) and flip it on click (`set_streaming`),
+    // which also commands the phone over the data channel. Starts Off, so a
+    // freshly-connected phone stays idle until the user turns streaming on.
+    let stream_row = build_stream_controls(Arc::clone(&font), &handles);
+
     let inner = FlexColumn::new()
         .with_gap(8.0)
         .with_padding(12.0)
         .add(Box::new(StatusText::new(Arc::clone(&font), Rc::clone(&status))))
+        .add(Box::new(stream_row))
         .add_flex(Box::new(stage), 1.0);
 
     Box::new(ScreenShareView {
@@ -57,6 +65,44 @@ pub fn screen_share_demo(font: Arc<Font>, handles: ScreenShareHandles) -> Box<dy
         img_visible,
         status,
     })
+}
+
+/// Build the `Stream  [On] [Off]` segmented control. Each segment is a subtle,
+/// outlined `Button` whose highlight tracks the transport's streaming flag and
+/// whose click drives [`ScreenShareTransport::set_streaming`], which both
+/// updates that flag and tells the phone to start / stop capturing.
+fn build_stream_controls(font: Arc<Font>, handles: &ScreenShareHandles) -> FlexRow {
+    let label = Label::new("Stream", Arc::clone(&font)).with_font_size(13.0);
+
+    let on_active = Rc::clone(&handles.transport);
+    let on_click = Rc::clone(&handles.transport);
+    let on_btn = Button::new("On", Arc::clone(&font))
+        .with_font_size(13.0)
+        .with_subtle()
+        .with_outlined()
+        .with_active_fn(move || on_active.borrow().is_streaming())
+        .on_click(move || {
+            on_click.borrow_mut().set_streaming(true);
+            agg_gui::animation::request_draw();
+        });
+
+    let off_active = Rc::clone(&handles.transport);
+    let off_click = Rc::clone(&handles.transport);
+    let off_btn = Button::new("Off", Arc::clone(&font))
+        .with_font_size(13.0)
+        .with_subtle()
+        .with_outlined()
+        .with_active_fn(move || !off_active.borrow().is_streaming())
+        .on_click(move || {
+            off_click.borrow_mut().set_streaming(false);
+            agg_gui::animation::request_draw();
+        });
+
+    FlexRow::new()
+        .with_gap(6.0)
+        .add(Box::new(label))
+        .add(Box::new(on_btn))
+        .add(Box::new(off_btn))
 }
 
 /// Bookkeeping wrapper. Owns no visuals of its own — each frame it reads the
@@ -75,12 +121,12 @@ struct ScreenShareView {
 impl ScreenShareView {
     /// Pull transport state and update shared cells. Runs every paint.
     fn sync(&mut self) {
-        let connected = {
+        let (connected, streaming) = {
             let mut transport = self.handles.transport.borrow_mut();
             if let Some(frame) = transport.take_latest_frame() {
                 *self.handles.frame.borrow_mut() = Some(frame);
             }
-            transport.is_connected()
+            (transport.is_connected(), transport.is_streaming())
         };
 
         self.qr_visible.set(!connected);
@@ -91,8 +137,10 @@ impl ScreenShareView {
             transport.peer_id().to_string()
         };
         let url = self.handles.phone_url.borrow().clone();
-        let next = if connected {
+        let next = if connected && streaming {
             "Connected — live view from phone.".to_string()
+        } else if connected {
+            "Connected — streaming paused (Stream is Off).".to_string()
         } else if url.is_empty() {
             format!("Waiting for server… (peer {peer})")
         } else {
@@ -134,17 +182,94 @@ impl Widget for ScreenShareView {
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
         // Inner column paints through the framework's child traversal.
+        //
+        // The QR↔live-view swap is performed by `sync()`, which runs from
+        // `layout()` — and the host only re-runs layout when the invalidation
+        // epoch changes. New frames bump that epoch on arrival, but a *stale*
+        // timeout flips `is_connected` purely on elapsed time with no arriving
+        // frame to trigger a bump. When that leaves the shown state out of sync,
+        // force one relayout so the swap happens; `needs_draw` then reports no
+        // further work and we fall idle again. This is the only invalidation we
+        // raise here — we do NOT repaint continuously while connected.
+        if self.handles.transport.borrow().is_connected() != self.img_visible.get() {
+            agg_gui::animation::request_draw();
+        }
     }
 
     fn needs_draw(&self) -> bool {
-        // While a phone is connected, keep repainting so new frames are pulled
-        // promptly. `is_connected` also applies the stale-timeout, so once the
-        // phone stops we fall idle and the QR reappears.
-        self.handles.transport.borrow().is_connected()
+        // Event-driven: do NOT repaint continuously while connected. A redraw is
+        // needed only when the shown QR/live state disagrees with the live
+        // transport state — i.e. a connect / disconnect / stale transition is
+        // pending. Arriving frames drive their own redraw by bumping the
+        // invalidation epoch on arrival (see `push_screen_encoded` on wasm and
+        // the wake `UserEvent` on native); this covers the staleness flip, which
+        // has no incoming frame to trigger it.
+        self.handles.transport.borrow().is_connected() != self.img_visible.get()
+    }
+
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        // While the live view is up, wake the loop once at the staleness
+        // deadline so a silently-stalled phone reverts to the QR even though no
+        // further frames arrive to drive a redraw. Re-armed every frame, so a
+        // healthy stream keeps pushing the deadline forward and never fires.
+        // (wasm's rAF loop polls `needs_draw` each tick, so it reverts without
+        // this; native sleeps between frames and needs the scheduled wakeup.)
+        if self.img_visible.get() {
+            self.handles.transport.borrow().frame_stale_deadline()
+        } else {
+            None
+        }
     }
 
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::screen_share::QueuedScreenTransport;
+    use std::sync::Mutex;
+
+    const TEST_FONT: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+
+    /// The view requests a redraw only on a pending connect/disconnect
+    /// transition — never continuously while connected. Frame delivery drives
+    /// its own redraw via the shells' invalidation, so a steady connected view
+    /// must report `needs_draw() == false`.
+    #[test]
+    fn needs_draw_only_on_transition_not_continuously() {
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font"));
+        let latest = Arc::new(Mutex::new(None));
+        let connected = Arc::new(Mutex::new(true));
+        let transport =
+            QueuedScreenTransport::new(latest, connected.clone(), "ag-test".to_string());
+
+        let handles = ScreenShareHandles::new();
+        *handles.transport.borrow_mut() = Box::new(transport);
+
+        let mut view = screen_share_demo(Arc::clone(&font), handles);
+        // Lay out so `sync()` reconciles the shown state to "connected".
+        view.layout(Size::new(360.0, 480.0));
+        assert!(
+            !view.needs_draw(),
+            "a connected, reconciled view must not repaint continuously"
+        );
+
+        // A dropped connection is a transition the view hasn't shown yet.
+        *connected.lock().unwrap() = false;
+        assert!(
+            view.needs_draw(),
+            "a pending connect/disconnect transition must request a redraw"
+        );
+
+        // Re-laying out reconciles it (back to the QR) and it falls idle again.
+        view.layout(Size::new(360.0, 480.0));
+        assert!(
+            !view.needs_draw(),
+            "the view must fall idle once the transition is reconciled"
+        );
     }
 }
 

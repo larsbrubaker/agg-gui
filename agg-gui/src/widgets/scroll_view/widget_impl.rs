@@ -75,6 +75,24 @@ impl Widget for ScrollView {
         self.base.max_size
     }
 
+    /// Report the *content's* required height, so an ancestor
+    /// [`Window::with_tight_content_fit`](crate::widgets::Window::with_tight_content_fit)
+    /// can size itself to fully contain the scroll content — no overflow,
+    /// hence no visible scrollbar — while the `ScrollView` stays in the tree
+    /// to absorb keyboard-driven lifts (see
+    /// [`try_scroll_to_lift`](Self::try_scroll_to_lift)).
+    ///
+    /// A vertical-only view pins its child to the viewport width at layout
+    /// time; with overlay (Floating) bars — and Solid bars while the content
+    /// fits — no gutter is reserved, so measuring at the full width matches
+    /// the height the content lays out to once the window has hugged it.
+    fn measure_min_height(&self, available_w: f64) -> f64 {
+        self.children
+            .first()
+            .map(|c| c.measure_min_height(available_w))
+            .unwrap_or(self.base.min_size.height)
+    }
+
     fn hit_test(&self, local_pos: Point) -> bool {
         if self.v.dragging || self.h.dragging || self.middle_dragging {
             return true;
