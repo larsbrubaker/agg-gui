@@ -48,6 +48,7 @@ web-sys = { version = "0.3.82", features = [
     "DomRect",
     "Event",
     "EventTarget",
+    "Location",
     "PointerEvent",
     "MouseEvent",
     "WheelEvent",

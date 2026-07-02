@@ -115,6 +115,17 @@ impl App {
         self.viewport_height = logical.height;
         self.viewport_size = logical;
         set_current_viewport(logical);
+        // Fresh safe-area for this frame. The on-screen keyboard is the
+        // one library-owned edge obstruction, so it reserves its strip
+        // here; app chrome (rails, trays) reserves via
+        // `widgets::ReserveInset` during the tree layout below.
+        crate::overlay_insets::begin_frame();
+        if crate::widgets::on_screen_keyboard::is_visible() {
+            crate::overlay_insets::reserve(crate::layout_props::Insets {
+                bottom: crate::widgets::on_screen_keyboard::target_panel_height(logical.width),
+                ..crate::layout_props::Insets::default()
+            });
+        }
         self.root
             .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);

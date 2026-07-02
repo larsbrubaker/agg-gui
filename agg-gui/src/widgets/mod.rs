@@ -21,6 +21,7 @@ pub mod menu;
 pub mod on_screen_keyboard;
 pub mod performance;
 pub mod primitives;
+pub mod reserve_inset;
 pub mod spacers;
 pub mod progress_bar;
 pub mod qr_view;
@@ -68,6 +69,7 @@ pub use performance::{
     RunModeDesc, RunModeRow, SharedFrameHistory,
 };
 pub use primitives::{Padding, SizedBox, Stack};
+pub use reserve_inset::{ReserveInset, ReservedEdge};
 pub use spacers::{Separator, Spacer};
 pub use progress_bar::ProgressBar;
 pub use qr_view::QrView;

@@ -99,17 +99,29 @@ fn device_pixel_ratio() -> f64 {
 /// `(pointer: coarse)` for the touch input profile / on-screen keyboard /
 /// UX scale. Mirrors what the reference JS harness computed and passed
 /// through a `set_client_platform` export.
+///
+/// Debug override: `?agg_input=mobile` (or `=desktop`) in the page URL
+/// forces the detection result, so a developer on a desktop browser can
+/// exercise the mobile layout (left rails, on-screen keyboard, UX zoom)
+/// without device emulation.
 fn apply_client_platform() {
     let Some(window) = web_sys::window() else {
         return;
     };
     let name = window.navigator().user_agent().unwrap_or_default();
-    let pointer_coarse = window
+    let mut pointer_coarse = window
         .match_media("(pointer: coarse)")
         .ok()
         .flatten()
         .map(|m| m.matches())
         .unwrap_or(false);
+    if let Ok(search) = window.location().search() {
+        if search.contains("agg_input=mobile") {
+            pointer_coarse = true;
+        } else if search.contains("agg_input=desktop") {
+            pointer_coarse = false;
+        }
+    }
     agg_gui::set_platform(agg_gui::platform_from_name(&name));
     let profile = agg_gui::input_profile::input_profile_from_hint(&name, pointer_coarse);
     agg_gui::input_profile::set_input_profile(profile);
