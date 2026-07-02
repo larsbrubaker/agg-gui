@@ -20,8 +20,9 @@
 //!
 //! # Child margin support
 //!
-//! Each child's `margin()` (scaled by `device_scale`) contributes to the slot
-//! size on the main axis and is respected for cross-axis placement.
+//! Each child's `margin()` (logical units — DPI is applied once at the App
+//! paint boundary) contributes to the slot size on the main axis and is
+//! respected for cross-axis placement.
 //! Margins are **additive** — child A's `margin.top` and child B's
 //! `margin.bottom` both contribute gap space between those children (in
 //! addition to `self.gap`).
@@ -33,7 +34,6 @@
 //! children vertically within the row's inner height.
 
 use crate::color::Color;
-use crate::device_scale::device_scale;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
@@ -49,7 +49,7 @@ use crate::widget::Widget;
 ///
 /// - `pad_l`     — column's left inner-padding offset.
 /// - `inner_w`   — column's usable width (after padding, before margins).
-/// - `margin_l/r` — child's scaled left/right margins.
+/// - `margin_l/r` — child's left/right margins (logical units).
 /// - `natural_w` — width returned by `child.layout()`.
 /// - `min_w/max_w` — child's min/max width constraints.
 fn place_cross_h(
@@ -288,17 +288,22 @@ impl Widget for FlexColumn {
         let pad_t = self.inner_padding.top;
         let pad_b = self.inner_padding.bottom;
         let inner_w = (available_w - pad_l - pad_r).max(0.0);
-        let scale = device_scale();
-        let n = self.children.len();
         let mut total = 0.0_f64;
+        let mut visible_n = 0_usize;
         for child in self.children.iter() {
-            let m = child.margin().scale(scale);
+            // Hidden slots (collapsed `Conditional`s, self-hiding widgets)
+            // consume no height, margin, or gap.
+            if !child.is_visible() {
+                continue;
+            }
+            visible_n += 1;
+            let m = child.margin();
             let slot_w = (inner_w - m.left - m.right).max(0.0);
             total += child.measure_min_height(slot_w) + m.vertical();
         }
         total += pad_t + pad_b;
-        if n > 1 {
-            total += self.gap * (n - 1) as f64;
+        if visible_n > 1 {
+            total += self.gap * (visible_n - 1) as f64;
         }
         total.max(self.base.min_size.height)
     }
@@ -317,15 +322,8 @@ impl Widget for FlexColumn {
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
         let inner_h = (available.height - pad_t - pad_b).max(0.0);
 
-        // Scaled margins for all children (physical units).
-        let scale = device_scale();
-        let margins: Vec<Insets> = self
-            .children
-            .iter()
-            .map(|c| c.margin().scale(scale))
-            .collect();
-
-        let total_gap = if n > 1 { gap * (n - 1) as f64 } else { 0.0 };
+        // Child margins (logical units end-to-end; DPI applied at paint).
+        let margins: Vec<Insets> = self.children.iter().map(|c| c.margin()).collect();
 
         // -------------------------------------------------------------------
         // Step 1: measure fixed children on the main (vertical) axis.
@@ -334,25 +332,49 @@ impl Widget for FlexColumn {
         // Flex children contribute only their margins to the space budget.
         // -------------------------------------------------------------------
         let mut content_heights = vec![0.0f64; n];
+        let mut natural_widths = vec![0.0f64; n];
         let mut total_fixed_with_margins = 0.0f64;
         let mut total_flex = 0.0f64;
         let mut total_flex_margin_v = 0.0f64;
         let mut max_child_natural_w = 0.0f64;
 
         for i in 0..n {
-            let m = &margins[i];
-            let slot_w = (inner_w - m.left - m.right).max(0.0);
             if self.flex_factors[i] == 0.0 {
+                let m = &margins[i];
+                let slot_w = (inner_w - m.left - m.right).max(0.0);
                 // Measure at natural height; pass inner_h as the available
                 // height so the child can self-report its natural size.
                 let desired = self.children[i].layout(Size::new(slot_w, inner_h));
-                let clamped_h = desired.height.clamp(
+                content_heights[i] = desired.height.clamp(
                     self.children[i].min_size().height,
                     self.children[i].max_size().height,
                 );
-                content_heights[i] = clamped_h;
-                total_fixed_with_margins += clamped_h + m.vertical();
-                max_child_natural_w = max_child_natural_w.max(desired.width + m.horizontal());
+                natural_widths[i] = desired.width;
+            }
+        }
+
+        // Visibility is read AFTER measuring: a child that hides itself
+        // (collapsed `Conditional`, a results list with no rows) reports
+        // `is_visible() == false` from its fresh layout state and consumes
+        // no slot, margin, or gap — the contract documented on
+        // [`crate::widgets::Conditional`]. Without this, every hidden slot
+        // leaves `gap` px of dead space in the flow.
+        let visible: Vec<bool> = self.children.iter().map(|c| c.is_visible()).collect();
+        let visible_n = visible.iter().filter(|v| **v).count();
+        let total_gap = if visible_n > 1 {
+            gap * (visible_n - 1) as f64
+        } else {
+            0.0
+        };
+
+        for i in 0..n {
+            if !visible[i] {
+                continue;
+            }
+            let m = &margins[i];
+            if self.flex_factors[i] == 0.0 {
+                total_fixed_with_margins += content_heights[i] + m.vertical();
+                max_child_natural_w = max_child_natural_w.max(natural_widths[i] + m.horizontal());
             } else {
                 total_flex += self.flex_factors[i];
                 total_flex_margin_v += m.vertical();
@@ -371,7 +393,7 @@ impl Widget for FlexColumn {
         };
 
         for i in 0..n {
-            if self.flex_factors[i] > 0.0 {
+            if self.flex_factors[i] > 0.0 && visible[i] {
                 let raw = self.flex_factors[i] * flex_unit;
                 content_heights[i] = raw.clamp(
                     self.children[i].min_size().height,
@@ -413,6 +435,13 @@ impl Widget for FlexColumn {
             let m = &margins[i];
             let slot_w = (inner_w - m.left - m.right).max(0.0);
             let content_h = content_heights[i];
+
+            if !visible[i] {
+                // Hidden slot: zero-size bounds at the cursor, no margins,
+                // no gap, no cursor advance — as if the child weren't there.
+                self.children[i].set_bounds(Rect::new(pad_l + m.left, cursor_y, 0.0, 0.0));
+                continue;
+            }
 
             // Subtract top margin first (moves cursor toward lower Y = downward).
             cursor_y -= m.top;

@@ -22,6 +22,35 @@ wgpu = { version = "29", default-features = false, features = ["wgsl"] }
 version = "29"
 features = ["vulkan", "dx12", "metal"]
 
+# native_shell — turn-key winit event loop + wgpu present for native shims.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+agg-gui = { path = "../agg-gui", features = ["winit-adapter"] }
+winit = "0.30"
+pollster = "0.3"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
 version = "29"
 features = ["webgl"]
+
+# web_shell — turn-key canvas + rAF loop + DOM input for wasm shims.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3.82", features = [
+    "console",
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CssStyleDeclaration",
+    "DomRect",
+    "Event",
+    "EventTarget",
+    "PointerEvent",
+    "MouseEvent",
+    "WheelEvent",
+    "Navigator",
+    "MediaQueryList",
+] }

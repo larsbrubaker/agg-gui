@@ -6,7 +6,6 @@
 //! layout arrives in Phase 5.
 
 use crate::color::Color;
-use crate::device_scale::device_scale;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
@@ -194,7 +193,6 @@ impl Widget for Container {
         let pad_t = self.props.inner_padding.top;
         let pad_b = self.props.inner_padding.bottom;
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
-        let scale = device_scale();
 
         fn layout_children(
             children: &mut [Box<dyn Widget>],
@@ -202,7 +200,6 @@ impl Widget for Container {
             pad_l: f64,
             pad_t: f64,
             pad_b: f64,
-            scale: f64,
             height: f64,
         ) -> f64 {
             // Stack children top-to-bottom (first child = visually highest).
@@ -211,7 +208,9 @@ impl Widget for Container {
             let mut cursor_y = start_cursor;
 
             for child in children.iter_mut() {
-                let m = child.margin().scale(scale);
+                // Margins are logical units; DPI is applied at the App
+                // paint boundary, never during layout.
+                let m = child.margin();
                 let avail_w = (inner_w - m.left - m.right).max(0.0);
                 let avail_h = (cursor_y - pad_b - m.top - m.bottom).max(0.0);
                 let desired = child.layout(Size::new(avail_w, avail_h));
@@ -236,7 +235,6 @@ impl Widget for Container {
             pad_l,
             pad_t,
             pad_b,
-            scale,
             available.height,
         );
 
@@ -256,7 +254,6 @@ impl Widget for Container {
                     pad_l,
                     pad_t,
                     pad_b,
-                    scale,
                     natural_h,
                 );
             }

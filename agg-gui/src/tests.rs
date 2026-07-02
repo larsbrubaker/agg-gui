@@ -41,6 +41,7 @@ mod color_wheel_picker;
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.
 mod drawing;
+mod flex_gap;
 mod focus;
 mod inspector_hover;
 mod inspector_tree;
@@ -53,6 +54,7 @@ mod on_screen_keyboard;
 mod reflect_roundtrip;
 mod retained_layers;
 mod scroll_view;
+mod stack_aligned;
 mod touch_scroll;
 mod tree_view;
 mod widgets;

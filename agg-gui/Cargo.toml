@@ -55,4 +55,16 @@ reflect        = ["dep:bevy_reflect"]
 wasm-bindgen = "0.2"
 
 [target.wasm32-unknown-unknown.dependencies]
-web-sys = { version = "0.3.82", features = ["console"] }
+web-sys = { version = "0.3.82", features = [
+    "console",
+    # web_adapter::install_keyboard_listeners — window-level keyboard +
+    # clipboard bridge shared by every agg-gui web shell.
+    "Window",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "ClipboardEvent",
+    "DataTransfer",
+    "Element",
+    "HtmlElement",
+] }

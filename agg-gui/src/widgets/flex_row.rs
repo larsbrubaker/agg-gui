@@ -8,7 +8,6 @@
 //! the row's inner height (see [`place_cross_v`]).
 
 use crate::color::Color;
-use crate::device_scale::device_scale;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
@@ -20,7 +19,7 @@ use crate::widget::Widget;
 ///
 /// - `pad_b`     — row's bottom inner-padding offset.
 /// - `inner_h`   — row's usable height (after padding, before margins).
-/// - `margin_b/t` — child's scaled bottom/top margins.
+/// - `margin_b/t` — child's bottom/top margins (logical units).
 /// - `natural_h` — height returned by `child.layout()`.
 /// - `min_h/max_h` — child's min/max height constraints.
 fn place_cross_v(
@@ -218,14 +217,8 @@ impl Widget for FlexRow {
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
         let inner_h = (available.height - pad_t - pad_b).max(0.0);
 
-        let scale = device_scale();
-        let margins: Vec<Insets> = self
-            .children
-            .iter()
-            .map(|c| c.margin().scale(scale))
-            .collect();
-
-        let total_gap = if n > 1 { gap * (n - 1) as f64 } else { 0.0 };
+        // Child margins (logical units end-to-end; DPI applied at paint).
+        let margins: Vec<Insets> = self.children.iter().map(|c| c.margin()).collect();
 
         // -------------------------------------------------------------------
         // Step 1: measure fixed children on the main (horizontal) axis.
@@ -236,18 +229,38 @@ impl Widget for FlexRow {
         let mut total_flex_margin_h = 0.0f64;
 
         for i in 0..n {
-            let m = &margins[i];
-            let slot_h = (inner_h - m.bottom - m.top).max(0.0);
             if self.flex_factors[i] == 0.0 {
+                let m = &margins[i];
+                let slot_h = (inner_h - m.bottom - m.top).max(0.0);
                 // Pass inner_w as available width so the child can report its
                 // natural width.
                 let desired = self.children[i].layout(Size::new(inner_w, slot_h));
-                let clamped_w = desired.width.clamp(
+                content_widths[i] = desired.width.clamp(
                     self.children[i].min_size().width,
                     self.children[i].max_size().width,
                 );
-                content_widths[i] = clamped_w;
-                total_fixed_with_margins += clamped_w + m.horizontal();
+            }
+        }
+
+        // Visibility is read AFTER measuring: a child that hides itself
+        // (collapsed `Conditional`, an empty self-hiding widget) consumes no
+        // slot, margin, or gap — the contract documented on
+        // [`crate::widgets::Conditional`]. Mirrors `FlexColumn`.
+        let visible: Vec<bool> = self.children.iter().map(|c| c.is_visible()).collect();
+        let visible_n = visible.iter().filter(|v| **v).count();
+        let total_gap = if visible_n > 1 {
+            gap * (visible_n - 1) as f64
+        } else {
+            0.0
+        };
+
+        for i in 0..n {
+            if !visible[i] {
+                continue;
+            }
+            let m = &margins[i];
+            if self.flex_factors[i] == 0.0 {
+                total_fixed_with_margins += content_widths[i] + m.horizontal();
             } else {
                 total_flex += self.flex_factors[i];
                 total_flex_margin_h += m.horizontal();
@@ -266,7 +279,7 @@ impl Widget for FlexRow {
         };
 
         for i in 0..n {
-            if self.flex_factors[i] > 0.0 {
+            if self.flex_factors[i] > 0.0 && visible[i] {
                 let raw = self.flex_factors[i] * flex_unit;
                 content_widths[i] = raw.clamp(
                     self.children[i].min_size().width,
@@ -285,6 +298,13 @@ impl Widget for FlexRow {
             let m = &margins[i];
             let slot_h = (inner_h - m.bottom - m.top).max(0.0);
             let content_w = content_widths[i];
+
+            if !visible[i] {
+                // Hidden slot: zero-size bounds at the cursor, no margins,
+                // no gap, no cursor advance — as if the child weren't there.
+                self.children[i].set_bounds(Rect::new(cursor_x, pad_b + m.bottom, 0.0, 0.0));
+                continue;
+            }
 
             // Advance past left margin.
             cursor_x += m.left;

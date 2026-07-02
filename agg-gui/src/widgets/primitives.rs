@@ -1,6 +1,5 @@
 //! Primitive layout widgets: Stack, Padding, SizedBox. (Spacer/Separator → `spacers`.)
 
-use crate::device_scale::device_scale;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
@@ -134,13 +133,22 @@ impl Widget for Stack {
                 // content (e.g. a FlexColumn) places its children within the
                 // box we actually assign rather than the full stack height.
                 let desired = child.layout(available);
-                let m = child.margin().scale(device_scale());
+                // Margins are logical units — DPI is applied once at the App
+                // paint boundary, never during layout.
+                let m = child.margin();
+                // The margin slot bounds the child even when its own max_size
+                // doesn't: an overlay must keep its margins on a viewport
+                // narrower than max_size, not go full-bleed off the edges.
+                let slot_w = (available.width - m.left - m.right).max(0.0);
+                let slot_h = (available.height - m.top - m.bottom).max(0.0);
                 let w = desired
                     .width
-                    .clamp(child.min_size().width, child.max_size().width);
+                    .clamp(child.min_size().width, child.max_size().width)
+                    .min(slot_w);
                 let h = desired
                     .height
-                    .clamp(child.min_size().height, child.max_size().height);
+                    .clamp(child.min_size().height, child.max_size().height)
+                    .min(slot_h);
                 child.layout(Size::new(w, h));
 
                 let ha = child.h_anchor();
@@ -465,7 +473,7 @@ impl Widget for SizedBox {
             return h;
         }
         if let Some(child) = self.children.first() {
-            let m = child.margin().scale(device_scale());
+            let m = child.margin();
             let w = self.width.unwrap_or(available_w);
             let slot_w = (w - m.left - m.right).max(0.0);
             return (child.measure_min_height(slot_w) + m.vertical())
@@ -495,8 +503,7 @@ impl Widget for SizedBox {
         });
 
         if let Some(child) = self.children.first_mut() {
-            let scale = device_scale();
-            let m = child.margin().scale(scale);
+            let m = child.margin();
             let slot_w = (w - m.left - m.right).max(0.0);
             let slot_h = (h - m.top - m.bottom).max(0.0);
 
