@@ -23,6 +23,25 @@
 //! Origin is the bottom-left corner of the window. Positive Y goes upward.
 //! This is a non-negotiable architectural invariant — see the dev plan for
 //! the rationale.
+//!
+//! ## Module guide
+//!
+//! - [`widget`] / [`widgets`] — the [`App`] event/layout/paint driver and the
+//!   widget set (buttons, text editing, windows, flex layout, menus, …).
+//! - [`draw_ctx`] — the [`DrawCtx`] drawing trait every widget paints
+//!   through; [`gfx_ctx`] is the software AGG implementation.
+//! - [`theme`] — dark / light / system visuals read via `ctx.visuals()`.
+//! - [`overlay_insets`] + [`widgets::ReserveInset`] + [`card`] — safe-area
+//!   overlay placement: reserved screen edges (the on-screen keyboard
+//!   reserves itself), and anchored info cards that measure, word-wrap,
+//!   flip, and clamp so floating content never hides under sibling chrome.
+//! - [`input_profile`] / [`ux_scale`] — touch-device detection and the
+//!   mobile UX zoom; [`widgets::on_screen_keyboard`] is the in-canvas
+//!   keyboard with keyboard-avoidance handled by [`App::layout`].
+//! - `winit_adapter` (feature `winit-adapter`) and, on WASM,
+//!   `web_adapter` (`install_keyboard_listeners` = typing + clipboard
+//!   for any browser shell) — platform glue. The repo's `demo-wgpu` crate
+//!   adds turn-key `native_shell` / `web_shell` runners on top.
 
 pub mod animation;
 pub mod app_state;

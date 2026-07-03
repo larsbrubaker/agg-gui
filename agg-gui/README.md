@@ -34,7 +34,7 @@ Optional features:
 
 ```toml
 [dependencies]
-agg-gui = { version = "0.1", features = ["winit-adapter", "clipboard"] }
+agg-gui = { version = "0.2", features = ["winit-adapter", "clipboard"] }
 ```
 
 ## Widgets And Layout
@@ -68,6 +68,8 @@ agg-gui = { version = "0.1", features = ["winit-adapter", "clipboard"] }
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
 | `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives |
+| `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
+| `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |
 | `Separator` | Horizontal or vertical rule |
 | `Spacer` / `Padding` | Layout utility widgets |
 
@@ -82,12 +84,22 @@ agg-gui = { version = "0.1", features = ["winit-adapter", "clipboard"] }
 - **Multi-touch** — gesture aggregator (`current_multi_touch()`) exposes per-frame
   zoom / rotation / translation / pressure deltas. Works on mobile browsers and
   touchscreen laptops.
+- **Mobile-ready input** — input profiles (`input_profile`) detect touch devices and
+  apply a recommended UX zoom; an in-canvas on-screen keyboard opens for focused text
+  fields, and the keyboard-avoidance lift keeps the focused field visible above it
+  (re-validated against fresh bounds every layout).
+- **Safe-area overlay placement** — `overlay_insets` tracks reserved screen edges
+  (the on-screen keyboard reserves itself; wrap app chrome in `ReserveInset`), and
+  `card::paint_anchored` measures, word-wraps, flips, and clamps anchored info cards
+  so floating content never renders under sibling chrome or off-screen.
 - **Drawing API** — `DrawCtx` covers paths, fills, strokes, rounded rects, circles,
   arcs, Bézier curves, text, transforms, clipping, compositing layers, image blitting,
   SVG rendering, and inline GL content. Two implementations: software AGG rasterizer
   + halo-AA GL path.
 - **Platform adapters** — crate-owned event, cursor, clipboard, font, device-scale,
-  screenshot, and platform types, with optional winit and WASM helper modules.
+  screenshot, and platform types, with optional winit helpers. On WASM,
+  `web_adapter::install_keyboard_listeners` gives any shell physical-keyboard typing
+  plus the copy/cut/paste clipboard bridge in one call.
 - **Inspector** — built-in widget-tree inspector overlay highlighting hovered widgets,
   showing bounds and properties, reporting hover position.
 

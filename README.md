@@ -43,13 +43,13 @@ cargo add agg-gui
 
 ```toml
 [dependencies]
-agg-gui = "0.1"
+agg-gui = "0.2"
 # Optional: winit event-type adapters (for desktop hosts)
-# agg-gui = { version = "0.1", features = ["winit-adapter", "clipboard"] }
+# agg-gui = { version = "0.2", features = ["winit-adapter", "clipboard"] }
 ```
 
 Only the `agg-gui` library crate is published — the demo crates
-(`demo-native`, `demo-wasm`, `demo-gl`, `demo-ui`) stay in-repo.
+(`demo-native`, `demo-wasm`, `demo-wgpu`, `demo-ui`) stay in-repo.
 
 ## Library
 
@@ -84,6 +84,8 @@ Only the `agg-gui` library crate is published — the demo crates
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
 | `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives |
+| `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
+| `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |
 | `Separator` | Horizontal or vertical rule |
 | `Spacer` / `Padding` | Layout utility widgets |
 
@@ -120,11 +122,26 @@ Two implementations:
 - **GL path** — tessellated via `tess2`, submitted as GPU draw calls; `GlPaint` trait for
   widgets that want to render their own 3-D content (e.g. the rotating cube demo)
 
+### Mobile & Overlays
+
+Input profiles detect touch devices and apply a recommended UX zoom; an in-canvas
+on-screen keyboard opens for focused text fields, with a keyboard-avoidance lift
+that keeps the field visible (re-validated against fresh bounds every layout).
+`overlay_insets` tracks reserved screen edges (keyboard included automatically;
+wrap app chrome in `ReserveInset`), and `card::paint_anchored` measures,
+word-wraps, flips, and clamps anchored info cards so floating content never
+renders under sibling chrome or off-screen.
+
 ### Platform Adapters
 
 The core crate owns its event, cursor, clipboard, font, device-scale, screenshot,
-and platform types. Optional adapters map winit input types into `agg-gui`, while
-WASM builds include web keyboard/cursor and clipboard helpers.
+and platform types. Optional adapters map winit input types into `agg-gui`. On
+WASM, `web_adapter::install_keyboard_listeners` gives any shell physical-keyboard
+typing plus the copy/cut/paste clipboard bridge; the in-repo
+`demo_wgpu::native_shell` / `web_shell` are turn-key platform shells (window /
+canvas, wgpu surface, frame loop, all input forwarding) so an app shim reduces to
+its app-specific glue. Append `?agg_input=mobile` to any `web_shell` URL to
+exercise the mobile layout from a desktop browser.
 
 ### Inspector
 
@@ -154,8 +171,10 @@ and feature set using agg-gui's own widgets:
 |-------|-------------|
 | `agg-gui` | Core library — widgets, layout, drawing, theme, text, undo |
 | `demo-ui` | Shared demo widget tree (identical for native and WASM) |
-| `demo-native` | Windows/macOS/Linux WGL/WGL demo (winit 0.30 + glutin 0.32 + glow 0.13) |
+| `demo-wgpu` | Shared wgpu `DrawCtx` backend + turn-key `native_shell` / `web_shell` platform shells |
+| `demo-native` | Desktop demo shell (winit 0.30 + wgpu) |
 | `demo-wasm` | WASM cdylib deployed to GitHub Pages |
+| `node-editor` | Node-graph editor demo built on agg-gui |
 | `demo/` | Frontend — TypeScript + Bun dev server on port 3001 |
 
 ## Getting Started
