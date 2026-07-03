@@ -51,6 +51,9 @@ pub enum KeyGlyph {
     DismissDown,
     /// Bent arrow — return / enter.
     Return,
+    /// ⌴ bracket — the space key on the numeric pad (the main spacebar
+    /// is blank, like Gboard's).
+    Space,
 }
 
 /// One key cell positioned and painted by the layout engine. Stored in

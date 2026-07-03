@@ -38,7 +38,9 @@
 //!
 //! ## Scope of this first cut
 //!
-//! - Single US-QWERTY letter layout + a numbers / symbols layer.
+//! - Gboard-style US-QWERTY pages (see `docs/Android Keyboard/`):
+//!   letters with a number row, `?123` symbols, `=\<` extended
+//!   symbols, and a numeric pad for numeric fields.
 //! - Tap-to-type (no long-press, no hold-to-repeat, no predictive bar
 //!   yet — the module is structured to grow into those without a
 //!   rewrite).
@@ -53,6 +55,7 @@ use crate::input_profile::current_input_profile;
 pub mod events;
 pub mod key;
 pub mod layouts;
+mod paint;
 pub mod state;
 pub mod style;
 
@@ -81,9 +84,9 @@ pub enum KeyboardInputMode {
     /// auto-cap heuristic fires).  The historical default.
     #[default]
     Text,
-    /// Numbers + common punctuation — opens directly into
-    /// [`KeyboardLayer::Numbers`] so the user can start typing digits
-    /// without tapping the `123` mode switch first.
+    /// Digits + arithmetic — opens directly into
+    /// [`KeyboardLayer::NumPad`] so the user can start typing digits
+    /// without tapping the `?123` mode switch first.
     Numeric,
 }
 
@@ -176,7 +179,7 @@ pub fn target_panel_height(viewport_width: f64) -> f64 {
 /// `mode` lets the focused widget opt into the numeric layer — e.g.
 /// a quantity field that wants the digit pad up first.  When
 /// [`KeyboardInputMode::Numeric`] is passed the auto-cap heuristic is
-/// skipped and the keyboard opens on [`Layer::Numbers`].
+/// skipped and the keyboard opens on [`Layer::NumPad`].
 pub fn set_text_input_focused(focused: bool, existing_text: Option<&str>, mode: KeyboardInputMode) {
     with_state_mut(|s| {
         if !s.enabled {
@@ -192,7 +195,7 @@ pub fn set_text_input_focused(focused: bool, existing_text: Option<&str>, mode: 
                     // open directly on the digit pad. Caps-lock is also
                     // reset so a leftover shift toggle from a previous
                     // letter-mode field doesn't carry into the digits.
-                    s.current_layer = Layer::Numbers;
+                    s.current_layer = Layer::NumPad;
                     s.caps_lock = false;
                     s.last_shift_tap = None;
                 }
@@ -496,8 +499,8 @@ fn commit_key_press(index: usize, modifiers: Modifiers) {
 /// - Second tap within [`state::SHIFT_DOUBLE_TAP_WINDOW`] → engage caps
 ///   lock; keyboard stays Shifted until shift is tapped again.
 /// - Tap while caps lock is on → release caps lock + drop to lowercase.
-/// - Any other layer switch (123 / ABC / #+=) just changes the layer
-///   and clears caps-lock state.
+/// - Any other layer switch (?123 / ABC / =\< / 1234) just changes the
+///   layer and clears caps-lock state.
 fn handle_layer_switch(target: Layer) {
     if target == Layer::Shifted || target == Layer::Letters {
         with_state_mut(|s| {

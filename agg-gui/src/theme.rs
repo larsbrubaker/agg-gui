@@ -245,12 +245,19 @@ impl Visuals {
         mix_color(accent, Color::black(), 0.18)
     }
 
+    /// `true` when this palette reads as a dark theme (background
+    /// luminance below 50%). Used by widgets that maintain their own
+    /// light/dark token sets (e.g. the on-screen keyboard) to follow
+    /// the app theme without a separate preference plumbed through.
+    pub fn is_dark(&self) -> bool {
+        0.299 * self.bg_color.r + 0.587 * self.bg_color.g + 0.114 * self.bg_color.b < 0.5
+    }
+
     /// Return this palette with its primary accent replaced.
     pub fn with_accent(mut self, accent: Color) -> Self {
         let hovered = Self::accent_hovered(accent);
         let pressed = Self::accent_pressed(accent);
-        let dark =
-            0.299 * self.bg_color.r + 0.587 * self.bg_color.g + 0.114 * self.bg_color.b < 0.5;
+        let dark = self.is_dark();
         self.accent = accent;
         self.accent_hovered = hovered;
         self.accent_pressed = pressed;

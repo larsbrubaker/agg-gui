@@ -251,8 +251,8 @@ fn numeric_mode_opens_on_numbers_layer() {
     use crate::widgets::on_screen_keyboard::state::with_state_ref;
     assert_eq!(
         with_state_ref(|s| s.current_layer),
-        Layer::Numbers,
-        "Numeric mode must open the keyboard on the digit layer, not Letters/Shifted"
+        Layer::NumPad,
+        "Numeric mode must open the keyboard on the number pad, not Letters/Shifted"
     );
 }
 
@@ -421,8 +421,8 @@ fn text_field_with_keyboard_mode_propagates_through_focus() {
     use crate::widgets::on_screen_keyboard::state::with_state_ref;
     assert_eq!(
         with_state_ref(|s| s.current_layer),
-        Layer::Numbers,
-        "focusing a Numeric TextField must raise the keyboard on the digit layer"
+        Layer::NumPad,
+        "focusing a Numeric TextField must raise the keyboard on the number pad"
     );
 }
 

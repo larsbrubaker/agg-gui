@@ -1,50 +1,66 @@
 //! Keyboard layouts — declarative tables of rows / keys per layer.
 //!
-//! Adding a new layer (e.g. a French AZERTY, an emoji picker, a search-
-//! optimised "go" button) is a data change here: define a new
-//! [`Layer`] variant and return a `Layout` from
-//! [`Layout::for_layer`]. The painter and hit-tester don't change.
+//! The layer set mirrors Google's Gboard (see `docs/Android Keyboard/`
+//! screenshots): a letters page with a dedicated number row, a `?123`
+//! symbols page, a `=\<` extended-symbols page, and a phone-style
+//! number pad for numeric fields. Adding a new layer (e.g. a French
+//! AZERTY, an emoji picker) is a data change here: define a new
+//! [`Layer`] variant and return a `Layout` from [`Layout::for_layer`].
+//! The painter ([`super::paint`]) and hit-tester don't change.
 
 use crate::draw_ctx::DrawCtx;
-use crate::geometry::{Point, Rect};
+use crate::geometry::Rect;
 
 use super::key::{KeyAction, KeyCap, KeyGlyph, PaintedKey};
+use super::paint::paint_key;
 use super::style::Style;
 
 /// Which layer of the keyboard is currently visible.
 ///
-/// "Shifted" is a one-shot upper-case mode (single tap of Shift); we'll
-/// add a `CapsLocked` variant later for double-tap behavior. "Numbers"
-/// holds digits + the most-used punctuation. "Symbols" is the third
-/// page reached from inside "Numbers".
+/// "Shifted" is a one-shot upper-case mode (single tap of Shift;
+/// double-tap engages caps lock). The other layers follow Gboard's
+/// paging: `?123` opens [`Layer::Symbols`], its `=\<` key opens
+/// [`Layer::SymbolsShift`], and the `1234` key (or a numeric input
+/// field) opens [`Layer::NumPad`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layer {
     Letters,
     Shifted,
-    Numbers,
+    /// Gboard's `?123` page — digits plus common symbols.
     Symbols,
+    /// Gboard's `=\<` page — math / currency / bracket symbols.
+    SymbolsShift,
+    /// Phone-style digit grid with an operator strip; the layer numeric
+    /// text fields open on.
+    NumPad,
 }
 
 /// Description of one key in a row — width is expressed in
 /// "letter-widths". A standard letter is 1.0; Shift / Backspace are
-/// usually 1.5; the spacebar is wide (e.g. 5.0 on iOS).
+/// 1.5; the spacebar is wide (4.0 on Gboard).
 #[derive(Debug, Clone)]
-struct KeySpec {
-    width_units: f64,
-    cap: KeyCap,
-    action: KeyAction,
-    kind: KeyKind,
+pub(super) struct KeySpec {
+    pub(super) width_units: f64,
+    pub(super) cap: KeyCap,
+    pub(super) action: KeyAction,
+    pub(super) kind: KeyKind,
+    /// Fully-rounded ends (Gboard draws the corner keys — `?123`,
+    /// `ABC`, enter — as pills / circles).
+    pub(super) pill: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KeyKind {
-    /// Letter / digit / punctuation — uses `key_face_*` style tokens.
+pub(super) enum KeyKind {
+    /// Letter / digit / symbol — uses `key_face_*` style tokens.
     Letter,
-    /// Shift / mode-switch / backspace / dismiss — uses `util_*`
-    /// tokens.
+    /// Shift / mode-switch / backspace / punctuation accents — uses
+    /// `util_*` tokens (the light-blue keys on Gboard).
     Utility,
-    /// Return key — uses `return_*` tokens.
+    /// Enter / search key — uses `return_*` tokens.
     Return,
+    /// Invisible filler used to center short rows (Gboard's home row).
+    /// Never painted, never hit-testable.
+    Spacer,
 }
 
 /// A laid-out layer, ready to paint. Captured so the paint and the
@@ -58,8 +74,9 @@ impl Layout {
         match layer {
             Layer::Letters => letters_layer(false),
             Layer::Shifted => letters_layer(true),
-            Layer::Numbers => numbers_layer(),
             Layer::Symbols => symbols_layer(),
+            Layer::SymbolsShift => symbols_shift_layer(),
+            Layer::NumPad => numpad_layer(),
         }
     }
 
@@ -102,6 +119,10 @@ impl Layout {
             let mut cursor_x = inner_x;
             for spec in row.iter() {
                 let kw = spec.width_units * key_unit_width;
+                if spec.kind == KeyKind::Spacer {
+                    cursor_x += kw + style.key_h_gap;
+                    continue;
+                }
                 let rect = Rect::new(cursor_x, row_bottom_y, kw, style.row_height);
 
                 let pressed = false; // pressed visuals come from hover state, painted later
@@ -125,6 +146,100 @@ impl Layout {
 }
 
 // ---------------------------------------------------------------------------
+// Key constructors
+// ---------------------------------------------------------------------------
+
+fn key(c: char) -> KeySpec {
+    KeySpec {
+        width_units: 1.0,
+        cap: KeyCap::Text(c.to_string()),
+        action: KeyAction::Char(c),
+        kind: KeyKind::Letter,
+        pill: false,
+    }
+}
+
+fn wide_key(c: char, width_units: f64) -> KeySpec {
+    KeySpec {
+        width_units,
+        ..key(c)
+    }
+}
+
+/// A character key with the light-blue utility face (Gboard paints the
+/// `,` / `.` keys and the numpad operator strip this way).
+fn util_char(c: char, width_units: f64) -> KeySpec {
+    KeySpec {
+        width_units,
+        kind: KeyKind::Utility,
+        ..key(c)
+    }
+}
+
+fn util_text(label: &str, action: KeyAction, width_units: f64) -> KeySpec {
+    KeySpec {
+        width_units,
+        cap: KeyCap::Text(label.to_string()),
+        action,
+        kind: KeyKind::Utility,
+        pill: false,
+    }
+}
+
+fn util_glyph(glyph: KeyGlyph, action: KeyAction, width_units: f64) -> KeySpec {
+    KeySpec {
+        width_units,
+        cap: KeyCap::Glyph(glyph),
+        action,
+        kind: KeyKind::Utility,
+        pill: false,
+    }
+}
+
+fn spacer(width_units: f64) -> KeySpec {
+    KeySpec {
+        width_units,
+        cap: KeyCap::Text(String::new()),
+        action: KeyAction::Dismiss, // never dispatched — spacers aren't hit-testable
+        kind: KeyKind::Spacer,
+        pill: false,
+    }
+}
+
+/// Bottom-corner mode key (`?123` / `ABC`) — pill-shaped like Gboard's.
+fn mode_pill(label: &str, target: Layer) -> KeySpec {
+    KeySpec {
+        pill: true,
+        ..util_text(label, KeyAction::Switch(target), 1.5)
+    }
+}
+
+fn space_bar(width_units: f64) -> KeySpec {
+    KeySpec {
+        width_units,
+        // Gboard's spacebar is blank (no "space" label).
+        cap: KeyCap::Text(String::new()),
+        action: KeyAction::Space,
+        kind: KeyKind::Letter,
+        pill: false,
+    }
+}
+
+fn enter_key() -> KeySpec {
+    KeySpec {
+        width_units: 1.5,
+        cap: KeyCap::Glyph(KeyGlyph::Return),
+        action: KeyAction::Enter,
+        kind: KeyKind::Return,
+        pill: true,
+    }
+}
+
+fn backspace(width_units: f64) -> KeySpec {
+    util_glyph(KeyGlyph::Backspace, KeyAction::Backspace, width_units)
+}
+
+// ---------------------------------------------------------------------------
 // Layer definitions
 // ---------------------------------------------------------------------------
 
@@ -132,21 +247,14 @@ fn letters_layer(shifted: bool) -> Layout {
     let case = |lower: char, upper: char| if shifted { upper } else { lower };
 
     let row_keys = |letters: &[(char, char)]| -> Vec<KeySpec> {
-        letters
-            .iter()
-            .map(|(lo, up)| {
-                let c = case(*lo, *up);
-                KeySpec {
-                    width_units: 1.0,
-                    cap: KeyCap::Text(c.to_string()),
-                    action: KeyAction::Char(c),
-                    kind: KeyKind::Letter,
-                }
-            })
-            .collect()
+        letters.iter().map(|(lo, up)| key(case(*lo, *up))).collect()
     };
 
-    let mut rows: Vec<Vec<KeySpec>> = Vec::with_capacity(4);
+    let mut rows: Vec<Vec<KeySpec>> = Vec::with_capacity(5);
+
+    // Gboard shows a dedicated number row above the letters.
+    rows.push("1234567890".chars().map(key).collect());
+
     rows.push(row_keys(&[
         ('q', 'Q'),
         ('w', 'W'),
@@ -160,7 +268,12 @@ fn letters_layer(shifted: bool) -> Layout {
         ('p', 'P'),
     ]));
 
-    let row2 = row_keys(&[
+    // Home row: 9 letters centered with half-key spacers so the keys
+    // stay the same width as row 1 (Gboard behavior) instead of
+    // stretching to fill.
+    let mut row_home: Vec<KeySpec> = Vec::with_capacity(11);
+    row_home.push(spacer(0.5));
+    row_home.extend(row_keys(&[
         ('a', 'A'),
         ('s', 'S'),
         ('d', 'D'),
@@ -170,25 +283,21 @@ fn letters_layer(shifted: bool) -> Layout {
         ('j', 'J'),
         ('k', 'K'),
         ('l', 'L'),
-    ]);
-    // iOS pads row 2 with half-key gaps; emulate by adding 0.5-width
-    // invisible spacers at each end. Easier: keep row 2 9 keys wide,
-    // which means the layout engine will auto-fit. The visual offset
-    // emerges from the row-2 letter count being one less than row 1.
-    rows.push(row2);
+    ]));
+    row_home.push(spacer(0.5));
+    rows.push(row_home);
 
-    let mut row3: Vec<KeySpec> = Vec::with_capacity(11);
-    row3.push(KeySpec {
-        width_units: 1.5,
-        cap: KeyCap::Glyph(KeyGlyph::Shift),
-        action: KeyAction::Switch(if shifted {
+    let mut row_shift: Vec<KeySpec> = Vec::with_capacity(9);
+    row_shift.push(util_glyph(
+        KeyGlyph::Shift,
+        KeyAction::Switch(if shifted {
             Layer::Letters
         } else {
             Layer::Shifted
         }),
-        kind: KeyKind::Utility,
-    });
-    row3.extend(row_keys(&[
+        1.5,
+    ));
+    row_shift.extend(row_keys(&[
         ('z', 'Z'),
         ('x', 'X'),
         ('c', 'C'),
@@ -197,288 +306,140 @@ fn letters_layer(shifted: bool) -> Layout {
         ('n', 'N'),
         ('m', 'M'),
     ]));
-    row3.push(KeySpec {
-        width_units: 1.5,
-        cap: KeyCap::Glyph(KeyGlyph::Backspace),
-        action: KeyAction::Backspace,
-        kind: KeyKind::Utility,
-    });
-    rows.push(row3);
+    row_shift.push(backspace(1.5));
+    rows.push(row_shift);
 
-    rows.push(action_row(if shifted {
-        Layer::Shifted
-    } else {
-        Layer::Letters
-    }));
-    Layout { rows }
-}
-
-fn numbers_layer() -> Layout {
-    let digit = |c: char| KeySpec {
-        width_units: 1.0,
-        cap: KeyCap::Text(c.to_string()),
-        action: KeyAction::Char(c),
-        kind: KeyKind::Letter,
-    };
-
-    let mut rows = Vec::with_capacity(4);
-    rows.push(
-        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
-            .iter()
-            .map(|c| digit(*c))
-            .collect(),
-    );
-    rows.push(
-        ['-', '/', ':', ';', '(', ')', '$', '&', '@', '"']
-            .iter()
-            .map(|c| digit(*c))
-            .collect(),
-    );
-
-    let mut row3 = Vec::with_capacity(9);
-    row3.push(KeySpec {
-        width_units: 1.5,
-        cap: KeyCap::Text("#+=".to_string()),
-        action: KeyAction::Switch(Layer::Symbols),
-        kind: KeyKind::Utility,
-    });
-    for c in ['.', ',', '?', '!', '\''] {
-        row3.push(digit(c));
-    }
-    row3.push(KeySpec {
-        width_units: 1.5,
-        cap: KeyCap::Glyph(KeyGlyph::Backspace),
-        action: KeyAction::Backspace,
-        kind: KeyKind::Utility,
-    });
-    rows.push(row3);
-
-    rows.push(action_row(Layer::Numbers));
-    Layout { rows }
-}
-
-fn symbols_layer() -> Layout {
-    let sym = |c: char| KeySpec {
-        width_units: 1.0,
-        cap: KeyCap::Text(c.to_string()),
-        action: KeyAction::Char(c),
-        kind: KeyKind::Letter,
-    };
-
-    let mut rows = Vec::with_capacity(4);
-    rows.push(
-        ['[', ']', '{', '}', '#', '%', '^', '*', '+', '=']
-            .iter()
-            .map(|c| sym(*c))
-            .collect(),
-    );
-    rows.push(
-        ['_', '\\', '|', '~', '<', '>', '€', '£', '¥', '·']
-            .iter()
-            .map(|c| sym(*c))
-            .collect(),
-    );
-
-    let mut row3 = Vec::with_capacity(9);
-    row3.push(KeySpec {
-        width_units: 1.5,
-        cap: KeyCap::Text("123".to_string()),
-        action: KeyAction::Switch(Layer::Numbers),
-        kind: KeyKind::Utility,
-    });
-    for c in ['.', ',', '?', '!', '\''] {
-        row3.push(sym(c));
-    }
-    row3.push(KeySpec {
-        width_units: 1.5,
-        cap: KeyCap::Glyph(KeyGlyph::Backspace),
-        action: KeyAction::Backspace,
-        kind: KeyKind::Utility,
-    });
-    rows.push(row3);
-
-    rows.push(action_row(Layer::Symbols));
-    Layout { rows }
-}
-
-/// The bottom row of every layer: mode switcher, space, return, and a
-/// dismiss key. `current` is the layer the row sits under; the mode key
-/// label / target is derived from where the user would expect to go
-/// next (letters → numbers, numbers/symbols → letters, shifted → numbers).
-fn action_row(current: Layer) -> Vec<KeySpec> {
-    let (mode_label, mode_action) = match current {
-        Layer::Letters | Layer::Shifted => ("123", KeyAction::Switch(Layer::Numbers)),
-        Layer::Numbers | Layer::Symbols => ("ABC", KeyAction::Switch(Layer::Letters)),
-    };
-    vec![
+    // Bottom row: ?123 · , · dismiss · space · . · enter. Gboard puts
+    // its emoji key where we place dismiss — we have no emoji layer,
+    // and the panel needs an explicit close affordance (no system nav
+    // bar underneath us).
+    rows.push(vec![
+        mode_pill("?123", Layer::Symbols),
+        util_char(',', 1.0),
         KeySpec {
-            width_units: 1.5,
-            cap: KeyCap::Text(mode_label.to_string()),
-            action: mode_action,
-            kind: KeyKind::Utility,
-        },
-        KeySpec {
-            width_units: 1.0,
             cap: KeyCap::Glyph(KeyGlyph::DismissDown),
             action: KeyAction::Dismiss,
-            kind: KeyKind::Utility,
+            ..key(' ')
         },
+        space_bar(4.0),
+        util_char('.', 1.0),
+        enter_key(),
+    ]);
+
+    Layout { rows }
+}
+
+/// Gboard's `?123` page.
+fn symbols_layer() -> Layout {
+    let mut rows: Vec<Vec<KeySpec>> = Vec::with_capacity(4);
+
+    rows.push("1234567890".chars().map(key).collect());
+    rows.push("@#$_&-+()/".chars().map(key).collect());
+
+    let mut row3: Vec<KeySpec> = Vec::with_capacity(9);
+    row3.push(util_text("=\\<", KeyAction::Switch(Layer::SymbolsShift), 1.5));
+    row3.extend("*\"':;!?".chars().map(key));
+    row3.push(backspace(1.5));
+    rows.push(row3);
+
+    rows.push(vec![
+        mode_pill("ABC", Layer::Letters),
+        util_char(',', 1.0),
         KeySpec {
-            width_units: 5.0,
-            cap: KeyCap::Text("space".to_string()),
+            cap: KeyCap::Text("1234".to_string()),
+            action: KeyAction::Switch(Layer::NumPad),
+            ..key(' ')
+        },
+        space_bar(4.0),
+        util_char('.', 1.0),
+        enter_key(),
+    ]);
+
+    Layout { rows }
+}
+
+/// Gboard's `=\<` page.
+fn symbols_shift_layer() -> Layout {
+    let mut rows: Vec<Vec<KeySpec>> = Vec::with_capacity(4);
+
+    rows.push("~`|•√π÷×§Δ".chars().map(key).collect());
+    rows.push("£¢€¥^°={}\\".chars().map(key).collect());
+
+    let mut row3: Vec<KeySpec> = Vec::with_capacity(9);
+    row3.push(util_text("?123", KeyAction::Switch(Layer::Symbols), 1.5));
+    row3.extend("%©®™✓[]".chars().map(key));
+    row3.push(backspace(1.5));
+    rows.push(row3);
+
+    rows.push(vec![
+        mode_pill("ABC", Layer::Letters),
+        util_char('<', 1.0),
+        KeySpec {
+            cap: KeyCap::Text("1234".to_string()),
+            action: KeyAction::Switch(Layer::NumPad),
+            ..key(' ')
+        },
+        space_bar(4.0),
+        util_char('>', 1.0),
+        enter_key(),
+    ]);
+
+    Layout { rows }
+}
+
+/// Phone-style number pad: operator strip on the left, digit grid in
+/// the middle, `%` / space / backspace column on the right. All rows
+/// sum to 9 units so the columns align.
+///
+/// Deviation from Gboard: its operator strip squeezes `+ - * /` into
+/// three rows' height; ours is one operator per row, so `/` is dropped
+/// (still reachable on the `?123` page).
+fn numpad_layer() -> Layout {
+    let digit = |c: char| wide_key(c, 2.0);
+
+    let mut rows: Vec<Vec<KeySpec>> = Vec::with_capacity(4);
+    rows.push(vec![
+        util_char('+', 1.5),
+        digit('1'),
+        digit('2'),
+        digit('3'),
+        util_char('%', 1.5),
+    ]);
+    rows.push(vec![
+        util_char('-', 1.5),
+        digit('4'),
+        digit('5'),
+        digit('6'),
+        KeySpec {
+            width_units: 1.5,
+            cap: KeyCap::Glyph(KeyGlyph::Space),
             action: KeyAction::Space,
-            kind: KeyKind::Letter,
+            kind: KeyKind::Utility,
+            pill: false,
         },
+    ]);
+    rows.push(vec![
+        util_char('*', 1.5),
+        digit('7'),
+        digit('8'),
+        digit('9'),
+        backspace(1.5),
+    ]);
+    rows.push(vec![
+        mode_pill("ABC", Layer::Letters),
+        util_char(',', 1.0),
         KeySpec {
-            width_units: 2.0,
-            cap: KeyCap::Glyph(KeyGlyph::Return),
-            action: KeyAction::Enter,
-            kind: KeyKind::Return,
+            cap: KeyCap::Text("!?#".to_string()),
+            action: KeyAction::Switch(Layer::Symbols),
+            ..key(' ')
         },
-    ]
-}
+        wide_key('0', 2.0),
+        key('='),
+        util_char('.', 1.0),
+        enter_key(),
+    ]);
 
-// ---------------------------------------------------------------------------
-// Key painting
-// ---------------------------------------------------------------------------
-
-fn paint_key(
-    ctx: &mut dyn DrawCtx,
-    rect: Rect,
-    spec: &KeySpec,
-    pressed: bool,
-    style: &Style,
-    _active_layer: Layer,
-) {
-    let (bg, text_color) = match (spec.kind, pressed) {
-        (KeyKind::Letter, false) => (style.key_face_bg, style.key_face_text),
-        (KeyKind::Letter, true) => (style.key_face_bg_pressed, style.key_face_text_pressed),
-        (KeyKind::Utility, false) => (style.util_key_bg, style.util_key_text),
-        (KeyKind::Utility, true) => (style.util_key_bg_pressed, style.key_face_text_pressed),
-        (KeyKind::Return, false) => (style.return_key_bg, style.return_key_text),
-        (KeyKind::Return, true) => (style.return_key_bg_pressed, style.return_key_text),
-    };
-
-    // Faux 1-pixel drop shadow (Y-up: shadow_offset_y is negative).
-    ctx.set_fill_color(style.key_shadow);
-    ctx.begin_path();
-    ctx.rounded_rect(
-        rect.x,
-        rect.y + style.key_shadow_offset_y,
-        rect.width,
-        rect.height,
-        style.key_corner_radius,
-    );
-    ctx.fill();
-
-    ctx.set_fill_color(bg);
-    ctx.begin_path();
-    ctx.rounded_rect(
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        style.key_corner_radius,
-    );
-    ctx.fill();
-
-    ctx.set_fill_color(text_color);
-    let center = Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
-
-    match &spec.cap {
-        KeyCap::Text(text) => {
-            let font_size = if matches!(spec.kind, KeyKind::Letter) && text.chars().count() == 1 {
-                style.letter_font_size
-            } else {
-                style.utility_font_size
-            };
-            ctx.set_font_size(font_size);
-            // Approximate text width: agg-gui's `measure_text` needs an
-            // active font set, which the host installs at startup. If
-            // none is set the text falls back to GSV outlines. Either
-            // way, we just need to draw "near the center" — exact
-            // centering can come once we wire up `measure_text` for
-            // real.
-            let approx_width = text.chars().count() as f64 * font_size * 0.55;
-            ctx.fill_text(
-                text,
-                center.x - approx_width / 2.0,
-                center.y - font_size * 0.3,
-            );
-        }
-        KeyCap::Glyph(glyph) => {
-            paint_glyph(ctx, center, style, *glyph, text_color);
-        }
-    }
-}
-
-fn paint_glyph(
-    ctx: &mut dyn DrawCtx,
-    center: Point,
-    style: &Style,
-    glyph: super::key::KeyGlyph,
-    color: crate::color::Color,
-) {
-    use super::key::KeyGlyph;
-    let r = style.utility_font_size * 0.55;
-    ctx.set_stroke_color(color);
-    ctx.set_fill_color(color);
-    ctx.set_line_width(2.0);
-    match glyph {
-        KeyGlyph::Backspace => {
-            ctx.begin_path();
-            // Tag shape: rectangle with a triangular notch on the left.
-            ctx.move_to(center.x - r, center.y);
-            ctx.line_to(center.x - r * 0.4, center.y + r * 0.7);
-            ctx.line_to(center.x + r * 0.9, center.y + r * 0.7);
-            ctx.line_to(center.x + r * 0.9, center.y - r * 0.7);
-            ctx.line_to(center.x - r * 0.4, center.y - r * 0.7);
-            ctx.close_path();
-            ctx.stroke();
-            // X inside.
-            ctx.begin_path();
-            ctx.move_to(center.x - r * 0.05, center.y - r * 0.35);
-            ctx.line_to(center.x + r * 0.55, center.y + r * 0.35);
-            ctx.move_to(center.x - r * 0.05, center.y + r * 0.35);
-            ctx.line_to(center.x + r * 0.55, center.y - r * 0.35);
-            ctx.stroke();
-        }
-        KeyGlyph::Shift => {
-            ctx.begin_path();
-            ctx.move_to(center.x, center.y + r);
-            ctx.line_to(center.x - r, center.y);
-            ctx.line_to(center.x - r * 0.4, center.y);
-            ctx.line_to(center.x - r * 0.4, center.y - r * 0.6);
-            ctx.line_to(center.x + r * 0.4, center.y - r * 0.6);
-            ctx.line_to(center.x + r * 0.4, center.y);
-            ctx.line_to(center.x + r, center.y);
-            ctx.close_path();
-            ctx.stroke();
-        }
-        KeyGlyph::DismissDown => {
-            ctx.begin_path();
-            ctx.move_to(center.x - r, center.y + r * 0.3);
-            ctx.line_to(center.x, center.y - r * 0.3);
-            ctx.line_to(center.x + r, center.y + r * 0.3);
-            ctx.stroke();
-            ctx.begin_path();
-            ctx.move_to(center.x - r, center.y - r * 0.6);
-            ctx.line_to(center.x + r, center.y - r * 0.6);
-            ctx.stroke();
-        }
-        KeyGlyph::Return => {
-            ctx.begin_path();
-            ctx.move_to(center.x + r, center.y + r * 0.6);
-            ctx.line_to(center.x + r, center.y - r * 0.2);
-            ctx.line_to(center.x - r * 0.5, center.y - r * 0.2);
-            ctx.stroke();
-            ctx.begin_path();
-            ctx.move_to(center.x - r * 0.5, center.y + r * 0.3);
-            ctx.line_to(center.x - r, center.y - r * 0.2);
-            ctx.line_to(center.x - r * 0.5, center.y - r * 0.7);
-            ctx.stroke();
-        }
-    }
+    Layout { rows }
 }
 
 #[cfg(test)]
@@ -486,27 +447,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn letters_layer_has_four_rows() {
+    fn letters_layer_has_five_rows_with_number_row() {
         let l = Layout::for_layer(Layer::Letters);
-        assert_eq!(l.rows.len(), 4);
+        assert_eq!(l.rows.len(), 5, "number row + 3 letter rows + action row");
+        let digits: Vec<char> = l.rows[0]
+            .iter()
+            .filter_map(|k| match k.action {
+                KeyAction::Char(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(digits, "1234567890".chars().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn home_row_is_centered_with_spacers() {
+        let l = Layout::for_layer(Layer::Letters);
+        let home = &l.rows[2];
+        assert_eq!(home.first().unwrap().kind, KeyKind::Spacer);
+        assert_eq!(home.last().unwrap().kind, KeyKind::Spacer);
+        // Spacers + 9 letters keep the row at the same 10-unit width as
+        // the rows above, so letter keys don't stretch.
+        let total: f64 = home.iter().map(|k| k.width_units).sum();
+        assert!((total - 10.0).abs() < 1e-9);
     }
 
     #[test]
     fn shift_key_switches_layer() {
         let l = Layout::for_layer(Layer::Letters);
-        let row3 = &l.rows[2];
-        let shift = &row3[0];
+        let shift = &l.rows[3][0];
         match shift.action {
             KeyAction::Switch(Layer::Shifted) => {}
-            other => panic!("expected Switch(Shifted) on row3[0], got {other:?}"),
+            other => panic!("expected Switch(Shifted) on shift row, got {other:?}"),
         }
     }
 
     #[test]
     fn shifted_layer_emits_uppercase_chars() {
         let l = Layout::for_layer(Layer::Shifted);
-        // First row, first key: should be 'Q'.
-        let q = &l.rows[0][0];
+        // Second row (after the number row), first key: should be 'Q'.
+        let q = &l.rows[1][0];
         match q.action {
             KeyAction::Char('Q') => {}
             other => panic!("expected Char('Q'), got {other:?}"),
@@ -514,17 +494,64 @@ mod tests {
     }
 
     #[test]
-    fn numbers_layer_includes_digits() {
-        let l = Layout::for_layer(Layer::Numbers);
-        let chars: Vec<char> = l.rows[0]
+    fn symbols_layer_matches_gboard_page() {
+        let l = Layout::for_layer(Layer::Symbols);
+        let row2: Vec<char> = l.rows[1]
             .iter()
             .filter_map(|k| match k.action {
                 KeyAction::Char(c) => Some(c),
                 _ => None,
             })
             .collect();
-        for d in ['1', '2', '3', '0'] {
-            assert!(chars.contains(&d), "missing digit {d} in numbers row 1");
+        assert_eq!(row2, "@#$_&-+()/".chars().collect::<Vec<_>>());
+        // First key of row 3 pages to the extended symbols layer.
+        match l.rows[2][0].action {
+            KeyAction::Switch(Layer::SymbolsShift) => {}
+            other => panic!("expected Switch(SymbolsShift), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn symbols_shift_layer_pages_back_to_symbols() {
+        let l = Layout::for_layer(Layer::SymbolsShift);
+        match l.rows[2][0].action {
+            KeyAction::Switch(Layer::Symbols) => {}
+            other => panic!("expected Switch(Symbols), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn numpad_has_digit_grid_and_operators() {
+        let l = Layout::for_layer(Layer::NumPad);
+        let chars_of = |row: &Vec<KeySpec>| -> Vec<char> {
+            row.iter()
+                .filter_map(|k| match k.action {
+                    KeyAction::Char(c) => Some(c),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(chars_of(&l.rows[0]), vec!['+', '1', '2', '3', '%']);
+        assert_eq!(chars_of(&l.rows[2]), vec!['*', '7', '8', '9']);
+        assert!(chars_of(&l.rows[3]).contains(&'0'));
+        // Every row spans the same 9 units so the columns align.
+        for row in &l.rows {
+            let total: f64 = row.iter().map(|k| k.width_units).sum();
+            assert!((total - 9.0).abs() < 1e-9, "row width {total} != 9");
+        }
+    }
+
+    #[test]
+    fn bottom_row_mode_keys_page_between_layers() {
+        let letters = Layout::for_layer(Layer::Letters);
+        match letters.rows[4][0].action {
+            KeyAction::Switch(Layer::Symbols) => {}
+            other => panic!("?123 should open Symbols, got {other:?}"),
+        }
+        let symbols = Layout::for_layer(Layer::Symbols);
+        match symbols.rows[3][0].action {
+            KeyAction::Switch(Layer::Letters) => {}
+            other => panic!("ABC should open Letters, got {other:?}"),
         }
     }
 }
