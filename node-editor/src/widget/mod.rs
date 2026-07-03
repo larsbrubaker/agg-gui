@@ -642,8 +642,19 @@ impl Widget for NodeEditor {
             Event::FileDropped { pos, paths } => {
                 // Translate the drop position from widget-local to
                 // canvas-space so the host can place a node at the
-                // user's intended spot regardless of pan/zoom.
-                let canvas_pos = self.local_to_canvas(*pos);
+                // user's intended spot regardless of pan/zoom. Drops
+                // can arrive from outside our bounds (the App re-offers
+                // unconsumed drops to the whole tree because native
+                // shells can't always report an accurate drop point) —
+                // clamp into the visible pane, inset a little so the
+                // spawned node isn't glued to the pane edge.
+                let inset_x = 40.0f64.min(self.bounds.width * 0.5);
+                let inset_y = 40.0f64.min(self.bounds.height * 0.5);
+                let clamped = agg_gui::Point::new(
+                    pos.x.clamp(inset_x, (self.bounds.width - inset_x).max(inset_x)),
+                    pos.y.clamp(inset_y, (self.bounds.height - inset_y).max(inset_y)),
+                );
+                let canvas_pos = self.local_to_canvas(clamped);
                 if let Some(handler) = self.file_drop_handler.as_mut() {
                     handler(paths, canvas_pos);
                     agg_gui::animation::request_draw();

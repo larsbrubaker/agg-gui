@@ -561,13 +561,23 @@ impl App {
         let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         let event = Event::FileDropped { pos, paths };
         let hit = self.compute_hit(pos);
-        if let Some(path) = hit {
-            dispatch_event(&mut self.root, &path, &event, pos);
-        } else {
+        let consumed = match hit {
+            Some(path) => dispatch_event(&mut self.root, &path, &event, pos),
             // No hit target: dispatch to the root anyway so app-level
             // handlers (e.g. "open the dropped .atmr project") can run
             // even when the user drops on chrome rather than canvas.
-            dispatch_event(&mut self.root, &[], &event, pos);
+            None => dispatch_event(&mut self.root, &[], &event, pos),
+        } == EventResult::Consumed;
+        if !consumed {
+            // The widget under the drop point ignored the files. Offer
+            // the event to the rest of the tree before giving up — the
+            // reported position is often wrong through no fault of the
+            // user (winit's Windows backend discards the OLE drop point
+            // and emits no CursorMoved during the drag, so shells fall
+            // back to the last pre-drag cursor position). A drop must
+            // find the app's file handler even when it "lands" on
+            // chrome or a sibling pane.
+            super::tree::dispatch_event_broadcast(&mut self.root, &event, pos);
         }
         crate::animation::request_draw();
     }
