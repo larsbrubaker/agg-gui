@@ -1,5 +1,6 @@
 use super::*;
 
+mod touch;
 mod tree_paths;
 use tree_paths::{collect_focusable, widget_at_path, widget_at_path_ref};
 
@@ -130,6 +131,24 @@ impl App {
             .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);
         self.apply_pending_focus();
+        // Re-evaluate the keyboard-avoidance lift against FRESH bounds.
+        // The focus-change hook runs before the tree has re-laid out (a
+        // just-revealed search panel still reports its hidden-state
+        // zero bounds there), so the lift computed at that instant can
+        // be wildly wrong — and nothing else would ever correct it.
+        // Doing it after every layout self-heals within a frame and
+        // tracks the field if the layout moves it. Gated on the enabled
+        // flag, not `is_visible()` — the slide fraction is still zero on
+        // the very frame the stale lift needs correcting.
+        if crate::widgets::on_screen_keyboard::is_enabled() {
+            if let Some(path) = self.focus.clone() {
+                crate::widget::keyboard_scroll::ensure_focused_visible_above_keyboard(
+                    Some(&path),
+                    logical.width,
+                    self.root.as_mut(),
+                );
+            }
+        }
     }
 
     /// Service a pending programmatic focus request
@@ -561,54 +580,6 @@ impl App {
     // points so widgets that only understand mouse input keep working
     // without changes.  Coordinates are the same physical-pixel Y-down
     // units the mouse entry points accept.
-    pub fn on_touch_start(
-        &mut self,
-        device: crate::touch_state::TouchDeviceId,
-        id: crate::touch_state::TouchId,
-        screen_x: f64,
-        screen_y: f64,
-        force: Option<f32>,
-    ) {
-        let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
-        self.touch_state.on_start(device, id, pos, force);
-        crate::touch_state::note_touch_event();
-    }
-    pub fn on_touch_move(
-        &mut self,
-        device: crate::touch_state::TouchDeviceId,
-        id: crate::touch_state::TouchId,
-        screen_x: f64,
-        screen_y: f64,
-        force: Option<f32>,
-    ) {
-        let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
-        self.touch_state.on_move(device, id, pos, force);
-        crate::touch_state::note_touch_event();
-    }
-    pub fn on_touch_end(
-        &mut self,
-        device: crate::touch_state::TouchDeviceId,
-        id: crate::touch_state::TouchId,
-    ) {
-        self.touch_state.on_end_or_cancel(device, id);
-        crate::touch_state::note_touch_event();
-    }
-    pub fn on_touch_cancel(
-        &mut self,
-        device: crate::touch_state::TouchDeviceId,
-        id: crate::touch_state::TouchId,
-    ) {
-        self.touch_state.on_end_or_cancel(device, id);
-        crate::touch_state::note_touch_event();
-    }
-    /// Current number of fingers down across all devices.  Used by
-    /// widgets that want to know the gesture has *begun* before the
-    /// first frame has had a chance to produce a delta (where
-    /// `current_multi_touch()` may still be `None`).
-    pub fn active_touch_count(&self) -> usize {
-        self.touch_state.active_count()
-    }
-
     // --- Private helpers ---
 
     /// If the click path passes through a `Window` widget, move that window to

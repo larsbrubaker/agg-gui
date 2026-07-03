@@ -43,6 +43,7 @@ mod color_wheel_picker;
 mod drawing;
 mod flex_gap;
 mod focus;
+mod keyboard_lift;
 mod reserve_inset;
 mod inspector_hover;
 mod inspector_tree;

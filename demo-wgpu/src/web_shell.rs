@@ -402,8 +402,16 @@ fn frame() {
     };
 
     // Match the backing store to the CSS size × DPR so rendering is
-    // pixel-perfect at any zoom / DPI / orientation.
+    // pixel-perfect at any zoom / DPI / orientation. The device scale is
+    // re-synced every tick, not just at boot / window-resize: browser
+    // zoom and monitor moves can change `devicePixelRatio` without a
+    // resize event, and a stale scale renders the whole UI at the wrong
+    // density.
     let dpr = device_pixel_ratio();
+    if (agg_gui::device_scale() - dpr).abs() > 1e-9 {
+        agg_gui::set_device_scale(dpr.max(0.5));
+        mark_dirty();
+    }
     let w = ((canvas.client_width() as f64 * dpr) as u32).max(1);
     let h = ((canvas.client_height() as f64 * dpr) as u32).max(1);
     if canvas.width() != w || canvas.height() != h {
