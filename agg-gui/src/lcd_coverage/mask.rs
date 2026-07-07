@@ -149,8 +149,20 @@ pub fn rasterize_text_lcd_cached(font: &Arc<Font>, text: &str, size: f64) -> Cac
     let italic_slack = (italic_now.abs() / 3.0) * (m.ascent + m.descent);
     let extra_pad = (width_slack + italic_slack).ceil();
     let pad_x = MASK_PAD + extra_pad;
+    // Music and icon fonts deliberately overflow their ascender/descender
+    // (a SMuFL treble clef spans staff spaces far past the em box), so a
+    // mask sized from the font-wide metrics would crop such glyphs flat.
+    // Grow to the actual outline extents of the glyphs being drawn.
+    let mut ink_ascent = m.ascent;
+    let mut ink_descent = m.descent;
+    for ch in text.chars() {
+        if let Some((y_min, y_max)) = font.glyph_visual_bounds(ch, size) {
+            ink_ascent = ink_ascent.max(y_max);
+            ink_descent = ink_descent.max(-y_min);
+        }
+    }
     let bw = (m.width + pad_x * 2.0).ceil().max(1.0) as u32;
-    let bh = (m.ascent + m.descent + MASK_PAD * 2.0).ceil().max(1.0) as u32;
+    let bh = (ink_ascent + ink_descent + MASK_PAD * 2.0).ceil().max(1.0) as u32;
     let bx = pad_x;
     // Snap the mask's internal baseline Y to a whole pixel **only when
     // the user has hinting enabled** — the same checkbox that drives
@@ -161,7 +173,7 @@ pub fn rasterize_text_lcd_cached(font: &Arc<Font>, text: &str, size: f64) -> Cac
     // hinting is OFF is intrinsic to LCD's composite-row-alignment
     // requirement, not something we can paper over without forcing a
     // permanent snap that the user explicitly rejected).
-    let by_unhinted = MASK_PAD + m.descent;
+    let by_unhinted = MASK_PAD + ink_descent;
     let by = if hint_y_now {
         by_unhinted.round()
     } else {
