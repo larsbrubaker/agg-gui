@@ -18,7 +18,7 @@
 //! Event dispatch: leaf → root (events bubble up; any widget can consume).
 
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
+use crate::event::{Event, EventResult, Key, Modifiers};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 

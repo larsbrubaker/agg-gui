@@ -18,6 +18,7 @@ mod inspector_props;
 pub mod label;
 pub mod markdown;
 pub mod menu;
+pub mod modal_sheet;
 pub mod on_screen_keyboard;
 pub mod performance;
 pub mod primitives;
@@ -27,6 +28,7 @@ pub mod progress_bar;
 pub mod qr_view;
 pub mod property_row;
 pub mod radio_group;
+pub mod rebuilder;
 pub mod resize;
 pub mod scroll_view;
 pub(crate) mod scrollbar;
@@ -60,6 +62,7 @@ pub use image_view::ImageView;
 pub use inspector::{InspectorPanel, InspectorSavedState};
 pub use label::{Label, LabelAlign};
 pub use markdown::MarkdownView;
+pub use modal_sheet::ModalSheet;
 pub use menu::{
     MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
     PopupMenu, ShortcutKey, TopMenu,
@@ -77,6 +80,7 @@ pub use property_row::{
     paint_editor_only, paint_row, EditorKind, NodeFieldAttrs, NumberAttrs, RowValue, VisibleWhen,
 };
 pub use radio_group::RadioGroup;
+pub use rebuilder::Rebuilder;
 pub use resize::Resize;
 pub use scroll_view::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,

@@ -1,5 +1,6 @@
 use super::*;
 
+mod pointer;
 mod touch;
 mod tree_paths;
 use tree_paths::{collect_focusable, widget_at_path, widget_at_path_ref};
@@ -278,131 +279,6 @@ impl App {
     // divide by the current device scale factor and flip Y so widget code sees
     // logical Y-up coordinates matching the layout pass.
 
-    /// Mouse cursor moved. `screen_y` is Y-down physical pixels.
-    pub fn on_mouse_move(&mut self, screen_x: f64, screen_y: f64) {
-        // Reset cursor so the hovered widget can set it; Default if nothing sets it.
-        crate::cursor::reset_cursor_icon();
-        let screen = self.flip_y(screen_x, screen_y);
-        if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_move(screen) {
-            self.drain_keyboard_synthetic_keys();
-            return;
-        }
-        let pos = super::keyboard_scroll::lift_to_world(screen);
-        set_current_mouse_world(pos);
-        if let Some(path) = active_modal_path(self.root.as_ref()) {
-            let event = Event::MouseMove { pos };
-            dispatch_event(&mut self.root, &path, &event, pos);
-            self.hovered = Some(path);
-            return;
-        }
-        self.dispatch_mouse_move(pos);
-    }
-
-    /// Mouse button pressed. `screen_y` is Y-down physical pixels.
-    pub fn on_mouse_down(
-        &mut self,
-        screen_x: f64,
-        screen_y: f64,
-        button: MouseButton,
-        mods: Modifiers,
-    ) {
-        let screen = self.flip_y(screen_x, screen_y);
-        // On-screen keyboard captures pointer events on its panel area
-        // before anything in the tree gets a look. Returning here also
-        // means the focused widget keeps focus (so the keyboard does
-        // not dismiss itself by stealing focus on every key tap).
-        if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_down(
-            screen, button, mods,
-        ) {
-            return;
-        }
-        let pos = super::keyboard_scroll::lift_to_world(screen);
-        set_current_mouse_world(pos);
-        let modal_path = active_modal_path(self.root.as_ref());
-        let event = Event::MouseDown {
-            pos,
-            button,
-            modifiers: mods,
-        };
-        if let Some(path) = modal_path {
-            self.set_focus(None);
-            if dispatch_event(&mut self.root, &path, &event, pos) == EventResult::Consumed {
-                self.captured = Some(path);
-            }
-            return;
-        }
-        let hit = self.compute_hit(pos);
-
-        // Click-to-focus: if the hit widget is focusable, give it focus.
-        if let Some(ref path) = hit {
-            let w = widget_at_path(&mut self.root, path);
-            if w.is_focusable() {
-                self.set_focus(Some(path.clone()));
-            } else {
-                self.set_focus(None);
-            }
-        } else {
-            self.set_focus(None);
-        }
-
-        if let Some(mut path) = hit {
-            let result = dispatch_event(&mut self.root, &path, &event, pos);
-            if result == EventResult::Consumed {
-                self.maybe_bring_to_front(&mut path);
-                let capture_path = self.compute_hit(pos).unwrap_or(path);
-                self.captured = Some(capture_path);
-            }
-        }
-        // NO blanket request_draw.  Mouse-down on an inert area must not
-        // cause a repaint.  Each widget that changes visual state in
-        // response to a MouseDown (button press, window raise, focus
-        // indicator on the focus-gained widget, etc.) is responsible for
-        // calling `crate::animation::request_draw` itself.
-    }
-
-    /// Mouse button released. `screen_y` is Y-down.
-    pub fn on_mouse_up(
-        &mut self,
-        screen_x: f64,
-        screen_y: f64,
-        button: MouseButton,
-        mods: Modifiers,
-    ) {
-        let screen = self.flip_y(screen_x, screen_y);
-        // On-screen keyboard owns release events on its panel; releases
-        // here commit a key tap and synthesize a `KeyDown`. After
-        // consumption we drain the synthetic-key queue so the focused
-        // text widget receives the character in the same frame.
-        if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_up(
-            screen, button, mods,
-        ) {
-            self.captured = None;
-            self.drain_keyboard_synthetic_keys();
-            return;
-        }
-        let pos = super::keyboard_scroll::lift_to_world(screen);
-        set_current_mouse_world(pos);
-        let event = Event::MouseUp {
-            pos,
-            button,
-            modifiers: mods,
-        };
-        if let Some(path) = active_modal_path(self.root.as_ref()) {
-            self.captured = None;
-            dispatch_event(&mut self.root, &path, &event, pos);
-            return;
-        }
-        // Deliver release to captured widget first (if any), then clear capture.
-        if let Some(path) = self.captured.take() {
-            dispatch_event(&mut self.root, &path, &event, pos);
-        } else {
-            let hit = self.compute_hit(pos);
-            if let Some(path) = hit {
-                dispatch_event(&mut self.root, &path, &event, pos);
-            }
-        }
-    }
-
     /// Key pressed. Delivered to the focused widget first, then to the visible
     /// widget tree as an unconsumed key if focus ignores it.
     pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
@@ -415,7 +291,13 @@ impl App {
             modifiers: mods,
         };
         let result = if let Some(path) = active_modal_path(self.root.as_ref()) {
-            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN)
+            // A focused widget INSIDE the modal (a dialog's text field)
+            // gets keys first; the modal subtree handles the rest (Esc).
+            let target = match self.focus.clone() {
+                Some(focus) if focus.starts_with(&path) => focus,
+                _ => path,
+            };
+            dispatch_event(&mut self.root, &target, &event, Point::ORIGIN)
         } else if let Some(path) = self.focus.clone() {
             dispatch_event(&mut self.root, &path, &event, Point::ORIGIN)
         } else {
@@ -468,7 +350,9 @@ impl App {
     ) {
         let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         set_current_mouse_world(pos);
-        let hit = active_modal_path(self.root.as_ref()).or_else(|| self.compute_hit(pos));
+        let hit = active_modal_path(self.root.as_ref())
+            .map(|path| self.extend_modal_path(&path, pos))
+            .or_else(|| self.compute_hit(pos));
         let event = Event::MouseWheel {
             pos,
             delta_y,

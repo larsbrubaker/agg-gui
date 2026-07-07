@@ -30,6 +30,10 @@ pub struct Stack {
     /// (overlay), `false` = stretched to fill (default).
     aligned: Vec<bool>,
     base: WidgetBase,
+    /// When true, the stack itself is transparent to hit testing: a point
+    /// hits only where some visible child hits, so empty space falls
+    /// through to whatever is stacked beneath this widget.
+    hit_children_only: bool,
 }
 
 impl Stack {
@@ -39,7 +43,20 @@ impl Stack {
             children: Vec::new(),
             aligned: Vec::new(),
             base: WidgetBase::new(),
+            hit_children_only: false,
         }
+    }
+
+    /// Make the stack hit-test transparent outside its visible children.
+    ///
+    /// A stretched `Stack` fills its slot, so by default it claims pointer
+    /// events even where it paints nothing — a full-window overlay layer
+    /// (modal sheets, popovers) would block every click while its overlays
+    /// are hidden. With this set, empty space falls through to lower
+    /// siblings of the stack.
+    pub fn with_hit_children_only(mut self, v: bool) -> Self {
+        self.hit_children_only = v;
+        self
     }
 
     /// Add a child stretched to fill the stack's full area.
@@ -228,6 +245,24 @@ impl Widget for Stack {
     }
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+
+    fn hit_test(&self, local_pos: crate::geometry::Point) -> bool {
+        if !self.hit_children_only {
+            let b = self.bounds();
+            return local_pos.x >= 0.0
+                && local_pos.x <= b.width
+                && local_pos.y >= 0.0
+                && local_pos.y <= b.height;
+        }
+        self.children.iter().any(|child| {
+            let b = child.bounds();
+            child.is_visible()
+                && child.hit_test(crate::geometry::Point::new(
+                    local_pos.x - b.x,
+                    local_pos.y - b.y,
+                ))
+        })
+    }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
