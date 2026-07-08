@@ -74,6 +74,7 @@ Only the `agg-gui` library crate is published — the demo crates
 | `ImageView` | Image display widget |
 | `ScrollView` | Vertical scroll with drag-thumb and mouse-wheel support |
 | `Window` | Floating panel: draggable title bar, close button, resize handles, collapse |
+| `ModalSheet` | Centered fixed-size panel over a scrim; Escape or scrim-tap to dismiss |
 | `FlexColumn` | Vertical flex layout with gap, padding, fixed + growing children |
 | `FlexRow` | Horizontal flex layout |
 | `Stack` | Z-ordered overlay layout (for floating windows) |
@@ -85,6 +86,7 @@ Only the `agg-gui` library crate is published — the demo crates
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
 | `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives |
 | `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
+| `Rebuilder` | Regenerates a child subtree from a builder closure when a shared version cell changes — for dynamic content sets (option lists, variable row counts) |
 | `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |
 | `Separator` | Horizontal or vertical rule |
 | `Spacer` / `Padding` | Layout utility widgets |
@@ -121,6 +123,16 @@ Two implementations:
 - **`GfxCtx`** — software AGG rasterizer writing to a `Framebuffer` (RGBA8, Y-up)
 - **GL path** — tessellated via `tess2`, submitted as GPU draw calls; `GlPaint` trait for
   widgets that want to render their own 3-D content (e.g. the rotating cube demo)
+
+### Text Rendering
+
+Text is shaped with `rustybuzz` + `ttf-parser` and rasterized through AGG into
+anti-aliased coverage masks (`lcd_coverage`), cached per `(font, string, size)`.
+Two mask flavours composite through one per-channel blit: **LCD subpixel** for
+standard-density displays, and **grayscale** (equal channels, no colour fringing)
+for hi-DPI, scaled, or touch displays where subpixel order is unknown. GPU
+backends upload the cached mask as a texture; the software path composites it
+directly.
 
 ### Mobile & Overlays
 
