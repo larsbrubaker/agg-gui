@@ -125,7 +125,10 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
 
     let window_attributes = WindowAttributes::default()
         .with_title(config.title)
-        .with_inner_size(LogicalSize::new(config.logical_size.0, config.logical_size.1))
+        .with_inner_size(LogicalSize::new(
+            config.logical_size.0,
+            config.logical_size.1,
+        ))
         // Shown after the first surface configure to avoid a white flash.
         .with_visible(false);
     let window = Arc::new(
@@ -258,6 +261,15 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
                     &mut on_frame,
                     &mut layout_key,
                 );
+            }
+
+            // A scheduled draw deadline elapsed (`request_draw_after`):
+            // the deadline was consumed when WaitUntil was armed, so the
+            // timer wake itself must trigger the frame — without this,
+            // every scheduled-draw consumer (tooltip delays, demo
+            // drivers) stalls after its first deadline.
+            Event::NewEvents(winit::event::StartCause::ResumeTimeReached { .. }) => {
+                window.request_redraw();
             }
 
             Event::AboutToWait => {

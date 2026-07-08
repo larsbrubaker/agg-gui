@@ -236,9 +236,7 @@ fn install_pointer_listeners() {
             with_app(|app| app.on_mouse_move(x, y));
             // Reflect the hovered widget's preferred cursor on the canvas.
             let icon = agg_gui::current_cursor_icon();
-            let _ = canvas_ref
-                .style()
-                .set_property("cursor", icon.to_css());
+            let _ = canvas_ref.style().set_property("cursor", icon.to_css());
         });
     }
     {

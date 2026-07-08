@@ -1,4 +1,4 @@
-﻿//! `Container` — a rectangular box with optional background, border, and
+//! `Container` — a rectangular box with optional background, border, and
 //! padding that holds zero or more child widgets.
 //!
 //! Phase 4 child layout is a simple top-down vertical stack (bottom-most child
@@ -248,14 +248,7 @@ impl Widget for Container {
             // A fit-height container paints at `natural_h`, so lay children out
             // again in that tight height to keep their bounds inside the frame.
             if (available.height - natural_h).abs() > 0.5 {
-                layout_children(
-                    &mut self.children,
-                    inner_w,
-                    pad_l,
-                    pad_t,
-                    pad_b,
-                    natural_h,
-                );
+                layout_children(&mut self.children, inner_w, pad_l, pad_t, pad_b, natural_h);
             }
             Size::new(available.width, natural_h)
         } else {

@@ -102,8 +102,7 @@ pub fn measure(
     let detail_block_h = if details.is_empty() {
         0.0
     } else {
-        details.len() as f64 * style.detail_size
-            + (details.len() as f64 - 1.0) * style.line_gap
+        details.len() as f64 * style.detail_size + (details.len() as f64 - 1.0) * style.line_gap
     };
     Size::new(
         w + style.pad_x * 2.0,
@@ -114,7 +113,13 @@ pub fn measure(
 /// Place a card of `size` near `anchor` inside `container`, avoiding the
 /// frame's [`crate::overlay_insets`]. See [`anchored_rect_with_insets`].
 pub fn anchored_rect(container: Size, anchor: Point, size: Size, style: &CardStyle) -> Rect {
-    anchored_rect_with_insets(container, anchor, size, style, crate::overlay_insets::current())
+    anchored_rect_with_insets(
+        container,
+        anchor,
+        size,
+        style,
+        crate::overlay_insets::current(),
+    )
 }
 
 /// Pure placement: prefer sitting fully below the anchor (Y-up: spanning
@@ -344,13 +349,8 @@ mod tests {
             bottom: 260.0,
             ..Insets::default()
         };
-        let r = anchored_rect_with_insets(
-            CONTAINER,
-            Point { x: 120.0, y: 300.0 },
-            CARD,
-            &style(),
-            ins,
-        );
+        let r =
+            anchored_rect_with_insets(CONTAINER, Point { x: 120.0, y: 300.0 }, CARD, &style(), ins);
         assert_eq!(r.y, 300.0 + 6.0, "flipped fully above the anchor");
         assert!(r.y >= 260.0 + 8.0, "clear of the reserved strip");
     }
@@ -413,10 +413,7 @@ mod tests {
         }
 
         // A single over-long word stays whole rather than splitting.
-        assert_eq!(
-            wrap_with(&w, "Circumpolar", 30.0),
-            vec!["Circumpolar"]
-        );
+        assert_eq!(wrap_with(&w, "Circumpolar", 30.0), vec!["Circumpolar"]);
     }
 
     #[test]

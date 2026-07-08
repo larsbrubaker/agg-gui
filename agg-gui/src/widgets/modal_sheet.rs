@@ -200,7 +200,13 @@ impl Widget for ModalSheet {
         ctx.set_stroke_color(v.window_stroke);
         ctx.set_line_width(1.0);
         ctx.begin_path();
-        ctx.rounded_rect(0.5, 0.5, self.panel.width - 1.0, self.panel.height - 1.0, CORNER_R);
+        ctx.rounded_rect(
+            0.5,
+            0.5,
+            self.panel.width - 1.0,
+            self.panel.height - 1.0,
+            CORNER_R,
+        );
         ctx.stroke();
         ctx.restore();
     }
@@ -213,9 +219,9 @@ impl Widget for ModalSheet {
             // Scrim: swallow pointer input the panel content didn't take,
             // so nothing behind the sheet reacts (no click-outside close —
             // matching macOS sheets).
-            Event::MouseDown { .. }
-            | Event::MouseUp { .. }
-            | Event::MouseWheel { .. } => EventResult::Consumed,
+            Event::MouseDown { .. } | Event::MouseUp { .. } | Event::MouseWheel { .. } => {
+                EventResult::Consumed
+            }
             Event::KeyDown {
                 key: Key::Escape, ..
             } if self.escape_closes => {

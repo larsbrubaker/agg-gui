@@ -177,8 +177,7 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
             (on_key.borrow_mut())(k, mods, true);
         })
     };
-    let _ = window
-        .add_event_listener_with_callback("keydown", down_cb.as_ref().unchecked_ref());
+    let _ = window.add_event_listener_with_callback("keydown", down_cb.as_ref().unchecked_ref());
     down_cb.forget();
 
     // --- keyup -------------------------------------------------------------

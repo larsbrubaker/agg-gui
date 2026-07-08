@@ -109,7 +109,8 @@ impl DrawCtx for ColorCaptureCtx {
             .premultiply(&TransAffine::new_rotation(radians));
     }
     fn scale(&mut self, sx: f64, sy: f64) {
-        self.transform.premultiply(&TransAffine::new_scaling(sx, sy));
+        self.transform
+            .premultiply(&TransAffine::new_scaling(sx, sy));
     }
     fn set_transform(&mut self, m: TransAffine) {
         self.transform = m;
@@ -179,9 +180,7 @@ fn explicit_color_overrides_dim_and_theme() {
     set_visuals(Visuals::dark());
     let font = test_font();
     let forced = Color::from_rgb8(0x12, 0x34, 0x56);
-    let mut label = Label::new("Forced", font)
-        .with_dim(true)
-        .with_color(forced);
+    let mut label = Label::new("Forced", font).with_dim(true).with_color(forced);
     assert_eq!(
         painted_color(&mut label),
         forced,

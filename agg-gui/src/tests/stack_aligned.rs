@@ -10,8 +10,8 @@
 //!      `device_scale` again (see `layout_props::WidgetBase::scaled_margin`).
 
 use crate::{
-    set_device_scale, FlexColumn, FlexRow, HAnchor, Insets, Size, SizedBox, Spacer, Stack,
-    VAnchor, Widget,
+    set_device_scale, FlexColumn, FlexRow, HAnchor, Insets, Size, SizedBox, Spacer, Stack, VAnchor,
+    Widget,
 };
 
 /// Build an overlay positioner mirroring a floating dialog: fills available
@@ -110,12 +110,14 @@ fn aligned_child_height_clamps_to_available_minus_margins() {
 fn flex_column_child_margin_not_scaled_by_device_scale() {
     set_device_scale(2.0);
     let mut col = FlexColumn::new().add(Box::new(
-        SizedBox::fixed(50.0, 20.0).with_h_anchor(HAnchor::LEFT).with_margin(Insets {
-            left: 10.0,
-            right: 0.0,
-            top: 0.0,
-            bottom: 0.0,
-        }),
+        SizedBox::fixed(50.0, 20.0)
+            .with_h_anchor(HAnchor::LEFT)
+            .with_margin(Insets {
+                left: 10.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            }),
     ));
     col.layout(Size::new(200.0, 100.0));
     let b = col.children()[0].bounds();
@@ -145,14 +147,13 @@ fn flex_row_child_margin_not_scaled_by_device_scale() {
 #[test]
 fn container_child_margin_not_scaled_by_device_scale() {
     set_device_scale(2.0);
-    let mut c = crate::Container::new().add(Box::new(
-        SizedBox::fixed(50.0, 20.0).with_margin(Insets {
+    let mut c =
+        crate::Container::new().add(Box::new(SizedBox::fixed(50.0, 20.0).with_margin(Insets {
             left: 10.0,
             right: 0.0,
             top: 0.0,
             bottom: 0.0,
-        }),
-    ));
+        })));
     c.layout(Size::new(200.0, 100.0));
     let b = c.children()[0].bounds();
     set_device_scale(1.0);

@@ -411,7 +411,12 @@ mod tests {
             b"TOBEORNOTTOBEORTOBEORNOT".to_vec(),
         ] {
             let comp = lzw_compress(&case);
-            assert_eq!(lzw_decompress(&comp), case, "lzw mismatch for len {}", case.len());
+            assert_eq!(
+                lzw_decompress(&comp),
+                case,
+                "lzw mismatch for len {}",
+                case.len()
+            );
         }
     }
 
@@ -437,7 +442,10 @@ mod tests {
 
         // Identical next frame → tiny delta, decodes to the same image.
         let d = enc.encode(&frame, 8, 6);
-        assert!(d.len() < k.len(), "identity delta should be smaller than keyframe");
+        assert!(
+            d.len() < k.len(),
+            "identity delta should be smaller than keyframe"
+        );
         let (img2, _, _) = dec.decode(&d).expect("delta decodes");
         assert_eq!(img2, frame);
     }
@@ -466,7 +474,9 @@ mod tests {
     fn resize_forces_keyframe_and_decodes() {
         let mut enc = FrameEncoder::new();
         let mut dec = FrameDecoder::new();
-        let _ = dec.decode(&enc.encode(&solid(4, 4, [1, 2, 3, 4]), 4, 4)).unwrap();
+        let _ = dec
+            .decode(&enc.encode(&solid(4, 4, [1, 2, 3, 4]), 4, 4))
+            .unwrap();
         // Different dimensions must be sent as a keyframe and still decode.
         let big = solid(10, 7, [9, 8, 7, 255]);
         let p = enc.encode(&big, 10, 7);

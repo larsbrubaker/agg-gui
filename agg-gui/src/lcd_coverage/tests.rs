@@ -555,3 +555,52 @@ fn test_lcd_buffer_composite_matches_composite_lcd_mask() {
         }
     }
 }
+
+/// The grayscale mask must be anti-aliased: a glyph edge produces bytes
+/// strictly between 0 and 255 (partial coverage). A non-AA (outline-fill)
+/// path would only ever emit 0 or 255. This is the property the wgpu
+/// non-LCD text path was missing before it switched to this rasteriser.
+#[test]
+fn test_gray_mask_is_antialiased() {
+    let mask = rasterize_gray_mask(
+        &font(),
+        "Wing",
+        24.0,
+        4.0,
+        20.0,
+        160,
+        40,
+        &TransAffine::new(),
+    );
+    let total: u64 = mask.data.iter().map(|&b| b as u64).sum();
+    assert!(total > 0, "gray mask produced all-zero coverage");
+    let partial = mask.data.iter().any(|&b| b > 8 && b < 248);
+    assert!(
+        partial,
+        "gray mask has no partial-coverage bytes — edges are aliased"
+    );
+}
+
+/// The grayscale mask must have equal channels at every pixel: unlike the
+/// LCD mask it carries no subpixel chroma, so `R == G == B` everywhere.
+/// That is what lets it composite through the shared per-channel path with
+/// no colour fringing.
+#[test]
+fn test_gray_mask_has_no_chroma() {
+    let mask = rasterize_gray_mask(
+        &font(),
+        "Wing",
+        24.0,
+        4.0,
+        20.0,
+        160,
+        40,
+        &TransAffine::new(),
+    );
+    for px in mask.data.chunks_exact(3) {
+        assert!(
+            px[0] == px[1] && px[1] == px[2],
+            "gray mask pixel has unequal channels: {px:?}"
+        );
+    }
+}

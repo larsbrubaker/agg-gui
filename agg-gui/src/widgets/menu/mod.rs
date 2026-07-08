@@ -258,7 +258,10 @@ mod tests {
         let more_row = state.layouts(&items, viewport)[0].rows[3].rect;
         // Tap toward the right of the parent row, where the clamped submenu's
         // first child overlaps.
-        let tap = Point::new(more_row.x + more_row.width - 20.0, more_row.y + more_row.height * 0.5);
+        let tap = Point::new(
+            more_row.x + more_row.width - 20.0,
+            more_row.y + more_row.height * 0.5,
+        );
 
         crate::touch_state::clear_last_touch_event_for_testing();
         crate::touch_state::note_touch_event();

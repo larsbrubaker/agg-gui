@@ -730,9 +730,11 @@ impl WgpuGfxCtx {
         self.queue.submit(std::iter::once(encoder.finish()));
 
         let (tx, rx) = std::sync::mpsc::channel();
-        staging.slice(..).map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
+        staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |res| {
+                let _ = tx.send(res);
+            });
         self.pending_readback = Some(crate::PendingReadback {
             staging,
             w,

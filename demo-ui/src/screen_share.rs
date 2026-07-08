@@ -286,8 +286,7 @@ mod tests {
     fn frame_stale_deadline_only_while_streaming_after_a_frame() {
         let latest = Arc::new(Mutex::new(None));
         let connected = Arc::new(Mutex::new(true));
-        let mut t =
-            QueuedScreenTransport::new(latest.clone(), connected, "ag-test".to_string());
+        let mut t = QueuedScreenTransport::new(latest.clone(), connected, "ag-test".to_string());
 
         // Not streaming → no revert deadline (paused phones are idle).
         assert!(t.frame_stale_deadline().is_none());

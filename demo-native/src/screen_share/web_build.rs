@@ -45,14 +45,24 @@ pub fn ensure_current() {
     let root = repo_root();
     let pkg = root.join("demo").join("public").join("pkg");
     let wasm = pkg.join("demo_wasm_bg.wasm");
-    let bundle = root.join("demo").join("public").join("dist").join("bundle.js");
+    let bundle = root
+        .join("demo")
+        .join("public")
+        .join("dist")
+        .join("bundle.js");
 
     // Rust sources that compile into the wasm (over-inclusive is fine — it only
     // costs an extra background rebuild, never a wrong answer).
-    let rust_dirs: Vec<PathBuf> = ["agg-gui", "demo-ui", "demo-wgpu", "demo-wasm", "node-editor"]
-        .iter()
-        .map(|c| root.join(c).join("src"))
-        .collect();
+    let rust_dirs: Vec<PathBuf> = [
+        "agg-gui",
+        "demo-ui",
+        "demo-wgpu",
+        "demo-wasm",
+        "node-editor",
+    ]
+    .iter()
+    .map(|c| root.join(c).join("src"))
+    .collect();
     let lock = root.join("Cargo.lock");
     let ts_dirs = vec![root.join("demo").join("src")];
     let index = root.join("demo").join("index.html");
@@ -197,7 +207,11 @@ fn rebuild_wasm_and_bundle(root: &Path) {
 fn rebuild_bundle(root: &Path) {
     eprintln!("screen-share: rebuilding JS bundle…");
     let stage = stage_dir(root);
-    let bundle = root.join("demo").join("public").join("dist").join("bundle.js");
+    let bundle = root
+        .join("demo")
+        .join("public")
+        .join("dist")
+        .join("bundle.js");
     let bundle_stage = stage.join("bundle.js");
     let _ = std::fs::create_dir_all(&stage);
     if !build_bundle(root, "../target/web-build/bundle.js") {

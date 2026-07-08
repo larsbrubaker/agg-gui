@@ -120,7 +120,9 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
     );
 
     col.push(
-        Box::new(Label::new("Type here (mode follows radio)", Arc::clone(&font)).with_font_size(12.0)),
+        Box::new(
+            Label::new("Type here (mode follows radio)", Arc::clone(&font)).with_font_size(12.0),
+        ),
         0.0,
     );
     col.push(
@@ -136,7 +138,9 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
     );
 
     col.push(
-        Box::new(Label::new("Numeric-only field (digit pad)", Arc::clone(&font)).with_font_size(12.0)),
+        Box::new(
+            Label::new("Numeric-only field (digit pad)", Arc::clone(&font)).with_font_size(12.0),
+        ),
         0.0,
     );
     col.push(

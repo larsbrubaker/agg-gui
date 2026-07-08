@@ -337,7 +337,11 @@ fn symbols_layer() -> Layout {
     rows.push("@#$_&-+()/".chars().map(key).collect());
 
     let mut row3: Vec<KeySpec> = Vec::with_capacity(9);
-    row3.push(util_text("=\\<", KeyAction::Switch(Layer::SymbolsShift), 1.5));
+    row3.push(util_text(
+        "=\\<",
+        KeyAction::Switch(Layer::SymbolsShift),
+        1.5,
+    ));
     row3.extend("*\"':;!?".chars().map(key));
     row3.push(backspace(1.5));
     rows.push(row3);

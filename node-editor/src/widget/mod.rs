@@ -651,8 +651,10 @@ impl Widget for NodeEditor {
                 let inset_x = 40.0f64.min(self.bounds.width * 0.5);
                 let inset_y = 40.0f64.min(self.bounds.height * 0.5);
                 let clamped = agg_gui::Point::new(
-                    pos.x.clamp(inset_x, (self.bounds.width - inset_x).max(inset_x)),
-                    pos.y.clamp(inset_y, (self.bounds.height - inset_y).max(inset_y)),
+                    pos.x
+                        .clamp(inset_x, (self.bounds.width - inset_x).max(inset_x)),
+                    pos.y
+                        .clamp(inset_y, (self.bounds.height - inset_y).max(inset_y)),
                 );
                 let canvas_pos = self.local_to_canvas(clamped);
                 if let Some(handler) = self.file_drop_handler.as_mut() {

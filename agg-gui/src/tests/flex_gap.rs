@@ -15,11 +15,8 @@ use crate::{FlexColumn, FlexRow, Insets, Size, SizedBox, Widget};
 
 fn hidden_box() -> (Rc<Cell<bool>>, Box<dyn Widget>) {
     let visible = Rc::new(Cell::new(false));
-    let child = Conditional::new(
-        Rc::clone(&visible),
-        Box::new(SizedBox::fixed(50.0, 20.0)),
-    )
-    .with_margin(Insets::all(4.0));
+    let child = Conditional::new(Rc::clone(&visible), Box::new(SizedBox::fixed(50.0, 20.0)))
+        .with_margin(Insets::all(4.0));
     (visible, Box::new(child))
 }
 

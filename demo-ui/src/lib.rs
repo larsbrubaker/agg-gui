@@ -21,12 +21,12 @@ mod windows;
 
 pub use api::{DemoHandles, PlatformHooks, PlatformKind};
 pub use app_builder::build_demo_ui;
+pub use backend_panel::{FrameHistory, RunMode};
 pub use screen_codec::{FrameDecoder, FrameEncoder};
 pub use screen_share::{
     NullScreenTransport, QueuedScreenTransport, ScreenFrame, ScreenShareHandles,
     ScreenShareTransport,
 };
-pub use backend_panel::{FrameHistory, RunMode};
 pub use state::{SavedState, StateAccessor, WindowState};
 pub use windows::{
     font_asset_by_name, install_font_bytes, load_font_by_name, take_pending_font_request,

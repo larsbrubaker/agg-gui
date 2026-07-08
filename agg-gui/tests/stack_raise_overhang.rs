@@ -101,7 +101,9 @@ impl Widget for Filler {
 #[test]
 fn raise_on_overhang_index_does_not_panic() {
     // Two children via add() → aligned.len() == 2.
-    let mut stack = Stack::new().add(Box::new(Filler::new())).add(Box::new(Filler::new()));
+    let mut stack = Stack::new()
+        .add(Box::new(Filler::new()))
+        .add(Box::new(Filler::new()));
     // A third child pushed directly bypasses `aligned` → children.len() == 3,
     // aligned.len() == 2. This raise-requesting child sits on the overhang.
     stack.children_mut().push(Box::new(RaiseOnce::new()));

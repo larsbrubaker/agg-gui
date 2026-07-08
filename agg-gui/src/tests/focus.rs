@@ -17,8 +17,9 @@ fn test_programmatic_focus_request() {
 
     const FIELD_ID: u64 = 4242;
     let mut root = Container::new().with_padding(4.0);
-    root.children_mut()
-        .push(Box::new(TextField::new(Arc::clone(&font)).with_font_size(14.0)));
+    root.children_mut().push(Box::new(
+        TextField::new(Arc::clone(&font)).with_font_size(14.0),
+    ));
     root.children_mut().push(Box::new(
         TextField::new(Arc::clone(&font))
             .with_font_size(14.0)
@@ -51,8 +52,9 @@ fn test_programmatic_focus_request() {
 fn test_programmatic_focus_request_unmatched_id() {
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let mut root = Container::new().with_padding(4.0);
-    root.children_mut()
-        .push(Box::new(TextField::new(Arc::clone(&font)).with_font_size(14.0)));
+    root.children_mut().push(Box::new(
+        TextField::new(Arc::clone(&font)).with_font_size(14.0),
+    ));
 
     let mut app = App::new(Box::new(root));
     crate::focus::request_focus(9999);

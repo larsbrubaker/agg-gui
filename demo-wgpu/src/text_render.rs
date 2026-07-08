@@ -43,10 +43,21 @@ impl WgpuGfxCtx {
         let ctm = *self.ctm();
         let ctm_scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt().max(1e-6);
 
-        // LCD subpixel path — same caching strategy as the GL backend.
-        if self.has_lcd_mask_composite() && self.lcd_mode {
+        // Coverage-mask path — AGG rasterises the run to an anti-aliased
+        // coverage mask cached at physical (1:1) pixels, then blits it via
+        // the 3-pass channel composite. LCD subpixel when `lcd_mode` is on;
+        // otherwise a grayscale mask (equal channels, no chroma fringing)
+        // for hi-DPI / scaled / touch displays. Both share the same cache,
+        // texture upload, and GPU composite — only the finalize differs.
+        // The tessellated-outline path below is a last resort for backends
+        // that can't composite a coverage mask.
+        if self.has_lcd_mask_composite() {
             let phys_size = self.font_size * ctm_scale;
-            let cached = agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size);
+            let cached = if self.lcd_mode {
+                agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size)
+            } else {
+                agg_gui::lcd_coverage::rasterize_text_gray_cached(&font, text, phys_size)
+            };
             let mut col = self.fill_color;
             col.a *= self.global_alpha as f32;
             let dst_x = x - cached.baseline_x_in_mask / ctm_scale;

@@ -465,7 +465,10 @@ mod tests {
         let groups: DemoMenuGroups = vec![
             (
                 "Widgets",
-                vec![("Button".into(), Rc::clone(&a)), ("Slider".into(), Rc::clone(&b))],
+                vec![
+                    ("Button".into(), Rc::clone(&a)),
+                    ("Slider".into(), Rc::clone(&b)),
+                ],
             ),
             ("Empty", vec![]), // skipped — no leaves
             ("Layout", vec![("Flex".into(), Rc::clone(&c))]),
@@ -515,7 +518,13 @@ mod tests {
 
     #[test]
     fn compose_menus_omits_demos_when_empty() {
-        let menus = compose_menus(false, ThemePreference::Dark, AccentColor::ALL[0], false, &[]);
+        let menus = compose_menus(
+            false,
+            ThemePreference::Dark,
+            AccentColor::ALL[0],
+            false,
+            &[],
+        );
         let labels: Vec<&str> = menus.iter().map(|m| m.label.as_str()).collect();
         assert_eq!(labels, vec!["View", "Help"]);
     }

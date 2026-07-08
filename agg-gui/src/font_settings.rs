@@ -320,7 +320,10 @@ mod tests {
         clear_lcd_enabled_override();
         set_device_scale(1.0);
         set_ux_scale(1.0);
-        assert!(lcd_enabled(), "standard DPI + no zoom should default to LCD on");
+        assert!(
+            lcd_enabled(),
+            "standard DPI + no zoom should default to LCD on"
+        );
         set_ux_scale(1.7);
         assert!(
             !lcd_enabled(),
@@ -336,7 +339,10 @@ mod tests {
         );
         // ...but at standard density the explicit override is honoured.
         set_ux_scale(1.0);
-        assert!(lcd_enabled(), "override LCD-on must apply at standard density");
+        assert!(
+            lcd_enabled(),
+            "override LCD-on must apply at standard density"
+        );
         // Restore sane state for sibling tests.
         clear_lcd_enabled_override();
         set_ux_scale(1.0);

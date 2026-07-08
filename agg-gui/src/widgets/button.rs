@@ -676,7 +676,9 @@ impl Widget for Button {
             let icon_block_w = self
                 .icon
                 .as_ref()
-                .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap())
+                .map(|i| {
+                    measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap()
+                })
                 .unwrap_or(0.0);
             ctx.set_font(font);
             ctx.set_font_size(self.font_size * crate::font_settings::current_font_size_scale());
@@ -715,8 +717,8 @@ impl Widget for Button {
                 .first()
                 .map(|c| c.bounds().x)
                 .unwrap_or_default();
-            let icon_block_w =
-                measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size) + self.icon_gap();
+            let icon_block_w = measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size)
+                + self.icon_gap();
             let group_x = (label_x - icon_block_w).max(0.0);
             Self::paint_icon(
                 ctx,

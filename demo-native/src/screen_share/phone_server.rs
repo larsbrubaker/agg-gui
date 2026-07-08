@@ -84,10 +84,10 @@ async fn handle(mut sock: TcpStream) -> std::io::Result<()> {
     loop {
         let mut request_line = String::new();
         match tokio::time::timeout(KEEP_ALIVE_IDLE, reader.read_line(&mut request_line)).await {
-            Ok(Ok(0)) => break,         // client closed
-            Ok(Ok(_)) => {}             // got a request line
+            Ok(Ok(0)) => break, // client closed
+            Ok(Ok(_)) => {}     // got a request line
             Ok(Err(e)) => return Err(e),
-            Err(_) => break,            // idle keep-alive timeout
+            Err(_) => break, // idle keep-alive timeout
         }
 
         let mut keep_alive = true; // HTTP/1.1 default
@@ -150,7 +150,11 @@ async fn handle(mut sock: TcpStream) -> std::io::Result<()> {
 /// Map a request path to a file under the demo web build directory. `/` serves
 /// `index.html`. Rejects path traversal.
 fn resolve_asset(path: &str) -> Option<(Vec<u8>, &'static str)> {
-    let rel = if path == "/" { "index.html" } else { path.trim_start_matches('/') };
+    let rel = if path == "/" {
+        "index.html"
+    } else {
+        path.trim_start_matches('/')
+    };
     if rel.is_empty() || rel.contains("..") || rel.contains('\\') {
         return None;
     }
@@ -379,7 +383,9 @@ mod tests {
 
         // Second request on the SAME socket; closes after.
         conn.get_mut()
-            .write_all(b"GET /assets/Nunito_Bold.ttf HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .write_all(
+                b"GET /assets/Nunito_Bold.ttf HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+            )
             .await
             .unwrap();
         let (status2, len2) = read_response(&mut conn).await;
@@ -419,7 +425,8 @@ mod tests {
                 break;
             }
             if let Some((n, v)) = line.split_once(':') {
-                if n.eq_ignore_ascii_case("content-encoding") && v.trim().eq_ignore_ascii_case("gzip")
+                if n.eq_ignore_ascii_case("content-encoding")
+                    && v.trim().eq_ignore_ascii_case("gzip")
                 {
                     gzipped = true;
                 } else if n.eq_ignore_ascii_case("content-length") {
@@ -429,7 +436,11 @@ mod tests {
         }
         assert!(gzipped, "expected gzip encoding");
         let raw = std::fs::read(demo_web_dir().join("assets/Nunito_Regular.ttf")).unwrap();
-        assert!(len < raw.len(), "compressed {len} should be < raw {}", raw.len());
+        assert!(
+            len < raw.len(),
+            "compressed {len} should be < raw {}",
+            raw.len()
+        );
 
         let mut body = vec![0u8; len];
         tokio::io::AsyncReadExt::read_exact(&mut conn, &mut body)
@@ -468,7 +479,9 @@ mod tests {
         let mut conn = tokio::io::BufReader::new(stream);
 
         conn.get_mut()
-            .write_all(b"GET /__diag/hello%20world HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n")
+            .write_all(
+                b"GET /__diag/hello%20world HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n",
+            )
             .await
             .unwrap();
         let (status, len) = read_response(&mut conn).await;
@@ -477,7 +490,9 @@ mod tests {
 
         // Connection still usable for a real asset afterwards.
         conn.get_mut()
-            .write_all(b"GET /assets/Nunito_Regular.ttf HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .write_all(
+                b"GET /assets/Nunito_Regular.ttf HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+            )
             .await
             .unwrap();
         let (status2, len2) = read_response(&mut conn).await;

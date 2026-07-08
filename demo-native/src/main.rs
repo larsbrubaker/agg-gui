@@ -270,10 +270,9 @@ fn main() {
     // Screen Share demo: bring up the LAN phone server + WebRTC bridge and
     // inject the live transport into the demo's screen-share seam. Held for the
     // process lifetime (the runtime owns the detached signaling tasks).
-    let wake: Arc<dyn Fn() + Send + Sync> =
-        Arc::new(move || {
-            let _ = wake_proxy.send_event(());
-        });
+    let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+        let _ = wake_proxy.send_event(());
+    });
     let _screen_share = screen_share::start(&screen_share_runtime, &handles.screen_share, wake);
 
     let show_inspector = Rc::clone(&handles.show_inspector);
@@ -723,7 +722,10 @@ mod tests {
             surface_acquire_action(&T::Outdated),
             SurfaceAcquire::Reconfigure
         );
-        assert_eq!(surface_acquire_action(&T::Lost), SurfaceAcquire::Reconfigure);
+        assert_eq!(
+            surface_acquire_action(&T::Lost),
+            SurfaceAcquire::Reconfigure
+        );
     }
 
     #[test]

@@ -67,7 +67,8 @@ fn paint_and_count_ink(bar: &mut MenuBar, physical_w: f64, effective: f64) -> u6
     };
     let mut ink = 0u64;
     for c in px.chunks_exact(4) {
-        let d = (c[0] as i32 - bg.0).abs() + (c[1] as i32 - bg.1).abs() + (c[2] as i32 - bg.2).abs();
+        let d =
+            (c[0] as i32 - bg.0).abs() + (c[1] as i32 - bg.1).abs() + (c[2] as i32 - bg.2).abs();
         if d > 80 {
             ink += 1;
         }
@@ -97,7 +98,10 @@ fn menu_bar_text_rerasters_when_effective_scale_changes() {
     crate::font_settings::clear_lcd_enabled_override();
     crate::device_scale::set_device_scale(1.0);
 
-    assert!(ink_1x > 0, "baseline frame must render menu-bar text (got {ink_1x})");
+    assert!(
+        ink_1x > 0,
+        "baseline frame must render menu-bar text (got {ink_1x})"
+    );
     // Doubling the effective scale doubles each glyph in both axes ⇒ ~4× ink.
     // A stale backbuffer (the bug) leaves ink_2x ≈ ink_1x.  Require a clear
     // scale signal so the test fails loudly if the text stops scaling.

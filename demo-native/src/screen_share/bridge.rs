@@ -22,8 +22,8 @@ use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
@@ -192,7 +192,8 @@ async fn handle_envelope(
                 build_peer_connection(src.clone(), connection_id.clone(), out.clone(), channels)
                     .await?;
 
-            let offer = RTCSessionDescription::offer(sdp).map_err(|e| format!("offer parse: {e}"))?;
+            let offer =
+                RTCSessionDescription::offer(sdp).map_err(|e| format!("offer parse: {e}"))?;
             pc.set_remote_description(offer)
                 .await
                 .map_err(|e| format!("set_remote: {e}"))?;
@@ -343,7 +344,10 @@ async fn build_peer_connection(
     pc.on_data_channel(Box::new(move |dc| {
         let channels = channels_for_dc.clone();
         Box::pin(async move {
-            eprintln!("screen-share signaling: data channel opening ({})", dc.label());
+            eprintln!(
+                "screen-share signaling: data channel opening ({})",
+                dc.label()
+            );
 
             let on_open = channels.clone();
             let dc_for_open = dc.clone();
@@ -361,8 +365,10 @@ async fn build_peer_connection(
                         eprintln!("screen-share signaling: initial stream command failed: {err}");
                     }
                     (channels.wake)();
-                    eprintln!("screen-share signaling: data channel open (stream {})",
-                        if on { "on" } else { "off" });
+                    eprintln!(
+                        "screen-share signaling: data channel open (stream {})",
+                        if on { "on" } else { "off" }
+                    );
                 })
             }));
 

@@ -39,9 +39,7 @@ pub fn screen_share_demo(font: Arc<Font>, handles: ScreenShareHandles) -> Box<dy
     let image_gated = Conditional::new(Rc::clone(&img_visible), Box::new(image));
 
     // QR and live view overlay the same area; only one is visible at a time.
-    let stage = Stack::new()
-        .add(Box::new(qr))
-        .add(Box::new(image_gated));
+    let stage = Stack::new().add(Box::new(qr)).add(Box::new(image_gated));
 
     // Stream On/Off — a segmented control the desktop owns. The transport's
     // streaming flag is the single source of truth: the buttons read it for
@@ -53,7 +51,10 @@ pub fn screen_share_demo(font: Arc<Font>, handles: ScreenShareHandles) -> Box<dy
     let inner = FlexColumn::new()
         .with_gap(8.0)
         .with_padding(12.0)
-        .add(Box::new(StatusText::new(Arc::clone(&font), Rc::clone(&status))))
+        .add(Box::new(StatusText::new(
+            Arc::clone(&font),
+            Rc::clone(&status),
+        )))
         .add(Box::new(stream_row))
         .add_flex(Box::new(stage), 1.0);
 

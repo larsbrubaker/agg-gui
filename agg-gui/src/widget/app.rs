@@ -269,7 +269,16 @@ impl App {
     /// e.g. a text field's cursor blink wakes the loop exactly at the flip
     /// boundary.  Invisible subtrees contribute nothing.
     pub fn next_draw_deadline(&self) -> Option<web_time::Instant> {
-        self.root.next_draw_deadline()
+        // Two schedule channels feed the host's WaitUntil: per-widget
+        // deadlines (cursor blink) from the tree walk, and the global
+        // `animation::request_draw_after` thread-local (read-and-clear;
+        // callers re-arm each frame). Serve the earliest.
+        let widget = self.root.next_draw_deadline();
+        let scheduled = crate::animation::take_next_draw_deadline();
+        match (widget, scheduled) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (deadline, None) | (None, deadline) => deadline,
+        }
     }
 
     // --- Platform event ingestion ---

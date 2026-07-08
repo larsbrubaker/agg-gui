@@ -22,17 +22,17 @@ pub mod modal_sheet;
 pub mod on_screen_keyboard;
 pub mod performance;
 pub mod primitives;
-pub mod reserve_inset;
-pub mod spacers;
 pub mod progress_bar;
-pub mod qr_view;
 pub mod property_row;
+pub mod qr_view;
 pub mod radio_group;
 pub mod rebuilder;
+pub mod reserve_inset;
 pub mod resize;
 pub mod scroll_view;
 pub(crate) mod scrollbar;
 pub mod slider;
+pub mod spacers;
 pub mod splitter;
 pub mod tab_view;
 pub mod table;
@@ -62,31 +62,31 @@ pub use image_view::ImageView;
 pub use inspector::{InspectorPanel, InspectorSavedState};
 pub use label::{Label, LabelAlign};
 pub use markdown::MarkdownView;
-pub use modal_sheet::ModalSheet;
 pub use menu::{
     MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
     PopupMenu, ShortcutKey, TopMenu,
 };
+pub use modal_sheet::ModalSheet;
 pub use performance::{
     paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView, RunMode,
     RunModeDesc, RunModeRow, SharedFrameHistory,
 };
 pub use primitives::{Padding, SizedBox, Stack};
-pub use reserve_inset::{ReserveInset, ReservedEdge};
-pub use spacers::{Separator, Spacer};
 pub use progress_bar::ProgressBar;
-pub use qr_view::QrView;
 pub use property_row::{
     paint_editor_only, paint_row, EditorKind, NodeFieldAttrs, NumberAttrs, RowValue, VisibleWhen,
 };
+pub use qr_view::QrView;
 pub use radio_group::RadioGroup;
 pub use rebuilder::Rebuilder;
+pub use reserve_inset::{ReserveInset, ReservedEdge};
 pub use resize::Resize;
 pub use scroll_view::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
     ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
 };
 pub use slider::Slider;
+pub use spacers::{Separator, Spacer};
 pub use splitter::Splitter;
 pub use tab_view::TabView;
 pub use table::{
