@@ -18,8 +18,20 @@ fn test_font() -> Arc<Font> {
     Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
 }
 
+/// Pin the globals the bar geometry now consults to their desktop
+/// baseline (process-wide input profile, thread-local touch latch,
+/// `ux_scale`) so cross-test contamination can't grow the bar to touch
+/// dimensions mid-assertion.
+fn reset_env() {
+    crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
+    crate::touch_state::clear_last_touch_event_for_testing();
+    crate::ux_scale::set_ux_scale(1.0);
+}
+
 #[test]
 fn moving_across_top_menus_switches_open_popup() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let mut bar = MenuBar::new(
         test_font(),
         vec![
@@ -55,6 +67,8 @@ fn moving_across_top_menus_switches_open_popup() {
 
 #[test]
 fn top_level_menu_tracks_hover() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let mut bar = MenuBar::new(
         test_font(),
         vec![TopMenu::new(
@@ -83,7 +97,8 @@ fn hover_change_advances_invalidation_epoch() {
     // stale bitmap and hover never appears.  The bug previously
     // appeared as: hover only briefly visible when something else
     // (e.g. a resize-edge highlight) happened to dirty the Window.
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let mut bar = MenuBar::new(
         test_font(),
         vec![TopMenu::new(
@@ -122,6 +137,8 @@ fn hover_change_advances_invalidation_epoch() {
 
 #[test]
 fn mouse_down_drag_release_activates_popup_item() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let actions = Rc::new(RefCell::new(Vec::new()));
@@ -166,6 +183,8 @@ fn mouse_down_drag_release_activates_popup_item() {
 
 #[test]
 fn simple_mouse_click_opens_menu_without_release_activation() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -204,7 +223,8 @@ fn simple_mouse_click_opens_menu_without_release_activation() {
 /// also the natural way to dismiss a popup without a row tap.
 #[test]
 fn click_on_currently_open_top_menu_closes_popup() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -257,6 +277,8 @@ fn click_on_currently_open_top_menu_closes_popup() {
 /// outside the popup body and close the popup).
 #[test]
 fn mobile_tap_sequence_keeps_other_top_menu_open() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -330,6 +352,8 @@ fn mobile_tap_sequence_keeps_other_top_menu_open() {
 /// the user has to tap twice to switch menus on mobile.
 #[test]
 fn tap_on_other_top_menu_switches_open_popup() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -379,6 +403,8 @@ fn tap_on_other_top_menu_switches_open_popup() {
 
 #[test]
 fn unconsumed_shortcut_fires_top_menu_action() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let actions = Rc::new(RefCell::new(Vec::new()));
     let actions_for_cb = Rc::clone(&actions);
     let mut bar = MenuBar::new(
@@ -408,6 +434,8 @@ fn unconsumed_shortcut_fires_top_menu_action() {
 
 #[test]
 fn arrow_keys_switch_open_top_menus() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let mut bar = MenuBar::new(
         test_font(),
         vec![
@@ -436,4 +464,48 @@ fn arrow_keys_switch_open_top_menus() {
         EventResult::Consumed
     );
     assert_eq!(bar.open_index, Some(0));
+}
+
+/// On touch the horizontal bar must grow to the 44px minimum, and the
+/// button hit-rect must grow WITH it — a press at y=40 (inside the 44px
+/// bar but above the old 26px one) must open the menu, proving hit-testing
+/// consults the same grown rect the bar paints.
+#[test]
+fn touch_bar_grows_to_44_and_hit_rect_follows() {
+    use super::super::geometry::TOUCH_MIN;
+
+    let _guard = crate::input_profile::profile_test_lock();
+    // Activate touch sizing via the thread-local latch with the profile
+    // left desktop (deterministic + isolated).
+    crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
+    crate::touch_state::clear_last_touch_event_for_testing();
+    crate::ux_scale::set_ux_scale(1.0);
+    crate::touch_state::note_touch_event();
+
+    let viewport = Size::new(300.0, 180.0);
+    crate::widget::set_current_viewport(viewport);
+    let mut bar = MenuBar::new(
+        test_font(),
+        vec![TopMenu::new(
+            "File",
+            vec![MenuItem::action("New", "file.new").into()],
+        )],
+        |_| {},
+    );
+    let used = bar.layout(viewport);
+    assert_eq!(used.height, TOUCH_MIN, "touch bar must be 44 tall");
+
+    // y = 40 is inside the 44px bar but above the desktop 26px bar.
+    bar.on_event(&Event::MouseDown {
+        pos: Point::new(8.0, 40.0),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    assert!(
+        bar.popup.is_open(),
+        "a press inside the grown bar must open the menu (hit-rect grew with paint)"
+    );
+
+    crate::touch_state::clear_last_touch_event_for_testing();
+    crate::ux_scale::set_ux_scale(1.0);
 }

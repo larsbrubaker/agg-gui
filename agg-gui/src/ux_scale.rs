@@ -69,6 +69,16 @@ pub fn effective_scale() -> f64 {
     crate::device_scale() * ux_scale()
 }
 
+/// Test-only: set the UX scale WITHOUT the positivity debug-assert that
+/// [`set_ux_scale`] enforces. Lets tests exercise how downstream code
+/// (e.g. [`crate::widgets::menu::effective_metrics`]) copes with the
+/// degenerate `0.0` a release-mode shell could leave behind — the assert
+/// would otherwise abort the test before the clamp under test could run.
+#[cfg(test)]
+pub(crate) fn set_ux_scale_raw_for_test(scale: f64) {
+    UX_SCALE.with(|s| s.set(scale));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

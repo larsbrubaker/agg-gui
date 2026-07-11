@@ -36,8 +36,40 @@ fn set_mobile_profile_for_test() {
     set_input_profile(InputProfile::MobileIOS);
 }
 
+/// RAII guard held for the full body of every keyboard test.
+///
+/// It does two things:
+/// 1. Serializes against every other test that reads OR writes the
+///    process-global input profile (the menu geometry / widget / strip
+///    tests) via the shared [`crate::input_profile::profile_test_lock`],
+///    so cargo's parallel threads can't interleave a mobile-profile
+///    write with a menu test's desktop read.
+/// 2. Restores [`InputProfile::Desktop`] on drop — including on a panic
+///    (a failed assertion unwinding mid-test) — so a
+///    [`set_mobile_profile_for_test`] call can never leak `MobileIOS`
+///    into the atomic that a sibling test observes.
+struct ProfileGuard {
+    #[allow(dead_code)]
+    lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl ProfileGuard {
+    fn new() -> Self {
+        Self {
+            lock: crate::input_profile::profile_test_lock(),
+        }
+    }
+}
+
+impl Drop for ProfileGuard {
+    fn drop(&mut self) {
+        set_input_profile(InputProfile::Desktop);
+    }
+}
+
 #[test]
 fn keyboard_disabled_by_default() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     assert!(
         !is_enabled(),
@@ -48,6 +80,7 @@ fn keyboard_disabled_by_default() {
 
 #[test]
 fn enabling_keyboard_does_not_make_it_visible_alone() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     assert!(is_enabled());
@@ -57,6 +90,7 @@ fn enabling_keyboard_does_not_make_it_visible_alone() {
 
 #[test]
 fn focusing_text_input_raises_keyboard() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some(""), KeyboardInputMode::Text);
@@ -75,6 +109,7 @@ fn focusing_text_input_raises_keyboard() {
 
 #[test]
 fn auto_cap_on_empty_field() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some(""), KeyboardInputMode::Text);
@@ -89,6 +124,7 @@ fn auto_cap_on_empty_field() {
 
 #[test]
 fn auto_cap_after_sentence_terminator() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some("Hello world."), KeyboardInputMode::Text);
@@ -103,6 +139,7 @@ fn auto_cap_after_sentence_terminator() {
 
 #[test]
 fn double_tap_shift_engages_caps_lock() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some("hello"), KeyboardInputMode::Text);
@@ -125,6 +162,7 @@ fn double_tap_shift_engages_caps_lock() {
 
 #[test]
 fn single_shift_tap_does_not_engage_caps_lock() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some("hello"), KeyboardInputMode::Text);
@@ -134,6 +172,7 @@ fn single_shift_tap_does_not_engage_caps_lock() {
 
 #[test]
 fn no_auto_cap_mid_sentence() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some("Hello world"), KeyboardInputMode::Text);
@@ -148,6 +187,7 @@ fn no_auto_cap_mid_sentence() {
 
 #[test]
 fn dismiss_lowers_keyboard() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     test_hook::force_visible();
@@ -168,6 +208,7 @@ fn dismiss_lowers_keyboard() {
 /// stuck because focus never changed.
 #[test]
 fn dismiss_clears_text_field_focus_and_drops_lift() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_mobile_profile_for_test();
     set_enabled(true);
@@ -217,6 +258,7 @@ fn dismiss_clears_text_field_focus_and_drops_lift() {
 
 #[test]
 fn pointer_outside_panel_falls_through() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     test_hook::force_visible();
@@ -244,6 +286,7 @@ fn numeric_mode_opens_on_numbers_layer() {
     // letter / sentence-start path entirely and slide the keyboard
     // up directly on the digit pad — the iOS / Android `numberPad`
     // convention.
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some(""), KeyboardInputMode::Numeric);
@@ -262,6 +305,7 @@ fn numeric_mode_clears_residual_caps_lock() {
     // Numeric field must wipe that state so the user doesn't see the
     // shift glyph lit while typing digits.  Re-focusing the original
     // Text field would then start a fresh shift state machine.
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_enabled(true);
     set_text_input_focused(true, Some(""), KeyboardInputMode::Text);
@@ -285,6 +329,7 @@ fn focusing_field_below_keyboard_scrolls_parent_view() {
     // spacer pushed FIRST and the field SECOND, the field lands near
     // the bottom of the content).  Without auto-scroll the field
     // would sit at screen Y ~ 0 — behind the keyboard panel.
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_mobile_profile_for_test();
     set_enabled(true);
@@ -332,6 +377,7 @@ fn focusing_field_with_no_scrollable_ancestor_requests_global_lift() {
     // App-level "global lift" so the focused field still clears
     // the keyboard panel.  Reproduce here with a TextField placed
     // near viewport bottom inside a non-scrollable column.
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_mobile_profile_for_test();
     set_enabled(true);
@@ -371,6 +417,7 @@ fn focusing_already_visible_field_does_not_scroll() {
     // keyboard panel, auto-scroll must do nothing — surprising the
     // user with a jump-scroll on a casual focus change would feel
     // worse than the keyboard issue we're solving.
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_mobile_profile_for_test();
     set_enabled(true);
@@ -405,6 +452,7 @@ fn text_field_with_keyboard_mode_propagates_through_focus() {
     // should drive the keyboard to the Numbers layer when it gains
     // focus through the normal App focus flow — proving the
     // `Widget::text_input_mode` plumbing reaches the keyboard.
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_mobile_profile_for_test();
     set_enabled(true);
@@ -428,6 +476,7 @@ fn text_field_with_keyboard_mode_propagates_through_focus() {
 
 #[test]
 fn synthetic_key_queue_drains_to_focused_field() {
+    let _guard = ProfileGuard::new();
     fresh_state();
     set_mobile_profile_for_test();
     set_enabled(true);

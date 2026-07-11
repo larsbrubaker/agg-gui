@@ -288,6 +288,17 @@ thread_local! {
     /// of milliseconds as touch-synthesised.
     static LAST_TOUCH_EVENT_AT: std::cell::Cell<Option<web_time::Instant>> =
         const { std::cell::Cell::new(None) };
+    /// Sticky "a real touch has happened this session" latch.  Unlike
+    /// [`LAST_TOUCH_EVENT_AT`] (which ages out and only distinguishes
+    /// touch-synthesised mouse events from desktop clicks), this NEVER
+    /// clears on its own: once any touch lifecycle event fires, the
+    /// process is treated as touch-driven for UI *sizing* policy (see
+    /// [`crate::input_profile::touch_ui_active`]).  Latching, rather than
+    /// aging out, means a menu that grew to a finger-friendly size the
+    /// instant the user first touched the screen doesn't shrink back to
+    /// desktop dimensions a few frames later.  Cleared only by the test
+    /// hook [`clear_last_touch_event_for_testing`].
+    static TOUCH_SEEN_THIS_SESSION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Publish this frame's multi-touch aggregate.  Called by
@@ -307,6 +318,17 @@ pub fn current_multi_touch() -> Option<MultiTouchInfo> {
 /// `App::on_touch_start/move/end/cancel`.
 pub(crate) fn note_touch_event() {
     LAST_TOUCH_EVENT_AT.with(|c| c.set(Some(web_time::Instant::now())));
+    TOUCH_SEEN_THIS_SESSION.with(|c| c.set(true));
+}
+
+/// Whether any real touch lifecycle event has fired this session.  Sticky
+/// once set (it does not age out), so it can serve as the runtime-fallback
+/// half of the menu sizing-policy signal in
+/// [`crate::input_profile::touch_ui_active`]: a phone whose shell forgot to
+/// call `set_input_profile` still grows its menus to finger size the moment
+/// the user first touches the screen.
+pub fn touch_seen_this_session() -> bool {
+    TOUCH_SEEN_THIS_SESSION.with(|c| c.get())
 }
 
 /// Time elapsed since the most recent touch lifecycle event, or
@@ -326,4 +348,5 @@ pub fn last_touch_event_age() -> Option<std::time::Duration> {
 #[doc(hidden)]
 pub fn clear_last_touch_event_for_testing() {
     LAST_TOUCH_EVENT_AT.with(|c| c.set(None));
+    TOUCH_SEEN_THIS_SESSION.with(|c| c.set(false));
 }

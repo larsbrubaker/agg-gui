@@ -98,6 +98,30 @@ pub fn is_mobile_touch() -> bool {
     current_input_profile().is_mobile_touch()
 }
 
+/// The signal the UI **sizing policy** consults to decide whether
+/// interactive targets must meet the touch minimum (see
+/// [`crate::widgets::menu::effective_metrics`]).
+///
+/// True when EITHER:
+/// - the platform declared a mobile-touch profile ([`is_mobile_touch`]) —
+///   the app called [`set_input_profile`] with a mobile variant, so we know
+///   up front the user is on a phone/tablet; OR
+/// - a real touch event has fired this session
+///   ([`crate::touch_state::touch_seen_this_session`]) — a runtime fallback
+///   for shells that *forgot* to call [`set_input_profile`] /
+///   [`crate::ux_scale::set_ux_scale`] (which has happened in real apps).
+///   Without it, such a phone would ship desktop-sized (26 CSS-px) menus;
+///   with it, the first touch flips the latch and the menus can never stay
+///   accidentally tiny.
+///
+/// Deliberately distinct from [`is_mobile_touch`]: that one drives the
+/// on-screen keyboard and other "no physical keyboard" features, which must
+/// NOT turn on just because a touchscreen laptop was tapped once.  Sizing
+/// minimums are safe to raise on any touch input, so this signal is broader.
+pub fn touch_ui_active() -> bool {
+    is_mobile_touch() || crate::touch_state::touch_seen_this_session()
+}
+
 /// Parse a coarse browser identifier ("iPhone", "iPad", "Android", …)
 /// into an [`InputProfile`]. Defaults to [`InputProfile::Desktop`] so a
 /// non-matching string (any desktop UA) keeps mobile features disabled.
@@ -140,6 +164,27 @@ fn profile_from_code(c: u8) -> InputProfile {
         3 => InputProfile::MobileOther,
         _ => InputProfile::Desktop,
     }
+}
+
+/// Serialization lock shared by every test that reads OR writes the
+/// process-global input profile [`CURRENT`].
+///
+/// The profile is a process-wide atomic, so under cargo's parallel test
+/// threads one test's `set_input_profile(Desktop)` can be clobbered by a
+/// sibling test's `set_input_profile(MobileIOS)` before the first test
+/// reads it back — a cross-thread flake window. Tests that touch the
+/// profile (menu geometry / widget / strip metric tests, the on-screen
+/// keyboard tests, and this module's own tests) hold this guard for their
+/// full body so at most one runs at a time.
+///
+/// Poison-proof: a panicking test (a failed assertion unwinding while
+/// holding the guard) still leaves the lock usable, so one real failure
+/// can't cascade into spurious `PoisonError` panics across every other
+/// profile test.
+#[cfg(test)]
+pub(crate) fn profile_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -186,5 +231,40 @@ mod tests {
         assert!(InputProfile::MobileIOS.is_mobile_touch());
         assert!(InputProfile::MobileAndroid.is_mobile_touch());
         assert!(InputProfile::MobileOther.is_mobile_touch());
+    }
+
+    #[test]
+    fn touch_ui_active_latches_on_a_real_touch_even_on_desktop_profile() {
+        let _guard = profile_test_lock();
+        // The runtime fallback: a shell that never called `set_input_profile`
+        // stays on the Desktop profile, yet the first real touch must flip
+        // the sizing signal so menus can't stay accidentally tiny.
+        set_input_profile(InputProfile::Desktop);
+        crate::touch_state::clear_last_touch_event_for_testing();
+        assert!(
+            !touch_ui_active(),
+            "desktop profile with no touch yet must not force touch sizing"
+        );
+
+        crate::touch_state::note_touch_event();
+        assert!(
+            touch_ui_active(),
+            "a real touch event must activate touch sizing regardless of profile"
+        );
+
+        // Restore for sibling tests (profile is a process-global atomic).
+        crate::touch_state::clear_last_touch_event_for_testing();
+    }
+
+    #[test]
+    fn touch_ui_active_follows_mobile_profile_without_any_touch() {
+        let _guard = profile_test_lock();
+        // The declared-profile half: an app that DID call `set_input_profile`
+        // gets touch sizing immediately, before any touch has occurred.
+        crate::touch_state::clear_last_touch_event_for_testing();
+        set_input_profile(InputProfile::MobileIOS);
+        assert!(touch_ui_active());
+        set_input_profile(InputProfile::Desktop);
+        assert!(!touch_ui_active());
     }
 }

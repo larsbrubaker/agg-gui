@@ -10,12 +10,15 @@ pub mod state;
 pub mod strip;
 pub mod widget;
 
-pub use geometry::{BAR_H as MENU_BAR_H, MENU_W, ROW_H};
+pub use geometry::{
+    effective_metrics, menu_bar_height, menu_vertical_row_height, MenuMetrics, BAR_H as MENU_BAR_H,
+    MENU_W, ROW_H, TOUCH_MIN, VERTICAL_ROW_H,
+};
 pub use model::{MenuEntry, MenuItem, MenuSelection, MenuShortcut, ShortcutKey};
 pub use paint::MenuStyle;
 pub use state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 pub use strip::MenuBarStrip;
-pub use widget::{MenuBar, MenuOrientation, PopupMenu, TopMenu, VERTICAL_ROW_H};
+pub use widget::{MenuBar, MenuOrientation, PopupMenu, TopMenu};
 
 #[cfg(test)]
 mod tests {
@@ -26,6 +29,19 @@ mod tests {
     use super::paint::submenu_chevron_points;
     use super::*;
     use crate::geometry::Rect;
+    use crate::input_profile::{set_input_profile, InputProfile};
+
+    /// Pin every global the menu geometry now depends on to its desktop
+    /// baseline.  The input profile is a process-wide atomic that OTHER
+    /// test files (e.g. `tests/on_screen_keyboard`) set to a mobile
+    /// variant, the touch latch is a thread-local that a sibling touch
+    /// test can leave set, and `ux_scale` is thread-local; without this
+    /// reset a desktop geometry assertion could observe a grown menu.
+    fn reset_env() {
+        set_input_profile(InputProfile::Desktop);
+        crate::touch_state::clear_last_touch_event_for_testing();
+        crate::ux_scale::set_ux_scale(1.0);
+    }
 
     fn test_items() -> Vec<MenuEntry> {
         vec![
@@ -48,6 +64,8 @@ mod tests {
 
     #[test]
     fn popup_clamps_to_viewport() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let items = test_items();
         let layouts = stack_layout(
             &items,
@@ -65,6 +83,8 @@ mod tests {
 
     #[test]
     fn menu_bar_popups_can_open_below_the_bar() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let items = test_items();
         let layouts = stack_layout(
             &items,
@@ -81,6 +101,8 @@ mod tests {
 
     #[test]
     fn hover_opens_submenu_and_hit_tests_nested_rows() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
@@ -108,6 +130,8 @@ mod tests {
 
     #[test]
     fn action_click_consumes_and_suppresses_followup_mouse_up() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let mut items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
@@ -129,6 +153,8 @@ mod tests {
 
     #[test]
     fn keep_open_check_and_radio_actions_do_not_close() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let mut items = vec![
             MenuItem::action("Check", "check")
                 .checked(false)
@@ -190,6 +216,8 @@ mod tests {
 
     #[test]
     fn disabled_rows_do_not_fire_actions() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let mut items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
@@ -211,6 +239,7 @@ mod tests {
 
     #[test]
     fn touch_synth_move_does_not_open_submenu() {
+        let _guard = crate::input_profile::profile_test_lock();
         // Root cause of "tapping a submenu parent activates its first child on
         // mobile": a touch tap synthesises a MouseMove at the tap point before
         // the MouseDown.  `update_hover` used to OPEN the submenu (`open_path`)
@@ -219,15 +248,16 @@ mod tests {
         // its parent — landed on (and activated) the first child.  On touch,
         // submenus must open only on the explicit tap in `handle_left_down`,
         // never on the synth move.
+        reset_env();
         let items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 200.0), MenuAnchorKind::Context);
         let viewport = Size::new(400.0, 300.0);
-        // Row 3 is the "More" submenu parent in `test_items`.
-        let more_row = state.layouts(&items, viewport)[0].rows[3].rect;
 
-        crate::touch_state::clear_last_touch_event_for_testing();
         crate::touch_state::note_touch_event();
+        // Row 3 is the "More" submenu parent in `test_items`.  Sample it AFTER
+        // the touch latch is set so the row matches the touch-active geometry.
+        let more_row = state.layouts(&items, viewport)[0].rows[3].rect;
 
         state.update_hover(
             &items,
@@ -245,16 +275,22 @@ mod tests {
 
     #[test]
     fn touch_tap_on_submenu_parent_opens_it_without_activating_child() {
+        let _guard = crate::input_profile::profile_test_lock();
         // End-to-end symptom: on a NARROW viewport the "More" submenu clamps
         // back over its parent, so the first child lands under the finger.  A
         // touch tap (synth MouseMove → MouseDown at the same point) on the
         // submenu parent must OPEN the submenu and must NOT activate a child.
+        reset_env();
         let mut items = test_items();
         let mut state = PopupMenuState::default();
-        // Narrow enough that the submenu (MENU_W = 224) can't sit beside the
-        // parent and gets clamped over it.
+        // Narrow enough that the submenu can't sit beside the parent and gets
+        // clamped over it.
         let viewport = Size::new(300.0, 320.0);
         state.open_at(Point::new(20.0, 250.0), MenuAnchorKind::Context);
+
+        crate::touch_state::note_touch_event();
+        // Sample the parent row AFTER the touch latch is set so `more_row`
+        // reflects the grown touch geometry the handlers will hit-test against.
         let more_row = state.layouts(&items, viewport)[0].rows[3].rect;
         // Tap toward the right of the parent row, where the clamped submenu's
         // first child overlaps.
@@ -262,9 +298,6 @@ mod tests {
             more_row.x + more_row.width - 20.0,
             more_row.y + more_row.height * 0.5,
         );
-
-        crate::touch_state::clear_last_touch_event_for_testing();
-        crate::touch_state::note_touch_event();
 
         // Synth MouseMove (touchstart), then MouseDown at the same point.
         state.handle_event(&mut items, &Event::MouseMove { pos: tap }, viewport);
@@ -293,6 +326,8 @@ mod tests {
 
     #[test]
     fn disabled_rows_do_not_become_hovered() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
@@ -309,12 +344,14 @@ mod tests {
 
     #[test]
     fn touch_synthesized_move_does_not_set_popup_hover() {
+        let _guard = crate::input_profile::profile_test_lock();
         // Regression: a touch tap synthesises a MouseMove at the tap point
         // before the MouseDown.  Without suppression, that move would set
         // `hover_path` and the post-tap state would still paint a hover
         // panel on the just-tapped row even though the menu has closed.
         // After the fix, an enabled-row MouseMove inside the touch-synth
         // window must leave `hover_path` as `None`.
+        reset_env();
         let items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
@@ -343,8 +380,10 @@ mod tests {
 
     #[test]
     fn desktop_move_still_sets_popup_hover() {
+        let _guard = crate::input_profile::profile_test_lock();
         // Mirror test: outside the touch-synth window the same MouseMove
         // SHOULD set hover so desktop users see the subtle hover panel.
+        reset_env();
         let items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
@@ -363,6 +402,8 @@ mod tests {
 
     #[test]
     fn outside_click_dismisses_menu() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let mut items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
@@ -381,6 +422,8 @@ mod tests {
 
     #[test]
     fn keyboard_navigation_activates_hovered_row() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
         let mut items = test_items();
         let mut state = PopupMenuState::default();
         state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);

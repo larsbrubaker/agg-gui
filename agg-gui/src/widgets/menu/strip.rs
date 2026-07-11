@@ -248,6 +248,46 @@ mod tests {
         assert_eq!(used.width, 800.0, "strip must span full available width");
     }
 
+    /// The strip sizes to its child's natural height, so when a wrapped
+    /// `MenuBar` grows its bar to the touch minimum the strip's reserved
+    /// chrome height must grow with it — no hard-coded 26 left behind.
+    #[test]
+    fn strip_reports_grown_bar_height_on_touch() {
+        use super::super::geometry::{BAR_H, TOUCH_MIN};
+        use super::super::widget::{MenuBar, TopMenu};
+        use crate::input_profile::{set_input_profile, InputProfile};
+        use crate::text::Font;
+        use std::sync::Arc;
+
+        const FONT_BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+
+        let _guard = crate::input_profile::profile_test_lock();
+        set_input_profile(InputProfile::Desktop);
+        crate::touch_state::clear_last_touch_event_for_testing();
+        crate::ux_scale::set_ux_scale(1.0);
+
+        let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
+        let bar = MenuBar::new(font, vec![TopMenu::new("File", vec![])], |_| {});
+        let mut strip = MenuBarStrip::new(Box::new(bar));
+
+        let desktop = strip.layout(Size::new(800.0, 200.0));
+        assert_eq!(
+            desktop.height, BAR_H,
+            "desktop strip is the bare bar height"
+        );
+
+        // First real touch flips the sizing latch; the next layout must
+        // grow the reserved height to the 44px touch minimum.
+        crate::touch_state::note_touch_event();
+        let touch = strip.layout(Size::new(800.0, 200.0));
+        assert_eq!(
+            touch.height, TOUCH_MIN,
+            "strip must grow with the touch bar"
+        );
+
+        crate::touch_state::clear_last_touch_event_for_testing();
+    }
+
     #[test]
     fn strip_overflow_scroll_kicks_in_when_child_wider_than_available() {
         let child = FixedHeightChild {

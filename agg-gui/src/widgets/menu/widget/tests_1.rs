@@ -16,6 +16,17 @@ fn test_font() -> Arc<Font> {
     Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
 }
 
+/// Pin the globals the bar geometry now consults to their desktop
+/// baseline: the process-wide input profile (another test file sets it
+/// mobile), the thread-local touch latch, and `ux_scale`.  Every test
+/// starts from a known desktop state so bar-button widths / heights don't
+/// silently grow to touch dimensions under cross-test contamination.
+fn reset_env() {
+    crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
+    crate::touch_state::clear_last_touch_event_for_testing();
+    crate::ux_scale::set_ux_scale(1.0);
+}
+
 /// Desktop drag-and-release in neutral space cancels the popup —
 /// the user opened a menu, dragged off the menu bar / popup body,
 /// and released somewhere unrelated.  Without this, dragging out
@@ -23,7 +34,8 @@ fn test_font() -> Arc<Font> {
 /// from the same gesture.
 #[test]
 fn desktop_drag_release_in_neutral_space_closes_popup() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -67,7 +79,8 @@ fn desktop_drag_release_in_neutral_space_closes_popup() {
 /// run; popup.handle_event sees an outside-click and closes.
 #[test]
 fn mobile_backdrop_tap_dismisses_popup() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -124,7 +137,8 @@ fn mobile_backdrop_tap_dismisses_popup() {
 /// that other menu.  Standard desktop menubar behaviour.
 #[test]
 fn hover_after_release_switches_open_top_menu_on_desktop() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -167,7 +181,8 @@ fn hover_after_release_switches_open_top_menu_on_desktop() {
 /// Spec row 3.
 #[test]
 fn desktop_drag_and_release_on_sibling_keeps_new_menu_open() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -205,7 +220,8 @@ fn desktop_drag_and_release_on_sibling_keeps_new_menu_open() {
 /// space: closes.  Spec row 4.
 #[test]
 fn desktop_drag_switch_then_release_off_closes() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -242,7 +258,8 @@ fn desktop_drag_switch_then_release_off_closes() {
 /// B opens (switch), neutral closes.  Spec row 5.
 #[test]
 fn desktop_press_press_press_neutral_closes_active_menu() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -278,7 +295,8 @@ fn desktop_press_press_press_neutral_closes_active_menu() {
 /// Spec row 2 of Mobile.
 #[test]
 fn mobile_tap_currently_open_top_menu_closes() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -333,7 +351,8 @@ fn mobile_tap_currently_open_top_menu_closes() {
 /// item (or off the bar).
 #[test]
 fn click_close_suppresses_hover_until_cursor_leaves() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(
@@ -389,7 +408,8 @@ fn click_close_suppresses_hover_until_cursor_leaves() {
 /// silently break it.
 #[test]
 fn escape_closes_active_menu() {
-    crate::touch_state::clear_last_touch_event_for_testing();
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
     let viewport = Size::new(300.0, 180.0);
     crate::widget::set_current_viewport(viewport);
     let mut bar = MenuBar::new(

@@ -12,17 +12,15 @@ use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
 use crate::widget::{current_viewport, BackbufferCache, Widget};
 
-use super::geometry::{contains, item_at_path, BAR_H};
-use super::model::{MenuEntry, MenuSelection};
-use super::paint::{
-    bar_button_text_color, paint_check_mark, paint_item_row_bg, paint_menu_bar_button_bg,
-    paint_panel, paint_separator, paint_submenu_chevron, MenuStyle,
-};
+use super::geometry::{contains, effective_metrics, item_at_path, DEFAULT_FONT_SIZE};
+use super::model::MenuEntry;
+use super::paint::{bar_button_text_color, paint_menu_bar_button_bg, paint_panel, MenuStyle};
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 
 use labels::{BarLabels, PopupLabels};
 
 mod labels;
+mod popup_paint;
 
 /// Layout direction for `MenuBar`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,8 +29,6 @@ pub enum MenuOrientation {
     HorizontalBottom,
     Vertical,
 }
-
-pub const VERTICAL_ROW_H: f64 = 36.0;
 
 /// Mouse events synthesised from a touch tap arrive within a few
 /// milliseconds of the corresponding `touchstart`/`touchend`.  Allow a
@@ -129,7 +125,7 @@ impl PopupMenu {
 
         for (level_idx, layout) in layouts.iter().enumerate() {
             paint_panel(ctx, layout.rect, &self.style);
-            paint_popup_level(
+            popup_paint::paint_popup_level(
                 ctx,
                 level_idx,
                 layout,
@@ -146,7 +142,11 @@ pub struct MenuBar {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     font: Arc<Font>,
-    font_size: f64,
+    /// Explicit caller override from [`MenuBar::with_font_size`].  `None`
+    /// means "auto": the size tracks [`effective_metrics`] so touch menus
+    /// grow their text in lock-step with their rows.  An explicit override
+    /// always wins (the caller knows best).
+    font_size: Option<f64>,
     menus: Vec<TopMenu>,
     open_index: Option<usize>,
     hover_index: Option<usize>,
@@ -193,7 +193,7 @@ impl MenuBar {
             bounds: Rect::default(),
             children: Vec::new(),
             font,
-            font_size: 14.0,
+            font_size: None,
             menus,
             open_index: None,
             hover_index: None,
@@ -210,8 +210,9 @@ impl MenuBar {
     /// Refresh the per-button label cache to match `self.menus`.
     fn sync_bar_labels(&mut self) {
         let labels: Vec<&str> = self.menus.iter().map(|m| m.label.as_str()).collect();
+        let font_size = self.effective_font_size();
         self.bar_labels
-            .sync_to(&self.active_font(), self.font_size, &labels);
+            .sync_to(&self.active_font(), font_size, &labels);
     }
 
     /// Use a vertical layout — the bar stacks its menu buttons top-to-
@@ -234,8 +235,17 @@ impl MenuBar {
     }
 
     pub fn with_font_size(mut self, font_size: f64) -> Self {
-        self.font_size = font_size;
+        self.font_size = Some(font_size);
         self
+    }
+
+    /// Resolve the text size the bar / its popup should use this frame.
+    /// An explicit [`with_font_size`](Self::with_font_size) override wins;
+    /// otherwise the size comes from [`effective_metrics`], which grows it
+    /// on touch so the label stays proportional to the (grown) row.
+    fn effective_font_size(&self) -> f64 {
+        self.font_size
+            .unwrap_or_else(|| effective_metrics().default_font_size)
     }
 
     /// Override the popup's [`MenuStyle`] — geometry and inline-glyph
@@ -424,26 +434,31 @@ impl Widget for MenuBar {
         // Keep the bar's Label cache in lock-step with `self.menus`
         // before measuring — handles dynamic menu lists.
         self.sync_bar_labels();
+        let m = effective_metrics();
         match self.orientation {
             MenuOrientation::Horizontal | MenuOrientation::HorizontalBottom => {
+                // Scale each button's width by the same factor the text
+                // grew, so the label keeps the same slack on touch as on
+                // desktop and the button hit-rect always contains its text.
+                let wscale = self.effective_font_size() / DEFAULT_FONT_SIZE;
                 let mut x = 0.0;
                 for menu in &mut self.menus {
-                    let width = (menu.label.chars().count() as f64 * 8.0 + 22.0).max(52.0);
-                    menu.rect = Rect::new(x, 0.0, width, BAR_H);
+                    let width = (menu.label.chars().count() as f64 * 8.0 + 22.0).max(52.0) * wscale;
+                    menu.rect = Rect::new(x, 0.0, width, m.bar_h);
                     x += width;
                 }
                 // Fit-width mode leaves room for sibling chrome.
                 let report_w = if self.fit_width { x } else { available.width };
-                Size::new(report_w, BAR_H)
+                Size::new(report_w, m.bar_h)
             }
             MenuOrientation::Vertical => {
                 // Stack top-to-bottom in Y-up coordinates.
                 let mut y = available.height;
                 for menu in &mut self.menus {
-                    y -= VERTICAL_ROW_H;
-                    menu.rect = Rect::new(0.0, y, available.width, VERTICAL_ROW_H);
+                    y -= m.vertical_row_h;
+                    menu.rect = Rect::new(0.0, y, available.width, m.vertical_row_h);
                 }
-                let used_h = self.menus.len() as f64 * VERTICAL_ROW_H;
+                let used_h = self.menus.len() as f64 * m.vertical_row_h;
                 Size::new(available.width, used_h)
             }
         }
@@ -453,12 +468,14 @@ impl Widget for MenuBar {
         // Re-sync in case paint runs without a preceding layout.
         self.sync_bar_labels();
         ctx.set_font(self.active_font());
-        ctx.set_font_size(self.font_size);
+        ctx.set_font_size(self.effective_font_size());
         let v = ctx.visuals();
         ctx.set_fill_color(v.top_bar_bg);
         ctx.begin_path();
         let bg_h = match self.orientation {
-            MenuOrientation::Horizontal | MenuOrientation::HorizontalBottom => BAR_H,
+            MenuOrientation::Horizontal | MenuOrientation::HorizontalBottom => {
+                effective_metrics().bar_h
+            }
             MenuOrientation::Vertical => self.bounds.height,
         };
         ctx.rect(0.0, 0.0, self.bounds.width, bg_h);
@@ -659,134 +676,9 @@ impl Widget for MenuBar {
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let font = self.active_font();
-        self.popup
-            .paint(ctx, font, self.font_size, current_viewport());
+        let font_size = self.effective_font_size();
+        self.popup.paint(ctx, font, font_size, current_viewport());
     }
-}
-
-/// Paint one popup panel: hover backgrounds, separators, icons,
-/// check / radio marks, submenu chevrons, AND each row's text via the
-/// shared `PopupLabels` cache.  Text colour is resolved per-row from
-/// the item's enabled / open / hovered state so a hover flip retints
-/// just one Label.
-fn paint_popup_level(
-    ctx: &mut dyn DrawCtx,
-    level_idx: usize,
-    layout: &super::geometry::PopupLayout,
-    items: &[MenuEntry],
-    state: &PopupMenuState,
-    style: &MenuStyle,
-    labels: &mut PopupLabels,
-) {
-    let level_items = items_for_layout(items, &layout.path_prefix);
-    for (row_idx, row_layout) in layout.rows.iter().enumerate() {
-        let Some(item_idx) = row_layout.item_index else {
-            // Separator row.
-            paint_separator(ctx, row_layout.rect);
-            continue;
-        };
-        let Some(MenuEntry::Item(item)) = level_items.get(item_idx) else {
-            continue;
-        };
-        let mut path = layout.path_prefix.clone();
-        path.push(item_idx);
-        let hovered = state.hover_path.as_ref() == Some(&path);
-        let open = state.open_path.starts_with(&path);
-
-        // Hover / open backdrop sits underneath the row's content.
-        paint_item_row_bg(ctx, row_layout.rect, hovered, open, item.enabled);
-
-        // Inline glyphs (icon / check / radio) — single chars that
-        // change infrequently; keeping them direct `fill_text` avoids
-        // a Label per glyph at the cost of a single rasterise call.
-        let inline_color =
-            super::paint::popup_row_text_color(ctx, item.enabled, open && item.enabled);
-        ctx.set_fill_color(inline_color);
-        if let Some(color) = item.swatch {
-            // Colour-swatch row (e.g., an accent palette).  A small
-            // rounded filled rect in the icon slot, anchored
-            // vertically to the row centre.  The selected radio gets a
-            // thin stroke around the swatch instead of the usual radio
-            // glyph so the colour itself stays the dominant cue.
-            let size = 12.0;
-            let sx = row_layout.rect.x + style.icon_x - size * 0.5 + 4.0;
-            let sy = row_layout.rect.y + (row_layout.rect.height - size) * 0.5;
-            let fill = if item.enabled {
-                color
-            } else {
-                // Wash out disabled swatches so they read as "not
-                // pickable" without losing their identity.
-                color.with_alpha(0.45)
-            };
-            ctx.set_fill_color(fill);
-            ctx.begin_path();
-            ctx.rounded_rect(sx, sy, size, size, 3.0);
-            ctx.fill();
-            if matches!(item.selection, MenuSelection::Radio { selected: true }) {
-                ctx.set_stroke_color(inline_color);
-                ctx.set_line_width(1.5);
-                ctx.begin_path();
-                ctx.rounded_rect(sx - 2.0, sy - 2.0, size + 4.0, size + 4.0, 4.0);
-                ctx.stroke();
-            }
-        } else if let Some(icon) = item.icon {
-            let icon = icon.to_string();
-            ctx.fill_text(
-                &icon,
-                row_layout.rect.x + style.icon_x,
-                row_layout.rect.y + 7.0,
-            );
-        }
-        // Selection indicator. Vector-drawn check mark shared by both
-        // Check and Radio rows so the indicator looks identical
-        // regardless of the host's icon font (or lack of one). When
-        // the row already has a left-side marker (icon or swatch),
-        // the check paints at the right edge so the marker's
-        // identity stays visible; otherwise it occupies the icon
-        // slot.
-        let selected = matches!(
-            item.selection,
-            MenuSelection::Check { selected: true } | MenuSelection::Radio { selected: true }
-        );
-        if selected {
-            let has_left_marker = item.swatch.is_some() || item.icon.is_some();
-            let cx = if has_left_marker {
-                let right_offset = if item.has_submenu() { 30.0 } else { 12.0 };
-                row_layout.rect.x + row_layout.rect.width - right_offset
-            } else {
-                row_layout.rect.x + style.icon_x
-            };
-            let cy = row_layout.rect.y + row_layout.rect.height * 0.5;
-            paint_check_mark(ctx, cx, cy, inline_color);
-        }
-        if item.has_submenu() {
-            paint_submenu_chevron(ctx, row_layout.rect, inline_color);
-        }
-
-        // Row text (label + shortcut) via the Label cache so glyph
-        // rendering routes through the backbuffer + LCD path.
-        labels.paint_row_with_state(
-            ctx,
-            level_idx,
-            row_idx,
-            row_layout.rect,
-            style.label_x,
-            style.shortcut_right,
-            item.enabled,
-            open && item.enabled,
-        );
-    }
-}
-
-fn items_for_layout<'a>(items: &'a [MenuEntry], path: &[usize]) -> &'a [MenuEntry] {
-    let mut current = items;
-    for &idx in path {
-        let Some(MenuEntry::Item(item)) = current.get(idx) else {
-            return current;
-        };
-        current = &item.submenu;
-    }
-    current
 }
 
 #[cfg(test)]
