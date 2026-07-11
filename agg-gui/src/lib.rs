@@ -48,6 +48,7 @@ pub mod app_state;
 pub mod card;
 pub mod clipboard;
 pub mod color;
+pub mod confetti;
 pub mod cursor;
 pub mod device_scale;
 pub mod draw_ctx;
