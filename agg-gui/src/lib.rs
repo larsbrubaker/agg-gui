@@ -152,9 +152,9 @@ pub use widgets::{
     ImageView, InspectorPanel, InspectorSavedState, Label, LabelAlign, MarkdownView, MenuBar,
     MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut, ModalSheet,
     NodeIcon, Padding, PerformanceView, PopupMenu, ProgressBar, QrView, RadioGroup, Rebuilder,
-    Resize, RunMode, RunModeDesc, RunModeRow, ScrollBarColor, ScrollBarKind, ScrollBarStyle,
-    ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey, SizedBox, Slider,
-    SliderClamping, SliderOrientation, Spacer, Splitter,
+    Resize, RunMode, RunModeDesc, RunModeRow, Scene, SceneTransform, ScrollBarColor, ScrollBarKind,
+    ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
+    SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter,
     Stack, TabView, Table, TableBuilder, TableColumn, TableRows, TextArea, TextField, ToggleSwitch,
     Tooltip, TopMenu, TreeView, Window,
 };
