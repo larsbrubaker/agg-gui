@@ -355,7 +355,7 @@ impl Widget for ModalOverlay {
                 // `clicking_escape_when_popup_open_should_not_close_modal`.
                 if layer == ModalLayer::User
                     && self.role_combo.is_open()
-                    && self.role_combo.on_event(event) == EventResult::Consumed
+                    && self.role_combo.on_event(event).is_consumed()
                 {
                     agg_gui::animation::request_draw();
                     return EventResult::Consumed;

@@ -223,6 +223,89 @@ fn test_request_draw_alone_does_not_invalidate_software_backbuffer_cache() {
     );
 }
 
+/// A widget that returns a fixed [`EventResult`] and — like a buggy new
+/// widget — never calls `request_draw` itself. Used to prove the dispatcher
+/// applies the automatic invalidation policy.
+struct FixedResultProbe {
+    bounds: crate::Rect,
+    children: Vec<Box<dyn Widget>>,
+    result: crate::EventResult,
+}
+
+impl Widget for FixedResultProbe {
+    fn bounds(&self) -> crate::Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, bounds: crate::Rect) {
+        self.bounds = bounds;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, available: Size) -> Size {
+        self.bounds = crate::Rect::new(0.0, 0.0, available.width, available.height);
+        available
+    }
+    fn paint(&mut self, _ctx: &mut dyn crate::DrawCtx) {}
+    fn on_event(&mut self, _event: &crate::Event) -> crate::EventResult {
+        self.result
+    }
+}
+
+fn dispatch_fixed_result(result: crate::EventResult) -> bool {
+    use crate::widget::dispatch_event;
+    use crate::{Event, Point, Rect};
+
+    let mut root: Box<dyn Widget> = Box::new(FixedResultProbe {
+        bounds: Rect::default(),
+        children: Vec::new(),
+        result,
+    });
+    root.layout(Size::new(40.0, 40.0));
+
+    crate::animation::clear_draw_request();
+    let event = Event::MouseMove {
+        pos: Point::new(5.0, 5.0),
+    };
+    let dispatched = dispatch_event(&mut root, &[], &event, Point::new(5.0, 5.0));
+    assert_eq!(dispatched, result, "dispatcher must preserve the result");
+    crate::animation::wants_draw()
+}
+
+/// The core of directive #1: a widget that consumes an event but forgets to
+/// request a draw must still get a frame scheduled by the dispatcher. Before
+/// the auto-invalidation hook this returned `false`.
+#[test]
+fn test_consumed_event_schedules_draw_via_dispatcher() {
+    assert!(
+        dispatch_fixed_result(crate::EventResult::Consumed),
+        "a Consumed result must auto-request a draw at the dispatch boundary"
+    );
+}
+
+/// The opt-out: `ConsumedQuiet` still stops propagation but must NOT schedule
+/// a frame, so high-frequency quiet consumption doesn't repaint every event.
+#[test]
+fn test_consumed_quiet_event_does_not_schedule_draw() {
+    assert!(
+        !dispatch_fixed_result(crate::EventResult::ConsumedQuiet),
+        "a ConsumedQuiet result must suppress the automatic draw request"
+    );
+}
+
+/// `Ignored` on its own (no manual request_draw) must stay quiet — the
+/// dispatcher only auto-invalidates on consumption.
+#[test]
+fn test_ignored_event_does_not_schedule_draw() {
+    assert!(
+        !dispatch_fixed_result(crate::EventResult::Ignored),
+        "an Ignored result must not schedule a draw by itself"
+    );
+}
+
 #[test]
 fn test_y_up_point_at_bottom() {
     let mut fb = Framebuffer::new(100, 100);

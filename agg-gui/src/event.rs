@@ -117,10 +117,52 @@ pub enum Event {
 }
 
 /// What a widget returns from [`crate::widget::Widget::on_event`].
+///
+/// # Automatic invalidation
+///
+/// The framework's event dispatcher (see [`crate::widget::tree`]) treats a
+/// [`Consumed`](EventResult::Consumed) result as "this widget changed
+/// something visible" and schedules a repaint via
+/// [`crate::animation::request_draw`] on the widget's behalf.  This makes the
+/// correct default automatic: the most common framework bug is a new widget
+/// that mutates paint-affecting state on an event but forgets to request a
+/// draw, so parts of it don't repaint.  With auto-invalidation a plain
+/// `Consumed` is always safe.
+///
+/// A widget that consumes a *high-frequency* event (typically `MouseMove`)
+/// **without** any visual change — for example, a hover affordance that only
+/// updates the OS cursor — should return
+/// [`ConsumedQuiet`](EventResult::ConsumedQuiet) so it doesn't schedule a
+/// wasteful repaint on every event.  `ConsumedQuiet` still stops propagation
+/// exactly like `Consumed`; it only suppresses the automatic draw request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventResult {
-    /// The widget handled the event; stop propagation.
+    /// The widget handled the event and may have changed its appearance;
+    /// stop propagation and schedule a repaint automatically.
     Consumed,
+    /// The widget handled the event (stop propagation) but produced **no**
+    /// visual change, so the dispatcher must NOT schedule a repaint.  Use
+    /// this only for genuinely quiet consumption of high-frequency events.
+    ConsumedQuiet,
     /// The widget did not handle the event; continue bubbling up.
     Ignored,
+}
+
+impl EventResult {
+    /// `true` for both [`Consumed`](EventResult::Consumed) and
+    /// [`ConsumedQuiet`](EventResult::ConsumedQuiet).
+    ///
+    /// Propagation, capture, and focus logic should branch on this rather
+    /// than comparing against `Consumed` directly, so a quietly-consuming
+    /// widget still stops the event exactly like a loud one.
+    pub const fn is_consumed(self) -> bool {
+        matches!(self, EventResult::Consumed | EventResult::ConsumedQuiet)
+    }
+
+    /// `true` only for [`Consumed`](EventResult::Consumed) — i.e. the
+    /// dispatcher should call [`crate::animation::request_draw`] for this
+    /// result.  `ConsumedQuiet` and `Ignored` return `false`.
+    pub const fn requests_redraw(self) -> bool {
+        matches!(self, EventResult::Consumed)
+    }
 }

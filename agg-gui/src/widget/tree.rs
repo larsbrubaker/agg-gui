@@ -109,8 +109,32 @@ pub fn global_overlay_hit_path(widget: &dyn Widget, local_pos: Point) -> Option<
     }
 }
 
+/// Centralized event delivery: call the widget's `on_event` and apply the
+/// framework's automatic-invalidation policy in ONE place, so no dispatch
+/// path can silently forget it.  A [`EventResult::Consumed`] result schedules
+/// a repaint via [`crate::animation::request_draw`];
+/// [`EventResult::ConsumedQuiet`] and [`EventResult::Ignored`] do not.
+///
+/// This single hook makes "consume ⇒ repaint" the default, fixing the
+/// recurring bug class where a widget mutates paint-affecting state on an
+/// event but forgets to request a draw, leaving part of itself stale.
+fn deliver(widget: &mut dyn Widget, event: &Event) -> EventResult {
+    auto_request_draw(widget.on_event(event))
+}
+
+/// Apply the auto-invalidation policy to an already-computed [`EventResult`].
+/// Shared by [`deliver`] (for `on_event`) and the unconsumed-key path (for
+/// `on_unconsumed_key`) so every delivery route honours the same rule.
+fn auto_request_draw(result: EventResult) -> EventResult {
+    if result.requests_redraw() {
+        crate::animation::request_draw();
+    }
+    result
+}
+
 /// Dispatch `event` through a path (list of child indices from the root).
-/// The event bubbles leaf → root; returns `Consumed` if any widget consumed it.
+/// The event bubbles leaf → root; returns a consuming result if any widget
+/// consumed it (preserving the `Consumed` vs `ConsumedQuiet` distinction).
 ///
 /// `pos_in_root` is the event position in the root widget's coordinate space.
 /// The function translates it down through each level of the path.
@@ -122,8 +146,8 @@ pub fn dispatch_event(
 ) -> EventResult {
     if path.is_empty() {
         let before = crate::animation::invalidation_epoch();
-        let result = root.on_event(event);
-        if result == EventResult::Consumed || before != crate::animation::invalidation_epoch() {
+        let result = deliver(root.as_mut(), event);
+        if result.requests_redraw() || before != crate::animation::invalidation_epoch() {
             root.mark_dirty();
         }
         return result;
@@ -134,7 +158,7 @@ pub fn dispatch_event(
     // CollapsingHeader collapsed since then and dropped its child.  Rather
     // than panic, just stop descending and deliver the event at this level.
     if idx >= root.children().len() {
-        return root.on_event(event);
+        return deliver(root.as_mut(), event);
     }
     let child_bounds = root.children()[idx].bounds();
     let child_pos = Point::new(
@@ -150,17 +174,19 @@ pub fn dispatch_event(
         &translated_event,
         child_pos,
     );
-    if child_result == EventResult::Consumed {
-        root.mark_dirty();
-        return EventResult::Consumed;
-    }
+    // A child (or descendant) that requested a draw bumped the epoch —
+    // invalidate our own cache so the retained backbuffer re-rasters. A
+    // quiet consume bumps nothing, so it correctly leaves the cache alone.
     if before_child != crate::animation::invalidation_epoch() {
         root.mark_dirty();
     }
+    if child_result.is_consumed() {
+        return child_result;
+    }
     // Bubble: deliver to this widget too (with original pos_in_root coords).
     let before_self = crate::animation::invalidation_epoch();
-    let result = root.on_event(event);
-    if result == EventResult::Consumed || before_self != crate::animation::invalidation_epoch() {
+    let result = deliver(root.as_mut(), event);
+    if result.requests_redraw() || before_self != crate::animation::invalidation_epoch() {
         root.mark_dirty();
     }
     result
@@ -179,15 +205,15 @@ pub fn dispatch_event_dyn(
 ) -> EventResult {
     if path.is_empty() {
         let before = crate::animation::invalidation_epoch();
-        let result = root.on_event(event);
-        if result == EventResult::Consumed || before != crate::animation::invalidation_epoch() {
+        let result = deliver(root, event);
+        if result.requests_redraw() || before != crate::animation::invalidation_epoch() {
             root.mark_dirty();
         }
         return result;
     }
     let idx = path[0];
     if idx >= root.children().len() {
-        return root.on_event(event);
+        return deliver(root, event);
     }
     let child_bounds = root.children()[idx].bounds();
     let child_pos = Point::new(
@@ -205,16 +231,15 @@ pub fn dispatch_event_dyn(
         &translated_event,
         child_pos,
     );
-    if child_result == EventResult::Consumed {
-        root.mark_dirty();
-        return EventResult::Consumed;
-    }
     if before_child != crate::animation::invalidation_epoch() {
         root.mark_dirty();
     }
+    if child_result.is_consumed() {
+        return child_result;
+    }
     let before_self = crate::animation::invalidation_epoch();
-    let result = root.on_event(event);
-    if result == EventResult::Consumed || before_self != crate::animation::invalidation_epoch() {
+    let result = deliver(root, event);
+    if result.requests_redraw() || before_self != crate::animation::invalidation_epoch() {
         root.mark_dirty();
     }
     result
@@ -231,15 +256,21 @@ pub fn dispatch_unconsumed_key(
     if !widget.is_visible() {
         return EventResult::Ignored;
     }
+    let mut consumed = None;
     for child in widget.children_mut().iter_mut().rev() {
-        if dispatch_unconsumed_key(child.as_mut(), key, modifiers) == EventResult::Consumed {
-            widget.mark_dirty();
-            return EventResult::Consumed;
+        let r = dispatch_unconsumed_key(child.as_mut(), key, modifiers);
+        if r.is_consumed() {
+            consumed = Some(r);
+            break;
         }
     }
+    if let Some(r) = consumed {
+        widget.mark_dirty();
+        return r;
+    }
     let before = crate::animation::invalidation_epoch();
-    let result = widget.on_unconsumed_key(key, modifiers);
-    if result == EventResult::Consumed || before != crate::animation::invalidation_epoch() {
+    let result = auto_request_draw(widget.on_unconsumed_key(key, modifiers));
+    if result.requests_redraw() || before != crate::animation::invalidation_epoch() {
         widget.mark_dirty();
     }
     result
@@ -309,15 +340,14 @@ pub fn dispatch_event_broadcast(
             pos_in_root.y - child_bounds.y,
         );
         let translated = translate_event(event, child_pos);
-        if dispatch_event_broadcast(&mut root.children_mut()[i], &translated, child_pos)
-            == EventResult::Consumed
-        {
+        let r = dispatch_event_broadcast(&mut root.children_mut()[i], &translated, child_pos);
+        if r.is_consumed() {
             root.mark_dirty();
-            return EventResult::Consumed;
+            return r;
         }
     }
-    let result = root.on_event(event);
-    if result == EventResult::Consumed {
+    let result = deliver(root.as_mut(), event);
+    if result.is_consumed() {
         root.mark_dirty();
     }
     result

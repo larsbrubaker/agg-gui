@@ -312,9 +312,9 @@ impl App {
         } else {
             EventResult::Ignored
         };
-        if result != EventResult::Consumed {
+        if !result.is_consumed() {
             let result = dispatch_unconsumed_key(self.root.as_mut(), &key, mods);
-            if result != EventResult::Consumed {
+            if !result.is_consumed() {
                 if let Some(ref mut handler) = self.global_key_handler {
                     handler(key, mods);
                 }
@@ -460,7 +460,8 @@ impl App {
             // handlers (e.g. "open the dropped .atmr project") can run
             // even when the user drops on chrome rather than canvas.
             None => dispatch_event(&mut self.root, &[], &event, pos),
-        } == EventResult::Consumed;
+        }
+        .is_consumed();
         if !consumed {
             // The widget under the drop point ignored the files. Offer
             // the event to the rest of the tree before giving up — the

@@ -596,7 +596,7 @@ impl Widget for Window {
                                 &translated,
                                 tb_local,
                             );
-                            if result == EventResult::Consumed {
+                            if result.is_consumed() {
                                 // Chevron flag is drained in `layout`,
                                 // but we also want this frame to redraw
                                 // before that.

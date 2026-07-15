@@ -12,8 +12,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
-    Button, Color, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Label,
-    MouseButton, Point, Rect, Separator, Size, SizedBox, Widget,
+    Button, Color, DragValue, DrawCell, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font,
+    Label, MouseButton, Point, Rect, Separator, Size, SizedBox, Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -71,13 +71,15 @@ struct PaintCanvas {
     /// Whether the left mouse button is currently held inside the canvas.
     painting: bool,
     /// Shared stroke width in pixels (driven by the DragValue editor).
-    stroke_width: Rc<Cell<f64>>,
+    /// `DrawCell` so the editor's `on_change` auto-requests a repaint on
+    /// change — no manual `request_draw` needed in the closure.
+    stroke_width: Rc<DrawCell<f64>>,
     /// Shared stroke color (driven by the swatch buttons).
     stroke_color: Rc<Cell<Color>>,
 }
 
 impl PaintCanvas {
-    fn new(stroke_width: Rc<Cell<f64>>, stroke_color: Rc<Cell<Color>>) -> Self {
+    fn new(stroke_width: Rc<DrawCell<f64>>, stroke_color: Rc<Cell<Color>>) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
@@ -415,7 +417,7 @@ pub fn painting(font: Arc<Font>) -> Box<dyn Widget> {
     let clear_flag = Rc::new(Cell::new(false));
     // egui default stroke: width 1.0, color rgb(25, 200, 100).
     let default_color = Color::rgb(25.0 / 255.0, 200.0 / 255.0, 100.0 / 255.0);
-    let stroke_width = Rc::new(Cell::new(1.0_f64));
+    let stroke_width = Rc::new(DrawCell::new(1.0_f64));
     let stroke_color = Rc::new(Cell::new(default_color));
 
     // A small palette of stroke colors for the swatch row.
@@ -442,12 +444,12 @@ pub fn painting(font: Arc<Font>) -> Box<dyn Widget> {
                     DragValue::new(stroke_width.get(), 1.0, 20.0, Arc::clone(&font))
                         .with_decimals(0)
                         .with_step(1.0)
+                        // `stroke_width` is a `DrawCell`, so `set` already
+                        // requests a repaint when the value changes — the
+                        // closure no longer needs a manual `request_draw`.
                         .on_change({
                             let stroke_width = Rc::clone(&stroke_width);
-                            move |x| {
-                                stroke_width.set(x);
-                                agg_gui::animation::request_draw();
-                            }
+                            move |x| stroke_width.set(x)
                         }),
                 )),
         ));

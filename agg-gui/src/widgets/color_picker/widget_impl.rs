@@ -197,13 +197,13 @@ impl Widget for ColorPicker {
                     let lp = Point::new(p.x - b.x, p.y - b.y);
                     let translated = translate_mouse_event(event, lp);
                     let res = child.on_event(&translated);
-                    if res == EventResult::Consumed {
+                    if res.is_consumed() {
                         self.handle_btn_flags();
                         return EventResult::Consumed;
                     }
                 } else {
                     let res = child.on_event(event);
-                    if res == EventResult::Consumed {
+                    if res.is_consumed() {
                         self.handle_btn_flags();
                         return EventResult::Consumed;
                     }

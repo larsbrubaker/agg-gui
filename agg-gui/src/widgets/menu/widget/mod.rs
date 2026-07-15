@@ -618,7 +618,7 @@ impl Widget for MenuBar {
                 self.suppress_hover_for = self.hover_index;
                 self.cache.invalidate();
             }
-            if result == EventResult::Consumed {
+            if result.is_consumed() {
                 return result;
             }
         }

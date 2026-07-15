@@ -133,7 +133,7 @@ impl Scene {
         // captures the pointer; a non-interactive hit (label, background) falls
         // through to a pan gesture.
         if let Some(path) = hit_test_subtree(self.content.as_ref(), content_local) {
-            if self.route_to_content(&path, event, content_local) == EventResult::Consumed {
+            if self.route_to_content(&path, event, content_local).is_consumed() {
                 self.inner_captured = Some(path);
                 // A child interaction breaks any pending background
                 // double-click sequence (bg-click → child-click → bg-click

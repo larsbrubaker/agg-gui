@@ -307,7 +307,7 @@ impl NodeEditor {
             }
             CanvasState::Idle => EventResult::Ignored,
         };
-        if result == EventResult::Consumed {
+        if result.is_consumed() {
             agg_gui::animation::request_draw();
         }
         result

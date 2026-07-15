@@ -3,7 +3,7 @@
 //! (800-line guardrail); wheel and keyboard routing stay in `app.rs`.
 
 use super::tree_paths::widget_at_path;
-use crate::event::{Event, EventResult, Modifiers, MouseButton};
+use crate::event::{Event, Modifiers, MouseButton};
 use crate::geometry::Point;
 use crate::widget::tree::{active_modal_path, dispatch_event, hit_test_subtree};
 use crate::widget::tree_inspector::set_current_mouse_world;
@@ -89,7 +89,7 @@ impl App {
             } else {
                 self.set_focus(None);
             }
-            if dispatch_event(&mut self.root, &path, &event, pos) == EventResult::Consumed {
+            if dispatch_event(&mut self.root, &path, &event, pos).is_consumed() {
                 self.captured = Some(path);
             }
             return;
@@ -110,7 +110,7 @@ impl App {
 
         if let Some(mut path) = hit {
             let result = dispatch_event(&mut self.root, &path, &event, pos);
-            if result == EventResult::Consumed {
+            if result.is_consumed() {
                 self.maybe_bring_to_front(&mut path);
                 let capture_path = self.compute_hit(pos).unwrap_or(path);
                 self.captured = Some(capture_path);

@@ -312,7 +312,7 @@ impl Widget for TreeView {
             Event::KeyDown { key, modifiers } => self.handle_key_down(key, *modifiers),
             _ => EventResult::Ignored,
         };
-        if result == EventResult::Consumed {
+        if result.is_consumed() {
             crate::animation::request_draw();
         }
         result

@@ -601,7 +601,7 @@ impl Widget for NodeEditor {
             // drain it whether or not THIS event was consumed.  We also
             // want to claim the redraw the close needs.
             let closed = self.drain_overlay_close();
-            if result == EventResult::Consumed || closed {
+            if result.is_consumed() || closed {
                 agg_gui::animation::request_draw();
                 return EventResult::Consumed;
             }
@@ -615,7 +615,7 @@ impl Widget for NodeEditor {
             } else if let MenuResponse::Closed = response {
                 self.popup.close();
             }
-            if result == EventResult::Consumed {
+            if result.is_consumed() {
                 return EventResult::Consumed;
             }
         }

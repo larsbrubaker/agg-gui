@@ -533,7 +533,10 @@ impl Widget for Table {
             let content_x = pos.x + h_offset;
             if resize_target_at(content_x, pos.y).is_some() {
                 set_cursor_icon(CursorIcon::ResizeHorizontal);
-                return EventResult::Consumed;
+                // Quiet: this only sets the OS cursor, which is applied by the
+                // host outside the widget's backbuffer — nothing repaints, so
+                // consuming every hover move here must NOT schedule a frame.
+                return EventResult::ConsumedQuiet;
             }
         }
 
@@ -586,7 +589,7 @@ impl Widget for Table {
                         let local_y = pos.y - header_y;
                         if let Some(cb) = self.header_click.borrow_mut().as_mut() {
                             let r = cb(col, local_x, local_y);
-                            if r == EventResult::Consumed {
+                            if r.is_consumed() {
                                 crate::animation::request_draw();
                             }
                             return r;

@@ -415,7 +415,7 @@ impl Widget for TextField {
                 let result = self.handle_key(key, *modifiers);
                 // Any text-editing keystroke that reached the focused field
                 // visibly mutates the text / cursor / selection; repaint.
-                if result == EventResult::Consumed {
+                if result.is_consumed() {
                     crate::animation::request_draw();
                 }
                 result
