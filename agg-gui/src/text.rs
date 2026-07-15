@@ -350,8 +350,8 @@ pub(crate) fn shape_text(
 
     // Pull the current typography-style globals ONCE per call.  The
     // text render path consults them here so any widget (including the
-    // LCD Subpixel demo's sliders) that writes through `font_settings`
-    // affects the next paint.
+    // System window's typography controls / Sample Text tab) that writes
+    // through `font_settings` affects the next paint.
     //
     // - `width_scale`  → horizontal outline scale per glyph
     // - `italic_shear` → faux-italic (0..1 range maps to /3 in the

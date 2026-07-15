@@ -1,4 +1,4 @@
-﻿//! `Label` — static text display widget.
+//! `Label` — static text display widget.
 //!
 //! Labels are non-interactive by design (`hit_test` always returns `false`
 //! and `on_event` always returns `Ignored`).  This makes them safe to use as
@@ -99,6 +99,14 @@ pub struct Label {
     /// captions.  Resolves at paint time like the `text_color` default, so
     /// it tracks live dark/light switches.
     dim: bool,
+    /// When `true` and no explicit `color` is set, render with an
+    /// emphasised "strong" text colour — agg-gui's analog of egui's
+    /// `ui.strong(...)` / `Visuals::strong_text_color()`.  agg-gui has no
+    /// bold font weight, so emphasis is expressed by pushing `text_color`
+    /// toward the theme's extreme (whiter on dark, blacker on light),
+    /// exactly as egui's strong colour brightens body text.  Resolves at
+    /// paint time so it tracks live dark/light switches.
+    strong: bool,
     align: LabelAlign,
     /// When `true` (the default), this Label owns a CPU backbuffer
     /// that's re-rasterised on dirty and blitted every frame.  Set to
@@ -158,6 +166,7 @@ impl Label {
             font_size: 14.0,
             color: None, // resolved from ctx.visuals() at paint time
             dim: false,
+            strong: false,
             align: LabelAlign::Left,
             // Default: backbuffer only when grayscale.  Rationale:
             //   - Grayscale on GL direct-to-surface goes through
@@ -208,6 +217,15 @@ impl Label {
     /// across live dark/light theme switches (unlike a hard-coded grey).
     pub fn with_dim(mut self, dim: bool) -> Self {
         self.dim = dim;
+        self
+    }
+    /// Emphasise this label with a "strong" text colour, agg-gui's analog
+    /// of egui's `ui.strong(...)`.  Has no effect when an explicit
+    /// [`with_color`](Label::with_color) is also set.  Like the default
+    /// colour path this resolves at paint time, so it tracks live
+    /// dark/light theme switches.
+    pub fn with_strong(mut self, strong: bool) -> Self {
+        self.strong = strong;
         self
     }
     pub fn with_align(mut self, align: LabelAlign) -> Self {
@@ -329,6 +347,30 @@ impl Label {
             self.align = align;
             self.cache.invalidate();
         }
+    }
+}
+
+/// Push `c` toward the theme's extreme to express egui-style "strong" text
+/// emphasis.  Light body text (on a dark theme) brightens toward white;
+/// dark body text (on a light theme) deepens toward black — mirroring how
+/// egui's `strong_text_color()` sits above the ordinary body colour.
+fn strengthen(c: Color) -> Color {
+    const BLEND: f32 = 0.5;
+    let lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+    if lum > 0.5 {
+        Color::rgba(
+            c.r + (1.0 - c.r) * BLEND,
+            c.g + (1.0 - c.g) * BLEND,
+            c.b + (1.0 - c.b) * BLEND,
+            c.a,
+        )
+    } else {
+        Color::rgba(
+            c.r * (1.0 - BLEND),
+            c.g * (1.0 - BLEND),
+            c.b * (1.0 - BLEND),
+            c.a,
+        )
     }
 }
 
@@ -476,6 +518,8 @@ impl Widget for Label {
             let v = ctx.visuals();
             if self.dim {
                 v.text_dim
+            } else if self.strong {
+                strengthen(v.text_color)
             } else {
                 v.text_color
             }
