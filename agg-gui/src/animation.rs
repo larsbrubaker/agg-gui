@@ -45,6 +45,29 @@ std::thread_local! {
     /// [`ASYNC_STATE_EPOCH`] are bumped — see the module docs above
     /// `ASYNC_WAKEUP_COUNTER` for why this indirection is required.
     static LAST_SEEN_ASYNC_WAKEUP: Cell<u64> = Cell::new(0);
+    /// Monotonic counter bumped once per pointer press that reaches the
+    /// widget tree (see [`bump_pointer_press_epoch`]).  A widget that runs
+    /// its own multi-click gesture but no longer sees every press —
+    /// [`Scene`](crate::widgets::Scene), whose hosted children consume
+    /// their own presses before they can bubble — reads this to tell
+    /// whether an *intervening* press (e.g. a click on a hosted button)
+    /// happened between two of its own background clicks, so a
+    /// background double-click that straddles a child interaction does
+    /// not falsely fire.
+    static POINTER_PRESS_EPOCH: Cell<u64> = Cell::new(0);
+}
+
+/// Advance the pointer-press epoch.  Called by [`App`](crate::App) once per
+/// pointer press that is about to be routed into the widget tree.
+pub fn bump_pointer_press_epoch() {
+    POINTER_PRESS_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+}
+
+/// Current pointer-press epoch — see [`bump_pointer_press_epoch`].  Two
+/// presses are *consecutive* (nothing pressed in between) exactly when their
+/// observed epochs differ by one.
+pub fn pointer_press_epoch() -> u64 {
+    POINTER_PRESS_EPOCH.with(|c| c.get())
 }
 
 /// Process-global counter bumped by [`signal_async_state_change`] from

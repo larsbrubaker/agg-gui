@@ -91,18 +91,30 @@ impl Scene {
             // fire an unintended reset.
             if self.pan_is_left && !self.pan_moved {
                 let now = Instant::now();
-                let is_double = self
+                // A double-click needs two background clicks that are both
+                // recent AND *consecutive* — no other press in between.  The
+                // second condition is what the pointer-press epoch buys us:
+                // a click on a hosted child bumps the epoch (the App counts
+                // it) even though the child consumes it and the Scene never
+                // sees it, so `bg-click → child-click → bg-click` reads as a
+                // gap of two and correctly does not reset.
+                let in_time = self
                     .last_bg_click
                     .map(|t| now.duration_since(t).as_millis() < DBL_CLICK_MS)
                     .unwrap_or(false);
-                if is_double {
+                let consecutive = self.last_bg_click_epoch
+                    == Some(self.pan_press_epoch.wrapping_sub(1));
+                if in_time && consecutive {
                     self.last_bg_click = None;
+                    self.last_bg_click_epoch = None;
                     self.reset_view();
                 } else {
                     self.last_bg_click = Some(now);
+                    self.last_bg_click_epoch = Some(self.pan_press_epoch);
                 }
             } else {
                 self.last_bg_click = None;
+                self.last_bg_click_epoch = None;
             }
             return EventResult::Consumed;
         }
@@ -110,7 +122,18 @@ impl Scene {
     }
 
     fn on_wheel(&mut self, pos: Point, delta_y: f64) -> EventResult {
-        // Wheel always zooms the scene (never scrolls a child) — matching egui.
+        // The wheel zooms the scene, anchored on the cursor.  Under the
+        // framework's leaf→root bubble the Scene receives the wheel only when
+        // no hosted child consumed it first — so ordinary content (buttons,
+        // labels, fields, painted shapes) zooms as expected, but a *scrollable*
+        // hosted child would scroll instead.
+        //
+        // Deviation from egui: egui's Scene always zooms on scroll regardless
+        // of what sits under the cursor; we deliver deepest-first.  Left as-is
+        // deliberately — a scrollable-inside-a-Scene case isn't in use.  If one
+        // appears, revisit with a pre-dispatch wheel interception rather than
+        // baking special-casing in here.
+        //
         // Positive delta_y (wheel forward / scroll up) zooms in; the factor is
         // exponential so zoom-in and zoom-out are symmetric.
         let factor = (delta_y * ZOOM_SENSITIVITY).exp();
@@ -128,6 +151,11 @@ impl Scene {
         self.pan_press = pos;
         self.pan_moved = false;
         self.pan_is_left = is_left;
+        // Snapshot the App's per-press counter for this background press so a
+        // release can tell whether the previous background click was the
+        // immediately-preceding press (a real double-click) or whether a
+        // hosted-child click happened in between.
+        self.pan_press_epoch = crate::animation::pointer_press_epoch();
     }
 }
 
@@ -182,6 +210,11 @@ mod tests {
     }
 
     fn down(s: &mut Scene, x: f64, y: f64) {
+        // Mirror the App contract: every pointer press routed to the tree
+        // bumps the press epoch (see `App::on_mouse_down`).  These unit tests
+        // drive `Scene::on_event` directly, so they must bump it themselves for
+        // the consecutive-press double-click gate to see distinct presses.
+        crate::animation::bump_pointer_press_epoch();
         s.on_event(&Event::MouseDown {
             pos: Point::new(x, y),
             button: MouseButton::Left,

@@ -76,6 +76,10 @@ impl App {
         }
         let pos = super::keyboard_scroll::lift_to_world(screen);
         set_current_mouse_world(pos);
+        // Count this press so widgets running their own multi-click gesture
+        // (Scene's background double-click) can detect an intervening press
+        // even when a hosted child consumes it before it can bubble.
+        crate::animation::bump_pointer_press_epoch();
         let modal_path = active_modal_path(self.root.as_ref());
         let event = Event::MouseDown {
             pos,

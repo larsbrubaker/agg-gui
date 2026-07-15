@@ -250,3 +250,154 @@ fn inspector_sees_scene_content_at_transformed_bounds() {
         b
     );
 }
+
+// ── Double-click-reset must survive an intervening hosted-child click ──
+
+/// A small hosted widget that *consumes* its own press (like a button), so a
+/// click on it captures the pointer and never bubbles to the Scene.  Sits at
+/// scene (0,0)-(20,20).
+struct ClickCatcher {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+}
+impl Widget for ClickCatcher {
+    fn type_name(&self) -> &'static str {
+        "ClickCatcher"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, _available: Size) -> Size {
+        Size::new(20.0, 20.0)
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        match event {
+            Event::MouseDown { .. } => EventResult::Consumed,
+            _ => EventResult::Ignored,
+        }
+    }
+}
+
+/// 100×100 content that ignores its own events but hosts a `ClickCatcher` in
+/// its bottom-left corner — so scene (5,5) hits the catcher (a "button") while
+/// scene (80,80) is empty background.
+struct MixedContent {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+}
+impl Widget for MixedContent {
+    fn type_name(&self) -> &'static str {
+        "MixedContent"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, _available: Size) -> Size {
+        self.children[0].set_bounds(Rect::new(0.0, 0.0, 20.0, 20.0));
+        self.children[0].layout(Size::new(20.0, 20.0));
+        Size::new(100.0, 100.0)
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
+/// Build a Scene (zoom 2, offset 0) over `MixedContent`.
+fn mixed_scene_app() -> App {
+    let content = MixedContent {
+        bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+        children: vec![Box::new(ClickCatcher {
+            bounds: Rect::new(0.0, 0.0, 20.0, 20.0),
+            children: Vec::new(),
+        })],
+    };
+    let scene = Scene::new(Box::new(content)).with_content_size(Size::new(100.0, 100.0));
+    let mut app = App::new(Box::new(scene));
+    app.layout(Size::new(200.0, 200.0));
+    app
+}
+
+/// Physical-coord click helpers (viewport 200 tall; flip Y-up → Y-down).
+fn app_click(app: &mut App, sx: f64, sy_up: f64) {
+    app.on_mouse_down(sx, 200.0 - sy_up, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(sx, 200.0 - sy_up, MouseButton::Left, Modifiers::default());
+}
+fn app_drag(app: &mut App, from: (f64, f64), to: (f64, f64)) {
+    app.on_mouse_down(from.0, 200.0 - from.1, MouseButton::Left, Modifiers::default());
+    app.on_mouse_move(to.0, 200.0 - to.1);
+    app.on_mouse_up(to.0, 200.0 - to.1, MouseButton::Left, Modifiers::default());
+}
+
+/// A background double-click that *straddles a hosted-child click* must NOT
+/// reset the view.  Regression test for the false reset that appeared once the
+/// hosted content became a first-class child: the child's press is consumed and
+/// never bubbles to the Scene, so the two background clicks looked adjacent in
+/// time.  The pointer-press epoch distinguishes them.
+#[test]
+fn bg_double_click_straddling_child_click_does_not_reset() {
+    let mut app = mixed_scene_app();
+    let fitted = scene_rect_prop(&app);
+
+    // Pan a small, KNOWN amount so a reset is observable AND the hosted
+    // ClickCatcher stays on-screen at a computable position.  Fit is zoom 2 /
+    // offset 0; dragging (100,100)->(90,90) is a screen delta of (-10,-10), so
+    // afterwards screen = 2*scene + (-10,-10).
+    app_drag(&mut app, (100.0, 100.0), (90.0, 90.0));
+    let panned = scene_rect_prop(&app);
+    assert_ne!(panned, fitted, "the drag should have panned the view");
+
+    // Screen positions under `screen = 2*scene - 10`:
+    //   background scene (60,60) -> screen (110,110);
+    //   ClickCatcher (scene 0..20) center scene (7.5,7.5) -> screen (5,5).
+    app_click(&mut app, 110.0, 110.0); // background
+    app_click(&mut app, 5.0, 5.0); // hosted "button" — consumes the press
+    app_click(&mut app, 110.0, 110.0); // background again
+
+    assert_eq!(
+        scene_rect_prop(&app),
+        panned,
+        "a background double-click interrupted by a hosted-child click must NOT reset the view"
+    );
+}
+
+/// Positive control: two *consecutive* background clicks (no child click
+/// between) still reset the view through real App routing.
+#[test]
+fn bg_genuine_double_click_resets_view_via_app() {
+    let mut app = mixed_scene_app();
+    let fitted = scene_rect_prop(&app);
+
+    app_drag(&mut app, (100.0, 100.0), (90.0, 90.0));
+    assert_ne!(scene_rect_prop(&app), fitted, "the drag should have panned");
+
+    // Two consecutive background clicks (screen (110,110) = scene (60,60)) →
+    // reset back to the fitted view.
+    app_click(&mut app, 110.0, 110.0);
+    app_click(&mut app, 110.0, 110.0);
+
+    assert_eq!(
+        scene_rect_prop(&app),
+        fitted,
+        "a genuine background double-click must reset the view to the fitted rect"
+    );
+}

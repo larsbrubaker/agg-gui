@@ -122,9 +122,20 @@ pub struct Scene {
     /// `true` when the current pan gesture was started with the left button
     /// (only left-button clicks participate in double-click reset).
     pan_is_left: bool,
+    /// Pointer-press epoch (see [`crate::animation::pointer_press_epoch`])
+    /// captured when the current background press began — compared against
+    /// [`last_bg_click_epoch`](Self::last_bg_click_epoch) on release so a
+    /// double-click that straddles a hosted-child click (which the Scene never
+    /// sees, because the child consumes it) is not mistaken for two
+    /// consecutive background clicks.
+    pan_press_epoch: u64,
     /// Completion time of the last genuine background left-click
     /// (press + release without significant motion), for double-click reset.
     last_bg_click: Option<Instant>,
+    /// Pointer-press epoch of that last background click.  A second click only
+    /// completes a double-click when its press epoch is exactly one greater
+    /// (i.e. no other press happened in between).
+    last_bg_click_epoch: Option<u64>,
 }
 
 impl Scene {
@@ -146,9 +157,17 @@ impl Scene {
             pan_press: Point::ORIGIN,
             pan_moved: false,
             pan_is_left: false,
+            pan_press_epoch: 0,
             last_bg_click: None,
+            last_bg_click_epoch: None,
         }
     }
+
+    // Invariant: `children` always holds exactly one element — the hosted
+    // content — set at construction and never drained.  `children_mut()` is
+    // public trait surface, so a caller could in principle empty it; the
+    // library itself never does, and indexing `[0]` documents (and asserts)
+    // that contract.
 
     /// The hosted content subtree (the Scene's single child).
     pub(super) fn content(&self) -> &dyn Widget {
