@@ -1,15 +1,17 @@
 //! Scene demo — a pan/zoom canvas built on the framework's [`Scene`] container.
 //!
 //! Mirrors egui's `scene.rs` demo: a `Scene` with the default `0.1..=2.0` zoom
-//! range hosts mixed interactive content (buttons + labels) alongside a few
-//! painted shapes, a live `scene_rect` readout, a "Reset view" button, and
-//! double-click-to-reset on the background.  Replaces the old static
-//! hover-highlight `SceneWidget` that lived in `interaction.rs`.
+//! range hosts mixed interactive content (buttons, labels, and a text field)
+//! alongside a few painted shapes, a live `scene_rect` readout, a "Reset view"
+//! button, and double-click-to-reset on the background.  Replaces the old
+//! static hover-highlight `SceneWidget` that lived in `interaction.rs`.
 //!
 //! The content lives in a small [`SceneCanvas`] container that positions its
 //! child widgets at explicit scene-space coordinates and paints backdrop
-//! shapes; `Scene` applies the pan/zoom transform to both its painting and its
-//! pointer input so the hosted buttons stay clickable at any zoom.
+//! shapes; `Scene` injects the pan/zoom through the framework's
+//! `Widget::child_transform` hook, so the hosted widgets stay clickable —
+//! and keyboard-focusable — at any zoom (the text field accepts typing after a
+//! click or Tab).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -17,7 +19,7 @@ use std::sync::Arc;
 
 use agg_gui::{
     Button, Color, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Label, Point, Rect,
-    Scene, Separator, Size, SizedBox, Widget,
+    Scene, Separator, Size, SizedBox, TextField, Widget,
 };
 
 /// Fixed scene-space extent of the demo content.
@@ -168,6 +170,22 @@ impl SceneCanvas {
             format!("Clicks: {}", count_src.get())
         })));
         positions.push(Point::new(20.0, CONTENT_H - 120.0));
+
+        // A text field — proves keyboard focus reaches inside the Scene: click
+        // it (or Tab to it) at any zoom and typed characters land here, because
+        // the content is a first-class framework child under the Scene's
+        // pan/zoom transform.
+        children.push(Box::new(
+            SizedBox::new()
+                .with_width(200.0)
+                .with_height(30.0)
+                .with_child(Box::new(
+                    TextField::new(Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .with_placeholder("Type here (focus works!)"),
+                )),
+        ));
+        positions.push(Point::new(20.0, CONTENT_H - 160.0));
 
         // A hint label near the shapes.
         children.push(Box::new(
