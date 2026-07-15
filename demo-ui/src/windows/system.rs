@@ -33,17 +33,17 @@ use agg_gui::{
 pub struct SystemCells {
     pub font_name: Rc<RefCell<Option<String>>>,
     /// Index into `FONT_OPTIONS` matching `font_name`.  Shared between
-    /// every font-picker `ComboBox` (System window + LCD Subpixel demo)
-    /// via `with_selected_cell`, so picking a font in either window
-    /// updates the other live.  Kept in lock-step with `font_name` by
-    /// `apply_font_by_index` and the System window's combo callback.
+    /// every font-picker `ComboBox` in the app via `with_selected_cell`, so
+    /// picking a font in any of them updates the others live.  Kept in
+    /// lock-step with `font_name` by `apply_font_by_index` and the System
+    /// window's combo callback.
     pub font_index: Rc<Cell<usize>>,
     pub font_size_scale: Rc<Cell<f64>>,
     pub lcd_enabled: Rc<Cell<bool>>,
     pub hinting_enabled: Rc<Cell<bool>>,
-    // Typography-style mirrors — shared between this window's controls,
-    // the TrueType LCD Subpixel demo's controls, and the font_settings
-    // globals that (phase 2) the text render path will read.
+    // Typography-style mirrors — shared between this window's controls and
+    // the font_settings globals that (phase 2) the text render path will
+    // read.
     pub gamma: Rc<Cell<f64>>,
     pub width_scale: Rc<Cell<f64>>,
     pub interval: Rc<Cell<f64>>,
@@ -74,9 +74,9 @@ pub fn init_cells(cells: SystemCells) {
 /// Retrieve the registered cells.  Panics if `init_cells` wasn't called —
 /// the demo shell always calls it, so this is a bug if it ever fires.
 ///
-/// Exposed to sibling windows (e.g. the TrueType LCD Subpixel demo) that
-/// want to bind their own widgets to the same live cells — the whole
-/// point of this module's init-once pattern.
+/// Exposed to sibling modules and windows that want to bind their own
+/// widgets to the same live cells — the whole point of this module's
+/// init-once pattern.
 pub fn cells() -> SystemCells {
     CELLS.with(|c| c.borrow().clone().expect("system::init_cells not called"))
 }
@@ -90,19 +90,21 @@ pub fn try_cells() -> Option<SystemCells> {
 // ---------------------------------------------------------------------------
 
 pub fn system_view(font: Arc<Font>) -> Box<dyn Widget> {
-    // Single Font tab — typography settings only.  The previous Render tab
-    // (MSAA + Relaunch) was removed when MSAA moved out of the surface
-    // pipeline and onto the 3-D Animation widget itself: it's a per-frame
-    // bar-grid concern, applies live, and doesn't need its own settings
-    // panel.  Kept as a TabView for visual consistency and because new
-    // System-scoped tabs (audio, accessibility, …) may land here.
+    // Two tabs: "Font" holds the typography controls; "Sample Text" shows a
+    // live preview of those settings against reference paragraphs.  The
+    // preview absorbed the only non-duplicated half of the old stand-alone
+    // "LCD Subpixel" demo (its slider panel merely mirrored these same
+    // controls).  The previous Render tab (MSAA + Relaunch) was removed when
+    // MSAA moved onto the 3-D Animation widget itself.
     let font_tab = build_font_tab(Arc::clone(&font));
+    let sample_tab = super::lcd_sample_text::sample_text_tab(Arc::clone(&font));
     let cells = cells();
 
     Box::new(
         TabView::new(Arc::clone(&font))
             .with_font_size(13.0)
             .add_tab("Font", font_tab)
+            .add_tab("Sample Text", sample_tab)
             .with_active_tab_cell(Rc::clone(&cells.system_tab)),
     )
 }
@@ -136,9 +138,8 @@ fn build_font_tab(font: Arc<Font>) -> Box<dyn Widget> {
         body("Sets the system font for every widget that doesn't override it."),
         0.0,
     );
-    // Shared font picker — same widget used in the LCD Subpixel demo.
-    // Owns its cell binding, per-item font loading, and on-change
-    // apply-font wiring; picking a font here updates every other
+    // Shared font picker.  Owns its cell binding, per-item font loading, and
+    // on-change apply-font wiring; picking a font here updates every other
     // FontPicker in the app on the next layout.
     col.push(
         crate::font_picker::font_picker_with_size(Arc::clone(&font), 14.0),
@@ -258,10 +259,9 @@ fn build_font_tab(font: Arc<Font>) -> Box<dyn Widget> {
     // Six `Slider` widgets, each bound to one of the `SystemCells` f64
     // cells via `with_value_cell`.  The on_change side mirrors the cell
     // write through to `agg_gui::font_settings::*` — the global that
-    // (phase 2) the text render path will consume.  Cells + globals
-    // stay in lock-step so the TrueType LCD Subpixel demo's widgets,
-    // which bind to the same cells, move whenever anything here does
-    // and vice-versa.
+    // (phase 2) the text render path will consume.  Cells + globals stay
+    // in lock-step, and the adjacent "Sample Text" tab re-rasters against
+    // them so it previews every change live.
     col.push(heading("Typography style"), 0.0);
     col.push(
         body(

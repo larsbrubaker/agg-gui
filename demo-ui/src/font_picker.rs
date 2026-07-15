@@ -12,9 +12,9 @@
 //!   through to `font_settings::set_system_font`, the persisted
 //!   `font_name` cell, and the shared `font_index` cell
 //!
-//! Drop `font_picker(font)` in anywhere a font choice is exposed — the wiring
-//! (cell binding, lazy load request, on-change side-effects) is handled here so
-//! call sites stay one line.
+//! Drop `font_picker_with_size(font, size)` in anywhere a font choice is
+//! exposed — the wiring (cell binding, lazy load request, on-change
+//! side-effects) is handled here so call sites stay one line.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -28,20 +28,14 @@ use crate::windows::{
 
 /// Build a font-picker `ComboBox` ready to drop into any layout.
 ///
-/// `label_font` is the typeface used for the closed combo's
-/// selected-name label and unloaded dropdown entries. Pass any reasonable
-/// fallback (the window's body font is fine).
+/// `label_font` is the typeface used for the closed combo's selected-name
+/// label and unloaded dropdown entries. Pass any reasonable fallback (the
+/// window's body font is fine).  `font_size` sets the closed-combo's font
+/// size — 13 pt matches the System window's body widgets.
 ///
-/// The returned box is the picker itself — no wrapping.  All
-/// font-picker behaviour comes from `ComboBox`'s built-in features
-/// plus the cell-binding + on-change wiring set up here.
-pub fn font_picker(label_font: Arc<Font>) -> Box<dyn Widget> {
-    font_picker_with_size(label_font, 13.0)
-}
-
-/// Variant that lets the caller override the closed-combo's font size
-/// (default is 13 pt to match the System window's body widgets).  Use
-/// when the picker sits in a denser or sparser layout context.
+/// The returned box is the picker itself — no wrapping.  All font-picker
+/// behaviour comes from `ComboBox`'s built-in features plus the
+/// cell-binding + on-change wiring set up here.
 pub fn font_picker_with_size(label_font: Arc<Font>, font_size: f64) -> Box<dyn Widget> {
     let cells = cells();
     let names = font_option_names();

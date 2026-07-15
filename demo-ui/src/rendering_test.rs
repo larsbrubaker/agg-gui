@@ -417,7 +417,7 @@ struct PixelTestLinesBitmap {
     /// 5-tap filter is mathematically guaranteed to smear at the
     /// 1-pixel-stripe Nyquist frequency, so no amount of pipeline
     /// tweaking can recover parity).  The LCD raster pipeline has its
-    /// own validation in the LCD Subpixel demo.
+    /// own validation in the System window's Sample Text tab.
     bitmap_vertical: Option<Arc<Vec<u8>>>,
     bitmap_horizontal: Option<Arc<Vec<u8>>>,
 }
