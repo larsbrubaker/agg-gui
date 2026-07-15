@@ -160,6 +160,7 @@ impl Widget for TextArea {
         self.bounds = Rect::new(0.0, 0.0, w, h);
         let inner_w = (w - self.padding * 2.0).max(1.0);
         self.refresh_wrap(inner_w);
+        self.sync_scroll();
         Size::new(w, h)
     }
 
@@ -289,6 +290,10 @@ impl Widget for TextArea {
             4.0,
         );
         ctx.stroke();
+
+        // Vertical scroll bar (floating overlay), drawn over the content but
+        // inside the border. Uses the global scroll style for consistency.
+        self.paint_scrollbar(ctx);
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
@@ -318,6 +323,17 @@ impl Widget for TextArea {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
+                // Scroll bar takes priority: continue a thumb drag, or update
+                // its hover state before the text-hover / selection logic.
+                let bar_hover_changed = match self.scrollbar_on_mouse_move(*pos) {
+                    super::scroll::ScrollMove::Dragging(moved) => {
+                        if moved {
+                            crate::animation::request_draw();
+                        }
+                        return EventResult::Consumed;
+                    }
+                    super::scroll::ScrollMove::Hover(changed) => changed,
+                };
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
                 if self.hovered {
@@ -329,7 +345,7 @@ impl Widget for TextArea {
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
-                if was != self.hovered {
+                if was != self.hovered || bar_hover_changed {
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -340,6 +356,11 @@ impl Widget for TextArea {
                 pos,
                 modifiers,
             } => {
+                // Grabbing the scroll thumb must not also place the caret.
+                if self.scrollbar_begin_drag(*pos) {
+                    crate::animation::request_draw();
+                    return EventResult::Consumed;
+                }
                 let off = self.byte_offset_at(*pos);
                 self.move_cursor_to(off, /*with_selection=*/ modifiers.shift);
                 self.selecting_drag = true;
@@ -350,8 +371,17 @@ impl Widget for TextArea {
                 button: MouseButton::Left,
                 ..
             } => {
+                self.scrollbar_end_drag();
                 self.selecting_drag = false;
                 EventResult::Consumed
+            }
+            Event::MouseWheel { delta_y, .. } => {
+                if self.scroll_by_wheel(*delta_y) {
+                    crate::animation::request_draw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             Event::FocusGained => {
                 self.focused = true;
@@ -460,6 +490,9 @@ impl Widget for TextArea {
                     }
                     _ => return EventResult::Ignored,
                 }
+                // Keep the caret on-screen after any edit or navigation
+                // (re-wraps if the edit dirtied the cache, then scrolls).
+                self.ensure_cursor_visible();
                 self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
@@ -486,6 +519,7 @@ impl Widget for TextArea {
     }
 
     fn needs_draw(&self) -> bool {
-        self.focused
+        // Focused → cursor blink; scrollbar animating → fade/expand tween.
+        self.focused || self.scrollbar_animating()
     }
 }

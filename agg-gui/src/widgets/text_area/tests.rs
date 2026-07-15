@@ -369,6 +369,104 @@ fn on_change_silent_for_intercept_without_text_edit() {
     assert_eq!(changed.get(), 0, "no text change → no on_change");
 }
 
+// ── (h) internal vertical scrolling ─────────────────────────────────────────
+//
+// Exercises the scroll-to-cursor math and wheel handling against the real
+// widget. `multiline(n, w, h)` builds a TextArea with `n` hard-broken lines in
+// an `h`-tall box; a small box makes the content overflow so `max_scroll_y > 0`.
+
+/// Build a laid-out TextArea whose content is `n` hard-broken lines. The
+/// initial cursor sits at the end (last line), matching `with_text`.
+fn multiline(n: usize, w: f64, h: f64) -> TextArea {
+    let text = (0..n).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+    laid_out(
+        TextArea::new(font()).with_font_size(13.0).with_text(text),
+        w,
+        h,
+    )
+}
+
+#[test]
+fn scroll_to_cursor_reveals_last_line_and_first_line() {
+    let mut ta = multiline(12, 200.0, 80.0);
+    let max = ta.max_scroll_y();
+    assert!(max > 0.0, "12 lines in an 80px box must overflow; max={max}");
+
+    // Cursor is at the end → scroll should pin the bottom of the last line to
+    // the bottom of the viewport, i.e. offset == max_scroll.
+    ta.ensure_cursor_visible();
+    assert!(
+        (ta.scroll_offset() - max).abs() < 0.5,
+        "caret at end must scroll to bottom: off={} max={max}",
+        ta.scroll_offset()
+    );
+
+    // Move the caret to the very start → scroll back to the top.
+    ta.set_cursor_to_start();
+    ta.ensure_cursor_visible();
+    assert_eq!(
+        ta.scroll_offset(),
+        0.0,
+        "caret at start must scroll to the top"
+    );
+}
+
+#[test]
+fn caret_geometry_moves_on_screen_after_scroll_to_cursor() {
+    // Before scrolling, the last line sits below the viewport (negative Y in
+    // the Y-up frame); after scroll-to-cursor it lands inside [0, height].
+    let mut ta = multiline(12, 200.0, 80.0);
+    let cursor = ta.cursor();
+    let y_before = ta.pos_for_cursor(cursor).y;
+    assert!(
+        y_before < 0.0,
+        "caret should start off the bottom of the viewport, got y={y_before}"
+    );
+    ta.ensure_cursor_visible();
+    let y_after = ta.pos_for_cursor(cursor).y;
+    assert!(
+        (0.0..=80.0).contains(&y_after),
+        "caret must be on-screen after scroll: y={y_after}"
+    );
+}
+
+#[test]
+fn content_that_fits_never_scrolls() {
+    let mut ta = multiline(3, 300.0, 300.0);
+    assert_eq!(ta.max_scroll_y(), 0.0, "3 lines fit a 300px box");
+    ta.ensure_cursor_visible();
+    assert_eq!(ta.scroll_offset(), 0.0);
+    assert!(
+        !ta.scroll_by_wheel(-40.0),
+        "wheel is a no-op when nothing overflows"
+    );
+    assert_eq!(ta.scroll_offset(), 0.0);
+}
+
+#[test]
+fn wheel_scrolls_within_bounds_and_clamps() {
+    let mut ta = multiline(12, 200.0, 80.0);
+    let max = ta.max_scroll_y();
+
+    // Positive delta means "see content above"; a negative delta scrolls the
+    // content down (offset grows).
+    assert!(ta.scroll_by_wheel(-40.0), "wheel must move the offset");
+    assert!(ta.scroll_offset() > 0.0);
+
+    // Spinning far down clamps at max_scroll (and then reports no movement).
+    for _ in 0..50 {
+        ta.scroll_by_wheel(-40.0);
+    }
+    assert!((ta.scroll_offset() - max).abs() < 0.5);
+    assert!(!ta.scroll_by_wheel(-40.0), "clamped at the bottom");
+
+    // Spinning back up returns to the top.
+    for _ in 0..50 {
+        ta.scroll_by_wheel(40.0);
+    }
+    assert_eq!(ta.scroll_offset(), 0.0);
+}
+
 // ── (g) highlight segmentation ──────────────────────────────────────────────
 //
 // The highlighter paint path must split a line into gap-free, non-overlapping
