@@ -1,10 +1,59 @@
 ﻿use super::*;
 use crate::color::Color;
 
+/// Split a highlighted line into gap-free, non-overlapping colour segments
+/// covering `[0, text.len())` exactly once.
+///
+/// Bytes covered by a valid span take that span's colour; every uncovered
+/// gap takes `base_color`. This is the segmentation the AA text path needs:
+/// each glyph is emitted by exactly one segment, so highlighted tokens never
+/// accumulate a second alpha pass on their fringes (which made them look
+/// subtly bolder) and no fill work is duplicated.
+///
+/// Spans are validated defensively — reversed, out-of-range, or
+/// non-char-boundary spans are dropped. Spans are processed in start order
+/// and the first span to cover a byte wins any overlap, so the output stays
+/// strictly non-overlapping even if a highlighter hands back sloppy ranges.
+pub(crate) fn segment_highlight(
+    text: &str,
+    spans: &[(usize, usize, Color)],
+    base_color: Color,
+) -> Vec<(usize, usize, Color)> {
+    let len = text.len();
+    let mut valid: Vec<(usize, usize, Color)> = spans
+        .iter()
+        .copied()
+        .filter(|&(s, e, _)| {
+            s < e && e <= len && text.is_char_boundary(s) && text.is_char_boundary(e)
+        })
+        .collect();
+    valid.sort_by_key(|&(s, _, _)| s);
+
+    let mut out: Vec<(usize, usize, Color)> = Vec::new();
+    let mut pos = 0usize;
+    for (s, e, color) in valid {
+        if e <= pos {
+            // Fully behind already-emitted output — first span won this byte.
+            continue;
+        }
+        // Clamp a partially overlapping start up to the emitted frontier.
+        let s = s.max(pos);
+        if s > pos {
+            out.push((pos, s, base_color)); // uncovered gap
+        }
+        out.push((s, e, color));
+        pos = e;
+    }
+    if pos < len {
+        out.push((pos, len, base_color));
+    }
+    out
+}
+
 impl TextArea {
-    /// Paint one wrapped line with syntax-highlight runs on top of an
-    /// ambient-colour base pass. Byte offsets in `spans` are relative to
-    /// `text`; out-of-range or non-boundary spans are skipped defensively.
+    /// Paint one wrapped line as gap-free, non-overlapping colour segments so
+    /// every glyph is filled exactly once (see [`segment_highlight`]). Byte
+    /// offsets in `spans` are relative to `text`.
     fn paint_highlighted_line(
         &self,
         ctx: &mut dyn DrawCtx,
@@ -14,18 +63,7 @@ impl TextArea {
         baseline_y: f64,
         base_color: Color,
     ) {
-        // Base pass: any bytes no run covers keep the ambient text colour.
-        ctx.set_fill_color(base_color);
-        ctx.fill_text(text, x0, baseline_y);
-        // Coloured runs, positioned by measuring the prefix advance.
-        for &(s, e, color) in spans {
-            if e <= s
-                || e > text.len()
-                || !text.is_char_boundary(s)
-                || !text.is_char_boundary(e)
-            {
-                continue;
-            }
+        for (s, e, color) in segment_highlight(text, spans, base_color) {
             let x = x0 + measure_advance(&self.font, &text[..s], self.font_size);
             ctx.set_fill_color(color);
             ctx.fill_text(&text[s..e], x, baseline_y);

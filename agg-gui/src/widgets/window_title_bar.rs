@@ -138,7 +138,6 @@ impl WindowTitleBar {
         self.collapsed.set(collapsed);
     }
 
-    #[allow(dead_code)]
     pub fn set_title(&mut self, title: &str) {
         // children[1] is the label (children[0] is the chevron).
         self.children[1].set_label_text(title);
