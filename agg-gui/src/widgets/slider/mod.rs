@@ -65,6 +65,9 @@ impl Default for HandleShape {
 
 /// Pixels of "aim radius" used when smart aim is on: the drag samples the value
 /// a little to each side of the pointer and snaps to the roundest value between.
+/// Deviation from egui: there this comes from `InputState::aim_radius()` (varies
+/// per input device); we use a fixed mouse-like radius since agg-gui's event
+/// layer doesn't carry per-device precision yet.
 const AIM_RADIUS: f64 = 1.5;
 /// Track length (px) of a vertical slider.
 const VERT_LEN: f64 = 140.0;
@@ -168,7 +171,9 @@ pub struct Slider {
 
 impl Slider {
     pub fn new(value: f64, min: f64, max: f64, font: Arc<Font>) -> Self {
-        let v = value.clamp(min, max);
+        // Not `f64::clamp` — that panics when min > max, and reversed
+        // (high-to-low) ranges are supported by the mapping in `slider_math`.
+        let v = clamp_value_to_range(value, min, max);
         let font_size = 12.0;
         let value_label = Label::new("", Arc::clone(&font))
             .with_font_size(font_size)
@@ -286,7 +291,8 @@ impl Slider {
     /// will drive this slider live; drag interactions here write back
     /// to the cell too.  Pattern mirrors `ToggleSwitch::with_state_cell`.
     pub fn with_value_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
-        self.props.value = cell.get().clamp(self.props.min, self.props.max);
+        // Reversed-range/NaN tolerant — see the note in `new`.
+        self.props.value = clamp_value_to_range(cell.get(), self.props.min, self.props.max);
         self.value_cell = Some(cell);
         self
     }
@@ -672,5 +678,40 @@ impl Widget for Slider {
             }
             _ => EventResult::Ignored,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+
+    fn test_font() -> Arc<Font> {
+        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    /// `slider_math` deliberately supports reversed (high-to-low) ranges, so
+    /// constructing a slider with one must not panic — `f64::clamp` does when
+    /// min > max.
+    #[test]
+    fn new_with_reversed_range_does_not_panic() {
+        let s = Slider::new(5.0, 10.0, 0.0, test_font());
+        assert_eq!(s.value(), 5.0);
+        // Out-of-range values clamp to the nearer end of the ordered range.
+        let s = Slider::new(-1.0, 10.0, 0.0, test_font());
+        assert_eq!(s.value(), 0.0);
+    }
+
+    /// Same for the external-cell binding, which clamps on construction and on
+    /// every layout read.
+    #[test]
+    fn value_cell_with_reversed_range_does_not_panic() {
+        let cell = Rc::new(Cell::new(42.0));
+        let mut s = Slider::new(5.0, 10.0, 0.0, test_font()).with_value_cell(Rc::clone(&cell));
+        assert_eq!(s.value(), 10.0);
+        cell.set(-3.0);
+        let _ = s.layout(Size::new(200.0, 22.0));
+        assert_eq!(s.value(), 0.0);
     }
 }

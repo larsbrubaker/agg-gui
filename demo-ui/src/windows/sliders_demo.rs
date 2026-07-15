@@ -152,10 +152,13 @@ fn build_demo_slider(cfg: &SliderConfig, font: &Arc<Font>) -> Box<dyn Widget> {
     col.push(Box::new(slider), 0.0);
 
     if !cfg.integer.get() {
+        // deviation: egui adds "You can always see the full precision value by
+        // hovering the value." — our value label has no hover tooltip (Tooltip
+        // text is static, and the slider only rebuilds on config changes, so a
+        // tooltip would go stale mid-drag), so that sentence is dropped.
         col.push(
             label(
-                "Sliders will intelligently pick how many decimals to show. \
-                 You can always see the full precision value by hovering the value.",
+                "Sliders will intelligently pick how many decimals to show.",
                 font,
             ),
             0.0,
@@ -213,9 +216,12 @@ pub fn sliders(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(16.0)
         .with_panel_bg();
 
+    // deviation: egui says "You can click a slider value to edit it with the
+    // keyboard." — our value strip is a plain Label (no inline editing), so
+    // describe the keyboard interaction that actually works here.
     col.push(
         label(
-            "You can click a slider value to edit it with the keyboard.",
+            "Focus a slider and use the arrow keys to nudge its value.",
             &font,
         ),
         0.0,
