@@ -5,7 +5,8 @@ use std::sync::Arc;
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
     Button, Checkbox, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult, FlexColumn,
-    FlexRow, Font, Label, RadioGroup, Rebuilder, Rect, ScrollView, Size, SizedBox, Slider, Widget,
+    FlexRow, Font, Label, RadioGroup, Rebuilder, Rect, Resize, ScrollView, Size, SizedBox, Slider,
+    Widget,
 };
 
 use super::tree_section::tree_section;
@@ -573,6 +574,35 @@ fn build_columns(font: &Arc<Font>, num_columns: &Rc<Cell<f64>>) -> Box<dyn Widge
     Box::new(row)
 }
 
+/// Build the Resize section content — a user-draggable `Resize` area with the
+/// same explanatory text egui shows (`misc_demo_window.rs` "Resize" header).
+/// Pull the SE handle to resize the region; egui's default height is 100.
+fn resize_section(font: &Arc<Font>) -> Box<dyn Widget> {
+    // `top_anchor` keeps the labels pinned to the top of the frame when the
+    // user drags the region taller, matching egui's top-down layout.
+    let mut inner = FlexColumn::new()
+        .with_gap(4.0)
+        .with_padding(8.0)
+        .with_top_anchor(true);
+    inner.push(
+        Box::new(Label::new("This ui can be resized!", Arc::clone(font)).with_font_size(12.0)),
+        0.0,
+    );
+    inner.push(
+        Box::new(
+            Label::new("Just pull the handle on the bottom right", Arc::clone(font))
+                .with_font_size(12.0),
+        ),
+        0.0,
+    );
+    Box::new(
+        Resize::new(Box::new(inner))
+            .with_default_size(Size::new(250.0, 100.0))
+            .with_min_size_hint(Size::new(80.0, 40.0))
+            .with_max_size_hint(Size::new(4000.0, 3000.0)),
+    )
+}
+
 /// Build the Misc Demos window — ✨ Misc Demos — matching egui's CollapsingHeader layout.
 ///
 /// Each section is a `CollapsingHeader` (click to expand/collapse), matching
@@ -649,6 +679,16 @@ pub fn misc_demos(font: Arc<Font>) -> Box<dyn Widget> {
             CollapsingHeader::new("Test box rendering", Arc::clone(&font))
                 .default_open(false)
                 .with_content(box_rendering_section(&font)),
+        ),
+        0.0,
+    );
+
+    // ── Resize (default closed) ──────────────────────────────────────────────
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Resize", Arc::clone(&font))
+                .default_open(false)
+                .with_content(resize_section(&font)),
         ),
         0.0,
     );
