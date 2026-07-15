@@ -200,7 +200,7 @@ impl App {
         }
         let viewport = self.viewport_size;
         crate::widgets::combo_box::begin_combo_popup_frame(viewport);
-        crate::widgets::tooltip::begin_tooltip_frame();
+        crate::widgets::tooltip::begin_tooltip_frame(viewport);
         // Recompute the multi-touch aggregate once per paint and publish
         // to the thread-local — widgets read it during `on_event` or
         // `paint` without an explicit `&App` reference.
