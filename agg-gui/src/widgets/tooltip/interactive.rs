@@ -90,11 +90,18 @@ impl Tooltip {
     }
 
     /// Reset all interactive open-state and clear any nested content hover.
+    ///
+    /// Also clears the anchor-hover timer: a keyboard close (Escape) is not
+    /// followed by a mouse-move, so `hovered`/`hover_started_at` would otherwise
+    /// still read "past the delay" and `update_interactive_state` would reopen
+    /// the tip on the very next frame. Clearing the timer makes the close stick
+    /// until the pointer leaves and re-enters the anchor.
     pub(super) fn close_tip(&mut self) {
         self.tip_open = false;
         self.tip_hovered = false;
         self.close_requested_at = None;
         self.tip_panel_local = None;
+        self.hover_started_at = None;
         self.clear_content_hover();
     }
 
@@ -267,9 +274,9 @@ impl Tooltip {
             }
             Event::MouseWheel { .. } => {
                 // Scrolling dismisses the tip (matches lightweight behaviour and
-                // egui's scroll-test expectation).
+                // egui's scroll-test expectation). `close_tip` clears the hover
+                // timer; drop the anchor-hover flag too so it does not re-arm.
                 self.hovered = false;
-                self.hover_started_at = None;
                 self.close_tip();
                 crate::animation::request_draw();
                 self.children
@@ -317,6 +324,10 @@ impl Tooltip {
         };
         let result = match hit_test_subtree(content.as_ref(), cpos) {
             Some(path) => dispatch_event_dyn(content.as_mut(), &path, event, cpos),
+            // A click on the panel's padding (inside the panel but off any child)
+            // is intentionally swallowed: the caller already claimed the pointer
+            // via `hit_test_global_overlay`, so returning `Ignored` here does NOT
+            // fall through to whatever sits under the floating tip.
             None => EventResult::Ignored,
         };
         self.content = Some(content);

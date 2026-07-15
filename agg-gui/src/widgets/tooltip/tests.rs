@@ -182,6 +182,29 @@ fn escape_closes_interactive_tip() {
 }
 
 #[test]
+fn escape_close_sticks_while_still_hovering_anchor() {
+    // Regression: Escape closes the tip, but a key press is not followed by a
+    // mouse-move, so `hovered` stays true and `hover_started_at` stays in the
+    // past. `update_interactive_state` must NOT reopen the tip on the next
+    // frame — reopening requires leaving and re-entering the anchor.
+    let mut t = interactive_tooltip(Arc::new(AtomicUsize::new(0)));
+    t.hovered = true;
+    t.hover_started_at = Some(Instant::now() - (TOOLTIP_INITIAL_DELAY + Duration::from_millis(20)));
+    t.tip_open = true;
+
+    assert_eq!(
+        t.on_unconsumed_key(&Key::Escape, Modifiers::default()),
+        EventResult::Consumed
+    );
+    assert!(!t.tip_open);
+
+    // Next frame's overlay pass: still hovering the anchor, delay already
+    // elapsed. Must stay closed.
+    t.update_interactive_state();
+    assert!(!t.tip_open);
+}
+
+#[test]
 fn interactive_forwards_click_into_content() {
     let clicks = Arc::new(AtomicUsize::new(0));
     let mut t = interactive_tooltip(clicks.clone());
