@@ -88,3 +88,11 @@ Improve code when it serves a purpose, not for aesthetics.
 
 This project uses **PowerShell** on Windows for build scripts. Claude Code's shell tool
 runs bash/Linux, so adapt commands accordingly.
+
+## Orchestration pattern
+
+The main session (Fable 5) acts as planner and orchestrator only — it should not
+write or edit code directly. All implementation is delegated to the `implementer`
+subagent, one scoped step at a time. All post-change review is delegated to the
+`reviewer` subagent. The main session handles only planning, architecture decisions,
+and synthesizing subagent results.
