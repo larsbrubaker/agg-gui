@@ -150,7 +150,10 @@ pub fn font_book(font: Arc<Font>) -> Box<dyn Widget> {
                 .add(Box::new(
                     Label::new("Font:", Arc::clone(&font)).with_font_size(13.0),
                 ))
-                .add(crate::font_picker::font_picker(Arc::clone(&font))),
+                .add(crate::font_picker::font_picker_with_size(
+                    Arc::clone(&font),
+                    13.0,
+                )),
         ),
         0.0,
     );
