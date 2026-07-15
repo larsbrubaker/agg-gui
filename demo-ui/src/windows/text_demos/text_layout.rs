@@ -636,5 +636,9 @@ pub fn text_layout(font: Arc<Font>) -> Box<dyn Widget> {
     );
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+    col.push(
+        crate::windows::helpers::source_link("text_demos/text_layout.rs", Arc::clone(&font)),
+        0.0,
+    );
     Box::new(ScrollView::new(Box::new(col)))
 }

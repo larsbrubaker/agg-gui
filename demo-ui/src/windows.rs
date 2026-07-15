@@ -16,6 +16,7 @@ mod code_example;
 mod font_book;
 mod frame_demo;
 mod gallery;
+mod helpers;
 mod interaction;
 mod lion;
 mod menu_demo;

@@ -100,23 +100,15 @@ impl ResizeTestWindow {
     }
 }
 
-/// URL of the source file containing the six Window Resize Test
-/// sub-window builders — surfaced via the "(source code)" footer
-/// link on each window so developers can see exactly how each
-/// layout was assembled, matching egui's `egui_github_link_file!`
-/// pattern in the original demo.
-const RESIZE_TEST_SOURCE_URL: &str =
-    "https://github.com/larsbrubaker/agg-gui/blob/main/demo-ui/src/windows/tests.rs";
-
 /// Helper: a small "(source code)" hyperlink that opens the test
 /// source file in a browser.  Callers push this as the final child
 /// of each sub-window's root column, just like egui's demo.
+///
+/// Delegates to the shared [`crate::windows::helpers::source_link`] so the
+/// URL tracks the real implementation file (`tests/resize.rs`) after the
+/// `tests.rs` module split, matching egui's `egui_github_link_file!` footer.
 fn source_link(font: Arc<Font>) -> Box<dyn Widget> {
-    Box::new(
-        Hyperlink::new("(source code)", font)
-            .with_font_size(11.0)
-            .on_click(|| crate::url::open_url(RESIZE_TEST_SOURCE_URL)),
-    )
+    crate::windows::helpers::source_link("tests/resize.rs", font)
 }
 
 /// Build the six sub-windows for the Window Resize Test, mirroring
@@ -393,6 +385,15 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
             Box::new(
                 TextArea::new(Arc::clone(&font))
                     .with_font_size(12.5)
+                    // egui seeds this with LOREM_IPSUM_LONG, but egui's
+                    // TextEdit::multiline scrolls internally so the long
+                    // text stays inside the fixed-height window.  agg-gui's
+                    // TextArea has no internal scroll and W5 is `floor_fit`
+                    // (window grows to fit ALL content, never clips), so a
+                    // LONG seed would force the window taller than its
+                    // on-screen slot / the canvas — breaking the W5
+                    // "no off-screen text" contract.  Keep the short seed
+                    // until TextArea gains internal vertical scrolling.
                     .with_text(LOREM_IPSUM),
             ),
             1.0,

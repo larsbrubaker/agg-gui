@@ -128,8 +128,8 @@ pub struct BackbufferCache {
     /// [`crate::font_settings::current_typography_epoch`]) — same
     /// pattern as `theme_epoch` but for font / size scale / LCD /
     /// hinting / gamma / width / interval / faux-* globals.  Lets a
-    /// slider drag in the LCD Subpixel demo invalidate every cached
-    /// `Label` bitmap without bespoke hooks per widget.
+    /// slider drag in the System window's typography controls invalidate
+    /// every cached `Label` bitmap without bespoke hooks per widget.
     pub typography_epoch: u64,
     /// Async-state epoch (see
     /// [`crate::animation::async_state_epoch`]) — bumped when an

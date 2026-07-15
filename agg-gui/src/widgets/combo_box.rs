@@ -305,6 +305,15 @@ impl ComboBox {
         self.selected
     }
 
+    /// Whether the dropdown popup is currently open.  Callers that host a
+    /// combo inside their own overlay (e.g. the Modals demo) use this to
+    /// route an Escape key press to the open dropdown first, matching
+    /// egui's rule that closing a popup takes priority over closing the
+    /// surrounding modal.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
     pub fn set_selected(&mut self, idx: usize) {
         if idx < self.options.len() {
             self.selected = idx;
@@ -575,8 +584,8 @@ impl Widget for ComboBox {
                         // change the index without swapping the face,
                         // leaving the closed combo showing the new
                         // name in the OLD typeface — the bug visible
-                        // when the LCD Subpixel demo's font picker
-                        // showed e.g. "Bangers" in Cascadia Code.
+                        // when the System window's font picker showed
+                        // e.g. "Bangers" in Cascadia Code.
                         self.set_selected(i);
                         self.open = false;
                         self.hovered_item = None;

@@ -231,7 +231,11 @@ pub fn frame_demo(font: Arc<Font>) -> Box<dyn Widget> {
             field_row(stroke_editor(&st, Arc::clone(&font))),
             Arc::clone(&font),
         ))
-        .add(Box::new(reset));
+        .add(Box::new(reset))
+        .add(crate::windows::helpers::source_link(
+            "frame_demo.rs",
+            Arc::clone(&font),
+        ));
 
     // ── Right column: live preview ──────────────────────────────────────────
     let preview = FramePreview {

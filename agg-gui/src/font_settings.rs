@@ -84,8 +84,8 @@ thread_local! {
     /// metrics — the pragmatic compromise used by the agg-rust reference.
     static HINTING_ENABLED: RefCell<bool> = RefCell::new(false);
 
-    // ── Typography-style parameters (drive the TrueType LCD Subpixel demo
-    // and, once the render pipeline is wired up, every text paint
+    // ── Typography-style parameters (driven by the System window's
+    // typography controls / Sample Text tab, and every text paint
     // globally).  Ranges mirror the agg-rust `truetype_test` demo so
     // numbers stay comparable against the reference implementation.
 
@@ -216,7 +216,7 @@ pub fn set_hinting_enabled(on: bool) {
 // All six follow the same shape: an immutable thread-local, a getter,
 // and a clamping setter.  The clamp ranges mirror the agg-rust
 // `truetype_test` demo so results stay numerically comparable.  Callers
-// (System window widgets + the TrueType LCD Subpixel demo) bind to
+// (the System window's typography controls / Sample Text tab) bind to
 // these via `Rc<Cell<f64>>` mirrors owned by `SystemCells`; the global
 // is the source-of-truth for rendering, the cell is the source-of-truth
 // for UI widgets and disk persistence.
