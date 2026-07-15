@@ -40,6 +40,11 @@ pub struct ChevronWidget {
     /// downcast through the children Vec. Defaults to white so a
     /// caller that never wires the cell still gets a visible glyph.
     color: Rc<Cell<Color>>,
+    /// Shared "affordance active" flag. When `false` the chevron paints
+    /// nothing and ignores clicks — lets a parent hide the collapse
+    /// affordance at runtime (e.g. a Window whose `collapsible` flag is
+    /// toggled off) without rebuilding the widget tree. Defaults to `true`.
+    enabled: Rc<Cell<bool>>,
     /// Invoked on left-click. Parents put their toggle logic in here.
     on_click: Option<Box<dyn FnMut()>>,
 }
@@ -54,8 +59,16 @@ impl ChevronWidget {
             children: Vec::new(),
             collapsed,
             color: Rc::new(Cell::new(Color::white())),
+            enabled: Rc::new(Cell::new(true)),
             on_click: None,
         }
+    }
+
+    /// Share the "affordance active" cell with the parent. When the parent
+    /// sets it to `false`, the chevron becomes invisible and non-interactive.
+    pub fn with_enabled_cell(mut self, cell: Rc<Cell<bool>>) -> Self {
+        self.enabled = cell;
+        self
     }
 
     /// Wire a left-click handler. Typical implementations flip the
@@ -100,19 +113,26 @@ impl Widget for ChevronWidget {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if !self.enabled.get() {
+            return;
+        }
         let cx = self.bounds.width * 0.5;
         let cy = self.bounds.height * 0.5;
         paint_chevron(ctx, cx, cy, self.collapsed.get(), self.color.get());
     }
 
     fn hit_test(&self, local: Point) -> bool {
-        local.x >= 0.0
+        self.enabled.get()
+            && local.x >= 0.0
             && local.x <= self.bounds.width
             && local.y >= 0.0
             && local.y <= self.bounds.height
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if !self.enabled.get() {
+            return EventResult::Ignored;
+        }
         if let Event::MouseDown {
             button: MouseButton::Left,
             ..

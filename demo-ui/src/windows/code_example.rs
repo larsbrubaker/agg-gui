@@ -135,10 +135,6 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
     let fg = Color::rgba(0.88, 0.90, 0.93, 1.0);
     let code_bg = Color::rgb(0.12, 0.13, 0.15);
 
-    // Suppress unused-variable warning — kw is here for completeness with the
-    // palette even though this demo currently uses only a subset of colors.
-    let _ = kw;
-
     /// Build a one-line syntax-colored code label.
     fn code_line(text: &str, color: Color, font: &Arc<Font>) -> Box<dyn Widget> {
         Box::new(
@@ -175,6 +171,28 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
         .with_gap(10.0)
         .with_padding(12.0)
         .with_panel_bg();
+
+    // ── Source context (above the grid) ───────────────────────────────────────
+    // egui's Code Example frames the interactive grid with the surrounding
+    // `struct` / `impl` source. We reproduce that header verbatim as a
+    // full-width syntax-colored block.
+    col.push(
+        code_box(
+            vec![
+                code_line("pub struct CodeExample {", kw, &font),
+                code_line("    name: String,", fg, &font),
+                code_line("    age: u32,", fg, &font),
+                code_line("}", fg, &font),
+                code_line("", fg, &font),
+                code_line("impl CodeExample {", kw, &font),
+                code_line("    fn ui(&mut self, ui: &mut egui::Ui) {", fn_, &font),
+                code_line("        // Saves us from writing `&mut self.name` etc", dim, &font),
+                code_line("        let Self { name, age } = self;", fg, &font),
+            ],
+            code_bg,
+        ),
+        0.0,
+    );
 
     // ── Heading row ───────────────────────────────────────────────────────────
     col.push(
@@ -307,6 +325,20 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
                 Rc::clone(&age),
                 Arc::clone(&font),
             )),
+        ),
+        0.0,
+    );
+
+    // ── Source context (below the grid) ───────────────────────────────────────
+    // Closing braces of `fn ui` and `impl`, mirroring egui's
+    // `crate::rust_view_ui(ui, "    }\n}")` after the grid.
+    col.push(
+        code_box(
+            vec![
+                code_line("    }", fg, &font),
+                code_line("}", fg, &font),
+            ],
+            code_bg,
         ),
         0.0,
     );

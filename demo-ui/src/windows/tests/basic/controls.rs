@@ -13,9 +13,10 @@ use agg_gui::framebuffer::unpremultiply_rgba_inplace;
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
     render_svg_at_size, render_svg_to_framebuffer_at_size, render_svg_to_lcd_buffer_at_size,
-    set_cursor_icon, Color, Container, CursorIcon, DrawCtx, Event, EventResult, FlexColumn,
-    FlexRow, Font, Hyperlink, Label, MouseButton, Point, Rect, Resize, ScrollBarVisibility,
-    ScrollView, Separator, Size, SizedBox, TextArea, TextField, Visuals, Widget,
+    set_cursor_icon, Checkbox, Color, Container, CursorIcon, DrawCtx, Event, EventResult,
+    FlexColumn, FlexRow, Font, Hyperlink, Label, MouseButton, Point, Rect, Resize,
+    ScrollBarVisibility, ScrollView, Separator, Size, SizedBox, TextArea, TextField, Visuals,
+    Widget,
 };
 
 // ---------------------------------------------------------------------------
@@ -363,29 +364,72 @@ pub fn grid_test(font: Arc<Font>) -> Box<dyn Widget> {
 // Input Event History
 // ---------------------------------------------------------------------------
 
-/// Records the last N events and renders them as a scrollable list.
+/// A deduplicated history row: consecutive identical `summary`s coalesce into
+/// one entry with an incrementing `count` (egui's `DeduplicatedHistory`).
+/// `full` keeps the detailed debug string (position, etc.) of the most recent
+/// occurrence — retained for a future per-row tooltip (see the module notes).
+struct HistoryEntry {
+    summary: String,
+    count: usize,
+    full: String,
+}
+
+const EVENT_LINE_H: f64 = 18.0;
+const EVENT_HISTORY_CAP: usize = 1000;
+
+/// Records raw input events (deduplicated) and renders them as a tall content
+/// widget meant to live inside a [`ScrollView`].  `include_movements` gates
+/// `MouseMove` recording, matching egui's "Include pointer/mouse movements"
+/// checkbox (off by default).
 struct EventHistoryWidget {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     font: Arc<Font>,
-    events: Vec<String>,
-    max: usize,
+    /// Newest at index 0.
+    history: Vec<HistoryEntry>,
+    include_movements: Rc<Cell<bool>>,
+    /// Shared with the wrapping `ScrollView` so the content can size itself to
+    /// at least fill the viewport (keeps the whole box interactive/recordable
+    /// even when there are only a handful of events).
+    viewport: Rc<Cell<Rect>>,
 }
 
 impl EventHistoryWidget {
-    fn new(font: Arc<Font>) -> Self {
+    fn new(font: Arc<Font>, include_movements: Rc<Cell<bool>>, viewport: Rc<Cell<Rect>>) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
             font,
-            events: Vec::new(),
-            max: 20,
+            history: Vec::new(),
+            include_movements,
+            viewport,
         }
     }
 
-    fn push_event(&mut self, s: String) {
-        self.events.insert(0, s);
-        self.events.truncate(self.max);
+    /// Add an event, coalescing with the newest entry if the summary matches.
+    fn add(&mut self, summary: String, full: String) {
+        if let Some(first) = self.history.first_mut() {
+            if first.summary == summary {
+                first.count += 1;
+                first.full = full;
+                return;
+            }
+        }
+        self.history.insert(
+            0,
+            HistoryEntry {
+                summary,
+                count: 1,
+                full,
+            },
+        );
+        self.history.truncate(EVENT_HISTORY_CAP);
+    }
+
+    fn content_height(&self) -> f64 {
+        let rows = self.history.len().max(1) as f64;
+        let natural = rows * EVENT_LINE_H + 12.0;
+        natural.max(self.viewport.get().height)
     }
 }
 
@@ -407,65 +451,102 @@ impl Widget for EventHistoryWidget {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
-        available
+        // Inside a ScrollView we're asked for our natural height; report the
+        // content height so the ScrollView can scroll it.
+        let h = self.content_height();
+        self.bounds = Rect::new(0.0, 0.0, available.width, h);
+        Size::new(available.width, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
         let w = self.bounds.width;
-        let h = self.bounds.height;
-        let line = 18.0_f64;
+        let content_h = self.bounds.height;
 
         ctx.set_fill_color(v.widget_bg);
         ctx.begin_path();
-        ctx.rect(0.0, 0.0, w, h);
+        ctx.rect(0.0, 0.0, w, content_h);
         ctx.fill();
-        ctx.set_stroke_color(v.widget_stroke);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rect(0.0, 0.0, w, h);
-        ctx.stroke();
+
+        if self.history.is_empty() {
+            ctx.set_font(Arc::clone(&self.font));
+            ctx.set_font_size(11.0);
+            ctx.set_fill_color(v.text_dim);
+            ctx.fill_text(
+                "Interact inside the box to record events…",
+                8.0,
+                content_h - 22.0,
+            );
+            return;
+        }
 
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(11.0);
 
-        for (i, ev) in self.events.iter().enumerate() {
-            let y = h - (i as f64 + 1.0) * line;
-            if y < 0.0 {
+        // Newest at the top (Y-up: highest y). Row i sits at content_h - (i+1)*line.
+        for (i, entry) in self.history.iter().enumerate() {
+            let y = content_h - (i as f64 + 1.0) * EVENT_LINE_H;
+            if y + EVENT_LINE_H < 0.0 {
                 break;
             }
-            let alpha = 1.0 - i as f64 * 0.045;
-            ctx.set_fill_color(Color::rgba(
-                v.text_color.r,
-                v.text_color.g,
-                v.text_color.b,
-                alpha as f32,
-            ));
-            ctx.fill_text(ev, 6.0, y + 4.0);
-        }
-
-        if self.events.is_empty() {
-            ctx.set_fill_color(v.text_dim);
-            ctx.set_font_size(11.0);
-            ctx.fill_text("Interact to record events…", 8.0, h * 0.45 + 4.0);
+            ctx.set_fill_color(v.text_color);
+            ctx.fill_text(&entry.summary, 6.0, y + 4.0);
+            if entry.count >= 2 {
+                let sw = ctx
+                    .measure_text(&entry.summary)
+                    .map(|m| m.width)
+                    .unwrap_or(0.0);
+                ctx.set_fill_color(v.text_dim);
+                ctx.fill_text(&format!(" \u{00d7}{}", entry.count), 6.0 + sw + 2.0, y + 4.0);
+            }
         }
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
-        let desc = match event {
-            Event::MouseMove { pos } => format!("MouseMove ({:.0}, {:.0})", pos.x, pos.y),
-            Event::MouseDown { pos, button, .. } => {
-                format!("MouseDown {:?} ({:.0},{:.0})", button, pos.x, pos.y)
+        // Build a dedup summary (kind) and a full debug string (with detail).
+        let (summary, full, is_move, consume) = match event {
+            Event::MouseMove { pos } => (
+                "MouseMove".to_string(),
+                format!("MouseMove ({:.0}, {:.0})", pos.x, pos.y),
+                true,
+                false,
+            ),
+            Event::MouseDown { pos, button, .. } => (
+                format!("MouseDown {button:?}"),
+                format!("MouseDown {:?} ({:.0}, {:.0})", button, pos.x, pos.y),
+                false,
+                true,
+            ),
+            Event::MouseUp { button, .. } => {
+                (format!("MouseUp {button:?}"), format!("MouseUp {button:?}"), false, true)
             }
-            Event::MouseUp { button, .. } => format!("MouseUp {:?}", button),
-            Event::KeyDown { key, .. } => format!("KeyDown {:?}", key),
-            Event::KeyUp { key, .. } => format!("KeyUp {:?}", key),
-            Event::MouseWheel { delta_y, .. } => format!("MouseWheel {:.1}", delta_y),
+            Event::KeyDown { key, .. } => {
+                (format!("KeyDown {key:?}"), format!("KeyDown {key:?}"), false, true)
+            }
+            Event::KeyUp { key, .. } => {
+                (format!("KeyUp {key:?}"), format!("KeyUp {key:?}"), false, true)
+            }
+            // Record wheel but let it bubble so the ScrollView can scroll.
+            Event::MouseWheel { delta_y, .. } => (
+                "MouseWheel".to_string(),
+                format!("MouseWheel {delta_y:.1}"),
+                false,
+                false,
+            ),
             _ => return EventResult::Ignored,
         };
-        self.push_event(desc);
-        EventResult::Consumed
+
+        if is_move && !self.include_movements.get() {
+            return EventResult::Ignored;
+        }
+
+        self.add(summary, full);
+        agg_gui::animation::request_draw();
+        if consume {
+            EventResult::Consumed
+        } else {
+            EventResult::Ignored
+        }
     }
 
     fn hit_test(&self, p: Point) -> bool {
@@ -473,8 +554,13 @@ impl Widget for EventHistoryWidget {
     }
 }
 
-/// Build the Input Event History — records and displays the last 20 events.
+/// Build the Input Event History — records raw input events (deduplicated,
+/// with an ×N repeat counter) in a scrollable list, matching egui's
+/// `input_event_history.rs`.
 pub fn input_event_history(font: Arc<Font>) -> Box<dyn Widget> {
+    let include_movements = Rc::new(Cell::new(false));
+    let viewport = Rc::new(Cell::new(Rect::default()));
+
     let mut col = FlexColumn::new()
         .with_gap(8.0)
         .with_padding(10.0)
@@ -483,7 +569,8 @@ pub fn input_event_history(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(
         Box::new(
             Label::new(
-                "Interact inside the box to record events (last 20)",
+                "Recent history of raw input events. Consecutive identical \
+                 events coalesce with an ×N counter.",
                 Arc::clone(&font),
             )
             .with_font_size(11.5)
@@ -492,6 +579,28 @@ pub fn input_event_history(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
-    col.push(Box::new(EventHistoryWidget::new(Arc::clone(&font))), 1.0);
+    col.push(
+        Box::new(
+            Checkbox::new(
+                "Include pointer/mouse movements",
+                Arc::clone(&font),
+                include_movements.get(),
+            )
+            .with_font_size(12.0)
+            .with_state_cell(Rc::clone(&include_movements)),
+        ),
+        0.0,
+    );
+
+    let recorder = EventHistoryWidget::new(
+        Arc::clone(&font),
+        Rc::clone(&include_movements),
+        Rc::clone(&viewport),
+    );
+    let scroll = ScrollView::new(Box::new(recorder))
+        .vertical(true)
+        .horizontal(false)
+        .with_viewport_cell(Rc::clone(&viewport));
+    col.push(Box::new(scroll), 1.0);
     Box::new(col)
 }

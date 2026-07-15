@@ -200,13 +200,36 @@ impl Widget for Window {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Pull runtime-driven flag cells (demo checkboxes → live window
+        // behaviour). Read before anything else so this frame's collapse /
+        // resize / auto-size / title decisions all see the current values.
+        if let Some(ref cell) = self.resizable_cell {
+            self.resizable = cell.get();
+        }
+        if let Some(ref cell) = self.auto_size_cell {
+            self.auto_size = cell.get();
+        }
+        if let Some(ref cell) = self.collapsible_cell {
+            self.collapsible = cell.get();
+        }
+        self.title_bar.set_collapsible(self.collapsible);
+        if let Some(ref cell) = self.title_cell {
+            let wanted = cell.borrow();
+            if *wanted != *self.last_applied_title.borrow() {
+                self.title_bar.set_title(&wanted);
+                *self.last_applied_title.borrow_mut() = wanted.clone();
+            }
+        }
+
         // Drain the title-bar chevron's click flag — the chevron is a
         // real child widget that flips this `Rc<Cell<bool>>` when the
         // framework dispatches its MouseDown.  Acting on the flag here
         // (rather than in our own `on_event`) lets the child consume
         // the event normally instead of forcing the parent to manual
-        // hit-test the chevron's coordinates.
-        if self.title_bar.take_chevron_click() {
+        // hit-test the chevron's coordinates.  Gate on `collapsible` so a
+        // stale click can't fold a window whose affordance was just
+        // disabled.
+        if self.title_bar.take_chevron_click() && self.collapsible {
             self.toggle_collapse();
             self.last_title_click = None;
             crate::animation::request_draw();

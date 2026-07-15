@@ -9,7 +9,8 @@ use agg_gui::{
 };
 
 mod basic;
-pub use basic::{undo_redo, window_options};
+mod undoer;
+pub use basic::{undo_redo, window_options, window_options_with_cells, WindowOptionCells};
 
 // ---------------------------------------------------------------------------
 // Modals demo
