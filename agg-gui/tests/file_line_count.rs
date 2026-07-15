@@ -17,6 +17,10 @@ const MAX_LINES: usize = 800;
 // and may be touched by an agent, it should be counted.
 const EXCLUDED_DIRS: &[&str] = &[
     ".git",
+    // Claude Code harness state; .claude/worktrees/* holds full agent checkouts
+    // (each with its own target/ of generated code), so scanning it both
+    // double-counts the project and trips on third-party build output.
+    ".claude",
     ".cursor",
     "target",
     "egui-reference",
