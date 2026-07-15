@@ -95,8 +95,8 @@ impl Widget for ScalarProgress {
 /// * **Opacity** — realised through a compositing layer
 ///   ([`Widget::compositing_layer`]); the framework paints the subtree into a
 ///   transparent buffer and blends it back at the requested alpha, which is the
-///   only path that fades backbuffered text/buttons uniformly. See the note in
-///   [`GalleryScope::compositing_layer`] about the device-scale limitation.
+///   only path that fades backbuffered text/buttons uniformly. The compositing
+///   path preserves device scale, so this works at any HiDPI scale.
 ///
 /// It also paints egui's alternating row striping behind the grid rows.
 struct GalleryScope {
@@ -200,15 +200,12 @@ impl Widget for GalleryScope {
 
     fn compositing_layer(&mut self) -> Option<CompositingLayer> {
         let alpha = self.effective_alpha();
-        // Only request a layer when there is something to fade.  The library's
-        // `push_layer` resets the CTM to identity, so on HiDPI (device scale
-        // != 1) the faded subtree would render at logical size inside a
-        // physical-pixel target — a mis-scale.  We therefore restrict the fade
-        // to device scale 1.0 and leave it a no-op elsewhere (flagged for a
-        // library fix: either honour `global_alpha` in the backbuffer blit or
-        // preserve device scale across `push_layer`).
-        let ds = agg_gui::device_scale();
-        if alpha < 0.999 && self.visible.get() && (ds - 1.0).abs() < 0.01 {
+        // Only request a layer when there is something to fade.  The compositing
+        // path now preserves device scale across `push_layer` (software
+        // `GfxCtx` and the wgpu backend both size the layer in physical pixels),
+        // so opacity fades correctly at any HiDPI scale.  The early-out at
+        // alpha >= 0.999 keeps the no-fade common case off the offscreen path.
+        if alpha < 0.999 && self.visible.get() {
             Some(CompositingLayer::new(0.0, 0.0, 0.0, 0.0, alpha))
         } else {
             None

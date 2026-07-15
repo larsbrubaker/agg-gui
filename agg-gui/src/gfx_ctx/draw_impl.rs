@@ -482,6 +482,11 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         let t = &self.state.transform;
         let sx = (dst_x * t.sx + dst_y * t.shx + t.tx).round() as i32;
         let sy = (dst_x * t.shy + dst_y * t.sy + t.ty).round() as i32;
+        // Honor `global_alpha`: scale both the premultiplied source colour and
+        // the per-channel coverage so LCD-cached text inside a faded subtree
+        // fades with the group.  Multiplying colour and alpha by the same
+        // factor keeps the plane premultiplied-consistent.
+        let ga = self.state.global_alpha.clamp(0.0, 1.0) as f32;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
         let fw = fb.width() as i32;
         let fh = fb.height() as i32;
@@ -503,16 +508,16 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
                 }
                 let ci = (src_y * w_u + src_x) * 3;
 
-                let sa_r = alpha[ci] as f32 / 255.0;
-                let sa_g = alpha[ci + 1] as f32 / 255.0;
-                let sa_b = alpha[ci + 2] as f32 / 255.0;
+                let sa_r = (alpha[ci] as f32 / 255.0) * ga;
+                let sa_g = (alpha[ci + 1] as f32 / 255.0) * ga;
+                let sa_b = (alpha[ci + 2] as f32 / 255.0) * ga;
                 if sa_r == 0.0 && sa_g == 0.0 && sa_b == 0.0 {
                     continue;
                 }
 
-                let sc_r = color[ci] as f32 / 255.0;
-                let sc_g = color[ci + 1] as f32 / 255.0;
-                let sc_b = color[ci + 2] as f32 / 255.0;
+                let sc_r = (color[ci] as f32 / 255.0) * ga;
+                let sc_g = (color[ci + 1] as f32 / 255.0) * ga;
+                let sc_b = (color[ci + 2] as f32 / 255.0) * ga;
 
                 let di = (dy_u * fw_u + dx as usize) * 4;
                 // Framebuffer holds premultiplied RGBA.  Per-channel
@@ -677,8 +682,13 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         };
         let screen_x = (tx + dst_x).round() as i32;
         let screen_y = (ty + dst_y).round() as i32;
+        // Honor the active `global_alpha` so backbuffered widgets (Labels,
+        // buttons) inside a faded subtree fade uniformly with the rest of the
+        // group — without this the blit composited at full opacity regardless
+        // of `set_global_alpha`.
+        let ga = self.state.global_alpha;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        composite_framebuffers(fb, &scaled, screen_x, screen_y, 1.0);
+        composite_framebuffers(fb, &scaled, screen_x, screen_y, ga);
     }
 }
 
