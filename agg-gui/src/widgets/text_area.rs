@@ -285,6 +285,12 @@ pub struct TextArea {
     /// single ambient-colour string.
     highlighter: Option<Rc<LineHighlighter>>,
 
+    /// Fired after any text mutation (typing, delete, paste, cut, and
+    /// key-intercept edits that advance the content epoch). Mirrors
+    /// TextField's `on_change`. Builder + dispatcher live in
+    /// `text_area/callbacks.rs`.
+    on_change: Option<Box<dyn FnMut(&str)>>,
+
     /// Live edit state.  Shared with future undo / clipboard wiring, and with
     /// external callers via [`with_edit_state`](Self::with_edit_state).
     edit: Rc<RefCell<TextEditState>>,
@@ -323,6 +329,7 @@ impl TextArea {
             focus_request_id: None,
             on_key_chord: None,
             highlighter: None,
+            on_change: None,
             edit: Rc::new(RefCell::new(TextEditState::default())),
             cached_wrap_width: -1.0,
             cached_lines: Vec::new(),
@@ -667,6 +674,7 @@ impl TextArea {
         st.note_text_change();
         drop(st);
         self.mark_dirty();
+        self.notify_change();
     }
 
     /// Delete the current selection, or (if empty) `dir` chars toward
@@ -693,6 +701,7 @@ impl TextArea {
         st.note_text_change();
         drop(st);
         self.mark_dirty();
+        self.notify_change();
     }
 
     /// Move cursor to an absolute byte offset.  `with_selection=false`
@@ -769,6 +778,7 @@ impl TextArea {
     }
 }
 
+mod callbacks;
 mod widget_impl;
 
 #[cfg(test)]

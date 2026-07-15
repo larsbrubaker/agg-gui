@@ -371,7 +371,15 @@ impl Widget for TextArea {
                 // built-in handling. Cloned out of `self` so the callback can
                 // freely borrow the shared edit state we also hold.
                 if let Some(cb) = self.on_key_chord.clone() {
+                    let epoch_before = self.edit.borrow().epoch;
                     if (cb.borrow_mut())(key, modifiers) {
+                        // An interceptor that edits text advances the content
+                        // epoch (via `note_text_change`); mirror the built-in
+                        // funnels by re-wrapping and firing `on_change`.
+                        if self.edit.borrow().epoch != epoch_before {
+                            self.mark_dirty();
+                            self.notify_change();
+                        }
                         crate::animation::request_draw();
                         return EventResult::Consumed;
                     }

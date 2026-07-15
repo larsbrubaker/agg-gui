@@ -271,6 +271,104 @@ fn key_intercept_runs_before_default_and_can_consume() {
     assert_eq!(ta.text(), "abcz");
 }
 
+// ── (f) on_change callback ──────────────────────────────────────────────────
+//
+// Mirrors TextField's `on_change`: fires after every mutation path so a caller
+// can capture edits back into a shared cell.
+
+/// Drive one focused KeyDown with default modifiers.
+fn key(ta: &mut TextArea, k: Key) {
+    ta.on_event(&Event::KeyDown {
+        key: k,
+        modifiers: Modifiers::default(),
+    });
+}
+
+#[test]
+fn on_change_fires_for_typing_delete_and_records_latest_text() {
+    let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen2 = Rc::clone(&seen);
+    let mut ta = laid_out(
+        TextArea::new(font()).on_change(move |s| seen2.borrow_mut().push(s.to_string())),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+
+    // Typing: one callback per inserted char, each carrying the running text.
+    key(&mut ta, Key::Char('h'));
+    key(&mut ta, Key::Char('i'));
+    // Delete (backspace): fires again.
+    key(&mut ta, Key::Backspace);
+
+    let seen = seen.borrow();
+    assert_eq!(*seen, vec!["h".to_string(), "hi".to_string(), "h".to_string()]);
+}
+
+#[test]
+fn on_change_fires_for_key_intercept_edit_when_epoch_advances() {
+    // An interceptor that mutates the shared state and calls `note_text_change`
+    // must trigger `on_change`, matching the built-in mutation funnels.
+    let changed = Rc::new(Cell::new(0u32));
+    let changed2 = Rc::clone(&changed);
+    let state = Rc::new(RefCell::new(TextEditState {
+        text: "abc".into(),
+        cursor: 0,
+        anchor: 3, // whole-line selection so the toggle has something to edit
+        epoch: 0,
+    }));
+    let state_key = Rc::clone(&state);
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_edit_state(Rc::clone(&state))
+            .with_key_intercept(move |key, mods| {
+                if (mods.ctrl || mods.meta) && matches!(key, Key::Char('y') | Key::Char('Y')) {
+                    let mut st = state_key.borrow_mut();
+                    if let Some((lo, hi)) = st.selection_range() {
+                        let up = st.text[lo..hi].to_uppercase();
+                        st.text.replace_range(lo..hi, &up);
+                        st.note_text_change();
+                    }
+                    true
+                } else {
+                    false
+                }
+            })
+            .on_change(move |_| changed2.set(changed2.get() + 1)),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+    ta.on_event(&Event::KeyDown {
+        key: Key::Char('y'),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    });
+    assert_eq!(changed.get(), 1, "epoch-advancing intercept must fire on_change");
+    assert_eq!(state.borrow().text, "ABC");
+}
+
+#[test]
+fn on_change_silent_for_intercept_without_text_edit() {
+    // An interceptor that consumes the key but leaves text untouched (epoch
+    // unchanged) must NOT fire on_change.
+    let changed = Rc::new(Cell::new(0u32));
+    let changed2 = Rc::clone(&changed);
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_text("abc")
+            .with_key_intercept(|_key, _mods| true) // consume everything, edit nothing
+            .on_change(move |_| changed2.set(changed2.get() + 1)),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+    key(&mut ta, Key::Char('z'));
+    assert_eq!(changed.get(), 0, "no text change → no on_change");
+}
+
 // ── (g) highlight segmentation ──────────────────────────────────────────────
 //
 // The highlighter paint path must split a line into gap-free, non-overlapping
