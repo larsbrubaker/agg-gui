@@ -425,6 +425,44 @@ mod tests {
         assert!(mid.is_finite() && mid > 0.0, "got {mid}");
     }
 
+    /// Regression: the Sliders demo's range sliders span `-∞..=∞` (logarithmic)
+    /// and the demo slider itself may be rebuilt with an infinite bound. The
+    /// initial displayed value/position must be finite — never `NaN` — for the
+    /// exact values the demo starts with. (egui's Sliders demo shows finite
+    /// values, never NaN.)
+    #[test]
+    fn infinite_range_initial_mapping_is_finite() {
+        let spec = log_spec();
+        // Demo slider default: value 10 in 0..=10000 (log).
+        let n = normalized_from_value(10.0, 0.0, 10000.0, &spec);
+        assert!(n.is_finite() && (0.0..=1.0).contains(&n), "demo n={n}");
+
+        // Range sliders: both bounds infinite. The current min (0) and max
+        // (10000) must map to a finite, in-range position.
+        for &v in &[0.0, 10000.0] {
+            let n = normalized_from_value(v, -f64::INFINITY, f64::INFINITY, &spec);
+            assert!(n.is_finite() && (0.0..=1.0).contains(&n), "v={v} n={n}");
+        }
+        // A finite normalized position maps back to a finite value.
+        let mid = value_from_normalized(0.5, -f64::INFINITY, f64::INFINITY, &spec);
+        assert!(mid.is_finite(), "mid={mid}");
+    }
+
+    /// One infinite bound (e.g. `min..=∞` after the user drags a range slider):
+    /// a finite value in the range still maps to a finite, in-range position,
+    /// and round-trips.
+    #[test]
+    fn one_infinite_bound_roundtrips_finite() {
+        let spec = log_spec();
+        let n = normalized_from_value(10.0, -f64::INFINITY, 10000.0, &spec);
+        assert!(n.is_finite() && (0.0..=1.0).contains(&n), "n={n}");
+        let v = value_from_normalized(n, -f64::INFINITY, 10000.0, &spec);
+        assert!(v.is_finite(), "v={v}");
+
+        let n = normalized_from_value(10.0, 0.0, f64::INFINITY, &spec);
+        assert!(n.is_finite() && (0.0..=1.0).contains(&n), "n={n}");
+    }
+
     #[test]
     fn clamp_handles_reversed_range() {
         assert_eq!(clamp_value_to_range(5.0, 10.0, 0.0), 5.0);
