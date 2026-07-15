@@ -41,6 +41,26 @@ use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, Widg
 use crate::widget::Widget;
 
 // ---------------------------------------------------------------------------
+// Default inter-child spacing
+// ---------------------------------------------------------------------------
+
+/// Default gap between adjacent `FlexColumn` children (vertical, logical px).
+///
+/// Non-zero by default so stacked controls breathe instead of touching,
+/// mirroring egui's `item_spacing.y` (~3-4). Deliberately fused/segmented
+/// vertical looks must opt out with `.with_gap(0.0)`.
+pub const DEFAULT_COLUMN_GAP: f64 = 4.0;
+
+/// Default gap between adjacent `FlexRow` children (horizontal, logical px).
+///
+/// Non-zero by default so rows of adjacent controls (e.g. segmented button
+/// rows) get visible breathing room instead of rendering touching, mirroring
+/// egui's `item_spacing.x` (8.0). Deliberately joined/segmented row looks must
+/// opt out with `.with_gap(0.0)`. Lives here (rather than in `flex_row.rs`) so
+/// both gap constants sit side by side and stay discoverable.
+pub const DEFAULT_ROW_GAP: f64 = 8.0;
+
+// ---------------------------------------------------------------------------
 // Cross-axis placement helpers
 // ---------------------------------------------------------------------------
 
@@ -130,7 +150,7 @@ impl FlexColumn {
             children: Vec::new(),
             flex_factors: Vec::new(),
             base: WidgetBase::new(),
-            gap: 0.0,
+            gap: DEFAULT_COLUMN_GAP,
             inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
             use_panel_bg: false,

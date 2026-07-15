@@ -10,8 +10,43 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::widgets::Conditional;
+use crate::widgets::{Conditional, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP};
 use crate::{FlexColumn, FlexRow, Insets, Size, SizedBox, Widget};
+
+/// The framework default is non-zero spacing (see [`DEFAULT_ROW_GAP`] /
+/// [`DEFAULT_COLUMN_GAP`]): adjacent controls breathe unless a caller opts
+/// into a fused/segmented look with `.with_gap(0.0)`. Pin the values and the
+/// fact that `::new()` applies them, so the default can't silently revert.
+#[test]
+fn flex_new_applies_non_zero_default_gaps() {
+    assert_eq!(DEFAULT_ROW_GAP, 8.0);
+    assert_eq!(DEFAULT_COLUMN_GAP, 4.0);
+
+    // FlexRow: two 20px children sit one DEFAULT_ROW_GAP apart.
+    let mut row = FlexRow::new()
+        .add(Box::new(SizedBox::fixed(20.0, 20.0)))
+        .add(Box::new(SizedBox::fixed(20.0, 20.0)));
+    row.layout(Size::new(300.0, 50.0));
+    assert_eq!(row.children()[0].bounds().x, 0.0);
+    assert_eq!(
+        row.children()[1].bounds().x,
+        20.0 + DEFAULT_ROW_GAP,
+        "second row child offset by the default 8px gap"
+    );
+
+    // FlexColumn: Y-up, first child spans [280, 300], second starts one
+    // DEFAULT_COLUMN_GAP below.
+    let mut col = FlexColumn::new()
+        .add(Box::new(SizedBox::fixed(20.0, 20.0)))
+        .add(Box::new(SizedBox::fixed(20.0, 20.0)));
+    col.layout(Size::new(200.0, 300.0));
+    assert_eq!(col.children()[0].bounds().y, 280.0);
+    assert_eq!(
+        col.children()[1].bounds().y,
+        280.0 - 20.0 - DEFAULT_COLUMN_GAP,
+        "second column child offset by the default 4px gap"
+    );
+}
 
 fn hidden_box() -> (Rc<Cell<bool>>, Box<dyn Widget>) {
     let visible = Rc::new(Cell::new(false));
