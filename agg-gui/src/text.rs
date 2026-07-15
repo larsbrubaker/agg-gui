@@ -195,6 +195,9 @@ impl Font {
         set
     }
 
+    /// Recursion terminates because the fallback chain cannot contain cycles:
+    /// `with_fallback` consumes `self` and the chain is immutable after
+    /// construction, so it is always a finite linked list.
     fn collect_characters(&self, set: &mut BTreeSet<char>) {
         self.with_ttf_face(|face| {
             let Some(cmap) = face.tables().cmap else {

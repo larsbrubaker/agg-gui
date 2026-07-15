@@ -259,12 +259,15 @@ impl GlyphGrid {
 
     /// Visible row range `[first, last)` from the shared viewport, in the
     /// same top-down content coordinates `RowList` uses.
+    ///
+    /// No special case for an unpublished viewport: `ScrollView::layout`
+    /// runs the child's layout *before* writing the viewport cell, so on the
+    /// first frame the cell is still `Rect::default()`. Treating that as a
+    /// zero-height viewport naturally yields ~1 row (RowList does the same),
+    /// instead of materializing every glyph cell in one layout pass.
     fn visible_rows(&self, rows: usize) -> (usize, usize) {
         let pitch = CELL + GAP;
         let vp = self.viewport.get();
-        if vp.height <= 0.0 {
-            return (0, rows);
-        }
         let first = (vp.y / pitch).floor().max(0.0) as usize;
         let last = ((vp.y + vp.height) / pitch).ceil() as usize + 1;
         (first.min(rows), last.min(rows))
