@@ -17,7 +17,23 @@
 //!   * cursor blink with focus state;
 //!   * copy / cut / paste via the standard clipboard shortcuts.
 //!
-//! Deferred (known gaps, filed for Stage 5 polish):
+//! Beyond W5, this widget also backs the standalone **TextEdit demo**
+//! (`demo-ui`'s `text_edit_demo.rs`, mirroring egui's `text_edit.rs`), so it
+//! grew the following egui-parity capabilities:
+//!   * configurable hint / placeholder text ([`with_hint_text`](TextArea::with_hint_text));
+//!   * content alignment — horizontal [`TextHAlign`] and vertical [`TextVAlign`],
+//!     settable statically or bound to a live `Rc<Cell<_>>`;
+//!   * selection introspection ([`selection`](TextArea::selection) /
+//!     [`selected_text`](TextArea::selected_text));
+//!   * a shared, externally-mutable edit state ([`with_edit_state`](TextArea::with_edit_state)
+//!     / [`edit_state`](TextArea::edit_state)) with content-epoch cache
+//!     invalidation, so a caller can clear/replace the text or move the cursor
+//!     from outside the widget tree;
+//!   * a programmatic focus id + cursor-to-start/end helpers;
+//!   * a pre-default key-chord interceptor ([`with_key_intercept`](TextArea::with_key_intercept)),
+//!     used by the demo for the Ctrl/Cmd+Y "toggle case of selection" shortcut.
+//!
+//! Deferred (known gaps, filed for later polish):
 //!   * word-boundary jumps (Ctrl+arrows) across wrapped visual lines;
 //!   * undo / redo;
 //!   * input-method composition;
@@ -31,12 +47,46 @@ use web_time::Instant;
 
 use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, Key, MouseButton};
+use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
+use crate::focus::FocusId;
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{measure_advance, measure_text_metrics, Font};
 use crate::widget::Widget;
 use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary, TextEditState};
+
+/// Horizontal alignment of the wrapped text content inside a [`TextArea`]'s
+/// padded inner rect. Mirrors egui's `TextEdit::horizontal_align`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum TextHAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// Vertical alignment of the wrapped text block inside a [`TextArea`]'s padded
+/// inner rect. Mirrors egui's `TextEdit::vertical_align`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum TextVAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
+/// Signature of a pre-default key-chord interceptor. Returns `true` to consume
+/// the event and suppress the widget's built-in handling for that key.
+pub type KeyIntercept = dyn FnMut(&Key, &Modifiers) -> bool;
+
+/// Signature of a per-visual-line syntax highlighter. Given one wrapped line's
+/// rendered text, it returns a list of `(start_byte, end_byte, color)` runs
+/// (byte offsets relative to that line). Bytes not covered by any run are
+/// drawn in the ambient text colour. Runs are expected to be non-overlapping
+/// and sorted; overlaps simply repaint. Keeping it line-oriented sidesteps
+/// span-across-wrap bookkeeping and matches the simple fallback highlighter in
+/// egui's Code Editor demo.
+pub type LineHighlighter = dyn Fn(&str) -> Vec<(usize, usize, crate::color::Color)>;
 
 fn clipboard_get() -> Option<String> {
     crate::clipboard::get_text()
@@ -208,13 +258,45 @@ pub struct TextArea {
     font_size: f64,
     padding: f64,
 
-    /// Live edit state.  Shared with future undo / clipboard wiring.
+    /// Placeholder shown (dimmed) while the buffer is empty. Mirrors egui's
+    /// `TextEdit::hint_text`.
+    hint: String,
+
+    /// Static content alignment. Ignored on the axis where a `*_align_cell`
+    /// binding is present (the cell wins so external toggles apply live).
+    content_h_align: TextHAlign,
+    content_v_align: TextVAlign,
+    /// Optional live bindings for content alignment — lets a caller flip
+    /// alignment from a segmented control without rebuilding the widget.
+    h_align_cell: Option<Rc<Cell<TextHAlign>>>,
+    v_align_cell: Option<Rc<Cell<TextVAlign>>>,
+
+    /// Stable id for the programmatic focus channel
+    /// ([`crate::focus::request_focus`]); `None` opts out.
+    focus_request_id: Option<FocusId>,
+
+    /// Pre-default key-chord interceptor. Invoked at the top of `KeyDown`
+    /// handling; when it returns `true` the event is consumed and the
+    /// built-in key handling is skipped.
+    on_key_chord: Option<Rc<RefCell<KeyIntercept>>>,
+
+    /// Optional per-line syntax highlighter (see [`LineHighlighter`]). When
+    /// present, each wrapped line is painted as coloured runs instead of a
+    /// single ambient-colour string.
+    highlighter: Option<Rc<LineHighlighter>>,
+
+    /// Live edit state.  Shared with future undo / clipboard wiring, and with
+    /// external callers via [`with_edit_state`](Self::with_edit_state).
     edit: Rc<RefCell<TextEditState>>,
 
     /// Cached layout — invalidated when text / font / width changes.
     cached_wrap_width: f64,
     cached_lines: Vec<WrappedLine>,
     cached_line_h: f64,
+    /// `edit.epoch` observed when `cached_lines` was last (re)built. A
+    /// mismatch means the text was mutated through the shared handle by an
+    /// external owner, so the wrap cache is stale even at the same width.
+    cached_epoch: u64,
 
     /// Ephemeral input state.
     focused: bool,
@@ -233,10 +315,19 @@ impl TextArea {
             font,
             font_size: 13.0,
             padding: 8.0,
+            hint: "Type here…".to_string(),
+            content_h_align: TextHAlign::Left,
+            content_v_align: TextVAlign::Top,
+            h_align_cell: None,
+            v_align_cell: None,
+            focus_request_id: None,
+            on_key_chord: None,
+            highlighter: None,
             edit: Rc::new(RefCell::new(TextEditState::default())),
             cached_wrap_width: -1.0,
             cached_lines: Vec::new(),
             cached_line_h: 0.0,
+            cached_epoch: 0,
             focused: false,
             hovered: false,
             selecting_drag: false,
@@ -248,12 +339,114 @@ impl TextArea {
     pub fn with_text(self, text: impl Into<String>) -> Self {
         let t: String = text.into();
         let cursor = t.len();
+        let epoch = self.edit.borrow().epoch.wrapping_add(1);
         *self.edit.borrow_mut() = TextEditState {
             text: t,
             cursor,
             anchor: cursor,
+            epoch,
         };
         self
+    }
+
+    /// Placeholder text shown, dimmed, while the buffer is empty.
+    pub fn with_hint_text(mut self, hint: impl Into<String>) -> Self {
+        self.hint = hint.into();
+        self
+    }
+
+    /// Static horizontal alignment of the wrapped content.
+    pub fn with_content_h_align(mut self, a: TextHAlign) -> Self {
+        self.content_h_align = a;
+        self
+    }
+    /// Static vertical alignment of the wrapped content block.
+    pub fn with_content_v_align(mut self, a: TextVAlign) -> Self {
+        self.content_v_align = a;
+        self
+    }
+    /// Bind horizontal alignment to a live cell (wins over the static value).
+    pub fn with_h_align_cell(mut self, cell: Rc<Cell<TextHAlign>>) -> Self {
+        self.h_align_cell = Some(cell);
+        self
+    }
+    /// Bind vertical alignment to a live cell (wins over the static value).
+    pub fn with_v_align_cell(mut self, cell: Rc<Cell<TextVAlign>>) -> Self {
+        self.v_align_cell = Some(cell);
+        self
+    }
+
+    /// Adopt an externally-owned edit state so a caller can read the text /
+    /// selection and mutate it (clear, replace, move cursor) from outside the
+    /// widget tree. External text mutations must call
+    /// [`TextEditState::note_text_change`] so the wrap cache invalidates.
+    pub fn with_edit_state(mut self, state: Rc<RefCell<TextEditState>>) -> Self {
+        self.edit = state;
+        self.cached_wrap_width = -1.0;
+        self
+    }
+
+    /// Stable id for the programmatic focus channel
+    /// ([`crate::focus::request_focus`]).
+    pub fn with_focus_id(mut self, id: FocusId) -> Self {
+        self.focus_request_id = Some(id);
+        self
+    }
+
+    /// Install a pre-default key-chord interceptor. It runs before the widget's
+    /// built-in key handling on every `KeyDown`; returning `true` consumes the
+    /// event and suppresses the default action for that key.
+    pub fn with_key_intercept(
+        mut self,
+        cb: impl FnMut(&Key, &Modifiers) -> bool + 'static,
+    ) -> Self {
+        self.on_key_chord = Some(Rc::new(RefCell::new(cb)));
+        self
+    }
+
+    /// Install a per-visual-line syntax highlighter (see [`LineHighlighter`]).
+    pub fn with_highlighter(
+        mut self,
+        cb: impl Fn(&str) -> Vec<(usize, usize, crate::color::Color)> + 'static,
+    ) -> Self {
+        self.highlighter = Some(Rc::new(cb));
+        self
+    }
+
+    /// Clone of the shared edit-state handle, for selection/text readback and
+    /// external mutation.
+    pub fn edit_state(&self) -> Rc<RefCell<TextEditState>> {
+        Rc::clone(&self.edit)
+    }
+
+    /// Current selection as a sorted `[start, end)` byte range, or `None` when
+    /// nothing is selected.
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        self.edit.borrow().selection_range()
+    }
+
+    /// The currently-selected substring (empty when there is no selection).
+    pub fn selected_text(&self) -> String {
+        let st = self.edit.borrow();
+        match st.selection_range() {
+            Some((lo, hi)) => st.text[lo..hi].to_string(),
+            None => String::new(),
+        }
+    }
+
+    /// Collapse the selection and place the cursor at the very start.
+    pub fn set_cursor_to_start(&mut self) {
+        let mut st = self.edit.borrow_mut();
+        st.cursor = 0;
+        st.anchor = 0;
+    }
+
+    /// Collapse the selection and place the cursor at the very end.
+    pub fn set_cursor_to_end(&mut self) {
+        let mut st = self.edit.borrow_mut();
+        let end = st.text.len();
+        st.cursor = end;
+        st.anchor = end;
     }
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.font_size = size;
@@ -304,15 +497,17 @@ impl TextArea {
     fn refresh_wrap(&mut self, inner_w: f64) {
         let st = self.edit.borrow();
         let same_width = (self.cached_wrap_width - inner_w).abs() < 0.5;
-        if same_width && !self.cached_lines.is_empty() {
-            // Wrap is expensive; skip when nothing that affects it
-            // changed.  `text` changes go through `mark_dirty` which
-            // resets `cached_wrap_width` to −1.
+        // An external owner of the shared edit state may have replaced the
+        // text without touching our width or calling `mark_dirty`; the epoch
+        // catches that case so the cache never blits stale wrapping.
+        let same_epoch = self.cached_epoch == st.epoch;
+        if same_width && same_epoch && !self.cached_lines.is_empty() {
             return;
         }
         let lines = wrap_text_indexed(&self.font, &st.text, self.font_size, inner_w.max(1.0));
         self.cached_lines = lines;
         self.cached_wrap_width = inner_w;
+        self.cached_epoch = st.epoch;
         // Line height — a little slacker than tight metrics so
         // descenders from line N don't kiss ascenders from N+1.
         self.cached_line_h = self.font_size * 1.35;
@@ -321,6 +516,68 @@ impl TextArea {
     /// Force a re-wrap on the next layout.
     fn mark_dirty(&mut self) {
         self.cached_wrap_width = -1.0;
+    }
+
+    // ── Content-alignment geometry ────────────────────────────────────────
+    //
+    // Alignment shifts where wrapped lines sit inside the padded inner rect.
+    // These helpers are the single source of truth for that offset math so
+    // paint, cursor overlay, hit-testing and cursor-position queries all agree.
+
+    /// Resolved horizontal alignment (cell binding wins over the static value).
+    fn resolved_h_align(&self) -> TextHAlign {
+        self.h_align_cell
+            .as_ref()
+            .map(|c| c.get())
+            .unwrap_or(self.content_h_align)
+    }
+
+    /// Resolved vertical alignment (cell binding wins over the static value).
+    fn resolved_v_align(&self) -> TextVAlign {
+        self.v_align_cell
+            .as_ref()
+            .map(|c| c.get())
+            .unwrap_or(self.content_v_align)
+    }
+
+    /// Inner content width (widget width minus horizontal padding).
+    fn inner_width(&self) -> f64 {
+        (self.bounds.width - self.padding * 2.0).max(0.0)
+    }
+
+    /// Vertical shift (downward, in the Y-up frame) applied to the whole line
+    /// block to honour [`TextVAlign`]. `0` for `Top`.
+    fn v_align_shift(&self) -> f64 {
+        let content_h = self.cached_lines.len() as f64 * self.cached_line_h;
+        let inner_h = (self.bounds.height - self.padding * 2.0).max(0.0);
+        let slack = (inner_h - content_h).max(0.0);
+        match self.resolved_v_align() {
+            TextVAlign::Top => 0.0,
+            TextVAlign::Center => slack * 0.5,
+            TextVAlign::Bottom => slack,
+        }
+    }
+
+    /// Y coordinate (Y-up) of the TOP edge of visual line 0.
+    fn content_top_y(&self) -> f64 {
+        self.bounds.height - self.padding - self.v_align_shift()
+    }
+
+    /// Y coordinate (Y-up) of the top edge of visual line `i`.
+    fn line_top_y(&self, i: usize) -> f64 {
+        self.content_top_y() - i as f64 * self.cached_line_h
+    }
+
+    /// Horizontal start (x) of a line's rendered text, honouring [`TextHAlign`].
+    fn line_x_start(&self, line: &WrappedLine) -> f64 {
+        let line_w = measure_advance(&self.font, &line.text, self.font_size);
+        let slack = (self.inner_width() - line_w).max(0.0);
+        let shift = match self.resolved_h_align() {
+            TextHAlign::Left => 0.0,
+            TextHAlign::Center => slack * 0.5,
+            TextHAlign::Right => slack,
+        };
+        self.padding + shift
     }
 
     /// Locate the (line_index, byte_pos_in_text) that the given cursor
@@ -342,8 +599,8 @@ impl TextArea {
         }
         // Visual lines stack top-to-bottom; Y-up flips their y coords.
         // Line 0 sits at the top (high Y), line N at the bottom (low Y).
-        let inner_top_y = self.bounds.height - self.padding;
-        let rel_from_top = inner_top_y - local.y;
+        // `content_top_y` folds in the vertical-alignment shift.
+        let rel_from_top = self.content_top_y() - local.y;
         let mut line_idx = (rel_from_top / self.cached_line_h).floor() as isize;
         if line_idx < 0 {
             line_idx = 0;
@@ -353,8 +610,9 @@ impl TextArea {
         }
         let line = &self.cached_lines[line_idx as usize];
         // X hit test: walk chars in the line's rendered text and pick
-        // the nearest grapheme boundary.
-        let pad_x = self.padding;
+        // the nearest grapheme boundary. The line's x start folds in the
+        // horizontal-alignment shift.
+        let pad_x = self.line_x_start(line);
         let rel_x = (local.x - pad_x).max(0.0);
         let txt = &line.text;
         let mut best_byte = 0usize;
@@ -388,10 +646,10 @@ impl TextArea {
         let line_idx = self.line_for_cursor(byte_pos);
         let line = &self.cached_lines[line_idx];
         let offset = byte_pos.saturating_sub(line.start).min(line.text.len());
-        let x = self.padding + measure_advance(&self.font, &line.text[..offset], self.font_size);
-        // Y-up: line i top-edge = inner_top - i * line_h.
-        let inner_top_y = self.bounds.height - self.padding;
-        let line_top = inner_top_y - line_idx as f64 * self.cached_line_h;
+        let x = self.line_x_start(line)
+            + measure_advance(&self.font, &line.text[..offset], self.font_size);
+        // Y-up: line i top-edge folds in the vertical-alignment shift.
+        let line_top = self.line_top_y(line_idx);
         let line_bottom = line_top - self.cached_line_h;
         Point::new(x, line_bottom)
     }
@@ -406,6 +664,7 @@ impl TextArea {
         st.text.replace_range(lo..hi, s);
         st.cursor = lo + s.len();
         st.anchor = st.cursor;
+        st.note_text_change();
         drop(st);
         self.mark_dirty();
     }
@@ -431,6 +690,7 @@ impl TextArea {
             let next = next_char_boundary(&st.text, cur);
             st.text.replace_range(cur..next, "");
         }
+        st.note_text_change();
         drop(st);
         self.mark_dirty();
     }
@@ -474,8 +734,15 @@ impl TextArea {
         if target_line == cur_line {
             return;
         }
-        // Preserve horizontal position (pixel column, not byte column).
-        let cur_x = self.pos_for_cursor(cursor).x - self.padding;
+        // Preserve horizontal position (pixel column, not byte column),
+        // measured relative to the current line's aligned start so left /
+        // center / right alignment all keep the caret in the same column.
+        let cur_line_x = self
+            .cached_lines
+            .get(cur_line)
+            .map(|l| self.line_x_start(l))
+            .unwrap_or(self.padding);
+        let cur_x = self.pos_for_cursor(cursor).x - cur_line_x;
         // Find byte offset in target_line closest to `cur_x`.
         let line = &self.cached_lines[target_line];
         let txt = &line.text;
@@ -503,3 +770,6 @@ impl TextArea {
 }
 
 mod widget_impl;
+
+#[cfg(test)]
+mod tests;

@@ -1,4 +1,37 @@
 ﻿use super::*;
+use crate::color::Color;
+
+impl TextArea {
+    /// Paint one wrapped line with syntax-highlight runs on top of an
+    /// ambient-colour base pass. Byte offsets in `spans` are relative to
+    /// `text`; out-of-range or non-boundary spans are skipped defensively.
+    fn paint_highlighted_line(
+        &self,
+        ctx: &mut dyn DrawCtx,
+        text: &str,
+        spans: &[(usize, usize, Color)],
+        x0: f64,
+        baseline_y: f64,
+        base_color: Color,
+    ) {
+        // Base pass: any bytes no run covers keep the ambient text colour.
+        ctx.set_fill_color(base_color);
+        ctx.fill_text(text, x0, baseline_y);
+        // Coloured runs, positioned by measuring the prefix advance.
+        for &(s, e, color) in spans {
+            if e <= s
+                || e > text.len()
+                || !text.is_char_boundary(s)
+                || !text.is_char_boundary(e)
+            {
+                continue;
+            }
+            let x = x0 + measure_advance(&self.font, &text[..s], self.font_size);
+            ctx.set_fill_color(color);
+            ctx.fill_text(&text[s..e], x, baseline_y);
+        }
+    }
+}
 
 impl Widget for TextArea {
     fn type_name(&self) -> &'static str {
@@ -19,6 +52,10 @@ impl Widget for TextArea {
 
     fn is_focusable(&self) -> bool {
         true
+    }
+
+    fn focus_id(&self) -> Option<crate::focus::FocusId> {
+        self.focus_request_id
     }
 
     fn accepts_text_input(&self) -> bool {
@@ -132,11 +169,10 @@ impl Widget for TextArea {
                 if sel_e <= sel_s {
                     continue;
                 }
-                let x0 =
-                    self.padding + measure_advance(&self.font, &line.text[..sel_s], self.font_size);
-                let x1 =
-                    self.padding + measure_advance(&self.font, &line.text[..sel_e], self.font_size);
-                let line_top = h - self.padding - i as f64 * self.cached_line_h;
+                let line_x = self.line_x_start(line);
+                let x0 = line_x + measure_advance(&self.font, &line.text[..sel_s], self.font_size);
+                let x1 = line_x + measure_advance(&self.font, &line.text[..sel_e], self.font_size);
+                let line_top = self.line_top_y(i);
                 let line_bottom = line_top - self.cached_line_h;
                 ctx.begin_path();
                 ctx.rect(x0, line_bottom, x1 - x0, self.cached_line_h);
@@ -153,21 +189,43 @@ impl Widget for TextArea {
             if line.text.is_empty() {
                 continue;
             }
-            let line_top = h - self.padding - i as f64 * self.cached_line_h;
+            let line_top = self.line_top_y(i);
             let line_bottom = line_top - self.cached_line_h;
             let baseline_y =
                 line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
-            ctx.fill_text(&line.text, self.padding, baseline_y);
+            let x0 = self.line_x_start(line);
+            match &self.highlighter {
+                // Syntax-highlighted path: paint each coloured run at its
+                // measured x offset; gaps stay in the ambient text colour.
+                Some(hl) => {
+                    let spans = hl(&line.text);
+                    self.paint_highlighted_line(ctx, &line.text, &spans, x0, baseline_y, v.text_color);
+                }
+                None => {
+                    ctx.fill_text(&line.text, x0, baseline_y);
+                }
+            }
         }
 
-        // ── Placeholder when empty + unfocused ─────────────────────
-        if st.text.is_empty() && !self.focused {
+        // ── Hint / placeholder when empty ──────────────────────────
+        // Shown whenever the buffer is empty (egui shows hint text until the
+        // first character is typed, regardless of focus), and honours the
+        // same content alignment as real text.
+        if st.text.is_empty() && !self.hint.is_empty() {
             ctx.set_fill_color(v.text_dim);
-            let line_top = h - self.padding;
+            let hint_w = measure_advance(&self.font, &self.hint, self.font_size);
+            let slack = (self.inner_width() - hint_w).max(0.0);
+            let hint_x = self.padding
+                + match self.resolved_h_align() {
+                    TextHAlign::Left => 0.0,
+                    TextHAlign::Center => slack * 0.5,
+                    TextHAlign::Right => slack,
+                };
+            let line_top = self.line_top_y(0);
             let line_bottom = line_top - self.cached_line_h;
             let baseline_y =
                 line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
-            ctx.fill_text("Type here…", self.padding, baseline_y);
+            ctx.fill_text(&self.hint, hint_x, baseline_y);
         }
 
         ctx.reset_clip();
@@ -270,6 +328,16 @@ impl Widget for TextArea {
                 EventResult::Ignored
             }
             Event::KeyDown { key, modifiers } => {
+                // Pre-default key-chord interception (e.g. the demo's Ctrl/Cmd+Y
+                // case-toggle). A `true` return consumes the event and skips
+                // built-in handling. Cloned out of `self` so the callback can
+                // freely borrow the shared edit state we also hold.
+                if let Some(cb) = self.on_key_chord.clone() {
+                    if (cb.borrow_mut())(key, modifiers) {
+                        crate::animation::request_draw();
+                        return EventResult::Consumed;
+                    }
+                }
                 let shift = modifiers.shift;
                 let cmd = modifiers.ctrl || modifiers.meta;
                 match key {

@@ -153,11 +153,41 @@ pub fn byte_at_x(font: &Font, text: &str, font_size: f64, target_x: f64) -> usiz
 // ---------------------------------------------------------------------------
 
 /// The mutable editing state shared between `TextField` and its undo commands.
+///
+/// `epoch` is a monotonically-increasing text-content revision. It lets a
+/// widget that caches something derived from `text` (e.g. `TextArea`'s wrapped
+/// visual lines) detect when the text was mutated *through a different owner of
+/// the same shared handle* — the case where the widget's own internal
+/// invalidation never ran. Bump it via [`note_text_change`](Self::note_text_change)
+/// whenever `text` is modified through a shared reference; cursor/anchor-only
+/// moves must NOT bump it (they don't affect wrapping).
 #[derive(Clone, Default)]
 pub struct TextEditState {
     pub text: String,
     pub cursor: usize,
     pub anchor: usize,
+    pub epoch: u64,
+}
+
+impl TextEditState {
+    /// Record that `text` changed: advances the content [`epoch`](Self::epoch).
+    #[inline]
+    pub fn note_text_change(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+    }
+
+    /// Sorted `[start, end)` byte range of the current selection, or `None`
+    /// when the selection is empty (cursor == anchor).
+    #[inline]
+    pub fn selection_range(&self) -> Option<(usize, usize)> {
+        let lo = self.cursor.min(self.anchor);
+        let hi = self.cursor.max(self.anchor);
+        if hi > lo {
+            Some((lo, hi))
+        } else {
+            None
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
