@@ -1,6 +1,16 @@
 ﻿//! `ProgressBar` — a read-only horizontal progress indicator.
+//!
+//! Supports an optional loading animation (`animate`) that pulses the fill
+//! brightness and sweeps a small spinner arc at the fill edge, mirroring
+//! egui's `ProgressBar::animate`. The animation only runs while `value < 1.0`
+//! and the bar is actually painted (i.e. visible), re-arming a ~60 fps wake via
+//! [`request_draw_after`](crate::animation::request_draw_after) each frame so
+//! the loop idles the moment the bar is culled or finishes.
 
 use std::sync::Arc;
+use std::time::Duration;
+
+use web_time::Instant;
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
@@ -13,6 +23,12 @@ use crate::widget::Widget;
 const BAR_H: f64 = 18.0;
 const WIDGET_H: f64 = 24.0;
 
+/// Linear interpolation between `a` and `b` by `t` (unclamped).
+#[inline]
+fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
+}
+
 /// Inspector-visible properties of a [`ProgressBar`].
 #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug)]
@@ -22,6 +38,8 @@ pub struct ProgressBarProps {
     pub show_text: bool,
     pub font_size: f64,
     pub fill_color: Option<Color>,
+    /// When `true`, play the loading animation while `value < 1.0`.
+    pub animate: bool,
 }
 
 impl Default for ProgressBarProps {
@@ -31,6 +49,7 @@ impl Default for ProgressBarProps {
             show_text: true,
             font_size: 11.0,
             fill_color: None,
+            animate: false,
         }
     }
 }
@@ -42,6 +61,13 @@ pub struct ProgressBar {
     base: WidgetBase,
     pub props: ProgressBarProps,
     font: Arc<Font>,
+    /// When set, the animation runs while the bar is hovered (matches the egui
+    /// gallery, which passes `response.hovered()` to `.animate`).
+    animate_on_hover: bool,
+    /// Live hover state, tracked so `animate_on_hover` can start/stop the loop.
+    hovered: bool,
+    /// Time origin for the pulse/spinner phase.
+    anim_start: Instant,
 }
 
 impl ProgressBar {
@@ -55,6 +81,9 @@ impl ProgressBar {
                 ..ProgressBarProps::default()
             },
             font,
+            animate_on_hover: false,
+            hovered: false,
+            anim_start: Instant::now(),
         }
     }
 
@@ -65,6 +94,31 @@ impl ProgressBar {
     pub fn with_fill_color(mut self, color: Color) -> Self {
         self.props.fill_color = Some(color);
         self
+    }
+
+    /// Enable the loading animation. While set (and `value < 1.0`), the fill
+    /// brightness pulses and a small spinner arc sweeps at the fill edge.
+    /// Mirrors egui's `ProgressBar::animate`.
+    pub fn with_animate(mut self, animate: bool) -> Self {
+        self.props.animate = animate;
+        self
+    }
+    /// Runtime setter for the animation flag (e.g. driven by app state).
+    pub fn set_animate(&mut self, animate: bool) {
+        self.props.animate = animate;
+    }
+    /// Animate only while the bar is hovered — the egui Widget Gallery
+    /// behavior ("The progress bar can be animated!").
+    pub fn with_animate_on_hover(mut self, on: bool) -> Self {
+        self.animate_on_hover = on;
+        self
+    }
+
+    /// Whether the animation should currently play: enabled (explicitly or via
+    /// hover) and not yet complete.
+    #[inline]
+    fn animating(&self) -> bool {
+        self.props.value < 1.0 && (self.props.animate || (self.animate_on_hover && self.hovered))
     }
 
     pub fn with_margin(mut self, m: Insets) -> Self {
@@ -162,14 +216,58 @@ impl Widget for ProgressBar {
         ctx.rounded_rect(0.0, bar_y, w, BAR_H, r);
         ctx.fill();
 
+        let animating = self.animating();
+
         // Fill — use explicit fill_color if set, otherwise fall back to accent.
-        let fill_color = self.props.fill_color.unwrap_or(v.accent);
+        // While animating, pulse the brightness like egui (cos-driven, 0.7..1.0).
+        let base_fill = self.props.fill_color.unwrap_or(v.accent);
+        let time = self.anim_start.elapsed().as_secs_f64();
+        let fill_color = if animating {
+            let factor = lerp(0.7, 1.0, time.cos().abs()) as f32;
+            Color::rgba(
+                base_fill.r * factor,
+                base_fill.g * factor,
+                base_fill.b * factor,
+                base_fill.a,
+            )
+        } else {
+            base_fill
+        };
         let fill_w = (w * self.props.value).max(0.0);
         if fill_w >= 1.0 {
             ctx.set_fill_color(fill_color);
             ctx.begin_path();
             ctx.rounded_rect(0.0, bar_y, fill_w, BAR_H, r);
             ctx.fill();
+        }
+
+        // Spinner arc that sweeps at the leading edge of the fill, matching
+        // egui's animated ProgressBar.
+        if animating {
+            let center_y = bar_y + BAR_H * 0.5;
+            let half_h = BAR_H * 0.5;
+            let circle_r = half_h - 2.0;
+            let start_angle = time * std::f64::consts::TAU;
+            let end_angle = start_angle + 240f64.to_radians() * time.sin();
+            let n = 20;
+            ctx.set_stroke_color(v.text_color);
+            ctx.set_line_width(2.0);
+            ctx.begin_path();
+            for i in 0..n {
+                let angle = lerp(start_angle, end_angle, i as f64 / n as f64);
+                let (sin, cos) = angle.sin_cos();
+                let px = fill_w - half_h + circle_r * cos;
+                let py = center_y + circle_r * sin;
+                if i == 0 {
+                    ctx.move_to(px, py);
+                } else {
+                    ctx.line_to(px, py);
+                }
+            }
+            ctx.stroke();
+            // Re-arm ~60 fps without invalidating cached widgets: the bar is
+            // uncached, so its next paint re-reads the phase and redraws.
+            crate::animation::request_draw_after(Duration::from_millis(16));
         }
 
         // Percentage text centered over bar
@@ -193,7 +291,60 @@ impl Widget for ProgressBar {
         }
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult {
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        // Track hover so `animate_on_hover` can start/stop the loading loop.
+        // Only matters when hover actually gates the animation.
+        if let Event::MouseMove { pos } = event {
+            if self.animate_on_hover {
+                let was = self.hovered;
+                self.hovered = self.hit_test(*pos);
+                if was != self.hovered {
+                    // Hover edge changes the bar's content (animation on/off),
+                    // so invalidate; the paint pass re-arms the frame timer.
+                    crate::animation::request_draw();
+                }
+            }
+        }
         EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+
+    fn test_font() -> Arc<Font> {
+        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    #[test]
+    fn not_animating_by_default() {
+        let pb = ProgressBar::new(0.5, test_font());
+        assert!(!pb.animating());
+    }
+
+    #[test]
+    fn explicit_animate_runs_below_full() {
+        let pb = ProgressBar::new(0.5, test_font()).with_animate(true);
+        assert!(pb.animating());
+    }
+
+    #[test]
+    fn animation_stops_when_complete() {
+        // egui gates the animation on `progress < 1.0`.
+        let pb = ProgressBar::new(1.0, test_font()).with_animate(true);
+        assert!(!pb.animating());
+    }
+
+    #[test]
+    fn hover_mode_only_animates_while_hovered() {
+        let mut pb = ProgressBar::new(0.5, test_font()).with_animate_on_hover(true);
+        assert!(!pb.animating(), "idle until hovered");
+        pb.hovered = true;
+        assert!(pb.animating(), "animates while hovered");
+        pb.hovered = false;
+        assert!(!pb.animating(), "stops when hover leaves");
     }
 }

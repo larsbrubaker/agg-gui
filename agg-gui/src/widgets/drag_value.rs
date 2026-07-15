@@ -61,6 +61,10 @@ pub struct DragValue {
     step: f64,
     /// Number of decimal places used when formatting the displayed value.
     decimals: usize,
+    /// Text appended after the value in the display label (e.g. "°" or
+    /// " years"). Mirrors `Slider::with_suffix`. It is shown only in the
+    /// non-editing label; inline edit text stays numeric so parsing works.
+    suffix: String,
 
     font: Arc<Font>,
     font_size: f64,
@@ -115,6 +119,7 @@ impl DragValue {
             speed: 1.0,
             step: 0.0,
             decimals: 2,
+            suffix: String::new(),
             font,
             font_size: 13.0,
             dragging: false,
@@ -160,6 +165,17 @@ impl DragValue {
         self
     }
 
+    /// Append a suffix to the displayed value (e.g. "°" or " years").
+    ///
+    /// The suffix is cosmetic: it appears in the drag label but not in the
+    /// inline edit buffer, so keyboard entry and parsing stay numeric. Mirrors
+    /// [`Slider::with_suffix`](crate::widgets::Slider::with_suffix).
+    pub fn with_suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.suffix = suffix.into();
+        self.sync_label();
+        self
+    }
+
     /// Register a callback invoked with the new value on every drag update.
     pub fn on_change(mut self, cb: impl FnMut(f64) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
@@ -196,12 +212,18 @@ impl DragValue {
 
     // ── Internal helpers ───────────────────────────────────────────────────
 
+    /// Numeric-only formatting (no suffix) — used for the inline edit buffer.
     fn format_value(&self) -> String {
         format_value(self.value, self.decimals)
     }
 
+    /// Display text shown in the drag label: value plus the optional suffix.
+    fn display_text(&self) -> String {
+        format!("{}{}", self.format_value(), self.suffix)
+    }
+
     fn sync_label(&mut self) {
-        self.value_label.set_text(self.format_value());
+        self.value_label.set_text(self.display_text());
     }
 
     fn apply_step_and_clamp(&self, raw: f64) -> f64 {
@@ -547,5 +569,49 @@ impl Widget for DragValue {
 
             _ => EventResult::Ignored,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+
+    fn test_font() -> Arc<Font> {
+        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    #[test]
+    fn display_text_appends_suffix() {
+        let dv = DragValue::new(30.0, 0.0, 360.0, test_font())
+            .with_decimals(0)
+            .with_suffix("°");
+        assert_eq!(dv.display_text(), "30°");
+        // Edit buffer stays numeric so parsing works.
+        assert_eq!(dv.format_value(), "30");
+    }
+
+    #[test]
+    fn suffix_with_space_reads_like_egui_years() {
+        let dv = DragValue::new(2.0, 0.0, 99.0, test_font())
+            .with_decimals(0)
+            .with_suffix(" years");
+        assert_eq!(dv.display_text(), "2 years");
+    }
+
+    #[test]
+    fn edit_mode_buffer_excludes_suffix() {
+        let mut dv = DragValue::new(5.0, 0.0, 10.0, test_font())
+            .with_decimals(0)
+            .with_suffix(" m");
+        dv.enter_edit_mode();
+        assert_eq!(dv.edit_text, "5", "suffix must not enter the edit buffer");
+    }
+
+    #[test]
+    fn no_suffix_matches_plain_value() {
+        let dv = DragValue::new(1.5, 0.0, 10.0, test_font()).with_decimals(2);
+        assert_eq!(dv.display_text(), "1.50");
     }
 }

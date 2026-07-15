@@ -56,6 +56,11 @@ pub struct Checkbox {
     hovered: bool,
     focused: bool,
     on_change: Option<Box<dyn FnMut(bool)>>,
+    /// When set and it returns `true`, the box renders a horizontal dash
+    /// (egui's indeterminate/tri-state look) instead of a checkmark. This only
+    /// affects appearance; clicking still toggles `checked`. Used for
+    /// "check/uncheck all" controls whose state depends on a group of boxes.
+    indeterminate_fn: Option<Box<dyn Fn() -> bool>>,
     /// Tracked label text — used for empty-check during layout and to rebuild
     /// the Label child when font size changes.
     label_text: String,
@@ -80,6 +85,7 @@ impl Checkbox {
             hovered: false,
             focused: false,
             on_change: None,
+            indeterminate_fn: None,
             label_text,
         }
     }
@@ -129,6 +135,23 @@ impl Checkbox {
     pub fn on_change(mut self, cb: impl FnMut(bool) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
         self
+    }
+
+    /// Drive the indeterminate (tri-state) appearance from a closure.
+    ///
+    /// When the closure returns `true` the box shows a horizontal dash instead
+    /// of a checkmark, mirroring egui's `Checkbox::indeterminate`. The closure
+    /// is evaluated every paint, so it can reflect live aggregate state (e.g. a
+    /// "check all" box that is indeterminate when only some children are set).
+    pub fn with_indeterminate_fn(mut self, f: impl Fn() -> bool + 'static) -> Self {
+        self.indeterminate_fn = Some(Box::new(f));
+        self
+    }
+
+    /// Returns whether the box should currently render as indeterminate.
+    #[inline]
+    fn is_indeterminate(&self) -> bool {
+        self.indeterminate_fn.as_ref().is_some_and(|f| f())
     }
 
     pub fn checked(&self) -> bool {
@@ -272,17 +295,21 @@ impl Widget for Checkbox {
         }
 
         let checked = self.effective_checked();
+        let indeterminate = self.is_indeterminate();
+        // The indeterminate state renders with the "on" (accent) fill, matching
+        // our checked look, so it reads as a partial selection rather than empty.
+        let filled = checked || indeterminate;
 
         // Box background
         let (unchecked_bg, unchecked_border) = Self::unchecked_colors(&v, self.hovered);
-        let bg = if checked { v.accent } else { unchecked_bg };
+        let bg = if filled { v.accent } else { unchecked_bg };
         ctx.set_fill_color(bg);
         ctx.begin_path();
         ctx.rounded_rect(box_x, box_y, BOX_SIZE, BOX_SIZE, 3.0);
         ctx.fill();
 
         // Box border
-        let border = if checked {
+        let border = if filled {
             v.widget_stroke_active
         } else {
             unchecked_border
@@ -300,8 +327,17 @@ impl Widget for Checkbox {
         );
         ctx.stroke();
 
-        // Checkmark — coordinates in Y-up space (origin = box bottom-left).
-        if checked {
+        // Mark — coordinates in Y-up space (origin = box bottom-left).
+        // Indeterminate takes visual priority: draw a horizontal dash rather
+        // than the checkmark, matching egui's tri-state look.
+        if indeterminate {
+            ctx.set_stroke_color(Color::white());
+            ctx.set_line_width(2.0);
+            ctx.begin_path();
+            ctx.move_to(box_x + 3.0, box_y + BOX_SIZE * 0.5);
+            ctx.line_to(box_x + BOX_SIZE - 3.0, box_y + BOX_SIZE * 0.5);
+            ctx.stroke();
+        } else if checked {
             ctx.set_stroke_color(Color::white());
             ctx.set_line_width(2.0);
             ctx.begin_path();
@@ -374,5 +410,42 @@ impl Widget for Checkbox {
             }
             _ => EventResult::Ignored,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+
+    fn test_font() -> Arc<Font> {
+        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    #[test]
+    fn no_indeterminate_fn_reads_false() {
+        let cb = Checkbox::new("x", test_font(), false);
+        assert!(!cb.is_indeterminate());
+    }
+
+    #[test]
+    fn indeterminate_fn_drives_visual_state() {
+        let flag = Rc::new(Cell::new(true));
+        let f = Rc::clone(&flag);
+        let cb = Checkbox::new("x", test_font(), false).with_indeterminate_fn(move || f.get());
+        assert!(cb.is_indeterminate());
+        flag.set(false);
+        assert!(!cb.is_indeterminate());
+    }
+
+    #[test]
+    fn click_still_toggles_while_indeterminate() {
+        // Indeterminate only affects appearance; toggling must still work.
+        let cb = Checkbox::new("x", test_font(), false).with_indeterminate_fn(|| true);
+        let mut cb = cb;
+        assert!(!cb.effective_checked());
+        cb.toggle();
+        assert!(cb.effective_checked());
     }
 }

@@ -135,6 +135,7 @@ impl Widget for TextField {
             h_bits: self.bounds.height.to_bits(),
             font_ptr: Arc::as_ptr(&font) as usize,
             font_size_bits: self.font_size.to_bits(),
+            masking: self.masking_active(),
         };
         drop(st);
         if self.last_sig.as_ref() != Some(&sig) {
@@ -155,7 +156,7 @@ impl Widget for TextField {
         };
         // In password mode render '•' for every character, but keep byte positions
         // consistent by recomputing them against the masked string.
-        let (text, cursor, anchor) = if self.password_mode {
+        let (text, cursor, anchor) = if self.masking_active() {
             const BULLET: char = '•';
             const BULLET_LEN: usize = 3; // '•' is 3 bytes in UTF-8
             let n = raw_text.chars().count();
@@ -277,14 +278,15 @@ impl Widget for TextField {
 
         let (text, cursor) = {
             let st = self.edit.borrow();
-            let text = if self.password_mode {
+            let masking = self.masking_active();
+            let text = if masking {
                 const BULLET: char = '•';
                 let n = st.text.chars().count();
                 BULLET.to_string().repeat(n)
             } else {
                 st.text.clone()
             };
-            let cursor = if self.password_mode {
+            let cursor = if masking {
                 const BULLET_LEN: usize = 3;
                 st.text[..st.cursor].chars().count() * BULLET_LEN
             } else {

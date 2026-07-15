@@ -252,25 +252,19 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
                     vec![
                         code_line("DragValue::new(", fn_, &font),
                         code_line("    age, 0.0, 120.0, font)", fg, &font),
-                        code_line("    // suffix: \" years\"", dim, &font),
+                        code_line("    .with_suffix(\" years\")", fn_, &font),
                     ],
                     code_bg,
                 ),
                 Box::new(
-                    FlexRow::new()
-                        .with_gap(6.0)
-                        .add(Box::new(
-                            SizedBox::new()
-                                .with_width(90.0)
-                                .with_height(28.0)
-                                .with_child(Box::new(
-                                    DragValue::new(age.get() as f64, 0.0, 120.0, Arc::clone(&font))
-                                        .with_decimals(0)
-                                        .on_change(move |v| age2.set(v as u32)),
-                                )),
-                        ))
-                        .add(Box::new(
-                            Label::new("years", Arc::clone(&font)).with_font_size(13.0),
+                    SizedBox::new()
+                        .with_width(120.0)
+                        .with_height(28.0)
+                        .with_child(Box::new(
+                            DragValue::new(age.get() as f64, 0.0, 120.0, Arc::clone(&font))
+                                .with_decimals(0)
+                                .with_suffix(" years")
+                                .on_change(move |v| age2.set(v as u32)),
                         )),
                 ),
             ),

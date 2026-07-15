@@ -17,6 +17,7 @@ use agg_gui::{
 
 mod interactive_container;
 mod misc_demos;
+mod misc_sections;
 mod tree_section;
 pub use interactive_container::interactive_container;
 pub use misc_demos::misc_demos;

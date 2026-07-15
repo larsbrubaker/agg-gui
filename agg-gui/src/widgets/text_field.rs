@@ -46,10 +46,13 @@ mod clipboard;
 mod filter;
 mod keyboard_mode;
 mod layout_builders;
+mod password;
+mod sig;
 mod theme;
 mod widget_impl;
 
 use clipboard::{clipboard_get, clipboard_set};
+use sig::TextFieldSig;
 pub use theme::TextFieldTheme;
 
 // ---------------------------------------------------------------------------
@@ -84,6 +87,11 @@ pub struct TextField {
     /// When `true`, every character is displayed as '•' (U+2022).
     /// The actual text is stored and edited normally; only the render is masked.
     pub password_mode: bool,
+    /// Optional runtime "reveal" override for password fields. When the cell is
+    /// present and holds `true`, masking is suppressed and the plaintext shows
+    /// even though `password_mode` is set — this backs a demo-side eye toggle
+    /// without rebuilding the widget. `None`/`false` keeps the field masked.
+    password_reveal: Option<Rc<Cell<bool>>>,
 
     // Interaction state
     focused: bool,
@@ -145,26 +153,6 @@ pub struct TextField {
     last_sig: Option<TextFieldSig>,
 }
 
-#[derive(Clone, PartialEq)]
-struct TextFieldSig {
-    text: String,
-    cursor: usize,
-    anchor: usize,
-    focused: bool,
-    hovered: bool,
-    scroll_x_bits: u64,
-    w_bits: u64,
-    h_bits: u64,
-    // Font identity + size: the cached bitmap was rasterised with a specific
-    // typeface at a specific point size, so any live swap in the System
-    // window (which runs through `font_settings::set_system_font` /
-    // `set_font_size_scale`) must invalidate — otherwise the stale bitmap
-    // keeps blitting until some other field in the sig happens to change
-    // (e.g. the user hovers the control, which flips `hovered`).
-    font_ptr: usize,
-    font_size_bits: u64,
-}
-
 impl TextField {
     pub fn new(font: Arc<Font>) -> Self {
         Self {
@@ -180,6 +168,7 @@ impl TextField {
             read_only: false,
             select_all_on_focus: false,
             password_mode: false,
+            password_reveal: None,
             focused: false,
             hovered: false,
             mouse_down: false,
@@ -231,10 +220,8 @@ impl TextField {
         self
     }
 
-    pub fn with_password_mode(mut self, v: bool) -> Self {
-        self.password_mode = v;
-        self
-    }
+    // Password-mode builders + the `masking_active` helper live in
+    // `text_field/password.rs` to keep this file under the 800-line cap.
 
     pub fn with_placeholder(mut self, s: impl Into<String>) -> Self {
         self.placeholder = s.into();
@@ -334,7 +321,7 @@ impl TextField {
     /// `real_text`.  In password mode, measures the masked string and maps back.
     fn click_to_cursor(&self, real_text: &str, tx: f64) -> usize {
         let font = self.active_font();
-        if self.password_mode {
+        if self.masking_active() {
             const BULLET: char = '•';
             const BULLET_LEN: usize = 3;
             let n = real_text.chars().count();
@@ -361,7 +348,7 @@ impl TextField {
         let font = self.active_font();
         let cx = {
             let st = self.edit.borrow();
-            if self.password_mode {
+            if self.masking_active() {
                 const BULLET: char = '•';
                 #[allow(dead_code)]
                 const BULLET_LEN: usize = 3;
