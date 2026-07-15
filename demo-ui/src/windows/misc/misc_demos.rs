@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    Checkbox, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow,
-    Font, Label, RadioGroup, Rect, ScrollView, Size, SizedBox, Slider, Widget,
+    Button, Checkbox, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult, FlexColumn,
+    FlexRow, Font, Label, RadioGroup, Rebuilder, Rect, ScrollView, Size, SizedBox, Slider, Widget,
 };
+
+use super::tree_section::tree_section;
 
 /// A color swatch + name row used by the Colors section of misc_demos.
 /// The swatch rectangle is painted directly; the name renders through a
@@ -65,6 +67,8 @@ impl Widget for SwatchRow {
 struct BoxPainter {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
+    box_w: Rc<Cell<f64>>,
+    box_h: Rc<Cell<f64>>,
     corner_radius: Rc<Cell<f64>>,
     stroke_width: Rc<Cell<f64>>,
     num_boxes: Rc<Cell<f64>>,
@@ -88,7 +92,19 @@ impl Widget for BoxPainter {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let h = 60.0_f64;
+        // Height grows with the box height and wrap count so the boxes are
+        // never clipped by the section (egui uses `horizontal_wrapped`).
+        let bw = self.box_w.get().max(1.0);
+        let bh = self.box_h.get().max(1.0);
+        let n = self.num_boxes.get() as usize;
+        let gap = 8.0_f64;
+        let per_row = ((available.width + gap) / (bw + gap)).floor().max(1.0) as usize;
+        let rows = if n == 0 {
+            0
+        } else {
+            n.div_ceil(per_row.max(1))
+        };
+        let h = (rows as f64 * (bh + gap) + gap).max(8.0);
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
         Size::new(available.width, h)
     }
@@ -98,12 +114,16 @@ impl Widget for BoxPainter {
         let cr = self.corner_radius.get();
         let sw = self.stroke_width.get();
         let n = self.num_boxes.get() as usize;
-        let bw = 60.0_f64;
-        let bh = 32.0_f64;
+        let bw = self.box_w.get().max(1.0);
+        let bh = self.box_h.get().max(1.0);
         let gap = 8.0_f64;
-        let start_y = (self.bounds.height - bh) * 0.5;
+        let per_row = ((self.bounds.width + gap) / (bw + gap)).floor().max(1.0) as usize;
         for i in 0..n {
-            let x = i as f64 * (bw + gap);
+            let col = i % per_row;
+            let row = i / per_row;
+            let x = col as f64 * (bw + gap);
+            // Y-up: first row sits at the top of the widget.
+            let y = self.bounds.height - gap - (row as f64 + 1.0) * bh - row as f64 * gap;
             ctx.set_fill_color(Color::rgba(
                 v.text_color.r,
                 v.text_color.g,
@@ -111,13 +131,13 @@ impl Widget for BoxPainter {
                 0.35,
             ));
             ctx.begin_path();
-            ctx.rounded_rect(x, start_y, bw, bh, cr);
+            ctx.rounded_rect(x, y, bw, bh, cr);
             ctx.fill();
             if sw > 0.0 {
                 ctx.set_stroke_color(v.text_color);
                 ctx.set_line_width(sw);
                 ctx.begin_path();
-                ctx.rounded_rect(x, start_y, bw, bh, cr);
+                ctx.rounded_rect(x, y, bw, bh, cr);
                 ctx.stroke();
             }
         }
@@ -372,10 +392,46 @@ fn colors_section(font: &Arc<Font>) -> Box<dyn Widget> {
 fn box_rendering_section(font: &Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new().with_gap(4.0);
 
+    let box_w = Rc::new(Cell::new(64.0_f64));
+    let box_h = Rc::new(Cell::new(32.0_f64));
     let corner_r = Rc::new(Cell::new(5.0_f64));
     let stroke_w = Rc::new(Cell::new(2.0_f64));
-    let num_boxes = Rc::new(Cell::new(3.0_f64));
+    let num_boxes = Rc::new(Cell::new(1.0_f64));
 
+    {
+        let bw = Rc::clone(&box_w);
+        col.push(
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    Slider::new(box_w.get(), 0.0, 500.0, Arc::clone(font))
+                        .with_step(1.0)
+                        .on_change(move |v| bw.set(v)),
+                )),
+            ),
+            0.0,
+        );
+        col.push(
+            Box::new(Label::new("width", Arc::clone(font)).with_font_size(10.5)),
+            0.0,
+        );
+    }
+    {
+        let bh = Rc::clone(&box_h);
+        col.push(
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    Slider::new(box_h.get(), 0.0, 500.0, Arc::clone(font))
+                        .with_step(1.0)
+                        .on_change(move |v| bh.set(v)),
+                )),
+            ),
+            0.0,
+        );
+        col.push(
+            Box::new(Label::new("height", Arc::clone(font)).with_font_size(10.5)),
+            0.0,
+        );
+    }
     {
         let cr = Rc::clone(&corner_r);
         col.push(
@@ -432,6 +488,8 @@ fn box_rendering_section(font: &Arc<Font>) -> Box<dyn Widget> {
         Box::new(BoxPainter {
             bounds: Rect::default(),
             children: Vec::new(),
+            box_w: Rc::clone(&box_w),
+            box_h: Rc::clone(&box_h),
             corner_radius: Rc::clone(&corner_r),
             stroke_width: Rc::clone(&stroke_w),
             num_boxes: Rc::clone(&num_boxes),
@@ -440,6 +498,79 @@ fn box_rendering_section(font: &Arc<Font>) -> Box<dyn Widget> {
     );
 
     Box::new(col)
+}
+
+/// Build the Columns section content — a slider (1..=10) driving a row of that
+/// many equal-flex columns, mirroring egui's `ui.columns`.
+fn columns_section(font: &Arc<Font>) -> Box<dyn Widget> {
+    let mut col = FlexColumn::new().with_gap(6.0);
+
+    let num_columns = Rc::new(Cell::new(2.0_f64));
+
+    {
+        let row = FlexRow::new()
+            .with_gap(8.0)
+            .add(Box::new(
+                Label::new("Columns", Arc::clone(font)).with_font_size(12.0),
+            ))
+            .add_flex(
+                Box::new(
+                    SizedBox::new().with_height(28.0).with_child(Box::new(
+                        Slider::new(num_columns.get(), 1.0, 10.0, Arc::clone(font))
+                            .with_step(1.0)
+                            .with_decimals(0)
+                            .with_value_cell(Rc::clone(&num_columns)),
+                    )),
+                ),
+                1.0,
+            );
+        col.push(Box::new(row), 0.0);
+    }
+
+    let version = {
+        let num_columns = Rc::clone(&num_columns);
+        move || num_columns.get() as u64
+    };
+    let builder = {
+        let font = Arc::clone(font);
+        let num_columns = Rc::clone(&num_columns);
+        move || build_columns(&font, &num_columns)
+    };
+    col.push(Box::new(Rebuilder::new(version, builder)), 0.0);
+
+    Box::new(col)
+}
+
+/// Build a row of `n` equal-flex columns; the last one carries a "Delete this"
+/// button that decrements the count (egui parity).
+fn build_columns(font: &Arc<Font>, num_columns: &Rc<Cell<f64>>) -> Box<dyn Widget> {
+    let n = (num_columns.get() as usize).clamp(1, 10);
+    let mut row = FlexRow::new().with_gap(8.0);
+    for i in 0..n {
+        let mut column = FlexColumn::new().with_gap(4.0).add(Box::new(
+            Label::new(
+                format!("Column {} out of {}", i + 1, n),
+                Arc::clone(font),
+            )
+            .with_font_size(11.5)
+            .with_wrap(true),
+        ));
+        if i + 1 == n {
+            let num_columns = Rc::clone(num_columns);
+            column = column.add(Box::new(
+                SizedBox::new().with_height(26.0).with_child(Box::new(
+                    Button::new("Delete this", Arc::clone(font))
+                        .with_font_size(11.0)
+                        .on_click(move || {
+                            let next = (num_columns.get() - 1.0).max(1.0);
+                            num_columns.set(next);
+                        }),
+                )),
+            ));
+        }
+        row = row.add_flex(Box::new(column), 1.0);
+    }
+    Box::new(row)
 }
 
 /// Build the Misc Demos window — ✨ Misc Demos — matching egui's CollapsingHeader layout.
@@ -472,6 +603,26 @@ pub fn misc_demos(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
+    // ── Colors (default closed) ──────────────────────────────────────────────
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Colors", Arc::clone(&font))
+                .default_open(false)
+                .with_content(colors_section(&font)),
+        ),
+        0.0,
+    );
+
+    // ── Tree (default closed) ────────────────────────────────────────────────
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Tree", Arc::clone(&font))
+                .default_open(false)
+                .with_content(tree_section(&font)),
+        ),
+        0.0,
+    );
+
     // ── Checkboxes (default closed) ─────────────────────────────────────────
     col.push(
         Box::new(
@@ -482,12 +633,12 @@ pub fn misc_demos(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
-    // ── Colors (default closed) ──────────────────────────────────────────────
+    // ── Columns (default closed) ─────────────────────────────────────────────
     col.push(
         Box::new(
-            CollapsingHeader::new("Colors", Arc::clone(&font))
+            CollapsingHeader::new("Columns", Arc::clone(&font))
                 .default_open(false)
-                .with_content(colors_section(&font)),
+                .with_content(columns_section(&font)),
         ),
         0.0,
     );

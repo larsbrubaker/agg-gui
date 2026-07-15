@@ -13,12 +13,12 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::widget::paint_subtree;
+use agg_gui::widget::{paint_subtree, CompositingLayer};
 use agg_gui::{
-    Button, Checkbox, CollapsingHeader, Color, ColorPicker, ColorWheelPicker, ComboBox, DragValue,
-    DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink, ImageView, Label,
-    ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox, Slider, TextField,
-    ToggleSwitch, Widget,
+    Button, Checkbox, CollapsingHeader, Color, ColorPicker, ColorWheelPicker, ComboBox,
+    Conditional, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink,
+    ImageView, Label, ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox,
+    Slider, TextField, ToggleSwitch, Tooltip, Widget,
 };
 
 const AGG_GUI_DOCS_URL: &str = "https://docs.rs/agg-gui/";
@@ -82,6 +82,144 @@ impl Widget for ScalarProgress {
     }
 }
 
+/// Scope wrapper around the gallery grid that reproduces egui's
+/// `UiBuilder::disabled()/invisible()` + `Ui::multiply_opacity` block.
+///
+/// * **Visible** — [`Widget::is_visible`] returns the `visible` flag, which
+///   suppresses painting of the whole subtree while layout still reserves its
+///   space (so the window does not jump).
+/// * **Interactive** — when unchecked, [`Widget::claims_pointer_exclusively`]
+///   makes the scope the hit target for every pointer position inside it, so
+///   `hit_test_subtree` stops before reaching any child widget and events are
+///   swallowed here. The subtree is additionally dimmed as a visual cue.
+/// * **Opacity** — realised through a compositing layer
+///   ([`Widget::compositing_layer`]); the framework paints the subtree into a
+///   transparent buffer and blends it back at the requested alpha, which is the
+///   only path that fades backbuffered text/buttons uniformly. See the note in
+///   [`GalleryScope::compositing_layer`] about the device-scale limitation.
+///
+/// It also paints egui's alternating row striping behind the grid rows.
+struct GalleryScope {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    visible: Rc<Cell<bool>>,
+    interactive: Rc<Cell<bool>>,
+    opacity: Rc<Cell<f64>>,
+}
+
+impl GalleryScope {
+    fn new(
+        grid: Box<dyn Widget>,
+        visible: Rc<Cell<bool>>,
+        interactive: Rc<Cell<bool>>,
+        opacity: Rc<Cell<f64>>,
+    ) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: vec![grid],
+            visible,
+            interactive,
+            opacity,
+        }
+    }
+
+    /// Effective whole-subtree alpha: the user opacity, further dimmed when the
+    /// grid is non-interactive to approximate egui's grayed-out disabled look
+    /// (per-widget disabled styling is not plumbed through the library).
+    fn effective_alpha(&self) -> f64 {
+        let base = self.opacity.get().clamp(0.0, 1.0);
+        if self.interactive.get() {
+            base
+        } else {
+            base * 0.4
+        }
+    }
+}
+
+impl Widget for GalleryScope {
+    fn type_name(&self) -> &'static str {
+        "GalleryScope"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+
+    fn layout(&mut self, available: Size) -> Size {
+        let size = if let Some(grid) = self.children.first_mut() {
+            let s = grid.layout(available);
+            grid.set_bounds(Rect::new(0.0, 0.0, s.width, s.height));
+            s
+        } else {
+            Size::new(0.0, 0.0)
+        };
+        self.bounds = Rect::new(0.0, 0.0, size.width, size.height);
+        size
+    }
+
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        // Alternating row striping (egui's `Grid::striped(true)`).  Painted
+        // before the grid child so the rows draw on top.  The stripe tint is
+        // derived from the theme text colour at low alpha so it adapts to both
+        // dark and light mode.
+        let v = ctx.visuals();
+        let stripe = Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.05);
+        let width = self.bounds.width;
+        if let Some(grid) = self.children.first() {
+            for (i, row) in grid.children().iter().enumerate() {
+                if i % 2 == 1 {
+                    let rb = row.bounds();
+                    ctx.set_fill_color(stripe);
+                    ctx.begin_path();
+                    ctx.rounded_rect(0.0, rb.y - 2.0, width, rb.height + 4.0, 2.0);
+                    ctx.fill();
+                }
+            }
+        }
+    }
+
+    fn is_visible(&self) -> bool {
+        self.visible.get()
+    }
+
+    /// When the grid is non-interactive, disable all pointer *and* keyboard
+    /// interaction for the subtree: `hit_test_subtree` stops here (clicks are
+    /// swallowed) and `collect_focusable` skips the subtree (Tab cannot reach
+    /// the grid's TextField).  Mirrors egui's `UiBuilder::disabled()`.
+    fn blocks_child_interaction(&self) -> bool {
+        !self.interactive.get()
+    }
+
+    fn compositing_layer(&mut self) -> Option<CompositingLayer> {
+        let alpha = self.effective_alpha();
+        // Only request a layer when there is something to fade.  The library's
+        // `push_layer` resets the CTM to identity, so on HiDPI (device scale
+        // != 1) the faded subtree would render at logical size inside a
+        // physical-pixel target — a mis-scale.  We therefore restrict the fade
+        // to device scale 1.0 and leave it a no-op elsewhere (flagged for a
+        // library fix: either honour `global_alpha` in the backbuffer blit or
+        // preserve device scale across `push_layer`).
+        let ds = agg_gui::device_scale();
+        if alpha < 0.999 && self.visible.get() && (ds - 1.0).abs() < 0.01 {
+            Some(CompositingLayer::new(0.0, 0.0, 0.0, 0.0, alpha))
+        } else {
+            None
+        }
+    }
+
+    fn on_event(&mut self, _: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
 /// Build the Widget Gallery demo — a scrollable showcase of all interactive
 /// widgets with section headers.
 pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
@@ -90,6 +228,9 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
     let scalar = Rc::new(Cell::new(42.0_f64));
     let color = Rc::new(Cell::new(Color::rgba(0.35, 0.55, 0.90, 0.50)));
     let custom_toggle = Rc::new(Cell::new(false));
+    let visible = Rc::new(Cell::new(true));
+    let interactive = Rc::new(Cell::new(true));
+    let opacity = Rc::new(Cell::new(1.0_f64));
 
     /// Left-column doc link label, following egui's gallery structure.
     fn doc_link(title: &str, search_term: &str, font: &Arc<Font>) -> Box<dyn Widget> {
@@ -123,10 +264,10 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
         )
     }
 
-    let mut col = FlexColumn::new()
-        .with_gap(8.0)
-        .with_padding(16.0)
-        .with_panel_bg();
+    // The grid itself carries no panel background: the striping painted by
+    // `GalleryScope` must sit on top of the panel fill, so the panel background
+    // lives on the outer column instead.
+    let mut col = FlexColumn::new().with_gap(8.0).with_padding(16.0);
 
     col.push(
         grid_row(
@@ -315,7 +456,11 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(
         grid_row(
             doc_link("ProgressBar", "ProgressBar", &font),
-            Box::new(ScalarProgress::new(Rc::clone(&scalar), Arc::clone(&font))),
+            Box::new(Tooltip::new(
+                Box::new(ScalarProgress::new(Rc::clone(&scalar), Arc::clone(&font))),
+                "The progress bar can be animated!",
+                Arc::clone(&font),
+            )),
         ),
         0.0,
     );
@@ -433,11 +578,28 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
         );
     }
 
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(
+    // Wrap the grid in the scope that applies Visible / Interactive / Opacity
+    // and paints the row striping.
+    let scope = GalleryScope::new(
+        Box::new(col),
+        Rc::clone(&visible),
+        Rc::clone(&interactive),
+        Rc::clone(&opacity),
+    );
+
+    // Outer column carries the panel background and holds the scope plus the
+    // egui-style control bar and documentation footer, which stay interactive
+    // and fully opaque regardless of the scope's state.
+    let mut outer = FlexColumn::new().with_gap(8.0).with_panel_bg();
+    outer.push(Box::new(scope), 0.0);
+    outer.push(Box::new(Separator::horizontal()), 0.0);
+    outer.push(gallery_controls(&font, &visible, &interactive, &opacity), 0.0);
+    outer.push(Box::new(Separator::horizontal()), 0.0);
+    outer.push(
         Box::new(
             FlexColumn::new()
                 .with_gap(4.0)
+                .with_padding(16.0)
                 .add(Box::new(
                     Hyperlink::new(AGG_GUI_DOCS_URL, Arc::clone(&font))
                         .with_font_size(12.0)
@@ -455,7 +617,82 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
+    outer.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
 
-    Box::new(ScrollView::new(Box::new(col)))
+    Box::new(ScrollView::new(Box::new(outer)))
+}
+
+/// Build egui's bottom control bar: a "Visible" checkbox that hides the whole
+/// grid, and — only while visible — an "Interactive" checkbox plus an Opacity
+/// drag value, each with the hover tooltips from the egui gallery.
+fn gallery_controls(
+    font: &Arc<Font>,
+    visible: &Rc<Cell<bool>>,
+    interactive: &Rc<Cell<bool>>,
+    opacity: &Rc<Cell<f64>>,
+) -> Box<dyn Widget> {
+    let visible_checkbox = Tooltip::new(
+        Box::new(
+            Checkbox::new("Visible", Arc::clone(font), visible.get())
+                .with_font_size(13.0)
+                .with_state_cell(Rc::clone(visible)),
+        ),
+        "Uncheck to hide all the widgets.",
+        Arc::clone(font),
+    );
+
+    let interactive_checkbox = Tooltip::new(
+        Box::new(
+            Checkbox::new("Interactive", Arc::clone(font), interactive.get())
+                .with_font_size(13.0)
+                .with_state_cell(Rc::clone(interactive)),
+        ),
+        "Uncheck to inspect how the widgets look when disabled.",
+        Arc::clone(font),
+    );
+
+    let opacity_control = Tooltip::new(
+        Box::new(
+            FlexRow::new()
+                .with_gap(6.0)
+                .add(Box::new(
+                    SizedBox::new().with_width(56.0).with_height(28.0).with_child(
+                        Box::new(
+                            DragValue::new(opacity.get(), 0.0, 1.0, Arc::clone(font))
+                                .with_speed(0.01)
+                                .with_decimals(2)
+                                .on_change({
+                                    let opacity = Rc::clone(opacity);
+                                    move |v| opacity.set(v)
+                                }),
+                        ),
+                    ),
+                ))
+                .add(Box::new(
+                    Label::new("Opacity", Arc::clone(font)).with_font_size(13.0),
+                )),
+        ),
+        "Reduce this value to make widgets semi-transparent.",
+        Arc::clone(font),
+    );
+
+    // The Interactive checkbox and Opacity control only appear while Visible is
+    // checked, matching egui's `if self.visible { ... }` guard.
+    let conditional_controls = Conditional::new(
+        Rc::clone(visible),
+        Box::new(
+            FlexRow::new()
+                .with_gap(12.0)
+                .add(Box::new(interactive_checkbox))
+                .add(Box::new(opacity_control)),
+        ),
+    );
+
+    Box::new(
+        FlexRow::new()
+            .with_gap(12.0)
+            .with_padding(16.0)
+            .add(Box::new(visible_checkbox))
+            .add(Box::new(conditional_controls)),
+    )
 }

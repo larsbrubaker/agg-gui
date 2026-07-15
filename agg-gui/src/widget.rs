@@ -79,6 +79,17 @@ pub trait Widget {
         false
     }
 
+    /// When `true`, this widget disables *all* interaction — pointer and
+    /// keyboard — within its subtree, reproducing egui's
+    /// `UiBuilder::disabled()`.  Unlike [`claims_pointer_exclusively`], this is
+    /// a position-independent state predicate: pointer hit-testing stops at
+    /// this widget (so clicks are swallowed rather than passing through), and
+    /// focus collection skips the whole subtree (so Tab cannot reach a child).
+    /// Default: `false`.
+    fn blocks_child_interaction(&self) -> bool {
+        false
+    }
+
     /// Return true when `local_pos` hits an app-level overlay owned by this
     /// widget. Unlike normal hit testing, ancestors may be missed because the
     /// overlay is painted outside their bounds.

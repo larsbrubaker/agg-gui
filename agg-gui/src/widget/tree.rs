@@ -44,8 +44,9 @@ pub fn hit_test_subtree(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usi
         return None;
     }
     // Let overlays (e.g. a floating scrollbar) claim the pointer before any
-    // child that happens to cover the same pixels.
-    if widget.claims_pointer_exclusively(local_pos) {
+    // child that happens to cover the same pixels, and let a disabled scope
+    // swallow the pointer so clicks never reach its (non-interactive) children.
+    if widget.claims_pointer_exclusively(local_pos) || widget.blocks_child_interaction() {
         return Some(vec![]);
     }
     // Check children in reverse order (last drawn = topmost = highest priority).
