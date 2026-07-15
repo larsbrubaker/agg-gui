@@ -55,8 +55,13 @@ pub use transform::SceneTransform;
 /// Default zoom range, matching egui's `Scene` (`0.1..=2.0`).
 pub const DEFAULT_ZOOM_RANGE: (f64, f64) = (0.1, 2.0);
 
-/// Double-click window (ms) for background-reset detection.
-const DBL_CLICK_MS: u128 = 500;
+/// Double-click window (ms) for background-reset detection.  300-400 ms is
+/// the conventional range; egui's default double-click delay is 300 ms.
+const DBL_CLICK_MS: u128 = 400;
+
+/// Maximum pointer travel (logical px) for a press-release pair to still
+/// count as a *click* rather than a drag — matches egui's click tolerance.
+const MAX_CLICK_DIST: f64 = 6.0;
 
 /// Wheel-notch → zoom sensitivity. `zoom *= exp(delta_y * k)`, so positive
 /// `delta_y` (wheel forward / scroll up) zooms in, symmetric on the way out.
@@ -101,12 +106,22 @@ pub struct Scene {
     // ── interaction state ──
     panning: bool,
     pan_last: Point,
+    /// Where the current pan gesture's button went down — used to decide on
+    /// release whether the gesture was a *click* (no significant motion) or a
+    /// drag, for double-click-reset detection.
+    pan_press: Point,
+    /// `true` once the current pan gesture moved beyond the click tolerance.
+    pan_moved: bool,
+    /// `true` when the current pan gesture was started with the left button
+    /// (only left-button clicks participate in double-click reset).
+    pan_is_left: bool,
     /// Path (within the content subtree) that captured the pointer on a
     /// child-consumed `MouseDown`; receives subsequent moves/up.
     inner_captured: Option<Vec<usize>>,
     /// Path last hovered within the content subtree (for hover clearing).
     inner_hovered: Option<Vec<usize>>,
-    /// Timestamp of the last background left-press, for double-click reset.
+    /// Completion time of the last genuine background left-click
+    /// (press + release without significant motion), for double-click reset.
     last_bg_click: Option<Instant>,
 }
 
@@ -127,6 +142,9 @@ impl Scene {
             reset_cell: None,
             panning: false,
             pan_last: Point::ORIGIN,
+            pan_press: Point::ORIGIN,
+            pan_moved: false,
+            pan_is_left: false,
             inner_captured: None,
             inner_hovered: None,
             last_bg_click: None,
