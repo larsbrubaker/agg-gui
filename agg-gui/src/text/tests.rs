@@ -2,6 +2,10 @@ use super::*;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
 const FA_BYTES: &[u8] = include_bytes!("../../../demo/assets/fa.ttf");
+/// Noto Sans has very broad Unicode coverage (Latin, Greek, Cyrillic,
+/// punctuation, currency, math) but deliberately no CJK ideographs — an
+/// ideal fixture for asserting `Font::characters()` reports real coverage.
+const NOTO_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 
 fn test_font() -> Arc<Font> {
     Arc::new(Font::from_slice(FONT_BYTES).expect("font ok"))
@@ -325,6 +329,68 @@ fn glyph_visual_bounds_returns_none_for_outlineless_glyph() {
     let font = test_font();
     // ASCII space — has an advance but no outline.
     assert!(font.glyph_visual_bounds(' ', 14.0).is_none());
+}
+
+/// `Font::characters()` must enumerate the real `cmap` coverage: common
+/// letters/digits and a spread of symbols are present, an ideograph the
+/// Latin font lacks is absent, and the count is plausibly large (not the
+/// old hard-coded ~80).
+#[test]
+fn characters_reports_real_cmap_coverage() {
+    let font = Font::from_slice(NOTO_BYTES).expect("parse NotoSans");
+    let chars = font.characters();
+
+    // Letters, digits.
+    for ch in ['A', 'z', '0', '9'] {
+        assert!(chars.contains(&ch), "expected {ch:?} in Noto Sans");
+    }
+    // Known symbols from Latin-1 Supplement / Greek / currency.
+    for ch in ['©', '±', '×', '€', 'α'] {
+        assert!(chars.contains(&ch), "expected symbol {ch:?} in Noto Sans");
+    }
+
+    // A CJK ideograph is NOT in the Latin Noto Sans, and neither is the
+    // unassigned max code point — proves we report actual coverage, not a
+    // superset.
+    assert!(
+        !chars.contains(&'中'),
+        "Latin Noto Sans must not claim CJK coverage"
+    );
+    assert!(
+        !chars.contains(&'\u{10FFFF}'),
+        "unmapped code point must be absent"
+    );
+
+    // Plausible count — Noto Sans carries thousands of glyphs. The exact
+    // number is intentionally not asserted so a font update can't break it;
+    // only that it dwarfs the old 80-glyph hard-coded set.
+    assert!(
+        chars.len() > 1000 && chars.len() < 100_000,
+        "glyph count {} is implausible",
+        chars.len()
+    );
+}
+
+/// The fallback chain contributes its glyphs to `characters()`, mirroring how
+/// the text renderer resolves missing code points through the fallback.
+#[test]
+fn characters_includes_fallback_glyphs() {
+    let cascadia_only = Font::from_slice(FONT_BYTES).expect("cc");
+    // The FA laptop code point lives only in fa.ttf, not CascadiaCode.
+    let fa_laptop = FA_LAPTOP.chars().next().unwrap();
+    assert!(
+        !cascadia_only.characters().contains(&fa_laptop),
+        "primary font alone must not cover the FA code point"
+    );
+
+    let fa = Font::from_slice(FA_BYTES).expect("fa");
+    let with_fallback = Font::from_slice(FONT_BYTES)
+        .expect("cc")
+        .with_fallback(Arc::new(fa));
+    assert!(
+        with_fallback.characters().contains(&fa_laptop),
+        "fallback glyph must appear once the fallback is chained"
+    );
 }
 
 /// Verify that all contour points are in screen-pixel range for the
