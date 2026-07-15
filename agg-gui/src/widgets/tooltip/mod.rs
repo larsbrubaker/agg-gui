@@ -1,9 +1,18 @@
 //! `Tooltip` — a wrapper widget that shows egui-style hover help.
 //!
-//! Tooltips are submitted during the normal widget paint pass, but drawn at the
-//! end of the frame by [`crate::widget::App`].  That makes them true floating
-//! overlays instead of child-local decorations, so they can escape scroll-area
-//! clips and window content clips.
+//! Tooltips come in two flavours:
+//!
+//! * **Lightweight** (the default, used by dozens of call sites): text lines
+//!   submitted during the widget paint pass and drawn at the end of the frame
+//!   by [`crate::widget::App`] via a global queue ([`render`]). Fire-and-forget,
+//!   no hit-testing.
+//!
+//! * **Interactive** (opt-in via [`Tooltip::with_interactive_content`]): the tip
+//!   is a real floating UI surface hosting a child widget tree (labels,
+//!   hyperlinks, a nested tooltip). It participates in the global-overlay
+//!   hit-test so the pointer can move *into* it without dismissing it, and it
+//!   supports one level of nesting — see [`interactive`]. This mirrors egui's
+//!   `on_hover_ui` tooltips.
 //!
 //! # Usage
 //!
@@ -15,13 +24,16 @@
 //! )
 //! ```
 
-use std::cell::RefCell;
+mod interactive;
+mod render;
+
+pub(crate) use render::{begin_tooltip_frame, paint_global_tooltips};
+
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use web_time::Instant;
 
-use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
@@ -29,43 +41,34 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::{current_mouse_world, Widget};
 
+use render::{submit_tooltip, TooltipRequest};
+
 /// Standard initial hover delay before the tooltip appears.
 ///
 /// Windows common controls default to roughly 500ms. MatterCAD uses
 /// 0.6s. Use 500ms and make it wall-clock based so the delay is not
 /// dependent on redraw frequency.
 const TOOLTIP_INITIAL_DELAY: Duration = Duration::from_millis(500);
-const TOOLTIP_FONT_SIZE: f64 = 12.0;
-const TOOLTIP_PAD_X: f64 = 8.0;
-const TOOLTIP_PAD_Y: f64 = 6.0;
-const TOOLTIP_GAP: f64 = 4.0;
+pub(super) const TOOLTIP_FONT_SIZE: f64 = 12.0;
+pub(super) const TOOLTIP_PAD_X: f64 = 8.0;
+pub(super) const TOOLTIP_PAD_Y: f64 = 6.0;
+pub(super) const TOOLTIP_GAP: f64 = 4.0;
 /// Extra vertical offset for pointer-anchored tooltips.  They should
 /// read as attached below the cursor rather than hugging it.
-const POINTER_TOOLTIP_EXTRA_DROP: f64 = 10.0;
-const SCREEN_MARGIN: f64 = 4.0;
+pub(super) const POINTER_TOOLTIP_EXTRA_DROP: f64 = 10.0;
+pub(super) const SCREEN_MARGIN: f64 = 4.0;
 
 #[derive(Clone)]
-enum TooltipLineKind {
+pub(super) enum TooltipLineKind {
     Text,
     Code,
     Link,
 }
 
 #[derive(Clone)]
-struct TooltipLine {
-    text: String,
-    kind: TooltipLineKind,
-}
-
-struct TooltipRequest {
-    font: Arc<Font>,
-    lines: Vec<TooltipLine>,
-    anchor: Point,
-    at_pointer: bool,
-}
-
-thread_local! {
-    static TOOLTIP_QUEUE: RefCell<Vec<TooltipRequest>> = const { RefCell::new(Vec::new()) };
+pub(super) struct TooltipLine {
+    pub text: String,
+    pub kind: TooltipLineKind,
 }
 
 /// A wrapper widget that shows a text tooltip on hover.
@@ -93,6 +96,34 @@ pub struct Tooltip {
     disabled_lines: Vec<TooltipLine>,
     disabled_when: Option<Rc<dyn Fn() -> bool>>,
     at_pointer: bool,
+
+    // --- Interactive-mode state (see `interactive`) ---------------------
+    /// When `true`, the tip is a hit-testable surface hosting `content`
+    /// instead of the lightweight text queue.
+    interactive: bool,
+    /// The interactive tip's child widget tree. Not part of `children`, so
+    /// it is not laid out / painted / hit-tested by the normal tree walk —
+    /// [`interactive`] manages it manually at the floating tip position.
+    content: Option<Box<dyn Widget>>,
+    /// Natural size of `content` from its last layout.
+    content_size: Size,
+    /// Latched open-state for the interactive tip. Stays open while the
+    /// pointer is over the anchor OR the tip; closes after a grace period
+    /// once it leaves both (or on Escape).
+    tip_open: bool,
+    /// Whether the pointer is currently over the interactive tip surface.
+    tip_hovered: bool,
+    /// Panel rectangle in this widget's LOCAL coordinate space, captured
+    /// during the last overlay paint and reused for hit-testing.
+    tip_panel_local: Option<Rect>,
+    /// Where `content` is painted within the panel (local coords).
+    content_origin_local: Point,
+    /// When the pointer left both anchor and tip; the tip closes once this
+    /// exceeds [`interactive::TOOLTIP_CLOSE_GRACE`].
+    close_requested_at: Option<Instant>,
+    /// Path of the content descendant the pointer last hovered, so we can
+    /// clear its hover (and any nested tooltip) when the pointer moves off.
+    last_content_path: Option<Vec<usize>>,
 }
 
 impl Tooltip {
@@ -111,6 +142,15 @@ impl Tooltip {
             disabled_lines: Vec::new(),
             disabled_when: None,
             at_pointer: true,
+            interactive: false,
+            content: None,
+            content_size: Size::new(0.0, 0.0),
+            tip_open: false,
+            tip_hovered: false,
+            tip_panel_local: None,
+            content_origin_local: Point::ORIGIN,
+            close_requested_at: None,
+            last_content_path: None,
         }
     }
 
@@ -138,6 +178,18 @@ impl Tooltip {
             text: text.into(),
             kind: TooltipLineKind::Link,
         });
+        self
+    }
+
+    /// Turn this tooltip into an **interactive** surface hosting `content`
+    /// (a small widget tree of labels / hyperlinks). The lightweight text
+    /// lines are ignored while interactive. The pointer can enter the tip
+    /// without dismissing it, and a tooltip-bearing widget inside `content`
+    /// shows its own (nested) tip. Mirrors egui's `on_hover_ui`.
+    pub fn with_interactive_content(mut self, content: Box<dyn Widget>) -> Self {
+        self.interactive = true;
+        self.content = Some(content);
+        self.at_pointer = false;
         self
     }
 
@@ -206,98 +258,6 @@ impl Tooltip {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::event::MouseButton;
-    use crate::text::Font;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
-
-    struct ClickChild {
-        bounds: Rect,
-        children: Vec<Box<dyn Widget>>,
-        clicks: Arc<AtomicUsize>,
-    }
-
-    impl ClickChild {
-        fn new(clicks: Arc<AtomicUsize>) -> Self {
-            Self {
-                bounds: Rect::default(),
-                children: Vec::new(),
-                clicks,
-            }
-        }
-    }
-
-    impl Widget for ClickChild {
-        fn bounds(&self) -> Rect {
-            self.bounds
-        }
-        fn set_bounds(&mut self, bounds: Rect) {
-            self.bounds = bounds;
-        }
-        fn children(&self) -> &[Box<dyn Widget>] {
-            &self.children
-        }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-            &mut self.children
-        }
-        fn type_name(&self) -> &'static str {
-            "ClickChild"
-        }
-        fn layout(&mut self, available: Size) -> Size {
-            self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
-            available
-        }
-        fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-        fn on_event(&mut self, event: &Event) -> EventResult {
-            if let Event::MouseUp {
-                button: MouseButton::Left,
-                ..
-            } = event
-            {
-                self.clicks.fetch_add(1, Ordering::SeqCst);
-                EventResult::Consumed
-            } else {
-                EventResult::Ignored
-            }
-        }
-    }
-
-    #[test]
-    fn tooltip_forwards_clicks_to_wrapped_child() {
-        let clicks = Arc::new(AtomicUsize::new(0));
-        let font = Arc::new(Font::from_bytes(FONT_BYTES.to_vec()).expect("bundled font"));
-        let mut tooltip = Tooltip::new(Box::new(ClickChild::new(clicks.clone())), "tip", font);
-        tooltip.layout(Size::new(20.0, 20.0));
-        let event = Event::MouseUp {
-            pos: Point::new(10.0, 10.0),
-            button: MouseButton::Left,
-            modifiers: Default::default(),
-        };
-        assert_eq!(tooltip.on_event(&event), EventResult::Consumed);
-        assert_eq!(clicks.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn tooltip_defaults_to_pointer_anchored() {
-        let clicks = Arc::new(AtomicUsize::new(0));
-        let font = Arc::new(Font::from_bytes(FONT_BYTES.to_vec()).expect("bundled font"));
-        let tooltip = Tooltip::new(Box::new(ClickChild::new(clicks)), "tip", font);
-        assert!(tooltip.at_pointer);
-    }
-
-    #[test]
-    fn tooltip_can_opt_into_widget_anchor() {
-        let clicks = Arc::new(AtomicUsize::new(0));
-        let font = Arc::new(Font::from_bytes(FONT_BYTES.to_vec()).expect("bundled font"));
-        let tooltip = Tooltip::new(Box::new(ClickChild::new(clicks)), "tip", font).at_widget();
-        assert!(!tooltip.at_pointer);
-    }
-}
-
 impl Widget for Tooltip {
     fn type_name(&self) -> &'static str {
         "Tooltip"
@@ -353,6 +313,12 @@ impl Widget for Tooltip {
     fn paint(&mut self, _: &mut dyn DrawCtx) {}
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        // Interactive tips paint their surface in `paint_global_overlay`,
+        // not through the lightweight text queue.
+        if self.interactive {
+            return;
+        }
+
         let should_show = self.show_tip();
 
         if self.hovered && !should_show {
@@ -400,7 +366,32 @@ impl Widget for Tooltip {
         });
     }
 
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if self.interactive {
+            self.paint_interactive_tip(ctx);
+        }
+    }
+
+    fn hit_test_global_overlay(&self, local_pos: Point) -> bool {
+        self.interactive && self.interactive_hit(local_pos)
+    }
+
+    fn on_unconsumed_key(
+        &mut self,
+        key: &crate::event::Key,
+        _modifiers: crate::event::Modifiers,
+    ) -> EventResult {
+        if self.interactive {
+            self.interactive_unconsumed_key(key)
+        } else {
+            EventResult::Ignored
+        }
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if self.interactive {
+            return self.on_interactive_event(event);
+        }
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
@@ -462,118 +453,5 @@ fn text_to_lines(text: impl Into<String>) -> Vec<TooltipLine> {
         .collect()
 }
 
-fn submit_tooltip(request: TooltipRequest) {
-    TOOLTIP_QUEUE.with(|q| q.borrow_mut().push(request));
-}
-
-pub(crate) fn begin_tooltip_frame() {
-    TOOLTIP_QUEUE.with(|q| q.borrow_mut().clear());
-}
-
-pub(crate) fn paint_global_tooltips(ctx: &mut dyn DrawCtx, viewport: Size) {
-    let requests = TOOLTIP_QUEUE.with(|q| q.borrow_mut().drain(..).collect::<Vec<_>>());
-    for request in requests {
-        paint_request(ctx, viewport, request);
-    }
-}
-
-fn paint_request(ctx: &mut dyn DrawCtx, viewport: Size, request: TooltipRequest) {
-    if request.lines.is_empty() {
-        return;
-    }
-
-    let v = ctx.visuals();
-    ctx.set_font(Arc::clone(&request.font));
-    ctx.set_font_size(TOOLTIP_FONT_SIZE);
-
-    let line_h = TOOLTIP_FONT_SIZE * 1.45;
-    let mut max_w = 0.0_f64;
-    for line in &request.lines {
-        if let Some(m) = ctx.measure_text(&line.text) {
-            max_w = max_w.max(m.width);
-        }
-    }
-
-    let panel_w = (max_w + TOOLTIP_PAD_X * 2.0).max(64.0);
-    let panel_h = request.lines.len() as f64 * line_h + TOOLTIP_PAD_Y * 2.0;
-    let mut panel_x = if request.at_pointer {
-        request.anchor.x
-    } else {
-        request.anchor.x - panel_w * 0.5
-    };
-    let mut panel_y = request.anchor.y - panel_h - TOOLTIP_GAP;
-    if request.at_pointer {
-        panel_y -= POINTER_TOOLTIP_EXTRA_DROP;
-    }
-
-    if panel_x + panel_w > viewport.width - SCREEN_MARGIN {
-        panel_x = viewport.width - panel_w - SCREEN_MARGIN;
-    }
-    if panel_y < SCREEN_MARGIN {
-        // If there is not enough room below, fall back above the
-        // cursor / widget, mirroring viewport-edge avoidance.
-        panel_y = request.anchor.y + TOOLTIP_GAP;
-    }
-    panel_x = panel_x.clamp(
-        SCREEN_MARGIN,
-        (viewport.width - panel_w - SCREEN_MARGIN).max(SCREEN_MARGIN),
-    );
-    panel_y = panel_y.clamp(
-        SCREEN_MARGIN,
-        (viewport.height - panel_h - SCREEN_MARGIN).max(SCREEN_MARGIN),
-    );
-
-    ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.20));
-    ctx.begin_path();
-    ctx.rounded_rect(panel_x + 1.0, panel_y - 1.0, panel_w, panel_h, 5.0);
-    ctx.fill();
-
-    ctx.set_fill_color(v.window_fill);
-    ctx.begin_path();
-    ctx.rounded_rect(panel_x, panel_y, panel_w, panel_h, 5.0);
-    ctx.fill();
-
-    ctx.set_stroke_color(v.widget_stroke);
-    ctx.set_line_width(1.0);
-    ctx.begin_path();
-    ctx.rounded_rect(panel_x, panel_y, panel_w, panel_h, 5.0);
-    ctx.stroke();
-
-    for (i, line) in request.lines.iter().enumerate() {
-        let y = panel_y + panel_h - TOOLTIP_PAD_Y - (i as f64 + 1.0) * line_h + 2.0;
-        match line.kind {
-            TooltipLineKind::Text => {
-                ctx.set_fill_color(v.text_color);
-                ctx.fill_text(&line.text, panel_x + TOOLTIP_PAD_X, y);
-            }
-            TooltipLineKind::Code => {
-                if let Some(m) = ctx.measure_text(&line.text) {
-                    ctx.set_fill_color(v.track_bg);
-                    ctx.begin_path();
-                    ctx.rounded_rect(
-                        panel_x + TOOLTIP_PAD_X - 3.0,
-                        y - 3.0,
-                        m.width + 6.0,
-                        line_h,
-                        3.0,
-                    );
-                    ctx.fill();
-                }
-                ctx.set_fill_color(v.text_color);
-                ctx.fill_text(&line.text, panel_x + TOOLTIP_PAD_X, y);
-            }
-            TooltipLineKind::Link => {
-                ctx.set_fill_color(v.text_link);
-                ctx.fill_text(&line.text, panel_x + TOOLTIP_PAD_X, y);
-                if let Some(m) = ctx.measure_text(&line.text) {
-                    ctx.set_stroke_color(v.text_link);
-                    ctx.set_line_width(1.0);
-                    ctx.begin_path();
-                    ctx.move_to(panel_x + TOOLTIP_PAD_X, y - 2.0);
-                    ctx.line_to(panel_x + TOOLTIP_PAD_X + m.width, y - 2.0);
-                    ctx.stroke();
-                }
-            }
-        }
-    }
-}
+#[cfg(test)]
+mod tests;

@@ -155,6 +155,11 @@ pub(crate) fn paint_lifted_tree(
     // their popups while `paint_global_overlays` runs, so drain once
     // more to draw those popups above the modal body.
     crate::widgets::combo_box::paint_global_combo_popups(ctx);
+    // Interactive tooltips paint their content subtree during the global
+    // overlay pass; a lightweight tooltip nested inside that content submits
+    // to the queue after the first drain, so drain again to render it above
+    // the parent tip.
+    crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
     if lifted {
         ctx.restore();
     }

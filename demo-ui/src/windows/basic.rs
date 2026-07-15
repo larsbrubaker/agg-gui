@@ -71,6 +71,9 @@ fn tooltip_misc_tests(font: Arc<Font>, enabled: Rc<Cell<bool>>) -> Box<dyn Widge
         0.0,
     );
 
+    // Interactive tooltip: hosts a real widget tree (a label + a hyperlink),
+    // and the hyperlink itself carries its own nested tooltip — mirroring
+    // egui's `on_hover_ui` + `hyperlink_to(...).on_hover_text(...)`.
     col.push(
         Box::new(
             Tooltip::new(
@@ -78,10 +81,10 @@ fn tooltip_misc_tests(font: Arc<Font>, enabled: Rc<Cell<bool>>) -> Box<dyn Widge
                     "Tooltips can contain interactive widgets.",
                     Arc::clone(&font),
                 )),
-                "This tooltip contains a link:",
+                "unused (interactive content follows)",
                 Arc::clone(&font),
             )
-            .with_link_line("www.egui.rs"),
+            .with_interactive_content(interactive_link_tip(Arc::clone(&font))),
         ),
         0.0,
     );
@@ -198,6 +201,28 @@ fn tooltip_scroll_test(font: Arc<Font>) -> Box<dyn Widget> {
         );
     }
     col.push(Box::new(ScrollView::new(Box::new(lines))), 1.0);
+    Box::new(col)
+}
+
+/// Content for the interactive tooltip: a label plus a hyperlink that itself
+/// carries a nested tooltip ("The tooltip has a tooltip in it!").
+fn interactive_link_tip(font: Arc<Font>) -> Box<dyn Widget> {
+    let mut col = FlexColumn::new().with_gap(4.0);
+    col.push(
+        Box::new(Label::new("This tooltip contains a link:", Arc::clone(&font)).with_font_size(12.0)),
+        0.0,
+    );
+    let link = Box::new(
+        Hyperlink::new("www.egui.rs", Arc::clone(&font))
+            .with_font_size(12.0)
+            .on_click(|| crate::url::open_url("https://www.egui.rs/")),
+    );
+    col.push(
+        Box::new(
+            Tooltip::new(link, "The tooltip has a tooltip in it!", font).at_widget(),
+        ),
+        0.0,
+    );
     Box::new(col)
 }
 
