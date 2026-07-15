@@ -415,7 +415,7 @@ pub fn painting(font: Arc<Font>) -> Box<dyn Widget> {
     let clear_flag = Rc::new(Cell::new(false));
     // egui default stroke: width 1.0, color rgb(25, 200, 100).
     let default_color = Color::rgb(25.0 / 255.0, 200.0 / 255.0, 100.0 / 255.0);
-    let stroke_width = Rc::new(Cell::new(2.0_f64));
+    let stroke_width = Rc::new(Cell::new(1.0_f64));
     let stroke_color = Rc::new(Cell::new(default_color));
 
     // A small palette of stroke colors for the swatch row.
