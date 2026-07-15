@@ -268,6 +268,18 @@ fn paint_subtree_direct_inner(
         stack.push(clipped);
     });
 
+    // Apply the widget's optional child transform (pan/zoom for a Scene) to
+    // the whole child group.  It goes on AFTER the children clip — the clip
+    // stays axis-aligned in this widget's screen-local space while the
+    // children paint under the scaled/translated frame.  The transform is
+    // popped by the `ctx.restore()` that lifts the children clip below, so
+    // per-child `bounds()` offsets are interpreted inside the transform.
+    if let Some(t) = widget.child_transform() {
+        let mut m = ctx.transform();
+        m.premultiply(&t);
+        ctx.set_transform(m);
+    }
+
     let n = widget.children().len();
     for i in 0..n {
         let child_bounds = widget.children()[i].bounds();

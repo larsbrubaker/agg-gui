@@ -467,8 +467,38 @@ pub trait Widget {
     /// Default: identity (most widgets translate their children only
     /// through `child.bounds()`, which `collect_inspector_nodes` already
     /// accumulates separately).
+    ///
+    /// Defaults to [`child_transform`](Self::child_transform) so a widget that
+    /// injects a real pan/zoom into pointer + paint (a [`Scene`]) is seen by the
+    /// inspector at the same on-screen position without having to implement two
+    /// hooks.  Widgets that need an inspector-only transform (rare) override
+    /// this directly.
     fn inspector_child_transform(&self) -> crate::TransAffine {
-        crate::TransAffine::new()
+        self.child_transform().unwrap_or_else(crate::TransAffine::new)
+    }
+
+    /// Affine transform (child-local → this widget's local space) that the
+    /// framework applies to **all** of this widget's children for painting,
+    /// hit-testing, and event dispatch alike.
+    ///
+    /// This is the "scale hook" that lets a container magnify/pan its whole
+    /// child subtree (a [`Scene`]) while keeping those children fully
+    /// first-class: because they live in [`children`](Self::children), keyboard
+    /// focus (Tab + click-to-focus), the inspector, and pointer input all reach
+    /// them through the framework's normal traversals, which map coordinates
+    /// through this transform when descending.
+    ///
+    /// The transform is applied to the child group as a whole; per-child
+    /// `bounds()` offsets are interpreted **inside** the transform (i.e. in the
+    /// child/scene space), so a container that pins its content at the origin
+    /// (the common case) needs no further care.  Pointer traversals invert this
+    /// transform to map an incoming screen-local point into child space.
+    ///
+    /// Default: `None` — children are positioned by `bounds()` alone.
+    ///
+    /// [`Scene`]: crate::widgets::Scene
+    fn child_transform(&self) -> Option<crate::TransAffine> {
+        None
     }
 
     // -------------------------------------------------------------------------

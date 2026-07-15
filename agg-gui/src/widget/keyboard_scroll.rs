@@ -251,37 +251,67 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
     request_lift(residual);
 }
 
-/// Walk from `root` down `path` and accumulate each visited widget's
-/// `bounds().origin()` (its position relative to its parent).  Returns
-/// the focused widget's screen-space rect in Y-up coordinates.
+/// Walk from `root` down `path` and compose each visited widget's
+/// `bounds().origin()` offset **and** its optional
+/// [`child_transform`](crate::widget::Widget::child_transform) into a single
+/// affine, then return the focused widget's screen-space rect in Y-up
+/// coordinates.
 ///
-/// Note: this only handles plain bounds-based positioning — widgets
-/// that apply additional transforms via `inspector_child_transform`
-/// (e.g. the node editor's pan/zoom canvas) aren't accounted for.
-/// That's deliberate — text input inside a panned canvas isn't a
-/// supported pattern for the software keyboard yet.
+/// Honouring `child_transform` matters because a focusable widget can live
+/// inside a pan/zoom container (a [`Scene`](crate::widgets::Scene)) — the demo
+/// hosts a `TextField` inside a zoomed Scene — so the naive bounds-only walk
+/// would report the field at its un-scaled scene position and lift it by the
+/// wrong amount.  The composition mirrors the inspector's
+/// (`collect_inspector_nodes`): descending from a widget applies
+/// `translate(widget.bounds) · widget.child_transform`.
 pub(crate) fn focused_widget_screen_bounds(root: &dyn Widget, path: &[usize]) -> Option<Rect> {
-    // Accumulate translation from root frame down to the focused leaf.
-    // The root's own bounds.origin() is always (0,0) in practice
-    // (App::layout sets it that way) but we include it for symmetry.
-    let mut accum_x = root.bounds().x;
-    let mut accum_y = root.bounds().y;
+    // `to_screen` maps the CURRENT widget's parent-local coords → screen,
+    // starting at identity (the root's parent frame — the inspector walk seeds
+    // its `parent_to_screen` the same way with `translate(0, 0)`).  Each loop
+    // iteration folds in the current widget's own bounds offset, so the root's
+    // position is accounted for by the first iteration, not a separate seed.
+    let mut to_screen = crate::TransAffine::new();
     let mut widget: &dyn Widget = root;
     for &idx in path.iter() {
+        // Descend from `widget` into child `idx`: shift into the widget's own
+        // frame, then apply its child transform (identity for most widgets).
+        let b = widget.bounds();
+        to_screen.translate(b.x, b.y);
+        if let Some(ct) = widget.child_transform() {
+            to_screen.premultiply(&ct);
+        }
         let children = widget.children();
         if idx >= children.len() {
             return None;
         }
         widget = children[idx].as_ref();
-        let b = widget.bounds();
-        accum_x += b.x;
-        accum_y += b.y;
     }
-    let b = widget.bounds();
-    // accum_x/y is the focused widget's parent-frame origin already
-    // composed with all ancestor offsets — i.e. its viewport-space
-    // bottom-left (Y-up).  Size comes straight from the leaf.
-    Some(Rect::new(accum_x, accum_y, b.width, b.height))
+    // `to_screen` now maps the focused widget's parent-local coords → screen;
+    // apply it to the leaf's own bounds rect and take the axis-aligned bound
+    // (exact for translation + uniform scale, conservative otherwise).
+    Some(transform_rect_aabb(&to_screen, widget.bounds()))
+}
+
+/// AABB of `rect`'s four corners after passing through `t`.  Mirrors the
+/// inspector's helper of the same name — duplicated here (a couple of lines)
+/// rather than made cross-module public to keep the two walks independent.
+fn transform_rect_aabb(t: &crate::TransAffine, rect: Rect) -> Rect {
+    let corners = [
+        (rect.x, rect.y),
+        (rect.x + rect.width, rect.y),
+        (rect.x, rect.y + rect.height),
+        (rect.x + rect.width, rect.y + rect.height),
+    ];
+    let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
+    let (mut max_x, mut max_y) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for (mut x, mut y) in corners {
+        t.transform(&mut x, &mut y);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    Rect::new(min_x, min_y, (max_x - min_x).max(0.0), (max_y - min_y).max(0.0))
 }
 
 /// Walk UP the focus path (innermost ancestor first), giving each
@@ -325,4 +355,128 @@ fn mutable_widget_at_path<'a>(root: &'a mut dyn Widget, path: &[usize]) -> &'a m
     let idx = path[0];
     let child = &mut root.children_mut()[idx];
     mutable_widget_at_path(child.as_mut(), &path[1..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::focused_widget_screen_bounds;
+    use crate::draw_ctx::DrawCtx;
+    use crate::event::{Event, EventResult};
+    use crate::geometry::{Rect, Size};
+    use crate::widget::Widget;
+    use crate::TransAffine;
+
+    /// Parent that scales+translates its children — stands in for a `Scene`.
+    struct ScaleParent {
+        bounds: Rect,
+        children: Vec<Box<dyn Widget>>,
+        zoom: f64,
+        offset: (f64, f64),
+    }
+    impl Widget for ScaleParent {
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, a: Size) -> Size {
+            a
+        }
+        fn paint(&mut self, _: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+        fn child_transform(&self) -> Option<TransAffine> {
+            let mut m = TransAffine::new_scaling_uniform(self.zoom);
+            m.translate(self.offset.0, self.offset.1);
+            Some(m)
+        }
+    }
+    struct Leaf {
+        bounds: Rect,
+        children: Vec<Box<dyn Widget>>,
+    }
+    impl Widget for Leaf {
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, _: Size) -> Size {
+            Size::new(self.bounds.width, self.bounds.height)
+        }
+        fn paint(&mut self, _: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+    }
+
+    /// A focused leaf hosted under a 2× scale+offset parent must report its
+    /// screen bounds through that transform — otherwise the keyboard lift uses
+    /// the un-scaled scene position and raises the field by the wrong amount.
+    #[test]
+    fn focused_bounds_honor_child_transform() {
+        let leaf = Leaf {
+            bounds: Rect::new(5.0, 5.0, 8.0, 4.0),
+            children: vec![],
+        };
+        let parent = ScaleParent {
+            bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
+            children: vec![Box::new(leaf)],
+            zoom: 2.0,
+            offset: (10.0, 20.0),
+        };
+        // Screen = 2*local + offset (parent at origin):
+        //   x = 10 + 5*2 = 20, y = 20 + 5*2 = 30, w = 8*2 = 16, h = 4*2 = 8.
+        let r = focused_widget_screen_bounds(&parent, &[0]).expect("bounds");
+        assert!(
+            (r.x - 20.0).abs() < 1e-6
+                && (r.y - 30.0).abs() < 1e-6
+                && (r.width - 16.0).abs() < 1e-6
+                && (r.height - 8.0).abs() < 1e-6,
+            "focused bounds must reflect the parent's child_transform; got {:?}",
+            r
+        );
+    }
+
+    /// Without a child transform the walk still reduces to plain bounds
+    /// accumulation (regression guard for the rewrite).
+    #[test]
+    fn focused_bounds_plain_bounds_accumulate() {
+        let leaf = Leaf {
+            bounds: Rect::new(5.0, 7.0, 8.0, 4.0),
+            children: vec![],
+        };
+        // ScaleParent with zoom 1, offset 0 == identity child transform.
+        let parent = ScaleParent {
+            bounds: Rect::new(30.0, 40.0, 400.0, 300.0),
+            children: vec![Box::new(leaf)],
+            zoom: 1.0,
+            offset: (0.0, 0.0),
+        };
+        let r = focused_widget_screen_bounds(&parent, &[0]).expect("bounds");
+        // 30 + 5 = 35, 40 + 7 = 47, size unchanged.
+        assert!(
+            (r.x - 35.0).abs() < 1e-6
+                && (r.y - 47.0).abs() < 1e-6
+                && (r.width - 8.0).abs() < 1e-6
+                && (r.height - 4.0).abs() < 1e-6,
+            "plain bounds accumulation regressed; got {:?}",
+            r
+        );
+    }
 }

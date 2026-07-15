@@ -11,30 +11,37 @@
 //! `Scene` container.  The current visible region is exposed as a scene-space
 //! rect via [`Scene::scene_rect`] / [`Scene::with_scene_rect_cell`].
 //!
-//! # Why the content is not a framework child
+//! # The content is a first-class framework child
 //!
-//! The framework's automatic hit-test and event dispatch
-//! ([`crate::widget::hit_test_subtree`], [`crate::widget::dispatch_event`])
-//! only translate pointer coordinates by each child's `bounds().x/y` — there is
-//! no hook to inject a *scale*.  A zoomed child would therefore receive
-//! mis-scaled coordinates through the standard machinery.  So `Scene` keeps its
-//! content in a private field (not in `children()`), paints it manually under
-//! the transform via [`crate::widget::paint_subtree`], and routes pointer
-//! events into it manually after mapping screen→scene coordinates.  This gives
-//! full pointer interactivity (hover, click, drag) for the hosted widgets.
+//! The hosted subtree lives in [`children`](crate::widget::Widget::children)
+//! like any other container's content, laid out in **scene space** (pinned at
+//! the origin).  The pan/zoom is injected through the framework's
+//! [`child_transform`](crate::widget::Widget::child_transform) hook: painting,
+//! hit-testing, event dispatch, focus, and the inspector all map coordinates
+//! through that transform when they descend into the Scene, so the content is
+//! fully interactive *and* reachable by:
 //!
-//! ## Known limitation — keyboard focus
+//! * keyboard focus — Tab traversal and click-to-focus reach widgets inside the
+//!   Scene, so text fields hosted here accept typing;
+//! * the inspector — hosted widgets appear in the tree at their on-screen
+//!   (transformed) bounds.
 //!
-//! Because the content lives outside the widget tree the `App` walks for focus,
-//! widgets inside a `Scene` cannot receive keyboard focus (Tab traversal and
-//! click-to-focus stop at the `Scene`).  Pointer interaction works fully; text
-//! entry into a focused field *inside* a `Scene` does not.  Host buttons,
-//! labels, sliders, and painted shapes — not text fields — inside a `Scene`.
+//! `Scene`'s own [`on_event`](crate::widget::Widget::on_event) handles only the
+//! background gestures (pan / zoom / double-click reset).  It receives a pointer
+//! event exactly when no hosted child consumed it — the framework's leaf→root
+//! bubble delivers the press to the Scene only after the content declined it —
+//! so a press on empty canvas pans while a press on a hosted button clicks the
+//! button.  While a pan is in progress the Scene claims the pointer
+//! exclusively (see [`claims_pointer_exclusively`]) so the drag keeps landing on
+//! the Scene regardless of what sits under the moving cursor.
 //!
 //! Relationship to other modules: mirrors the builder style of
 //! [`crate::widgets::ScrollView`]; the transform math lives in the
-//! [`transform`] submodule (unit-tested independently); the event routing lives
-//! in the [`events`] submodule.
+//! [`transform`] submodule (unit-tested independently); the background-gesture
+//! handling lives in the [`events`] submodule.
+//!
+//! [`claims_pointer_exclusively`]: crate::widget::Widget::claims_pointer_exclusively
+//! [`on_event`]: crate::widget::Widget::on_event
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -45,7 +52,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::widget::{paint_subtree, Widget};
+use crate::widget::Widget;
 
 mod events;
 mod transform;
@@ -75,12 +82,12 @@ pub struct Scene {
     bounds: Rect,
     base: WidgetBase,
 
-    /// The hosted subtree. **Not** exposed through `children()` — see module
-    /// docs. Positioned at scene-space origin `(0, 0)` after layout.
-    content: Box<dyn Widget>,
-    /// Always empty; returned by `children()` so the framework does not
-    /// auto-traverse the transformed content with un-scaled coordinates.
-    empty: Vec<Box<dyn Widget>>,
+    /// The hosted subtree as the Scene's single framework child, laid out in
+    /// scene space and pinned at the scene-space origin `(0, 0)`.  The pan/zoom
+    /// is injected via [`Widget::child_transform`], so the framework maps
+    /// coordinates through it for paint, hit-test, dispatch, focus, and the
+    /// inspector.
+    children: Vec<Box<dyn Widget>>,
 
     transform: SceneTransform,
     zoom_range: (f64, f64),
@@ -115,14 +122,20 @@ pub struct Scene {
     /// `true` when the current pan gesture was started with the left button
     /// (only left-button clicks participate in double-click reset).
     pan_is_left: bool,
-    /// Path (within the content subtree) that captured the pointer on a
-    /// child-consumed `MouseDown`; receives subsequent moves/up.
-    inner_captured: Option<Vec<usize>>,
-    /// Path last hovered within the content subtree (for hover clearing).
-    inner_hovered: Option<Vec<usize>>,
+    /// Pointer-press epoch (see [`crate::animation::pointer_press_epoch`])
+    /// captured when the current background press began — compared against
+    /// [`last_bg_click_epoch`](Self::last_bg_click_epoch) on release so a
+    /// double-click that straddles a hosted-child click (which the Scene never
+    /// sees, because the child consumes it) is not mistaken for two
+    /// consecutive background clicks.
+    pan_press_epoch: u64,
     /// Completion time of the last genuine background left-click
     /// (press + release without significant motion), for double-click reset.
     last_bg_click: Option<Instant>,
+    /// Pointer-press epoch of that last background click.  A second click only
+    /// completes a double-click when its press epoch is exactly one greater
+    /// (i.e. no other press happened in between).
+    last_bg_click_epoch: Option<u64>,
 }
 
 impl Scene {
@@ -131,8 +144,7 @@ impl Scene {
         Self {
             bounds: Rect::default(),
             base: WidgetBase::new(),
-            content,
-            empty: Vec::new(),
+            children: vec![content],
             transform: SceneTransform::identity(),
             zoom_range: DEFAULT_ZOOM_RANGE,
             content_size: None,
@@ -145,10 +157,26 @@ impl Scene {
             pan_press: Point::ORIGIN,
             pan_moved: false,
             pan_is_left: false,
-            inner_captured: None,
-            inner_hovered: None,
+            pan_press_epoch: 0,
             last_bg_click: None,
+            last_bg_click_epoch: None,
         }
+    }
+
+    // Invariant: `children` always holds exactly one element — the hosted
+    // content — set at construction and never drained.  `children_mut()` is
+    // public trait surface, so a caller could in principle empty it; the
+    // library itself never does, and indexing `[0]` documents (and asserts)
+    // that contract.
+
+    /// The hosted content subtree (the Scene's single child).
+    pub(super) fn content(&self) -> &dyn Widget {
+        self.children[0].as_ref()
+    }
+
+    /// Mutable access to the hosted content subtree.
+    pub(super) fn content_mut(&mut self) -> &mut dyn Widget {
+        self.children[0].as_mut()
     }
 
     /// Set the allowed zoom range (min, max). Values are screen-px per scene
@@ -233,7 +261,7 @@ impl Scene {
     /// the container and content both have positive size.
     fn fit_to_default(&mut self) {
         let container = Size::new(self.bounds.width, self.bounds.height);
-        let cb = self.content.bounds();
+        let cb = self.content().bounds();
         let target = self
             .default_scene_rect
             .unwrap_or_else(|| Rect::new(0.0, 0.0, cb.width, cb.height));
@@ -264,10 +292,25 @@ impl Widget for Scene {
         self.bounds = b;
     }
     fn children(&self) -> &[Box<dyn Widget>] {
-        &self.empty
+        &self.children
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.empty
+        &mut self.children
+    }
+
+    /// Inject the pan/zoom as the framework-level child transform.  Every
+    /// coordinate-mapping traversal (paint, hit-test, dispatch, inspector)
+    /// composes this when descending into the content, so hosted widgets are
+    /// painted, clicked, focused, and inspected at the right place.
+    fn child_transform(&self) -> Option<crate::TransAffine> {
+        Some(self.transform.to_affine())
+    }
+
+    /// While a background pan is in progress the Scene owns the pointer: the
+    /// drag must keep landing on the Scene even as the cursor sweeps over
+    /// hosted widgets, so hit-testing stops here until the gesture ends.
+    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
+        self.panning
     }
 
     fn margin(&self) -> Insets {
@@ -298,18 +341,6 @@ impl Widget for Scene {
         false
     }
 
-    /// The content isn't a framework child, so the default children-walk can't
-    /// see its ongoing draw needs — forward them explicitly.
-    fn needs_draw(&self) -> bool {
-        self.is_visible() && self.content.needs_draw()
-    }
-    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
-        if !self.is_visible() {
-            return None;
-        }
-        self.content.next_draw_deadline()
-    }
-
     fn layout(&mut self, available: Size) -> Size {
         // Poll the external reset trigger.
         if let Some(cell) = &self.reset_cell {
@@ -324,8 +355,8 @@ impl Widget for Scene {
         // Lay out the content at its natural (or configured) size and pin it to
         // the scene-space origin.
         let content_avail = self.content_size.unwrap_or(available);
-        let sz = self.content.layout(content_avail);
-        self.content
+        let sz = self.content_mut().layout(content_avail);
+        self.content_mut()
             .set_bounds(Rect::new(0.0, 0.0, sz.width, sz.height));
 
         // Keep the view fitted until the user takes control, so the initial
@@ -343,23 +374,15 @@ impl Widget for Scene {
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        // Canvas background.
+        // Canvas background only. The hosted content is a framework child,
+        // painted after this returns: the framework clips it to
+        // `clip_children_rect` (the Scene's bounds, in screen space) and then
+        // applies the pan/zoom via `child_transform`, so it lands exactly where
+        // pointer/focus/inspector expect it.
         ctx.set_fill_color(v.bg_color);
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, h);
         ctx.fill();
-
-        // Paint the content under the pan/zoom transform, clipped to the
-        // Scene's own bounds. The clip is established in screen-local space
-        // *before* the transform so it stays axis-aligned to the widget.
-        ctx.save();
-        ctx.clip_rect(0.0, 0.0, w, h);
-        ctx.translate(self.transform.offset.x, self.transform.offset.y);
-        ctx.scale(self.transform.zoom, self.transform.zoom);
-        let cb = self.content.bounds();
-        ctx.translate(cb.x, cb.y);
-        paint_subtree(self.content.as_mut(), ctx);
-        ctx.restore();
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
