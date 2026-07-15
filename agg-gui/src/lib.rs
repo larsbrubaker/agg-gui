@@ -154,9 +154,9 @@ pub use widgets::{
     NodeIcon, Padding, PerformanceView, PopupMenu, ProgressBar, QrView, RadioGroup, Rebuilder,
     Resize, RunMode, RunModeDesc, RunModeRow, Scene, SceneTransform, ScrollBarColor, ScrollBarKind,
     ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
-    SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter,
-    Stack, TabView, Table, TableBuilder, TableColumn, TableRows, TextArea, TextField, ToggleSwitch,
-    Tooltip, TopMenu, TreeView, Window,
+    SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter, Stack, TabView, Table,
+    TableBuilder, TableColumn, TableRows, TextArea, TextEditState, TextField, TextHAlign,
+    TextVAlign, ToggleSwitch, Tooltip, TopMenu, TreeView, Window,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

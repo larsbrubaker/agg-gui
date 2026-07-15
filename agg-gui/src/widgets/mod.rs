@@ -96,8 +96,9 @@ pub use table::{
     clip_text_to_width as table_clip_text_to_width, CellInfo, CellPainter, ColumnSize, HeaderClick,
     HeaderInfo, HeaderPainter, RowPredicate, Table, TableBuilder, TableColumn, TableRows,
 };
-pub use text_area::TextArea;
+pub use text_area::{TextArea, TextHAlign, TextVAlign};
 pub use text_field::{TextField, TextFieldTheme};
+pub use text_field_core::TextEditState;
 pub use toggle_switch::ToggleSwitch;
 pub use tooltip::Tooltip;
 pub use tree_view::{NodeIcon, TreeView};

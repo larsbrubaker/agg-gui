@@ -11,6 +11,7 @@
 
 mod animation;
 mod basic;
+mod code_editor_demo;
 mod code_example;
 mod font_book;
 mod frame_demo;
@@ -30,10 +31,13 @@ mod system;
 mod system_fonts;
 mod tests;
 mod text_demos;
+mod text_edit_demo;
 
 // Re-export every public demo builder so callers use `windows::foo(font)`.
 pub use animation::{bezier_curve, dancing_strings, painting};
-pub use basic::{code_editor, text_edit, tooltips};
+pub use basic::tooltips;
+pub use code_editor_demo::code_editor;
+pub use text_edit_demo::text_edit;
 pub use code_example::code_example;
 pub use font_book::font_book;
 pub use frame_demo::frame_demo;
