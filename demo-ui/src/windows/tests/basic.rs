@@ -1,5 +1,6 @@
 //! Basic diagnostic test windows.
 
+mod absolute_place;
 mod controls;
 mod layout;
 
