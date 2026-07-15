@@ -84,6 +84,10 @@ pub(crate) struct WindowTitleBar {
     /// Set by the chevron's `on_click` closure. `Window` drains it on
     /// every `on_event` pass and runs the collapse toggle.
     chevron_clicked: Rc<Cell<bool>>,
+    /// Shared with the chevron child: when `false` the collapse affordance
+    /// is hidden and inert. `Window` writes it each layout from its own
+    /// `collapsible` flag (egui's `Window::collapsible(bool)`).
+    collapsible: Rc<Cell<bool>>,
 }
 
 impl WindowTitleBar {
@@ -91,10 +95,12 @@ impl WindowTitleBar {
         let collapsed = Rc::new(Cell::new(false));
         let chevron_clicked = Rc::new(Cell::new(false));
         let chevron_color = Rc::new(Cell::new(Color::white()));
+        let collapsible = Rc::new(Cell::new(true));
         let chevron = {
             let flag = Rc::clone(&chevron_clicked);
             ChevronWidget::new(Rc::clone(&collapsed))
                 .with_color_cell(Rc::clone(&chevron_color))
+                .with_enabled_cell(Rc::clone(&collapsible))
                 .on_click(move || {
                     flag.set(true);
                 })
@@ -107,7 +113,14 @@ impl WindowTitleBar {
             collapsed,
             chevron_color,
             chevron_clicked,
+            collapsible,
         }
+    }
+
+    /// Show/hide the collapse chevron. `Window` calls this every layout so
+    /// the affordance tracks a runtime-driven `collapsible` flag.
+    pub(crate) fn set_collapsible(&self, on: bool) {
+        self.collapsible.set(on);
     }
 
     /// Atomically read + clear the shared chevron-clicked flag.

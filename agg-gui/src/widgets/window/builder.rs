@@ -4,7 +4,7 @@
 //! live in a sibling `impl Window` block that has full access to private
 //! fields by virtue of being inside the parent `window` module.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::geometry::{Rect, Size};
@@ -137,6 +137,41 @@ impl Window {
     /// `Window::resizable(bool)`.
     pub fn with_resizable(mut self, on: bool) -> Self {
         self.resizable = on;
+        self
+    }
+
+    /// Drive `resizable` from a shared cell read every `layout()`.  Lets a
+    /// demo's checkbox steer the real host window at runtime.  Follows the
+    /// [`with_maximized_cell`](Self::with_maximized_cell) precedent.
+    pub fn with_resizable_cell(mut self, cell: Rc<Cell<bool>>) -> Self {
+        self.resizable = cell.get();
+        self.resizable_cell = Some(cell);
+        self
+    }
+
+    /// Drive `auto_size` from a shared cell read every `layout()`.
+    pub fn with_auto_size_cell(mut self, cell: Rc<Cell<bool>>) -> Self {
+        self.auto_size = cell.get();
+        self.auto_size_cell = Some(cell);
+        self
+    }
+
+    /// Drive `collapsible` (whether the collapse chevron is offered) from a
+    /// shared cell read every `layout()`.  Matches egui `Window::collapsible`.
+    pub fn with_collapsible_cell(mut self, cell: Rc<Cell<bool>>) -> Self {
+        self.collapsible = cell.get();
+        self.collapsible_cell = Some(cell);
+        self
+    }
+
+    /// Drive the displayed title text from a shared cell read every
+    /// `layout()`.  Only the title-bar *label* changes — the window's
+    /// identity string (`title()`, used as the persistence / z-order key)
+    /// is intentionally left fixed so live retitling can't corrupt saved
+    /// state.  Mirrors egui's demo, which sets a fixed `Id` precisely
+    /// because it changes the visible title.
+    pub fn with_title_cell(mut self, cell: Rc<RefCell<String>>) -> Self {
+        self.title_cell = Some(cell);
         self
     }
 

@@ -118,6 +118,20 @@ pub struct Window {
     reset_to: Option<Rc<Cell<Option<Rect>>>>,
     position_cell: Option<Rc<Cell<Rect>>>,
     maximized_cell: Option<Rc<Cell<bool>>>,
+    /// Runtime-driven flag cells (egui `Window::resizable/collapsible`,
+    /// plus our `auto_size` addition). Read each `layout()` so a demo's
+    /// checkboxes can steer the real host window. `None` means the flag is
+    /// fixed at its builder value.
+    resizable_cell: Option<Rc<Cell<bool>>>,
+    auto_size_cell: Option<Rc<Cell<bool>>>,
+    collapsible_cell: Option<Rc<Cell<bool>>>,
+    /// Live title text. Applied to the title-bar label only — the window's
+    /// identity (`self.title`, used as the persistence / z-order key) is
+    /// deliberately left untouched so retitling can't corrupt saved state.
+    title_cell: Option<Rc<RefCell<String>>>,
+    /// Last title string pushed into the title bar, so we only re-set (and
+    /// invalidate the label's glyph cache) when the text actually changes.
+    last_applied_title: RefCell<String>,
 
     /// Snapshot of `is_visible()` from the previous `layout()` call.  Used
     /// to detect the false→true transition (demo toggled on in the
@@ -136,6 +150,9 @@ pub struct Window {
     raise_request: Cell<bool>,
 
     collapsed: bool,
+    /// Whether the collapse affordance is offered. Driven at runtime by
+    /// `collapsible_cell` when wired. Matches egui `Window::collapsible`.
+    collapsible: bool,
     /// Height before collapsing, so we can restore it.
     pre_collapse_h: f64,
 
@@ -262,6 +279,11 @@ impl Window {
             reset_to: None,
             position_cell: None,
             maximized_cell: None,
+            resizable_cell: None,
+            auto_size_cell: None,
+            collapsible_cell: None,
+            title_cell: None,
+            last_applied_title: RefCell::new(title_str.clone()),
             // Seed `last_visible` to `true` (matches `visible` above) so a
             // window that's open on first frame doesn't spuriously request
             // a raise before the user has interacted with it.
@@ -269,6 +291,7 @@ impl Window {
             needs_initial_fit: Cell::new(true),
             raise_request: Cell::new(false),
             collapsed: false,
+            collapsible: true,
             pre_collapse_h: 280.0,
             drag_mode: DragMode::None,
             drag_start_world: Point::ORIGIN,
