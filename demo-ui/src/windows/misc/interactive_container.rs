@@ -182,6 +182,9 @@ impl Widget for InteractiveContainer {
                 // the container frame must not light up over Reset / + 100.
                 self.hovered = self.hit_test(*pos) && !self.point_over_child(*pos);
                 if self.hovered != was {
+                    // The frame lights up on hover, so the cached bitmap is now
+                    // stale — invalidate so the next frame repaints.
+                    agg_gui::animation::request_draw();
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -196,6 +199,8 @@ impl Widget for InteractiveContainer {
                 // button, i.e. it landed on the container background.
                 if self.hit_test(*pos) {
                     self.pressed = true;
+                    // Press darkens the frame fill — repaint needed.
+                    agg_gui::animation::request_draw();
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -211,6 +216,11 @@ impl Widget for InteractiveContainer {
                     if self.hit_test(*pos) {
                         self.count.set(self.count.get() + 1);
                     }
+                    // Releasing clears the press state, and a background click
+                    // just changed the count label — either way the bitmap is
+                    // stale and must repaint.  This is the fix for the reported
+                    // bug where the big count label did not update on click.
+                    agg_gui::animation::request_draw();
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -356,6 +366,80 @@ mod tests {
         assert_eq!(count.get(), 1);
         click(&mut root, top);
         assert_eq!(count.get(), 2);
+    }
+
+    #[test]
+    fn background_click_requests_draw() {
+        // Regression: a background click bumped the counter but never called
+        // request_draw, so the big count label did not repaint until some
+        // unrelated event forced a redraw.  Every on_event path that mutates
+        // paint-affecting state must request a draw.
+        let mut c = InteractiveContainer::new(test_font());
+        c.layout(Size::new(240.0, 200.0));
+        let top = Point::new(120.0, c.bounds().height - 6.0);
+
+        // Press over the background arms `pressed` (frame darkens) → draw.
+        agg_gui::animation::clear_draw_request();
+        assert_eq!(
+            c.on_event(&Event::MouseDown {
+                pos: top,
+                button: MouseButton::Left,
+                modifiers: Modifiers::default(),
+            }),
+            EventResult::Consumed
+        );
+        assert!(
+            agg_gui::animation::wants_draw(),
+            "press must request a draw (frame press state changed)"
+        );
+
+        // Release over the background increments the count → the label text
+        // changes and must repaint.
+        agg_gui::animation::clear_draw_request();
+        assert_eq!(
+            c.on_event(&Event::MouseUp {
+                pos: top,
+                button: MouseButton::Left,
+                modifiers: Modifiers::default(),
+            }),
+            EventResult::Consumed
+        );
+        assert!(
+            agg_gui::animation::wants_draw(),
+            "background click increment must request a draw"
+        );
+    }
+
+    #[test]
+    fn hover_change_requests_draw() {
+        // The frame lights up on hover, so a hover transition is paint-affecting
+        // and must invalidate.
+        let mut c = InteractiveContainer::new(test_font());
+        c.layout(Size::new(240.0, 200.0));
+        let top = Point::new(120.0, c.bounds().height - 6.0);
+
+        agg_gui::animation::clear_draw_request();
+        assert_eq!(
+            c.on_event(&Event::MouseMove { pos: top }),
+            EventResult::Consumed
+        );
+        assert!(
+            agg_gui::animation::wants_draw(),
+            "hover onset must request a draw"
+        );
+
+        // Moving off the container clears hover — another paint-affecting change.
+        agg_gui::animation::clear_draw_request();
+        assert_eq!(
+            c.on_event(&Event::MouseMove {
+                pos: Point::new(-10.0, -10.0),
+            }),
+            EventResult::Consumed
+        );
+        assert!(
+            agg_gui::animation::wants_draw(),
+            "hover offset must request a draw"
+        );
     }
 
     #[test]
