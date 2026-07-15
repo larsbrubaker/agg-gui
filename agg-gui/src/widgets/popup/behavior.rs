@@ -33,29 +33,31 @@ pub enum PopupCloseBehavior {
 }
 
 impl Default for PopupCloseBehavior {
+    /// `CloseOnClick`, matching egui's `#[default]` on its
+    /// `PopupCloseBehavior` (used by combo boxes and menus).
     fn default() -> Self {
-        Self::CloseOnClickOutside
+        Self::CloseOnClick
     }
 }
 
 impl PopupCloseBehavior {
-    /// The three behaviors in a stable order with a label and a one-line
-    /// explanation — the demo uses these to build its selector + tooltips.
+    /// The three behaviors in a stable order with a label and the same
+    /// one-line explanation egui's Popups demo shows as a hover tooltip.
     pub const ALL: [(Self, &'static str, &'static str); 3] = [
         (
             Self::CloseOnClick,
             "CloseOnClick",
-            "Close as soon as the user clicks anywhere, inside or outside.",
+            "Closes when the user clicks anywhere (inside or outside)",
         ),
         (
             Self::CloseOnClickOutside,
             "CloseOnClickOutside",
-            "Close only when the user clicks outside the popup.",
+            "Closes when the user clicks outside the popup",
         ),
         (
             Self::IgnoreClicks,
             "IgnoreClicks",
-            "Never close on a click — only an explicit toggle closes it.",
+            "Close only when the button is clicked again",
         ),
     ];
 
@@ -145,18 +147,50 @@ impl Popup {
         self.size = size;
     }
 
-    /// The placed, viewport-clamped popup rect.
-    pub fn rect(&self, viewport: Size) -> Rect {
-        clamp_rect(
-            self.align.place_child(self.anchor, self.size, self.gap),
-            viewport,
+    /// The placement actually used this frame: the configured `align` if the
+    /// popup fits on-screen with it, otherwise the first of its
+    /// [`RectAlign::symmetries`] (then [`RectAlign::MENU_ALIGNS`]) that does —
+    /// egui's overflow-flip (`Popup::get_best_align` in
+    /// egui/src/containers/popup.rs).
+    pub fn effective_align(&self, viewport: Size) -> RectAlign {
+        let content = Rect::new(0.0, 0.0, viewport.width, viewport.height);
+        RectAlign::find_best_align(
+            std::iter::once(self.align)
+                .chain(self.align.symmetries())
+                .chain(RectAlign::MENU_ALIGNS),
+            content,
+            self.anchor,
+            self.gap,
+            self.size,
         )
+        .unwrap_or(self.align)
+    }
+
+    /// The placed popup rect: best-fit alignment first (overflow flip), then
+    /// clamped to the viewport as the final fallback when even the best
+    /// candidate overflows.
+    pub fn rect(&self, viewport: Size) -> Rect {
+        let align = self.effective_align(viewport);
+        clamp_rect(align.place_child(self.anchor, self.size, self.gap), viewport)
     }
 
     /// Whether `pos` falls inside the placed popup rect.
     pub fn contains(&self, pos: Point, viewport: Size) -> bool {
         let r = self.rect(viewport);
         pos.x >= r.x && pos.x <= r.x + r.width && pos.y >= r.y && pos.y <= r.y + r.height
+    }
+
+    /// Close on Escape, regardless of [`PopupCloseBehavior`] — egui closes any
+    /// popup on Escape (popup.rs `should_close`), so even an `IgnoreClicks`
+    /// popup stays keyboard-dismissable. Returns `true` if this call closed
+    /// the popup (callers should consume the key event then).
+    pub fn on_escape(&mut self) -> bool {
+        if self.open {
+            self.open = false;
+            true
+        } else {
+            false
+        }
     }
 
     /// Apply the close behavior to a left mouse-down at `pos`.
@@ -268,5 +302,36 @@ mod tests {
         for (i, (b, _, _)) in PopupCloseBehavior::ALL.iter().enumerate() {
             assert_eq!(b.all_index(), i);
         }
+    }
+
+    #[test]
+    fn default_close_behavior_matches_egui() {
+        assert_eq!(PopupCloseBehavior::default(), PopupCloseBehavior::CloseOnClick);
+        assert_eq!(Popup::default().close_behavior, PopupCloseBehavior::CloseOnClick);
+    }
+
+    #[test]
+    fn escape_closes_even_ignore_clicks_popups() {
+        let mut p = popup(PopupCloseBehavior::IgnoreClicks);
+        assert!(p.is_open());
+        assert!(p.on_escape(), "escape must close an IgnoreClicks popup");
+        assert!(!p.is_open());
+        assert!(!p.on_escape(), "second escape is a no-op");
+    }
+
+    #[test]
+    fn rect_flips_to_opposite_side_when_anchor_hugs_an_edge() {
+        // Anchor at the bottom of the screen (Y-up: y near 0): BOTTOM_START
+        // would overflow below, so the effective align flips to TOP_START and
+        // the popup opens above the anchor instead of merely clamping over it.
+        let mut p = popup(PopupCloseBehavior::CloseOnClick);
+        p.set_anchor(Rect::new(100.0, 10.0, 40.0, 20.0));
+        assert_eq!(p.effective_align(VIEWPORT), RectAlign::TOP_START);
+        let r = p.rect(VIEWPORT);
+        assert_eq!(r.y, 10.0 + 20.0 + p.gap, "popup bottom sits gap above the anchor top");
+
+        // Plenty of room: the configured align is kept.
+        p.set_anchor(Rect::new(100.0, 300.0, 40.0, 20.0));
+        assert_eq!(p.effective_align(VIEWPORT), RectAlign::BOTTOM_START);
     }
 }

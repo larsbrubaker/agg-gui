@@ -56,6 +56,16 @@ impl Align {
             Align::Max => 1.0,
         }
     }
+
+    /// Mirror this alignment: `Min` ↔ `Max`, `Center` stays.
+    /// Matches egui's `Align::flip` (emath/src/align.rs).
+    pub fn flip(self) -> Self {
+        match self {
+            Align::Min => Align::Max,
+            Align::Center => Align::Center,
+            Align::Max => Align::Min,
+        }
+    }
 }
 
 /// A 2D anchor point within a rectangle (an `x` and a `y` [`Align`]).
@@ -106,19 +116,20 @@ impl Align2 {
         y: Align::Min,
     };
 
-    /// All nine anchors in reading order (top row first, left to right) with a
-    /// display label. The array index is stable so UI (e.g. a combo box) can
-    /// map a selected index straight back to an `Align2`.
+    /// All nine anchors with the display names egui's Popups demo uses, in
+    /// the same order its align combo box lists them (left column, center
+    /// column, right column). The array index is stable so UI (e.g. a combo
+    /// box) can map a selected index straight back to an `Align2`.
     pub const ALL: [(Self, &'static str); 9] = [
-        (Self::LEFT_TOP, "Left Top"),
-        (Self::CENTER_TOP, "Center Top"),
-        (Self::RIGHT_TOP, "Right Top"),
-        (Self::LEFT_CENTER, "Left Center"),
-        (Self::CENTER, "Center"),
-        (Self::RIGHT_CENTER, "Right Center"),
-        (Self::LEFT_BOTTOM, "Left Bottom"),
-        (Self::CENTER_BOTTOM, "Center Bottom"),
-        (Self::RIGHT_BOTTOM, "Right Bottom"),
+        (Self::LEFT_TOP, "LEFT_TOP"),
+        (Self::LEFT_CENTER, "LEFT_CENTER"),
+        (Self::LEFT_BOTTOM, "LEFT_BOTTOM"),
+        (Self::CENTER_TOP, "CENTER_TOP"),
+        (Self::CENTER, "CENTER_CENTER"),
+        (Self::CENTER_BOTTOM, "CENTER_BOTTOM"),
+        (Self::RIGHT_TOP, "RIGHT_TOP"),
+        (Self::RIGHT_CENTER, "RIGHT_CENTER"),
+        (Self::RIGHT_BOTTOM, "RIGHT_BOTTOM"),
     ];
 
     /// Index of this anchor within [`Align2::ALL`], or 0 if somehow absent.
@@ -135,6 +146,30 @@ impl Align2 {
             rect.x + rect.width * self.x.frac(),
             rect.y + rect.height * self.y.frac(),
         )
+    }
+
+    /// Mirror on the x-axis (e.g. `LEFT_TOP` → `RIGHT_TOP`).
+    pub fn flip_x(self) -> Self {
+        Self {
+            x: self.x.flip(),
+            y: self.y,
+        }
+    }
+
+    /// Mirror on the y-axis (e.g. `LEFT_TOP` → `LEFT_BOTTOM`).
+    pub fn flip_y(self) -> Self {
+        Self {
+            x: self.x,
+            y: self.y.flip(),
+        }
+    }
+
+    /// Mirror on both axes (e.g. `LEFT_TOP` → `RIGHT_BOTTOM`).
+    pub fn flip(self) -> Self {
+        Self {
+            x: self.x.flip(),
+            y: self.y.flip(),
+        }
     }
 }
 
@@ -210,21 +245,40 @@ impl RectAlign {
         child: Align2::RIGHT_BOTTOM,
     };
 
-    /// The named presets in a stable order, each with a display label. Used by
-    /// the Popups demo to offer one-click placement shortcuts.
+    /// The named presets with the display names and ordering of egui's Popups
+    /// demo preset combo box (egui_demo_lib/src/demo/popups.rs).
     pub const PRESETS: [(Self, &'static str); 12] = [
-        (Self::BOTTOM_START, "Bottom Start"),
-        (Self::BOTTOM, "Bottom"),
-        (Self::BOTTOM_END, "Bottom End"),
-        (Self::TOP_START, "Top Start"),
-        (Self::TOP, "Top"),
-        (Self::TOP_END, "Top End"),
-        (Self::RIGHT_START, "Right Start"),
-        (Self::RIGHT, "Right"),
-        (Self::RIGHT_END, "Right End"),
-        (Self::LEFT_START, "Left Start"),
-        (Self::LEFT, "Left"),
-        (Self::LEFT_END, "Left End"),
+        (Self::TOP_START, "TOP_START"),
+        (Self::TOP, "TOP"),
+        (Self::TOP_END, "TOP_END"),
+        (Self::RIGHT_START, "RIGHT_START"),
+        (Self::RIGHT, "RIGHT"),
+        (Self::RIGHT_END, "RIGHT_END"),
+        (Self::BOTTOM_START, "BOTTOM_START"),
+        (Self::BOTTOM, "BOTTOM"),
+        (Self::BOTTOM_END, "BOTTOM_END"),
+        (Self::LEFT_START, "LEFT_START"),
+        (Self::LEFT, "LEFT"),
+        (Self::LEFT_END, "LEFT_END"),
+    ];
+
+    /// The 12 common menu positions in egui's fallback-preference order
+    /// (emath's `RectAlign::MENU_ALIGNS`): corner placements first, centered
+    /// ones last, for use with [`RectAlign::find_best_align`].
+    pub const MENU_ALIGNS: [Self; 12] = [
+        Self::BOTTOM_START,
+        Self::BOTTOM_END,
+        Self::TOP_START,
+        Self::TOP_END,
+        Self::RIGHT_END,
+        Self::RIGHT_START,
+        Self::LEFT_END,
+        Self::LEFT_START,
+        // These come last on purpose, we prefer the corner ones.
+        Self::TOP,
+        Self::RIGHT,
+        Self::BOTTOM,
+        Self::LEFT,
     ];
 
     /// The preset label matching this alignment exactly, or `None` for an
@@ -234,6 +288,60 @@ impl RectAlign {
             .iter()
             .find(|(a, _)| *a == self)
             .map(|(_, label)| *label)
+    }
+
+    /// Mirror the placement on the x-axis (e.g. `RIGHT` → `LEFT`).
+    pub fn flip_x(self) -> Self {
+        Self {
+            parent: self.parent.flip_x(),
+            child: self.child.flip_x(),
+        }
+    }
+
+    /// Mirror the placement on the y-axis (e.g. `BOTTOM_START` → `TOP_START`).
+    pub fn flip_y(self) -> Self {
+        Self {
+            parent: self.parent.flip_y(),
+            child: self.child.flip_y(),
+        }
+    }
+
+    /// Mirror the placement on both axes.
+    pub fn flip(self) -> Self {
+        Self {
+            parent: self.parent.flip(),
+            child: self.child.flip(),
+        }
+    }
+
+    /// The 3 alternative placements flipped in various ways, for use with
+    /// [`RectAlign::find_best_align`] (mirrors egui's `RectAlign::symmetries`).
+    pub fn symmetries(self) -> [Self; 3] {
+        [self.flip_x(), self.flip_y(), self.flip()]
+    }
+
+    /// Look for the first candidate placement whose popup rect fits entirely
+    /// inside `content_rect` — egui's overflow-flip (`find_best_align`).
+    ///
+    /// If no candidate fits, the FIRST candidate is returned (so the caller's
+    /// preferred alignment wins and downstream clamping takes over). Returns
+    /// `None` only when the iterator is empty.
+    pub fn find_best_align(
+        values_to_try: impl Iterator<Item = Self>,
+        content_rect: Rect,
+        parent_rect: Rect,
+        gap: f64,
+        expected_size: Size,
+    ) -> Option<Self> {
+        let mut first_choice = None;
+        for align in values_to_try {
+            first_choice = first_choice.or(Some(align));
+            let suggested = align.place_child(parent_rect, expected_size, gap);
+            if contains_rect(content_rect, suggested) {
+                return Some(align);
+            }
+        }
+        first_choice
     }
 
     /// Place a popup of `size` relative to `parent`, applying `gap` pixels of
@@ -268,6 +376,14 @@ impl RectAlign {
     pub fn place_child_clamped(self, parent: Rect, size: Size, gap: f64, viewport: Size) -> Rect {
         clamp_rect(self.place_child(parent, size, gap), viewport)
     }
+}
+
+/// `true` when `inner` lies entirely within `outer` (edges may touch).
+fn contains_rect(outer: Rect, inner: Rect) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.x + inner.width <= outer.x + outer.width
+        && inner.y + inner.height <= outer.y + outer.height
 }
 
 /// Clamp `rect` inside `viewport` with a [`MARGIN`] gutter. If the rect is
@@ -375,9 +491,122 @@ mod tests {
     fn presets_and_anchor_tables_round_trip() {
         // Every preset is discoverable by label, and every Align2 maps back to
         // its own index — the demo relies on both.
-        assert_eq!(RectAlign::BOTTOM.preset_label(), Some("Bottom"));
+        assert_eq!(RectAlign::BOTTOM.preset_label(), Some("BOTTOM"));
         for (i, (a, _)) in Align2::ALL.iter().enumerate() {
             assert_eq!(a.all_index(), i);
         }
+    }
+
+    #[test]
+    fn flips_mirror_the_named_presets() {
+        // Same pairings egui documents on Align2::flip_x/flip_y/flip.
+        assert_eq!(RectAlign::BOTTOM_START.flip_y(), RectAlign::TOP_START);
+        assert_eq!(RectAlign::TOP_END.flip_y(), RectAlign::BOTTOM_END);
+        assert_eq!(RectAlign::LEFT.flip_x(), RectAlign::RIGHT);
+        assert_eq!(RectAlign::RIGHT_START.flip_x(), RectAlign::LEFT_START);
+        assert_eq!(RectAlign::BOTTOM_START.flip(), RectAlign::TOP_END);
+        // symmetries() = [flip_x, flip_y, flip], in that order.
+        assert_eq!(
+            RectAlign::BOTTOM_START.symmetries(),
+            [
+                RectAlign::BOTTOM_END,
+                RectAlign::TOP_START,
+                RectAlign::TOP_END
+            ]
+        );
+    }
+
+    /// Candidate order egui's `Popup::get_best_align` tries: the configured
+    /// align, then its symmetries, then the full MENU_ALIGNS table.
+    fn candidates(align: RectAlign) -> impl Iterator<Item = RectAlign> {
+        std::iter::once(align)
+            .chain(align.symmetries())
+            .chain(RectAlign::MENU_ALIGNS)
+    }
+
+    #[test]
+    fn find_best_align_flips_at_each_screen_edge() {
+        let screen = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let size = Size::new(100.0, 80.0);
+
+        // Anchor near the BOTTOM edge (Y-up: small y): BOTTOM_START overflows
+        // downward, flip_y (TOP_START) survives.
+        let parent = Rect::new(150.0, 10.0, 40.0, 20.0);
+        let best = RectAlign::find_best_align(
+            candidates(RectAlign::BOTTOM_START),
+            screen,
+            parent,
+            GAP,
+            size,
+        );
+        assert_eq!(best, Some(RectAlign::TOP_START));
+
+        // Anchor near the TOP edge: TOP_START overflows upward, flips back down.
+        let parent = Rect::new(150.0, 270.0, 40.0, 20.0);
+        let best = RectAlign::find_best_align(
+            candidates(RectAlign::TOP_START),
+            screen,
+            parent,
+            GAP,
+            size,
+        );
+        assert_eq!(best, Some(RectAlign::BOTTOM_START));
+
+        // Anchor near the RIGHT edge: RIGHT_START overflows, LEFT_START survives.
+        let parent = Rect::new(340.0, 100.0, 40.0, 20.0);
+        let best = RectAlign::find_best_align(
+            candidates(RectAlign::RIGHT_START),
+            screen,
+            parent,
+            GAP,
+            size,
+        );
+        assert_eq!(best, Some(RectAlign::LEFT_START));
+
+        // Anchor near the LEFT edge: LEFT_START overflows, RIGHT_START survives.
+        let parent = Rect::new(10.0, 100.0, 40.0, 20.0);
+        let best = RectAlign::find_best_align(
+            candidates(RectAlign::LEFT_START),
+            screen,
+            parent,
+            GAP,
+            size,
+        );
+        assert_eq!(best, Some(RectAlign::RIGHT_START));
+    }
+
+    #[test]
+    fn find_best_align_keeps_preferred_align_when_it_fits() {
+        let screen = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let parent = Rect::new(150.0, 150.0, 40.0, 20.0);
+        let best = RectAlign::find_best_align(
+            candidates(RectAlign::BOTTOM_START),
+            screen,
+            parent,
+            GAP,
+            Size::new(100.0, 80.0),
+        );
+        assert_eq!(best, Some(RectAlign::BOTTOM_START));
+    }
+
+    #[test]
+    fn find_best_align_falls_back_to_first_candidate_when_nothing_fits() {
+        // Popup bigger than the screen: nothing fits, first candidate returned
+        // (the caller's preferred align), None only for an empty iterator.
+        let screen = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let parent = Rect::new(40.0, 40.0, 20.0, 10.0);
+        let big = Size::new(500.0, 500.0);
+        let best = RectAlign::find_best_align(
+            candidates(RectAlign::BOTTOM_START),
+            screen,
+            parent,
+            GAP,
+            big,
+        );
+        assert_eq!(best, Some(RectAlign::BOTTOM_START));
+        assert_eq!(
+            RectAlign::find_best_align(std::iter::empty(), screen, parent, GAP, big),
+            None
+        );
     }
 }

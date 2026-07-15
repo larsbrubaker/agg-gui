@@ -134,4 +134,60 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     ctx.begin_path();
     ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
     ctx.stroke();
+
+    paint_item_hover_tooltip(ctx, &request, popup_y);
+}
+
+/// Paint the per-item hover tooltip (from `ComboBox::with_item_tooltips`)
+/// beside the hovered row.  Painted immediately (no hover delay) because the
+/// dropdown is already an explicit, transient interaction — unlike the
+/// wander-prone main canvas the `Tooltip` widget's 500 ms delay protects.
+fn paint_item_hover_tooltip(ctx: &mut dyn DrawCtx, request: &ComboPopupRequest, popup_y: f64) {
+    let Some((text, font)) = &request.hover_tooltip else {
+        return;
+    };
+    let Some(hovered) = request.hovered_item else {
+        return;
+    };
+    // Only rows currently scrolled into view can anchor a tooltip.
+    if hovered < request.first_item || hovered >= request.first_item + request.visible_count {
+        return;
+    }
+    let v = ctx.visuals();
+    const FONT_SIZE: f64 = 12.0;
+    const PAD: f64 = 7.0;
+    const GAP: f64 = 6.0;
+    ctx.set_font(std::sync::Arc::clone(font));
+    ctx.set_font_size(FONT_SIZE);
+    let text_w = ctx.measure_text(text).map(|m| m.width).unwrap_or(0.0);
+    let panel_w = text_w + PAD * 2.0;
+    let panel_h = FONT_SIZE * 1.5 + PAD * 2.0 - 4.0;
+
+    let row = hovered - request.first_item;
+    let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
+    let mut px = request.x + request.width + GAP;
+    let mut py = item_y + (ITEM_H - panel_h) * 0.5;
+    // Keep on-screen: fall back to the popup's left side, clamp vertically.
+    if let Some(viewport) = current_combo_viewport() {
+        if px + panel_w > viewport.width - 4.0 {
+            px = (request.x - GAP - panel_w).max(4.0);
+        }
+        py = py.clamp(4.0, (viewport.height - panel_h - 4.0).max(4.0));
+    }
+
+    ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.20));
+    ctx.begin_path();
+    ctx.rounded_rect(px + 1.0, py - 1.0, panel_w, panel_h, 4.0);
+    ctx.fill();
+    ctx.set_fill_color(v.window_fill);
+    ctx.begin_path();
+    ctx.rounded_rect(px, py, panel_w, panel_h, 4.0);
+    ctx.fill();
+    ctx.set_stroke_color(v.widget_stroke);
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.rounded_rect(px, py, panel_w, panel_h, 4.0);
+    ctx.stroke();
+    ctx.set_fill_color(v.text_color);
+    ctx.fill_text(text, px + PAD, py + PAD - 1.0);
 }
