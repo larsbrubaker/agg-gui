@@ -54,6 +54,10 @@ pub(super) struct ComboPopupRequest {
     /// on the Label is what makes popup item rendering compositional
     /// and reuses the cache between frames).
     pub(super) item_labels: Rc<RefCell<Vec<Label>>>,
+    /// Hover help for the currently hovered item (text + font), resolved
+    /// from [`ComboBox::with_item_tooltips`]. Painted beside the hovered
+    /// row by the popup drain pass.
+    pub(super) hover_tooltip: Option<(String, Arc<Font>)>,
 }
 
 thread_local! {
@@ -104,6 +108,11 @@ pub struct ComboBox {
     /// the selected label uses `vec[selected]`, ignoring the system
     /// font override so font-preview UI stays stable.
     item_fonts: Option<Vec<Arc<Font>>>,
+    /// Optional per-item hover help, set via [`with_item_tooltips`].
+    /// `tooltips[i]` is shown beside option `i` while it is hovered in the
+    /// open dropdown — the agg-gui equivalent of egui's per-item
+    /// `.on_hover_text(...)`. Empty strings show nothing.
+    item_tooltips: Option<Vec<String>>,
 
     popup_opens_up: bool,
     popup_visible_count: usize,
@@ -149,6 +158,7 @@ impl ComboBox {
             selected_label,
             item_labels,
             item_fonts: None,
+            item_tooltips: None,
             popup_opens_up: false,
             popup_visible_count: DEFAULT_VISIBLE_ITEMS,
             scroll_offset: 0,
@@ -245,6 +255,15 @@ impl ComboBox {
     /// the closed combo reflects the live face.
     pub fn with_item_fonts(mut self, fonts: Vec<Arc<Font>>) -> Self {
         self.set_item_fonts(fonts);
+        self
+    }
+
+    /// Attach hover help to each dropdown option — the agg-gui equivalent of
+    /// egui's per-item `.on_hover_text(...)`. `tooltips[i]` paints in a small
+    /// panel beside option `i` while the cursor rests on it in the open
+    /// dropdown. Missing / empty entries show nothing.
+    pub fn with_item_tooltips(mut self, tooltips: Vec<impl Into<String>>) -> Self {
+        self.item_tooltips = Some(tooltips.into_iter().map(|t| t.into()).collect());
         self
     }
 
@@ -487,6 +506,13 @@ impl Widget for ComboBox {
                 scrollbar,
                 item_count: self.options.len(),
                 item_labels: Rc::clone(&self.item_labels),
+                hover_tooltip: self.hovered_item.and_then(|idx| {
+                    let text = self.item_tooltips.as_ref()?.get(idx)?;
+                    if text.is_empty() {
+                        return None;
+                    }
+                    Some((text.clone(), Arc::clone(&self.font)))
+                }),
             });
         }
     }

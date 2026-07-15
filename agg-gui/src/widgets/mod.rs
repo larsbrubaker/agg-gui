@@ -21,6 +21,7 @@ pub mod menu;
 pub mod modal_sheet;
 pub mod on_screen_keyboard;
 pub mod performance;
+pub mod popup;
 pub mod primitives;
 pub mod progress_bar;
 pub mod property_row;
@@ -73,6 +74,7 @@ pub use performance::{
     paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView, RunMode,
     RunModeDesc, RunModeRow, SharedFrameHistory,
 };
+pub use popup::{Align, Align2, Popup, PopupClickOutcome, PopupCloseBehavior, RectAlign};
 pub use primitives::{Padding, SizedBox, Stack};
 pub use progress_bar::ProgressBar;
 pub use property_row::{
