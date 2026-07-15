@@ -65,7 +65,7 @@ pub use system_fonts::{
     DEFAULT_FONT_NAME, EMOJI_FONT_PATH, FONT_AWESOME_PATH,
 };
 pub use tests::{
-    clipboard_test, cursor_test, grid_test, input_event_history, input_test, layout_test,
+    clipboard_test, cursor_test, input_event_history, input_test, layout_test,
     manual_layout_test, svg_test, window_resize_sub_windows, ResizeTestWindow,
 };
 pub use text_demos::{

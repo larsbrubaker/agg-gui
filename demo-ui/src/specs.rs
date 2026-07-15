@@ -350,14 +350,6 @@ pub(crate) const TESTS: &[DemoSpec] = &[
         win_h: 560.0,
     },
     DemoSpec {
-        title: "\u{F00A} Grid Test",
-        label: "\u{F00A} Grid Test",
-        group: "Tests",
-        open: false,
-        win_w: WIN_W,
-        win_h: WIN_H,
-    },
-    DemoSpec {
         title: "\u{F1DA} Input Event History",
         label: "\u{F1DA} Input Event History",
         group: "Tests",
