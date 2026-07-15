@@ -11,13 +11,15 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::Font;
+use crate::text::{measure_advance, Font};
 use crate::widget::Widget;
 use crate::widgets::label::Label;
 
 const DOT_R: f64 = 7.0; // outer circle radius
 const GAP: f64 = 8.0;
 const ROW_H: f64 = 22.0;
+/// Horizontal spacing between wrapped items in horizontal-wrap mode.
+const HWRAP_SPACING: f64 = 6.0;
 /// Left/right slack reserved so the circle's 1.5-px stroke (and its AA
 /// fringe) and the focus-ring outline stay INSIDE the widget's bounds.
 /// Without it, the parent container's `clip_children_rect` (which
@@ -52,6 +54,14 @@ pub struct RadioGroup {
     /// Optional external mirror of `selected` — same bidirectional-binding
     /// pattern as `Slider::with_value_cell` / `ToggleSwitch::with_state_cell`.
     selected_cell: Option<Rc<Cell<usize>>>,
+    /// When `true`, options flow left-to-right and wrap to new lines instead
+    /// of stacking vertically. Backs egui's "64 radio buttons" wrapped row.
+    horizontal: bool,
+    /// Per-option layout computed during a horizontal-wrap `layout` pass:
+    /// `(dot_cx, dot_cy, label_x, has_label, hit_box)` in widget-local
+    /// coordinates (x-left / y-up). Empty in vertical mode, where
+    /// `row_center_y`/`row_for_y` are used instead.
+    hwrap_items: Vec<(f64, f64, f64, bool, Rect)>,
 }
 
 impl RadioGroup {
@@ -77,7 +87,18 @@ impl RadioGroup {
             font_size,
             on_change: None,
             selected_cell: None,
+            horizontal: false,
+            hwrap_items: Vec::new(),
         }
+    }
+
+    /// Lay the options out left-to-right, wrapping to new lines when they run
+    /// out of horizontal room (egui's `horizontal_wrapped` radio row). Options
+    /// with empty labels render as bare dots, which is how egui's 64-radio demo
+    /// is built.
+    pub fn with_horizontal_wrap(mut self, on: bool) -> Self {
+        self.horizontal = on;
+        self
     }
 
     /// Bind this group's selection to an external `Rc<Cell<usize>>`.  The
@@ -178,6 +199,86 @@ impl RadioGroup {
         }
         None
     }
+
+    /// Compute horizontal-wrap geometry for the given available width.
+    ///
+    /// Returns one `(dot_cx, dot_cy, label_x, has_label, hit_box)` per option
+    /// plus the total height. Coordinates are widget-local (x grows right,
+    /// y grows up, so the first wrapped line sits at the top). Pure w.r.t.
+    /// widget state — used by both `layout` and `measure_min_height`.
+    fn compute_hwrap(&self, available_w: f64) -> (Vec<(f64, f64, f64, bool, Rect)>, f64) {
+        let n = self.options.len();
+        if n == 0 {
+            return (Vec::new(), 0.0);
+        }
+        let dot_extent = LEFT_INSET + DOT_R * 2.0;
+        // First pass (top-down rows): assign each option a row and x offset.
+        let mut placed: Vec<(usize, f64, f64, f64, bool)> = Vec::with_capacity(n);
+        let mut x = 0.0_f64;
+        let mut row = 0usize;
+        for opt in &self.options {
+            let has_label = !opt.is_empty();
+            let label_w = if has_label {
+                measure_advance(&self.font, opt, self.font_size)
+            } else {
+                0.0
+            };
+            let item_w = dot_extent + if has_label { GAP + label_w } else { 0.0 };
+            if x > 0.0 && x + item_w > available_w {
+                row += 1;
+                x = 0.0;
+            }
+            placed.push((row, x, item_w, label_w, has_label));
+            x += item_w + HWRAP_SPACING;
+        }
+        let rows = row + 1;
+        let h = rows as f64 * ROW_H;
+        // Second pass: convert row index to Y-up centre and build hit boxes.
+        let items = placed
+            .into_iter()
+            .map(|(r, x_left, item_w, _label_w, has_label)| {
+                let cy = h - (r as f64) * ROW_H - ROW_H * 0.5;
+                let dot_cx = LEFT_INSET + DOT_R + x_left;
+                let label_x = x_left + dot_extent + GAP;
+                let hit = Rect::new(x_left, cy - ROW_H * 0.5, item_w, ROW_H);
+                (dot_cx, cy, label_x, has_label, hit)
+            })
+            .collect();
+        (items, h)
+    }
+
+    /// Locate the option whose clickable box contains `pos` (horizontal mode).
+    fn hwrap_item_at(&self, pos_x: f64, pos_y: f64) -> Option<usize> {
+        self.hwrap_items.iter().position(|(_, _, _, _, hit)| {
+            pos_x >= hit.x
+                && pos_x < hit.x + hit.width
+                && pos_y >= hit.y
+                && pos_y < hit.y + hit.height
+        })
+    }
+
+    /// Horizontal-wrap layout pass: caches item geometry, positions the label
+    /// children beside their dots, and sizes the widget to the wrapped height.
+    fn layout_horizontal(&mut self, available: Size) -> Size {
+        let (items, h) = self.compute_hwrap(available.width);
+        self.bounds = Rect::new(0.0, 0.0, available.width, h);
+        for (i, child) in self.children.iter_mut().enumerate() {
+            let Some(&(_dot_cx, cy, label_x, has_label, _hit)) = items.get(i) else {
+                continue;
+            };
+            if !has_label {
+                // Bare dot: give the empty label a zero-width slot at the dot.
+                child.set_bounds(Rect::new(label_x, cy, 0.0, 0.0));
+                let _ = child.layout(Size::new(0.0, ROW_H));
+                continue;
+            }
+            let s = child.layout(Size::new((available.width - label_x).max(0.0), ROW_H));
+            let ly = cy - s.height * 0.5;
+            child.set_bounds(Rect::new(label_x, ly, s.width, s.height));
+        }
+        self.hwrap_items = items;
+        Size::new(available.width, h)
+    }
 }
 
 impl Widget for RadioGroup {
@@ -227,7 +328,11 @@ impl Widget for RadioGroup {
     /// produces.  Without this override the trait default returns `0`, and
     /// an ancestor `Window::with_tight_content_fit` would size the window
     /// too short by the radio's full height.
-    fn measure_min_height(&self, _available_w: f64) -> f64 {
+    fn measure_min_height(&self, available_w: f64) -> f64 {
+        if self.horizontal {
+            let (_, h) = self.compute_hwrap(available_w);
+            return h;
+        }
         self.options.len() as f64 * ROW_H
     }
 
@@ -240,6 +345,9 @@ impl Widget for RadioGroup {
                 let v = cell.get().min(n - 1);
                 self.selected = v;
             }
+        }
+        if self.horizontal {
+            return self.layout_horizontal(available);
         }
         let h = self.options.len() as f64 * ROW_H;
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
@@ -283,7 +391,16 @@ impl Widget for RadioGroup {
         // the foreground theme-aware without rebuilding the Label.
         let text_color = v.text_color;
         for i in 0..self.options.len() {
-            let cy = self.row_center_y(i, h);
+            // Dot centre differs by layout mode: vertical rows use the fixed
+            // left column; horizontal-wrap uses the cached per-item centre.
+            let (dot_cx, cy) = if self.horizontal {
+                match self.hwrap_items.get(i) {
+                    Some(&(cx, cy, _, _, _)) => (cx, cy),
+                    None => continue,
+                }
+            } else {
+                (LEFT_INSET + DOT_R, self.row_center_y(i, h))
+            };
             let checked = i == self.selected;
             let hovered = self.hovered == Some(i);
 
@@ -298,13 +415,13 @@ impl Widget for RadioGroup {
 
             ctx.set_fill_color(bg);
             ctx.begin_path();
-            ctx.circle(LEFT_INSET + DOT_R, cy, DOT_R);
+            ctx.circle(dot_cx, cy, DOT_R);
             ctx.fill();
 
             ctx.set_stroke_color(border);
             ctx.set_line_width(1.5);
             ctx.begin_path();
-            ctx.circle(LEFT_INSET + DOT_R, cy, DOT_R);
+            ctx.circle(dot_cx, cy, DOT_R);
             ctx.stroke();
 
             // Inner dot when checked — always widget_bg so it stays
@@ -312,7 +429,7 @@ impl Widget for RadioGroup {
             if checked {
                 ctx.set_fill_color(v.widget_bg);
                 ctx.begin_path();
-                ctx.circle(LEFT_INSET + DOT_R, cy, DOT_R * 0.45);
+                ctx.circle(dot_cx, cy, DOT_R * 0.45);
                 ctx.fill();
             }
 
@@ -326,7 +443,11 @@ impl Widget for RadioGroup {
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
-                self.hovered = self.row_for_y(pos.y);
+                self.hovered = if self.horizontal {
+                    self.hwrap_item_at(pos.x, pos.y)
+                } else {
+                    self.row_for_y(pos.y)
+                };
                 if was != self.hovered {
                     crate::animation::request_draw();
                     return EventResult::Consumed;
@@ -338,7 +459,12 @@ impl Widget for RadioGroup {
                 pos,
                 ..
             } => {
-                if let Some(i) = self.row_for_y(pos.y) {
+                let hit = if self.horizontal {
+                    self.hwrap_item_at(pos.x, pos.y)
+                } else {
+                    self.row_for_y(pos.y)
+                };
+                if let Some(i) = hit {
                     let was = self.selected;
                     self.selected = i;
                     self.fire();
@@ -400,5 +526,70 @@ impl Widget for RadioGroup {
             }
             _ => EventResult::Ignored,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::Modifiers;
+    use crate::geometry::Point;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+
+    fn test_font() -> Arc<Font> {
+        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    fn empty_group(n: usize) -> RadioGroup {
+        let opts: Vec<String> = (0..n).map(|_| String::new()).collect();
+        RadioGroup::new(opts, 0, test_font()).with_horizontal_wrap(true)
+    }
+
+    #[test]
+    fn empty_labels_wrap_onto_multiple_rows() {
+        let mut g = empty_group(64);
+        // Narrow width forces many rows; a single dot is ~16px + spacing.
+        let size = g.layout(Size::new(80.0, 0.0));
+        assert!(size.height > ROW_H, "64 dots at 80px wide must wrap");
+        assert_eq!(g.hwrap_items.len(), 64);
+        // Row count is height / ROW_H; must be > 1 for a wrapped layout.
+        let rows = (size.height / ROW_H).round() as usize;
+        assert!(rows > 1, "expected multiple rows, got {rows}");
+    }
+
+    #[test]
+    fn single_wide_row_does_not_wrap() {
+        let mut g = empty_group(4);
+        let size = g.layout(Size::new(2000.0, 0.0));
+        assert_eq!(
+            (size.height / ROW_H).round() as usize,
+            1,
+            "4 dots in 2000px must stay on one row"
+        );
+    }
+
+    #[test]
+    fn click_selects_the_hit_dot() {
+        let mut g = empty_group(8);
+        g.layout(Size::new(2000.0, 0.0)); // one row, all dots side by side
+        // Aim at the 3rd dot's centre.
+        let (cx, cy, _, _, _) = g.hwrap_items[2];
+        let down = Event::MouseDown {
+            pos: Point::new(cx, cy),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        };
+        let r = g.on_event(&down);
+        assert_eq!(r, EventResult::Consumed);
+        assert_eq!(g.selected(), 2);
+    }
+
+    #[test]
+    fn vertical_mode_is_unaffected() {
+        let mut g = RadioGroup::new(vec!["a", "b", "c"], 0, test_font());
+        let size = g.layout(Size::new(200.0, 0.0));
+        assert_eq!(size.height, 3.0 * ROW_H);
+        assert!(g.hwrap_items.is_empty());
     }
 }
