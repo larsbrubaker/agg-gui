@@ -17,7 +17,7 @@ use agg_gui::widget::{paint_subtree, CompositingLayer};
 use agg_gui::{
     Button, Checkbox, CollapsingHeader, Color, ColorPicker, ColorWheelPicker, ComboBox,
     Conditional, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink,
-    ImageView, Label, Point, ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox,
+    ImageView, Label, ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox,
     Slider, TextField, ToggleSwitch, Tooltip, Widget,
 };
 
@@ -190,9 +190,11 @@ impl Widget for GalleryScope {
         self.visible.get()
     }
 
-    /// When the grid is non-interactive, claim every pointer position so
-    /// `hit_test_subtree` stops here and child widgets never receive events.
-    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
+    /// When the grid is non-interactive, disable all pointer *and* keyboard
+    /// interaction for the subtree: `hit_test_subtree` stops here (clicks are
+    /// swallowed) and `collect_focusable` skips the subtree (Tab cannot reach
+    /// the grid's TextField).  Mirrors egui's `UiBuilder::disabled()`.
+    fn blocks_child_interaction(&self) -> bool {
         !self.interactive.get()
     }
 

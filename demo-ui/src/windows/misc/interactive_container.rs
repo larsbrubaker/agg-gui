@@ -177,7 +177,10 @@ impl Widget for InteractiveContainer {
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
-                self.hovered = self.hit_test(*pos);
+                // egui's `response.hovered()` is false while the pointer is over
+                // a nested button (that is `contains_pointer`, not `hovered`), so
+                // the container frame must not light up over Reset / + 100.
+                self.hovered = self.hit_test(*pos) && !self.point_over_child(*pos);
                 if self.hovered != was {
                     EventResult::Consumed
                 } else {
@@ -222,6 +225,18 @@ impl Widget for InteractiveContainer {
             && local_pos.x <= self.bounds.width
             && local_pos.y >= 0.0
             && local_pos.y <= self.bounds.height
+    }
+}
+
+impl InteractiveContainer {
+    /// True when `pos` (container-local) falls inside one of the nested button
+    /// rects.  Used to keep the container's `hovered` flag false over a child,
+    /// matching egui's `contains_pointer` vs `hovered` split.
+    fn point_over_child(&self, pos: Point) -> bool {
+        self.children.iter().any(|child| {
+            let b = child.bounds();
+            pos.x >= b.x && pos.x <= b.x + b.width && pos.y >= b.y && pos.y <= b.y + b.height
+        })
     }
 }
 
@@ -305,6 +320,30 @@ mod tests {
         let mut root: Box<dyn Widget> = Box::new(container);
         root.layout(Size::new(240.0, 200.0));
         (root, count)
+    }
+
+    fn mouse_move(w: &mut InteractiveContainer, pos: Point) {
+        w.on_event(&Event::MouseMove { pos });
+    }
+
+    #[test]
+    fn hover_is_false_over_nested_buttons() {
+        let mut c = InteractiveContainer::new(test_font());
+        c.layout(Size::new(240.0, 200.0));
+
+        // Over the empty background near the top: the frame lights up.
+        let top = Point::new(120.0, c.bounds().height - 6.0);
+        mouse_move(&mut c, top);
+        assert!(c.hovered, "background hover should set hovered");
+
+        // Over the "+ 100" button (children[1]): hovered must clear, matching
+        // egui's response.hovered() being false over a child.
+        let plus = c.children()[1].bounds();
+        mouse_move(
+            &mut c,
+            Point::new(plus.x + plus.width * 0.5, plus.y + plus.height * 0.5),
+        );
+        assert!(!c.hovered, "hover must be false while pointer is over a button");
     }
 
     #[test]
