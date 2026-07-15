@@ -24,6 +24,7 @@ mod screen_share;
 mod screenshot_demo;
 mod scrolling;
 mod lcd_sample_text;
+mod sliders_demo;
 mod system;
 mod system_fonts;
 mod tests;
@@ -31,7 +32,7 @@ mod text_demos;
 
 // Re-export every public demo builder so callers use `windows::foo(font)`.
 pub use animation::{bezier_curve, dancing_strings, painting};
-pub use basic::{code_editor, sliders, text_edit, tooltips};
+pub use basic::{code_editor, text_edit, tooltips};
 pub use code_example::code_example;
 pub use font_book::font_book;
 pub use frame_demo::frame_demo;
@@ -44,6 +45,7 @@ pub use mobile_keyboard::{mobile_keyboard, TITLE as MOBILE_KEYBOARD_TITLE};
 pub use screen_share::screen_share_demo;
 pub use screenshot_demo::screenshot_demo;
 pub use scrolling::scrolling_demo;
+pub use sliders_demo::sliders;
 pub use system::{
     cells as system_cells, init_cells as init_system_cells, system_view, SystemCells,
 };
