@@ -366,8 +366,8 @@ pub(crate) const TESTS: &[DemoSpec] = &[
         win_h: WIN_H,
     },
     DemoSpec {
-        title: "\u{F0E4} Layout Test",
-        label: "\u{F0E4} Layout Test",
+        title: "\u{F0E4} Flex Layout Test",
+        label: "\u{F0E4} Flex Layout Test",
         group: "Tests",
         open: false,
         win_w: WIN_W,

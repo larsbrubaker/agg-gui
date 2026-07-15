@@ -444,7 +444,7 @@ pub fn build_demo_ui(
             "\u{F05B} Cursor Test" => windows::cursor_test(Arc::clone(&font)),
             "\u{F1DA} Input Event History" => windows::input_event_history(Arc::clone(&font)),
             "\u{F11C} Input Test" => windows::input_test(Arc::clone(&font)),
-            "\u{F0E4} Layout Test" => windows::layout_test(Arc::clone(&font)),
+            "\u{F0E4} Flex Layout Test" => windows::layout_test(Arc::clone(&font)),
             "\u{F0AD} Manual Layout Test" => windows::manual_layout_test(Arc::clone(&font)),
             "\u{F03E} SVG Test" => windows::svg_test(Arc::clone(&font)),
             _ => windows::coming_soon(),
