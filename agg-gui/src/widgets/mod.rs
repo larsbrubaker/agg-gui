@@ -58,7 +58,7 @@ pub use combo_box::ComboBox;
 pub use conditional::Conditional;
 pub use container::Container;
 pub use drag_value::DragValue;
-pub use flex::FlexColumn;
+pub use flex::{FlexColumn, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP};
 pub use flex_row::FlexRow;
 pub use hyperlink::Hyperlink;
 pub use image_view::ImageView;

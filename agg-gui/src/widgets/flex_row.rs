@@ -11,6 +11,7 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
+use crate::widgets::flex::DEFAULT_ROW_GAP;
 use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
@@ -86,7 +87,7 @@ impl FlexRow {
             children: Vec::new(),
             flex_factors: Vec::new(),
             base: WidgetBase::new(),
-            gap: 0.0,
+            gap: DEFAULT_ROW_GAP,
             inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
             fit_width: false,

@@ -151,6 +151,7 @@ pub use widgets::{
     set_scroll_style, set_scroll_visibility, shared_frame_history, shared_run_mode, Button,
     CellInfo, Checkbox, CollapsingHeader, ColorPicker, ColorWheelPicker, ComboBox, Conditional,
     Align, Align2, Container, DragValue, FlexColumn, FlexRow, FrameHistory, HandleShape,
+    DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
     HeaderInfo, Hyperlink, ImageView, InspectorPanel, InspectorSavedState, Label, LabelAlign,
     MarkdownView, MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection,
     MenuShortcut, ModalSheet, NodeIcon, Padding, PerformanceView, Popup, PopupClickOutcome,
