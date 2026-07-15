@@ -1,4 +1,13 @@
-//! `Slider` — a horizontal range slider with a draggable thumb.
+//! `Slider` — a range slider with a draggable thumb.
+//!
+//! Supports linear and logarithmic value mapping (including ranges that span
+//! zero and infinity), three clamping modes, integer/step snapping, "smart aim"
+//! round-value snapping, an optional value suffix, horizontal or vertical
+//! orientation, a toggleable trailing fill, and circle/rect handle shapes.
+//!
+//! The numeric core (value ↔ normalized-position mapping and smart aim) lives
+//! in the sibling [`crate::widgets::slider_math`] module so it can be unit
+//! tested in isolation and to keep this file within the project's size limit.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -11,6 +20,54 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::{Label, LabelAlign};
+use crate::widgets::slider_math::{
+    best_in_range_f64, clamp_value_to_range, normalized_from_value, value_from_normalized,
+    SliderSpec,
+};
+
+mod paint;
+
+/// Orientation of a [`Slider`]. Horizontal is the default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SliderOrientation {
+    Horizontal,
+    Vertical,
+}
+
+/// When a [`Slider`] clamps values to its range. Mirrors egui's `SliderClamping`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum SliderClamping {
+    /// Never clamp — the value may sit outside the range (thumb pins to the edge).
+    Never,
+    /// Only clamp values produced by interacting with the slider; pre-existing
+    /// out-of-range values are left intact.
+    Edits,
+    /// Always clamp, including a pre-existing out-of-range value.
+    #[default]
+    Always,
+}
+
+/// Shape of a [`Slider`]'s draggable handle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HandleShape {
+    /// A circle (the default).
+    Circle,
+    /// A rectangle whose extent along the slider axis is `aspect_ratio` times
+    /// its cross-axis extent.
+    Rect { aspect_ratio: f64 },
+}
+
+impl Default for HandleShape {
+    fn default() -> Self {
+        Self::Circle
+    }
+}
+
+/// Pixels of "aim radius" used when smart aim is on: the drag samples the value
+/// a little to each side of the pointer and snaps to the roundest value between.
+const AIM_RADIUS: f64 = 1.5;
+/// Track length (px) of a vertical slider.
+const VERT_LEN: f64 = 140.0;
 
 const TRACK_H: f64 = 4.0;
 const THUMB_R: f64 = 7.0;
@@ -91,6 +148,22 @@ pub struct Slider {
     /// Tracks the string last pushed into `value_label` so we only
     /// invalidate its cache when the displayed value actually changes.
     last_value_text: String,
+
+    // ── Extended configuration (egui-parity options) ──────────────────────
+    /// Log/linear mapping spec. `logarithmic` off by default.
+    spec: SliderSpec,
+    clamping: SliderClamping,
+    smart_aim: bool,
+    orientation: SliderOrientation,
+    handle_shape: HandleShape,
+    /// When true, values are rounded to integers and formatted with no decimals.
+    integer: bool,
+    /// Text appended after the numeric value (e.g. "°" or " m").
+    suffix: String,
+    /// Whether to paint the accent-colored fill up to the handle. Defaults to
+    /// `true` to preserve the widget's historical appearance across the app;
+    /// egui's per-slider default is off, so demos set this explicitly.
+    trailing_fill: bool,
 }
 
 impl Slider {
@@ -120,11 +193,89 @@ impl Slider {
             value_cell: None,
             value_label,
             last_value_text: String::new(),
+            spec: SliderSpec::default(),
+            clamping: SliderClamping::default(),
+            smart_aim: true,
+            orientation: SliderOrientation::Horizontal,
+            handle_shape: HandleShape::Circle,
+            integer: false,
+            suffix: String::new(),
+            trailing_fill: true,
         }
     }
 
     pub fn with_step(mut self, step: f64) -> Self {
         self.props.step = step;
+        self
+    }
+
+    // ── Extended-configuration builders ────────────────────────────────────
+
+    /// Enable/disable logarithmic value mapping. Great for spanning huge ranges
+    /// (and, unlike naive log, tolerates ranges that include zero and infinity).
+    pub fn with_logarithmic(mut self, logarithmic: bool) -> Self {
+        self.spec.logarithmic = logarithmic;
+        self
+    }
+
+    /// For logarithmic sliders including zero: the smallest positive value the
+    /// user can select. Default `1e-6` (or `1` for integer sliders).
+    pub fn with_smallest_positive(mut self, smallest_positive: f64) -> Self {
+        self.spec.smallest_positive = smallest_positive;
+        self
+    }
+
+    /// For logarithmic sliders whose high end is infinity: the largest finite
+    /// value before the slider switches to `∞`. Default `∞`.
+    pub fn with_largest_finite(mut self, largest_finite: f64) -> Self {
+        self.spec.largest_finite = largest_finite;
+        self
+    }
+
+    /// Choose when values are clamped to the range. Default [`SliderClamping::Always`].
+    pub fn with_clamping(mut self, clamping: SliderClamping) -> Self {
+        self.clamping = clamping;
+        self
+    }
+
+    /// Turn smart aim (snap toward round values while dragging) on/off. Default on.
+    pub fn with_smart_aim(mut self, smart_aim: bool) -> Self {
+        self.smart_aim = smart_aim;
+        self
+    }
+
+    /// Horizontal or vertical. Default horizontal.
+    pub fn with_orientation(mut self, orientation: SliderOrientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    /// Change the handle shape (circle or aspect-ratio'd rectangle).
+    pub fn with_handle_shape(mut self, shape: HandleShape) -> Self {
+        self.handle_shape = shape;
+        self
+    }
+
+    /// Make this an integer slider: values round to whole numbers, formatting
+    /// uses no decimals, and logarithmic mapping treats `1` as the smallest
+    /// positive value.
+    pub fn with_integer(mut self, integer: bool) -> Self {
+        self.integer = integer;
+        if integer {
+            self.spec.smallest_positive = 1.0;
+        }
+        self
+    }
+
+    /// Append a suffix to the value label (e.g. "°" or " m").
+    pub fn with_suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.suffix = suffix.into();
+        self
+    }
+
+    /// Toggle the accent-colored trailing fill painted up to the handle.
+    pub fn with_trailing_fill(mut self, trailing_fill: bool) -> Self {
+        self.trailing_fill = trailing_fill;
         self
     }
 
@@ -182,7 +333,7 @@ impl Slider {
     }
 
     pub fn set_value(&mut self, v: f64) {
-        self.props.value = v.clamp(self.props.min, self.props.max);
+        self.props.value = self.commit(v);
         if let Some(cell) = &self.value_cell {
             cell.set(self.props.value);
         }
@@ -198,9 +349,22 @@ impl Slider {
         }
     }
 
-    /// Pixel X of the track's right edge.  The value label (when shown)
-    /// lives in a reserved strip to the right of this, outside the track
-    /// so a thumb at max doesn't overdraw the digits.
+    fn is_vertical(&self) -> bool {
+        matches!(self.orientation, SliderOrientation::Vertical)
+    }
+
+    /// Handle radius along the slider axis — the range is shrunk by this so the
+    /// handle never overhangs the ends.
+    fn handle_extent(&self) -> f64 {
+        match self.handle_shape {
+            HandleShape::Circle => THUMB_R,
+            HandleShape::Rect { aspect_ratio } => THUMB_R * aspect_ratio,
+        }
+    }
+
+    /// Pixel X of the track's right edge (horizontal).  The value label lives in
+    /// a reserved strip to the right of this so a thumb at max doesn't overdraw
+    /// the digits.
     fn track_right(&self) -> f64 {
         let reserved = if self.props.show_value {
             VALUE_W + VALUE_GAP
@@ -210,44 +374,117 @@ impl Slider {
         (self.bounds.width - reserved - THUMB_R).max(THUMB_R + 1.0)
     }
 
-    /// Pixel X of the thumb center within the track area.
-    fn thumb_x(&self) -> f64 {
-        let track_left = THUMB_R;
-        let track_right = self.track_right();
-        let t = if self.props.max > self.props.min {
-            (self.props.value - self.props.min) / (self.props.max - self.props.min)
+    /// The pixel positions (along the main axis) of normalized `0.0` and `1.0`.
+    /// For vertical sliders the larger value maps to the top (smaller y).
+    fn position_range(&self) -> (f64, f64) {
+        let hr = self.handle_extent();
+        if self.is_vertical() {
+            let bottom = self.bounds.height - hr; // normalized 0
+            let top = hr; // normalized 1
+            (bottom, top)
         } else {
+            (THUMB_R, self.track_right()) // normalized 0..1
+        }
+    }
+
+    fn normalized(&self) -> f64 {
+        normalized_from_value(self.props.value, self.props.min, self.props.max, &self.spec)
+    }
+
+    /// Center of the thumb along the main axis (px).
+    fn thumb_pos(&self) -> f64 {
+        let (p0, p1) = self.position_range();
+        p0 + self.normalized().clamp(0.0, 1.0) * (p1 - p0)
+    }
+
+    fn value_from_pixel(&self, px: f64) -> f64 {
+        let (p0, p1) = self.position_range();
+        let n = if (p1 - p0).abs() < f64::EPSILON {
             0.0
+        } else {
+            ((px - p0) / (p1 - p0)).clamp(0.0, 1.0)
         };
-        track_left + t * (track_right - track_left)
+        value_from_normalized(n, self.props.min, self.props.max, &self.spec)
     }
 
-    fn value_from_x(&self, x: f64) -> f64 {
-        let track_left = THUMB_R;
-        let track_right = self.track_right();
-        let t = ((x - track_left) / (track_right - track_left)).clamp(0.0, 1.0);
-        let raw = self.props.min + t * (self.props.max - self.props.min);
-        // Snap to step
-        let snapped = (raw / self.props.step).round() * self.props.step;
-        snapped.clamp(self.props.min, self.props.max)
+    /// Apply clamping, step snapping and integer rounding to a raw value.
+    fn commit(&self, mut value: f64) -> f64 {
+        if self.clamping != SliderClamping::Never {
+            value = clamp_value_to_range(value, self.props.min, self.props.max);
+        }
+        if self.props.step > 0.0 {
+            let start = self.props.min;
+            value = start + ((value - start) / self.props.step).round() * self.props.step;
+        }
+        if self.integer {
+            value = value.round();
+        }
+        value
     }
 
-    /// Format the slider's value using `decimals` if set, otherwise heuristic
-    /// based on `step`.
-    fn format_value(&self) -> String {
-        if let Some(d) = self.props.decimals {
-            return format!("{:.*}", d, self.props.value);
+    /// Value the pointer maps to, with smart aim applied when enabled.
+    fn pointer_value(&self, px: f64) -> f64 {
+        let raw = if self.smart_aim {
+            best_in_range_f64(
+                self.value_from_pixel(px - AIM_RADIUS),
+                self.value_from_pixel(px + AIM_RADIUS),
+            )
+        } else {
+            self.value_from_pixel(px)
+        };
+        self.commit(raw)
+    }
+
+    /// Move the value one keyboard step in `dir` (+1 increases the value).
+    fn nudge(&self, dir: f64) -> f64 {
+        if self.props.step > 0.0 {
+            return self.commit(self.props.value + dir * self.props.step);
+        }
+        let (p0, p1) = self.position_range();
+        let cur = self.thumb_pos();
+        let px = cur + dir * (p1 - p0).signum();
+        let raw = if self.smart_aim {
+            best_in_range_f64(
+                self.value_from_pixel(px - 0.49),
+                self.value_from_pixel(px + 0.49),
+            )
+        } else {
+            self.value_from_pixel(px)
+        };
+        self.commit(raw)
+    }
+
+    /// Number of decimals to show when no explicit `decimals` override is set.
+    fn auto_decimals(&self) -> usize {
+        if self.integer {
+            return 0;
         }
         if self.props.step >= 1.0 {
-            format!("{:.0}", self.props.value)
+            0
         } else if self.props.step >= 0.1 {
-            format!("{:.1}", self.props.value)
+            1
         } else if self.props.step >= 0.01 {
-            format!("{:.2}", self.props.value)
+            2
+        } else if self.props.step > 0.0 {
+            3
         } else {
-            format!("{:.3}", self.props.value)
+            // No step (e.g. logarithmic): pick precision from magnitude so a
+            // value of 10000 shows no decimals and 0.001 shows several.
+            let v = self.props.value.abs();
+            if v == 0.0 || !v.is_finite() {
+                2
+            } else {
+                (3 - v.log10().floor() as i32).clamp(0, 6) as usize
+            }
         }
     }
+
+    /// Format the slider's value (decimals + optional suffix).
+    fn format_value(&self) -> String {
+        let decimals = self.props.decimals.unwrap_or_else(|| self.auto_decimals());
+        format!("{:.*}{}", decimals, self.props.value, self.suffix)
+    }
+
 }
 
 impl Widget for Slider {
@@ -309,7 +546,12 @@ impl Widget for Slider {
         // back by rounding inside the source cell.
         if !self.dragging {
             if let Some(cell) = &self.value_cell {
-                self.props.value = cell.get().clamp(self.props.min, self.props.max);
+                let raw = cell.get();
+                self.props.value = if self.clamping == SliderClamping::Always {
+                    clamp_value_to_range(raw, self.props.min, self.props.max)
+                } else {
+                    raw
+                };
             }
         }
 
@@ -331,80 +573,18 @@ impl Widget for Slider {
                 .set_bounds(Rect::new(0.0, 0.0, VALUE_W, lh));
         }
 
-        Size::new(available.width, WIDGET_H)
+        if self.is_vertical() {
+            Size::new(available.width, VERT_LEN)
+        } else {
+            Size::new(available.width, WIDGET_H)
+        }
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        let h = self.bounds.height;
-        let cy = h * 0.5;
-
-        let track_right = self.track_right();
-        let track_w = (track_right - THUMB_R).max(0.0);
-
-        // Track (background)
-        ctx.set_fill_color(v.track_bg);
-        ctx.begin_path();
-        ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, track_w, TRACK_H, TRACK_H * 0.5);
-        ctx.fill();
-
-        // Track (filled portion up to thumb)
-        let tx = self.thumb_x();
-        if tx > THUMB_R {
-            ctx.set_fill_color(v.accent);
-            ctx.begin_path();
-            ctx.rounded_rect(
-                THUMB_R,
-                cy - TRACK_H * 0.5,
-                tx - THUMB_R,
-                TRACK_H,
-                TRACK_H * 0.5,
-            );
-            ctx.fill();
-        }
-
-        // Focus ring
-        if self.focused {
-            ctx.set_stroke_color(v.accent_focus);
-            ctx.set_line_width(2.0);
-            ctx.begin_path();
-            ctx.circle(tx, cy, THUMB_R + 3.0);
-            ctx.stroke();
-        }
-
-        // Thumb
-        let thumb_color = if self.dragging || self.focused {
-            v.accent_pressed
-        } else if self.hovered {
-            v.accent_hovered
+        if self.is_vertical() {
+            self.paint_vertical(ctx);
         } else {
-            v.accent
-        };
-        ctx.set_fill_color(thumb_color);
-        ctx.begin_path();
-        ctx.circle(tx, cy, THUMB_R);
-        ctx.fill();
-
-        ctx.set_fill_color(v.widget_bg);
-        ctx.begin_path();
-        ctx.circle(tx, cy, THUMB_R - 2.5);
-        ctx.fill();
-
-        // Value label — composed via backbuffered Label so it uses the
-        // same text-raster path as every other label in the app.  The
-        // Label is right-aligned inside its box and positioned in the
-        // reserved strip to the right of the track.
-        if self.props.show_value {
-            self.value_label.set_color(v.text_color);
-            let lb = self.value_label.bounds();
-            let strip_left = track_right + VALUE_GAP;
-            let ly = cy - lb.height * 0.5;
-            self.value_label
-                .set_bounds(Rect::new(strip_left, ly, lb.width, lb.height));
-            ctx.save();
-            ctx.translate(strip_left, ly);
-            paint_subtree(&mut self.value_label, ctx);
-            ctx.restore();
+            self.paint_horizontal(ctx);
         }
     }
 
@@ -414,7 +594,8 @@ impl Widget for Slider {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
                 if self.dragging {
-                    self.props.value = self.value_from_x(pos.x);
+                    let px = if self.is_vertical() { pos.y } else { pos.x };
+                    self.props.value = self.pointer_value(px);
                     self.fire();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
@@ -431,7 +612,8 @@ impl Widget for Slider {
                 ..
             } => {
                 self.dragging = true;
-                self.props.value = self.value_from_x(pos.x);
+                let px = if self.is_vertical() { pos.y } else { pos.x };
+                self.props.value = self.pointer_value(px);
                 self.fire();
                 crate::animation::request_draw();
                 EventResult::Consumed
@@ -448,30 +630,17 @@ impl Widget for Slider {
                 EventResult::Consumed
             }
             Event::KeyDown { key, .. } => {
-                let changed = match key {
-                    Key::ArrowLeft => {
-                        self.props.value = (self.props.value - self.props.step)
-                            .clamp(self.props.min, self.props.max);
-                        true
-                    }
-                    Key::ArrowRight => {
-                        self.props.value = (self.props.value + self.props.step)
-                            .clamp(self.props.min, self.props.max);
-                        true
-                    }
-                    Key::ArrowDown => {
-                        self.props.value = (self.props.value - self.props.step * 10.0)
-                            .clamp(self.props.min, self.props.max);
-                        true
-                    }
-                    Key::ArrowUp => {
-                        self.props.value = (self.props.value + self.props.step * 10.0)
-                            .clamp(self.props.min, self.props.max);
-                        true
-                    }
-                    _ => false,
+                // Arrows move the value along the slider's own axis: left/right
+                // for horizontal, up/down for vertical (up = increase).
+                let dir = match (key, self.is_vertical()) {
+                    (Key::ArrowLeft, false) => -1.0,
+                    (Key::ArrowRight, false) => 1.0,
+                    (Key::ArrowDown, true) => -1.0,
+                    (Key::ArrowUp, true) => 1.0,
+                    _ => 0.0,
                 };
-                if changed {
+                if dir != 0.0 {
+                    self.props.value = self.nudge(dir);
                     self.fire();
                     crate::animation::request_draw();
                     EventResult::Consumed
