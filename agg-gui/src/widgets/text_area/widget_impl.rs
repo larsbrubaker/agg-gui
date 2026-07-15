@@ -50,6 +50,26 @@ pub(crate) fn segment_highlight(
     out
 }
 
+/// Clamp the caret's vertical span `[p_y, p_y + line_h]` (Y-up) to the padded
+/// inner band `[inner_lo, inner_hi]`, returning the visible sub-segment. Yields
+/// `None` when the caret's line has scrolled entirely outside the inner rect,
+/// so the un-clipped `paint_overlay` never strokes the caret over the
+/// border/padding.
+pub(crate) fn caret_visible_segment(
+    p_y: f64,
+    line_h: f64,
+    inner_lo: f64,
+    inner_hi: f64,
+) -> Option<(f64, f64)> {
+    let y0 = p_y.max(inner_lo);
+    let y1 = (p_y + line_h).min(inner_hi);
+    if y1 > y0 {
+        Some((y0, y1))
+    } else {
+        None
+    }
+}
+
 impl TextArea {
     /// Paint one wrapped line as gap-free, non-overlapping colour segments so
     /// every glyph is filled exactly once (see [`segment_highlight`]). Byte
@@ -311,12 +331,24 @@ impl Widget for TextArea {
         }
         let st = self.edit.borrow().clone();
         let p = self.pos_for_cursor(st.cursor);
+        // `paint_overlay` is drawn AFTER the cached content blit and is NOT
+        // clipped by the framework, so a caret whose line has been scrolled
+        // (wheel/drag) outside the padded inner rect would otherwise streak
+        // over the border/padding. Clamp its vertical span to the inner band
+        // and skip entirely when the line is fully off-screen.
+        let inner_lo = self.padding;
+        let inner_hi = (self.bounds.height - self.padding).max(inner_lo);
+        let Some((y0, y1)) =
+            caret_visible_segment(p.y, self.cached_line_h, inner_lo, inner_hi)
+        else {
+            return;
+        };
         let v = ctx.visuals();
         ctx.set_stroke_color(v.text_color);
         ctx.set_line_width(1.5);
         ctx.begin_path();
-        ctx.move_to(p.x, p.y);
-        ctx.line_to(p.x, p.y + self.cached_line_h);
+        ctx.move_to(p.x, y0);
+        ctx.line_to(p.x, y1);
         ctx.stroke();
     }
 
@@ -405,10 +437,12 @@ impl Widget for TextArea {
                     if (cb.borrow_mut())(key, modifiers) {
                         // An interceptor that edits text advances the content
                         // epoch (via `note_text_change`); mirror the built-in
-                        // funnels by re-wrapping and firing `on_change`.
+                        // funnels by re-wrapping, firing `on_change`, and
+                        // scrolling the (possibly moved) caret back into view.
                         if self.edit.borrow().epoch != epoch_before {
                             self.mark_dirty();
                             self.notify_change();
+                            self.ensure_cursor_visible();
                         }
                         crate::animation::request_draw();
                         return EventResult::Consumed;

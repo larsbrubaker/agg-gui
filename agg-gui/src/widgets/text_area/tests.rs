@@ -467,6 +467,74 @@ fn wheel_scrolls_within_bounds_and_clamps() {
     assert_eq!(ta.scroll_offset(), 0.0);
 }
 
+#[test]
+fn caret_visible_segment_clamps_and_hides_off_screen() {
+    use super::widget_impl::caret_visible_segment;
+    // Inner band [8, 72]. A caret line fully inside is returned unchanged.
+    assert_eq!(caret_visible_segment(20.0, 18.0, 8.0, 72.0), Some((20.0, 38.0)));
+    // A caret straddling the bottom edge is clamped up to `inner_lo`.
+    assert_eq!(caret_visible_segment(0.0, 18.0, 8.0, 72.0), Some((8.0, 18.0)));
+    // Straddling the top edge is clamped down to `inner_hi`.
+    assert_eq!(caret_visible_segment(64.0, 18.0, 8.0, 72.0), Some((64.0, 72.0)));
+    // A line scrolled entirely below the inner rect draws nothing.
+    assert_eq!(caret_visible_segment(-40.0, 18.0, 8.0, 72.0), None);
+    // Entirely above the inner rect also draws nothing.
+    assert_eq!(caret_visible_segment(200.0, 18.0, 8.0, 72.0), None);
+}
+
+#[test]
+fn key_intercept_edit_scrolls_caret_into_view() {
+    // An interceptor that moves the caret to the very end of a long buffer
+    // (and bumps the epoch) must scroll it into view, mirroring the built-in
+    // edit funnel — otherwise the caret would sit off-screen after the edit.
+    let state = Rc::new(RefCell::new(TextEditState {
+        text: (0..30).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"),
+        cursor: 0,
+        anchor: 0,
+        epoch: 0,
+    }));
+    let state_key = Rc::clone(&state);
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_font_size(13.0)
+            .with_edit_state(Rc::clone(&state))
+            .with_key_intercept(move |key, _mods| {
+                if matches!(key, Key::Char('g')) {
+                    // Jump the caret to the document end and append a char so
+                    // the epoch advances (text actually changed).
+                    let mut st = state_key.borrow_mut();
+                    st.text.push('!');
+                    let end = st.text.len();
+                    st.cursor = end;
+                    st.anchor = end;
+                    st.note_text_change();
+                    true
+                } else {
+                    false
+                }
+            }),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+    assert_eq!(ta.scroll_offset(), 0.0, "starts at the top");
+    ta.on_event(&Event::KeyDown {
+        key: Key::Char('g'),
+        modifiers: Modifiers::default(),
+    });
+    assert!(
+        ta.scroll_offset() > 0.0,
+        "intercept edit at document end must scroll the caret into view, got {}",
+        ta.scroll_offset()
+    );
+    let cursor = ta.cursor();
+    let y = ta.pos_for_cursor(cursor).y;
+    assert!(
+        (0.0..=80.0).contains(&y),
+        "caret must be on-screen after intercept edit: y={y}"
+    );
+}
+
 // ── (g) highlight segmentation ──────────────────────────────────────────────
 //
 // The highlighter paint path must split a line into gap-free, non-overlapping
