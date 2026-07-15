@@ -22,6 +22,9 @@ impl App {
                 return modal_path.to_vec();
             };
             let bounds = child.bounds();
+            if let Some(t) = widget.child_transform() {
+                t.inverse_transform(&mut pos.x, &mut pos.y);
+            }
             pos = Point::new(pos.x - bounds.x, pos.y - bounds.y);
             widget = child.as_ref();
         }

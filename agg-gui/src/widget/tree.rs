@@ -17,6 +17,24 @@
 
 use super::*;
 
+/// Map a point from a parent's local space into the local space of its child
+/// at index `idx`, honouring the parent's optional
+/// [`Widget::child_transform`](crate::widget::Widget::child_transform).
+///
+/// The child transform (if any) is inverted first — it maps child→parent, so
+/// its inverse maps the incoming parent-local point back into child space —
+/// and only then is the child's `bounds()` offset removed.  Bounds are thus
+/// interpreted *inside* the transform, matching how [`paint_subtree`] applies
+/// the transform to the whole child group before translating per child.
+fn child_local_pos(parent: &dyn Widget, child_bounds: Rect, pos_in_parent: Point) -> Point {
+    let mut x = pos_in_parent.x;
+    let mut y = pos_in_parent.y;
+    if let Some(t) = parent.child_transform() {
+        t.inverse_transform(&mut x, &mut y);
+    }
+    Point::new(x - child_bounds.x, y - child_bounds.y)
+}
+
 /// Recursively call `mark_dirty` on `widget` and every visible
 /// descendant.  Used by the host frame loop after an async data
 /// source (image fetch + decode, font load, etc.) finishes outside
@@ -51,10 +69,7 @@ pub fn hit_test_subtree(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usi
     }
     // Check children in reverse order (last drawn = topmost = highest priority).
     for (i, child) in widget.children().iter().enumerate().rev() {
-        let child_local = Point::new(
-            local_pos.x - child.bounds().x,
-            local_pos.y - child.bounds().y,
-        );
+        let child_local = child_local_pos(widget, child.bounds(), local_pos);
         if let Some(mut sub_path) = hit_test_subtree(child.as_ref(), child_local) {
             sub_path.insert(0, i);
             return Some(sub_path);
@@ -93,10 +108,7 @@ pub fn global_overlay_hit_path(widget: &dyn Widget, local_pos: Point) -> Option<
         return None;
     }
     for (i, child) in widget.children().iter().enumerate().rev() {
-        let child_local = Point::new(
-            local_pos.x - child.bounds().x,
-            local_pos.y - child.bounds().y,
-        );
+        let child_local = child_local_pos(widget, child.bounds(), local_pos);
         if let Some(mut sub_path) = global_overlay_hit_path(child.as_ref(), child_local) {
             sub_path.insert(0, i);
             return Some(sub_path);
@@ -161,10 +173,7 @@ pub fn dispatch_event(
         return deliver(root.as_mut(), event);
     }
     let child_bounds = root.children()[idx].bounds();
-    let child_pos = Point::new(
-        pos_in_root.x - child_bounds.x,
-        pos_in_root.y - child_bounds.y,
-    );
+    let child_pos = child_local_pos(root.as_ref(), child_bounds, pos_in_root);
     let translated_event = translate_event(event, child_pos);
 
     let before_child = crate::animation::invalidation_epoch();
@@ -216,10 +225,7 @@ pub fn dispatch_event_dyn(
         return deliver(root, event);
     }
     let child_bounds = root.children()[idx].bounds();
-    let child_pos = Point::new(
-        pos_in_root.x - child_bounds.x,
-        pos_in_root.y - child_bounds.y,
-    );
+    let child_pos = child_local_pos(root, child_bounds, pos_in_root);
     let translated_event = translate_event(event, child_pos);
 
     let before_child = crate::animation::invalidation_epoch();
@@ -335,10 +341,7 @@ pub fn dispatch_event_broadcast(
     }
     for i in (0..root.children().len()).rev() {
         let child_bounds = root.children()[i].bounds();
-        let child_pos = Point::new(
-            pos_in_root.x - child_bounds.x,
-            pos_in_root.y - child_bounds.y,
-        );
+        let child_pos = child_local_pos(root.as_ref(), child_bounds, pos_in_root);
         let translated = translate_event(event, child_pos);
         let r = dispatch_event_broadcast(&mut root.children_mut()[i], &translated, child_pos);
         if r.is_consumed() {
