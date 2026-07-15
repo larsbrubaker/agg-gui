@@ -548,5 +548,9 @@ pub fn table_demo(font: Arc<Font>) -> Box<dyn Widget> {
     col = col.add(controls);
     col.push(Box::new(SizedBox::new().with_height(2.0)), 0.0);
     col.push(Box::new(table), 1.0);
+    col.push(
+        crate::windows::helpers::source_link("text_demos/table_demo.rs", Arc::clone(&font)),
+        0.0,
+    );
     Box::new(col)
 }

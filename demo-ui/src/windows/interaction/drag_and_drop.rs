@@ -460,6 +460,10 @@ pub fn drag_and_drop(font: Arc<Font>) -> Box<dyn Widget> {
     );
 
     outer.push(Box::new(DragAndDropWidget::new(Arc::clone(&font))), 1.0);
+    outer.push(
+        crate::windows::helpers::source_link("interaction/drag_and_drop.rs", Arc::clone(&font)),
+        0.0,
+    );
     Box::new(outer)
 }
 

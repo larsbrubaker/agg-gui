@@ -330,12 +330,14 @@ pub fn multi_touch(font: Arc<Font>) -> Box<dyn Widget> {
             .with_wrap(true),
     });
 
+    // egui renders this line with `ui.strong(...)`, so mirror the emphasis.
     let heading = Label::new(
         "This demo only works on devices with multitouch support \
          (e.g. mobiles, tablets, and trackpads).",
         Arc::clone(&font),
     )
     .with_font_size(13.0)
+    .with_strong(true)
     .with_wrap(true);
 
     let hint = Label::new(
@@ -355,7 +357,11 @@ pub fn multi_touch(font: Arc<Font>) -> Box<dyn Widget> {
         .add(Box::new(Separator::horizontal()))
         .add(Box::new(hint))
         .add(status_label)
-        .add_flex(view, 1.0);
+        .add_flex(view, 1.0)
+        .add(crate::windows::helpers::source_link(
+            "text_demos/multi_touch.rs",
+            Arc::clone(&font),
+        ));
 
     Box::new(col)
 }

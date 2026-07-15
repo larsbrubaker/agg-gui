@@ -579,7 +579,10 @@ impl Widget for PaintCanvas {
         ctx.rect(0.0, 0.0, w, h);
         ctx.stroke();
 
-        // Draw all strokes.
+        // Draw all strokes.  Deviation from egui: egui's painting demo
+        // defaults its stroke to 1.0 px (and exposes a width control we
+        // don't); we use a fixed 2.5 px so freehand mouse/touch strokes
+        // stay clearly visible on the canvas.
         ctx.set_stroke_color(v.accent);
         ctx.set_line_width(2.5);
         for stroke in &self.strokes {
