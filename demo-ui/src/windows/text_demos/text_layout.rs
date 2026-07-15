@@ -367,14 +367,20 @@ impl Widget for TextLayoutPreview {
 /// sharing a `Rc<Cell<usize>>` for the selected index.  Inactive segments
 /// use the muted theme colours (`with_subtle()`); the selected segment
 /// flips to the accent surface (`with_active_fn`).  Width is divided
-/// evenly across segments — passes `cell_w` as `available.width` so each
-/// stretching child fills its slot.
+/// evenly across segments, leaving a small gap between them so these read
+/// as separate `selectable_value` toggles (matching egui's Text Layout
+/// demo) rather than a fused segmented control.
 struct SelectionButtons {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     n: usize,
     button_h: f64,
 }
+
+/// Horizontal gap between adjacent selection buttons (logical px).  Mirrors
+/// the framework's `DEFAULT_ROW_GAP` / egui `item_spacing.x` so these
+/// toggles get visible breathing room instead of touching.
+const SELECTION_BUTTON_GAP: f64 = agg_gui::DEFAULT_ROW_GAP;
 
 impl SelectionButtons {
     fn new(options: Vec<impl Into<String>>, selected: Rc<Cell<usize>>, font: Arc<Font>) -> Self {
@@ -437,10 +443,16 @@ impl Widget for SelectionButtons {
         let w = available.width;
         self.bounds = Rect::new(0.0, 0.0, w, h);
         if self.n > 0 {
-            let cell_w = w / self.n as f64;
+            let total_gap = SELECTION_BUTTON_GAP * (self.n - 1) as f64;
+            let cell_w = ((w - total_gap) / self.n as f64).max(0.0);
             for (i, child) in self.children.iter_mut().enumerate() {
                 child.layout(Size::new(cell_w, h));
-                child.set_bounds(Rect::new(i as f64 * cell_w, 0.0, cell_w, h));
+                child.set_bounds(Rect::new(
+                    i as f64 * (cell_w + SELECTION_BUTTON_GAP),
+                    0.0,
+                    cell_w,
+                    h,
+                ));
             }
         }
         Size::new(w, h)
