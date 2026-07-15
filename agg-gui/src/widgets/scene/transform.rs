@@ -47,6 +47,19 @@ impl SceneTransform {
         Point::new(self.zoom * p.x + self.offset.x, self.zoom * p.y + self.offset.y)
     }
 
+    /// This transform as a [`crate::TransAffine`] mapping scene (child) space to
+    /// Scene-local screen space, i.e. `screen = zoom * scene + offset`.
+    ///
+    /// This is what `Scene` returns from
+    /// [`Widget::child_transform`](crate::widget::Widget::child_transform) so
+    /// the framework's paint / hit-test / dispatch / inspector traversals all
+    /// map coordinates through the same pan/zoom the content is drawn under.
+    pub fn to_affine(&self) -> crate::TransAffine {
+        let mut m = crate::TransAffine::new_scaling_uniform(self.zoom);
+        m.translate(self.offset.x, self.offset.y);
+        m
+    }
+
     /// Map a Scene-local screen point back to scene space.
     pub fn screen_to_scene(&self, p: Point) -> Point {
         let z = self.zoom.max(1e-12);
@@ -190,6 +203,29 @@ mod tests {
             t.scene_to_screen(content.center()),
             Point::new(100.0, 100.0),
         );
+    }
+
+    #[test]
+    fn to_affine_matches_scene_to_screen() {
+        // The affine handed to the framework must reproduce `scene_to_screen`
+        // exactly, and its inverse must reproduce `screen_to_scene` — that is
+        // the contract the hit-test / dispatch traversals rely on.
+        let t = SceneTransform::new(1.75, Point::new(12.0, -7.0));
+        let m = t.to_affine();
+        for p in [
+            Point::new(0.0, 0.0),
+            Point::new(3.0, 4.0),
+            Point::new(-10.0, 25.0),
+        ] {
+            let (mut x, mut y) = (p.x, p.y);
+            m.transform(&mut x, &mut y);
+            let expect = t.scene_to_screen(p);
+            approx(Point::new(x, y), expect);
+
+            let (mut ix, mut iy) = (expect.x, expect.y);
+            m.inverse_transform(&mut ix, &mut iy);
+            approx(Point::new(ix, iy), p);
+        }
     }
 
     #[test]

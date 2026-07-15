@@ -1,24 +1,30 @@
-//! Pointer-event routing for [`Scene`](super::Scene).
+//! Background-gesture handling for [`Scene`](super::Scene).
 //!
 //! `Scene` receives events in its own bottom-left-origin Y-up screen space
-//! (the `App` has already translated ancestor offsets away). This module maps
-//! those into scene coordinates and hand-routes them into the hosted content
-//! subtree using the framework's own [`hit_test_subtree`] /
-//! [`dispatch_event_dyn`] helpers, or handles them as pan/zoom/reset gestures
-//! on the empty background.
+//! (the `App` has already translated ancestor offsets away).  The hosted
+//! content is a first-class framework child, so pointer input reaches it
+//! through the normal leaf→root dispatch — mapped through the Scene's
+//! [`child_transform`](crate::widget::Widget::child_transform).  This module
+//! therefore handles only what happens on the **empty background**: pan (left
+//! or middle drag), zoom (wheel, anchored on the cursor), and double-click
+//! reset.
 //!
-//! # Capture model
+//! # Bubble + capture model
 //!
-//! When a child consumes a `MouseDown`, the outer `App` captures the *Scene*
-//! (the deepest widget in the framework tree, since the content isn't a
-//! framework child). The Scene remembers the internal path it dispatched to in
-//! `inner_captured` and forwards subsequent moves/up there — so dragging a
-//! slider inside the scene keeps working even when the cursor leaves the child.
+//! The Scene sees a pointer event exactly when no hosted child consumed it —
+//! the framework bubbles the press up to the Scene only after the content
+//! declined it.  A press on empty canvas therefore reaches [`on_mouse_down`]
+//! and starts a pan; a press on a hosted button is consumed by the button and
+//! the Scene never sees it.  Once a pan starts, the Scene reports
+//! [`claims_pointer_exclusively`](crate::widget::Widget::claims_pointer_exclusively)
+//! so the `App` captures the Scene itself and every subsequent move lands here
+//! regardless of what the cursor sweeps over.
+//!
+//! [`on_mouse_down`]: Scene::on_mouse_down
 
 use super::{Scene, DBL_CLICK_MS, MAX_CLICK_DIST, ZOOM_SENSITIVITY};
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::Point;
-use crate::widget::{dispatch_event_dyn, hit_test_subtree};
 use web_time::Instant;
 
 impl Scene {
@@ -26,58 +32,17 @@ impl Scene {
     pub(super) fn handle_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => self.on_mouse_move(*pos),
-            Event::MouseDown { pos, button, .. } => self.on_mouse_down(*pos, *button, event),
-            Event::MouseUp { pos, .. } => self.on_mouse_up(*pos, event),
+            Event::MouseDown { pos, button, .. } => self.on_mouse_down(*pos, *button),
+            Event::MouseUp { pos, .. } => self.on_mouse_up(*pos),
             Event::MouseWheel { pos, delta_y, .. } => self.on_wheel(*pos, *delta_y),
             _ => EventResult::Ignored,
         }
     }
 
-    /// Map a Scene-local screen point into the content subtree's local space
-    /// (scene coordinates minus the content's own origin).
-    fn to_content_local(&self, screen: Point) -> Point {
-        let scene = self.transform.screen_to_scene(screen);
-        let cb = self.content.bounds();
-        Point::new(scene.x - cb.x, scene.y - cb.y)
-    }
-
-    /// Rebuild `event` with mouse positions replaced by `pos`. Only the mouse
-    /// variants Scene routes carry a position; others pass through unchanged.
-    fn event_with_pos(event: &Event, pos: Point) -> Event {
-        match event {
-            Event::MouseMove { .. } => Event::MouseMove { pos },
-            Event::MouseDown {
-                button, modifiers, ..
-            } => Event::MouseDown {
-                pos,
-                button: *button,
-                modifiers: *modifiers,
-            },
-            Event::MouseUp {
-                button, modifiers, ..
-            } => Event::MouseUp {
-                pos,
-                button: *button,
-                modifiers: *modifiers,
-            },
-            other => other.clone(),
-        }
-    }
-
-    /// Dispatch an event into the content subtree along `path`, translating its
-    /// position into `content_local` first.
-    fn route_to_content(
-        &mut self,
-        path: &[usize],
-        event: &Event,
-        content_local: Point,
-    ) -> EventResult {
-        let ev = Self::event_with_pos(event, content_local);
-        dispatch_event_dyn(self.content.as_mut(), path, &ev, content_local)
-    }
-
     fn on_mouse_move(&mut self, pos: Point) -> EventResult {
-        // Active background pan takes priority over child hover.
+        // The Scene only acts on moves while it owns an active background pan;
+        // hover/drag of hosted widgets is handled by the framework dispatching
+        // directly to the content child.
         if self.panning {
             // Track whether the gesture left the click tolerance — a
             // press-release pair that moved is a drag, not a click, and must
@@ -97,52 +62,12 @@ impl Scene {
             crate::animation::request_draw();
             return EventResult::Consumed;
         }
-
-        let content_local = self.to_content_local(pos);
-
-        // A captured child keeps receiving real positions (drag outside
-        // bounds).  Checked BEFORE the hover diff so a mid-drag move can
-        // never dispatch a spurious (-1,-1) hover-clear into the child that
-        // owns the gesture.
-        if let Some(path) = self.inner_captured.clone() {
-            self.route_to_content(&path, &Event::MouseMove { pos }, content_local);
-            return EventResult::Consumed;
-        }
-
-        let new_hit = hit_test_subtree(self.content.as_ref(), content_local);
-
-        // Clear hover on the previously-hovered path when the target changes.
-        if new_hit != self.inner_hovered {
-            if let Some(old) = self.inner_hovered.take() {
-                let clear = Point::new(-1.0, -1.0);
-                self.route_to_content(&old, &Event::MouseMove { pos: clear }, clear);
-            }
-            self.inner_hovered = new_hit.clone();
-        }
-
-        if let Some(path) = new_hit {
-            self.route_to_content(&path, &Event::MouseMove { pos }, content_local);
-        }
         EventResult::Ignored
     }
 
-    fn on_mouse_down(&mut self, pos: Point, button: MouseButton, event: &Event) -> EventResult {
-        let content_local = self.to_content_local(pos);
-
-        // Offer the press to the content first. A child that consumes it
-        // captures the pointer; a non-interactive hit (label, background) falls
-        // through to a pan gesture.
-        if let Some(path) = hit_test_subtree(self.content.as_ref(), content_local) {
-            if self.route_to_content(&path, event, content_local).is_consumed() {
-                self.inner_captured = Some(path);
-                // A child interaction breaks any pending background
-                // double-click sequence (bg-click → child-click → bg-click
-                // must not read as a double-click).
-                self.last_bg_click = None;
-                return EventResult::Consumed;
-            }
-        }
-
+    pub(super) fn on_mouse_down(&mut self, pos: Point, button: MouseButton) -> EventResult {
+        // Reaching here means the content declined the press (it bubbled up),
+        // so this is a background gesture.
         match button {
             MouseButton::Left | MouseButton::Middle => {
                 // Every background press starts a (potential) pan; whether it
@@ -156,7 +81,7 @@ impl Scene {
         }
     }
 
-    fn on_mouse_up(&mut self, pos: Point, event: &Event) -> EventResult {
+    fn on_mouse_up(&mut self, _pos: Point) -> EventResult {
         if self.panning {
             self.panning = false;
             // Click vs drag is decided here, at release: only a left-button
@@ -180,13 +105,6 @@ impl Scene {
                 self.last_bg_click = None;
             }
             return EventResult::Consumed;
-        }
-        let content_local = self.to_content_local(pos);
-        if let Some(path) = self.inner_captured.take() {
-            return self.route_to_content(&path, event, content_local);
-        }
-        if let Some(path) = hit_test_subtree(self.content.as_ref(), content_local) {
-            return self.route_to_content(&path, event, content_local);
         }
         EventResult::Ignored
     }
