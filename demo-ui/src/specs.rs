@@ -280,14 +280,6 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         win_h: 420.0,
     },
     DemoSpec {
-        title: "\u{F0D0} Highlighting",
-        label: "\u{F0D0} Highlighting",
-        group: "Graphics",
-        open: false,
-        win_w: WIN_W,
-        win_h: WIN_H,
-    },
-    DemoSpec {
         title: "\u{F1B3} 3D Animation",
         label: "\u{F1B3} 3D Animation",
         group: "Graphics",
@@ -302,14 +294,6 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         open: false,
         win_w: 520.0,
         win_h: 640.0,
-    },
-    DemoSpec {
-        title: "\u{F031} LCD Subpixel",
-        label: "\u{F031} LCD Subpixel",
-        group: "Graphics",
-        open: false,
-        win_w: 640.0,
-        win_h: 720.0,
     },
     // ── Interaction ──
     DemoSpec {
@@ -344,14 +328,6 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         win_w: WIN_W,
         win_h: WIN_H,
     },
-    DemoSpec {
-        title: "\u{F108} Extra Viewport",
-        label: "\u{F108} Extra Viewport",
-        group: "Interaction",
-        open: false,
-        win_w: WIN_W,
-        win_h: WIN_H,
-    },
 ];
 
 // Tests — regression/correctness windows.  Each one now has a Font Awesome
@@ -376,14 +352,6 @@ pub(crate) const TESTS: &[DemoSpec] = &[
     DemoSpec {
         title: "\u{F00A} Grid Test",
         label: "\u{F00A} Grid Test",
-        group: "Tests",
-        open: false,
-        win_w: WIN_W,
-        win_h: WIN_H,
-    },
-    DemoSpec {
-        title: "\u{F007} Id Test",
-        label: "\u{F007} Id Test",
         group: "Tests",
         open: false,
         win_w: WIN_W,

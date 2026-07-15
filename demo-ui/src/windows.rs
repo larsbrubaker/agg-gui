@@ -23,11 +23,11 @@ mod mobile_keyboard;
 mod screen_share;
 mod screenshot_demo;
 mod scrolling;
+mod lcd_sample_text;
 mod system;
 mod system_fonts;
 mod tests;
 mod text_demos;
-mod truetype_lcd;
 
 // Re-export every public demo builder so callers use `windows::foo(font)`.
 pub use animation::{bezier_curve, dancing_strings, painting};
@@ -39,7 +39,7 @@ pub use gallery::widget_gallery;
 pub use interaction::{drag_and_drop, panels_demo, popups_demo, scene_demo};
 pub use lion::lion_demo;
 pub use menu_demo::menu_demo;
-pub use misc::{extra_viewport, highlighting, interactive_container, misc_demos};
+pub use misc::{interactive_container, misc_demos};
 pub use mobile_keyboard::{mobile_keyboard, TITLE as MOBILE_KEYBOARD_TITLE};
 pub use screen_share::screen_share_demo;
 pub use screenshot_demo::screenshot_demo;
@@ -54,14 +54,12 @@ pub use system_fonts::{
     DEFAULT_FONT_NAME, EMOJI_FONT_PATH, FONT_AWESOME_PATH,
 };
 pub use tests::{
-    clipboard_test, cursor_test, grid_test, id_test, input_event_history, input_test, layout_test,
+    clipboard_test, cursor_test, grid_test, input_event_history, input_test, layout_test,
     manual_layout_test, svg_test, window_resize_sub_windows, ResizeTestWindow,
 };
 pub use text_demos::{
     modals_demo, multi_touch, strip_demo, table_demo, text_layout, undo_redo, window_options,
 };
-pub use truetype_lcd::truetype_lcd_view;
-
 use std::sync::Arc;
 
 use agg_gui::{DrawCtx, Event, EventResult, Font, MarkdownView, Rect, ScrollView, Size, Widget};

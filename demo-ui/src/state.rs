@@ -99,8 +99,10 @@ pub struct SavedState {
     /// Change takes effect on next launch.
     pub msaa_samples: u8,
 
-    /// Active tab index inside the System window (`Font` = 0, `Render` = 1).
-    /// Defaults to 0 on first run so new users land on the Font settings.
+    /// Active tab index inside the System window (`Font` = 0,
+    /// `Sample Text` = 1).  Defaults to 0 on first run so new users land on
+    /// the Font settings.  Out-of-range values (e.g. from older state files)
+    /// are ignored by `TabView`, which keeps the current tab.
     pub system_tab: usize,
 
     /// Window z-order — list of titles (DEMOS / TESTS / About) in
@@ -515,9 +517,9 @@ pub struct StateAccessor {
     pub lcd_enabled: Rc<Cell<bool>>,
     /// Hinting toggle mirror.
     pub hinting_enabled: Rc<Cell<bool>>,
-    /// Typography-style parameter mirrors — shared with the System window
-    /// and the TrueType LCD Subpixel demo so changes in either route
-    /// write through to disk via the auto-save loop.
+    /// Typography-style parameter mirrors — shared with the System window's
+    /// controls so changes there write through to disk via the auto-save
+    /// loop.
     pub gamma: Rc<Cell<f64>>,
     pub width_scale: Rc<Cell<f64>>,
     pub interval: Rc<Cell<f64>>,
@@ -531,7 +533,7 @@ pub struct StateAccessor {
     pub msaa_samples: Rc<Cell<u8>>,
 
     /// Active tab index inside the System window — persisted so users
-    /// stay on the Render / Font tab they were last on.
+    /// stay on the Font / Sample Text tab they were last on.
     pub system_tab: Rc<Cell<usize>>,
 
     /// Shared z-order tracker — back-to-front list of window titles

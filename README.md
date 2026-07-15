@@ -165,12 +165,12 @@ widget, shows the widget tree with bounds and properties, and reports hover posi
 The demo shell is a faithful reimplementation of the [egui demo](https://www.egui.rs/) layout
 and feature set using agg-gui's own widgets:
 
-- **28 demo windows** — Bézier Curve, Code Editor, Code Example, Dancing Strings, Drag and
-  Drop, Font Book, Frame, Highlighting, Interactive Container, Misc Demos, Modals,
+- **27 demo windows** — Bézier Curve, Code Editor, Code Example, Dancing Strings, Drag and
+  Drop, Font Book, Frame, Interactive Container, Misc Demos, Modals,
   Multi Touch, Painting, Panels, Popups, Scene, Screenshot, Scrolling, Sliders, Strip,
   Table, TextEdit, Text Layout, Tooltips, Undo Redo, Widget Gallery, Window Options,
   and a 3D Cube GL showcase
-- **11 test windows** — Clipboard, Cursor, Grid, Id, Input Event History, Input, Layout,
+- **10 test windows** — Clipboard, Cursor, Grid, Input Event History, Input, Layout,
   Manual Layout, SVG, Tessellation, Window Resize
 - **About window** — renders this README via `MarkdownView`, including images
 - **Backend panel** — run mode (reactive/continuous), FPS graph, font selector, memory reset

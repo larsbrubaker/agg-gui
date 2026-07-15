@@ -44,8 +44,6 @@ pub(crate) fn build_demo_content(
         // lion.rs — halo-AA pipeline proof
         "\u{F1B0} Lion" => windows::lion_demo(font),
         // misc.rs
-        "\u{F108} Extra Viewport" => windows::extra_viewport(font),
-        "\u{F0D0} Highlighting" => windows::highlighting(font),
         "\u{F1B2} Interactive Container" => windows::interactive_container(font),
         "\u{F031} Font Book" => windows::font_book(font),
         "\u{F03A} Misc Demos" => windows::misc_demos(font),
@@ -57,7 +55,6 @@ pub(crate) fn build_demo_content(
         "\u{F0C9} Menus" => windows::menu_demo(font),
         "\u{F0C3} Rendering Test" => rendering_test::rendering_test_view(font),
         "\u{F013} System" => windows::system_view(font),
-        "\u{F031} LCD Subpixel" => windows::truetype_lcd_view(font),
         "\u{F002} Scene" => windows::scene_demo(font),
         "\u{F030} Screenshot" => windows::screenshot_demo(
             font,

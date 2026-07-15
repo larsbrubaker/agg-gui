@@ -360,68 +360,6 @@ pub fn grid_test(font: Arc<Font>) -> Box<dyn Widget> {
 }
 
 // ---------------------------------------------------------------------------
-// Id Test
-// ---------------------------------------------------------------------------
-
-/// Build the Id Test — static informational display of widget type names.
-pub fn id_test(font: Arc<Font>) -> Box<dyn Widget> {
-    let types = [
-        ("Button", "btn_primary"),
-        ("Checkbox", "cb_feature_a"),
-        ("Slider", "slider_val_0"),
-        ("TextField", "tf_search"),
-        ("Label", "lbl_title"),
-        ("FlexColumn", "col_root"),
-        ("FlexRow", "row_buttons"),
-        ("Container", "container_panel"),
-        ("ScrollView", "scroll_main"),
-        ("ProgressBar", "pb_loading"),
-    ];
-
-    let mut col = FlexColumn::new()
-        .with_gap(8.0)
-        .with_padding(14.0)
-        .with_panel_bg();
-
-    col.push(
-        Box::new(Label::new("Widget type → generated ID", Arc::clone(&font)).with_font_size(12.0)),
-        0.0,
-    );
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-
-    for (ty, id) in types {
-        let row = FlexRow::new()
-            .with_gap(8.0)
-            .add(Box::new(SizedBox::new().with_width(120.0).with_child(
-                Box::new(Label::new(ty, Arc::clone(&font)).with_font_size(12.5)),
-            )))
-            .add(Box::new(
-                Label::new(id, Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_color(Color::rgb(0.22, 0.45, 0.88)),
-            ));
-        col.push(Box::new(row), 0.0);
-    }
-
-    col.push(Box::new(Separator::horizontal()), 0.0);
-    col.push(
-        Box::new(
-            Label::new(
-                "IDs are hashed from the widget type name + call-site path.",
-                Arc::clone(&font),
-            )
-            .with_font_size(11.0)
-            .with_wrap(true),
-        ),
-        0.0,
-    );
-
-    col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
-    Box::new(col)
-}
-
-// ---------------------------------------------------------------------------
 // Input Event History
 // ---------------------------------------------------------------------------
 

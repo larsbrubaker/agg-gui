@@ -422,7 +422,6 @@ pub fn build_demo_ui(
             "\u{F0EA} Clipboard Test" => windows::clipboard_test(Arc::clone(&font)),
             "\u{F05B} Cursor Test" => windows::cursor_test(Arc::clone(&font)),
             "\u{F00A} Grid Test" => windows::grid_test(Arc::clone(&font)),
-            "\u{F007} Id Test" => windows::id_test(Arc::clone(&font)),
             "\u{F1DA} Input Event History" => windows::input_event_history(Arc::clone(&font)),
             "\u{F11C} Input Test" => windows::input_test(Arc::clone(&font)),
             "\u{F0E4} Layout Test" => windows::layout_test(Arc::clone(&font)),
