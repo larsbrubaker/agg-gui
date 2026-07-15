@@ -1,29 +1,48 @@
 //! Test window implementations for egui-inspired diagnostic windows.
 //!
-//! These are diagnostic/test widgets that verify framework behaviour.  Where
-//! native capabilities (clipboard, OS cursors, SVG) are not yet wired up, a
-//! clear informational placeholder is shown instead of broken code.
+//! These are diagnostic/test widgets that verify framework behaviour.  The
+//! Clipboard Test performs real copy operations through
+//! [`agg_gui::clipboard`]; the remaining widgets exercise cursor, input and
+//! event plumbing directly.
 
 #![allow(unused_imports)]
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::framebuffer::unpremultiply_rgba_inplace;
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    render_svg_at_size, render_svg_to_framebuffer_at_size, render_svg_to_lcd_buffer_at_size,
-    set_cursor_icon, Checkbox, Color, Container, CursorIcon, DrawCtx, Event, EventResult,
-    FlexColumn, FlexRow, Font, Hyperlink, Label, MouseButton, Point, Rect, Resize,
-    ScrollBarVisibility, ScrollView, Separator, Size, SizedBox, TextArea, TextField, Visuals,
-    Widget,
+    clipboard, render_svg_at_size, render_svg_to_framebuffer_at_size,
+    render_svg_to_lcd_buffer_at_size, set_cursor_icon, Button, Checkbox, Color, Container,
+    CursorIcon, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink, ImageView,
+    Label, MouseButton, Point, Rect, Resize, ScrollBarVisibility, ScrollView, Separator, Size,
+    SizedBox, TextArea, TextField, Visuals, Widget,
 };
 
 // ---------------------------------------------------------------------------
 // Clipboard Test
 // ---------------------------------------------------------------------------
 
-/// Build the Clipboard Test — egui wording with agg-gui's editable TextField.
+/// Generate a small RGBA test image (a two-axis color gradient) used by the
+/// image-copy row.  The same buffer is displayed via [`ImageView`] and handed
+/// to [`clipboard::set_image_rgba`], so what you see is exactly what is copied.
+fn generate_test_image(w: u32, h: u32) -> Vec<u8> {
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let r = (255 * x / w.max(1)) as u8;
+            let g = (255 * y / h.max(1)) as u8;
+            data.extend_from_slice(&[r, g, 160, 255]);
+        }
+    }
+    data
+}
+
+/// Build the Clipboard Test — mirrors egui's `tests/clipboard_test.rs`: an
+/// editable text field with a 📋 copy button that writes to the system
+/// clipboard, plus an image-copy row.  The keyboard shortcut legend documents
+/// the text field's real copy/cut/paste behaviour.
 pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new()
         .with_gap(14.0)
@@ -52,17 +71,73 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
-    let row = FlexRow::new().with_gap(10.0).add_flex(
-        Box::new(
+    // The text field mirrors its content into a shared cell so the 📋 button
+    // can copy the live text (egui's `ui.copy_text(self.text.clone())`).
+    let text_cell = Rc::new(RefCell::new(
+        "Example text you can copy-and-paste".to_string(),
+    ));
+    let copy_cell = Rc::clone(&text_cell);
+    let initial_text = text_cell.borrow().clone();
+    let row = FlexRow::new()
+        .with_gap(10.0)
+        .add_flex(
+            Box::new(
+                SizedBox::new().with_height(32.0).with_child(Box::new(
+                    TextField::new(Arc::clone(&font))
+                        .with_font_size(13.0)
+                        .with_text(initial_text)
+                        .on_change(move |s| *text_cell.borrow_mut() = s.to_string()),
+                )),
+            ),
+            1.0,
+        )
+        .add(Box::new(
             SizedBox::new().with_height(32.0).with_child(Box::new(
-                TextField::new(Arc::clone(&font))
+                Button::new("\u{F0C5}", Arc::clone(&font))
                     .with_font_size(13.0)
-                    .with_text("Example text you can copy-and-paste"),
+                    .on_click(move || clipboard::set_text(&copy_cell.borrow())),
             )),
-        ),
-        1.0,
-    );
+        ));
     col.push(Box::new(row), 0.0);
+
+    // ── Image copy ───────────────────────────────────────────────────────────
+    // egui shows an image next to a 📋 button that copies it. We generate a
+    // small RGBA gradient, display it, and copy the identical buffer.
+    col.push(
+        Box::new(
+            Label::new("You can also copy images:", Arc::clone(&font)).with_font_size(12.0),
+        ),
+        0.0,
+    );
+    const IMG_W: u32 = 48;
+    const IMG_H: u32 = 48;
+    let image_data = Rc::new(generate_test_image(IMG_W, IMG_H));
+    let image_source = Rc::new(RefCell::new(Some((
+        (*image_data).clone(),
+        IMG_W,
+        IMG_H,
+    ))));
+    let copy_image = Rc::clone(&image_data);
+    let image_row = FlexRow::new()
+        .with_gap(10.0)
+        .add(Box::new(
+            SizedBox::new()
+                .with_width(48.0)
+                .with_height(48.0)
+                .with_child(Box::new(
+                    ImageView::new(Arc::clone(&font), image_source).with_outline(true),
+                )),
+        ))
+        .add(Box::new(
+            SizedBox::new().with_height(32.0).with_child(Box::new(
+                Button::new("\u{F0C5}", Arc::clone(&font))
+                    .with_font_size(13.0)
+                    .on_click(move || {
+                        clipboard::set_image_rgba(&copy_image, IMG_W, IMG_H);
+                    }),
+            )),
+        ));
+    col.push(Box::new(image_row), 0.0);
 
     col.push(Box::new(Separator::horizontal()), 0.0);
     col.push(
