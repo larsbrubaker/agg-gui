@@ -59,6 +59,7 @@ pub use tests::{
 };
 pub use text_demos::{
     modals_demo, multi_touch, strip_demo, table_demo, text_layout, undo_redo, window_options,
+    window_options_with_cells, WindowOptionCells,
 };
 pub use truetype_lcd::truetype_lcd_view;
 

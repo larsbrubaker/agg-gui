@@ -299,8 +299,22 @@ pub fn build_demo_ui(
             .filter(|ws| ws.has_valid_bounds())
             .map(|ws| ws.to_rect())
             .unwrap_or_else(|| tile_rect(i, default_canvas_h, spec.win_w, spec.win_h));
+        // Window Options is hosted in a real framework Window: build shared
+        // cells so its checkboxes/field steer the actual window (resizable,
+        // collapsible, auto-size, title) instead of writing to dead state.
+        let wopts_cells = if spec.title == "\u{F013} Window Options" {
+            Some(windows::WindowOptionCells::new(spec.title))
+        } else {
+            None
+        };
         let content: Box<dyn Widget> = if i == cube_idx {
             windows::coming_soon()
+        } else if let Some(cells) = &wopts_cells {
+            windows::window_options_with_cells(
+                Arc::clone(&font),
+                cells,
+                Rc::clone(&demo_pos_cells[i]),
+            )
         } else {
             build_demo_content(
                 spec.title,
@@ -337,6 +351,13 @@ pub fn build_demo_ui(
             .on_raised(make_on_raised());
         if tight_fit {
             win = win.with_tight_content_fit(true).with_resizable(false);
+        }
+        if let Some(cells) = &wopts_cells {
+            win = win
+                .with_resizable_cell(Rc::clone(&cells.resizable))
+                .with_collapsible_cell(Rc::clone(&cells.collapsible))
+                .with_auto_size_cell(Rc::clone(&cells.auto_size))
+                .with_title_cell(Rc::clone(&cells.title));
         }
         canvas = canvas.add(Box::new(win));
     }
