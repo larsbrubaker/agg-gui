@@ -25,6 +25,7 @@
 mod bezier_flat;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use agg_rust::basics::{
@@ -175,6 +176,53 @@ impl Font {
         let face = ttf_parser::Face::parse(&self.data, self.index)
             .expect("font was validated at construction");
         f(&face)
+    }
+
+    /// Enumerate every character this font can actually render.
+    ///
+    /// Walks the `cmap` table's Unicode subtables, keeping only code points
+    /// that resolve to a real (non-`.notdef`) glyph, then recurses into the
+    /// fallback chain so the set reflects everything the whole font stack can
+    /// draw — Font Awesome / emoji glyphs that live in a fallback are
+    /// included, matching how the text renderer resolves them at shape time.
+    ///
+    /// Returns a sorted, de-duplicated `BTreeSet<char>`. This backs the Font
+    /// Book demo's glyph grid and its "supports N characters" count, replacing
+    /// the previous hard-coded glyph list.
+    pub fn characters(&self) -> BTreeSet<char> {
+        let mut set = BTreeSet::new();
+        self.collect_characters(&mut set);
+        set
+    }
+
+    /// Recursion terminates because the fallback chain cannot contain cycles:
+    /// `with_fallback` consumes `self` and the chain is immutable after
+    /// construction, so it is always a finite linked list.
+    fn collect_characters(&self, set: &mut BTreeSet<char>) {
+        self.with_ttf_face(|face| {
+            let Some(cmap) = face.tables().cmap else {
+                return;
+            };
+            for subtable in cmap.subtables {
+                // Only Unicode-compatible subtables map `char`s directly; skip
+                // legacy Mac/symbol encodings so we don't invent code points.
+                if !subtable.is_unicode() {
+                    continue;
+                }
+                subtable.codepoints(|cp| {
+                    if let Some(ch) = char::from_u32(cp) {
+                        // `codepoints` may report code points that still map to
+                        // glyph 0; keep only those with a genuine glyph slot.
+                        if face.glyph_index(ch).is_some() {
+                            set.insert(ch);
+                        }
+                    }
+                });
+            }
+        });
+        if let Some(fallback) = &self.fallback {
+            fallback.collect_characters(set);
+        }
     }
 }
 
