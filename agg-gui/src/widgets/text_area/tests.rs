@@ -271,6 +271,270 @@ fn key_intercept_runs_before_default_and_can_consume() {
     assert_eq!(ta.text(), "abcz");
 }
 
+// ── (f) on_change callback ──────────────────────────────────────────────────
+//
+// Mirrors TextField's `on_change`: fires after every mutation path so a caller
+// can capture edits back into a shared cell.
+
+/// Drive one focused KeyDown with default modifiers.
+fn key(ta: &mut TextArea, k: Key) {
+    ta.on_event(&Event::KeyDown {
+        key: k,
+        modifiers: Modifiers::default(),
+    });
+}
+
+#[test]
+fn on_change_fires_for_typing_delete_and_records_latest_text() {
+    let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen2 = Rc::clone(&seen);
+    let mut ta = laid_out(
+        TextArea::new(font()).on_change(move |s| seen2.borrow_mut().push(s.to_string())),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+
+    // Typing: one callback per inserted char, each carrying the running text.
+    key(&mut ta, Key::Char('h'));
+    key(&mut ta, Key::Char('i'));
+    // Delete (backspace): fires again.
+    key(&mut ta, Key::Backspace);
+
+    let seen = seen.borrow();
+    assert_eq!(*seen, vec!["h".to_string(), "hi".to_string(), "h".to_string()]);
+}
+
+#[test]
+fn on_change_fires_for_key_intercept_edit_when_epoch_advances() {
+    // An interceptor that mutates the shared state and calls `note_text_change`
+    // must trigger `on_change`, matching the built-in mutation funnels.
+    let changed = Rc::new(Cell::new(0u32));
+    let changed2 = Rc::clone(&changed);
+    let state = Rc::new(RefCell::new(TextEditState {
+        text: "abc".into(),
+        cursor: 0,
+        anchor: 3, // whole-line selection so the toggle has something to edit
+        epoch: 0,
+    }));
+    let state_key = Rc::clone(&state);
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_edit_state(Rc::clone(&state))
+            .with_key_intercept(move |key, mods| {
+                if (mods.ctrl || mods.meta) && matches!(key, Key::Char('y') | Key::Char('Y')) {
+                    let mut st = state_key.borrow_mut();
+                    if let Some((lo, hi)) = st.selection_range() {
+                        let up = st.text[lo..hi].to_uppercase();
+                        st.text.replace_range(lo..hi, &up);
+                        st.note_text_change();
+                    }
+                    true
+                } else {
+                    false
+                }
+            })
+            .on_change(move |_| changed2.set(changed2.get() + 1)),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+    ta.on_event(&Event::KeyDown {
+        key: Key::Char('y'),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    });
+    assert_eq!(changed.get(), 1, "epoch-advancing intercept must fire on_change");
+    assert_eq!(state.borrow().text, "ABC");
+}
+
+#[test]
+fn on_change_silent_for_intercept_without_text_edit() {
+    // An interceptor that consumes the key but leaves text untouched (epoch
+    // unchanged) must NOT fire on_change.
+    let changed = Rc::new(Cell::new(0u32));
+    let changed2 = Rc::clone(&changed);
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_text("abc")
+            .with_key_intercept(|_key, _mods| true) // consume everything, edit nothing
+            .on_change(move |_| changed2.set(changed2.get() + 1)),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+    key(&mut ta, Key::Char('z'));
+    assert_eq!(changed.get(), 0, "no text change → no on_change");
+}
+
+// ── (h) internal vertical scrolling ─────────────────────────────────────────
+//
+// Exercises the scroll-to-cursor math and wheel handling against the real
+// widget. `multiline(n, w, h)` builds a TextArea with `n` hard-broken lines in
+// an `h`-tall box; a small box makes the content overflow so `max_scroll_y > 0`.
+
+/// Build a laid-out TextArea whose content is `n` hard-broken lines. The
+/// initial cursor sits at the end (last line), matching `with_text`.
+fn multiline(n: usize, w: f64, h: f64) -> TextArea {
+    let text = (0..n).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+    laid_out(
+        TextArea::new(font()).with_font_size(13.0).with_text(text),
+        w,
+        h,
+    )
+}
+
+#[test]
+fn scroll_to_cursor_reveals_last_line_and_first_line() {
+    let mut ta = multiline(12, 200.0, 80.0);
+    let max = ta.max_scroll_y();
+    assert!(max > 0.0, "12 lines in an 80px box must overflow; max={max}");
+
+    // Cursor is at the end → scroll should pin the bottom of the last line to
+    // the bottom of the viewport, i.e. offset == max_scroll.
+    ta.ensure_cursor_visible();
+    assert!(
+        (ta.scroll_offset() - max).abs() < 0.5,
+        "caret at end must scroll to bottom: off={} max={max}",
+        ta.scroll_offset()
+    );
+
+    // Move the caret to the very start → scroll back to the top.
+    ta.set_cursor_to_start();
+    ta.ensure_cursor_visible();
+    assert_eq!(
+        ta.scroll_offset(),
+        0.0,
+        "caret at start must scroll to the top"
+    );
+}
+
+#[test]
+fn caret_geometry_moves_on_screen_after_scroll_to_cursor() {
+    // Before scrolling, the last line sits below the viewport (negative Y in
+    // the Y-up frame); after scroll-to-cursor it lands inside [0, height].
+    let mut ta = multiline(12, 200.0, 80.0);
+    let cursor = ta.cursor();
+    let y_before = ta.pos_for_cursor(cursor).y;
+    assert!(
+        y_before < 0.0,
+        "caret should start off the bottom of the viewport, got y={y_before}"
+    );
+    ta.ensure_cursor_visible();
+    let y_after = ta.pos_for_cursor(cursor).y;
+    assert!(
+        (0.0..=80.0).contains(&y_after),
+        "caret must be on-screen after scroll: y={y_after}"
+    );
+}
+
+#[test]
+fn content_that_fits_never_scrolls() {
+    let mut ta = multiline(3, 300.0, 300.0);
+    assert_eq!(ta.max_scroll_y(), 0.0, "3 lines fit a 300px box");
+    ta.ensure_cursor_visible();
+    assert_eq!(ta.scroll_offset(), 0.0);
+    assert!(
+        !ta.scroll_by_wheel(-40.0),
+        "wheel is a no-op when nothing overflows"
+    );
+    assert_eq!(ta.scroll_offset(), 0.0);
+}
+
+#[test]
+fn wheel_scrolls_within_bounds_and_clamps() {
+    let mut ta = multiline(12, 200.0, 80.0);
+    let max = ta.max_scroll_y();
+
+    // Positive delta means "see content above"; a negative delta scrolls the
+    // content down (offset grows).
+    assert!(ta.scroll_by_wheel(-40.0), "wheel must move the offset");
+    assert!(ta.scroll_offset() > 0.0);
+
+    // Spinning far down clamps at max_scroll (and then reports no movement).
+    for _ in 0..50 {
+        ta.scroll_by_wheel(-40.0);
+    }
+    assert!((ta.scroll_offset() - max).abs() < 0.5);
+    assert!(!ta.scroll_by_wheel(-40.0), "clamped at the bottom");
+
+    // Spinning back up returns to the top.
+    for _ in 0..50 {
+        ta.scroll_by_wheel(40.0);
+    }
+    assert_eq!(ta.scroll_offset(), 0.0);
+}
+
+#[test]
+fn caret_visible_segment_clamps_and_hides_off_screen() {
+    use super::widget_impl::caret_visible_segment;
+    // Inner band [8, 72]. A caret line fully inside is returned unchanged.
+    assert_eq!(caret_visible_segment(20.0, 18.0, 8.0, 72.0), Some((20.0, 38.0)));
+    // A caret straddling the bottom edge is clamped up to `inner_lo`.
+    assert_eq!(caret_visible_segment(0.0, 18.0, 8.0, 72.0), Some((8.0, 18.0)));
+    // Straddling the top edge is clamped down to `inner_hi`.
+    assert_eq!(caret_visible_segment(64.0, 18.0, 8.0, 72.0), Some((64.0, 72.0)));
+    // A line scrolled entirely below the inner rect draws nothing.
+    assert_eq!(caret_visible_segment(-40.0, 18.0, 8.0, 72.0), None);
+    // Entirely above the inner rect also draws nothing.
+    assert_eq!(caret_visible_segment(200.0, 18.0, 8.0, 72.0), None);
+}
+
+#[test]
+fn key_intercept_edit_scrolls_caret_into_view() {
+    // An interceptor that moves the caret to the very end of a long buffer
+    // (and bumps the epoch) must scroll it into view, mirroring the built-in
+    // edit funnel — otherwise the caret would sit off-screen after the edit.
+    let state = Rc::new(RefCell::new(TextEditState {
+        text: (0..30).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"),
+        cursor: 0,
+        anchor: 0,
+        epoch: 0,
+    }));
+    let state_key = Rc::clone(&state);
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_font_size(13.0)
+            .with_edit_state(Rc::clone(&state))
+            .with_key_intercept(move |key, _mods| {
+                if matches!(key, Key::Char('g')) {
+                    // Jump the caret to the document end and append a char so
+                    // the epoch advances (text actually changed).
+                    let mut st = state_key.borrow_mut();
+                    st.text.push('!');
+                    let end = st.text.len();
+                    st.cursor = end;
+                    st.anchor = end;
+                    st.note_text_change();
+                    true
+                } else {
+                    false
+                }
+            }),
+        200.0,
+        80.0,
+    );
+    ta.on_event(&Event::FocusGained);
+    assert_eq!(ta.scroll_offset(), 0.0, "starts at the top");
+    ta.on_event(&Event::KeyDown {
+        key: Key::Char('g'),
+        modifiers: Modifiers::default(),
+    });
+    assert!(
+        ta.scroll_offset() > 0.0,
+        "intercept edit at document end must scroll the caret into view, got {}",
+        ta.scroll_offset()
+    );
+    let cursor = ta.cursor();
+    let y = ta.pos_for_cursor(cursor).y;
+    assert!(
+        (0.0..=80.0).contains(&y),
+        "caret must be on-screen after intercept edit: y={y}"
+    );
+}
+
 // ── (g) highlight segmentation ──────────────────────────────────────────────
 //
 // The highlighter paint path must split a line into gap-free, non-overlapping

@@ -359,12 +359,14 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
 
     // ── 5. ↔ resizable with TextEdit ────────────────────────────────────────
     //
-    // Stage-4 multiline `TextArea` fills the remaining space — so as
-    // the user resizes the window, the editor follows both axes.
-    // Pre-seeded with lorem ipsum so wrap + selection are immediately
-    // demonstrable.  `tight_fit` enforces the egui contract: window
-    // height ≥ TextArea content height, so wrapping text never falls
-    // off-screen.
+    // Multiline `TextArea` fills the remaining space — so as the user resizes
+    // the window, the editor follows both axes.  Seeded with LOREM_IPSUM_LONG
+    // exactly like egui, whose `TextEdit::multiline` scrolls internally.  Now
+    // that `TextArea` has its own vertical scroll, this window is a plain
+    // resizable window (NO floor-to-content): content taller than the editor
+    // scrolls internally instead of forcing the window to grow, and the user
+    // can shrink the window freely without any text being clipped
+    // unreachably off-screen.
     {
         let mut root = FlexColumn::new()
             .with_gap(8.0)
@@ -385,24 +387,21 @@ pub fn window_resize_sub_windows(font: Arc<Font>) -> Vec<ResizeTestWindow> {
             Box::new(
                 TextArea::new(Arc::clone(&font))
                     .with_font_size(12.5)
-                    // egui seeds this with LOREM_IPSUM_LONG, but egui's
-                    // TextEdit::multiline scrolls internally so the long
-                    // text stays inside the fixed-height window.  agg-gui's
-                    // TextArea has no internal scroll and W5 is `floor_fit`
-                    // (window grows to fit ALL content, never clips), so a
-                    // LONG seed would force the window taller than its
-                    // on-screen slot / the canvas — breaking the W5
-                    // "no off-screen text" contract.  Keep the short seed
-                    // until TextArea gains internal vertical scrolling.
-                    .with_text(LOREM_IPSUM),
+                    // Matches egui's seed. The editor scrolls internally, so
+                    // the long text stays inside the fixed-height window.
+                    .with_text(LOREM_IPSUM_LONG),
             ),
             1.0,
         );
         root.push(source_link(Arc::clone(&font)), 0.0);
-        out.push(
-            ResizeTestWindow::new("↔ resizable with TextEdit", Box::new(root), rects[4])
-                .with_floor_fit(),
-        );
+        // Plain resizable window (no floor-to-content): the TextArea's own
+        // vertical scroll handles overflow, so the window need not grow to fit
+        // all text — mirroring egui's `.vscroll(false)` + `TextEdit::multiline`.
+        out.push(ResizeTestWindow::new(
+            "↔ resizable with TextEdit",
+            Box::new(root),
+            rects[4],
+        ));
     }
 
     // ── 6. ↔ freely resized ─────────────────────────────────────────────────

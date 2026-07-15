@@ -53,6 +53,7 @@ use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{measure_advance, measure_text_metrics, Font};
 use crate::widget::Widget;
+use crate::widgets::scrollbar::ScrollbarAxis;
 use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary, TextEditState};
 
 /// Horizontal alignment of the wrapped text content inside a [`TextArea`]'s
@@ -285,6 +286,12 @@ pub struct TextArea {
     /// single ambient-colour string.
     highlighter: Option<Rc<LineHighlighter>>,
 
+    /// Fired after any text mutation (typing, delete, paste, cut, and
+    /// key-intercept edits that advance the content epoch). Mirrors
+    /// TextField's `on_change`. Builder + dispatcher live in
+    /// `text_area/callbacks.rs`.
+    on_change: Option<Box<dyn FnMut(&str)>>,
+
     /// Live edit state.  Shared with future undo / clipboard wiring, and with
     /// external callers via [`with_edit_state`](Self::with_edit_state).
     edit: Rc<RefCell<TextEditState>>,
@@ -297,6 +304,13 @@ pub struct TextArea {
     /// mismatch means the text was mutated through the shared handle by an
     /// external owner, so the wrap cache is stale even at the same width.
     cached_epoch: u64,
+
+    /// Internal vertical scroll state. Reuses `ScrollView`'s [`ScrollbarAxis`]
+    /// so overflow math, thumb geometry, drag/hover and painting stay
+    /// pixel-consistent with the app's other scroll bars. `offset` is the
+    /// scroll distance from the top (0 = first line visible); it is folded into
+    /// [`content_top_y`](Self::content_top_y). See `text_area/scroll.rs`.
+    vbar: ScrollbarAxis,
 
     /// Ephemeral input state.
     focused: bool,
@@ -323,11 +337,16 @@ impl TextArea {
             focus_request_id: None,
             on_key_chord: None,
             highlighter: None,
+            on_change: None,
             edit: Rc::new(RefCell::new(TextEditState::default())),
             cached_wrap_width: -1.0,
             cached_lines: Vec::new(),
             cached_line_h: 0.0,
             cached_epoch: 0,
+            vbar: ScrollbarAxis {
+                enabled: true,
+                ..ScrollbarAxis::default()
+            },
             focused: false,
             hovered: false,
             selecting_drag: false,
@@ -559,8 +578,13 @@ impl TextArea {
     }
 
     /// Y coordinate (Y-up) of the TOP edge of visual line 0.
+    ///
+    /// Folds in the internal vertical scroll offset: as the user scrolls down
+    /// (`vbar.offset` grows), line 0 rises above the visible top edge and lower
+    /// lines come into view. Every geometry query (paint, hit-test, cursor
+    /// overlay, scroll-to-cursor) routes through here, so they all agree.
     fn content_top_y(&self) -> f64 {
-        self.bounds.height - self.padding - self.v_align_shift()
+        self.bounds.height - self.padding - self.v_align_shift() + self.vbar.offset
     }
 
     /// Y coordinate (Y-up) of the top edge of visual line `i`.
@@ -653,122 +677,11 @@ impl TextArea {
         let line_bottom = line_top - self.cached_line_h;
         Point::new(x, line_bottom)
     }
-
-    /// Insert a string at the cursor, replacing any active selection.
-    fn insert_str(&mut self, s: &str) {
-        let mut st = self.edit.borrow_mut();
-        let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
-        // Make sure we slice at grapheme boundaries.
-        let lo = lo.min(st.text.len());
-        let hi = hi.min(st.text.len());
-        st.text.replace_range(lo..hi, s);
-        st.cursor = lo + s.len();
-        st.anchor = st.cursor;
-        st.note_text_change();
-        drop(st);
-        self.mark_dirty();
-    }
-
-    /// Delete the current selection, or (if empty) `dir` chars toward
-    /// the supplied side.  `-1` = backspace, `+1` = delete, `0` = just
-    /// collapse the selection (cut path).
-    fn delete(&mut self, dir: i32) {
-        let mut st = self.edit.borrow_mut();
-        let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
-        if lo != hi {
-            st.text.replace_range(lo..hi, "");
-            st.cursor = lo;
-            st.anchor = lo;
-        } else if dir < 0 && st.cursor > 0 {
-            let cur = st.cursor;
-            let prev = prev_char_boundary(&st.text, cur);
-            st.text.replace_range(prev..cur, "");
-            st.cursor = prev;
-            st.anchor = prev;
-        } else if dir > 0 && st.cursor < st.text.len() {
-            let cur = st.cursor;
-            let next = next_char_boundary(&st.text, cur);
-            st.text.replace_range(cur..next, "");
-        }
-        st.note_text_change();
-        drop(st);
-        self.mark_dirty();
-    }
-
-    /// Move cursor to an absolute byte offset.  `with_selection=false`
-    /// collapses anchor with cursor; `true` leaves the anchor alone
-    /// so a selection is extended.
-    fn move_cursor_to(&mut self, pos: usize, with_selection: bool) {
-        let mut st = self.edit.borrow_mut();
-        let p = pos.min(st.text.len());
-        st.cursor = p;
-        if !with_selection {
-            st.anchor = p;
-        }
-    }
-
-    /// Cursor one char left / right.
-    fn move_char(&mut self, dir: i32, with_selection: bool) {
-        let st = self.edit.borrow();
-        let p = if dir < 0 {
-            prev_char_boundary(&st.text, st.cursor)
-        } else {
-            next_char_boundary(&st.text, st.cursor)
-        };
-        drop(st);
-        self.move_cursor_to(p, with_selection);
-    }
-
-    /// Cursor one visual line up / down.  `dir` = −1 for up, +1 for down.
-    fn move_line(&mut self, dir: i32, with_selection: bool) {
-        if self.cached_lines.is_empty() {
-            return;
-        }
-        let cursor = self.edit.borrow().cursor;
-        let cur_line = self.line_for_cursor(cursor);
-        let target_line = if dir < 0 {
-            cur_line.saturating_sub(1)
-        } else {
-            (cur_line + 1).min(self.cached_lines.len() - 1)
-        };
-        if target_line == cur_line {
-            return;
-        }
-        // Preserve horizontal position (pixel column, not byte column),
-        // measured relative to the current line's aligned start so left /
-        // center / right alignment all keep the caret in the same column.
-        let cur_line_x = self
-            .cached_lines
-            .get(cur_line)
-            .map(|l| self.line_x_start(l))
-            .unwrap_or(self.padding);
-        let cur_x = self.pos_for_cursor(cursor).x - cur_line_x;
-        // Find byte offset in target_line closest to `cur_x`.
-        let line = &self.cached_lines[target_line];
-        let txt = &line.text;
-        let mut best_byte = 0usize;
-        let mut best_delta = f64::INFINITY;
-        let mut acc = 0.0_f64;
-        let mut prev_byte = 0usize;
-        for (i, _) in txt.char_indices().chain(std::iter::once((txt.len(), ' '))) {
-            let w = if i > prev_byte {
-                measure_advance(&self.font, &txt[prev_byte..i], self.font_size)
-            } else {
-                0.0
-            };
-            acc += w;
-            let d = (acc - cur_x).abs();
-            if d < best_delta {
-                best_delta = d;
-                best_byte = i;
-            }
-            prev_byte = i;
-        }
-        let target = line.start + best_byte;
-        self.move_cursor_to(target, with_selection);
-    }
 }
 
+mod callbacks;
+mod edit_ops;
+mod scroll;
 mod widget_impl;
 
 #[cfg(test)]

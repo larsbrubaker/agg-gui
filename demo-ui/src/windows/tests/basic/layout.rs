@@ -142,7 +142,14 @@ fn build_placed_widget(
         2 => Box::new(
             TextArea::new(Arc::clone(font))
                 .with_font_size(12.5)
-                .with_text(text.borrow().clone()),
+                .with_text(text.borrow().clone())
+                // Capture edits back into the shared cell so switching the
+                // widget type away and back re-seeds the editor with the
+                // user's mid-session text instead of the original default.
+                .on_change({
+                    let text = Rc::clone(text);
+                    move |s| *text.borrow_mut() = s.to_string()
+                }),
         ),
         _ => Box::new(
             Button::new("Example button", Arc::clone(font))

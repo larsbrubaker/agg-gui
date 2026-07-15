@@ -3,11 +3,12 @@ use super::*;
 // ─── W5 — ↔ resizable with TextEdit ──────────────────────────────────────────
 
 #[test]
-fn w5_text_area_width_tracks_and_window_can_grow_above_content() {
-    // Updated contract: W5 has floor-only — window cannot shrink
-    // below TextArea content (no off-screen text), but CAN be
-    // dragged taller (TextArea fills the extra space; whitespace
-    // appears below the text).  Matches egui's W5 demo.
+fn w5_text_area_width_tracks_and_window_resizes_freely() {
+    // Updated contract (internal TextArea scrolling): W5 is now a plain
+    // resizable window with NO floor-to-content.  The editor scrolls its own
+    // overflow, so the window can be dragged both taller AND shorter — all the
+    // way down to MIN_H — without clipping any text unreachably off-screen.
+    // Matches egui's W5 (`.vscroll(false)` + `TextEdit::multiline`).
     let (mut app, title, _pos) = make_test_app(4);
     let before = window_bounds(&app, &title);
     let ta_before = find_widget_by_type(find_widget_by_id(app.root(), &title).unwrap(), "TextArea")
@@ -29,7 +30,7 @@ fn w5_text_area_width_tracks_and_window_can_grow_above_content() {
         ta_after_e.width
     );
 
-    // N drag SHOULD grow the window — floor-only allows growth.
+    // N drag SHOULD grow the window — resizable both ways.
     let win_after_e = window_bounds(&app, &title);
     let mid_x = win_after_e.x + win_after_e.width * 0.5;
     let top_y_up = win_after_e.y + win_after_e.height - 1.0;
@@ -43,7 +44,9 @@ fn w5_text_area_width_tracks_and_window_can_grow_above_content() {
         win_after_n.height
     );
 
-    // S drag past content → floor stops at content height, NOT MIN_H.
+    // S drag far down → with no floor-to-content the window now shrinks
+    // freely toward MIN_H (80).  The editor scrolls internally, so shrinking
+    // never leaves text clipped off-screen unreachably.
     let win_after_n2 = window_bounds(&app, &title);
     let mid_x2 = win_after_n2.x + win_after_n2.width * 0.5;
     let bot_y_up = win_after_n2.y + 1.0;
@@ -51,28 +54,68 @@ fn w5_text_area_width_tracks_and_window_can_grow_above_content() {
     drag(&mut app, (mid_x2, bot_y_dn), (mid_x2, bot_y_dn - 1000.0));
     let win_after_s = window_bounds(&app, &title);
     assert!(
-        win_after_s.height > 100.0,
-        "floor_fit must keep window height above MIN_H=80; got {}",
+        win_after_s.height < win_after_n2.height && win_after_s.height <= 82.0,
+        "W5 must shrink freely toward MIN_H=80 (internal scroll); \
+         was {}, now {}",
+        win_after_n2.height,
         win_after_s.height
     );
 }
 
 #[test]
-fn w5_text_area_height_meets_content_height() {
-    // After layout, the TextArea's `bounds.height` must fully cover
-    // its wrapped content — no off-screen text, ever.  Asserts the
-    // egui "no clipping" contract end-to-end: TextArea reports its
-    // required min via `measure_min_height`, FlexColumn aggregates,
-    // Window snaps to the total.
+fn w5_long_text_scrolls_internally_instead_of_growing_window() {
+    // Updated contract (internal TextArea scrolling): W5 seeds the editor with
+    // LOREM_IPSUM_LONG and scrolls it internally, like egui's
+    // `TextEdit::multiline`.  The window is a plain resizable window that no
+    // longer grows to fit all text, so the editor's wrapped content is TALLER
+    // than its bounds — the overflow is reached by scrolling, never clipped
+    // off-screen unreachably.  (Scroll reachability itself is unit-tested in
+    // agg-gui's `text_area` module; see `w5_text_area_wheel_reaches_overflow`
+    // below for the end-to-end drive.)
     let (app, title, _pos) = make_test_app(4);
     let win = find_widget_by_id(app.root(), &title).unwrap();
+    let win_h = win.bounds().height;
     let ta = find_widget_by_type(win, "TextArea").unwrap();
     let needed = ta.measure_min_height(ta.bounds().width);
     assert!(
-        ta.bounds().height >= needed - 1.0,
-        "TextArea bounds.height ({}) must cover wrapped content needed={}",
-        ta.bounds().height,
-        needed
+        needed > ta.bounds().height + 1.0,
+        "LONG seed must overflow the fixed editor area (internal scroll): \
+         needed={needed} bounds.h={}",
+        ta.bounds().height
+    );
+    // The window did NOT balloon to the full content height — it stays near its
+    // initial size, proving floor-to-content was removed for W5.
+    assert!(
+        win_h < needed,
+        "window height ({win_h}) must stay below full content height \
+         ({needed}); it scrolls internally rather than growing"
+    );
+}
+
+#[test]
+fn w5_text_area_wheel_reaches_overflow() {
+    // End-to-end proof of the new contract: a fixed-height multiline editor
+    // seeded with long text starts at the top and scrolls on the wheel, so the
+    // lower content is reachable — no text is unreachably off-screen.
+    let long = "Lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(60);
+    let mut ta = TextArea::new(font()).with_font_size(12.5).with_text(&long);
+    ta.layout(Size::new(280.0, 160.0));
+    assert!(
+        ta.measure_min_height(280.0) > 160.0,
+        "long seed must overflow the fixed editor area"
+    );
+    assert_eq!(ta.scroll_offset(), 0.0, "editor starts scrolled to the top");
+    // Wheel down (negative delta_y = content moves up) reveals lower lines.
+    ta.on_event(&Event::MouseWheel {
+        pos: Point::new(20.0, 20.0),
+        delta_y: -600.0,
+        delta_x: 0.0,
+        modifiers: Modifiers::default(),
+    });
+    assert!(
+        ta.scroll_offset() > 0.0,
+        "wheel must scroll the long content, got {}",
+        ta.scroll_offset()
     );
 }
 
