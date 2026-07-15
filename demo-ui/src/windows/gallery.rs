@@ -39,7 +39,9 @@ impl ScalarProgress {
             bounds: Rect::default(),
             children: Vec::new(),
             scalar,
-            bar: ProgressBar::new(0.0, font),
+            // egui's gallery animates the bar while it's hovered
+            // ("The progress bar can be animated!").
+            bar: ProgressBar::new(0.0, font).with_animate_on_hover(true),
         }
     }
 }
@@ -77,8 +79,11 @@ impl Widget for ScalarProgress {
         paint_subtree(&mut self.bar, ctx);
     }
 
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        // Forward events so the bar can track hover and drive its
+        // hover-only loading animation (the bar shares this widget's bounds,
+        // so pointer coordinates need no translation).
+        self.bar.on_event(event)
     }
 }
 

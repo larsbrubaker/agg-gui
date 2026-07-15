@@ -4,64 +4,15 @@ use std::sync::Arc;
 
 use agg_gui::widget::paint_subtree;
 use agg_gui::{
-    Button, Checkbox, CollapsingHeader, Color, DragValue, DrawCtx, Event, EventResult, FlexColumn,
-    FlexRow, Font, Label, RadioGroup, Rebuilder, Rect, Resize, ScrollView, Size, SizedBox, Slider,
-    Widget,
+    Button, CollapsingHeader, Color, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Label,
+    Rebuilder, Rect, Resize, ScrollView, Size, SizedBox, Slider, Widget,
 };
 
+use super::misc_sections::{
+    checkboxes_section, colors_section, custom_collapsing_section, misc_widgets_section,
+    paint_icon_section,
+};
 use super::tree_section::tree_section;
-
-/// A color swatch + name row used by the Colors section of misc_demos.
-/// The swatch rectangle is painted directly; the name renders through a
-/// real `Label` child so its glyph cache stays warm across frames.
-struct SwatchRow {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-    color: Color,
-}
-
-impl Widget for SwatchRow {
-    fn type_name(&self) -> &'static str {
-        "SwatchRow"
-    }
-    fn bounds(&self) -> Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, b: Rect) {
-        self.bounds = b;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-
-    fn layout(&mut self, available: Size) -> Size {
-        self.bounds = Rect::new(0.0, 0.0, available.width, 22.0);
-        if let Some(child) = self.children.first_mut() {
-            let s = child.layout(Size::new(available.width - 30.0, 22.0));
-            child.set_bounds(Rect::new(28.0, (22.0 - s.height) * 0.5, s.width, s.height));
-        }
-        Size::new(available.width, 22.0)
-    }
-
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let v = ctx.visuals();
-        ctx.set_fill_color(self.color);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 3.0, 20.0, 16.0, 3.0);
-        ctx.fill();
-        if let Some(child) = self.children.first_mut() {
-            child.set_label_color(v.text_color);
-        }
-        // Label child paints itself via the framework's tree walk.
-    }
-
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
-    }
-}
 
 /// Box painting widget — draws N boxes whose visual properties are controlled
 /// by shared cells (sliders set them externally).
@@ -238,153 +189,6 @@ fn label_section(font: &Arc<Font>) -> Box<dyn Widget> {
         "The default font supports latin, cyrillic (ИÅđ…), math (∫√∞²⅓…), and emojis (💓🌟🖩…).",
         Arc::clone(font),
     ).with_font_size(12.0)), 0.0);
-
-    Box::new(col)
-}
-
-/// Build the Misc widgets section content.
-fn misc_widgets_section(font: &Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new().with_gap(6.0);
-
-    let angle_cell = Rc::new(Cell::new(2.094_f64));
-    {
-        let ac = Rc::clone(&angle_cell);
-        let angle_row = FlexRow::new()
-            .with_gap(8.0)
-            .add(Box::new(
-                Label::new("An angle:", Arc::clone(font)).with_font_size(12.5),
-            ))
-            .add(Box::new(
-                SizedBox::new()
-                    .with_height(28.0)
-                    .with_width(80.0)
-                    .with_child(Box::new(
-                        DragValue::new(angle_cell.get(), -6.283, 6.283, Arc::clone(font))
-                            .with_speed(0.02)
-                            .with_decimals(2)
-                            .on_change(move |v| ac.set(v)),
-                    )),
-            ));
-        col.push(Box::new(angle_row), 0.0);
-    }
-
-    let pw_row = FlexRow::new()
-        .with_gap(8.0)
-        .add(Box::new(
-            Label::new("Password:", Arc::clone(font)).with_font_size(12.5),
-        ))
-        .add_flex(
-            Box::new(
-                SizedBox::new().with_height(28.0).with_child(Box::new(
-                    agg_gui::TextField::new(Arc::clone(font))
-                        .with_font_size(12.5)
-                        .with_placeholder("hunter2")
-                        .with_password_mode(true),
-                )),
-            ),
-            1.0,
-        );
-    col.push(Box::new(pw_row), 0.0);
-
-    Box::new(col)
-}
-
-/// Build the Checkboxes section content.
-fn checkboxes_section(font: &Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new().with_gap(4.0);
-
-    col.push(
-        Box::new(
-            Label::new(
-                "Checkboxes with empty labels take up very little space:",
-                Arc::clone(font),
-            )
-            .with_font_size(11.5),
-        ),
-        0.0,
-    );
-
-    let shared_bool = Rc::new(Cell::new(false));
-    for _row in 0..4 {
-        let mut cb_row = FlexRow::new().with_gap(2.0);
-        for _c in 0..16 {
-            let cell = Rc::clone(&shared_bool);
-            cb_row.push(
-                Box::new(
-                    SizedBox::new()
-                        .with_height(22.0)
-                        .with_width(22.0)
-                        .with_child(Box::new(
-                            Checkbox::new("", Arc::clone(font), cell.get())
-                                .with_font_size(11.0)
-                                .with_state_cell(Rc::clone(&cell))
-                                .on_change(move |v| cell.set(v)),
-                        )),
-                ),
-                0.0,
-            );
-        }
-        col.push(Box::new(cb_row), 0.0);
-    }
-
-    col.push(
-        Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-            Checkbox::new("checkbox", Arc::clone(font), false).with_font_size(12.5),
-        ))),
-        0.0,
-    );
-
-    col.push(
-        Box::new(Label::new("Radio buttons:", Arc::clone(font)).with_font_size(11.5)),
-        0.0,
-    );
-
-    let radio_sel = Rc::new(Cell::new(0_usize));
-    {
-        let rs = Rc::clone(&radio_sel);
-        col.push(
-            Box::new(
-                RadioGroup::new(
-                    vec!["Option A", "Option B", "Option C"],
-                    radio_sel.get(),
-                    Arc::clone(font),
-                )
-                .with_font_size(12.5)
-                .on_change(move |i| rs.set(i)),
-            ),
-            0.0,
-        );
-    }
-
-    Box::new(col)
-}
-
-/// Build the Colors section content.
-fn colors_section(font: &Arc<Font>) -> Box<dyn Widget> {
-    let mut col = FlexColumn::new().with_gap(2.0);
-
-    let named_colors: &[(&str, Color)] = &[
-        ("Red", Color::rgb(0.88, 0.25, 0.18)),
-        ("Orange", Color::rgb(0.92, 0.55, 0.15)),
-        ("Yellow", Color::rgb(0.92, 0.85, 0.15)),
-        ("Green", Color::rgb(0.25, 0.78, 0.30)),
-        ("Cyan", Color::rgb(0.22, 0.65, 0.88)),
-        ("Blue", Color::rgb(0.22, 0.45, 0.88)),
-        ("Purple", Color::rgb(0.60, 0.25, 0.88)),
-        ("Pink", Color::rgb(0.88, 0.25, 0.65)),
-    ];
-    for &(name, color) in named_colors {
-        col.push(
-            Box::new(SwatchRow {
-                bounds: Rect::default(),
-                children: vec![Box::new(
-                    Label::new(name, Arc::clone(font)).with_font_size(11.5),
-                )],
-                color,
-            }),
-            0.0,
-        );
-    }
 
     Box::new(col)
 }
@@ -679,6 +483,26 @@ pub fn misc_demos(font: Arc<Font>) -> Box<dyn Widget> {
             CollapsingHeader::new("Test box rendering", Arc::clone(&font))
                 .default_open(false)
                 .with_content(box_rendering_section(&font)),
+        ),
+        0.0,
+    );
+
+    // ── Custom Collapsing Header (default closed) ────────────────────────────
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Custom Collapsing Header", Arc::clone(&font))
+                .default_open(false)
+                .with_content(custom_collapsing_section(&font)),
+        ),
+        0.0,
+    );
+
+    // ── Misc / paint-your-own-icon (default closed) ──────────────────────────
+    col.push(
+        Box::new(
+            CollapsingHeader::new("Misc", Arc::clone(&font))
+                .default_open(false)
+                .with_content(paint_icon_section(&font)),
         ),
         0.0,
     );
