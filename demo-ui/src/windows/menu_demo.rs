@@ -152,7 +152,7 @@ impl Widget for MenuDemo {
                 MenuResponse::Action(action) => push_log(&self.log, &action),
                 MenuResponse::Closed | MenuResponse::None => {}
             }
-            if result == EventResult::Consumed {
+            if result.is_consumed() {
                 return result;
             }
         }

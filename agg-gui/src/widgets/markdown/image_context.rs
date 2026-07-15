@@ -5,7 +5,7 @@
 
 use crate::clipboard;
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, Modifiers, MouseButton};
+use crate::event::{Event, Modifiers, MouseButton};
 use crate::geometry::Point;
 use crate::widget::current_viewport;
 use crate::widgets::menu::{MenuEntry, MenuItem, MenuResponse, PopupMenu};
@@ -95,7 +95,7 @@ impl MarkdownView {
         };
         let event = Event::MouseMove { pos };
         let (result, _) = menu.menu.handle_event(&event, current_viewport());
-        result == EventResult::Consumed
+        result.is_consumed()
     }
 
     pub(super) fn context_menu_contains(&self, _pos: Point) -> bool {
@@ -130,7 +130,7 @@ impl MarkdownView {
             }
             MenuResponse::None => {}
         }
-        result == EventResult::Consumed
+        result.is_consumed()
     }
 
     fn run_image_action(&mut self, action: ImageContextAction, image: &ImageContextTarget) {

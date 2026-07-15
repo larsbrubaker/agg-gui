@@ -335,7 +335,7 @@ impl Widget for PopupsDemo {
                 }
                 MenuResponse::Closed | MenuResponse::None => {}
             }
-            if result == EventResult::Consumed {
+            if result.is_consumed() {
                 return result;
             }
         }
