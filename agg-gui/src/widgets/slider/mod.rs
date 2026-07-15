@@ -174,6 +174,18 @@ impl Slider {
         // Not `f64::clamp` — that panics when min > max, and reversed
         // (high-to-low) ranges are supported by the mapping in `slider_math`.
         let v = clamp_value_to_range(value, min, max);
+        // Default step is 1/100th of the span, but an infinite/degenerate range
+        // (e.g. the logarithmic `-∞..=∞` sliders in the Sliders demo) makes this
+        // `∞` or `NaN`; fall back to "no step" so `commit` never step-snaps into
+        // a NaN. Callers set an explicit finite step via `with_step`.
+        let default_step = {
+            let s = (max - min) / 100.0;
+            if s.is_finite() {
+                s
+            } else {
+                0.0
+            }
+        };
         let font_size = 12.0;
         let value_label = Label::new("", Arc::clone(&font))
             .with_font_size(font_size)
@@ -186,7 +198,7 @@ impl Slider {
                 value: v,
                 min,
                 max,
-                step: (max - min) / 100.0,
+                step: default_step,
                 show_value: true,
                 decimals: None,
                 font_size,
@@ -339,6 +351,11 @@ impl Slider {
     }
 
     pub fn set_value(&mut self, v: f64) {
+        // Reject NaN so one bad write can't permanently poison the value (and,
+        // through a shared value cell, other widgets bound to it).
+        if v.is_nan() {
+            return;
+        }
         self.props.value = self.commit(v);
         if let Some(cell) = &self.value_cell {
             cell.set(self.props.value);
@@ -414,11 +431,21 @@ impl Slider {
     }
 
     /// Apply clamping, step snapping and integer rounding to a raw value.
+    ///
+    /// Rejects `NaN` outright (returning the current value) so a single bad
+    /// input can never poison the stored state — see also `set_value` and the
+    /// value-cell read in `layout`.
     fn commit(&self, mut value: f64) -> f64 {
+        if value.is_nan() {
+            return self.props.value;
+        }
         if self.clamping != SliderClamping::Never {
             value = clamp_value_to_range(value, self.props.min, self.props.max);
         }
-        if self.props.step > 0.0 {
+        // Step-snapping only makes sense with a finite step *and* a finite
+        // origin: an infinite bound (`min = -∞`, as on the demo's log range
+        // sliders) turns the arithmetic below into `NaN`.
+        if self.props.step > 0.0 && self.props.step.is_finite() && self.props.min.is_finite() {
             let start = self.props.min;
             value = start + ((value - start) / self.props.step).round() * self.props.step;
         }
@@ -553,11 +580,15 @@ impl Widget for Slider {
         if !self.dragging {
             if let Some(cell) = &self.value_cell {
                 let raw = cell.get();
-                self.props.value = if self.clamping == SliderClamping::Always {
-                    clamp_value_to_range(raw, self.props.min, self.props.max)
-                } else {
-                    raw
-                };
+                // Ignore a NaN in the cell — keep the last good value so a single
+                // poisoned frame from another writer can't wedge this slider.
+                if !raw.is_nan() {
+                    self.props.value = if self.clamping == SliderClamping::Always {
+                        clamp_value_to_range(raw, self.props.min, self.props.max)
+                    } else {
+                        raw
+                    };
+                }
             }
         }
 
@@ -682,36 +713,4 @@ impl Widget for Slider {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const FONT_BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
-
-    fn test_font() -> Arc<Font> {
-        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
-    }
-
-    /// `slider_math` deliberately supports reversed (high-to-low) ranges, so
-    /// constructing a slider with one must not panic — `f64::clamp` does when
-    /// min > max.
-    #[test]
-    fn new_with_reversed_range_does_not_panic() {
-        let s = Slider::new(5.0, 10.0, 0.0, test_font());
-        assert_eq!(s.value(), 5.0);
-        // Out-of-range values clamp to the nearer end of the ordered range.
-        let s = Slider::new(-1.0, 10.0, 0.0, test_font());
-        assert_eq!(s.value(), 0.0);
-    }
-
-    /// Same for the external-cell binding, which clamps on construction and on
-    /// every layout read.
-    #[test]
-    fn value_cell_with_reversed_range_does_not_panic() {
-        let cell = Rc::new(Cell::new(42.0));
-        let mut s = Slider::new(5.0, 10.0, 0.0, test_font()).with_value_cell(Rc::clone(&cell));
-        assert_eq!(s.value(), 10.0);
-        cell.set(-3.0);
-        let _ = s.layout(Size::new(200.0, 22.0));
-        assert_eq!(s.value(), 0.0);
-    }
-}
+mod tests;
