@@ -29,6 +29,7 @@ pub mod radio_group;
 pub mod rebuilder;
 pub mod reserve_inset;
 pub mod resize;
+pub mod scene;
 pub mod scroll_view;
 pub(crate) mod scrollbar;
 pub mod slider;
@@ -81,6 +82,7 @@ pub use radio_group::RadioGroup;
 pub use rebuilder::Rebuilder;
 pub use reserve_inset::{ReserveInset, ReservedEdge};
 pub use resize::Resize;
+pub use scene::{Scene, SceneTransform};
 pub use scroll_view::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
     ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
