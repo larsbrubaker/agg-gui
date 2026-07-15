@@ -170,7 +170,7 @@ and feature set using agg-gui's own widgets:
   Multi Touch, Painting, Panels, Popups, Scene, Screenshot, Scrolling, Sliders, Strip,
   Table, TextEdit, Text Layout, Tooltips, Undo Redo, Widget Gallery, Window Options,
   and a 3D Cube GL showcase
-- **10 test windows** — Clipboard, Cursor, Grid, Input Event History, Input, Layout,
+- **9 test windows** — Clipboard, Cursor, Input Event History, Input, Layout,
   Manual Layout, SVG, Tessellation, Window Resize
 - **About window** — renders this README via `MarkdownView`, including images
 - **Backend panel** — run mode (reactive/continuous), FPS graph, font selector, memory reset
