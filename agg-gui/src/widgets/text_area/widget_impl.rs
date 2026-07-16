@@ -602,7 +602,32 @@ impl Widget for TextArea {
     }
 
     fn needs_draw(&self) -> bool {
-        // Focused → cursor blink; scrollbar animating → fade/expand tween.
-        self.focused || self.scrollbar_animating()
+        // Scrollbar fade/expand tween is a genuine per-frame animation while it
+        // runs, so it keeps requesting frames.  The cursor blink, by contrast,
+        // is transition-scheduled: report dirty only when wall-clock time has
+        // crossed a 500 ms flip boundary since the last painted phase.  An idle
+        // focused editor therefore wakes twice a second (see
+        // `next_draw_deadline`) instead of every frame.
+        if self.scrollbar_animating() {
+            return true;
+        }
+        if !self.focused {
+            return false;
+        }
+        let Some(t) = self.focus_time else {
+            return false;
+        };
+        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        current_phase != self.blink_last_phase.get()
+    }
+
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        if !self.focused {
+            return None;
+        }
+        let t = self.focus_time?;
+        let ms = t.elapsed().as_millis() as u64;
+        let next_phase = (ms / 500) + 1;
+        Some(t + std::time::Duration::from_millis(next_phase * 500))
     }
 }

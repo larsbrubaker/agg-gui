@@ -409,7 +409,32 @@ impl Widget for RichTextEdit {
     }
 
     fn needs_draw(&self) -> bool {
-        self.focused || self.scrollbar_animating()
+        // Scrollbar fade/expand tween genuinely animates every frame while it
+        // runs.  The caret blink is transition-scheduled instead: report dirty
+        // only when wall-clock time crosses a 500 ms flip boundary since the
+        // last painted phase, so an idle focused editor wakes twice a second
+        // (see `next_draw_deadline`) rather than every frame.
+        if self.scrollbar_animating() {
+            return true;
+        }
+        if !self.focused {
+            return false;
+        }
+        let Some(t) = self.focus_time else {
+            return false;
+        };
+        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        current_phase != self.blink_last_phase.get()
+    }
+
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        if !self.focused {
+            return None;
+        }
+        let t = self.focus_time?;
+        let ms = t.elapsed().as_millis() as u64;
+        let next_phase = (ms / 500) + 1;
+        Some(t + std::time::Duration::from_millis(next_phase * 500))
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

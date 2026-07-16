@@ -786,3 +786,5 @@ mod widget_impl;
 mod selection_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod redraw_tests;
