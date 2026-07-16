@@ -23,28 +23,31 @@
 //! [`with_families`](RichTextToolbar::with_families).  With no families the
 //! dropdown is omitted entirely.
 //!
-//! # Colours
+//! # Colours (self-contained)
 //!
 //! The text/highlight swatches open a floating
-//! [`color_wheel_picker_dialog`](crate::color_wheel_picker_dialog).  A floating
-//! dialog needs the full canvas, which a thin toolbar strip cannot provide, so
-//! the picker lives in a **companion overlay** returned by
-//! [`color_overlay`](RichTextToolbar::color_overlay): add it to a top-level
-//! [`Stack`](crate::widgets::primitives::Stack) that spans the editor area.  See
-//! the example below.  (Colour changes currently apply on *Select* only; live
-//! preview is pending a handle preview-session API — see [`color`].)
+//! [`color_wheel_picker_dialog_with_on_close`](crate::widgets::color_wheel_picker::color_wheel_picker_dialog_with_on_close).
+//! That dialog is a **modal** window, so it paints through the framework's
+//! clip-free global-overlay pass and clamps itself into the viewport — meaning
+//! the picker can live *inside* the (thin) toolbar widget and still float
+//! un-truncated over the editor.  The toolbar is therefore **fully
+//! self-contained**: no companion overlay to place, no top-level `Stack`
+//! required.  Colours drive a live preview through the handle's preview session
+//! (`begin/commit/cancel_preview`) — the selection recolours as the wheel is
+//! dragged, commits on *Select*, and restores on *Cancel* / × / *Escape* (see
+//! [`color`]).
 //!
 //! # Example
 //!
-//! Extends the module-level embedding example with a toolbar and its colour
-//! overlay, composed as `Stack[ FlexColumn[toolbar, editor], color_overlay ]`.
+//! Extends the module-level embedding example: just drop the toolbar above the
+//! editor in a [`FlexColumn`] — the colour picker is handled internally.
 //!
 //! ```
 //! use std::sync::Arc;
 //! use agg_gui::Font;
 //! use agg_gui::widgets::rich_text::{single_font_resolver, RichDoc, RichTextEdit};
 //! use agg_gui::widgets::rich_text::toolbar::{RichTextToolbar, Variant};
-//! use agg_gui::{FlexColumn, Stack};
+//! use agg_gui::FlexColumn;
 //!
 //! let bytes = std::fs::read(concat!(
 //!     env!("CARGO_MANIFEST_DIR"),
@@ -59,17 +62,11 @@
 //! let toolbar = RichTextToolbar::new(handle, Arc::clone(&font))
 //!     .with_families(vec!["Sans".to_string(), "Serif".to_string()], None)
 //!     .with_variant_check(|_family, v| matches!(v, Variant::Italic));
-//! let color_overlay = toolbar.color_overlay();
 //!
-//! // The toolbar strip sits above the editor; the picker floats over the whole
-//! // body via the companion overlay.
-//! let body = FlexColumn::new()
+//! // The toolbar strip sits above the editor; the colour dialog floats itself.
+//! let _body = FlexColumn::new()
 //!     .add(Box::new(toolbar))
 //!     .add_flex(Box::new(editor), 1.0);
-//! let _root = Stack::new()
-//!     .with_hit_children_only(false)
-//!     .add(Box::new(body))
-//!     .add_aligned(color_overlay);
 //! ```
 
 use std::cell::Cell;
@@ -160,6 +157,11 @@ impl Default for ToolbarConfig {
 const DEFAULT_FONT_SIZES: &[f64] = &[
     8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0,
 ];
+
+/// Generous slot used to lay out the colour-overlay's modal dialog so it can
+/// size itself regardless of how thin the toolbar strip is. The dialog's final
+/// on-screen position comes from the paint-time viewport clamp, not this size.
+const OVERLAY_LAYOUT_ROOM: Size = Size::new(4096.0, 4096.0);
 
 /// A configurable formatting toolbar bound to a [`RichEditHandle`].
 ///
@@ -321,16 +323,14 @@ impl RichTextToolbar {
         self
     }
 
-    /// Build the floating colour-picker overlay for this toolbar.  Add it to a
-    /// top-level [`Stack`](crate::widgets::primitives::Stack) via `add_aligned`
-    /// so the dialog can float over the editor (see the [module example](self)).
-    /// Returns a zero-size layer while no swatch is open, and a no-op layer if
-    /// both colour swatches are disabled.
-    pub fn color_overlay(&self) -> Box<dyn Widget> {
-        color::color_overlay(&self.font, &self.handle, &self.picker)
-    }
-
-    /// Reconstruct the two-row control tree from the current config.
+    /// Reconstruct the control tree from the current config.
+    ///
+    /// `root[0]` is the two-row [`FlexColumn`] that determines the toolbar's
+    /// size.  When either colour swatch is enabled, `root[1]` is the
+    /// self-contained colour-picker overlay — a modal dialog that paints through
+    /// the global-overlay pass, so it floats over the editor without enlarging
+    /// the strip (see [`layout`](Widget::layout), which excludes it from the
+    /// reported size).
     fn rebuild(&mut self) {
         let mut col = FlexColumn::new().with_gap(6.0);
         let row1 = self.build_row1();
@@ -341,7 +341,11 @@ impl RichTextToolbar {
         if !row2.children().is_empty() {
             col.push(row2, 0.0);
         }
-        self.root = vec![Box::new(col)];
+        let mut root: Vec<Box<dyn Widget>> = vec![Box::new(col)];
+        if self.cfg.text_color || self.cfg.highlight {
+            root.push(color::color_overlay(&self.font, &self.handle, &self.picker));
+        }
+        self.root = root;
     }
 
     /// Row 1: inline character formatting, font family + size, colours.
@@ -484,14 +488,30 @@ impl Widget for RichTextToolbar {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        if let Some(child) = self.root.first_mut() {
-            let desired = child.layout(available);
-            child.set_bounds(Rect::new(0.0, 0.0, desired.width, desired.height));
-            self.bounds = Rect::new(0.0, 0.0, desired.width, desired.height);
-            desired
-        } else {
-            Size::new(0.0, 0.0)
+        // root[0] (the rows) sizes the toolbar; root[1..] (the colour overlay)
+        // is laid out so its modal dialog can size/position itself, but excluded
+        // from the reported size so opening the picker never grows the strip —
+        // the modal paints via the global-overlay pass regardless of bounds.
+        let mut reported = Size::new(0.0, 0.0);
+        for (i, child) in self.root.iter_mut().enumerate() {
+            if i == 0 {
+                let desired = child.layout(available);
+                child.set_bounds(Rect::new(0.0, 0.0, desired.width, desired.height));
+                reported = desired;
+            } else {
+                // The overlay's modal dialog must size itself against ample room
+                // — a thin toolbar strip's `available` (a few dozen px tall)
+                // would clamp the dialog's min-size against too small a slot and
+                // panic. It positions itself via the paint-time viewport clamp,
+                // so the generous layout size here has no effect on where it
+                // lands. Zero bounds keep it out of normal hit-testing while
+                // closed; its window paints via the global-overlay pass.
+                child.layout(OVERLAY_LAYOUT_ROOM);
+                child.set_bounds(Rect::new(0.0, 0.0, 0.0, 0.0));
+            }
         }
+        self.bounds = Rect::new(0.0, 0.0, reported.width, reported.height);
+        reported
     }
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}

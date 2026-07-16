@@ -4,20 +4,21 @@
 //!
 //! A swatch button flips a shared [`PickerKind`] cell; the [`color_overlay`]
 //! widget (a [`Rebuilder`]) watches that cell and shows a
-//! [`color_wheel_picker_dialog`] while a swatch is open, applying the chosen
-//! colour through the [`RichEditHandle`] on *Select*.
+//! [`color_wheel_picker_dialog_with_on_close`] while a swatch is open, driving a
+//! **live preview** on the [`RichEditHandle`]:
 //!
-//! ## Live-preview status
+//! * open   → [`RichEditHandle::begin_preview`] (snapshot + suspend undo feed),
+//! * drag   → `on_change` execs a fresh `SetTextColor` / `SetHighlight` so the
+//!            selection recolours in context,
+//! * Select → [`RichEditHandle::commit_preview`] banks the whole drag as one
+//!            undo step,
+//! * Cancel / × / Escape → [`RichEditHandle::cancel_preview`] restores the
+//!            pre-dialog state.
 //!
-//! The owner's spec calls for wiring these through a `begin/commit/cancel`
-//! preview session on the handle so the selection previews the colour live
-//! while the wheel is dragged.  That session API is **not yet on `main`** (it is
-//! in review on another branch), so this implementation applies the colour only
-//! on *Select* (commit) and treats *Cancel* as a no-op — no live preview.
-//!
-//! TODO(color-preview): once the `RichEditHandle` preview-session API lands,
-//! drive `on_change` → `begin/continue_preview`, `on_select` → `commit_preview`,
-//! and `on_cancel` → `cancel_preview` so the selection previews live.
+//! The picker dialog is a **modal** [`Window`](crate::widgets::window::Window),
+//! so it paints through the clip-free global-overlay pass and clamps into the
+//! viewport — the overlay can therefore live *inside* the (thin) toolbar widget
+//! without being truncated by the toolbar's own child clip.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -27,7 +28,7 @@ use crate::color::Color;
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::button::Button;
-use crate::widgets::color_wheel_picker::{color_wheel_picker_dialog, ColorWheelPicker};
+use crate::widgets::color_wheel_picker::{color_wheel_picker_dialog_with_on_close, ColorWheelPicker};
 use crate::widgets::primitives::SizedBox;
 use crate::widgets::rebuilder::Rebuilder;
 
@@ -68,10 +69,10 @@ fn color_button(
 }
 
 /// Build the floating colour-picker overlay bound to the toolbar's `picker`
-/// cell.  Add the returned widget to a top-level [`Stack`](crate::widgets::primitives::Stack)
-/// (via `add_aligned`) that spans the editor area so the dialog can float over
-/// the content — a thin toolbar strip cannot host it directly.  Returns a
-/// zero-size layer while no swatch is open.
+/// cell.  Placed as an internal child of the toolbar; the modal dialog it shows
+/// paints through the global-overlay pass, so it renders over the editor even
+/// though the toolbar is a thin strip.  Returns a zero-size layer while no
+/// swatch is open.
 pub(super) fn color_overlay(
     font: &Arc<Font>,
     handle: &RichEditHandle,
@@ -91,6 +92,40 @@ pub(super) fn color_overlay(
     ))
 }
 
+/// Seed the wheel from the selection's current colour so the dialog opens on
+/// what is already there (mirrors the demo).
+fn initial_color(handle: &RichEditHandle, kind: PickerKind) -> Color {
+    let common = handle.common_style_of_selection();
+    match kind {
+        PickerKind::TextColor => match common.text_color {
+            Some(Some(c)) => c,
+            _ => Color::rgb(0.2, 0.45, 0.88),
+        },
+        PickerKind::Highlight => match common.highlight {
+            Some(Some(c)) => c,
+            // Uniform "no highlight" opens on pass-through (alpha 0).
+            Some(None) => Color::rgba(0.0, 0.0, 0.0, 0.0),
+            None => Color::rgb(1.0, 0.92, 0.23),
+        },
+        PickerKind::None => Color::rgb(0.2, 0.45, 0.88),
+    }
+}
+
+/// Apply a picker colour to the selection for `kind`.  Text colour only applies
+/// a concrete colour; highlight also forwards `None` (the "No Color" choice
+/// removes the highlight).
+fn apply_color(handle: &RichEditHandle, kind: PickerKind, opt: Option<Color>) {
+    match kind {
+        PickerKind::TextColor => {
+            if let Some(c) = opt {
+                handle.exec(&RichCommand::SetTextColor(c));
+            }
+        }
+        PickerKind::Highlight => handle.exec(&RichCommand::SetHighlight(opt)),
+        PickerKind::None => {}
+    }
+}
+
 fn build_picker_dialog(
     font: &Arc<Font>,
     handle: &RichEditHandle,
@@ -101,30 +136,39 @@ fn build_picker_dialog(
         return Box::new(SizedBox::new().with_width(0.0).with_height(0.0));
     }
     let allow_none = kind == PickerKind::Highlight;
-    let initial = Color::rgb(0.2, 0.45, 0.88);
+
+    // Snapshot the committed document + selection and suspend undo feeding for
+    // the duration of the dialog: live previewing exec's a fresh colour on every
+    // drag frame, so without this each mutation would seed an undo step and a
+    // Cancel would strand a stray entry. `commit_preview` (Select) collapses the
+    // drag into one step; `cancel_preview` (Cancel / × / Escape) restores this.
+    handle.begin_preview();
+    let initial = initial_color(handle, kind);
+
+    let change_handle = handle.clone();
     let sel_handle = handle.clone();
+    let cancel_handle = handle.clone();
+    let close_handle = handle.clone();
     let sel_picker = Rc::clone(picker);
     let cancel_picker = Rc::clone(picker);
-    // TODO(color-preview): once the handle exposes a preview session, add an
-    // `.on_change(...)` here that previews `opt` on the selection live.
+    let close_picker = Rc::clone(picker);
+
     let widget = ColorWheelPicker::new(initial, Arc::clone(font))
         .with_allow_none(allow_none)
         .with_show_alpha(true)
         .with_font_size(12.0)
+        // Live preview: recolour the selection in context as the user drags.
+        .on_change(move |opt| apply_color(&change_handle, kind, opt))
+        // Select = commit: apply the final colour, then bank one undo step.
         .on_select(move |opt| {
-            match kind {
-                PickerKind::TextColor => {
-                    if let Some(c) = opt {
-                        sel_handle.exec(&RichCommand::SetTextColor(c));
-                    }
-                }
-                PickerKind::Highlight => sel_handle.exec(&RichCommand::SetHighlight(opt)),
-                PickerKind::None => {}
-            }
+            apply_color(&sel_handle, kind, opt);
+            sel_handle.commit_preview();
             sel_picker.set(PickerKind::None);
             crate::animation::request_draw();
         })
+        // Cancel button = restore the pre-dialog snapshot.
         .on_cancel(move || {
+            cancel_handle.cancel_preview();
             cancel_picker.set(PickerKind::None);
             crate::animation::request_draw();
         });
@@ -132,5 +176,12 @@ fn build_picker_dialog(
         PickerKind::Highlight => "Highlight colour",
         _ => "Text colour",
     };
-    color_wheel_picker_dialog(widget, title)
+    // The window's × button and Escape close the dialog through a route that
+    // bypasses the picker's Cancel button; forward that close to the SAME
+    // teardown so the preview session can't dangle.
+    color_wheel_picker_dialog_with_on_close(widget, title, move || {
+        close_handle.cancel_preview();
+        close_picker.set(PickerKind::None);
+        crate::animation::request_draw();
+    })
 }
