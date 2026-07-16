@@ -53,7 +53,12 @@ impl WgpuGfxCtx {
         // that can't composite a coverage mask.
         if self.has_lcd_mask_composite() {
             let phys_size = self.font_size * ctm_scale;
-            let cached = if self.lcd_mode {
+            // LCD subpixel geometry is only valid against the final opaque
+            // backbuffer.  Inside a compositing layer we rasterise a grayscale
+            // coverage mask instead — it composites (via the flattened,
+            // alpha-writing path) without chroma fringing or wash-out.
+            let use_lcd = self.lcd_mode && self.layer_stack.is_empty();
+            let cached = if use_lcd {
                 agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size)
             } else {
                 agg_gui::lcd_coverage::rasterize_text_gray_cached(&font, text, phys_size)
@@ -238,6 +243,11 @@ impl WgpuGfxCtx {
             alpha_tex,
             alpha_view,
             clip: self.current_clip(),
+            global_alpha: self.global_alpha as f32,
+            // Inside a compositing layer the 3-pass premultiplied blit leaves
+            // the transparent layer's alpha at 0 (it only writes colour); flatten
+            // to a single alpha-writing pass so the pop composite is correct.
+            flatten: !self.layer_stack.is_empty(),
         });
     }
 
@@ -293,6 +303,9 @@ impl WgpuGfxCtx {
             view,
             color,
             clip: self.current_clip(),
+            // See `LcbMask.flatten` above — inside a layer, render the coverage
+            // as a single-pass grayscale quad so the layer accumulates alpha.
+            flatten: !self.layer_stack.is_empty(),
         });
     }
 

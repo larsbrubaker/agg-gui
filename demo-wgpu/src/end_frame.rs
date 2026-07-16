@@ -111,7 +111,7 @@ pub(crate) enum Prepared {
         bg1: wgpu::BindGroup,
         clip: Option<[i32; 4]>,
     },
-    /// LCD subpixel mask (3-pass).
+    /// LCD subpixel mask (3-pass, or single grayscale pass when `flatten`).
     LcdMask {
         _texture: Arc<wgpu::Texture>,
         _view: wgpu::TextureView,
@@ -120,8 +120,9 @@ pub(crate) enum Prepared {
         bg0s: [wgpu::BindGroup; 3],
         bg1: wgpu::BindGroup,
         clip: Option<[i32; 4]>,
+        flatten: bool,
     },
-    /// LCD backbuffer (3-pass, two-plane input).
+    /// LCD backbuffer (3-pass two-plane, or single flatten pass when `flatten`).
     LcbMask {
         _color_tex: Arc<wgpu::Texture>,
         _color_view: wgpu::TextureView,
@@ -132,6 +133,7 @@ pub(crate) enum Prepared {
         bg0s: [wgpu::BindGroup; 3],
         bg1: wgpu::BindGroup,
         clip: Option<[i32; 4]>,
+        flatten: bool,
     },
     /// Begin rendering into a new layer texture.
     PushLayer {
@@ -146,6 +148,7 @@ pub(crate) enum Prepared {
         vb: PreparedSlice,
         bg0: wgpu::BindGroup,
         bg1: wgpu::BindGroup,
+        parent_clip: Option<[i32; 4]>,
     },
     /// Composite a retained layer onto the current target — no layer-stack
     /// change.
@@ -155,6 +158,7 @@ pub(crate) enum Prepared {
         vb: PreparedSlice,
         bg0: wgpu::BindGroup,
         bg1: wgpu::BindGroup,
+        parent_clip: Option<[i32; 4]>,
     },
     /// Drive the bar-grid 3-D renderer onto whatever render target is
     /// active when execute reaches this point.  Treated as a pass break
@@ -276,6 +280,7 @@ fn execute_prepared<'a>(
         &'a PreparedSlice,
         &'a wgpu::BindGroup,
         &'a wgpu::BindGroup,
+        Option<[i32; 4]>,
     )> = None;
 
     let mut i = 0usize;
@@ -290,14 +295,17 @@ fn execute_prepared<'a>(
             pass.set_viewport(0.0, 0.0, target_vp.0, target_vp.1, 0.0, 1.0);
 
             // First, if a PopLayer is pending, emit its composite quad at the
-            // start of this resumed parent pass.
-            if let Some((vb, bg0, bg1)) = pending_composite.take() {
-                pass.set_scissor_rect(0, 0, target_vp.0 as u32, target_vp.1 as u32);
-                pass.set_pipeline(&pipelines.layer_pipeline);
-                pass.set_bind_group(0, bg0, &[]);
-                pass.set_bind_group(1, bg1, &[]);
-                pass.set_vertex_buffer(0, vb.wgpu_slice());
-                pass.draw(0..6, 0..1);
+            // start of this resumed parent pass — clipped to the scissor that
+            // was active in the parent when the layer was pushed, so the blit
+            // can't spill outside the parent's clip (e.g. over a title bar).
+            if let Some((vb, bg0, bg1, parent_clip)) = pending_composite.take() {
+                if apply_clip(&mut pass, parent_clip, target_vp) {
+                    pass.set_pipeline(&pipelines.layer_pipeline);
+                    pass.set_bind_group(0, bg0, &[]);
+                    pass.set_bind_group(1, bg1, &[]);
+                    pass.set_vertex_buffer(0, vb.wgpu_slice());
+                    pass.draw(0..6, 0..1);
+                }
             }
 
             // Drive the pass forward until end-of-list or a pass break.  Layer
@@ -330,9 +338,15 @@ fn execute_prepared<'a>(
                     load_op = wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT);
                     i += 1;
                 }
-                Prepared::PopLayer { vb, bg0, bg1, .. } => {
+                Prepared::PopLayer {
+                    vb,
+                    bg0,
+                    bg1,
+                    parent_clip,
+                    ..
+                } => {
                     target_stack.pop();
-                    pending_composite = Some((vb, bg0, bg1));
+                    pending_composite = Some((vb, bg0, bg1, *parent_clip));
                     i += 1;
                 }
                 Prepared::DrawBarGrid {
@@ -486,6 +500,7 @@ fn execute_one(
             bg0s,
             bg1,
             clip,
+            flatten,
             ..
         } => {
             if !apply_clip(pass, *clip, vp) {
@@ -494,11 +509,19 @@ fn execute_one(
             pass.set_bind_group(1, bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
-            let lcd_pipelines = [&pipelines.lcd_r, &pipelines.lcd_g, &pipelines.lcd_b];
-            for ch in 0..3 {
-                pass.set_pipeline(lcd_pipelines[ch]);
-                pass.set_bind_group(0, &bg0s[ch], &[]);
+            if *flatten {
+                // Single alpha-writing grayscale pass (inside a layer). Uniforms
+                // in bg0s[0] carry the colour; the channel field is ignored.
+                pass.set_pipeline(&pipelines.text_gray);
+                pass.set_bind_group(0, &bg0s[0], &[]);
                 pass.draw_indexed(0..6, 0, 0..1);
+            } else {
+                let lcd_pipelines = [&pipelines.lcd_r, &pipelines.lcd_g, &pipelines.lcd_b];
+                for ch in 0..3 {
+                    pass.set_pipeline(lcd_pipelines[ch]);
+                    pass.set_bind_group(0, &bg0s[ch], &[]);
+                    pass.draw_indexed(0..6, 0, 0..1);
+                }
             }
         }
         Prepared::LcbMask {
@@ -507,6 +530,7 @@ fn execute_one(
             bg0s,
             bg1,
             clip,
+            flatten,
             ..
         } => {
             if !apply_clip(pass, *clip, vp) {
@@ -515,17 +539,35 @@ fn execute_one(
             pass.set_bind_group(1, bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
-            let lcb_pipelines = [&pipelines.lcb_r, &pipelines.lcb_g, &pipelines.lcb_b];
-            for ch in 0..3 {
-                pass.set_pipeline(lcb_pipelines[ch]);
-                pass.set_bind_group(0, &bg0s[ch], &[]);
+            if *flatten {
+                // Single flatten pass (inside a layer). Any of the three bind
+                // groups works — they share resolution + global_alpha and only
+                // differ in the (here-ignored) channel selector.
+                pass.set_pipeline(&pipelines.lcb_flatten);
+                pass.set_bind_group(0, &bg0s[0], &[]);
                 pass.draw_indexed(0..6, 0, 0..1);
+            } else {
+                let lcb_pipelines = [&pipelines.lcb_r, &pipelines.lcb_g, &pipelines.lcb_b];
+                for ch in 0..3 {
+                    pass.set_pipeline(lcb_pipelines[ch]);
+                    pass.set_bind_group(0, &bg0s[ch], &[]);
+                    pass.draw_indexed(0..6, 0, 0..1);
+                }
             }
         }
-        Prepared::CompositeLayer { vb, bg0, bg1, .. } => {
+        Prepared::CompositeLayer {
+            vb,
+            bg0,
+            bg1,
+            parent_clip,
+            ..
+        } => {
             // Composite a retained layer onto the current target — no stack
-            // change, full target as scissor.
-            pass.set_scissor_rect(0, 0, vp.0 as u32, vp.1 as u32);
+            // change.  Clip to the scissor active when the composite was
+            // requested so the blit can't paint outside the parent's clip.
+            if !apply_clip(pass, *parent_clip, vp) {
+                return;
+            }
             pass.set_pipeline(&pipelines.layer_pipeline);
             pass.set_bind_group(0, bg0, &[]);
             pass.set_bind_group(1, bg1, &[]);

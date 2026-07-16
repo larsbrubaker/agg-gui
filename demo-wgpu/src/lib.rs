@@ -102,6 +102,9 @@ mod primitives;
 mod shaders;
 mod text_render;
 
+#[cfg(test)]
+mod layer_text_readback_tests;
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
 
@@ -185,6 +188,9 @@ pub(crate) struct WgpuLayerEntry {
     /// Non-None when this layer will be stored in `retained_layers` on pop.
     pub(crate) retained_key: Option<u64>,
     pub(crate) rounded_clip: Option<LayerRoundedClip>,
+    /// Scissor active in the parent at push time — applied to the composite
+    /// blit on pop so the layer can't paint outside the parent's clip.
+    pub(crate) parent_clip: Option<[i32; 4]>,
 }
 
 /// A retained layer that persists across frames (keyed by `u64` handle).
@@ -609,14 +615,24 @@ pub(crate) enum DrawCommand {
         clip: Option<[i32; 4]>,
     },
     /// LCD subpixel mask (3-pass write-mask blend).
+    ///
+    /// `flatten` routes to the single-pass, alpha-writing grayscale pipeline
+    /// instead of the 3-pass subpixel one — set when the text lands inside a
+    /// compositing layer, whose transparent destination the 3-pass path can't
+    /// blend correctly (see `text_gray` in `pipelines.rs`).
     LcdMask {
         verts: [f32; 16],
         texture: Arc<wgpu::Texture>,
         view: wgpu::TextureView,
         color: Color,
         clip: Option<[i32; 4]>,
+        flatten: bool,
     },
     /// LCD backbuffer (two-plane 3-pass blend).
+    ///
+    /// `flatten` (inside a layer) routes to the single-pass `lcb_flatten`
+    /// pipeline.  `global_alpha` folds the context alpha into the premultiplied
+    /// blit so cached LCD text fades under a direct `set_global_alpha`.
     LcbMask {
         verts: [f32; 16],
         color_tex: Arc<wgpu::Texture>,
@@ -624,6 +640,8 @@ pub(crate) enum DrawCommand {
         alpha_tex: Arc<wgpu::Texture>,
         alpha_view: wgpu::TextureView,
         clip: Option<[i32; 4]>,
+        global_alpha: f32,
+        flatten: bool,
     },
     /// Clear the current render target to a solid color.
     Clear(Color),
@@ -645,6 +663,10 @@ pub(crate) enum DrawCommand {
         layer_h: u32,
         alpha: f32,
         rounded_clip: Option<LayerRoundedClip>,
+        /// Scissor active in the PARENT at `push_layer` time.  The composite
+        /// blit must honor it — otherwise a layer taller than its clipped
+        /// content paints over sibling chrome (e.g. a window title bar).
+        parent_clip: Option<[i32; 4]>,
     },
     /// Composite a previously-retained layer onto the current render target
     /// without entering it as a draw target.  Used by `composite_retained_layer`.
@@ -657,6 +679,8 @@ pub(crate) enum DrawCommand {
         layer_h: u32,
         alpha: f32,
         rounded_clip: Option<LayerRoundedClip>,
+        /// Scissor active on the target when the composite is requested.
+        parent_clip: Option<[i32; 4]>,
     },
     /// Render the 3-D bar-grid scene into the current render target.  The
     /// renderer is shared with [`bar_grid::WgpuCubeWidget`] via `Rc<RefCell<>>`

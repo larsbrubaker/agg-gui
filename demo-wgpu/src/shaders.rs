@@ -457,7 +457,7 @@ pub(crate) const LCB_WGSL: &str = "
 struct LcbUniforms {
     resolution: vec2<f32>,
     channel: u32,
-    pad: u32,
+    global_alpha: f32,
 }
 @group(0) @binding(0) var<uniform> u: LcbUniforms;
 @group(1) @binding(0) var u_color: texture_2d<f32>;
@@ -490,6 +490,103 @@ struct VOut {
     } else {
         cc = c.b; aa = a.b; col = vec3<f32>(0.0, 0.0, cc);
     }
-    return vec4<f32>(col, aa);
+    // Premultiplied output: scale colour AND alpha by the same global
+    // alpha so a set_global_alpha fade stays premult-correct.
+    return vec4<f32>(col * u.global_alpha, aa * u.global_alpha);
+}
+";
+
+// ---------------------------------------------------------------------------
+// Grayscale text pipeline (single-pass, alpha-writing) — used INSIDE layers
+// ---------------------------------------------------------------------------
+// The 3-pass LCD write-mask pipelines above never write the alpha channel
+// (each pass masks to one colour channel).  Against the opaque surface that
+// is fine (dst alpha is pinned at 1), but inside a transparent compositing
+// layer the text region keeps alpha=0, so the pop_layer composite blends it
+// additively and the glyphs wash out to white.  Inside a layer we therefore
+// render text as a plain grayscale coverage quad: one pass, ColorWrites::ALL,
+// standard src-over.  The coverage is the average of the mask's three
+// channels (equal for a grayscale mask), so there is no subpixel chroma —
+// which is correct, since LCD subpixel geometry only makes sense against the
+// final opaque backbuffer, not an intermediate layer.
+// group(0) binding(0): LcdUniforms { resolution, channel(unused), pad, color }
+// group(1) binding(0): mask texture, binding(1): sampler
+
+pub(crate) const TEXT_GRAY_WGSL: &str = "
+struct LcdUniforms {
+    resolution: vec2<f32>,
+    channel: u32,
+    pad: u32,
+    color: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> u: LcdUniforms;
+@group(1) @binding(0) var u_mask: texture_2d<f32>;
+@group(1) @binding(1) var u_sampler: sampler;
+
+struct VIn {
+    @location(0) pos: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+}
+struct VOut {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) v_uv: vec2<f32>,
+}
+
+@vertex fn vs_main(in: VIn) -> VOut {
+    let ndc = (in.pos / u.resolution) * 2.0 - 1.0;
+    return VOut(vec4<f32>(ndc, 0.0, 1.0), in.uv);
+}
+@fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
+    let c = textureSample(u_mask, u_sampler, in.v_uv).rgb;
+    let cov = (c.r + c.g + c.b) * (1.0 / 3.0);
+    // Straight-alpha colour + coverage — the standard src-over blend folds
+    // the coverage into both colour and the layer's accumulating alpha.
+    return vec4<f32>(u.color.rgb, cov * u.color.a);
+}
+";
+
+// ---------------------------------------------------------------------------
+// LCD backbuffer FLATTEN pipeline (single-pass, alpha-writing) — INSIDE layers
+// ---------------------------------------------------------------------------
+// Two-plane cached backbuffer analogue of TEXT_GRAY: collapses the per-channel
+// (premultiplied colour, per-channel alpha) planes into a single premultiplied
+// RGBA sample so the layer texture receives correct alpha.  Alpha is the max
+// of the three channel alphas (matching `LcdBuffer::to_rgba8_top_down_collapsed`
+// on the software side); colour is the premultiplied colour plane as-is.  One
+// pass, ColorWrites::ALL, premultiplied src-over.
+// group(0) binding(0): LcbUniforms { resolution, channel(unused), global_alpha }
+// group(1) binding(0): colour plane, binding(1): alpha plane, binding(2): sampler
+
+pub(crate) const LCB_FLATTEN_WGSL: &str = "
+struct LcbUniforms {
+    resolution: vec2<f32>,
+    channel: u32,
+    global_alpha: f32,
+}
+@group(0) @binding(0) var<uniform> u: LcbUniforms;
+@group(1) @binding(0) var u_color: texture_2d<f32>;
+@group(1) @binding(1) var u_alpha: texture_2d<f32>;
+@group(1) @binding(2) var u_sampler: sampler;
+
+struct VIn {
+    @location(0) pos: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+}
+struct VOut {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) v_uv: vec2<f32>,
+}
+
+@vertex fn vs_main(in: VIn) -> VOut {
+    let ndc = (in.pos / u.resolution) * 2.0 - 1.0;
+    return VOut(vec4<f32>(ndc, 0.0, 1.0), in.uv);
+}
+@fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
+    let c = textureSample(u_color, u_sampler, in.v_uv).rgb;
+    let a = textureSample(u_alpha, u_sampler, in.v_uv).rgb;
+    let aa = max(a.r, max(a.g, a.b));
+    // Premultiplied: colour plane is already colour*coverage, so scaling both
+    // it and the alpha by global_alpha keeps the sample premult-correct.
+    return vec4<f32>(c * u.global_alpha, aa * u.global_alpha);
 }
 ";
