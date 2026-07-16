@@ -118,6 +118,18 @@ pub fn word_range_at(s: &str, byte_pos: usize) -> (usize, usize) {
     (start, end)
 }
 
+/// Returns the `[start, end)` byte range of the *logical* line (paragraph)
+/// containing `byte_pos` — everything between the surrounding `\n`s, excluding
+/// the newlines themselves. Used for triple-click line selection in the
+/// multiline editors. "Logical" means the source paragraph, not a soft-wrapped
+/// visual line, so a triple-click grabs the whole paragraph even when it wraps.
+pub fn paragraph_range_at(s: &str, byte_pos: usize) -> (usize, usize) {
+    let pos = byte_pos.min(s.len());
+    let start = s[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let end = s[pos..].find('\n').map(|i| pos + i).unwrap_or(s.len());
+    (start, end)
+}
+
 // ---------------------------------------------------------------------------
 // X-coordinate ↔ byte-offset
 // ---------------------------------------------------------------------------
@@ -215,5 +227,71 @@ impl UndoRedoCommand for TextEditCommand {
     }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod word_line_tests {
+    use super::{paragraph_range_at, word_range_at};
+
+    #[test]
+    fn word_range_selects_alnum_run() {
+        let s = "hello world";
+        // Click inside "hello".
+        assert_eq!(word_range_at(s, 2), (0, 5));
+        // Click inside "world".
+        assert_eq!(word_range_at(s, 8), (6, 11));
+    }
+
+    #[test]
+    fn word_range_stops_at_punctuation() {
+        let s = "foo.bar";
+        // "foo" and "bar" are separate words; the '.' is its own run.
+        assert_eq!(word_range_at(s, 1), (0, 3));
+        assert_eq!(word_range_at(s, 5), (4, 7));
+        // Clicking on the punctuation selects just the punctuation run.
+        assert_eq!(word_range_at(s, 3), (3, 4));
+    }
+
+    #[test]
+    fn word_range_at_word_edge() {
+        let s = "cat dog";
+        // Right at the boundary between "cat" and the space: the char at the
+        // click position is the space, so the whitespace run is selected.
+        assert_eq!(word_range_at(s, 3), (3, 4));
+        // One byte earlier is still inside "cat".
+        assert_eq!(word_range_at(s, 2), (0, 3));
+    }
+
+    #[test]
+    fn word_range_includes_underscore() {
+        let s = "snake_case here";
+        assert_eq!(word_range_at(s, 3), (0, 10));
+    }
+
+    #[test]
+    fn paragraph_range_single_line() {
+        let s = "just one line";
+        assert_eq!(paragraph_range_at(s, 4), (0, s.len()));
+    }
+
+    #[test]
+    fn paragraph_range_middle_line() {
+        let s = "first\nsecond\nthird";
+        // Offset 8 is inside "second".
+        assert_eq!(paragraph_range_at(s, 8), (6, 12));
+    }
+
+    #[test]
+    fn paragraph_range_last_line_no_trailing_newline() {
+        let s = "a\nbb\nccc";
+        assert_eq!(paragraph_range_at(s, 7), (5, 8));
+    }
+
+    #[test]
+    fn paragraph_range_on_blank_line() {
+        let s = "a\n\nb";
+        // Offset 2 is the empty line between the two newlines.
+        assert_eq!(paragraph_range_at(s, 2), (2, 2));
     }
 }

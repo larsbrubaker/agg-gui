@@ -54,7 +54,10 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{measure_advance, measure_text_metrics, Font};
 use crate::widget::Widget;
 use crate::widgets::scrollbar::ScrollbarAxis;
-use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary, TextEditState};
+use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
+use crate::widgets::text_field_core::{
+    next_char_boundary, paragraph_range_at, prev_char_boundary, word_range_at, TextEditState,
+};
 
 /// Horizontal alignment of the wrapped text content inside a [`TextArea`]'s
 /// padded inner rect. Mirrors egui's `TextEdit::horizontal_align`.
@@ -326,6 +329,15 @@ pub struct TextArea {
     selecting_drag: bool,
     focus_time: Option<Instant>,
     blink_last_phase: Cell<u64>,
+
+    /// Multi-click (single / double / triple) detection and the granularity of
+    /// the active selection drag. A double-click selects the word, a
+    /// triple-click the logical line (paragraph), and dragging afterwards
+    /// extends by whole words / paragraphs. `select_pivot` is the byte range
+    /// the initiating click selected.
+    multi_click: MultiClickTracker,
+    select_granularity: SelectGranularity,
+    select_pivot: (usize, usize),
 }
 
 impl TextArea {
@@ -361,6 +373,9 @@ impl TextArea {
             selecting_drag: false,
             focus_time: None,
             blink_last_phase: Cell::new(0),
+            multi_click: MultiClickTracker::default(),
+            select_granularity: SelectGranularity::default(),
+            select_pivot: (0, 0),
         }
     }
 
@@ -708,5 +723,7 @@ mod edit_ops;
 mod scroll;
 mod widget_impl;
 
+#[cfg(test)]
+mod selection_tests;
 #[cfg(test)]
 mod tests;

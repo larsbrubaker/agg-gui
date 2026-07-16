@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use crate::event::{Event, Modifiers, MouseButton};
 use crate::geometry::{Point, Size};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -239,4 +240,69 @@ fn click_before_first_char_is_byte_zero() {
     // Far to the left of the text still clamps to the line start.
     let hit = ed.hit_test_pos(Point::new(geom.x - 50.0, geom.y_bottom + 2.0));
     assert_eq!(hit, DocPos::new(0, 0));
+}
+
+// ── Double-click word / triple-click block selection ──────────────────────
+
+fn plain_doc(blocks: &[&str]) -> RichDoc {
+    RichDoc::from_blocks(blocks.iter().map(|s| Block::plain(*s)).collect())
+}
+
+#[test]
+fn double_click_selects_word() {
+    let mut ed = laid_out_editor(plain_doc(&["hello world"]), 400.0, 120.0);
+    // DocPos byte 8 is inside "world".
+    ed.begin_pointer_selection(DocPos::new(0, 8), 2, false);
+    assert_eq!(ed.core.borrow().selected_plain_text(), "world");
+}
+
+#[test]
+fn double_click_stops_at_punctuation() {
+    let mut ed = laid_out_editor(plain_doc(&["foo.bar"]), 400.0, 120.0);
+    ed.begin_pointer_selection(DocPos::new(0, 1), 2, false);
+    assert_eq!(ed.core.borrow().selected_plain_text(), "foo");
+    ed.begin_pointer_selection(DocPos::new(0, 5), 2, false);
+    assert_eq!(ed.core.borrow().selected_plain_text(), "bar");
+}
+
+#[test]
+fn triple_click_selects_block() {
+    let mut ed = laid_out_editor(plain_doc(&["first block", "second block"]), 400.0, 200.0);
+    // Triple-click in the second block selects that whole block.
+    ed.begin_pointer_selection(DocPos::new(1, 4), 3, false);
+    assert_eq!(ed.core.borrow().selected_plain_text(), "second block");
+}
+
+#[test]
+fn word_drag_extends_by_whole_words() {
+    let mut ed = laid_out_editor(plain_doc(&["alpha beta gamma"]), 400.0, 120.0);
+    ed.begin_pointer_selection(DocPos::new(0, 7), 2, false); // "beta"
+    assert_eq!(ed.core.borrow().selected_plain_text(), "beta");
+    ed.extend_selection_drag(DocPos::new(0, 13)); // drag into "gamma"
+    assert_eq!(ed.core.borrow().selected_plain_text(), "beta gamma");
+    ed.extend_selection_drag(DocPos::new(0, 2)); // drag back into "alpha"
+    assert_eq!(ed.core.borrow().selected_plain_text(), "alpha beta");
+}
+
+/// A real double `MouseDown` at the same point selects the word, proving the
+/// multi-click counter is wired through the event handler.
+#[test]
+fn double_mouse_down_event_selects_word() {
+    let mut ed = laid_out_editor(plain_doc(&["hello world"]), 400.0, 120.0);
+    ed.on_event(&Event::FocusGained);
+    let geom = ed.caret_geometry(DocPos::new(0, 8)).unwrap();
+    let click = Point::new(geom.x + 0.5, geom.y_bottom + geom.height * 0.5);
+    let down = Event::MouseDown {
+        pos: click,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    };
+    ed.on_event(&down);
+    ed.on_event(&Event::MouseUp {
+        pos: click,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    ed.on_event(&down);
+    assert_eq!(ed.core.borrow().selected_plain_text(), "world");
 }

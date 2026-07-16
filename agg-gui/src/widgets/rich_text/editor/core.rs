@@ -145,6 +145,16 @@ impl RichEditCore {
         self.bump_rev();
     }
 
+    /// Set both endpoints of the selection explicitly — `anchor` is the fixed
+    /// end, `caret` the moving end. Used by double/triple-click word/block
+    /// selection and the drag that extends it.
+    pub fn set_selection(&mut self, anchor: DocPos, caret: DocPos) {
+        self.anchor = self.clamp_pos(anchor);
+        self.caret = self.clamp_pos(caret);
+        self.pending_style = None;
+        self.bump_rev();
+    }
+
     // ── Style introspection ───────────────────────────────────────────────
 
     /// Style a freshly-typed character would take: the pending caret style if

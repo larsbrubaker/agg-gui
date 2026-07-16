@@ -11,6 +11,7 @@ use web_time::Instant;
 
 use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::event::{Event, EventResult, Key, MouseButton};
+use crate::widgets::multi_click::SelectGranularity;
 use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary};
 
 use super::super::model::DocPos;
@@ -38,7 +39,7 @@ impl RichTextEdit {
                 }
                 if self.selecting_drag {
                     let target = self.hit_test_pos(*pos);
-                    self.core.borrow_mut().set_caret(target, true);
+                    self.extend_selection_drag(target);
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -58,7 +59,8 @@ impl RichTextEdit {
                     return EventResult::Consumed;
                 }
                 let target = self.hit_test_pos(*pos);
-                self.core.borrow_mut().set_caret(target, modifiers.shift);
+                let clicks = self.multi_click.register(*pos);
+                self.begin_pointer_selection(target, clicks, modifiers.shift);
                 self.selecting_drag = true;
                 self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
@@ -273,5 +275,105 @@ impl RichTextEdit {
             }
             DocPos::new(caret.block, i)
         }
+    }
+
+    /// Caret/selection update for a fresh pointer press. `clicks` is the
+    /// multi-click count (1 = single, 2 = double, 3 = triple). Double selects
+    /// the word under `target`, triple selects the whole block; `shift` extends
+    /// the existing selection instead.
+    pub(super) fn begin_pointer_selection(&mut self, target: DocPos, clicks: u32, shift: bool) {
+        if shift {
+            self.select_granularity = SelectGranularity::Char;
+            self.select_pivot = (target, target);
+            self.core.borrow_mut().set_caret(target, true);
+            return;
+        }
+        match clicks {
+            n if n >= 3 => {
+                self.select_granularity = SelectGranularity::Line;
+                let (a, b) = self.block_range_at_pos(target);
+                self.select_pivot = (a, b);
+                self.core.borrow_mut().set_selection(a, b);
+            }
+            2 => {
+                self.select_granularity = SelectGranularity::Word;
+                let (a, b) = self.word_range_at_pos(target);
+                self.select_pivot = (a, b);
+                self.core.borrow_mut().set_selection(a, b);
+            }
+            _ => {
+                self.select_granularity = SelectGranularity::Char;
+                self.select_pivot = (target, target);
+                self.core.borrow_mut().set_caret(target, false);
+            }
+        }
+    }
+
+    /// Extend the selection during a drag, honouring the granularity the
+    /// initiating click established. `target` is the caret position under the
+    /// pointer.
+    pub(super) fn extend_selection_drag(&mut self, target: DocPos) {
+        match self.select_granularity {
+            SelectGranularity::Char => self.core.borrow_mut().set_caret(target, true),
+            SelectGranularity::Word => {
+                let (pivot_start, pivot_end) = self.select_pivot;
+                let (cs, ce) = self.word_range_at_pos(target);
+                if target >= pivot_end {
+                    self.core.borrow_mut().set_selection(pivot_start, ce);
+                } else {
+                    self.core.borrow_mut().set_selection(pivot_end, cs);
+                }
+            }
+            SelectGranularity::Line => {
+                let (pivot_start, pivot_end) = self.select_pivot;
+                let (cs, ce) = self.block_range_at_pos(target);
+                if target >= pivot_end {
+                    self.core.borrow_mut().set_selection(pivot_start, ce);
+                } else {
+                    self.core.borrow_mut().set_selection(pivot_end, cs);
+                }
+            }
+        }
+    }
+
+    /// `[start, end)` document range of the word under `pos`, within its block.
+    /// Uses the same word classification as [`word_target`](Self::word_target)
+    /// (ASCII alphanumerics, `_`, and any non-ASCII byte are "word" bytes) so
+    /// double-click selection and Ctrl+arrow navigation agree.
+    fn word_range_at_pos(&self, pos: DocPos) -> (DocPos, DocPos) {
+        let core = self.core.borrow();
+        let doc = core.doc();
+        let Some(block) = doc.blocks.get(pos.block) else {
+            return (pos, pos);
+        };
+        let text = block.text();
+        let bytes = text.as_bytes();
+        let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+        let clamp = pos.byte.min(text.len());
+        // Class of the char at the click; past the block end there is no char,
+        // so treat it as a non-word boundary (select the trailing run, if any).
+        let anchor_class = clamp < text.len() && is_word(bytes[clamp]);
+        let mut start = clamp;
+        while start > 0 && is_word(bytes[start - 1]) == anchor_class {
+            start -= 1;
+        }
+        let mut end = clamp;
+        while end < text.len() && is_word(bytes[end]) == anchor_class {
+            end += 1;
+        }
+        (DocPos::new(pos.block, start), DocPos::new(pos.block, end))
+    }
+
+    /// The whole block (triple-click line selection) containing `pos`, from its
+    /// start to its end byte.
+    fn block_range_at_pos(&self, pos: DocPos) -> (DocPos, DocPos) {
+        let core = self.core.borrow();
+        let len = core
+            .doc()
+            .blocks
+            .get(pos.block)
+            .map(|b| b.text_len())
+            .unwrap_or(0);
+        (DocPos::new(pos.block, 0), DocPos::new(pos.block, len))
     }
 }

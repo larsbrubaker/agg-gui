@@ -19,6 +19,7 @@ pub mod label;
 pub mod markdown;
 pub mod menu;
 pub mod modal_sheet;
+pub mod multi_click;
 pub mod on_screen_keyboard;
 pub mod performance;
 pub mod popup;
