@@ -241,17 +241,11 @@ impl Widget for TextArea {
 
         // ── Text ───────────────────────────────────────────────────
         ctx.set_fill_color(v.text_color);
-        // Tight metrics for baseline positioning — the glyph baseline
-        // sits `descent` above each line's bottom edge.
-        let m = ctx.measure_text("Ag").unwrap_or_default();
         for (i, line) in self.cached_lines.iter().enumerate() {
             if line.text.is_empty() {
                 continue;
             }
-            let line_top = self.line_top_y(i);
-            let line_bottom = line_top - self.cached_line_h;
-            let baseline_y =
-                line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
+            let baseline_y = self.line_baseline_y(i);
             let x0 = self.line_x_start(line);
             match &self.highlighter {
                 // Syntax-highlighted path: paint each coloured run at its
@@ -280,10 +274,7 @@ impl Widget for TextArea {
                     TextHAlign::Center => slack * 0.5,
                     TextHAlign::Right => slack,
                 };
-            let line_top = self.line_top_y(0);
-            let line_bottom = line_top - self.cached_line_h;
-            let baseline_y =
-                line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
+            let baseline_y = self.line_baseline_y(0);
             ctx.fill_text(&self.hint, hint_x, baseline_y);
         }
 

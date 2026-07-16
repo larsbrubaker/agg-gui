@@ -677,6 +677,21 @@ impl TextArea {
         let line_bottom = line_top - self.cached_line_h;
         Point::new(x, line_bottom)
     }
+
+    /// Glyph baseline Y (Y-up) for visual line `i`, vertically centring the
+    /// font's full vertical extent within the 1.35× line cell.
+    ///
+    /// `descent` is a POSITIVE quantity here (see [`Font::descender_px`]), so
+    /// the text block's height is `ascent + descent`. Getting this wrong pushes
+    /// the block up and clips line 0's ascenders against the padded inner-rect
+    /// clip, so paint and the clip-safety test share this single helper.
+    fn line_baseline_y(&self, i: usize) -> f64 {
+        let ascent = self.font.ascender_px(self.font_size);
+        let descent = self.font.descender_px(self.font_size);
+        let line_top = self.line_top_y(i);
+        let line_bottom = line_top - self.cached_line_h;
+        line_bottom + (self.cached_line_h - (ascent + descent)) * 0.5 + descent
+    }
 }
 
 mod callbacks;

@@ -535,6 +535,26 @@ fn key_intercept_edit_scrolls_caret_into_view() {
     );
 }
 
+#[test]
+fn first_line_top_not_clipped_at_scroll_top() {
+    // Bug 1: at scroll offset 0 the first visual line's glyph top
+    // (baseline + ascent) must not poke above the padded inner-rect clip edge,
+    // otherwise the ascenders of the first line are visibly cut off. Asserts
+    // via `line_baseline_y`, the very helper `paint` uses to place glyphs.
+    let mut ta = multiline(12, 200.0, 80.0);
+    ta.set_cursor_to_start();
+    ta.ensure_cursor_visible();
+    assert_eq!(ta.scroll_offset(), 0.0, "scrolled to the very top");
+
+    let inner_top = ta.bounds.height - ta.padding; // Y-up clip top edge
+    let ascent = ta.font.ascender_px(ta.font_size);
+    let glyph_top = ta.line_baseline_y(0) + ascent;
+    assert!(
+        glyph_top <= inner_top + 0.01,
+        "first line ascenders clipped: glyph_top={glyph_top} > inner_top={inner_top}"
+    );
+}
+
 // ── (g) highlight segmentation ──────────────────────────────────────────────
 //
 // The highlighter paint path must split a line into gap-free, non-overlapping
