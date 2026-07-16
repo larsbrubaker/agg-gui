@@ -95,6 +95,7 @@ pub mod commands;
 pub mod editor;
 pub mod layout;
 pub mod model;
+pub mod toolbar;
 pub mod view;
 
 pub use commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand, MAX_INDENT};
@@ -107,4 +108,5 @@ pub use model::{
     insert_text, merge_block_with_prev, remove_range, split_block, Block, DocPos, DocRange,
     InlineStyle, ListKind, RichDoc, TextRun,
 };
+pub use toolbar::{RichTextToolbar, Variant};
 pub use view::{single_font_resolver, uniform_resolver, RichTextView, SharedResolver};

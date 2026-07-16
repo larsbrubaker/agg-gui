@@ -90,7 +90,7 @@ pub use resize::Resize;
 pub use rich_text::{
     apply_command, range_common_style, single_font_resolver, style_at, Block, CommonStyle, DocPos,
     DocRange, InlineStyle, ListKind, RichCommand, RichDoc, RichEditHandle, RichTextEdit,
-    RichTextView, SharedResolver, TextRun,
+    RichTextToolbar, RichTextView, SharedResolver, TextRun, Variant,
 };
 pub use scene::{Scene, SceneTransform};
 pub use scroll_view::{

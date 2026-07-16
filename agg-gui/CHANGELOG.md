@@ -43,6 +43,15 @@ parity work against egui 0.34.3. Includes a few semver-relevant changes — see
   `set_caret`, `set_selection` (clamped), `selection`, `plain_text`, and `load`
   (replaces the document and resets the undo history) for driving an embedded
   editor from code.
+- **`RichTextToolbar`** — a configurable, batteries-included formatting toolbar
+  widget driven by a `RichEditHandle`: bold/italic/underline/strike (Bold/Italic
+  gateable through an injected `Variant` check), alignment, ordered/bullet lists,
+  outdent/indent, undo/redo, a font-size dropdown, and text/highlight colour
+  swatches. Every control group toggles off through the builder; the font-family
+  dropdown is opt-in via `with_families` (the library takes no font catalog).
+  Colours open a floating `color_wheel_picker_dialog` via a companion
+  `color_overlay()` layer (apply-on-select; live preview pending a handle
+  preview-session API).
 - **Scene pan/zoom container** — a `Scene` widget that hosts content as a
   first-class child under a `child_transform`, added via the new
   `Widget::child_transform` hook for scaled subtrees (focus, click-to-focus, and
