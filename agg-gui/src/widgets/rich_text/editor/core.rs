@@ -26,7 +26,7 @@ use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary};
 use super::super::commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand};
 use super::super::model::{
     insert_text, merge_block_with_prev, remove_range, split_block, DocPos, DocRange, InlineStyle,
-    RichDoc,
+    ListKind, RichDoc,
 };
 
 /// One undo/redo snapshot: the whole document plus the caret and anchor, so an
@@ -235,8 +235,26 @@ impl RichEditCore {
     }
 
     /// Enter: split the paragraph at the caret (after clearing any selection).
+    ///
+    /// Standard editor behaviour for an **empty list item**: instead of adding
+    /// yet another empty bullet, Enter first outdents (indent > 0 → indent − 1),
+    /// and at indent 0 exits the list ([`ListKind::None`]) — no split in either
+    /// case.  A non-empty (or non-list) block splits normally.
     pub fn split(&mut self) {
         self.take_selection();
+        if let Some(block) = self.doc.blocks.get_mut(self.caret.block) {
+            if block.list != ListKind::None && block.text_len() == 0 {
+                if block.indent > 0 {
+                    block.indent -= 1;
+                } else {
+                    block.list = ListKind::None;
+                }
+                self.anchor = self.caret;
+                self.pending_style = None;
+                self.bump_doc();
+                return;
+            }
+        }
         self.caret = split_block(&mut self.doc, self.caret);
         self.anchor = self.caret;
         self.pending_style = None;
@@ -320,6 +338,12 @@ impl RichEditCore {
     }
 
     // ── Undo / redo (time-coalescing snapshots) ───────────────────────────
+    //
+    // Note: `feed_undo` (once per frame) and `can_undo` / `can_redo` each build
+    // a `snapshot`, which clones the whole `RichDoc`. That is fine at demo
+    // scale — per the measure-first rule we don't optimise on speculation — but
+    // for very large documents this per-frame clone is the first thing to
+    // revisit (e.g. a dirty flag or structural sharing).
 
     fn snapshot(&self) -> EditSnapshot {
         EditSnapshot {

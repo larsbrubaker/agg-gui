@@ -254,6 +254,10 @@ fn build_picker(
 /// invalidates the editor's cached layout when a new face loads, so
 /// asynchronously-loaded fonts are picked up (the editor otherwise caches its
 /// layout against `(width, doc_revision)` only).
+///
+/// It deliberately does **not** forward layout-props (margin, anchors,
+/// min/max size): the editor is sized by its enclosing `SizedBox`, so the
+/// wrapper only needs to pass through layout, paint, events and focus.
 struct RichEditHost {
     editor: RichTextEdit,
     last_epoch: Cell<u64>,

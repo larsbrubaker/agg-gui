@@ -8,7 +8,7 @@ use crate::geometry::{Point, Size};
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::rich_text::commands::RichCommand;
-use crate::widgets::rich_text::model::{Block, DocPos, InlineStyle, RichDoc, TextRun};
+use crate::widgets::rich_text::model::{Block, DocPos, InlineStyle, ListKind, RichDoc, TextRun};
 use crate::widgets::rich_text::view::SharedResolver;
 
 use super::core::RichEditCore;
@@ -144,6 +144,56 @@ fn clipboard_round_trip_across_blocks() {
     assert_eq!(fresh.doc().blocks.len(), 2);
     assert_eq!(fresh.doc().blocks[0].text(), "alpha");
     assert_eq!(fresh.doc().blocks[1].text(), "beta");
+}
+
+#[test]
+fn enter_on_empty_list_item_exits_list_at_indent_zero() {
+    // An empty bullet item + Enter becomes a plain paragraph (no new bullet).
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![],
+        list: ListKind::Bullet,
+        indent: 0,
+        ..Block::new()
+    }]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.set_caret(DocPos::new(0, 0), false);
+    core.split();
+    assert_eq!(core.doc().blocks.len(), 1, "no split occurred");
+    assert_eq!(core.doc().blocks[0].list, ListKind::None);
+    assert_eq!(core.doc().blocks[0].indent, 0);
+}
+
+#[test]
+fn enter_on_empty_nested_list_item_outdents() {
+    // An empty nested item + Enter decreases indent and keeps the list.
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![],
+        list: ListKind::Ordered,
+        indent: 2,
+        ..Block::new()
+    }]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.set_caret(DocPos::new(0, 0), false);
+    core.split();
+    assert_eq!(core.doc().blocks.len(), 1, "no split occurred");
+    assert_eq!(core.doc().blocks[0].list, ListKind::Ordered);
+    assert_eq!(core.doc().blocks[0].indent, 1);
+}
+
+#[test]
+fn enter_on_non_empty_list_item_splits_normally() {
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![TextRun::plain("item")],
+        list: ListKind::Bullet,
+        ..Block::new()
+    }]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.set_caret(core.doc().end_pos(), false);
+    core.split();
+    assert_eq!(core.doc().blocks.len(), 2, "non-empty item splits");
+    // The new block inherits the list kind (an empty continuation bullet).
+    assert_eq!(core.doc().blocks[1].list, ListKind::Bullet);
+    assert_eq!(core.doc().blocks[1].text(), "");
 }
 
 // ── Widget geometry (caret hit-testing) ───────────────────────────────────
