@@ -15,8 +15,8 @@ use std::mem::size_of;
 use bytemuck::{Pod, Zeroable};
 
 use crate::shaders::{
-    AA_SOLID_WGSL, AA_TEXTURE_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_WGSL, LCD_WGSL, SOLID_WGSL,
-    TEX_DOWNSAMPLE_3X_WGSL, TEX_DOWNSAMPLE_4X_WGSL, TEX_WGSL,
+    AA_SOLID_WGSL, AA_TEXTURE_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_FLATTEN_WGSL, LCB_WGSL, LCD_WGSL,
+    SOLID_WGSL, TEXT_GRAY_WGSL, TEX_DOWNSAMPLE_3X_WGSL, TEX_DOWNSAMPLE_4X_WGSL, TEX_WGSL,
 };
 
 // ---------------------------------------------------------------------------
@@ -85,12 +85,17 @@ pub(crate) struct LcdUniforms {
 const _: () = assert!(size_of::<LcdUniforms>() == 32);
 
 /// 16-byte uniform block for the LCD backbuffer composite pipeline.
+///
+/// `global_alpha` folds the context's active alpha into the premultiplied
+/// blit so a direct `set_global_alpha` fades cached LCD text — matching the
+/// Textured and LcdMask paths, which already carry it.  Occupies the slot
+/// that used to be dead padding, so the struct is still 16 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub(crate) struct LcbUniforms {
     pub resolution: [f32; 2],
     pub channel: u32,
-    pub _pad: u32,
+    pub global_alpha: f32,
 }
 const _: () = assert!(size_of::<LcbUniforms>() == 16);
 
@@ -205,6 +210,17 @@ pub struct WgpuPipelines {
     pub lcb_b: wgpu::RenderPipeline,
     pub lcb_bgl0: wgpu::BindGroupLayout,
     pub lcb_bgl1: wgpu::BindGroupLayout,
+
+    // ── Inside-layer text (single-pass, alpha-writing) ────────────────────────
+    /// Grayscale coverage text quad — reuses the LCD bind-group layouts but
+    /// writes ALL colour channels + alpha in one pass.  Routed to when text is
+    /// drawn inside a compositing layer so the layer texture gets correct alpha
+    /// (the 3-pass LCD pipelines never write alpha → washed-out glyphs on pop).
+    pub text_gray: wgpu::RenderPipeline,
+    /// Two-plane backbuffer flatten quad — reuses the LCB bind-group layouts,
+    /// collapses the per-channel planes into a single premultiplied sample in
+    /// one alpha-writing pass.  Inside-layer companion to `lcb_r/g/b`.
+    pub lcb_flatten: wgpu::RenderPipeline,
 
     // ── Shared samplers ───────────────────────────────────────────────────────
     /// Nearest-neighbour — used for LCD mask textures and Label backbuffers.
@@ -517,6 +533,37 @@ impl WgpuPipelines {
             sample_count,
         );
 
+        // Inside-layer text: single-pass, alpha-writing.  `text_gray` reuses the
+        // LCD layout (`lcd_pl`) + a straight-alpha blend; `lcb_flatten` reuses
+        // the LCB layout (`lcb_pl`) + a premultiplied blend.  Both write ALL
+        // channels so a transparent layer accumulates correct alpha.
+        let text_gray_sm = mk_shader(device, "text_gray", TEXT_GRAY_WGSL);
+        let text_gray = build_pipeline(
+            device,
+            "text_gray",
+            &lcd_pl,
+            &text_gray_sm,
+            &text_gray_sm,
+            &[vbl_pos2_uv2()],
+            surface_format,
+            Some(BLEND_STANDARD),
+            wgpu::ColorWrites::ALL,
+            sample_count,
+        );
+        let lcb_flatten_sm = mk_shader(device, "lcb_flatten", LCB_FLATTEN_WGSL);
+        let lcb_flatten = build_pipeline(
+            device,
+            "lcb_flatten",
+            &lcb_pl,
+            &lcb_flatten_sm,
+            &lcb_flatten_sm,
+            &[vbl_pos2_uv2()],
+            surface_format,
+            Some(BLEND_PREMUL),
+            wgpu::ColorWrites::ALL,
+            sample_count,
+        );
+
         Self {
             solid_pipeline,
             solid_bgl,
@@ -546,6 +593,8 @@ impl WgpuPipelines {
             lcb_b,
             lcb_bgl0,
             lcb_bgl1,
+            text_gray,
+            lcb_flatten,
             nearest_sampler,
             linear_sampler,
         }

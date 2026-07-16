@@ -161,6 +161,9 @@ impl WgpuGfxCtx {
         retained_key: Option<u64>,
     ) {
         let saved = self.capture_draw_state();
+        // Snapshot the parent's active scissor BEFORE the layer resets clip
+        // state — the composite blit on pop must be clipped to it.
+        let parent_clip = self.current_clip();
         let origin_x = self.ctm().tx;
         let origin_y = self.ctm().ty;
         let (scale_x, scale_y) = layer_scale_from_transform(self.ctm());
@@ -210,6 +213,7 @@ impl WgpuGfxCtx {
             saved,
             retained_key,
             rounded_clip,
+            parent_clip,
         });
 
         // Reset draw state for the layer's local coordinate system.
@@ -249,6 +253,7 @@ impl WgpuGfxCtx {
             layer_h: layer.height,
             alpha: layer.alpha as f32,
             rounded_clip: layer.rounded_clip,
+            parent_clip: layer.parent_clip,
         });
     }
 
@@ -286,6 +291,7 @@ impl WgpuGfxCtx {
         let view = retained.view.clone();
         let rounded_clip = retained.rounded_clip;
 
+        let parent_clip = self.current_clip();
         self.commands.push(DrawCommand::CompositeLayer {
             texture,
             view,
@@ -295,6 +301,7 @@ impl WgpuGfxCtx {
             layer_h: h,
             alpha: alpha.clamp(0.0, 1.0) as f32,
             rounded_clip,
+            parent_clip,
         });
         true
     }

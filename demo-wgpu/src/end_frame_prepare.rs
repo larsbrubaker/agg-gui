@@ -311,6 +311,7 @@ pub(crate) fn prepare_all(
                 view,
                 color,
                 clip,
+                flatten,
             } => {
                 let ubs: [PreparedSlice; 3] = std::array::from_fn(|ch| {
                     let u = LcdUniforms {
@@ -353,6 +354,7 @@ pub(crate) fn prepare_all(
                     bg0s,
                     bg1,
                     clip: *clip,
+                    flatten: *flatten,
                 });
             }
 
@@ -363,12 +365,14 @@ pub(crate) fn prepare_all(
                 alpha_tex,
                 alpha_view,
                 clip,
+                global_alpha,
+                flatten,
             } => {
                 let ubs: [PreparedSlice; 3] = std::array::from_fn(|ch| {
                     let u = LcbUniforms {
                         resolution: [cur_vp.0, cur_vp.1],
                         channel: ch as u32,
-                        _pad: 0,
+                        global_alpha: *global_alpha,
                     };
                     alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u))
                 });
@@ -410,6 +414,7 @@ pub(crate) fn prepare_all(
                     bg0s,
                     bg1,
                     clip: *clip,
+                    flatten: *flatten,
                 });
             }
 
@@ -436,6 +441,7 @@ pub(crate) fn prepare_all(
                 layer_h,
                 alpha,
                 rounded_clip,
+                parent_clip,
             } => {
                 size_stack.pop();
                 let parent_vp = *size_stack.last().unwrap_or(&viewport);
@@ -468,6 +474,7 @@ pub(crate) fn prepare_all(
                     vb,
                     bg0,
                     bg1,
+                    parent_clip: *parent_clip,
                 });
             }
 
@@ -480,6 +487,7 @@ pub(crate) fn prepare_all(
                 layer_h,
                 alpha,
                 rounded_clip,
+                parent_clip,
             } => {
                 let (mask_rect, mask_radius, mask_enabled) = match rounded_clip {
                     Some(LayerRoundedClip { x, y, w, h, r }) => ([*x, *y, *w, *h], *r, 1u32),
@@ -510,6 +518,7 @@ pub(crate) fn prepare_all(
                     vb,
                     bg0,
                     bg1,
+                    parent_clip: *parent_clip,
                 });
             }
 

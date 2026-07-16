@@ -48,23 +48,38 @@ pub(super) fn composite_framebuffers(
     dest_x: i32,
     dest_y: i32,
     alpha: f64,
+    clip: Option<(f64, f64, f64, f64)>,
 ) {
     let src_w = src.width() as i32;
     let src_h = src.height() as i32;
     let dst_w = dst.width() as i32;
     let dst_h = dst.height() as i32;
 
+    // Destination scissor bounds in Y-up pixel space (half-open).  `clip` is a
+    // screen-space rect in the same coordinates as `dest_x/dest_y`; a composite
+    // (e.g. a popped layer) must not paint outside the scissor that was active
+    // when the layer was pushed.
+    let (cx1, cy1, cx2, cy2) = match clip {
+        Some((cx, cy, cw, ch)) => (
+            cx.floor() as i32,
+            cy.floor() as i32,
+            (cx + cw).ceil() as i32,
+            (cy + ch).ceil() as i32,
+        ),
+        None => (0, 0, dst_w, dst_h),
+    };
+
     let src_px = src.pixels();
     let dst_px = dst.pixels_mut();
 
     for sy in 0..src_h {
         let dy = dest_y + sy;
-        if dy < 0 || dy >= dst_h {
+        if dy < 0 || dy >= dst_h || dy < cy1 || dy >= cy2 {
             continue;
         }
         for sx in 0..src_w {
             let dx = dest_x + sx;
-            if dx < 0 || dx >= dst_w {
+            if dx < 0 || dx >= dst_w || dx < cx1 || dx >= cx2 {
                 continue;
             }
             let si = ((sy * src_w + sx) * 4) as usize;
@@ -688,7 +703,9 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // of `set_global_alpha`.
         let ga = self.state.global_alpha;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        composite_framebuffers(fb, &scaled, screen_x, screen_y, ga);
+        // No extra scissor here — the image blit path's clipping is handled
+        // by its caller; the composite clip param is used by the layer pop.
+        composite_framebuffers(fb, &scaled, screen_x, screen_y, ga, None);
     }
 }
 

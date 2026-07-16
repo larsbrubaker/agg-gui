@@ -67,11 +67,15 @@ impl GfxCtx<'_> {
         let oy = layer.origin_y as i32;
         self.state = layer.saved_state;
         self.state_stack = layer.saved_stack;
+        // Clip the composite to the parent scissor restored above — a layer
+        // sized larger than its clipped content must not overpaint siblings
+        // (e.g. a window's opacity group spilling over the title bar).
+        let parent_clip = self.state.clip;
         // Composite: src = layer.fb, dst = now-active framebuffer.
         if let Some(top) = self.layer_stack.last_mut() {
-            composite_framebuffers(&mut top.fb, &layer.fb, ox, oy, layer.alpha);
+            composite_framebuffers(&mut top.fb, &layer.fb, ox, oy, layer.alpha, parent_clip);
         } else {
-            composite_framebuffers(self.base_fb, &layer.fb, ox, oy, layer.alpha);
+            composite_framebuffers(self.base_fb, &layer.fb, ox, oy, layer.alpha, parent_clip);
         }
     }
 }
