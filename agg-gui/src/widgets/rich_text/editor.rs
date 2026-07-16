@@ -29,7 +29,7 @@ use crate::event::{Event, EventResult};
 use crate::focus::FocusId;
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::widget::Widget;
+use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
 use crate::widgets::scrollbar::ScrollbarAxis;
 
@@ -93,6 +93,32 @@ pub struct RichTextEdit {
     /// Caret revision observed at the previous layout, to scroll external
     /// (toolbar-driven) caret moves into view.
     last_layout_rev: Option<u64>,
+
+    /// Per-widget CPU bitmap cache. Routes the whole editor (bg + selection +
+    /// styled runs) through the same LCD-subpixel / grayscale pipeline as
+    /// `Label` and `TextField` via `paint_subtree_backbuffered`, so styled text
+    /// gets the app's best rendering by default and follows the System settings.
+    cache: BackbufferCache,
+    /// Last painted signature; a change invalidates [`Self::cache`] in `layout`.
+    last_sig: Option<RichEditSig>,
+}
+
+/// Snapshot of every input that affects the cached backbuffer bitmap
+/// (background + selection band + styled runs + border). `layout` compares the
+/// current sig against the last one and drops the cache on any difference.
+///
+/// Blink phase and the floating scrollbar paint in `paint_overlay` (after the
+/// blit) and are excluded; typography / theme invalidation is handled by the
+/// framework's epoch checks. `core_rev` folds in every document, caret and
+/// selection change (see [`RichEditCore::rev`]).
+#[derive(Clone, PartialEq)]
+struct RichEditSig {
+    core_rev: u64,
+    focused: bool,
+    hovered: bool,
+    offset_bits: u64,
+    w_bits: u64,
+    h_bits: u64,
 }
 
 impl RichTextEdit {
@@ -123,6 +149,20 @@ impl RichTextEdit {
             select_pivot: (DocPos::new(0, 0), DocPos::new(0, 0)),
             start: Instant::now(),
             last_layout_rev: None,
+            cache: BackbufferCache::default(),
+            last_sig: None,
+        }
+    }
+
+    /// Build the backbuffer-cache invalidation signature from current state.
+    fn cache_sig(&self) -> RichEditSig {
+        RichEditSig {
+            core_rev: self.core.borrow().rev(),
+            focused: self.focused,
+            hovered: self.hovered,
+            offset_bits: self.vbar.offset.to_bits(),
+            w_bits: self.bounds.width.to_bits(),
+            h_bits: self.bounds.height.to_bits(),
         }
     }
 
@@ -275,6 +315,22 @@ impl Widget for RichTextEdit {
         self.base.max_size
     }
 
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
+        Some(&mut self.cache)
+    }
+
+    fn backbuffer_mode(&self) -> BackbufferMode {
+        // Same decision as `Label` / `TextField` / `TextArea`: LCD coverage
+        // buffer when the global toggle is on, grayscale RGBA otherwise. The
+        // mode-flip detection in `paint_subtree_backbuffered` re-rasters when
+        // the toggle changes.
+        if crate::font_settings::lcd_enabled() {
+            BackbufferMode::LcdCoverage
+        } else {
+            BackbufferMode::Rgba
+        }
+    }
+
     fn measure_min_height(&self, available_w: f64) -> f64 {
         let resolver: &FontResolver = &*self.resolver;
         let core = self.core.borrow();
@@ -307,6 +363,15 @@ impl Widget for RichTextEdit {
             self.ensure_caret_visible();
         }
         self.last_layout_rev = Some(rev);
+
+        // Drop the cached bitmap when any painted input changed (document,
+        // caret/selection, scroll, focus/hover, size). Blink phase and the
+        // floating scrollbar are excluded — they paint in `paint_overlay`.
+        let sig = self.cache_sig();
+        if self.last_sig.as_ref() != Some(&sig) {
+            self.last_sig = Some(sig);
+            self.cache.invalidate();
+        }
         Size::new(w, h)
     }
 
@@ -315,6 +380,10 @@ impl Widget for RichTextEdit {
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn crate::draw_ctx::DrawCtx) {
+        // Floating scrollbar first (after the cache blit) so its hover/fade
+        // animation stays live without re-rastering the text bitmap, then the
+        // blinking caret.
+        self.paint_scrollbar(ctx);
         self.paint_caret(ctx);
     }
 

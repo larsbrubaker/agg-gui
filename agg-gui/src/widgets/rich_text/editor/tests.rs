@@ -306,3 +306,31 @@ fn double_mouse_down_event_selects_word() {
     ed.on_event(&down);
     assert_eq!(ed.core.borrow().selected_plain_text(), "world");
 }
+
+// ── Text-rendering pipeline: LCD routing ───────────────────────────────────
+
+/// The editor must follow the System LCD setting exactly like `Label` /
+/// `TextField` / `TextArea`: an `LcdCoverage` backbuffer when LCD is on, a
+/// grayscale `Rgba` backbuffer when it is off.
+#[test]
+fn backbuffer_mode_follows_lcd_setting() {
+    use crate::widget::BackbufferMode;
+    // Standard density so the high-scale hard cap in `lcd_enabled` doesn't mask
+    // the explicit override under test.
+    crate::device_scale::set_device_scale(1.0);
+    crate::ux_scale::set_ux_scale(1.0);
+
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![sized("hello", 16.0)],
+        ..Block::new()
+    }]);
+    let ed = laid_out_editor(doc, 400.0, 120.0);
+
+    crate::font_settings::set_lcd_enabled(true);
+    assert_eq!(ed.backbuffer_mode(), BackbufferMode::LcdCoverage);
+
+    crate::font_settings::set_lcd_enabled(false);
+    assert_eq!(ed.backbuffer_mode(), BackbufferMode::Rgba);
+
+    crate::font_settings::clear_lcd_enabled_override();
+}

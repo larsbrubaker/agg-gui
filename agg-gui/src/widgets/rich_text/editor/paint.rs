@@ -55,7 +55,9 @@ impl RichTextEdit {
             if let (Some(marker), Some(font), Some(first)) =
                 (&block.marker, &block.marker_font, block.lines.first())
             {
-                let baseline_up = self.doc_top_yup() - (y_top + first.baseline_from_top);
+                let baseline_up = crate::font_settings::snap_baseline_y(
+                    self.doc_top_yup() - (y_top + first.baseline_from_top),
+                );
                 let color = first
                     .fragments
                     .first()
@@ -69,7 +71,9 @@ impl RichTextEdit {
 
             for line in &block.lines {
                 let line_top = y_top;
-                let baseline_up = self.doc_top_yup() - (line_top + line.baseline_from_top);
+                let baseline_up = crate::font_settings::snap_baseline_y(
+                    self.doc_top_yup() - (line_top + line.baseline_from_top),
+                );
                 let line_bottom_up = self.doc_top_yup() - (line_top + line.height);
                 let text_x0 = self.padding + block.text_left + line.align_dx;
 
@@ -124,8 +128,8 @@ impl RichTextEdit {
             4.0,
         );
         ctx.stroke();
-
-        self.paint_scrollbar(ctx);
+        // Scrollbar paints in `paint_overlay` (after the cache blit) so its
+        // animation doesn't force the styled-text bitmap to re-raster.
     }
 
     /// Paint the fragments of one line (text, highlight, underline/strike).
