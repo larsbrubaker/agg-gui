@@ -21,6 +21,11 @@ use super::RichTextEdit;
 impl RichTextEdit {
     /// Central event dispatch (called from `Widget::on_event`).
     pub(super) fn handle_event(&mut self, event: &Event) -> EventResult {
+        // While the right-click menu is open it captures events (see
+        // `has_active_modal`); route them through it first.
+        if let Some(result) = self.route_context_menu(event) {
+            return result;
+        }
         match event {
             Event::MouseMove { pos } => {
                 let bar_hover_changed = match self.scrollbar_on_mouse_move(*pos) {
@@ -65,6 +70,18 @@ impl RichTextEdit {
                 self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
+            }
+            Event::MouseDown {
+                button: MouseButton::Right,
+                pos,
+                ..
+            } => {
+                if self.context_menu_enabled {
+                    self.open_context_menu(*pos);
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             Event::MouseUp {
                 button: MouseButton::Left,

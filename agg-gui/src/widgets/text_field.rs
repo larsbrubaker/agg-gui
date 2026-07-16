@@ -43,6 +43,7 @@ use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 
 mod binding;
 mod clipboard;
+mod context_menu;
 mod filter;
 mod keyboard_mode;
 mod layout_builders;
@@ -55,6 +56,7 @@ mod widget_impl;
 #[cfg(test)]
 mod selection_tests;
 
+use crate::widgets::text_context_menu::TextContextMenu;
 use clipboard::{clipboard_get, clipboard_set};
 use sig::TextFieldSig;
 pub use theme::TextFieldTheme;
@@ -159,6 +161,11 @@ pub struct TextField {
     // the cache.  Sig deliberately excludes `blink_visible`.
     cache: BackbufferCache,
     last_sig: Option<TextFieldSig>,
+
+    /// Default-on right-click Cut/Copy/Paste/Select-All menu. Opt out with
+    /// [`with_context_menu(false)`](Self::with_context_menu).
+    context_menu: TextContextMenu,
+    context_menu_enabled: bool,
 }
 
 impl TextField {
@@ -200,6 +207,8 @@ impl TextField {
             theme: TextFieldTheme::default(),
             cache: BackbufferCache::default(),
             last_sig: None,
+            context_menu: TextContextMenu::new(),
+            context_menu_enabled: true,
         }
     }
 
@@ -223,6 +232,12 @@ impl TextField {
     }
     pub fn with_read_only(mut self, v: bool) -> Self {
         self.read_only = v;
+        self
+    }
+    /// Enable or disable the default right-click Cut/Copy/Paste/Select-All
+    /// context menu. On by default.
+    pub fn with_context_menu(mut self, v: bool) -> Self {
+        self.context_menu_enabled = v;
         self
     }
     pub fn with_select_all_on_focus(mut self, v: bool) -> Self {
@@ -482,10 +497,7 @@ impl TextField {
                 if cmd {
                     return match c {
                         'a' | 'A' => {
-                            let len = self.edit.borrow().text.len();
-                            let mut st = self.edit.borrow_mut();
-                            st.anchor = 0;
-                            st.cursor = len;
+                            self.select_all_text();
                             EventResult::Consumed
                         }
                         'z' | 'Z' if !mods.shift => {
@@ -501,24 +513,15 @@ impl TextField {
                             EventResult::Consumed
                         }
                         'x' | 'X' => {
-                            if !self.read_only && self.has_selection() {
-                                clipboard_set(&self.selection());
-                                self.do_delete(false, false); // delete selection via do_delete
-                            }
+                            self.clipboard_cut();
                             EventResult::Consumed
                         }
                         'c' | 'C' => {
-                            if self.has_selection() {
-                                clipboard_set(&self.selection());
-                            }
+                            self.clipboard_copy();
                             EventResult::Consumed
                         }
                         'v' | 'V' => {
-                            if !self.read_only {
-                                if let Some(clip) = clipboard_get() {
-                                    self.do_insert(&clip, false);
-                                }
-                            }
+                            self.clipboard_paste();
                             EventResult::Consumed
                         }
                         _ => EventResult::Ignored,
@@ -540,16 +543,12 @@ impl TextField {
             // Plain `Insert` toggles overwrite mode in many editors — we
             // don't model overwrite, so plain Insert is a no-op here.
             Key::Insert => {
-                if mods.shift && !self.read_only {
-                    if let Some(clip) = clipboard_get() {
-                        self.do_insert(&clip, false);
-                    }
+                if mods.shift {
+                    self.clipboard_paste();
                     return EventResult::Consumed;
                 }
                 if cmd {
-                    if self.has_selection() {
-                        clipboard_set(&self.selection());
-                    }
+                    self.clipboard_copy();
                     return EventResult::Consumed;
                 }
                 EventResult::Ignored
@@ -565,10 +564,7 @@ impl TextField {
             Key::Delete if !self.read_only => {
                 if mods.shift {
                     // Shift+Delete = Cut
-                    if self.has_selection() {
-                        clipboard_set(&self.selection());
-                        self.do_delete(false, false);
-                    }
+                    self.clipboard_cut();
                 } else {
                     self.do_delete(true, word);
                 }

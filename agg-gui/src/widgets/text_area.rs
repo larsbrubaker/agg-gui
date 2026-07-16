@@ -374,6 +374,11 @@ pub struct TextArea {
     cache: BackbufferCache,
     /// Last painted signature; a change invalidates [`Self::cache`] in `layout`.
     last_sig: Option<TextAreaSig>,
+
+    /// Default-on right-click Cut/Copy/Paste/Select-All menu. Opt out with
+    /// [`with_context_menu(false)`](Self::with_context_menu).
+    context_menu: crate::widgets::text_context_menu::TextContextMenu,
+    context_menu_enabled: bool,
 }
 
 impl TextArea {
@@ -414,6 +419,8 @@ impl TextArea {
             select_pivot: (0, 0),
             cache: BackbufferCache::default(),
             last_sig: None,
+            context_menu: crate::widgets::text_context_menu::TextContextMenu::new(),
+            context_menu_enabled: true,
         }
     }
 
@@ -778,6 +785,7 @@ impl TextArea {
 }
 
 mod callbacks;
+mod context_menu;
 mod edit_ops;
 mod scroll;
 mod widget_impl;

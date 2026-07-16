@@ -42,6 +42,7 @@ pub mod splitter;
 pub mod tab_view;
 pub mod table;
 pub mod text_area;
+pub mod text_context_menu;
 pub mod text_field;
 pub mod text_field_core;
 pub mod toggle_switch;
@@ -106,6 +107,7 @@ pub use table::{
     HeaderInfo, HeaderPainter, RowPredicate, Table, TableBuilder, TableColumn, TableRows,
 };
 pub use text_area::{TextArea, TextHAlign, TextVAlign};
+pub use text_context_menu::{TextContextMenu, TextMenuAction};
 pub use text_field::{TextField, TextFieldTheme};
 pub use text_field_core::TextEditState;
 pub use toggle_switch::ToggleSwitch;
