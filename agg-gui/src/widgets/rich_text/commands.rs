@@ -51,6 +51,15 @@ pub struct CommonStyle {
     pub font_size: Option<Option<f64>>,
     pub text_color: Option<Option<Color>>,
     pub highlight: Option<Option<Color>>,
+    /// Block-level alignment shared by every block the selection touches, or
+    /// `None` when they disagree (mixed). Drives the toolbar's L/C/R alignment
+    /// radio group. Only populated by [`range_common_style`] — the inline-only
+    /// [`CommonStyle::of_style`] path leaves it `None`.
+    pub align: Option<TextHAlign>,
+    /// Block-level list decoration shared by every touched block, or `None`
+    /// when mixed. Drives the ordered/bullet toggles: `Some(ListKind::None)`
+    /// means "all plain paragraphs", so neither list button is active.
+    pub list: Option<ListKind>,
 }
 
 impl CommonStyle {
@@ -73,6 +82,36 @@ impl CommonStyle {
             font_size: Some(style.font_size),
             text_color: Some(style.text_color),
             highlight: Some(style.highlight),
+            // Block-level attributes are unknown from a run's inline style;
+            // `range_common_style` folds them in afterwards from the blocks.
+            align: None,
+            list: None,
+        }
+    }
+
+    /// Fold the block-level align/list attributes of every block `range`
+    /// touches into this summary. Called by [`range_common_style`] after the
+    /// inline attributes are seeded, so an all-agree selection reports a
+    /// concrete `Some(_)` and a mixed one reports `None`.
+    ///
+    /// `pub(crate)` so the editor's collapsed-caret + pending-style path can
+    /// fold the caret block's align/list into a [`CommonStyle::of_style`]
+    /// summary — block state is independent of the armed inline pending style.
+    pub(crate) fn merge_blocks(&mut self, doc: &RichDoc, range: DocRange) {
+        let (a, b) = range.ordered();
+        let mut first = true;
+        for bi in a.block..=b.block {
+            let Some(block) = doc.blocks.get(bi) else {
+                continue;
+            };
+            if first {
+                self.align = Some(block.align);
+                self.list = Some(block.list);
+                first = false;
+            } else {
+                fold(&mut self.align, block.align);
+                fold(&mut self.list, block.list);
+            }
         }
     }
 
@@ -139,22 +178,27 @@ pub fn style_at(doc: &RichDoc, pos: DocPos) -> InlineStyle {
 /// its caret position (via [`style_at`]).
 pub fn range_common_style(doc: &RichDoc, range: DocRange) -> CommonStyle {
     let (a, b) = range.ordered();
-    if a == b {
-        return CommonStyle::from_style(&style_at(doc, a));
-    }
-    let styles = collect_styles_in_range(doc, range);
-    let mut iter = styles.iter();
-    match iter.next() {
-        Some(first) => {
-            let mut cs = CommonStyle::from_style(first);
-            for s in iter {
-                cs.merge(s);
+    let mut cs = if a == b {
+        CommonStyle::from_style(&style_at(doc, a))
+    } else {
+        let styles = collect_styles_in_range(doc, range);
+        let mut iter = styles.iter();
+        match iter.next() {
+            Some(first) => {
+                let mut cs = CommonStyle::from_style(first);
+                for s in iter {
+                    cs.merge(s);
+                }
+                cs
             }
-            cs
+            // Range covers only empty blocks — fall back to the caret style.
+            None => CommonStyle::from_style(&style_at(doc, a)),
         }
-        // Range covers only empty blocks — fall back to the caret style.
-        None => CommonStyle::from_style(&style_at(doc, a)),
-    }
+    };
+    // Block attributes (align/list) always summarise every block the range
+    // touches, independent of the inline-run folding above.
+    cs.merge_blocks(doc, range);
+    cs
 }
 
 /// Collect (clones of) the styles of every run that intersects `range`.

@@ -1,11 +1,12 @@
 ﻿//! `ProgressBar` — a read-only horizontal progress indicator.
 //!
 //! Supports an optional loading animation (`animate`) that pulses the fill
-//! brightness and sweeps a small spinner arc at the fill edge, mirroring
-//! egui's `ProgressBar::animate`. The animation only runs while `value < 1.0`
-//! and the bar is actually painted (i.e. visible), re-arming a ~60 fps wake via
-//! [`request_draw_after`](crate::animation::request_draw_after) each frame so
-//! the loop idles the moment the bar is culled or finishes.
+//! brightness, mirroring egui's `ProgressBar::animate`. There is deliberately
+//! **no** spinner arc or dot at the fill head — a circle there reads as an
+//! interactive handle, but the bar is read-only. The animation only runs while
+//! `value < 1.0` and the bar is actually painted (i.e. visible), re-arming a
+//! ~60 fps wake via [`request_draw_after`](crate::animation::request_draw_after)
+//! each frame so the loop idles the moment the bar is culled or finishes.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -97,8 +98,8 @@ impl ProgressBar {
     }
 
     /// Enable the loading animation. While set (and `value < 1.0`), the fill
-    /// brightness pulses and a small spinner arc sweeps at the fill edge.
-    /// Mirrors egui's `ProgressBar::animate`.
+    /// brightness pulses gently. Mirrors egui's `ProgressBar::animate`; there is
+    /// no spinner arc or handle at the fill head.
     pub fn with_animate(mut self, animate: bool) -> Self {
         self.props.animate = animate;
         self
@@ -219,11 +220,15 @@ impl Widget for ProgressBar {
         let animating = self.animating();
 
         // Fill — use explicit fill_color if set, otherwise fall back to accent.
-        // While animating, pulse the brightness like egui (cos-driven, 0.7..1.0).
+        // While animating, gently pulse the whole fill's brightness (egui-like,
+        // a smooth 0.78..1.0 sine). This is the ONLY animated element: no arc,
+        // dot, or moving handle at the head that could read as interactive.
         let base_fill = self.props.fill_color.unwrap_or(v.accent);
         let time = self.anim_start.elapsed().as_secs_f64();
         let fill_color = if animating {
-            let factor = lerp(0.7, 1.0, time.cos().abs()) as f32;
+            // sin maps to 0..1 via (sin+1)/2, then into the 0.78..1.0 range.
+            let pulse = (time * std::f64::consts::TAU * 0.6).sin() * 0.5 + 0.5;
+            let factor = lerp(0.78, 1.0, pulse) as f32;
             Color::rgba(
                 base_fill.r * factor,
                 base_fill.g * factor,
@@ -241,32 +246,11 @@ impl Widget for ProgressBar {
             ctx.fill();
         }
 
-        // Spinner arc that sweeps at the leading edge of the fill, matching
-        // egui's animated ProgressBar.
+        // Keep the pulse alive: re-arm ~60 fps without invalidating cached
+        // widgets. The bar is uncached, so its next paint re-reads the phase
+        // and redraws. Gated on `animating` AND actually painting, so the loop
+        // idles the instant the bar is culled or reaches 100%.
         if animating {
-            let center_y = bar_y + BAR_H * 0.5;
-            let half_h = BAR_H * 0.5;
-            let circle_r = half_h - 2.0;
-            let start_angle = time * std::f64::consts::TAU;
-            let end_angle = start_angle + 240f64.to_radians() * time.sin();
-            let n = 20;
-            ctx.set_stroke_color(v.text_color);
-            ctx.set_line_width(2.0);
-            ctx.begin_path();
-            for i in 0..n {
-                let angle = lerp(start_angle, end_angle, i as f64 / n as f64);
-                let (sin, cos) = angle.sin_cos();
-                let px = fill_w - half_h + circle_r * cos;
-                let py = center_y + circle_r * sin;
-                if i == 0 {
-                    ctx.move_to(px, py);
-                } else {
-                    ctx.line_to(px, py);
-                }
-            }
-            ctx.stroke();
-            // Re-arm ~60 fps without invalidating cached widgets: the bar is
-            // uncached, so its next paint re-reads the phase and redraws.
             crate::animation::request_draw_after(Duration::from_millis(16));
         }
 
@@ -312,11 +296,138 @@ impl Widget for ProgressBar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draw_ctx::{FillRule, GlPaint, LinearGradientPaint, RadialGradientPaint};
+    use crate::text::TextMetrics;
+    use agg_rust::comp_op::CompOp;
+    use agg_rust::math_stroke::{LineCap, LineJoin};
+    use agg_rust::trans_affine::TransAffine;
 
     const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
 
     fn test_font() -> Arc<Font> {
         Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
+    }
+
+    /// Counts stroked paths and filled rounded rects so a test can assert the
+    /// bar draws its track + fill but NO stroked spinner arc (the old handle
+    /// that read as interactive). The arc was the widget's only `stroke()`, so
+    /// `strokes == 0` pins its removal.
+    struct PaintRecorder {
+        transform: TransAffine,
+        stack: Vec<TransAffine>,
+        strokes: usize,
+        filled_rounded_rects: usize,
+        last_was_rounded_rect: bool,
+    }
+
+    impl PaintRecorder {
+        fn new() -> Self {
+            Self {
+                transform: TransAffine::new(),
+                stack: Vec::new(),
+                strokes: 0,
+                filled_rounded_rects: 0,
+                last_was_rounded_rect: false,
+            }
+        }
+    }
+
+    impl DrawCtx for PaintRecorder {
+        fn set_fill_color(&mut self, _color: Color) {}
+        fn set_stroke_color(&mut self, _color: Color) {}
+        fn set_fill_linear_gradient(&mut self, _gradient: LinearGradientPaint) {}
+        fn set_fill_radial_gradient(&mut self, _gradient: RadialGradientPaint) {}
+        fn set_line_width(&mut self, _w: f64) {}
+        fn set_line_join(&mut self, _join: LineJoin) {}
+        fn set_line_cap(&mut self, _cap: LineCap) {}
+        fn set_miter_limit(&mut self, _limit: f64) {}
+        fn set_line_dash(&mut self, _dashes: &[f64], _offset: f64) {}
+        fn set_blend_mode(&mut self, _mode: CompOp) {}
+        fn set_global_alpha(&mut self, _alpha: f64) {}
+        fn set_fill_rule(&mut self, _rule: FillRule) {}
+        fn set_font(&mut self, _font: Arc<Font>) {}
+        fn set_font_size(&mut self, _size: f64) {}
+        fn clip_rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64) {}
+        fn reset_clip(&mut self) {}
+        fn clear(&mut self, _color: Color) {}
+        fn begin_path(&mut self) {
+            self.last_was_rounded_rect = false;
+        }
+        fn move_to(&mut self, _x: f64, _y: f64) {
+            self.last_was_rounded_rect = false;
+        }
+        fn line_to(&mut self, _x: f64, _y: f64) {
+            self.last_was_rounded_rect = false;
+        }
+        fn cubic_to(&mut self, _cx1: f64, _cy1: f64, _cx2: f64, _cy2: f64, _x: f64, _y: f64) {}
+        fn quad_to(&mut self, _cx: f64, _cy: f64, _x: f64, _y: f64) {}
+        fn arc_to(&mut self, _cx: f64, _cy: f64, _r: f64, _s: f64, _e: f64, _ccw: bool) {}
+        fn circle(&mut self, _cx: f64, _cy: f64, _r: f64) {
+            self.last_was_rounded_rect = false;
+        }
+        fn rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64) {
+            self.last_was_rounded_rect = false;
+        }
+        fn rounded_rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _r: f64) {
+            self.last_was_rounded_rect = true;
+        }
+        fn close_path(&mut self) {}
+        fn fill(&mut self) {
+            if self.last_was_rounded_rect {
+                self.filled_rounded_rects += 1;
+            }
+        }
+        fn stroke(&mut self) {
+            self.strokes += 1;
+        }
+        fn fill_and_stroke(&mut self) {}
+        fn draw_triangles_aa(&mut self, _vertices: &[[f32; 3]], _indices: &[u32], _color: Color) {}
+        fn fill_text(&mut self, _text: &str, _x: f64, _y: f64) {}
+        fn fill_text_gsv(&mut self, _text: &str, _x: f64, _y: f64, _size: f64) {}
+        fn measure_text(&self, _text: &str) -> Option<TextMetrics> {
+            Some(TextMetrics {
+                width: 30.0,
+                ascent: 8.0,
+                descent: 2.0,
+                line_height: 12.0,
+            })
+        }
+        fn transform(&self) -> TransAffine {
+            self.transform
+        }
+        fn save(&mut self) {
+            self.stack.push(self.transform);
+        }
+        fn restore(&mut self) {
+            if let Some(t) = self.stack.pop() {
+                self.transform = t;
+            }
+        }
+        fn translate(&mut self, tx: f64, ty: f64) {
+            self.transform
+                .premultiply(&TransAffine::new_translation(tx, ty));
+        }
+        fn rotate(&mut self, radians: f64) {
+            self.transform
+                .premultiply(&TransAffine::new_rotation(radians));
+        }
+        fn scale(&mut self, sx: f64, sy: f64) {
+            self.transform.premultiply(&TransAffine::new_scaling(sx, sy));
+        }
+        fn set_transform(&mut self, m: TransAffine) {
+            self.transform = m;
+        }
+        fn reset_transform(&mut self) {
+            self.transform = TransAffine::new();
+        }
+        fn gl_paint(&mut self, _screen_rect: Rect, _painter: &mut dyn GlPaint) {}
+    }
+
+    fn paint_recorded(pb: &mut ProgressBar) -> PaintRecorder {
+        pb.set_bounds(Rect::new(0.0, 0.0, 200.0, WIDGET_H));
+        let mut ctx = PaintRecorder::new();
+        pb.paint(&mut ctx);
+        ctx
     }
 
     #[test]
@@ -346,5 +457,34 @@ mod tests {
         assert!(pb.animating(), "animates while hovered");
         pb.hovered = false;
         assert!(!pb.animating(), "stops when hover leaves");
+    }
+
+    /// Regression: while animating, the bar must draw NO stroked spinner arc /
+    /// handle at the fill head — only the filled track and fill. A circle there
+    /// reads as an interactive drag handle, but the bar is read-only.
+    #[test]
+    fn animating_paint_has_no_spinner_arc() {
+        let mut pb = ProgressBar::new(0.5, test_font())
+            .with_animate(true)
+            .with_show_text(false);
+        let rec = paint_recorded(&mut pb);
+        assert_eq!(
+            rec.strokes, 0,
+            "animating bar must not stroke a spinner arc / handle"
+        );
+        assert_eq!(
+            rec.filled_rounded_rects, 2,
+            "track + fill are the only filled shapes"
+        );
+    }
+
+    /// The static (non-animating) bar likewise draws just track + fill and no
+    /// stroked element — the pulse is purely a fill-brightness effect.
+    #[test]
+    fn static_paint_has_no_stroked_element() {
+        let mut pb = ProgressBar::new(0.5, test_font()).with_show_text(false);
+        let rec = paint_recorded(&mut pb);
+        assert_eq!(rec.strokes, 0);
+        assert_eq!(rec.filled_rounded_rects, 2);
     }
 }

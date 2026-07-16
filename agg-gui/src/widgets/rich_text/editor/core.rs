@@ -172,7 +172,13 @@ impl RichEditCore {
         let sel = self.selection();
         if sel.is_empty() {
             if let Some(p) = &self.pending_style {
-                return CommonStyle::of_style(p);
+                // Inline attributes come from the armed pending style, but
+                // block-level align/list are independent of it — fold the
+                // caret block's values in so the alignment/list toggles keep
+                // reflecting the caret's block while a format is pending.
+                let mut cs = CommonStyle::of_style(p);
+                cs.merge_blocks(&self.doc, sel);
+                return cs;
             }
         }
         range_common_style(&self.doc, sel)
