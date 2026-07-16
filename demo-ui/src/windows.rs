@@ -58,7 +58,8 @@ pub use screenshot_demo::screenshot_demo;
 pub use scrolling::scrolling_demo;
 pub use sliders_demo::sliders;
 pub use system::{
-    cells as system_cells, init_cells as init_system_cells, system_view, SystemCells,
+    cells as system_cells, init_cells as init_system_cells, system_view, try_cells as try_system_cells,
+    SystemCells,
 };
 pub use system_fonts::{
     apply_font_by_index, default_font_index, font_asset_by_name, font_cache_epoch,
