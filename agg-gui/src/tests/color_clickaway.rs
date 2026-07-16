@@ -209,6 +209,28 @@ fn clickaway_without_change_closes_and_keeps_document() {
     );
 }
 
+#[test]
+fn clickaway_right_press_also_dismisses() {
+    // Any button pressed outside dismisses — not just left/middle. A right-press
+    // must close the dialog rather than being swallowed with the dialog left up.
+    unit_scale();
+    let (mut app, handle) = build_toolbar_app();
+    app.layout(Size::new(VP_W, VP_H));
+
+    open_text_color(&mut app);
+    assert!(modal_open(&app), "the picker dialog must be open");
+
+    let w = modal_window_world(&app);
+    let outside = Point::new(w.x + w.width + 12.0, w.y + w.height * 0.5);
+    let screen_y = VP_H - outside.y;
+    app.on_mouse_down(outside.x, screen_y, MouseButton::Right, Modifiers::default());
+    app.on_mouse_up(outside.x, screen_y, MouseButton::Right, Modifiers::default());
+    app.layout(Size::new(VP_W, VP_H));
+
+    assert!(!modal_open(&app), "a right-press outside must close the dialog");
+    assert!(!handle.is_previewing(), "right-press click-away ends the preview");
+}
+
 // ── Click-away must not activate the widget underneath ──────────────────────
 
 /// Hosts a single `ComboBox` whose rect is driven by a shared cell, standing in

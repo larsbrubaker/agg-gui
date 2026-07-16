@@ -584,25 +584,29 @@ impl Widget for Window {
                 EventResult::Ignored
             }
 
+            // Click-away dismissal: while this window holds the modal grab, the
+            // App routes EVERY press to our subtree — including presses OUTSIDE
+            // our bounds (they arrive here with an out-of-range local `pos`). If
+            // click-away is enabled, ANY button pressed outside closes us through
+            // the unified `close()` path with `ClickAway` and swallows the press
+            // so it never activates whatever sat underneath. This arm precedes
+            // the button-specific handlers so a right/middle press-away dismisses
+            // too (a right-click must not, e.g., start a title drag). Wheel
+            // events are `MouseWheel`, not `MouseDown`, so scrolling outside
+            // stays inert.
+            Event::MouseDown { pos, .. }
+                if self.modal
+                    && self.click_away == ClickAwayAction::Close
+                    && !self.point_in_local_bounds(*pos) =>
+            {
+                self.close(CloseReason::ClickAway);
+                EventResult::Consumed
+            }
+
             Event::MouseDown { button, pos, .. }
                 if matches!(*button, MouseButton::Left | MouseButton::Middle) =>
             {
                 let is_left_click = *button == MouseButton::Left;
-
-                // Click-away dismissal: while this window holds the modal grab,
-                // the App routes EVERY press to our subtree — including presses
-                // OUTSIDE our bounds (they arrive here with an out-of-range local
-                // `pos`). If click-away is enabled, close through the unified
-                // `close()` path with `ClickAway` and swallow the press so it
-                // never activates whatever sat underneath. Gated on the press
-                // landing outside our bounds so inner clicks route normally.
-                if self.modal
-                    && self.click_away == ClickAwayAction::Close
-                    && !self.point_in_local_bounds(*pos)
-                {
-                    self.close(CloseReason::ClickAway);
-                    return EventResult::Consumed;
-                }
 
                 // Press-to-raise: any direct press on this window brings it forward.
                 self.raise_request.set(true);
