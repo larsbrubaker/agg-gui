@@ -25,8 +25,8 @@ use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary};
 
 use super::super::commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand};
 use super::super::model::{
-    insert_text, merge_block_with_prev, remove_range, split_block, DocPos, DocRange, InlineStyle,
-    ListKind, RichDoc,
+    extract_range, insert_text, merge_block_with_prev, remove_range, splice_fragment, split_block,
+    Block, DocPos, DocRange, InlineStyle, ListKind, RichDoc,
 };
 
 /// One undo/redo snapshot: the whole document plus the caret and anchor, so an
@@ -210,6 +210,14 @@ impl RichEditCore {
         out
     }
 
+    /// The selected content as a styled fragment (blocks + runs), for the rich
+    /// clipboard. Empty when the selection is collapsed. The plain-text
+    /// flattening of this fragment equals [`selected_plain_text`](Self::selected_plain_text),
+    /// which is the fingerprint the paste path matches against.
+    pub fn selected_fragment(&self) -> Vec<Block> {
+        extract_range(&self.doc, self.selection())
+    }
+
     // ── Text mutation ─────────────────────────────────────────────────────
 
     /// Remove the active selection (if any), returning the collapse position.
@@ -246,6 +254,23 @@ impl RichEditCore {
             first = false;
         }
         self.anchor = self.caret;
+        self.pending_style = None;
+        self.bump_doc();
+    }
+
+    /// Insert a styled `fragment` (from the rich clipboard) at the caret,
+    /// replacing any selection. Preserves each run's style and the fragment's
+    /// block structure, unlike [`insert`](Self::insert) which only carries plain
+    /// text in the caret's style. One `bump_doc` — so it coalesces into a single
+    /// undo step per paste, matching plain paste.
+    pub fn insert_fragment(&mut self, fragment: &[Block]) {
+        if fragment.is_empty() {
+            return;
+        }
+        self.take_selection();
+        let end = splice_fragment(&mut self.doc, self.caret, fragment);
+        self.caret = end;
+        self.anchor = end;
         self.pending_style = None;
         self.bump_doc();
     }

@@ -206,3 +206,73 @@ impl Block {
         }
     }
 }
+
+// ── extract_range / splice_fragment (styled clipboard) ─────────────────────
+
+#[test]
+fn extract_range_keeps_run_styles_within_one_block() {
+    // "plainBOLD" — select "ainBO" straddling the run boundary; the fragment
+    // must keep both the plain and bold portions with their styles.
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![TextRun::plain("plain"), TextRun::new("BOLD", bold())],
+        ..Block::new()
+    }]);
+    let frag = extract_range(&doc, DocRange::new(DocPos::new(0, 2), DocPos::new(0, 7)));
+    assert_eq!(frag.len(), 1);
+    assert_eq!(frag[0].text(), "ainBO");
+    assert_eq!(frag[0].runs.len(), 2);
+    assert_eq!(frag[0].runs[0].text, "ain");
+    assert!(!frag[0].runs[0].style.bold);
+    assert_eq!(frag[0].runs[1].text, "BO");
+    assert!(frag[0].runs[1].style.bold);
+}
+
+#[test]
+fn extract_range_keeps_block_attributes_for_whole_blocks() {
+    let doc = RichDoc::from_blocks(vec![Block::plain("head"), Block::new_ordered("item")]);
+    let frag = extract_range(&doc, DocRange::new(DocPos::new(0, 0), DocPos::new(1, 4)));
+    assert_eq!(frag.len(), 2);
+    assert_eq!(frag[1].text(), "item");
+    assert_eq!(frag[1].list, ListKind::Ordered);
+}
+
+#[test]
+fn splice_single_block_fragment_is_inline() {
+    // Paste "XY" into the middle of "abcd" — no new paragraph, runs spliced.
+    let mut doc = RichDoc::from_blocks(vec![Block::plain("abcd")]);
+    let frag = vec![Block::from_run(TextRun::new("XY", bold()))];
+    let end = splice_fragment(&mut doc, DocPos::new(0, 2), &frag);
+    assert_eq!(doc.blocks.len(), 1);
+    assert_eq!(doc.blocks[0].text(), "abXYcd");
+    assert_eq!(end, DocPos::new(0, 4));
+    // The bold run is preserved between the plain halves.
+    let bold_run = doc.blocks[0].runs.iter().find(|r| r.text == "XY").unwrap();
+    assert!(bold_run.style.bold);
+}
+
+#[test]
+fn splice_single_block_into_empty_adopts_list_attribute() {
+    // Copying a whole bullet/ordered item and pasting into a blank paragraph
+    // should reproduce the list decoration, not a plain line.
+    let mut doc = RichDoc::new();
+    let frag = vec![Block::new_ordered("item")];
+    splice_fragment(&mut doc, DocPos::new(0, 0), &frag);
+    assert_eq!(doc.blocks.len(), 1);
+    assert_eq!(doc.blocks[0].text(), "item");
+    assert_eq!(doc.blocks[0].list, ListKind::Ordered);
+}
+
+#[test]
+fn splice_multi_block_fragment_splits_paragraph() {
+    // Paste a 2-block fragment into the middle of "abcd": head keeps "ab" plus
+    // the fragment's first line, a new paragraph carries the second line plus
+    // the original tail "cd".
+    let mut doc = RichDoc::from_blocks(vec![Block::plain("abcd")]);
+    let frag = vec![Block::plain("ONE"), Block::plain("TWO")];
+    let end = splice_fragment(&mut doc, DocPos::new(0, 2), &frag);
+    assert_eq!(doc.blocks.len(), 2);
+    assert_eq!(doc.blocks[0].text(), "abONE");
+    assert_eq!(doc.blocks[1].text(), "TWOcd");
+    // Caret sits between the pasted "TWO" and the original tail "cd".
+    assert_eq!(end, DocPos::new(1, 3));
+}

@@ -401,6 +401,107 @@ pub fn merge_block_with_prev(doc: &mut RichDoc, idx: usize) -> DocPos {
     }
 }
 
+/// Extract the content within `range` as a standalone list of blocks, keeping
+/// each run's [`InlineStyle`] and (for wholly-selected blocks) the block-level
+/// attributes.  Drives styled Copy / Cut — the inverse shape of
+/// [`splice_fragment`].  Returns an empty vec for a collapsed range.
+pub fn extract_range(doc: &RichDoc, range: DocRange) -> Vec<Block> {
+    let (a, b) = range.ordered();
+    if a == b {
+        return Vec::new();
+    }
+    let b_block = b.block.min(doc.blocks.len().saturating_sub(1));
+    let mut out = Vec::new();
+    for bi in a.block..=b_block {
+        let Some(src) = doc.blocks.get(bi) else {
+            continue;
+        };
+        let mut block = src.clone();
+        let hi = if bi == b_block { b.byte } else { block.text_len() };
+        let lo = if bi == a.block { a.byte } else { 0 };
+        // Trim the tail first so the head boundary offset stays valid.
+        let end = block.ensure_boundary(hi);
+        block.runs.truncate(end);
+        let start = block.ensure_boundary(lo);
+        block.runs.drain(0..start);
+        block.normalize();
+        out.push(block);
+    }
+    out
+}
+
+/// Insert a `fragment` (a list of blocks produced by [`extract_range`]) at
+/// `pos`, preserving run styles.  A single-block fragment splices inline (no new
+/// paragraph); a multi-block fragment splits the target paragraph, appends the
+/// fragment's first block to the head, inserts the interior blocks verbatim, and
+/// merges the fragment's last block with the original tail (which keeps the
+/// target paragraph's block attributes).  Returns the caret position at the end
+/// of the inserted content.
+pub fn splice_fragment(doc: &mut RichDoc, pos: DocPos, fragment: &[Block]) -> DocPos {
+    if fragment.is_empty() {
+        return pos;
+    }
+    let Some(target) = doc.blocks.get_mut(pos.block) else {
+        return pos;
+    };
+    if fragment.len() == 1 {
+        // Pasting one paragraph's worth of runs is an inline splice — it must
+        // not change the target paragraph's block attributes. The exception is
+        // pasting into a pristine empty paragraph (a blank doc, or a fresh line
+        // after Enter): there the fragment's own block attributes (e.g. a bullet
+        // list) should carry over, so a copied list item pastes as a list item.
+        let default = Block::new();
+        let adopt_attrs = target.runs.is_empty()
+            && target.align == default.align
+            && target.list == default.list
+            && target.indent == default.indent;
+        let mut idx = target.ensure_boundary(pos.byte);
+        let mut added = 0usize;
+        for run in &fragment[0].runs {
+            target.runs.insert(idx, run.clone());
+            idx += 1;
+            added += run.text.len();
+        }
+        target.normalize();
+        if adopt_attrs {
+            target.align = fragment[0].align;
+            target.list = fragment[0].list;
+            target.indent = fragment[0].indent;
+        }
+        return DocPos::new(pos.block, pos.byte + added);
+    }
+
+    // Multi-block: split the target paragraph at `pos`, keeping the head in
+    // place and stashing the tail runs to re-attach after the fragment.
+    let split_idx = target.ensure_boundary(pos.byte);
+    let tail_runs = target.runs.split_off(split_idx);
+    let (t_align, t_list, t_indent) = (target.align, target.list, target.indent);
+    target.runs.extend(fragment[0].runs.iter().cloned());
+    target.normalize();
+
+    // Interior blocks verbatim, then the final block: the fragment's last block
+    // merged with the original tail. The merged line keeps the target
+    // paragraph's block attributes (it is a continuation of that paragraph).
+    let last = &fragment[fragment.len() - 1];
+    let end_byte = last.text_len();
+    let mut new_blocks: Vec<Block> = fragment[1..fragment.len() - 1].to_vec();
+    let mut last_block = Block {
+        runs: last.runs.clone(),
+        align: t_align,
+        list: t_list,
+        indent: t_indent,
+    };
+    last_block.runs.extend(tail_runs);
+    last_block.normalize();
+    new_blocks.push(last_block);
+
+    let count = new_blocks.len(); // == fragment.len() - 1
+    for (k, block) in new_blocks.into_iter().enumerate() {
+        doc.blocks.insert(pos.block + 1 + k, block);
+    }
+    DocPos::new(pos.block + count, end_byte)
+}
+
 #[cfg(test)]
 #[path = "model_tests.rs"]
 mod model_tests;
