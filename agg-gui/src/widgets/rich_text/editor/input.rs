@@ -180,22 +180,15 @@ impl RichTextEdit {
             Key::Enter => self.core.borrow_mut().split(),
             Key::Char('a') | Key::Char('A') if cmd => self.core.borrow_mut().select_all(),
             Key::Char('c') | Key::Char('C') if cmd => {
-                let text = self.core.borrow().selected_plain_text();
-                if !text.is_empty() {
-                    crate::clipboard::set_text(&text);
-                }
+                self.copy_selection();
             }
             Key::Char('x') | Key::Char('X') if cmd => {
-                let text = self.core.borrow().selected_plain_text();
-                if !text.is_empty() {
-                    crate::clipboard::set_text(&text);
+                if self.copy_selection() {
                     self.core.borrow_mut().backspace();
                 }
             }
             Key::Char('v') | Key::Char('V') if cmd => {
-                if let Some(text) = crate::clipboard::get_text() {
-                    self.core.borrow_mut().insert(&text);
-                }
+                self.paste_clipboard();
             }
             Key::Char('z') | Key::Char('Z') if cmd && shift => {
                 self.core.borrow_mut().redo();
@@ -217,6 +210,45 @@ impl RichTextEdit {
         self.focus_time = Some(Instant::now());
         crate::animation::request_draw();
         EventResult::Consumed
+    }
+
+    /// Copy the current selection to both clipboards: the styled fragment into
+    /// the in-process rich slot (keyed by the plain-text fingerprint) and the
+    /// plain text into the system clipboard so external apps get text. Returns
+    /// `true` when something was selected (Cut uses this to know whether to
+    /// delete). A collapsed selection leaves both clipboards untouched.
+    ///
+    /// `pub(super)` so the right-click context menu (`context_menu.rs`) shares
+    /// the exact styled-clipboard behaviour instead of duplicating it.
+    pub(super) fn copy_selection(&mut self) -> bool {
+        let (text, fragment) = {
+            let core = self.core.borrow();
+            (core.selected_plain_text(), core.selected_fragment())
+        };
+        if text.is_empty() {
+            return false;
+        }
+        super::super::rich_clipboard::set(text.clone(), fragment);
+        crate::clipboard::set_text(&text);
+        true
+    }
+
+    /// Paste at the caret. When the system clipboard text still matches the
+    /// fingerprint of our last styled Copy/Cut (same session, clipboard
+    /// unchanged), reinsert the styled fragment; otherwise insert the external
+    /// plain text, inheriting the caret's style.
+    ///
+    /// `pub(super)` so the right-click context menu shares this exact paste
+    /// behaviour rather than duplicating it.
+    pub(super) fn paste_clipboard(&mut self) {
+        let Some(text) = crate::clipboard::get_text() else {
+            return;
+        };
+        if let Some(fragment) = super::super::rich_clipboard::matching(&text) {
+            self.core.borrow_mut().insert_fragment(&fragment);
+        } else {
+            self.core.borrow_mut().insert(&text);
+        }
     }
 
     /// One char left (`-1`) or right (`+1`) from `caret`, crossing block

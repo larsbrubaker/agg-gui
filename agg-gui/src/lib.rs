@@ -147,7 +147,8 @@ pub use widget::{
     WidgetBaseField,
 };
 pub use widgets::{
-    color_wheel_picker_dialog, current_scroll_style, current_scroll_visibility, paint_sparkline,
+    color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, current_scroll_style,
+    current_scroll_visibility, paint_sparkline,
     set_scroll_style, set_scroll_visibility, shared_frame_history, shared_run_mode, Button,
     CellInfo, Checkbox, CollapsingHeader, ColorPicker, ColorWheelPicker, ComboBox, Conditional,
     Align, Align2, Container, DragValue, FlexColumn, FlexRow, FrameHistory, HandleShape,
@@ -157,7 +158,7 @@ pub use widgets::{
     MenuShortcut, ModalSheet, NodeIcon, Padding, PerformanceView, Popup, PopupClickOutcome,
     PopupCloseBehavior, PopupMenu, ProgressBar, QrView, RadioGroup, Rebuilder, RectAlign,
     Resize, RichCommand, RichDoc, RichEditHandle, RichTextEdit, RichTextView, RunMode, RunModeDesc,
-    RunModeRow, Scene, SharedResolver,
+    RunModeRow, Scene, SharedResolver, single_font_resolver,
     SceneTransform, ScrollBarColor, ScrollBarKind,
     ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
     SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter, Stack, TabView, Table,

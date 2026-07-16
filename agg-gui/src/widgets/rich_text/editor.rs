@@ -17,7 +17,7 @@
 //! and undo/redo the very editor being rendered.
 //!
 //! Submodules keep each concern (and this file) under the 800-line cap:
-//! [`core`] (shared logic), [`geometry`] (caret ↔ pixel mapping), `input`
+//! [`core`] (shared logic), `geometry` (caret ↔ pixel mapping), `input`
 //! (key/mouse handling), `paint`, and `scroll` (internal vertical scrollbar).
 
 use std::cell::{Cell, RefCell};
@@ -191,26 +191,34 @@ impl RichTextEdit {
         }
     }
 
+    /// Set the default font size (points) runs inherit when their style leaves
+    /// [`InlineStyle::font_size`](super::model::InlineStyle::font_size) unset.
     pub fn with_font_size(self, size: f64) -> Self {
         self.core.borrow_mut().set_default_font_size(size);
         self
     }
+    /// Set the inner padding (logical px) between the border and the text.
     pub fn with_padding(mut self, p: f64) -> Self {
         self.padding = p;
         self
     }
+    /// Set the widget's outer margin.
     pub fn with_margin(mut self, m: Insets) -> Self {
         self.base.margin = m;
         self
     }
+    /// Assign a stable [`FocusId`] so the app can focus this editor
+    /// programmatically.
     pub fn with_focus_id(mut self, id: FocusId) -> Self {
         self.focus_request_id = Some(id);
         self
     }
+    /// Set the horizontal anchor used when the editor is placed in a layout.
     pub fn with_h_anchor(mut self, h: HAnchor) -> Self {
         self.base.h_anchor = h;
         self
     }
+    /// Set the vertical anchor used when the editor is placed in a layout.
     pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
         self.base.v_anchor = v;
         self
@@ -231,15 +239,19 @@ impl RichTextEdit {
     pub fn common_style_of_selection(&self) -> CommonStyle {
         self.core.borrow().common_style_of_selection()
     }
+    /// Undo the last coalesced edit; returns `true` if the document changed.
     pub fn undo(&mut self) -> bool {
         self.core.borrow_mut().undo()
     }
+    /// Redo the last undone edit; returns `true` if the document changed.
     pub fn redo(&mut self) -> bool {
         self.core.borrow_mut().redo()
     }
+    /// Whether an undo step is available.
     pub fn can_undo(&self) -> bool {
         self.core.borrow().can_undo()
     }
+    /// Whether a redo step is available.
     pub fn can_redo(&self) -> bool {
         self.core.borrow().can_redo()
     }

@@ -66,3 +66,58 @@ fn test_programmatic_focus_request_unmatched_id() {
         "an unmatched request is still consumed"
     );
 }
+
+/// The web clipboard bridge focuses a hidden `<textarea>` only while a text
+/// widget is focused; that focus is what makes browsers deliver copy / cut /
+/// paste DOM events. A focused `RichTextEdit` must therefore report as a text
+/// input — regression guard for the WASM demo where it was omitted and its
+/// clipboard shortcuts silently no-op'd.
+#[test]
+fn rich_text_edit_is_a_focused_text_input() {
+    use crate::widgets::rich_text::{uniform_resolver, RichDoc, RichTextEdit};
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+
+    const FIELD_ID: u64 = 7777;
+    let mut root = Container::new().with_padding(4.0);
+    root.children_mut().push(Box::new(
+        RichTextEdit::new(RichDoc::new(), uniform_resolver(Arc::clone(&font)))
+            .with_font_size(14.0)
+            .with_focus_id(FIELD_ID),
+    ));
+
+    let mut app = App::new(Box::new(root));
+    app.layout(Size::new(200.0, 200.0));
+    assert!(
+        !app.focused_is_text_input(),
+        "nothing focused before a request"
+    );
+
+    crate::focus::request_focus(FIELD_ID);
+    app.layout(Size::new(200.0, 200.0));
+
+    assert_eq!(app.focused_widget_type_name(), Some("RichTextEdit"));
+    assert!(
+        app.focused_is_text_input(),
+        "a focused RichTextEdit must count as a text input for the clipboard bridge"
+    );
+}
+
+/// The clipboard bridge gates on `Widget::accepts_text_input` — the property
+/// `focused_is_text_input` delegates to. Editors opt in via the trait; a Button
+/// (focusable, but not text-bearing) never does. Guards the trait delegation
+/// against a regression back to a hardcoded type-name list.
+#[test]
+fn accepts_text_input_gates_the_clipboard_bridge() {
+    use crate::widget::Widget;
+    use crate::widgets::rich_text::{uniform_resolver, RichDoc, RichTextEdit};
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let editor = RichTextEdit::new(RichDoc::new(), uniform_resolver(Arc::clone(&font)));
+    assert!(editor.accepts_text_input(), "RichTextEdit accepts text input");
+    let button = Button::new("ok", Arc::clone(&font));
+    assert!(
+        !button.accepts_text_input(),
+        "a Button does not accept text input"
+    );
+}

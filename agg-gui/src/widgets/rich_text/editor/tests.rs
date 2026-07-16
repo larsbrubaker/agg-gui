@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use crate::event::{Event, Modifiers, MouseButton};
+use crate::color::Color;
+use crate::event::{Event, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Size};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -161,6 +162,99 @@ fn undo_coalesces_rapid_typing_into_one_step() {
     assert!(!core.can_undo(), "typing coalesced into one undo step");
 }
 
+// ── Live colour preview: undo hygiene ─────────────────────────────────────
+//
+// A colour dialog previews by exec-ing `SetTextColor` every drag frame. The
+// preview session (`begin_preview` → `commit_preview` / `cancel_preview`)
+// suspends undo feeding so the drag collapses into ONE undo step on commit and
+// leaves NO stray entry on cancel.
+
+fn colored(text: &str, color: crate::color::Color) -> TextRun {
+    TextRun::new(
+        text,
+        InlineStyle {
+            text_color: Some(color),
+            ..Default::default()
+        },
+    )
+}
+
+#[test]
+fn preview_commit_collapses_drag_into_one_undo_step() {
+    let red = crate::color::Color::rgb(1.0, 0.0, 0.0);
+    let blue = crate::color::Color::rgb(0.0, 0.0, 1.0);
+    let green = crate::color::Color::rgb(0.0, 1.0, 0.0);
+    let doc = RichDoc::from_blocks(vec![Block::from_run(colored("hello", red))]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.select_all();
+    core.feed_undo(0.0); // baseline undo point (red)
+    assert!(!core.can_undo());
+
+    // Dialog opens: capture the committed state + suspend feeding.
+    core.begin_preview();
+    assert!(core.is_previewing());
+
+    // Drag: rapid live previews. Feeding is suspended, so none snapshot.
+    core.exec(&RichCommand::SetTextColor(blue));
+    core.feed_undo(0.1);
+    core.exec(&RichCommand::SetTextColor(green));
+    core.feed_undo(0.2);
+
+    // Select: commit + resume, then settle into exactly one undo point.
+    core.commit_preview();
+    assert!(!core.is_previewing());
+    core.feed_undo(3.0);
+    core.feed_undo(4.5);
+    assert!(core.can_undo(), "the committed colour change is undoable");
+
+    // A single undo reverts the whole drag back to the original colour, and
+    // there is nothing left to undo — the drag collapsed into one step.
+    assert!(core.undo());
+    assert_eq!(core.common_style_of_selection().text_color, Some(Some(red)));
+    assert!(!core.can_undo(), "the drag must collapse into a single undo step");
+}
+
+#[test]
+fn preview_cancel_restores_and_leaves_no_undo_residue() {
+    let red = crate::color::Color::rgb(1.0, 0.0, 0.0);
+    let blue = crate::color::Color::rgb(0.0, 0.0, 1.0);
+    let doc = RichDoc::from_blocks(vec![Block::from_run(colored("hello", red))]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.select_all();
+    core.feed_undo(0.0); // baseline undo point (red)
+    assert!(!core.can_undo());
+
+    core.begin_preview();
+    // Preview to a different colour, feeding at times that WOULD stabilise into
+    // an undo point (gap ≥ stable_time) if suspension were broken.
+    core.exec(&RichCommand::SetTextColor(blue));
+    core.feed_undo(0.1);
+    core.feed_undo(2.0);
+    assert_eq!(
+        core.common_style_of_selection().text_color,
+        Some(Some(blue)),
+        "the preview updates the document live"
+    );
+
+    // Cancel: restore the captured snapshot + resume.
+    core.cancel_preview();
+    assert!(!core.is_previewing());
+    assert_eq!(
+        core.common_style_of_selection().text_color,
+        Some(Some(red)),
+        "cancel restores the original colour"
+    );
+
+    // Resume feeding: the restored state equals the committed baseline, so no
+    // stray undo entry survives the cancelled preview.
+    core.feed_undo(3.0);
+    core.feed_undo(4.5);
+    assert!(
+        !core.can_undo(),
+        "a cancelled preview must leave no undo residue"
+    );
+}
+
 #[test]
 fn clipboard_round_trip_across_blocks() {
     // Multi-block selection flattens to text with `\n`; re-inserting it rebuilds
@@ -226,6 +320,177 @@ fn enter_on_non_empty_list_item_splits_normally() {
     // The new block inherits the list kind (an empty continuation bullet).
     assert_eq!(core.doc().blocks[1].list, ListKind::Bullet);
     assert_eq!(core.doc().blocks[1].text(), "");
+}
+
+// ── Styled clipboard (rich Copy / Cut / Paste) ─────────────────────────────
+
+fn ctrl(c: char) -> Event {
+    Event::KeyDown {
+        key: Key::Char(c),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    }
+}
+
+fn red_24_bold() -> InlineStyle {
+    InlineStyle {
+        bold: true,
+        font_size: Some(24.0),
+        text_color: Some(Color::from_rgb8(255, 0, 0)),
+        ..Default::default()
+    }
+}
+
+/// Copy a styled, bulleted line and paste it into a fresh editor: the bold /
+/// 24pt / red run and the list decoration must all survive the round trip
+/// through the in-process rich clipboard slot.
+#[test]
+fn styled_run_and_list_block_survive_copy_paste() {
+    crate::widgets::rich_text::rich_clipboard::clear();
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![TextRun::new("Hi", red_24_bold())],
+        list: ListKind::Bullet,
+        ..Block::new()
+    }]);
+    let mut src = laid_out_editor(doc, 400.0, 200.0);
+    src.on_event(&Event::FocusGained);
+    src.core.borrow_mut().select_all();
+    src.on_event(&ctrl('c'));
+
+    // Cross-instance paste into a blank editor.
+    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
+    dst.on_event(&Event::FocusGained);
+    dst.on_event(&ctrl('v'));
+
+    let doc = dst.core.borrow().doc().clone();
+    assert_eq!(doc.blocks.len(), 1);
+    assert_eq!(doc.blocks[0].list, ListKind::Bullet, "list decoration survives");
+    let run = &doc.blocks[0].runs[0];
+    assert_eq!(run.text, "Hi");
+    assert!(run.style.bold, "bold survives");
+    assert_eq!(run.style.font_size, Some(24.0), "point size survives");
+    assert_eq!(
+        run.style.text_color,
+        Some(Color::from_rgb8(255, 0, 0)),
+        "colour survives"
+    );
+}
+
+/// A native clipboard (arboard on Windows) may hand back `\r\n` for text we
+/// copied with `\n`. The fingerprint match normalizes line endings, so a styled
+/// multi-line copy still pastes styled after that round trip.
+#[test]
+fn crlf_mangled_clipboard_still_matches_fingerprint() {
+    crate::widgets::rich_text::rich_clipboard::clear();
+    let doc = RichDoc::from_blocks(vec![
+        Block::from_run(TextRun::new("one", red_24_bold())),
+        Block::from_run(TextRun::new("two", red_24_bold())),
+    ]);
+    let mut src = laid_out_editor(doc, 400.0, 200.0);
+    src.on_event(&Event::FocusGained);
+    src.core.borrow_mut().select_all();
+    src.on_event(&ctrl('c'));
+
+    // Simulate the OS clipboard normalizing "one\ntwo" to CRLF line endings.
+    crate::clipboard::set_text("one\r\ntwo");
+
+    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
+    dst.on_event(&Event::FocusGained);
+    dst.on_event(&ctrl('v'));
+
+    let doc = dst.core.borrow().doc().clone();
+    assert_eq!(doc.blocks.len(), 2);
+    assert!(doc.blocks[0].runs[0].style.bold, "styled fragment reused");
+    assert!(doc.blocks[1].runs[0].style.bold);
+}
+
+/// When the system clipboard text no longer matches our stored fingerprint
+/// (something was copied elsewhere in between), paste falls back to inserting
+/// the external plain text in the caret's inherited style.
+#[test]
+fn fingerprint_mismatch_falls_back_to_plain_text() {
+    crate::widgets::rich_text::rich_clipboard::clear();
+    let doc = RichDoc::from_blocks(vec![Block::from_run(TextRun::new("Hi", red_24_bold()))]);
+    let mut src = laid_out_editor(doc, 400.0, 200.0);
+    src.on_event(&Event::FocusGained);
+    src.core.borrow_mut().select_all();
+    src.on_event(&ctrl('c'));
+
+    // Simulate an external app overwriting the system clipboard: the rich slot
+    // still holds the styled fragment, but its fingerprint no longer matches.
+    crate::clipboard::set_text("external");
+
+    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
+    dst.on_event(&Event::FocusGained);
+    dst.on_event(&ctrl('v'));
+
+    let doc = dst.core.borrow().doc().clone();
+    assert_eq!(doc.blocks[0].text(), "external");
+    // Inserted as plain text — no bold carried over from the stale fragment.
+    assert!(!doc.blocks[0].runs[0].style.bold);
+}
+
+/// External plain text (never copied from a RichTextEdit) pastes as plain text.
+#[test]
+fn external_plain_text_pastes_unstyled() {
+    crate::widgets::rich_text::rich_clipboard::clear();
+    crate::clipboard::set_text("hello world");
+    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
+    dst.on_event(&Event::FocusGained);
+    dst.on_event(&ctrl('v'));
+    let doc = dst.core.borrow().doc().clone();
+    assert_eq!(doc.blocks[0].text(), "hello world");
+    assert!(!doc.blocks[0].runs[0].style.bold);
+}
+
+/// Cut removes the styled selection and still makes it available for a styled
+/// paste elsewhere.
+#[test]
+fn cut_removes_styled_content_and_keeps_it_for_paste() {
+    crate::widgets::rich_text::rich_clipboard::clear();
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![TextRun::new("keep ", InlineStyle::default()), TextRun::new("cutme", red_24_bold())],
+        ..Block::new()
+    }]);
+    let mut src = laid_out_editor(doc, 400.0, 200.0);
+    src.on_event(&Event::FocusGained);
+    // Select just "cutme".
+    src.core.borrow_mut().set_selection(DocPos::new(0, 5), DocPos::new(0, 10));
+    src.on_event(&ctrl('x'));
+    assert_eq!(src.core.borrow().doc().blocks[0].text(), "keep ");
+
+    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
+    dst.on_event(&Event::FocusGained);
+    dst.on_event(&ctrl('v'));
+    let doc = dst.core.borrow().doc().clone();
+    assert_eq!(doc.blocks[0].text(), "cutme");
+    assert!(doc.blocks[0].runs[0].style.bold);
+}
+
+/// A styled paste is a single undo step, matching plain paste.
+#[test]
+fn styled_paste_is_one_undo_step() {
+    crate::widgets::rich_text::rich_clipboard::clear();
+    let doc = RichDoc::from_blocks(vec![Block::from_run(TextRun::new("AB", red_24_bold()))]);
+    let mut src = laid_out_editor(doc, 400.0, 200.0);
+    src.on_event(&Event::FocusGained);
+    src.core.borrow_mut().select_all();
+    src.on_event(&ctrl('c'));
+
+    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
+    dst.on_event(&Event::FocusGained);
+    // Baseline undo snapshot for the empty doc, then paste and let it settle.
+    dst.core.borrow_mut().feed_undo(0.0);
+    dst.on_event(&ctrl('v'));
+    dst.core.borrow_mut().feed_undo(0.1);
+    dst.core.borrow_mut().feed_undo(1.5);
+    assert_eq!(dst.core.borrow().doc().blocks[0].text(), "AB");
+
+    assert!(dst.core.borrow_mut().undo(), "one undo reverts the paste");
+    assert_eq!(dst.core.borrow().doc().blocks[0].text(), "");
+    assert!(!dst.core.borrow().can_undo(), "paste was a single undo step");
 }
 
 // ── Widget geometry (caret hit-testing) ───────────────────────────────────
@@ -476,5 +741,50 @@ fn one_wheel_notch_scrolls_about_three_lines() {
     assert!(
         (moved - expected).abs() < 0.5,
         "one notch should scroll ~3 lines: moved {moved}, expected {expected}"
+    );
+}
+
+/// A `RichTextEdit` added **directly** as a tree child — with no host wrapper
+/// forwarding `backbuffer_cache_mut` — must still engage the cached LCD/RGBA
+/// backbuffer path when painted through the framework. The widget forwards the
+/// backbuffer hooks itself, so `paint_subtree` takes the backbuffered branch and
+/// populates the cache pixels. This mirrors the demo host test
+/// (`host_engages_editor_backbuffer_cache`) but proves an unwrapped editor needs
+/// no framework precondition the host was compensating for.
+#[test]
+fn direct_embed_engages_backbuffer_cache() {
+    // Standard density so LCD is available; either mode still populates pixels
+    // (the assertion only cares that the cached path ran, not which mode).
+    crate::device_scale::set_device_scale(1.0);
+    crate::ux_scale::set_ux_scale(1.0);
+
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![sized("hello world", 16.0)],
+        ..Block::new()
+    }]);
+    let mut ed = RichTextEdit::new(doc, resolver()).with_font_size(16.0);
+
+    // The widget exposes its own cache — no host forwarding involved.
+    assert!(
+        ed.backbuffer_cache_mut().is_some(),
+        "RichTextEdit must expose its backbuffer cache directly"
+    );
+
+    ed.layout(Size::new(400.0, 300.0));
+
+    let mut fb = crate::Framebuffer::new(400, 300);
+    {
+        let mut ctx = crate::GfxCtx::new(&mut fb);
+        crate::widget::paint_subtree(&mut ed, &mut ctx);
+    }
+
+    let engaged = ed
+        .backbuffer_cache_mut()
+        .map(|c| c.pixels.is_some())
+        .unwrap_or(false);
+    assert!(
+        engaged,
+        "a directly-embedded RichTextEdit's backbuffer cache must populate after \
+         a framework paint — the cached LCD/RGBA path did not engage"
     );
 }

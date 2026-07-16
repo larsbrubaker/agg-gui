@@ -32,24 +32,35 @@ use crate::widgets::text_area::TextHAlign;
 /// either bold or not).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InlineStyle {
+    /// Bold weight (the resolver picks the matching face).
     pub bold: bool,
+    /// Italic slant (the resolver picks the matching face).
     pub italic: bool,
+    /// Draw an underline under the run.
     pub underline: bool,
+    /// Draw a line through the run.
     pub strikethrough: bool,
+    /// Font family name, or `None` to inherit the widget default family.
     pub font_family: Option<String>,
+    /// Font size in points, or `None` to inherit the widget default size.
     pub font_size: Option<f64>,
+    /// Text colour, or `None` to inherit the theme's text colour.
     pub text_color: Option<Color>,
+    /// Highlight (background) colour behind the run, or `None` for none.
     pub highlight: Option<Color>,
 }
 
 /// A contiguous span of text sharing one [`InlineStyle`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextRun {
+    /// The run's characters (never contains `\n` — newlines are block breaks).
     pub text: String,
+    /// The inline formatting shared by every character in the run.
     pub style: InlineStyle,
 }
 
 impl TextRun {
+    /// A run of `text` in `style`.
     pub fn new(text: impl Into<String>, style: InlineStyle) -> Self {
         Self {
             text: text.into(),
@@ -66,9 +77,12 @@ impl TextRun {
 /// List decoration applied to a whole [`Block`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ListKind {
+    /// Not a list item — a plain paragraph.
     #[default]
     None,
+    /// A bulleted (`•`) list item.
     Bullet,
+    /// An ordered (`1.`, `2.`, …) list item.
     Ordered,
 }
 
@@ -76,9 +90,13 @@ pub enum ListKind {
 /// (alignment, list decoration, indent depth).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Block {
+    /// The paragraph's styled runs, in order.
     pub runs: Vec<TextRun>,
+    /// Horizontal text alignment within the block.
     pub align: TextHAlign,
+    /// List decoration (none / bullet / ordered).
     pub list: ListKind,
+    /// Indent depth; each level offsets the block by [`INDENT_PX`](super::layout::INDENT_PX).
     pub indent: u8,
 }
 
@@ -177,6 +195,7 @@ impl Block {
 /// A whole rich-text document: an ordered list of blocks (paragraphs).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichDoc {
+    /// The document's paragraphs, in order (always at least one).
     pub blocks: Vec<Block>,
 }
 
@@ -194,6 +213,7 @@ impl RichDoc {
         }
     }
 
+    /// A document from `blocks`, substituting the blank state when empty.
     pub fn from_blocks(blocks: Vec<Block>) -> Self {
         if blocks.is_empty() {
             Self::new()
@@ -230,11 +250,14 @@ impl RichDoc {
 /// document is "less".
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct DocPos {
+    /// Index of the block (paragraph) this position lies in.
     pub block: usize,
+    /// Byte offset into that block's flattened text.
     pub byte: usize,
 }
 
 impl DocPos {
+    /// A position at `byte` within `block`.
     pub fn new(block: usize, byte: usize) -> Self {
         Self { block, byte }
     }
@@ -244,11 +267,14 @@ impl DocPos {
 /// [`DocRange::ordered`] returns them low-to-high.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DocRange {
+    /// One endpoint (not necessarily the earlier one).
     pub start: DocPos,
+    /// The other endpoint (not necessarily the later one).
     pub end: DocPos,
 }
 
 impl DocRange {
+    /// A range between `start` and `end` (in either document order).
     pub fn new(start: DocPos, end: DocPos) -> Self {
         Self { start, end }
     }
@@ -275,10 +301,12 @@ impl DocRange {
         }
     }
 
+    /// The earlier endpoint in document order.
     pub fn min(&self) -> DocPos {
         self.ordered().0
     }
 
+    /// The later endpoint in document order.
     pub fn max(&self) -> DocPos {
         self.ordered().1
     }
@@ -399,6 +427,107 @@ pub fn merge_block_with_prev(doc: &mut RichDoc, idx: usize) -> DocPos {
         block: idx - 1,
         byte: join_byte,
     }
+}
+
+/// Extract the content within `range` as a standalone list of blocks, keeping
+/// each run's [`InlineStyle`] and (for wholly-selected blocks) the block-level
+/// attributes.  Drives styled Copy / Cut — the inverse shape of
+/// [`splice_fragment`].  Returns an empty vec for a collapsed range.
+pub fn extract_range(doc: &RichDoc, range: DocRange) -> Vec<Block> {
+    let (a, b) = range.ordered();
+    if a == b {
+        return Vec::new();
+    }
+    let b_block = b.block.min(doc.blocks.len().saturating_sub(1));
+    let mut out = Vec::new();
+    for bi in a.block..=b_block {
+        let Some(src) = doc.blocks.get(bi) else {
+            continue;
+        };
+        let mut block = src.clone();
+        let hi = if bi == b_block { b.byte } else { block.text_len() };
+        let lo = if bi == a.block { a.byte } else { 0 };
+        // Trim the tail first so the head boundary offset stays valid.
+        let end = block.ensure_boundary(hi);
+        block.runs.truncate(end);
+        let start = block.ensure_boundary(lo);
+        block.runs.drain(0..start);
+        block.normalize();
+        out.push(block);
+    }
+    out
+}
+
+/// Insert a `fragment` (a list of blocks produced by [`extract_range`]) at
+/// `pos`, preserving run styles.  A single-block fragment splices inline (no new
+/// paragraph); a multi-block fragment splits the target paragraph, appends the
+/// fragment's first block to the head, inserts the interior blocks verbatim, and
+/// merges the fragment's last block with the original tail (which keeps the
+/// target paragraph's block attributes).  Returns the caret position at the end
+/// of the inserted content.
+pub fn splice_fragment(doc: &mut RichDoc, pos: DocPos, fragment: &[Block]) -> DocPos {
+    if fragment.is_empty() {
+        return pos;
+    }
+    let Some(target) = doc.blocks.get_mut(pos.block) else {
+        return pos;
+    };
+    if fragment.len() == 1 {
+        // Pasting one paragraph's worth of runs is an inline splice — it must
+        // not change the target paragraph's block attributes. The exception is
+        // pasting into a pristine empty paragraph (a blank doc, or a fresh line
+        // after Enter): there the fragment's own block attributes (e.g. a bullet
+        // list) should carry over, so a copied list item pastes as a list item.
+        let default = Block::new();
+        let adopt_attrs = target.runs.is_empty()
+            && target.align == default.align
+            && target.list == default.list
+            && target.indent == default.indent;
+        let mut idx = target.ensure_boundary(pos.byte);
+        let mut added = 0usize;
+        for run in &fragment[0].runs {
+            target.runs.insert(idx, run.clone());
+            idx += 1;
+            added += run.text.len();
+        }
+        target.normalize();
+        if adopt_attrs {
+            target.align = fragment[0].align;
+            target.list = fragment[0].list;
+            target.indent = fragment[0].indent;
+        }
+        return DocPos::new(pos.block, pos.byte + added);
+    }
+
+    // Multi-block: split the target paragraph at `pos`, keeping the head in
+    // place and stashing the tail runs to re-attach after the fragment.
+    let split_idx = target.ensure_boundary(pos.byte);
+    let tail_runs = target.runs.split_off(split_idx);
+    let (t_align, t_list, t_indent) = (target.align, target.list, target.indent);
+    target.runs.extend(fragment[0].runs.iter().cloned());
+    target.normalize();
+
+    // Interior blocks verbatim, then the final block: the fragment's last block
+    // merged with the original tail. The merged line keeps the target
+    // paragraph's block attributes (it is a continuation of that paragraph).
+    let last = &fragment[fragment.len() - 1];
+    let end_byte = last.text_len();
+    let mut new_blocks: Vec<Block> = fragment[1..fragment.len() - 1].to_vec();
+    let mut last_block = Block {
+        runs: last.runs.clone(),
+        align: t_align,
+        list: t_list,
+        indent: t_indent,
+    };
+    last_block.runs.extend(tail_runs);
+    last_block.normalize();
+    new_blocks.push(last_block);
+
+    let count = new_blocks.len(); // == fragment.len() - 1
+    for (k, block) in new_blocks.into_iter().enumerate() {
+        doc.blocks.insert(pos.block + 1 + k, block);
+    }
+    DocPos::new(pos.block + count, end_byte)
 }
 
 #[cfg(test)]

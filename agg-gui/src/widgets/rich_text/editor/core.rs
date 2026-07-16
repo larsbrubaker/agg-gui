@@ -25,8 +25,8 @@ use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary};
 
 use super::super::commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand};
 use super::super::model::{
-    insert_text, merge_block_with_prev, remove_range, split_block, DocPos, DocRange, InlineStyle,
-    ListKind, RichDoc,
+    extract_range, insert_text, merge_block_with_prev, remove_range, splice_fragment, split_block,
+    Block, DocPos, DocRange, InlineStyle, ListKind, RichDoc,
 };
 
 /// One undo/redo snapshot: the whole document plus the caret and anchor, so an
@@ -46,6 +46,17 @@ pub struct RichEditCore {
     pending_style: Option<InlineStyle>,
     default_font_size: f64,
     undoer: Undoer<EditSnapshot>,
+    /// While `true`, [`feed_undo`](Self::feed_undo) is a no-op. Used during a
+    /// live colour-preview drag so the rapid per-frame document mutations don't
+    /// each seed an undo snapshot; a single step is recorded once the preview
+    /// commits and feeding resumes.
+    undo_suspended: bool,
+    /// The committed `{doc, caret, anchor}` captured at
+    /// [`begin_preview`](Self::begin_preview), restored verbatim on
+    /// [`cancel_preview`](Self::cancel_preview). A full snapshot (not just the
+    /// colour) so a mixed-colour selection — or a highlight that was `None` —
+    /// is restored exactly.
+    preview_snapshot: Option<EditSnapshot>,
     /// Bumped whenever `doc` changes — the view invalidates its layout cache.
     doc_rev: u64,
     /// Bumped on any caret / anchor / doc change — the view repaints.
@@ -53,6 +64,7 @@ pub struct RichEditCore {
 }
 
 impl RichEditCore {
+    /// Create a core over `doc` with the given default font size (points).
     pub fn new(doc: RichDoc, default_font_size: f64) -> Self {
         Self {
             doc,
@@ -61,6 +73,8 @@ impl RichEditCore {
             pending_style: None,
             default_font_size,
             undoer: Undoer::default(),
+            undo_suspended: false,
+            preview_snapshot: None,
             doc_rev: 0,
             rev: 0,
         }
@@ -68,28 +82,38 @@ impl RichEditCore {
 
     // ── Accessors ─────────────────────────────────────────────────────────
 
+    /// The document being edited.
     pub fn doc(&self) -> &RichDoc {
         &self.doc
     }
+    /// The moving end of the selection (the blinking caret position).
     pub fn caret(&self) -> DocPos {
         self.caret
     }
+    /// The fixed end of the selection (coincides with the caret when collapsed).
     pub fn anchor(&self) -> DocPos {
         self.anchor
     }
+    /// Default font size (points) runs inherit when their style leaves it unset.
     pub fn default_font_size(&self) -> f64 {
         self.default_font_size
     }
+    /// Change the inherited default font size and mark the document dirty.
     pub fn set_default_font_size(&mut self, size: f64) {
         self.default_font_size = size;
         self.bump_doc();
     }
+    /// Revision counter bumped on every document change (drives layout caching).
     pub fn doc_rev(&self) -> u64 {
         self.doc_rev
     }
+    /// Revision counter bumped on any document, caret, or selection change
+    /// (drives repaint / scroll-into-view).
     pub fn rev(&self) -> u64 {
         self.rev
     }
+    /// The armed pending caret style (a format toggled at a collapsed caret,
+    /// awaiting the next keystroke), if any.
     pub fn pending_style(&self) -> Option<&InlineStyle> {
         self.pending_style.as_ref()
     }
@@ -210,6 +234,14 @@ impl RichEditCore {
         out
     }
 
+    /// The selected content as a styled fragment (blocks + runs), for the rich
+    /// clipboard. Empty when the selection is collapsed. The plain-text
+    /// flattening of this fragment equals [`selected_plain_text`](Self::selected_plain_text),
+    /// which is the fingerprint the paste path matches against.
+    pub fn selected_fragment(&self) -> Vec<Block> {
+        extract_range(&self.doc, self.selection())
+    }
+
     // ── Text mutation ─────────────────────────────────────────────────────
 
     /// Remove the active selection (if any), returning the collapse position.
@@ -227,7 +259,7 @@ impl RichEditCore {
 
     /// Insert `text` at the caret, replacing any selection.  Embedded `\n`
     /// characters split the paragraph (so pasted multi-line text lands as
-    /// several blocks).  The inserted text takes [`style_for_insert`].
+    /// several blocks).  The inserted text takes [`Self::style_for_insert`].
     pub fn insert(&mut self, text: &str) {
         if text.is_empty() {
             return;
@@ -246,6 +278,23 @@ impl RichEditCore {
             first = false;
         }
         self.anchor = self.caret;
+        self.pending_style = None;
+        self.bump_doc();
+    }
+
+    /// Insert a styled `fragment` (from the rich clipboard) at the caret,
+    /// replacing any selection. Preserves each run's style and the fragment's
+    /// block structure, unlike [`insert`](Self::insert) which only carries plain
+    /// text in the caret's style. One `bump_doc` — so it coalesces into a single
+    /// undo step per paste, matching plain paste.
+    pub fn insert_fragment(&mut self, fragment: &[Block]) {
+        if fragment.is_empty() {
+            return;
+        }
+        self.take_selection();
+        let end = splice_fragment(&mut self.doc, self.caret, fragment);
+        self.caret = end;
+        self.anchor = end;
         self.pending_style = None;
         self.bump_doc();
     }
@@ -379,10 +428,59 @@ impl RichEditCore {
 
     /// Feed the undoer the current state at `time` (seconds).  Returns `true`
     /// while a change is still coalescing, so the caller keeps frames coming.
+    ///
+    /// Suspended during a live preview ([`begin_preview`](Self::begin_preview))
+    /// so the drag's rapid mutations don't each snapshot; the committed change
+    /// is recorded in the single frame after feeding resumes.
     pub fn feed_undo(&mut self, time: f64) -> bool {
+        if self.undo_suspended {
+            return false;
+        }
         let snap = self.snapshot();
         self.undoer.feed_state(time, &snap);
         self.undoer.is_in_flux()
+    }
+
+    // ── Live preview (colour dialog) ──────────────────────────────────────
+    //
+    // A colour dialog previews its result by exec-ing `SetTextColor` /
+    // `SetHighlight` on every drag frame so the document updates in context.
+    // Those rapid mutations must NOT each become an undo step, and a Cancel
+    // must leave no residue. `begin_preview` captures the committed state and
+    // suspends undo feeding; `commit_preview` keeps the result and resumes
+    // (one step is recorded on the next feed); `cancel_preview` restores the
+    // captured state and resumes (restored == committed, so nothing is added).
+
+    /// Start a live-preview session: snapshot the committed state and suspend
+    /// undo feeding. Idempotent — a redundant call keeps the original snapshot.
+    pub fn begin_preview(&mut self) {
+        if self.preview_snapshot.is_none() {
+            self.preview_snapshot = Some(self.snapshot());
+        }
+        self.undo_suspended = true;
+    }
+
+    /// Commit the preview: keep the current document and resume undo feeding so
+    /// the whole drag collapses into a single undo step.
+    pub fn commit_preview(&mut self) {
+        self.preview_snapshot = None;
+        self.undo_suspended = false;
+    }
+
+    /// Cancel the preview: restore the `{doc, caret, anchor}` captured at
+    /// [`begin_preview`](Self::begin_preview) and resume undo feeding. The
+    /// restored state equals the last committed one, so no stray undo entry is
+    /// recorded.
+    pub fn cancel_preview(&mut self) {
+        if let Some(snap) = self.preview_snapshot.take() {
+            self.apply_snapshot(snap);
+        }
+        self.undo_suspended = false;
+    }
+
+    /// Whether a live preview is currently active (test/introspection hook).
+    pub fn is_previewing(&self) -> bool {
+        self.preview_snapshot.is_some()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -470,20 +568,53 @@ impl RichEditHandle {
         self.core.borrow().common_style_of_selection()
     }
 
+    /// Undo one step through the shared core, requesting a redraw on change.
     pub fn undo(&self) {
         if self.core.borrow_mut().undo() {
             crate::animation::request_draw();
         }
     }
+    /// Redo one step through the shared core, requesting a redraw on change.
     pub fn redo(&self) {
         if self.core.borrow_mut().redo() {
             crate::animation::request_draw();
         }
     }
+    /// Whether an undo step is available.
     pub fn can_undo(&self) -> bool {
         self.core.borrow().can_undo()
     }
+    /// Whether a redo step is available.
     pub fn can_redo(&self) -> bool {
         self.core.borrow().can_redo()
+    }
+
+    // ── Live preview (colour dialog) ──────────────────────────────────────
+
+    /// Begin a live-preview session — see [`RichEditCore::begin_preview`].
+    /// Call when a colour dialog opens, before any preview `exec`.
+    pub fn begin_preview(&self) {
+        self.core.borrow_mut().begin_preview();
+    }
+
+    /// Commit the live preview (dialog's Select) — see
+    /// [`RichEditCore::commit_preview`].
+    pub fn commit_preview(&self) {
+        self.core.borrow_mut().commit_preview();
+        crate::animation::request_draw();
+    }
+
+    /// Cancel the live preview (dialog's Cancel / Escape / close) — restores
+    /// the state captured when the preview began. See
+    /// [`RichEditCore::cancel_preview`].
+    pub fn cancel_preview(&self) {
+        self.core.borrow_mut().cancel_preview();
+        crate::animation::request_draw();
+    }
+
+    /// Whether a live preview is currently active. Exposed so a host can assert
+    /// (in tests) that every dialog-dismissal route unwinds the session.
+    pub fn is_previewing(&self) -> bool {
+        self.core.borrow().is_previewing()
     }
 }

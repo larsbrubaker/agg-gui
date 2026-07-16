@@ -56,7 +56,9 @@ pub use checkbox::Checkbox;
 pub use chevron::{ChevronWidget, CHEVRON_SIZE};
 pub use collapsing_header::CollapsingHeader;
 pub use color_picker::ColorPicker;
-pub use color_wheel_picker::{color_wheel_picker_dialog, ColorWheelPicker};
+pub use color_wheel_picker::{
+    color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, ColorWheelPicker,
+};
 pub use combo_box::ComboBox;
 pub use conditional::Conditional;
 pub use container::Container;
@@ -89,9 +91,9 @@ pub use rebuilder::Rebuilder;
 pub use reserve_inset::{ReserveInset, ReservedEdge};
 pub use resize::Resize;
 pub use rich_text::{
-    apply_command, range_common_style, style_at, Block, CommonStyle, DocPos, DocRange, InlineStyle,
-    ListKind, RichCommand, RichDoc, RichEditHandle, RichTextEdit, RichTextView, SharedResolver,
-    TextRun,
+    apply_command, range_common_style, single_font_resolver, style_at, Block, CommonStyle, DocPos,
+    DocRange, InlineStyle, ListKind, RichCommand, RichDoc, RichEditHandle, RichTextEdit,
+    RichTextView, SharedResolver, TextRun,
 };
 pub use scene::{Scene, SceneTransform};
 pub use scroll_view::{

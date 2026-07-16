@@ -21,17 +21,29 @@ pub const MAX_INDENT: u8 = 8;
 /// A single editor command.  Deliberately excludes undo/redo (see module docs).
 #[derive(Clone, Debug, PartialEq)]
 pub enum RichCommand {
+    /// Toggle bold over the selection (Word/egui toggle semantics).
     ToggleBold,
+    /// Toggle italic over the selection.
     ToggleItalic,
+    /// Toggle underline over the selection.
     ToggleUnderline,
+    /// Toggle strikethrough over the selection.
     ToggleStrikethrough,
+    /// Set the font family of the selected runs.
     SetFontFamily(String),
+    /// Set the font size (points) of the selected runs.
     SetFontSize(f64),
+    /// Set the text colour of the selected runs.
     SetTextColor(Color),
+    /// Set (or clear, with `None`) the highlight colour of the selected runs.
     SetHighlight(Option<Color>),
+    /// Set the horizontal alignment of every touched block.
     SetAlign(TextHAlign),
+    /// Set (or toggle off) the list decoration of every touched block.
     SetList(ListKind),
+    /// Increase the indent depth of every touched block (capped at [`MAX_INDENT`]).
     Indent,
+    /// Decrease the indent depth of every touched block (floored at 0).
     Outdent,
 }
 
@@ -43,13 +55,21 @@ pub enum RichCommand {
 /// inherit the widget default", `Some(x)` = "all set to `x`").
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CommonStyle {
+    /// Shared bold state, or `None` when the selection is mixed.
     pub bold: Option<bool>,
+    /// Shared italic state, or `None` when mixed.
     pub italic: Option<bool>,
+    /// Shared underline state, or `None` when mixed.
     pub underline: Option<bool>,
+    /// Shared strikethrough state, or `None` when mixed.
     pub strikethrough: Option<bool>,
+    /// Shared font family (inner `None` = all inherit default), or `None` when mixed.
     pub font_family: Option<Option<String>>,
+    /// Shared font size (inner `None` = all inherit default), or `None` when mixed.
     pub font_size: Option<Option<f64>>,
+    /// Shared text colour (inner `None` = all inherit default), or `None` when mixed.
     pub text_color: Option<Option<Color>>,
+    /// Shared highlight colour (inner `None` = none), or `None` when mixed.
     pub highlight: Option<Option<Color>>,
     /// Block-level alignment shared by every block the selection touches, or
     /// `None` when they disagree (mixed). Drives the toolbar's L/C/R alignment

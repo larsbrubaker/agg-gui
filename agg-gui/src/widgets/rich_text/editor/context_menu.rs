@@ -2,15 +2,11 @@
 //!
 //! Presentation and event plumbing reuse the shared
 //! [`crate::widgets::text_context_menu`] module, exactly as `TextField` and
-//! `TextArea` do. The clipboard verbs below drive the same
-//! [`RichEditCore`](super::core::RichEditCore) operations as the keyboard
-//! chords in `input.rs`.
-//!
-//! NOTE: a parallel track owns the rich clipboard FORMAT and the `input.rs`
-//! copy/cut/paste chords. To avoid stepping on that work these verbs mirror the
-//! chord bodies rather than sharing an extracted helper inside `input.rs`; when
-//! the clipboard track lands its rich format it can point both entry points at
-//! a single implementation.
+//! `TextArea` do. Cut/Copy/Paste delegate to the SAME styled-clipboard helpers
+//! the keyboard chords use ([`copy_selection`](RichTextEdit::copy_selection) /
+//! [`paste_clipboard`](RichTextEdit::paste_clipboard) in `input.rs`), so the
+//! menu gets identical rich-fragment behaviour with no duplicated logic. Select
+//! All uses the core's programmatic path.
 
 use web_time::Instant;
 
@@ -22,28 +18,22 @@ use super::super::model::{DocPos, InlineStyle};
 use super::RichTextEdit;
 
 impl RichTextEdit {
-    /// Copy the selection's plain text (no-op with an empty selection).
+    /// Copy the selection (styled fragment + plain text) — same as Ctrl+C.
     pub(super) fn menu_copy(&mut self) {
-        let text = self.core.borrow().selected_plain_text();
-        if !text.is_empty() {
-            crate::clipboard::set_text(&text);
-        }
+        self.copy_selection();
     }
 
-    /// Cut = copy then delete the selection.
+    /// Cut = styled copy then delete the selection — same as Ctrl+X.
     pub(super) fn menu_cut(&mut self) {
-        let text = self.core.borrow().selected_plain_text();
-        if !text.is_empty() {
-            crate::clipboard::set_text(&text);
+        if self.copy_selection() {
             self.core.borrow_mut().backspace();
         }
     }
 
-    /// Paste the clipboard text at the caret / over the selection.
+    /// Paste the clipboard (styled fragment when it matches our last copy,
+    /// else external plain text) — same as Ctrl+V.
     pub(super) fn menu_paste(&mut self) {
-        if let Some(text) = crate::clipboard::get_text() {
-            self.core.borrow_mut().insert(&text);
-        }
+        self.paste_clipboard();
     }
 
     /// Select the whole document (Ctrl+A).
