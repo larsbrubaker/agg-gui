@@ -137,7 +137,7 @@ pub use theme::{
 };
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
-pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
+pub use undo::{DoUndoActions, Settings as UndoerSettings, UndoBuffer, Undoer, UndoRedoCommand};
 #[cfg(feature = "reflect")]
 pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{

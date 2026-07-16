@@ -2,15 +2,15 @@
 //! `egui::util::undoer::Undoer<State>` (see
 //! `egui-reference/crates/egui/src/util/undoer.rs`).
 //!
-//! Used by the Undo Redo demo ([`super::basic::undo_redo`]) so a single
-//! `Undoer` snapshots the *whole* demo state `{toggle, text}` with the same
+//! A single [`Undoer`] snapshots a *whole* state value `State` with the
 //! time-based coalescing egui demonstrates: an undo point is created once the
 //! state has been stable for `stable_time`, or forcibly every
 //! `auto_save_interval` if the user never stops changing it.
 //!
-//! Kept in the demo crate (rather than the agg-gui library) because it is
-//! demo-scoped and the library's own `UndoBuffer` follows a different,
-//! command-history model.
+//! Lives in the [`crate::undo`] module alongside the command-history
+//! [`UndoBuffer`](super::UndoBuffer): they are complementary models (snapshot
+//! vs. command). The RichTextEdit widget snapshots `{RichDoc, caret}` through
+//! it, and the dialogs demo snapshots its `{toggle, text}`.
 
 use std::collections::VecDeque;
 
