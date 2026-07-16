@@ -199,6 +199,19 @@ impl Widget for Window {
             && (self.drag_mode != DragMode::None || self.resize_dir(local_pos).is_some())
     }
 
+    /// Opt-in modal windows (e.g. the floating colour-wheel picker dialog)
+    /// grab all pointer/keyboard routing while visible.  The `App` walks to
+    /// this subtree before normal hit-testing, so clicks over the window —
+    /// including the chrome close button and any point that would otherwise
+    /// fall through an ancestor whose bounds don't cover the window (the
+    /// `Rebuilder`/`Stack` overlay slot) — are delivered here and never leak
+    /// to widgets painted beneath.  Gated on `requested_visible()` so a closing
+    /// dialog releases the modal grab in the same frame it hides, letting the
+    /// captured press/release pair complete against this window.
+    fn has_active_modal(&self) -> bool {
+        self.modal && self.requested_visible()
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         // Pull runtime-driven flag cells (demo checkboxes → live window
         // behaviour). Read before anything else so this frame's collapse /

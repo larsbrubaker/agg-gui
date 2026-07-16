@@ -40,7 +40,11 @@ pub fn color_wheel_picker_dialog(
         .with_min_size(Size::new(content_w, win_h))
         .with_auto_size(true)
         .with_resizable(false)
-        .with_constrain(true);
+        .with_constrain(true)
+        // Grab all pointer/keyboard input over the dialog while it is open so
+        // clicks (including the close button) never leak to widgets painted
+        // beneath the floating window.  See `Window::with_modal`.
+        .with_modal(true);
 
     Box::new(win)
 }

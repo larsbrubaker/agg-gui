@@ -191,6 +191,14 @@ pub struct Window {
     /// When true, the window is kept fully inside the canvas bounds during drag/resize.
     constrain: bool,
 
+    /// When true, the window declares itself an app-modal layer while visible
+    /// (see [`Widget::has_active_modal`]).  The `App` then routes *all* pointer
+    /// and keyboard events into this window's subtree, so a floating dialog
+    /// (e.g. the colour-wheel picker) swallows every click over its bounds
+    /// instead of leaking them to widgets painted underneath.  Opt-in — plain
+    /// windows leave this `false` and hit-test normally.
+    modal: bool,
+
     /// When true, the window bounds adopt the content's preferred size each
     /// layout pass (width + height).  Keeps the title-bar top edge pinned so
     /// the window appears to grow/shrink downward.  User resize is disabled
@@ -315,6 +323,7 @@ impl Window {
             // by `layout()` before any drag/resize/collapse hit-test runs.
             canvas_size: Size::new(0.0, 0.0),
             constrain: true,
+            modal: false,
             auto_size: false,
             resizable: true,
             resizable_h: true,
