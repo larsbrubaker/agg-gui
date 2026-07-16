@@ -199,3 +199,42 @@ fn range_common_style_all_agree() {
     let cs = range_common_style(&doc, r);
     assert_eq!(cs.bold, Some(true));
 }
+
+/// A fresh single block reports its concrete block align/list — the toolbar
+/// reads these to decide which alignment/list toggle is active. A default
+/// block is Left-aligned with no list, so exactly the Left button lights up
+/// and neither list button does.
+#[test]
+fn common_style_reports_block_align_and_list() {
+    let doc = doc_one("abcd");
+    let cs = range_common_style(&doc, full_range(&doc, 0));
+    assert_eq!(cs.align, Some(TextHAlign::Left));
+    assert_eq!(cs.list, Some(ListKind::None));
+
+    let mut doc = doc_one("abcd");
+    let r = full_range(&doc, 0);
+    apply_command(&mut doc, r, &RichCommand::SetAlign(TextHAlign::Center));
+    apply_command(&mut doc, r, &RichCommand::SetList(ListKind::Ordered));
+    let cs = range_common_style(&doc, r);
+    assert_eq!(cs.align, Some(TextHAlign::Center));
+    assert_eq!(cs.list, Some(ListKind::Ordered));
+}
+
+/// When a selection spans blocks whose align/list disagree, both collapse to
+/// `None` (mixed) so the toolbar shows no alignment/list button as active.
+#[test]
+fn common_style_block_attrs_mixed_across_blocks() {
+    let mut doc = RichDoc::from_blocks(vec![Block::plain("aaa"), Block::plain("bbb")]);
+    // Give only the first block a Center align + ordered list.
+    let block0 = full_range(&doc, 0);
+    apply_command(&mut doc, block0, &RichCommand::SetAlign(TextHAlign::Center));
+    apply_command(&mut doc, block0, &RichCommand::SetList(ListKind::Ordered));
+    // Selection spanning both blocks now disagrees on align and list.
+    let span = DocRange::new(
+        DocPos::new(0, 0),
+        DocPos::new(1, doc.blocks[1].text_len()),
+    );
+    let cs = range_common_style(&doc, span);
+    assert_eq!(cs.align, None, "mixed align must report None");
+    assert_eq!(cs.list, None, "mixed list must report None");
+}

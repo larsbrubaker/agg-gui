@@ -21,7 +21,9 @@ use agg_gui::{
 };
 
 use super::PickerKind;
-use crate::windows::system_fonts::{font_option_index, font_option_names};
+use crate::windows::system_fonts::{
+    family_has_bold, family_has_italic, font_option_index, font_option_names,
+};
 
 /// Font sizes offered by the size dropdown (points), matching common editors.
 const FONT_SIZES: &[f64] = &[
@@ -66,13 +68,24 @@ fn row_one(
 ) -> Box<dyn Widget> {
     let mut row = FlexRow::new().with_gap(4.0);
 
-    row = row.add(style_toggle(font, handle, ICON_BOLD, |c| c.bold, RichCommand::ToggleBold));
+    // Bold / Italic gate on the current family actually shipping that variant
+    // (`family_has_bold` / `family_has_italic`); Underline / Strikethrough are
+    // synthetic and stay always-enabled.
+    row = row.add(style_toggle(
+        font,
+        handle,
+        ICON_BOLD,
+        |c| c.bold,
+        RichCommand::ToggleBold,
+        Some(family_has_bold),
+    ));
     row = row.add(style_toggle(
         font,
         handle,
         ICON_ITALIC,
         |c| c.italic,
         RichCommand::ToggleItalic,
+        Some(family_has_italic),
     ));
     row = row.add(style_toggle(
         font,
@@ -80,6 +93,7 @@ fn row_one(
         ICON_UNDERLINE,
         |c| c.underline,
         RichCommand::ToggleUnderline,
+        None,
     ));
     row = row.add(style_toggle(
         font,
@@ -87,6 +101,7 @@ fn row_one(
         ICON_STRIKE,
         |c| c.strikethrough,
         RichCommand::ToggleStrikethrough,
+        None,
     ));
 
     row = row.add(family_combo(font, handle));
@@ -106,18 +121,8 @@ fn row_two(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
     row = row.add(align_toggle(font, handle, ICON_ALIGN_CENTER, TextHAlign::Center));
     row = row.add(align_toggle(font, handle, ICON_ALIGN_RIGHT, TextHAlign::Right));
 
-    row = row.add(command_button(
-        font,
-        handle,
-        ICON_LIST_OL,
-        RichCommand::SetList(ListKind::Ordered),
-    ));
-    row = row.add(command_button(
-        font,
-        handle,
-        ICON_LIST_UL,
-        RichCommand::SetList(ListKind::Bullet),
-    ));
+    row = row.add(list_toggle(font, handle, ICON_LIST_OL, ListKind::Ordered));
+    row = row.add(list_toggle(font, handle, ICON_LIST_UL, ListKind::Bullet));
     row = row.add(command_button(font, handle, ICON_OUTDENT, RichCommand::Outdent));
     row = row.add(command_button(font, handle, ICON_INDENT, RichCommand::Indent));
 
@@ -131,12 +136,62 @@ fn row_two(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
 /// selection's [`CommonStyle`]. `Some(true)` = active; `Some(false)` / `None`
 /// (mixed) render inactive — a deliberate simplification (a Button has no
 /// tri-state), noted in the demo's module docs.
+///
+/// `family_supports`, when `Some`, gates the button on the selection's
+/// effective family actually shipping that variant (see
+/// [`family_variant_enabled`]): Bold/Italic disable for families with no such
+/// face; Underline/Strikethrough pass `None` and stay always-enabled.
 fn style_toggle(
     font: &Arc<Font>,
     handle: &RichEditHandle,
     icon: &str,
     read: fn(&CommonStyle) -> Option<bool>,
     cmd: RichCommand,
+    family_supports: Option<fn(&str) -> bool>,
+) -> Box<dyn Widget> {
+    let active_handle = handle.clone();
+    let click_handle = handle.clone();
+    let button = Button::new(icon, Arc::clone(font))
+        .with_font_size(13.0)
+        .with_subtle()
+        .with_active_fn(move || read(&active_handle.common_style_of_selection()) == Some(true))
+        .on_click(move || click_handle.exec(&cmd));
+    let button = if let Some(check) = family_supports {
+        let enabled_handle = handle.clone();
+        button.with_enabled_fn(move || {
+            family_variant_enabled(
+                &enabled_handle.common_style_of_selection().font_family,
+                check,
+            )
+        })
+    } else {
+        button
+    };
+    Box::new(button)
+}
+
+/// Decide whether a family-gated toggle (Bold / Italic) should be enabled for a
+/// selection's common `font_family`:
+/// - `Some(Some(name))` — a consistent explicit family: gate on `check(name)`.
+/// - `Some(None)` — the inherited default family: gate on the default's variant.
+/// - `None` — a mixed selection: keep enabled (the user may be narrowing it).
+fn family_variant_enabled(family: &Option<Option<String>>, check: fn(&str) -> bool) -> bool {
+    match family {
+        Some(Some(name)) => check(name),
+        Some(None) => check(crate::windows::DEFAULT_FONT_NAME),
+        None => true,
+    }
+}
+
+/// An alignment toggle. Behaves like a radio group: active precisely when
+/// every selected block already carries `align` (`common_style.align ==
+/// Some(align)`), so exactly one of L/C/R lights up for a consistent
+/// selection and none do for a mixed one. Same subtle→accent look as B/I/U/S.
+fn align_toggle(
+    font: &Arc<Font>,
+    handle: &RichEditHandle,
+    icon: &str,
+    align: TextHAlign,
 ) -> Box<dyn Widget> {
     let active_handle = handle.clone();
     let click_handle = handle.clone();
@@ -144,28 +199,35 @@ fn style_toggle(
         Button::new(icon, Arc::clone(font))
             .with_font_size(13.0)
             .with_subtle()
-            .with_active_fn(move || read(&active_handle.common_style_of_selection()) == Some(true))
-            .on_click(move || click_handle.exec(&cmd)),
+            .with_active_fn(move || active_handle.common_style_of_selection().align == Some(align))
+            .on_click(move || click_handle.exec(&RichCommand::SetAlign(align))),
     )
 }
 
-/// An alignment toggle, active when every selected block already has `align`.
-fn align_toggle(
+/// An ordered/bullet list toggle, active only when every selected block is
+/// already that list `kind` (`common_style.list == Some(kind)`). A mixed
+/// selection reports `None` and an all-plain one reports `Some(ListKind::None)`,
+/// so in both cases neither list button reads as active.
+fn list_toggle(
     font: &Arc<Font>,
     handle: &RichEditHandle,
     icon: &str,
-    align: TextHAlign,
+    kind: ListKind,
 ) -> Box<dyn Widget> {
+    let active_handle = handle.clone();
     let click_handle = handle.clone();
     Box::new(
         Button::new(icon, Arc::clone(font))
             .with_font_size(13.0)
             .with_subtle()
-            .on_click(move || click_handle.exec(&RichCommand::SetAlign(align))),
+            .with_active_fn(move || active_handle.common_style_of_selection().list == Some(kind))
+            .on_click(move || click_handle.exec(&RichCommand::SetList(kind))),
     )
 }
 
-/// A plain command button (lists / indent) — fire-and-forget.
+/// A momentary action button (indent / outdent) — fire-and-forget. Rendered as
+/// a plain ghost that never enters the active/accent state: `with_active_fn(||
+/// false)` forces the muted ghost look so it can't be mistaken for a toggle.
 fn command_button(
     font: &Arc<Font>,
     handle: &RichEditHandle,
@@ -176,7 +238,8 @@ fn command_button(
     Box::new(
         Button::new(icon, Arc::clone(font))
             .with_font_size(13.0)
-            .with_subtle()
+            .with_ghost()
+            .with_active_fn(|| false)
             .on_click(move || click_handle.exec(&cmd)),
     )
 }
@@ -261,13 +324,17 @@ fn size_combo(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
     )
 }
 
+/// Undo / redo are momentary actions gated on availability: a ghost button
+/// (never active) that greys out via `enabled_fn` when there is nothing to
+/// undo/redo — consistent with the indent/outdent buttons beside them.
 fn undo_button(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
     let enabled_handle = handle.clone();
     let click_handle = handle.clone();
     Box::new(
         Button::new(ICON_UNDO, Arc::clone(font))
             .with_font_size(13.0)
-            .with_subtle()
+            .with_ghost()
+            .with_active_fn(|| false)
             .with_enabled_fn(move || enabled_handle.can_undo())
             .on_click(move || click_handle.undo()),
     )
@@ -279,7 +346,8 @@ fn redo_button(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
     Box::new(
         Button::new(ICON_REDO, Arc::clone(font))
             .with_font_size(13.0)
-            .with_subtle()
+            .with_ghost()
+            .with_active_fn(|| false)
             .with_enabled_fn(move || enabled_handle.can_redo())
             .on_click(move || click_handle.redo()),
     )
@@ -343,5 +411,32 @@ mod tests {
             vec!["Button"; 9],
             "row 2 control roster changed"
         );
+    }
+
+    /// Bold/Italic gating: a family with the variant keeps the toggle enabled,
+    /// a family without it disables the toggle, the inherited default (`None`)
+    /// follows the default family (Nunito → both available), and a mixed
+    /// selection (`None` outer) stays enabled.
+    #[test]
+    fn family_variant_gating() {
+        // Explicit family with a real Bold + Italic (Nunito).
+        let nunito = Some(Some("Nunito".to_string()));
+        assert!(family_variant_enabled(&nunito, family_has_bold));
+        assert!(family_variant_enabled(&nunito, family_has_italic));
+
+        // Explicit family with italic but no bold (Arial): Bold off, Italic on.
+        let arial = Some(Some("Arial".to_string()));
+        assert!(!family_variant_enabled(&arial, family_has_bold));
+        assert!(family_variant_enabled(&arial, family_has_italic));
+
+        // Inherited default family -> follows the default (Nunito): both on.
+        let inherited: Option<Option<String>> = Some(None);
+        assert!(family_variant_enabled(&inherited, family_has_bold));
+        assert!(family_variant_enabled(&inherited, family_has_italic));
+
+        // Mixed selection -> keep enabled regardless of the variant check.
+        let mixed: Option<Option<String>> = None;
+        assert!(family_variant_enabled(&mixed, family_has_bold));
+        assert!(family_variant_enabled(&mixed, family_has_italic));
     }
 }
