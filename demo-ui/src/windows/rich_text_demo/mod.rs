@@ -214,30 +214,58 @@ fn build_picker(
         return Box::new(SizedBox::new().with_width(0.0).with_height(0.0));
     }
     let allow_none = kind == PickerKind::Highlight;
-    let initial = Color::rgb(0.2, 0.45, 0.88);
+
+    // Snapshot the committed document + selection and suspend undo feeding for
+    // the duration of the dialog. Live previewing exec's a fresh `SetTextColor`
+    // / `SetHighlight` on every drag frame, so without this the rapid mutations
+    // would each seed an undo step and a Cancel would leave a stray entry.
+    // `commit_preview` (Select) collapses the whole drag into one undo step;
+    // `cancel_preview` (Cancel / Escape / close) restores this exact snapshot.
+    handle.begin_preview();
+
+    // Seed the wheel from the selection's current colour so the dialog opens on
+    // what's already there. The selection stays visible (the editor paints its
+    // band even while unfocused) so the user sees what they are recolouring.
+    let common = handle.common_style_of_selection();
+    let initial = match kind {
+        PickerKind::TextColor => match common.text_color {
+            Some(Some(c)) => c,
+            // Uniform default / mixed: fall back to a neutral starting colour.
+            _ => Color::rgb(0.2, 0.45, 0.88),
+        },
+        PickerKind::Highlight => match common.highlight {
+            Some(Some(c)) => c,
+            // Uniform "no highlight" opens on pass-through (alpha 0 → the
+            // picker checks its "No Color" box).
+            Some(None) => Color::rgba(0.0, 0.0, 0.0, 0.0),
+            // Mixed highlight: a sensible default the user can adjust.
+            None => Color::rgb(1.0, 0.92, 0.23),
+        },
+        PickerKind::None => unreachable!("guarded above"),
+    };
+
+    let change_handle = handle.clone();
     let sel_handle = handle.clone();
+    let cancel_handle = handle.clone();
     let sel_picker = Rc::clone(picker);
     let cancel_picker = Rc::clone(picker);
+
     let widget = ColorWheelPicker::new(initial, Arc::clone(font))
         .with_allow_none(allow_none)
         .with_show_alpha(true)
         .with_font_size(12.0)
+        // Live preview: recolour the selection in context as the user drags.
+        .on_change(move |opt| apply_color(&change_handle, kind, opt))
+        // Select = commit: apply the final colour, then bank one undo step.
         .on_select(move |opt| {
-            match kind {
-                PickerKind::TextColor => {
-                    if let Some(c) = opt {
-                        sel_handle.exec(&RichCommand::SetTextColor(c));
-                    }
-                }
-                PickerKind::Highlight => {
-                    sel_handle.exec(&RichCommand::SetHighlight(opt));
-                }
-                PickerKind::None => {}
-            }
+            apply_color(&sel_handle, kind, opt);
+            sel_handle.commit_preview();
             sel_picker.set(PickerKind::None);
             agg_gui::animation::request_draw();
         })
+        // Cancel / Escape / close = restore the pre-dialog snapshot.
         .on_cancel(move || {
+            cancel_handle.cancel_preview();
             cancel_picker.set(PickerKind::None);
             agg_gui::animation::request_draw();
         });
@@ -246,6 +274,21 @@ fn build_picker(
         _ => "Text colour",
     };
     agg_gui::color_wheel_picker_dialog(widget, title)
+}
+
+/// Apply a picker colour to the selection for the given `kind`. Text colour
+/// only applies a concrete colour (a text run always has one); highlight also
+/// forwards `None` — the picker's "No Color" choice removes the highlight.
+fn apply_color(handle: &RichEditHandle, kind: PickerKind, opt: Option<Color>) {
+    match kind {
+        PickerKind::TextColor => {
+            if let Some(c) = opt {
+                handle.exec(&RichCommand::SetTextColor(c));
+            }
+        }
+        PickerKind::Highlight => handle.exec(&RichCommand::SetHighlight(opt)),
+        PickerKind::None => {}
+    }
 }
 
 // ── RichEditHost: re-invalidate the editor's layout on font-cache changes ──

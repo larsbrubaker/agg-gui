@@ -46,6 +46,17 @@ pub struct RichEditCore {
     pending_style: Option<InlineStyle>,
     default_font_size: f64,
     undoer: Undoer<EditSnapshot>,
+    /// While `true`, [`feed_undo`](Self::feed_undo) is a no-op. Used during a
+    /// live colour-preview drag so the rapid per-frame document mutations don't
+    /// each seed an undo snapshot; a single step is recorded once the preview
+    /// commits and feeding resumes.
+    undo_suspended: bool,
+    /// The committed `{doc, caret, anchor}` captured at
+    /// [`begin_preview`](Self::begin_preview), restored verbatim on
+    /// [`cancel_preview`](Self::cancel_preview). A full snapshot (not just the
+    /// colour) so a mixed-colour selection — or a highlight that was `None` —
+    /// is restored exactly.
+    preview_snapshot: Option<EditSnapshot>,
     /// Bumped whenever `doc` changes — the view invalidates its layout cache.
     doc_rev: u64,
     /// Bumped on any caret / anchor / doc change — the view repaints.
@@ -61,6 +72,8 @@ impl RichEditCore {
             pending_style: None,
             default_font_size,
             undoer: Undoer::default(),
+            undo_suspended: false,
+            preview_snapshot: None,
             doc_rev: 0,
             rev: 0,
         }
@@ -379,10 +392,59 @@ impl RichEditCore {
 
     /// Feed the undoer the current state at `time` (seconds).  Returns `true`
     /// while a change is still coalescing, so the caller keeps frames coming.
+    ///
+    /// Suspended during a live preview ([`begin_preview`](Self::begin_preview))
+    /// so the drag's rapid mutations don't each snapshot; the committed change
+    /// is recorded in the single frame after feeding resumes.
     pub fn feed_undo(&mut self, time: f64) -> bool {
+        if self.undo_suspended {
+            return false;
+        }
         let snap = self.snapshot();
         self.undoer.feed_state(time, &snap);
         self.undoer.is_in_flux()
+    }
+
+    // ── Live preview (colour dialog) ──────────────────────────────────────
+    //
+    // A colour dialog previews its result by exec-ing `SetTextColor` /
+    // `SetHighlight` on every drag frame so the document updates in context.
+    // Those rapid mutations must NOT each become an undo step, and a Cancel
+    // must leave no residue. `begin_preview` captures the committed state and
+    // suspends undo feeding; `commit_preview` keeps the result and resumes
+    // (one step is recorded on the next feed); `cancel_preview` restores the
+    // captured state and resumes (restored == committed, so nothing is added).
+
+    /// Start a live-preview session: snapshot the committed state and suspend
+    /// undo feeding. Idempotent — a redundant call keeps the original snapshot.
+    pub fn begin_preview(&mut self) {
+        if self.preview_snapshot.is_none() {
+            self.preview_snapshot = Some(self.snapshot());
+        }
+        self.undo_suspended = true;
+    }
+
+    /// Commit the preview: keep the current document and resume undo feeding so
+    /// the whole drag collapses into a single undo step.
+    pub fn commit_preview(&mut self) {
+        self.preview_snapshot = None;
+        self.undo_suspended = false;
+    }
+
+    /// Cancel the preview: restore the `{doc, caret, anchor}` captured at
+    /// [`begin_preview`](Self::begin_preview) and resume undo feeding. The
+    /// restored state equals the last committed one, so no stray undo entry is
+    /// recorded.
+    pub fn cancel_preview(&mut self) {
+        if let Some(snap) = self.preview_snapshot.take() {
+            self.apply_snapshot(snap);
+        }
+        self.undo_suspended = false;
+    }
+
+    /// Whether a live preview is currently active (test/introspection hook).
+    pub fn is_previewing(&self) -> bool {
+        self.preview_snapshot.is_some()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -485,5 +547,28 @@ impl RichEditHandle {
     }
     pub fn can_redo(&self) -> bool {
         self.core.borrow().can_redo()
+    }
+
+    // ── Live preview (colour dialog) ──────────────────────────────────────
+
+    /// Begin a live-preview session — see [`RichEditCore::begin_preview`].
+    /// Call when a colour dialog opens, before any preview `exec`.
+    pub fn begin_preview(&self) {
+        self.core.borrow_mut().begin_preview();
+    }
+
+    /// Commit the live preview (dialog's Select) — see
+    /// [`RichEditCore::commit_preview`].
+    pub fn commit_preview(&self) {
+        self.core.borrow_mut().commit_preview();
+        crate::animation::request_draw();
+    }
+
+    /// Cancel the live preview (dialog's Cancel / Escape / close) — restores
+    /// the state captured when the preview began. See
+    /// [`RichEditCore::cancel_preview`].
+    pub fn cancel_preview(&self) {
+        self.core.borrow_mut().cancel_preview();
+        crate::animation::request_draw();
     }
 }
