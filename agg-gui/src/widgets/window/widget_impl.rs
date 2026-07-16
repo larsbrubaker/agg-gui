@@ -505,7 +505,7 @@ impl Widget for Window {
         if !self.modal || !self.is_visible() {
             return;
         }
-        let (dx, dy) = self.clamp_modal_into_viewport(ctx);
+        let (dx, dy) = super::paint::clamp_modal_into_viewport(self, ctx);
         ctx.save();
         if dx != 0.0 || dy != 0.0 {
             ctx.translate(dx, dy);
