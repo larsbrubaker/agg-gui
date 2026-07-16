@@ -334,3 +334,27 @@ fn backbuffer_mode_follows_lcd_setting() {
 
     crate::font_settings::clear_lcd_enabled_override();
 }
+
+/// An async font arrival reshapes the layout via `invalidate_layout` WITHOUT
+/// advancing `core.rev()`, so the paint signature must fold in the layout
+/// generation or the backbuffer would keep blitting the stale fallback-font
+/// bitmap. Bumping the generation must change the sig.
+#[test]
+fn invalidate_layout_changes_cache_sig() {
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![sized("hello", 16.0)],
+        ..Block::new()
+    }]);
+    let mut ed = laid_out_editor(doc, 400.0, 120.0);
+
+    let before = ed.cache_sig();
+    // No document/caret change — `core.rev()` is untouched.
+    let rev_before = ed.core.borrow().rev();
+    ed.invalidate_layout();
+    assert_eq!(ed.core.borrow().rev(), rev_before, "rev must not change");
+    let after = ed.cache_sig();
+    assert_ne!(
+        before, after,
+        "invalidate_layout must change the cache sig so an async font arrival re-rasters"
+    );
+}

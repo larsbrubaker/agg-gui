@@ -101,6 +101,13 @@ pub struct RichTextEdit {
     cache: BackbufferCache,
     /// Last painted signature; a change invalidates [`Self::cache`] in `layout`.
     last_sig: Option<RichEditSig>,
+    /// Monotonic counter bumped by [`Self::invalidate_layout`]. The cached
+    /// layout is keyed on `(width, doc_rev)` and does NOT observe the demo's
+    /// asynchronous font catalog, so an async face arrival reshapes the doc
+    /// *without* advancing `core.rev()`. Folding this counter into
+    /// [`RichEditSig`] makes such a reshape invalidate the backbuffer too,
+    /// otherwise the cache would keep blitting the stale fallback-font bitmap.
+    layout_gen: u64,
 }
 
 /// Snapshot of every input that affects the cached backbuffer bitmap
@@ -111,7 +118,7 @@ pub struct RichTextEdit {
 /// blit) and are excluded; typography / theme invalidation is handled by the
 /// framework's epoch checks. `core_rev` folds in every document, caret and
 /// selection change (see [`RichEditCore::rev`]).
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct RichEditSig {
     core_rev: u64,
     focused: bool,
@@ -119,6 +126,7 @@ struct RichEditSig {
     offset_bits: u64,
     w_bits: u64,
     h_bits: u64,
+    layout_gen: u64,
 }
 
 impl RichTextEdit {
@@ -151,6 +159,7 @@ impl RichTextEdit {
             last_layout_rev: None,
             cache: BackbufferCache::default(),
             last_sig: None,
+            layout_gen: 0,
         }
     }
 
@@ -163,6 +172,7 @@ impl RichTextEdit {
             offset_bits: self.vbar.offset.to_bits(),
             w_bits: self.bounds.width.to_bits(),
             h_bits: self.bounds.height.to_bits(),
+            layout_gen: self.layout_gen,
         }
     }
 
@@ -232,6 +242,10 @@ impl RichTextEdit {
         self.layout = None;
         self.layout_width = -1.0;
         self.layout_doc_rev = u64::MAX;
+        // Advance the generation so the backbuffer cache re-rasters too: an
+        // async font arrival reshapes without bumping `core.rev()`, which the
+        // paint signature otherwise keys on.
+        self.layout_gen = self.layout_gen.wrapping_add(1);
     }
 
     // ── Layout cache ──────────────────────────────────────────────────────
