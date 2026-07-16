@@ -11,6 +11,7 @@ use crate::widget::Widget;
 use crate::widgets::rich_text::commands::RichCommand;
 use crate::widgets::rich_text::model::{Block, DocPos, InlineStyle, ListKind, RichDoc, TextRun};
 use crate::widgets::rich_text::view::SharedResolver;
+use crate::widgets::text_area::TextHAlign;
 
 use super::core::RichEditCore;
 use super::RichTextEdit;
@@ -100,6 +101,36 @@ fn toggle_bold_over_selection_through_exec() {
     // A second toggle clears it.
     core.exec(&RichCommand::ToggleBold);
     assert_eq!(core.common_style_of_selection().bold, Some(false));
+}
+
+#[test]
+fn pending_style_keeps_block_align_and_list_active() {
+    // Caret in a left-aligned bullet block; arm bold with a collapsed caret.
+    // The inline pending style must not blank out the block-level toolbar
+    // state: alignment and list stay reported from the caret's block.
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![TextRun::plain("item")],
+        align: TextHAlign::Left,
+        list: ListKind::Bullet,
+        indent: 0,
+    }]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.set_caret(DocPos::new(0, 4), false);
+    core.exec(&RichCommand::ToggleBold);
+    assert!(core.pending_style().is_some(), "bold armed at the caret");
+
+    let cs = core.common_style_of_selection();
+    assert_eq!(cs.bold, Some(true), "pending bold is reported");
+    assert_eq!(
+        cs.align,
+        Some(TextHAlign::Left),
+        "block alignment must survive an armed pending style"
+    );
+    assert_eq!(
+        cs.list,
+        Some(ListKind::Bullet),
+        "block list kind must survive an armed pending style"
+    );
 }
 
 #[test]

@@ -93,7 +93,11 @@ impl CommonStyle {
     /// touches into this summary. Called by [`range_common_style`] after the
     /// inline attributes are seeded, so an all-agree selection reports a
     /// concrete `Some(_)` and a mixed one reports `None`.
-    fn merge_blocks(&mut self, doc: &RichDoc, range: DocRange) {
+    ///
+    /// `pub(crate)` so the editor's collapsed-caret + pending-style path can
+    /// fold the caret block's align/list into a [`CommonStyle::of_style`]
+    /// summary — block state is independent of the armed inline pending style.
+    pub(crate) fn merge_blocks(&mut self, doc: &RichDoc, range: DocRange) {
         let (a, b) = range.ordered();
         let mut first = true;
         for bi in a.block..=b.block {
