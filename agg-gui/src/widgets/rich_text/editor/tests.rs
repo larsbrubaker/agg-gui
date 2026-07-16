@@ -322,6 +322,9 @@ fn enter_on_non_empty_list_item_splits_normally() {
     assert_eq!(core.doc().blocks[1].text(), "");
 }
 
+// Programmatic handle-API tests live in `handle_api_tests.rs` (declared from
+// `editor.rs`) to keep this file under the 800-line cap.
+
 // ── Styled clipboard (rich Copy / Cut / Paste) ─────────────────────────────
 
 fn ctrl(c: char) -> Event {

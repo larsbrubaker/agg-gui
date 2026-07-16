@@ -80,11 +80,35 @@ impl RichEditCore {
         }
     }
 
+    /// Replace the entire document, resetting the caret/selection to the start
+    /// and **discarding the undo/redo history** — the freshly-loaded document is
+    /// the new baseline, so there is nothing to undo back to.  Any armed pending
+    /// caret style is cleared.
+    pub fn load(&mut self, doc: RichDoc) {
+        self.doc = doc;
+        self.caret = DocPos::default();
+        self.anchor = DocPos::default();
+        self.pending_style = None;
+        // A new document is a new history: drop every prior undo/redo snapshot.
+        self.undoer = Undoer::default();
+        // Abandon any in-flight live preview: the captured snapshot belongs to
+        // the old document, so keeping it would let a later `cancel_preview`
+        // clobber the freshly-loaded doc — and leaving undo suspended would keep
+        // `feed_undo` a no-op forever (dead undo).
+        self.preview_snapshot = None;
+        self.undo_suspended = false;
+        self.bump_doc();
+    }
+
     // ── Accessors ─────────────────────────────────────────────────────────
 
     /// The document being edited.
     pub fn doc(&self) -> &RichDoc {
         &self.doc
+    }
+    /// The document's plain text (blocks joined by `\n`).
+    pub fn plain_text(&self) -> String {
+        self.doc.plain_text()
     }
     /// The moving end of the selection (the blinking caret position).
     pub fn caret(&self) -> DocPos {
@@ -566,6 +590,47 @@ impl RichEditHandle {
     /// Summary of the styles under the current selection (drives toolbar state).
     pub fn common_style_of_selection(&self) -> CommonStyle {
         self.core.borrow().common_style_of_selection()
+    }
+
+    /// Select the whole document, then request a redraw.
+    pub fn select_all(&self) {
+        self.core.borrow_mut().select_all();
+        crate::animation::request_draw();
+    }
+
+    /// Move the caret to `pos` (clamped onto a valid position), collapsing any
+    /// selection, and request a redraw.
+    pub fn set_caret(&self, pos: DocPos) {
+        self.core.borrow_mut().set_caret(pos, false);
+        crate::animation::request_draw();
+    }
+
+    /// Set the selection to `range` — `range.start` becomes the fixed anchor and
+    /// `range.end` the moving caret, each clamped onto a valid position — and
+    /// request a redraw.
+    pub fn set_selection(&self, range: DocRange) {
+        self.core
+            .borrow_mut()
+            .set_selection(range.start, range.end);
+        crate::animation::request_draw();
+    }
+
+    /// The current selection (anchor → caret; collapsed when they coincide).
+    pub fn selection(&self) -> DocRange {
+        self.core.borrow().selection()
+    }
+
+    /// The document's plain text (blocks joined by `\n`).
+    pub fn plain_text(&self) -> String {
+        self.core.borrow().plain_text()
+    }
+
+    /// Replace the editor's document with `doc`, resetting the caret to the
+    /// start and **discarding the undo/redo history** (the loaded document is
+    /// the new baseline).  Requests a redraw.
+    pub fn load(&self, doc: RichDoc) {
+        self.core.borrow_mut().load(doc);
+        crate::animation::request_draw();
     }
 
     /// Undo one step through the shared core, requesting a redraw on change.

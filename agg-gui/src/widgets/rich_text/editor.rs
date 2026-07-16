@@ -34,7 +34,7 @@ use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
 use crate::widgets::scrollbar::ScrollbarAxis;
 
 use super::commands::{CommonStyle, RichCommand};
-use super::model::DocPos;
+use super::model::{DocPos, DocRange};
 use super::layout::{layout_doc, DocLayout, FontResolver};
 use super::model::RichDoc;
 use super::view::SharedResolver;
@@ -50,6 +50,8 @@ pub use core::{RichEditCore, RichEditHandle};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod handle_api_tests;
 
 /// An interactive, styled rich-text editor.
 pub struct RichTextEdit {
@@ -238,6 +240,30 @@ impl RichTextEdit {
     /// Summary of the styles under the current selection (drives toolbar state).
     pub fn common_style_of_selection(&self) -> CommonStyle {
         self.core.borrow().common_style_of_selection()
+    }
+
+    /// Select the whole document.
+    pub fn select_all(&mut self) {
+        self.core.borrow_mut().select_all();
+    }
+    /// Move the caret to `pos` (clamped), collapsing any selection.
+    pub fn set_caret(&mut self, pos: DocPos) {
+        self.core.borrow_mut().set_caret(pos, false);
+    }
+    /// Set the selection to `range` — `range.start` is the anchor, `range.end`
+    /// the caret, each clamped onto a valid position.
+    pub fn set_selection(&mut self, range: DocRange) {
+        self.core.borrow_mut().set_selection(range.start, range.end);
+    }
+    /// The current selection (anchor → caret; collapsed when they coincide).
+    pub fn selection(&self) -> DocRange {
+        self.core.borrow().selection()
+    }
+    /// Replace the document with `doc`, resetting the caret to the start and
+    /// **discarding the undo/redo history** (the loaded document is the new
+    /// baseline).
+    pub fn load(&mut self, doc: RichDoc) {
+        self.core.borrow_mut().load(doc);
     }
     /// Undo the last coalesced edit; returns `true` if the document changed.
     pub fn undo(&mut self) -> bool {
