@@ -39,6 +39,10 @@ parity work against egui 0.34.3. Includes a few semver-relevant changes — see
   family's real variants, block alignment, lists). Enter on an empty list item
   outdents/exits the list. Backed by a cached LCD backbuffer that invalidates on
   async font arrival. A dedicated RichTextEdit demo window exercises the toolbar.
+- **RichEditHandle / RichTextEdit programmatic APIs** — `select_all`,
+  `set_caret`, `set_selection` (clamped), `selection`, `plain_text`, and `load`
+  (replaces the document and resets the undo history) for driving an embedded
+  editor from code.
 - **Scene pan/zoom container** — a `Scene` widget that hosts content as a
   first-class child under a `child_transform`, added via the new
   `Widget::child_transform` hook for scaled subtrees (focus, click-to-focus, and

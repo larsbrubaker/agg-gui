@@ -228,6 +228,74 @@ fn enter_on_non_empty_list_item_splits_normally() {
     assert_eq!(core.doc().blocks[1].text(), "");
 }
 
+// ── Programmatic handle APIs ──────────────────────────────────────────────
+
+/// A toolbar-style flow: `select_all` through the handle, then `ToggleBold`,
+/// must bold the whole document — proving the handle's selection API drives the
+/// same core the widget renders.
+#[test]
+fn handle_select_all_then_bold() {
+    let editor = RichTextEdit::new(RichDoc::from_blocks(vec![Block::plain("hello")]), resolver());
+    let handle = editor.handle();
+    handle.select_all();
+    assert_eq!(
+        handle.selection(),
+        crate::widgets::rich_text::model::DocRange::new(DocPos::new(0, 0), DocPos::new(0, 5)),
+    );
+    handle.exec(&RichCommand::ToggleBold);
+    assert_eq!(handle.common_style_of_selection().bold, Some(true));
+    assert_eq!(handle.plain_text(), "hello");
+}
+
+/// `set_caret` / `set_selection` clamp out-of-range positions onto valid ones.
+#[test]
+fn handle_set_selection_clamps() {
+    use crate::widgets::rich_text::model::DocRange;
+    let editor = RichTextEdit::new(RichDoc::from_blocks(vec![Block::plain("hi")]), resolver());
+    let handle = editor.handle();
+    // A wildly out-of-range selection clamps to the single block's extent.
+    handle.set_selection(DocRange::new(DocPos::new(9, 9), DocPos::new(0, 99)));
+    let sel = handle.selection();
+    assert_eq!(sel.start, DocPos::new(0, 2), "anchor clamped to end of block");
+    assert_eq!(sel.end, DocPos::new(0, 2), "caret clamped to end of block");
+    // A collapsed caret set past the end clamps too.
+    handle.set_caret(DocPos::new(0, 50));
+    assert!(handle.selection().is_empty());
+    assert_eq!(handle.selection().start, DocPos::new(0, 2));
+}
+
+/// The handle's `load` replaces the document and resets the caret to the start.
+#[test]
+fn handle_load_replaces_content() {
+    let editor = RichTextEdit::new(RichDoc::from_blocks(vec![Block::plain("old")]), resolver());
+    let handle = editor.handle();
+    handle.select_all();
+    handle.load(RichDoc::from_blocks(vec![Block::plain("brand new")]));
+    assert_eq!(handle.plain_text(), "brand new");
+    assert_eq!(handle.selection().start, DocPos::new(0, 0));
+    assert!(handle.selection().is_empty(), "caret collapsed after load");
+}
+
+/// `load` **discards the undo history**: after loading, there is nothing to undo
+/// back to even though the prior document had a coalesced edit.  Driven at the
+/// core level, which owns the per-frame undo feed.
+#[test]
+fn load_resets_undo_history() {
+    let mut core = RichEditCore::new(RichDoc::from_blocks(vec![Block::plain("old")]), 16.0);
+    // Baseline, then a coalesced edit → one undo point.
+    core.feed_undo(0.0);
+    core.select_all();
+    core.exec(&RichCommand::ToggleBold);
+    core.feed_undo(0.1);
+    core.feed_undo(2.0);
+    assert!(core.can_undo(), "edit created an undo point");
+
+    core.load(RichDoc::from_blocks(vec![Block::plain("brand new")]));
+    assert_eq!(core.doc().plain_text(), "brand new");
+    assert!(!core.can_undo(), "load must discard the prior undo history");
+    assert_eq!(core.caret(), DocPos::new(0, 0), "caret reset to document start");
+}
+
 // ── Widget geometry (caret hit-testing) ───────────────────────────────────
 
 fn laid_out_editor(doc: RichDoc, w: f64, h: f64) -> RichTextEdit {
