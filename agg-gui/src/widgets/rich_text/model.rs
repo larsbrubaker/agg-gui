@@ -32,24 +32,35 @@ use crate::widgets::text_area::TextHAlign;
 /// either bold or not).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InlineStyle {
+    /// Bold weight (the resolver picks the matching face).
     pub bold: bool,
+    /// Italic slant (the resolver picks the matching face).
     pub italic: bool,
+    /// Draw an underline under the run.
     pub underline: bool,
+    /// Draw a line through the run.
     pub strikethrough: bool,
+    /// Font family name, or `None` to inherit the widget default family.
     pub font_family: Option<String>,
+    /// Font size in points, or `None` to inherit the widget default size.
     pub font_size: Option<f64>,
+    /// Text colour, or `None` to inherit the theme's text colour.
     pub text_color: Option<Color>,
+    /// Highlight (background) colour behind the run, or `None` for none.
     pub highlight: Option<Color>,
 }
 
 /// A contiguous span of text sharing one [`InlineStyle`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextRun {
+    /// The run's characters (never contains `\n` — newlines are block breaks).
     pub text: String,
+    /// The inline formatting shared by every character in the run.
     pub style: InlineStyle,
 }
 
 impl TextRun {
+    /// A run of `text` in `style`.
     pub fn new(text: impl Into<String>, style: InlineStyle) -> Self {
         Self {
             text: text.into(),
@@ -66,9 +77,12 @@ impl TextRun {
 /// List decoration applied to a whole [`Block`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ListKind {
+    /// Not a list item — a plain paragraph.
     #[default]
     None,
+    /// A bulleted (`•`) list item.
     Bullet,
+    /// An ordered (`1.`, `2.`, …) list item.
     Ordered,
 }
 
@@ -76,9 +90,13 @@ pub enum ListKind {
 /// (alignment, list decoration, indent depth).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Block {
+    /// The paragraph's styled runs, in order.
     pub runs: Vec<TextRun>,
+    /// Horizontal text alignment within the block.
     pub align: TextHAlign,
+    /// List decoration (none / bullet / ordered).
     pub list: ListKind,
+    /// Indent depth; each level offsets the block by [`INDENT_PX`](super::layout::INDENT_PX).
     pub indent: u8,
 }
 
@@ -177,6 +195,7 @@ impl Block {
 /// A whole rich-text document: an ordered list of blocks (paragraphs).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichDoc {
+    /// The document's paragraphs, in order (always at least one).
     pub blocks: Vec<Block>,
 }
 
@@ -194,6 +213,7 @@ impl RichDoc {
         }
     }
 
+    /// A document from `blocks`, substituting the blank state when empty.
     pub fn from_blocks(blocks: Vec<Block>) -> Self {
         if blocks.is_empty() {
             Self::new()
@@ -230,11 +250,14 @@ impl RichDoc {
 /// document is "less".
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct DocPos {
+    /// Index of the block (paragraph) this position lies in.
     pub block: usize,
+    /// Byte offset into that block's flattened text.
     pub byte: usize,
 }
 
 impl DocPos {
+    /// A position at `byte` within `block`.
     pub fn new(block: usize, byte: usize) -> Self {
         Self { block, byte }
     }
@@ -244,11 +267,14 @@ impl DocPos {
 /// [`DocRange::ordered`] returns them low-to-high.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DocRange {
+    /// One endpoint (not necessarily the earlier one).
     pub start: DocPos,
+    /// The other endpoint (not necessarily the later one).
     pub end: DocPos,
 }
 
 impl DocRange {
+    /// A range between `start` and `end` (in either document order).
     pub fn new(start: DocPos, end: DocPos) -> Self {
         Self { start, end }
     }
@@ -275,10 +301,12 @@ impl DocRange {
         }
     }
 
+    /// The earlier endpoint in document order.
     pub fn min(&self) -> DocPos {
         self.ordered().0
     }
 
+    /// The later endpoint in document order.
     pub fn max(&self) -> DocPos {
         self.ordered().1
     }

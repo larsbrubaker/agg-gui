@@ -45,14 +45,21 @@ pub type FontResolver<'a> = dyn Fn(&InlineStyle) -> Arc<Font> + 'a;
 /// line); adjacent same-style pieces on a line are merged into one fragment.
 #[derive(Clone)]
 pub struct LineFragment {
+    /// The fragment's characters.
     pub text: String,
+    /// The inline style shared by every character in the fragment.
     pub style: InlineStyle,
+    /// Font this fragment was shaped/measured with (from the resolver).
     pub font: Arc<Font>,
+    /// Font size (points) used for this fragment.
     pub font_size: f64,
     /// X offset of this fragment's left edge from the start of the line's text.
     pub x: f64,
+    /// Advance width of the fragment.
     pub width: f64,
+    /// Ascent (px above baseline) at this fragment's size.
     pub ascent: f64,
+    /// Descent (px below baseline) at this fragment's size.
     pub descent: f64,
     /// Byte offset into the owning block's **flattened** text where this
     /// fragment's `text` begins.  Within a line, kept fragments are
@@ -66,12 +73,15 @@ pub struct LineFragment {
 /// One visual line within a block.
 #[derive(Clone)]
 pub struct LineLayout {
+    /// The fragments painted on this line, left to right.
     pub fragments: Vec<LineFragment>,
     /// Total advance width of the line's text.
     pub width: f64,
     /// Line-box height = `max(ascent + descent) * LINE_SPACING`.
     pub height: f64,
+    /// Tallest ascent across the line's fragments.
     pub ascent: f64,
+    /// Deepest descent across the line's fragments.
     pub descent: f64,
     /// Alignment offset added to every fragment's `x` within the text column.
     pub align_dx: f64,
@@ -89,6 +99,7 @@ pub struct LineLayout {
 /// Layout of one block/paragraph.
 #[derive(Clone)]
 pub struct BlockLayout {
+    /// The block's visual lines, top to bottom.
     pub lines: Vec<LineLayout>,
     /// Left edge of the text column (indent + optional list gutter).
     pub text_left: f64,
@@ -96,18 +107,24 @@ pub struct BlockLayout {
     pub marker: Option<String>,
     /// Marker font (resolved from the block's leading style).
     pub marker_font: Option<Arc<Font>>,
+    /// Marker font size (points).
     pub marker_font_size: f64,
     /// X of the marker's left edge (right-aligned into the gutter).
     pub marker_x: f64,
+    /// Total height of the block (sum of its line heights).
     pub height: f64,
+    /// Rightmost extent of the block (`text_left` + widest line).
     pub width: f64,
 }
 
 /// Layout of a whole document.
 #[derive(Clone)]
 pub struct DocLayout {
+    /// Laid-out blocks, top to bottom.
     pub blocks: Vec<BlockLayout>,
+    /// Measured content width (`max(requested width, widest block)`).
     pub width: f64,
+    /// Total content height (sum of block heights).
     pub height: f64,
 }
 
