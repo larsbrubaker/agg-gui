@@ -53,7 +53,7 @@ use web_time::Instant;
 
 use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, MouseButton};
+use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
@@ -428,6 +428,25 @@ impl Window {
         if self.maximized {
             self.pre_maximize_bounds = self.bounds;
         }
+    }
+
+    /// Close the window: hide it, sync the optional `visible_cell`, and fire
+    /// `on_close`.  Shared by the title-bar × button, the Escape key (modal
+    /// windows), and any programmatic close so every route runs the same
+    /// teardown — critically the `on_close` hook, which a modal dialog uses to
+    /// unwind in-flight state (e.g. cancelling a live colour preview). Before
+    /// this was factored out, only the × button ran it, so an Escape/close of
+    /// the colour dialog left its preview session dangling.
+    fn close(&mut self) {
+        self.visible = false;
+        self.visibility_anim.set_target(0.0);
+        if let Some(ref cell) = self.visible_cell {
+            cell.set(false);
+        }
+        if let Some(cb) = self.on_close.as_mut() {
+            cb();
+        }
+        crate::animation::request_draw();
     }
 
     pub fn show(&mut self) {

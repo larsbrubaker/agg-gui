@@ -166,6 +166,48 @@ pub(super) fn paint_overlay(window: &mut Window, ctx: &mut dyn DrawCtx) {
     }
 }
 
+/// Clamp a *modal* window into the live app viewport so it can never open
+/// partially off-screen, regardless of where its host places it in the tree.
+/// Called from `paint_global_overlay`, where the ctx's root transform carries
+/// the accumulated ancestor offset (the overlay walk applies only translations,
+/// no clips). Returns the logical `(dx, dy)` correction so the caller can shift
+/// the paint by the same amount this frame; the correction is also folded into
+/// `bounds` so the next frame's input routing (which reads `bounds` in the same
+/// parent-local space) stays in lockstep.
+///
+/// Coordinates are logical Y-up with the origin at the viewport's bottom-left —
+/// the window's local `(0, 0)` is its own bottom-left corner, so a fit requires
+/// `0 ≤ root_y` and `root_y + height ≤ viewport.height`.
+///
+/// Note: this folds the clamp correction into `bounds`. A modal window paired
+/// with `with_position_cell` would therefore persist the clamp shift to disk;
+/// no current caller pairs the two (dialogs are transient and unpositioned), so
+/// this is a documented constraint rather than a guard.
+pub(super) fn clamp_modal_into_viewport(window: &mut Window, ctx: &dyn DrawCtx) -> (f64, f64) {
+    let vp = crate::widget::current_viewport();
+    if vp.width <= 1.0 || vp.height <= 1.0 {
+        return (0.0, 0.0);
+    }
+    // `App::paint` scales the ctx by the combined device × UX zoom factor, so
+    // the root transform maps logical units up by `effective_scale`; divide by
+    // the same to recover logical (device-independent) root coordinates that
+    // match `current_viewport()`.
+    let scale = crate::ux_scale::effective_scale().max(1e-6);
+    // Window-local origin mapped to physical root, then back to logical.
+    let mut ox = 0.0;
+    let mut oy = 0.0;
+    ctx.root_transform().transform(&mut ox, &mut oy);
+    let root_x = ox / scale;
+    let root_y = oy / scale;
+    let max_x = (vp.width - window.bounds.width).max(0.0);
+    let max_y = (vp.height - window.bounds.height).max(0.0);
+    let dx = root_x.clamp(0.0, max_x) - root_x;
+    let dy = root_y.clamp(0.0, max_y) - root_y;
+    window.bounds.x += dx;
+    window.bounds.y += dy;
+    (dx, dy)
+}
+
 /// Body of `<Window as Widget>::finish_paint`.  Pops the
 /// compositing layer pushed in `paint` if it was opened this frame.
 pub(super) fn finish_paint(window: &mut Window, ctx: &mut dyn DrawCtx) {

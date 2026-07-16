@@ -26,6 +26,29 @@ pub fn color_wheel_picker_dialog(
     picker: ColorWheelPicker,
     title: impl Into<String>,
 ) -> Box<dyn Widget> {
+    Box::new(build_window(picker, title))
+}
+
+/// Like [`color_wheel_picker_dialog`] but forwards the window's title-bar ×
+/// button (and Escape, which routes through the same [`Window`] close path) to
+/// `on_close`.
+///
+/// The picker's own Cancel button fires `ColorWheelPicker::on_cancel`; the
+/// window chrome's close affordance is a *separate* route that bypasses it.
+/// Hosts that must unwind state when the dialog is dismissed by any means — the
+/// RichTextEdit demo cancels its live colour preview — wire `on_close` to the
+/// same teardown as `on_cancel`, so closing via × or Escape can't strand the
+/// preview session.
+pub fn color_wheel_picker_dialog_with_on_close(
+    picker: ColorWheelPicker,
+    title: impl Into<String>,
+    on_close: impl FnMut() + 'static,
+) -> Box<dyn Widget> {
+    Box::new(build_window(picker, title).on_close(on_close))
+}
+
+/// Shared builder: wrap `picker` in a modal, auto-sized, non-resizable window.
+fn build_window(picker: ColorWheelPicker, title: impl Into<String>) -> Window {
     let allow_none = picker.allow_none;
     let show_alpha = picker.show_alpha;
     let font = picker.font.clone();
@@ -35,7 +58,7 @@ pub fn color_wheel_picker_dialog(
     // ~28px title bar + a small breathing room.
     let win_h = content_h + 28.0 + 4.0;
 
-    let win = Window::new(title, font, Box::new(picker))
+    Window::new(title, font, Box::new(picker))
         .with_bounds(Rect::new(60.0, 60.0, content_w, win_h))
         .with_min_size(Size::new(content_w, win_h))
         .with_auto_size(true)
@@ -44,7 +67,5 @@ pub fn color_wheel_picker_dialog(
         // Grab all pointer/keyboard input over the dialog while it is open so
         // clicks (including the close button) never leak to widgets painted
         // beneath the floating window.  See `Window::with_modal`.
-        .with_modal(true);
-
-    Box::new(win)
+        .with_modal(true)
 }

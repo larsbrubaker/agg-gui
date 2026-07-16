@@ -487,6 +487,33 @@ impl Widget for Window {
         super::paint::finish_paint(self, ctx);
     }
 
+    /// Modal windows paint via the global-overlay pass (see
+    /// [`paint_global_overlay`](Self::paint_global_overlay)) so an ancestor's
+    /// clip — a scrolled container, the host window's content region — can't
+    /// truncate the dialog. Non-modal windows keep the ordinary inline paint.
+    fn defer_paint_to_overlay(&self) -> bool {
+        self.modal
+    }
+
+    /// Paint a modal window during the clip-free global overlay walk. The walk
+    /// has already translated `ctx` to this window's local origin without
+    /// pushing any ancestor clip, so re-entering the normal paint path here via
+    /// [`paint_subtree_forced`] renders the whole dialog (chrome + content)
+    /// above and outside everything that would otherwise clip it. We first
+    /// clamp the window into the viewport so it can't open partially off-screen.
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if !self.modal || !self.is_visible() {
+            return;
+        }
+        let (dx, dy) = super::paint::clamp_modal_into_viewport(self, ctx);
+        ctx.save();
+        if dx != 0.0 || dy != 0.0 {
+            ctx.translate(dx, dy);
+        }
+        crate::widget::paint_subtree_forced(self, ctx);
+        ctx.restore();
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         if !self.requested_visible() {
             return EventResult::Ignored;
@@ -559,15 +586,7 @@ impl Widget for Window {
 
                 // Close button — highest priority.
                 if is_left_click && self.in_close_button(*pos) {
-                    self.visible = false;
-                    self.visibility_anim.set_target(0.0);
-                    if let Some(ref cell) = self.visible_cell {
-                        cell.set(false);
-                    }
-                    if let Some(cb) = self.on_close.as_mut() {
-                        cb();
-                    }
-                    crate::animation::request_draw();
+                    self.close();
                     return EventResult::Consumed;
                 }
 
@@ -686,6 +705,18 @@ impl Widget for Window {
                 } else {
                     EventResult::Ignored
                 }
+            }
+
+            // Escape closes a modal window (standard dialog convention),
+            // running the same teardown as the × button so `on_close` fires.
+            // Modal key routing bubbles Escape up to us when no inner field
+            // consumed it (see `App::on_key_down`); non-modal windows ignore it
+            // so app-level shortcuts still see the key.
+            Event::KeyDown {
+                key: Key::Escape, ..
+            } if self.modal => {
+                self.close();
+                EventResult::Consumed
             }
 
             _ => EventResult::Ignored,
