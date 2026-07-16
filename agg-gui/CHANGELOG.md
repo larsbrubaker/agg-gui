@@ -41,8 +41,8 @@ parity work against egui 0.34.3. Includes a few semver-relevant changes — see
   async font arrival. A dedicated RichTextEdit demo window exercises the toolbar.
 - **RichEditHandle / RichTextEdit programmatic APIs** — `select_all`,
   `set_caret`, `set_selection` (clamped), `selection`, `plain_text`, and `load`
-  (replaces the document and resets the undo history) for driving an embedded
-  editor from code.
+  (replaces the document and resets the undo history and any in-flight colour
+  preview) for driving an embedded editor from code.
 - **`RichTextToolbar`** — a configurable, fully self-contained formatting toolbar
   widget driven by a `RichEditHandle`: bold/italic/underline/strike (Bold/Italic
   gateable through an injected `Variant` check), alignment, ordered/bullet lists,

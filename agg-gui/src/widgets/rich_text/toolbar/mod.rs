@@ -11,7 +11,8 @@
 //!
 //! # Layout
 //!
-//! Controls flow across **two rows** (a [`FlexColumn`] of two [`FlexRow`]s),
+//! Controls flow across **two rows** (a [`FlexColumn`] of two
+//! [`FlexRow`](crate::widgets::flex_row::FlexRow)s),
 //! matching the demo: row 1 is inline character formatting + font family/size +
 //! colours; row 2 is block formatting (alignment, lists, indent) + history.  An
 //! empty row (its whole group disabled) is omitted.
@@ -33,9 +34,11 @@
 //! un-truncated over the editor.  The toolbar is therefore **fully
 //! self-contained**: no companion overlay to place, no top-level `Stack`
 //! required.  Colours drive a live preview through the handle's preview session
-//! (`begin/commit/cancel_preview`) — the selection recolours as the wheel is
-//! dragged, commits on *Select*, and restores on *Cancel* / × / *Escape* (see
-//! [`color`]).
+//! ([`begin_preview`](RichEditHandle::begin_preview) /
+//! [`commit_preview`](RichEditHandle::commit_preview) /
+//! [`cancel_preview`](RichEditHandle::cancel_preview)) — the selection recolours
+//! as the wheel is dragged, commits on *Select*, and restores on
+//! *Cancel* / × / *Escape*.
 //!
 //! # Example
 //!
@@ -91,7 +94,7 @@ mod controls;
 use crate::widgets::text_area::TextHAlign;
 
 /// Which colour the toolbar's floating picker is currently editing, shared
-/// between the swatch buttons and the [`color_overlay`](RichTextToolbar::color_overlay).
+/// between the swatch buttons and the internal colour overlay.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PickerKind {
     None,
@@ -167,8 +170,9 @@ const OVERLAY_LAYOUT_ROOM: Size = Size::new(4096.0, 4096.0);
 ///
 /// Build it with [`new`](Self::new), tweak the control roster and font
 /// family/size options through the `with_*` builders, then place it in a layout
-/// like any other widget.  For colours, also add [`color_overlay`](Self::color_overlay)
-/// to a top-level stack (see the [module example](self)).
+/// like any other widget.  The colour picker is hosted internally (a modal
+/// dialog that floats via the global-overlay pass), so the toolbar is fully
+/// self-contained — nothing else to place (see the [module example](self)).
 pub struct RichTextToolbar {
     bounds: Rect,
     base: WidgetBase,
@@ -284,6 +288,10 @@ impl RichTextToolbar {
     /// face; pass `None` for a plain-text list.  Selecting a family issues a
     /// [`SetFontFamily`](super::commands::RichCommand::SetFontFamily) — the
     /// app's resolver maps family + bold/italic to a concrete face.
+    ///
+    /// `item_fonts` need not match `names` in length: a row with no matching
+    /// entry falls back to the toolbar's base font, and any extra fonts beyond
+    /// `names.len()` are ignored.
     pub fn with_families(mut self, names: Vec<String>, item_fonts: Option<Vec<Arc<Font>>>) -> Self {
         self.families = if names.is_empty() {
             None
@@ -518,6 +526,25 @@ impl Widget for RichTextToolbar {
 
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+impl Drop for RichTextToolbar {
+    /// If the toolbar is torn down while its colour dialog is still open
+    /// mid-preview, the shared editor core would be left with undo suspended and
+    /// a dangling preview snapshot (dead undo; a later `cancel_preview` could
+    /// clobber the doc). Unwind the session so the editor stays usable.
+    ///
+    /// The guard fires only when *this* toolbar's own picker is open, and
+    /// `cancel_preview` is a no-op when no session is active, so it never
+    /// disturbs an unrelated editor. The held [`RichEditHandle`] keeps the core
+    /// alive for the call, so this is safe regardless of drop order relative to
+    /// the editor widget.
+    fn drop(&mut self) {
+        if self.picker.get() != PickerKind::None {
+            self.handle.cancel_preview();
+            self.picker.set(PickerKind::None);
+        }
     }
 }
 

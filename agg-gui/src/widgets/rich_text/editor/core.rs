@@ -91,6 +91,12 @@ impl RichEditCore {
         self.pending_style = None;
         // A new document is a new history: drop every prior undo/redo snapshot.
         self.undoer = Undoer::default();
+        // Abandon any in-flight live preview: the captured snapshot belongs to
+        // the old document, so keeping it would let a later `cancel_preview`
+        // clobber the freshly-loaded doc — and leaving undo suspended would keep
+        // `feed_undo` a no-op forever (dead undo).
+        self.preview_snapshot = None;
+        self.undo_suspended = false;
         self.bump_doc();
     }
 

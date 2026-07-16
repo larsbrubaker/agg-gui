@@ -177,3 +177,36 @@ fn bold_toggle_reflects_tri_state() {
     handle.select_all();
     assert_eq!(toolbar.common_style_of_selection().bold, Some(false));
 }
+
+// ── Drop guard: dropping mid-preview unwinds the session ───────────────────
+
+/// Dropping the toolbar while its colour dialog is open mid-preview must cancel
+/// the live-preview session, so the shared editor core isn't left with undo
+/// suspended and a dangling snapshot.
+#[test]
+fn drop_mid_preview_cancels_session() {
+    let (mut toolbar, handle) = toolbar_over(RichDoc::from_blocks(vec![Block::plain("hi")]));
+    handle.select_all();
+    toolbar.layout(Size::new(600.0, 100.0));
+
+    // Click the text-colour swatch (row 1, index 5: B/I/U/S + size combo, then
+    // text colour) to open the picker, then re-layout so the overlay's
+    // Rebuilder builds the dialog and begins the preview session.
+    {
+        let col = &mut toolbar.children_mut()[0];
+        let row1 = &mut col.children_mut()[0];
+        let swatch = &mut row1.children_mut()[5];
+        let b = swatch.bounds();
+        let pos = Point::new(b.width * 0.5, b.height * 0.5);
+        swatch.on_event(&Event::MouseDown { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+        swatch.on_event(&Event::MouseUp { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+    }
+    toolbar.layout(Size::new(600.0, 100.0));
+    assert!(handle.is_previewing(), "opening the swatch begins a preview session");
+
+    drop(toolbar);
+    assert!(
+        !handle.is_previewing(),
+        "dropping the toolbar mid-preview must cancel the session"
+    );
+}

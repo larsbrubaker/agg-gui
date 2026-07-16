@@ -49,6 +49,8 @@ pub use core::{RichEditCore, RichEditHandle};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod handle_api_tests;
 
 /// An interactive, styled rich-text editor.
 pub struct RichTextEdit {
