@@ -389,3 +389,48 @@ fn invalidate_layout_changes_cache_sig() {
         "invalidate_layout must change the cache sig so an async font arrival re-rasters"
     );
 }
+
+/// A `RichTextEdit` added **directly** as a tree child — with no host wrapper
+/// forwarding `backbuffer_cache_mut` — must still engage the cached LCD/RGBA
+/// backbuffer path when painted through the framework. The widget forwards the
+/// backbuffer hooks itself, so `paint_subtree` takes the backbuffered branch and
+/// populates the cache pixels. This mirrors the demo host test
+/// (`host_engages_editor_backbuffer_cache`) but proves an unwrapped editor needs
+/// no framework precondition the host was compensating for.
+#[test]
+fn direct_embed_engages_backbuffer_cache() {
+    // Standard density so LCD is available; either mode still populates pixels
+    // (the assertion only cares that the cached path ran, not which mode).
+    crate::device_scale::set_device_scale(1.0);
+    crate::ux_scale::set_ux_scale(1.0);
+
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![sized("hello world", 16.0)],
+        ..Block::new()
+    }]);
+    let mut ed = RichTextEdit::new(doc, resolver()).with_font_size(16.0);
+
+    // The widget exposes its own cache — no host forwarding involved.
+    assert!(
+        ed.backbuffer_cache_mut().is_some(),
+        "RichTextEdit must expose its backbuffer cache directly"
+    );
+
+    ed.layout(Size::new(400.0, 300.0));
+
+    let mut fb = crate::Framebuffer::new(400, 300);
+    {
+        let mut ctx = crate::GfxCtx::new(&mut fb);
+        crate::widget::paint_subtree(&mut ed, &mut ctx);
+    }
+
+    let engaged = ed
+        .backbuffer_cache_mut()
+        .map(|c| c.pixels.is_some())
+        .unwrap_or(false);
+    assert!(
+        engaged,
+        "a directly-embedded RichTextEdit's backbuffer cache must populate after \
+         a framework paint — the cached LCD/RGBA path did not engage"
+    );
+}
