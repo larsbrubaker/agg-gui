@@ -586,15 +586,7 @@ impl Widget for Window {
 
                 // Close button — highest priority.
                 if is_left_click && self.in_close_button(*pos) {
-                    self.visible = false;
-                    self.visibility_anim.set_target(0.0);
-                    if let Some(ref cell) = self.visible_cell {
-                        cell.set(false);
-                    }
-                    if let Some(cb) = self.on_close.as_mut() {
-                        cb();
-                    }
-                    crate::animation::request_draw();
+                    self.close();
                     return EventResult::Consumed;
                 }
 
@@ -713,6 +705,18 @@ impl Widget for Window {
                 } else {
                     EventResult::Ignored
                 }
+            }
+
+            // Escape closes a modal window (standard dialog convention),
+            // running the same teardown as the × button so `on_close` fires.
+            // Modal key routing bubbles Escape up to us when no inner field
+            // consumed it (see `App::on_key_down`); non-modal windows ignore it
+            // so app-level shortcuts still see the key.
+            Event::KeyDown {
+                key: Key::Escape, ..
+            } if self.modal => {
+                self.close();
+                EventResult::Consumed
             }
 
             _ => EventResult::Ignored,

@@ -84,7 +84,7 @@ mod widget_impl;
 mod tests;
 
 pub use alpha_track::AlphaTrack;
-pub use dialog::color_wheel_picker_dialog;
+pub use dialog::{color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close};
 pub use hue_wheel::HueWheel;
 pub use preview_swatches::PreviewSwatches;
 pub use sv_triangle::SvTriangle;

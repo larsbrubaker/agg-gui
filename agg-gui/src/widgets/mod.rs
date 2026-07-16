@@ -55,7 +55,9 @@ pub use checkbox::Checkbox;
 pub use chevron::{ChevronWidget, CHEVRON_SIZE};
 pub use collapsing_header::CollapsingHeader;
 pub use color_picker::ColorPicker;
-pub use color_wheel_picker::{color_wheel_picker_dialog, ColorWheelPicker};
+pub use color_wheel_picker::{
+    color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, ColorWheelPicker,
+};
 pub use combo_box::ComboBox;
 pub use conditional::Conditional;
 pub use container::Container;

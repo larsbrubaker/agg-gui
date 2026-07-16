@@ -571,4 +571,10 @@ impl RichEditHandle {
         self.core.borrow_mut().cancel_preview();
         crate::animation::request_draw();
     }
+
+    /// Whether a live preview is currently active. Exposed so a host can assert
+    /// (in tests) that every dialog-dismissal route unwinds the session.
+    pub fn is_previewing(&self) -> bool {
+        self.core.borrow().is_previewing()
+    }
 }

@@ -456,6 +456,19 @@ pub trait Widget {
     /// container needs so it can't be truncated by its host.
     ///
     /// Default `false`: ordinary widgets paint inline as usual.
+    ///
+    /// # Z-order caveat for deferred hosts
+    ///
+    /// The global-overlay walk is post-order (a parent's
+    /// `paint_global_overlay` runs *after* its descendants'), so a deferred
+    /// widget's body — painted in its own `paint_global_overlay` — draws on top
+    /// of anything a descendant painted *directly* in an earlier
+    /// `paint_global_overlay` (e.g. a `menu`/`PopupMenu` surface, the markdown
+    /// link layer, or a nested modal). Descendants that instead submit to a
+    /// drained queue (`ComboBox` popups, `Tooltip`) are unaffected — those
+    /// queues drain after the whole overlay walk. Today the colour dialog's
+    /// content uses only queue-based descendants, so it's safe; a future modal
+    /// host embedding a direct-overlay child must account for this occlusion.
     fn defer_paint_to_overlay(&self) -> bool {
         false
     }

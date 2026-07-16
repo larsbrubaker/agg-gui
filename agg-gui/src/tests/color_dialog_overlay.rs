@@ -365,6 +365,62 @@ fn test_modal_dialog_paints_outside_ancestor_clip() {
     );
 }
 
+// ── on_close forwarding: × button and Escape ───────────────────────────────
+//
+// The window chrome's close affordance (× button) and Escape are a route
+// SEPARATE from the picker's own Cancel button. `color_wheel_picker_dialog`
+// alone never wires the window's `on_close`, so a host relying on it (the
+// RichTextEdit demo cancels a live preview there) would be stranded. These pin
+// that `color_wheel_picker_dialog_with_on_close` forwards both routes.
+
+fn build_closeable_dialog_app(closed: Rc<Cell<bool>>) -> App {
+    let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
+    let picker = ColorWheelPicker::new(Color::rgb(0.2, 0.45, 0.88), Arc::clone(&font))
+        .with_show_alpha(true)
+        .with_font_size(12.0);
+    let dialog = crate::color_wheel_picker_dialog_with_on_close(picker, "Text colour", move || {
+        closed.set(true)
+    });
+    let root = Stack::new().with_hit_children_only(false).add(dialog);
+    App::new(Box::new(root))
+}
+
+#[test]
+fn test_dialog_close_button_fires_on_close() {
+    unit_scale();
+    let closed = Rc::new(Cell::new(false));
+    let mut app = build_closeable_dialog_app(Rc::clone(&closed));
+    app.layout(Size::new(VP_W, VP_H));
+
+    // Window is a direct Stack child, so its bounds are already root-space.
+    let wb = app.root().children()[0].bounds();
+    let close_world = Point::new(wb.x + wb.width - 10.0, wb.y + wb.height - 14.0);
+    let screen_y = VP_H - close_world.y;
+    app.on_mouse_down(close_world.x, screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(close_world.x, screen_y, MouseButton::Left, Modifiers::default());
+
+    assert!(
+        closed.get(),
+        "clicking the dialog's × button must fire the forwarded on_close"
+    );
+}
+
+#[test]
+fn test_dialog_escape_fires_on_close() {
+    unit_scale();
+    let closed = Rc::new(Cell::new(false));
+    let mut app = build_closeable_dialog_app(Rc::clone(&closed));
+    app.layout(Size::new(VP_W, VP_H));
+
+    // Escape routes through the modal path to the window and closes it.
+    app.on_key_down(Key::Escape, Modifiers::default());
+
+    assert!(
+        closed.get(),
+        "Escape on the open modal dialog must fire the forwarded on_close"
+    );
+}
+
 /// The dialog must also be clamped into the live viewport so it can't open
 /// partially off-screen. A modal window positioned so its right edge spills
 /// past the viewport is pulled back in during the overlay paint.

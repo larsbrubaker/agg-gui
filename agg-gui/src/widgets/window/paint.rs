@@ -178,6 +178,11 @@ pub(super) fn paint_overlay(window: &mut Window, ctx: &mut dyn DrawCtx) {
 /// Coordinates are logical Y-up with the origin at the viewport's bottom-left —
 /// the window's local `(0, 0)` is its own bottom-left corner, so a fit requires
 /// `0 ≤ root_y` and `root_y + height ≤ viewport.height`.
+///
+/// Note: this folds the clamp correction into `bounds`. A modal window paired
+/// with `with_position_cell` would therefore persist the clamp shift to disk;
+/// no current caller pairs the two (dialogs are transient and unpositioned), so
+/// this is a documented constraint rather than a guard.
 pub(super) fn clamp_modal_into_viewport(window: &mut Window, ctx: &dyn DrawCtx) -> (f64, f64) {
     let vp = crate::widget::current_viewport();
     if vp.width <= 1.0 || vp.height <= 1.0 {
