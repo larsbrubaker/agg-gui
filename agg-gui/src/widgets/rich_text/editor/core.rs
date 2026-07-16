@@ -53,6 +53,7 @@ pub struct RichEditCore {
 }
 
 impl RichEditCore {
+    /// Create a core over `doc` with the given default font size (points).
     pub fn new(doc: RichDoc, default_font_size: f64) -> Self {
         Self {
             doc,
@@ -68,28 +69,38 @@ impl RichEditCore {
 
     // ── Accessors ─────────────────────────────────────────────────────────
 
+    /// The document being edited.
     pub fn doc(&self) -> &RichDoc {
         &self.doc
     }
+    /// The moving end of the selection (the blinking caret position).
     pub fn caret(&self) -> DocPos {
         self.caret
     }
+    /// The fixed end of the selection (coincides with the caret when collapsed).
     pub fn anchor(&self) -> DocPos {
         self.anchor
     }
+    /// Default font size (points) runs inherit when their style leaves it unset.
     pub fn default_font_size(&self) -> f64 {
         self.default_font_size
     }
+    /// Change the inherited default font size and mark the document dirty.
     pub fn set_default_font_size(&mut self, size: f64) {
         self.default_font_size = size;
         self.bump_doc();
     }
+    /// Revision counter bumped on every document change (drives layout caching).
     pub fn doc_rev(&self) -> u64 {
         self.doc_rev
     }
+    /// Revision counter bumped on any document, caret, or selection change
+    /// (drives repaint / scroll-into-view).
     pub fn rev(&self) -> u64 {
         self.rev
     }
+    /// The armed pending caret style (a format toggled at a collapsed caret,
+    /// awaiting the next keystroke), if any.
     pub fn pending_style(&self) -> Option<&InlineStyle> {
         self.pending_style.as_ref()
     }
@@ -227,7 +238,7 @@ impl RichEditCore {
 
     /// Insert `text` at the caret, replacing any selection.  Embedded `\n`
     /// characters split the paragraph (so pasted multi-line text lands as
-    /// several blocks).  The inserted text takes [`style_for_insert`].
+    /// several blocks).  The inserted text takes [`Self::style_for_insert`].
     pub fn insert(&mut self, text: &str) {
         if text.is_empty() {
             return;
@@ -470,19 +481,23 @@ impl RichEditHandle {
         self.core.borrow().common_style_of_selection()
     }
 
+    /// Undo one step through the shared core, requesting a redraw on change.
     pub fn undo(&self) {
         if self.core.borrow_mut().undo() {
             crate::animation::request_draw();
         }
     }
+    /// Redo one step through the shared core, requesting a redraw on change.
     pub fn redo(&self) {
         if self.core.borrow_mut().redo() {
             crate::animation::request_draw();
         }
     }
+    /// Whether an undo step is available.
     pub fn can_undo(&self) -> bool {
         self.core.borrow().can_undo()
     }
+    /// Whether a redo step is available.
     pub fn can_redo(&self) -> bool {
         self.core.borrow().can_redo()
     }

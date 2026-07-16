@@ -5,7 +5,7 @@
 //! undo stack and add a keyboard editor on top).  It reports its content height
 //! from `layout`, so it drops cleanly into a [`ScrollView`](crate::widgets::ScrollView).
 //!
-//! Painting walks the [`DocLayout`](super::layout::DocLayout) top-down and flips
+//! Painting walks the [`DocLayout`] top-down and flips
 //! into the framework's Y-up space: per-run font/size/colour via `ctx.fill_text`,
 //! highlight as a filled rect behind the run, underline / strikethrough as 1px
 //! lines at metric-derived offsets, and list markers hung in the left gutter.
@@ -61,11 +61,14 @@ impl RichTextView {
         }
     }
 
+    /// Set the default font size (points) runs inherit when their style leaves
+    /// [`InlineStyle::font_size`](super::model::InlineStyle::font_size) unset.
     pub fn with_default_font_size(mut self, size: f64) -> Self {
         self.default_font_size = size;
         self
     }
 
+    /// Set the widget's outer margin.
     pub fn with_margin(mut self, m: Insets) -> Self {
         self.base.margin = m;
         self
@@ -244,8 +247,48 @@ fn stroke_hline(ctx: &mut dyn DrawCtx, x0: f64, x1: f64, y: f64) {
     ctx.stroke();
 }
 
-/// Convenience: a resolver that returns the same font for every style.  Handy
-/// for tests and simple read-only displays that don't vary the typeface.
-pub fn uniform_resolver(font: Arc<Font>) -> SharedResolver {
+/// One-line resolver for the common single-font case: every run is shaped and
+/// measured with `font`, regardless of its [`InlineStyle`].
+///
+/// This is the fastest way to get a *working* editor on screen — pass it one
+/// [`Font`] and you have a functional [`RichTextView`] or
+/// [`RichTextEdit`](super::RichTextEdit). Bold / italic / family requests all
+/// fall back to `font`, so styled text still edits and lays out correctly; it
+/// simply renders in the one typeface until you supply a resolver that returns
+/// real variant faces (see the resolver contract below).
+///
+/// # Resolver contract
+///
+/// A resolver is any `Fn(&InlineStyle) -> Arc<Font>`. It maps a run's *style* to
+/// the concrete [`Font`] used to **shape and measure** that run. It is called
+/// once per run during layout. What each input field means:
+///
+/// * [`bold`](InlineStyle::bold) / [`italic`](InlineStyle::italic) — return the
+///   matching real face if you have one (e.g. an Italic `.ttf`). The layout
+///   engine applies **no** faux-bold / faux-slant, so bold/italic only *look*
+///   different when the resolver hands back a genuinely different face.
+/// * [`font_family`](InlineStyle::font_family) — `Some(name)` selects a family;
+///   `None` means "the app default". Map unknown families to your base font.
+/// * [`font_size`](InlineStyle::font_size) — **ignore this.** Size is applied by
+///   the layout engine, not the resolver; a resolver picks the *typeface* only.
+/// * `underline` / `strikethrough` / `text_color` / `highlight` — decorations
+///   the painter draws; not the resolver's concern.
+///
+/// **Returning the base font for any style is always safe** — text still shapes,
+/// measures, wraps, and edits; it just won't show that style's typeface. Build
+/// up from there face by face.
+///
+/// For a full multi-font resolver backed by a system-font catalog with real
+/// bold/italic faces, see the demo's `make_resolver` in
+/// `demo-ui/src/windows/rich_text_demo`.
+pub fn single_font_resolver(font: Arc<Font>) -> SharedResolver {
     Rc::new(move |_: &InlineStyle| Arc::clone(&font))
+}
+
+/// Deprecated alias for [`single_font_resolver`], kept for source compatibility.
+///
+/// Prefer [`single_font_resolver`], whose name states the single-typeface intent
+/// and whose docs spell out the full resolver contract.
+pub fn uniform_resolver(font: Arc<Font>) -> SharedResolver {
+    single_font_resolver(font)
 }

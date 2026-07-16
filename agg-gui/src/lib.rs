@@ -157,7 +157,7 @@ pub use widgets::{
     MenuShortcut, ModalSheet, NodeIcon, Padding, PerformanceView, Popup, PopupClickOutcome,
     PopupCloseBehavior, PopupMenu, ProgressBar, QrView, RadioGroup, Rebuilder, RectAlign,
     Resize, RichCommand, RichDoc, RichEditHandle, RichTextEdit, RichTextView, RunMode, RunModeDesc,
-    RunModeRow, Scene, SharedResolver,
+    RunModeRow, Scene, SharedResolver, single_font_resolver,
     SceneTransform, ScrollBarColor, ScrollBarKind,
     ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
     SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter, Stack, TabView, Table,
