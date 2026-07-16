@@ -331,7 +331,7 @@ impl Widget for TextField {
                     let tx = pos.x - self.padding + self.scroll_x;
                     let text = self.edit.borrow().text.clone();
                     let new_cur = self.click_to_cursor(&text, tx);
-                    self.edit.borrow_mut().cursor = new_cur;
+                    self.extend_selection_drag(&text, new_cur);
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -352,20 +352,32 @@ impl Widget for TextField {
                 let text = self.edit.borrow().text.clone();
                 let new_cur = self.click_to_cursor(&text, tx);
 
-                // Double-click: select word
-                let is_double = self
-                    .last_click_time
-                    .map(|t| t.elapsed().as_millis() < 350)
-                    .unwrap_or(false);
-                self.last_click_time = Some(Instant::now());
+                // Distinguish single / double / triple click. A double-click
+                // selects the word, a triple-click selects the whole field
+                // (a TextField is a single logical line). Shift+click always
+                // extends the existing selection to the click point.
+                let clicks = self.multi_click.register(*pos);
+                use crate::widgets::multi_click::SelectGranularity;
 
-                if is_double && !mods.shift {
+                if mods.shift {
+                    self.select_granularity = SelectGranularity::Char;
+                    self.select_pivot = (new_cur, new_cur);
+                    self.edit.borrow_mut().cursor = new_cur;
+                } else if clicks >= 3 {
+                    self.select_granularity = SelectGranularity::Line;
+                    let len = text.len();
+                    self.select_pivot = (0, len);
+                    self.edit.borrow_mut().anchor = 0;
+                    self.edit.borrow_mut().cursor = len;
+                } else if clicks == 2 {
+                    self.select_granularity = SelectGranularity::Word;
                     let (ws, we) = word_range_at(&text, new_cur);
+                    self.select_pivot = (ws, we);
                     self.edit.borrow_mut().anchor = ws;
                     self.edit.borrow_mut().cursor = we;
-                } else if mods.shift {
-                    self.edit.borrow_mut().cursor = new_cur;
                 } else {
+                    self.select_granularity = SelectGranularity::Char;
+                    self.select_pivot = (new_cur, new_cur);
                     self.edit.borrow_mut().cursor = new_cur;
                     self.edit.borrow_mut().anchor = new_cur;
                 }

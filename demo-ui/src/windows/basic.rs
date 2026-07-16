@@ -213,9 +213,9 @@ fn interactive_link_tip(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
     let link = Box::new(
-        Hyperlink::new("www.egui.rs", Arc::clone(&font))
+        Hyperlink::new("github.com/larsbrubaker/agg-gui", Arc::clone(&font))
             .with_font_size(12.0)
-            .on_click(|| crate::url::open_url("https://www.egui.rs/")),
+            .on_click(|| crate::url::open_url("https://github.com/larsbrubaker/agg-gui")),
     );
     col.push(
         Box::new(

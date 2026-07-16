@@ -52,7 +52,7 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(
         Box::new(
             Label::new(
-                "egui integrates with the system clipboard.",
+                "agg-gui integrates with the system clipboard.",
                 Arc::clone(&font),
             )
             .with_font_size(12.0),

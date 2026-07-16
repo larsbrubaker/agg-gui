@@ -30,9 +30,11 @@ use crate::focus::FocusId;
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
+use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
 use crate::widgets::scrollbar::ScrollbarAxis;
 
 use super::commands::{CommonStyle, RichCommand};
+use super::model::DocPos;
 use super::layout::{layout_doc, DocLayout, FontResolver};
 use super::model::RichDoc;
 use super::view::SharedResolver;
@@ -77,6 +79,15 @@ pub struct RichTextEdit {
     selecting_drag: bool,
     focus_time: Option<Instant>,
     blink_last_phase: Cell<u64>,
+
+    /// Multi-click (single / double / triple) detection and the granularity of
+    /// the active selection drag. A double-click selects the word, a
+    /// triple-click the block; dragging afterwards extends by whole words /
+    /// blocks. `select_pivot` is the `(anchor, caret)` range (in document
+    /// order) the initiating click selected.
+    multi_click: MultiClickTracker,
+    select_granularity: SelectGranularity,
+    select_pivot: (DocPos, DocPos),
     /// Start instant for the undoer's monotonic clock.
     start: Instant,
     /// Caret revision observed at the previous layout, to scroll external
@@ -107,6 +118,9 @@ impl RichTextEdit {
             selecting_drag: false,
             focus_time: None,
             blink_last_phase: Cell::new(0),
+            multi_click: MultiClickTracker::default(),
+            select_granularity: SelectGranularity::default(),
+            select_pivot: (DocPos::new(0, 0), DocPos::new(0, 0)),
             start: Instant::now(),
             last_layout_rev: None,
         }

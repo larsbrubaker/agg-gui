@@ -47,9 +47,13 @@ mod filter;
 mod keyboard_mode;
 mod layout_builders;
 mod password;
+mod pointer;
 mod sig;
 mod theme;
 mod widget_impl;
+
+#[cfg(test)]
+mod selection_tests;
 
 use clipboard::{clipboard_get, clipboard_set};
 use sig::TextFieldSig;
@@ -109,8 +113,12 @@ pub struct TextField {
     // paint after focus always writes the real phase.
     blink_last_phase: std::cell::Cell<u64>,
 
-    // Double-click detection.
-    last_click_time: Option<Instant>,
+    // Multi-click (single / double / triple) detection.
+    multi_click: crate::widgets::multi_click::MultiClickTracker,
+    // Granularity of the active selection drag (word/line drags extend by whole
+    // words/lines) plus the pivot range the initiating click selected.
+    select_granularity: crate::widgets::multi_click::SelectGranularity,
+    select_pivot: (usize, usize),
 
     // Content
     pub placeholder: String,
@@ -175,7 +183,9 @@ impl TextField {
             scroll_x: 0.0,
             focus_time: None,
             blink_last_phase: std::cell::Cell::new(u64::MAX),
-            last_click_time: None,
+            multi_click: crate::widgets::multi_click::MultiClickTracker::default(),
+            select_granularity: crate::widgets::multi_click::SelectGranularity::default(),
+            select_pivot: (0, 0),
             placeholder: String::new(),
             padding: 8.0,
             on_change: None,
@@ -314,55 +324,6 @@ impl TextField {
     fn flush_pending(&mut self) {
         if let Some(cmd) = self.pending_insert.take() {
             self.undo.add(Box::new(cmd));
-        }
-    }
-
-    /// Convert a pixel x position (in text-local space) to a byte offset in
-    /// `real_text`.  In password mode, measures the masked string and maps back.
-    fn click_to_cursor(&self, real_text: &str, tx: f64) -> usize {
-        let font = self.active_font();
-        if self.masking_active() {
-            const BULLET: char = '•';
-            const BULLET_LEN: usize = 3;
-            let n = real_text.chars().count();
-            let masked = BULLET.to_string().repeat(n);
-            let disp = byte_at_x(&font, &masked, self.font_size, tx);
-            // Map masked byte offset → char index → real byte offset.
-            let char_idx = disp / BULLET_LEN;
-            real_text
-                .char_indices()
-                .nth(char_idx)
-                .map(|(i, _)| i)
-                .unwrap_or(real_text.len())
-        } else {
-            byte_at_x(&font, real_text, self.font_size, tx)
-        }
-    }
-
-    /// Scroll `scroll_x` so that the cursor stays visible.
-    fn ensure_cursor_visible(&mut self) {
-        if self.bounds.width < 1.0 {
-            return;
-        }
-        let inner_w = (self.bounds.width - self.padding * 2.0).max(0.0);
-        let font = self.active_font();
-        let cx = {
-            let st = self.edit.borrow();
-            if self.masking_active() {
-                const BULLET: char = '•';
-                #[allow(dead_code)]
-                const BULLET_LEN: usize = 3;
-                let n = st.text[..st.cursor].chars().count();
-                let masked = BULLET.to_string().repeat(n);
-                measure_advance(&font, &masked, self.font_size)
-            } else {
-                measure_advance(&font, &st.text[..st.cursor], self.font_size)
-            }
-        };
-        if cx < self.scroll_x {
-            self.scroll_x = cx;
-        } else if cx > self.scroll_x + inner_w {
-            self.scroll_x = cx - inner_w;
         }
     }
 

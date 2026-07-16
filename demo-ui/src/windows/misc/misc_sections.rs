@@ -413,7 +413,7 @@ pub fn colors_section(font: &Arc<Font>) -> Box<dyn Widget> {
     col.push(
         Box::new(
             Label::new(
-                "(egui also shows premultiplied/unmultiplied u8 & f32 variants.)",
+                "(Premultiplied and unmultiplied u8 & f32 variants also exist.)",
                 Arc::clone(font),
             )
             .with_font_size(10.5),

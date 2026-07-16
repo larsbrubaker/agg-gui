@@ -53,6 +53,86 @@ impl TextArea {
         self.notify_change();
     }
 
+    /// Handle the caret/selection change for a fresh pointer press. `clicks` is
+    /// the multi-click count (1 = single, 2 = double, 3 = triple). A double
+    /// selects the word under `off`, a triple the logical line (paragraph);
+    /// `shift` extends the existing selection to `off`.
+    pub(super) fn begin_pointer_selection(&mut self, off: usize, clicks: u32, shift: bool) {
+        if shift {
+            self.select_granularity = SelectGranularity::Char;
+            self.select_pivot = (off, off);
+            self.move_cursor_to(off, /*with_selection=*/ true);
+            return;
+        }
+        let text = self.edit.borrow().text.clone();
+        match clicks {
+            n if n >= 3 => {
+                self.select_granularity = SelectGranularity::Line;
+                let (start, end) = paragraph_range_at(&text, off);
+                self.select_pivot = (start, end);
+                self.set_selection(start, end);
+            }
+            2 => {
+                self.select_granularity = SelectGranularity::Word;
+                let (start, end) = word_range_at(&text, off);
+                self.select_pivot = (start, end);
+                self.set_selection(start, end);
+            }
+            _ => {
+                self.select_granularity = SelectGranularity::Char;
+                self.select_pivot = (off, off);
+                self.move_cursor_to(off, /*with_selection=*/ false);
+            }
+        }
+    }
+
+    /// Extend the selection during a drag, honouring the granularity the
+    /// initiating click established. `off` is the caret byte offset under the
+    /// pointer.
+    pub(super) fn extend_selection_drag(&mut self, off: usize) {
+        match self.select_granularity {
+            SelectGranularity::Char => self.move_cursor_to(off, /*with_selection=*/ true),
+            SelectGranularity::Word => {
+                let text = self.edit.borrow().text.clone();
+                let (pivot_start, pivot_end) = self.select_pivot;
+                let (cs, ce) = word_range_at(&text, off);
+                if off >= pivot_end {
+                    self.set_caret_anchor(ce, pivot_start);
+                } else {
+                    self.set_caret_anchor(cs, pivot_end);
+                }
+            }
+            SelectGranularity::Line => {
+                let text = self.edit.borrow().text.clone();
+                let (pivot_start, pivot_end) = self.select_pivot;
+                let (cs, ce) = paragraph_range_at(&text, off);
+                if off >= pivot_end {
+                    self.set_caret_anchor(ce, pivot_start);
+                } else {
+                    self.set_caret_anchor(cs, pivot_end);
+                }
+            }
+        }
+    }
+
+    /// Set anchor and cursor to a sorted `[start, end)` selection, caret at the
+    /// end.
+    pub(super) fn set_selection(&mut self, start: usize, end: usize) {
+        let mut st = self.edit.borrow_mut();
+        let len = st.text.len();
+        st.anchor = start.min(len);
+        st.cursor = end.min(len);
+    }
+
+    /// Place the caret at `cursor` with the selection anchored at `anchor`
+    /// (both clamped to the text length).
+    fn set_caret_anchor(&mut self, cursor: usize, anchor: usize) {
+        let mut st = self.edit.borrow_mut();
+        let len = st.text.len();
+        st.cursor = cursor.min(len);
+        st.anchor = anchor.min(len);
+    }
+
     /// Move cursor to an absolute byte offset.  `with_selection=false`
     /// collapses anchor with cursor; `true` leaves the anchor alone
     /// so a selection is extended.

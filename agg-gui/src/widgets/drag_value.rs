@@ -20,7 +20,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::Font;
+use crate::text::{measure_advance, Font};
 use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::{Label, LabelAlign};
 
@@ -35,8 +35,17 @@ fn format_value(value: f64, decimals: usize) -> String {
 const WIDGET_H: f64 = 24.0;
 /// Half-width of the left/right arrow indicator text.
 const ARROW_MARGIN: f64 = 8.0;
+/// Horizontal half-extent of each arrow triangle (from its inner edge).
+const ARROW_TRI_W: f64 = 6.0;
+/// Extra gap between an arrow triangle and the value label, per side.
+const LABEL_SIDE_PAD: f64 = 4.0;
 /// Horizontal drag distance (logical px) before a press is treated as a drag.
 const DRAG_THRESHOLD: f64 = 3.0;
+
+/// Total horizontal space reserved on each side of the value label for the
+/// drag-arrow zone plus padding. Paint and the intrinsic-width measurement both
+/// route through this so the label never overlaps an arrow — or clips.
+const LABEL_SIDE_INSET: f64 = ARROW_MARGIN + ARROW_TRI_W + LABEL_SIDE_PAD;
 
 // ── Struct ─────────────────────────────────────────────────────────────────
 
@@ -257,6 +266,21 @@ impl DragValue {
         self.value_label.set_text(text);
     }
 
+    /// The minimum width (logical px) the widget needs so its formatted value
+    /// (plus suffix) renders without clipping between the drag arrows.
+    ///
+    /// Measures the current display text plus one extra digit of headroom — a
+    /// conservative stand-in for "the widest value this control is likely to
+    /// show" without walking the whole `[min, max]` range — then adds the arrow
+    /// zones and padding that [`paint`](Widget::paint) reserves on each side.
+    /// This is what keeps a value like `1.00` from being clipped in a narrow
+    /// host; it is reported through [`min_size`](Widget::min_size).
+    pub fn intrinsic_min_width(&self) -> f64 {
+        let text_w = measure_advance(&self.font, &self.display_text(), self.font_size);
+        let digit_w = measure_advance(&self.font, "0", self.font_size);
+        text_w + digit_w + LABEL_SIDE_INSET * 2.0
+    }
+
     /// Push the current value into the bound cell, if any.  Keeps sibling
     /// widgets (the gallery Slider/progress bar) in sync when this DragValue
     /// is the one being edited or dragged.
@@ -362,10 +386,17 @@ impl Widget for DragValue {
         self.base.v_anchor
     }
     fn min_size(&self) -> Size {
-        self.base.min_size
+        // Floor the width at the intrinsic content width so a narrow host can
+        // never clip the value; keep any (larger) explicit min the caller set.
+        let w = self.base.min_size.width.max(self.intrinsic_min_width());
+        Size::new(w, self.base.min_size.height)
     }
     fn max_size(&self) -> Size {
         self.base.max_size
+    }
+
+    fn measure_min_height(&self, _available_w: f64) -> f64 {
+        WIDGET_H.max(self.base.min_size.height)
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -392,7 +423,10 @@ impl Widget for DragValue {
                 }
             }
         }
-        Size::new(available.width, WIDGET_H)
+        // Never render narrower than the intrinsic content width, even if the
+        // host offers less; larger host sizing is respected as-is.
+        let w = available.width.max(self.intrinsic_min_width());
+        Size::new(w, WIDGET_H)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
@@ -478,7 +512,7 @@ impl Widget for DragValue {
             // Arrow triangles as drag affordances.
             let mid = h * 0.5;
             let tri_half = 4.0;
-            let tri_w = 6.0;
+            let tri_w = ARROW_TRI_W;
             ctx.set_fill_color(arrow);
             ctx.begin_path();
             ctx.move_to(ARROW_MARGIN, mid);
@@ -493,7 +527,7 @@ impl Widget for DragValue {
             ctx.close_path();
             ctx.fill();
 
-            let avail_w = (w - (ARROW_MARGIN + tri_w + 4.0) * 2.0).max(1.0);
+            let avail_w = (w - LABEL_SIDE_INSET * 2.0).max(1.0);
             let lsz = self.value_label.layout(Size::new(avail_w, h));
             let lx = (w - lsz.width) * 0.5;
             let ly = (h - lsz.height) * 0.5;
@@ -638,98 +672,4 @@ impl Widget for DragValue {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
-
-    fn test_font() -> Arc<Font> {
-        Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
-    }
-
-    #[test]
-    fn display_text_appends_suffix() {
-        let dv = DragValue::new(30.0, 0.0, 360.0, test_font())
-            .with_decimals(0)
-            .with_suffix("°");
-        assert_eq!(dv.display_text(), "30°");
-        // Edit buffer stays numeric so parsing works.
-        assert_eq!(dv.format_value(), "30");
-    }
-
-    #[test]
-    fn suffix_with_space_reads_like_egui_years() {
-        let dv = DragValue::new(2.0, 0.0, 99.0, test_font())
-            .with_decimals(0)
-            .with_suffix(" years");
-        assert_eq!(dv.display_text(), "2 years");
-    }
-
-    #[test]
-    fn edit_mode_buffer_excludes_suffix() {
-        let mut dv = DragValue::new(5.0, 0.0, 10.0, test_font())
-            .with_decimals(0)
-            .with_suffix(" m");
-        dv.enter_edit_mode();
-        assert_eq!(dv.edit_text, "5", "suffix must not enter the edit buffer");
-    }
-
-    #[test]
-    fn no_suffix_matches_plain_value() {
-        let dv = DragValue::new(1.5, 0.0, 10.0, test_font()).with_decimals(2);
-        assert_eq!(dv.display_text(), "1.50");
-    }
-
-    /// Regression (Widget Gallery): a DragValue bound to a shared cell must
-    /// re-read that cell every `layout()` so a *sibling* widget writing the
-    /// same cell (e.g. the gallery Slider) drives this DragValue's displayed
-    /// value live.  Before the fix the DragValue captured its value at build
-    /// time and only ever wrote via `on_change`, so it read stale (the reported
-    /// "slider at 140, DragValue reads 205").
-    #[test]
-    fn value_cell_tracks_external_writes_after_layout() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let cell = Rc::new(Cell::new(42.0_f64));
-        let mut dv = DragValue::new(cell.get(), 0.0, 360.0, test_font())
-            .with_decimals(0)
-            .with_value_cell(Rc::clone(&cell));
-
-        assert_eq!(dv.value_label.text_str(), "42");
-
-        // A sibling (the Slider) writes a new value into the shared cell.
-        cell.set(140.0);
-        // The next layout pass must pick it up and refresh the label text.
-        let _ = dv.layout(Size::new(120.0, 24.0));
-
-        assert_eq!(dv.value(), 140.0, "DragValue value must follow the cell");
-        assert_eq!(
-            dv.value_label.text_str(),
-            "140",
-            "DragValue label text must repaint to the cell's value"
-        );
-    }
-
-    /// The value cell is bidirectional: a drag on the DragValue writes back to
-    /// the cell so the Slider (and progress bar) follow it too.
-    #[test]
-    fn drag_writes_back_to_value_cell() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let cell = Rc::new(Cell::new(10.0_f64));
-        let mut dv = DragValue::new(cell.get(), 0.0, 360.0, test_font())
-            .with_decimals(0)
-            .with_value_cell(Rc::clone(&cell));
-
-        // Simulate a confirmed drag that moves the value.
-        dv.drag_start_x = 0.0;
-        dv.drag_start_value = 10.0;
-        dv.dragging = true;
-        dv.update_from_drag(5.0); // speed 1.0 → +5 units
-
-        assert_eq!(dv.value(), 15.0);
-        assert_eq!(cell.get(), 15.0, "drag must write back to the shared cell");
-    }
-}
+mod tests;

@@ -374,7 +374,7 @@ impl Widget for TextArea {
                 }
                 if self.selecting_drag {
                     let off = self.byte_offset_at(*pos);
-                    self.move_cursor_to(off, /*with_selection=*/ true);
+                    self.extend_selection_drag(off);
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -395,8 +395,10 @@ impl Widget for TextArea {
                     return EventResult::Consumed;
                 }
                 let off = self.byte_offset_at(*pos);
-                self.move_cursor_to(off, /*with_selection=*/ modifiers.shift);
+                let clicks = self.multi_click.register(*pos);
+                self.begin_pointer_selection(off, clicks, modifiers.shift);
                 self.selecting_drag = true;
+                self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
             }

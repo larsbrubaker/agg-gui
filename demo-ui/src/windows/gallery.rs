@@ -438,19 +438,22 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(
         grid_row(
             doc_link("DragValue", "DragValue", &font),
-            Box::new(
-                SizedBox::new()
-                    .with_width(120.0)
-                    .with_height(28.0)
-                    .with_child(Box::new(
-                        DragValue::new(scalar.get(), 0.0, 360.0, Arc::clone(&font))
-                            .with_decimals(0)
-                            // Bind to the shared scalar so the Slider and this
-                            // DragValue always show the same value: `layout()`
-                            // re-reads the cell each frame and drags write back.
-                            .with_value_cell(Rc::clone(&scalar)),
-                    )),
-            ),
+            {
+                // Bind to the shared scalar so the Slider and this DragValue
+                // always show the same value: `layout()` re-reads the cell each
+                // frame and drags write back. Size the wrapper to the widget's
+                // intrinsic width (value + arrows) rather than a fixed 120px.
+                let dv = DragValue::new(scalar.get(), 0.0, 360.0, Arc::clone(&font))
+                    .with_decimals(0)
+                    .with_value_cell(Rc::clone(&scalar));
+                let w = dv.intrinsic_min_width();
+                Box::new(
+                    SizedBox::new()
+                        .with_width(w)
+                        .with_height(28.0)
+                        .with_child(Box::new(dv)),
+                )
+            },
         ),
         0.0,
     );
@@ -657,18 +660,22 @@ fn gallery_controls(
         Box::new(
             FlexRow::new()
                 .with_gap(6.0)
-                .add(Box::new(
-                    // Wide enough for the drag arrows plus a "0.00"–"1.00"
-                    // label at the 13px font; the old 56px clipped "0.94".
-                    SizedBox::new().with_width(76.0).with_height(28.0).with_child(
-                        Box::new(
-                            DragValue::new(opacity.get(), 0.0, 1.0, Arc::clone(font))
-                                .with_speed(0.01)
-                                .with_decimals(2)
-                                .with_value_cell(Rc::clone(opacity)),
-                        ),
-                    ),
-                ))
+                .add({
+                    // Size the wrapper to the DragValue's own intrinsic width
+                    // (value text + arrow zones) instead of a hand-tuned 76px —
+                    // the widget now measures the space its numbers need.
+                    let dv = DragValue::new(opacity.get(), 0.0, 1.0, Arc::clone(font))
+                        .with_speed(0.01)
+                        .with_decimals(2)
+                        .with_value_cell(Rc::clone(opacity));
+                    let w = dv.intrinsic_min_width();
+                    Box::new(
+                        SizedBox::new()
+                            .with_width(w)
+                            .with_height(28.0)
+                            .with_child(Box::new(dv)),
+                    )
+                })
                 .add(Box::new(
                     Label::new("Opacity", Arc::clone(font)).with_font_size(13.0),
                 )),
