@@ -83,6 +83,13 @@ impl RichTextView {
         self.layout.as_ref().map(|l| l.height).unwrap_or(0.0)
     }
 
+    /// Measured content width from the last layout (0 before first layout).
+    /// This is `max(available_width, widest_block)`, so a block wider than the
+    /// slot is surfaced rather than silently clipped to the available width.
+    pub fn content_width(&self) -> f64 {
+        self.layout.as_ref().map(|l| l.width).unwrap_or(0.0)
+    }
+
     fn ensure_layout(&mut self, width: f64) {
         if self.layout.is_some() && (self.layout_width - width).abs() < 0.5 {
             return;
@@ -125,8 +132,10 @@ impl Widget for RichTextView {
     fn layout(&mut self, available: Size) -> Size {
         let width = available.width.max(1.0);
         self.ensure_layout(width);
-        let height = self.content_height();
-        Size::new(width, height)
+        // Report the measured content width (which is at least `width`) so a
+        // block wider than the slot is surfaced to the parent instead of being
+        // reported as exactly the available width.
+        Size::new(self.content_width().max(width), self.content_height())
     }
 
     fn measure_min_height(&self, available_w: f64) -> f64 {

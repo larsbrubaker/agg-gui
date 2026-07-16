@@ -28,6 +28,7 @@ pub(crate) fn build_demo_content(
         "\u{F121} Code Editor" => windows::code_editor(font),
         "\u{F1DE} Sliders" => windows::sliders(font),
         "\u{F040} TextEdit" => windows::text_edit(font),
+        "\u{F1DC} RichTextEdit" => windows::rich_text_edit(font),
         "\u{F086} Tooltips" => windows::tooltips(font),
         // mobile_keyboard.rs — on-screen software keyboard testbed.
         t if t == windows::MOBILE_KEYBOARD_TITLE => windows::mobile_keyboard(font),

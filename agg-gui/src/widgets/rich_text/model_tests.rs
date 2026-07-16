@@ -106,6 +106,35 @@ fn remove_range_across_blocks_merges() {
 }
 
 #[test]
+fn remove_range_clamps_end_block_past_document() {
+    // A range whose high endpoint names a block past the end (e.g. a stale
+    // select-all target after the doc shrank) must not panic and should behave
+    // as if it reached the true last block's tail.
+    let mut doc = RichDoc::from_blocks(vec![Block::plain("Hello"), Block::plain("World")]);
+    let pos = remove_range(
+        &mut doc,
+        DocRange::new(DocPos::new(0, 2), DocPos::new(9, 999)),
+    );
+    assert_eq!(pos, DocPos::new(0, 2));
+    // Everything from (0,2) to the clamped end of block 1 is gone.
+    assert_eq!(doc.blocks.len(), 1);
+    assert_eq!(doc.blocks[0].text(), "He");
+}
+
+#[test]
+fn remove_range_single_block_out_of_range_end() {
+    // Same clamp when the document has only one block.
+    let mut doc = RichDoc::from_blocks(vec![Block::plain("Hello")]);
+    let pos = remove_range(
+        &mut doc,
+        DocRange::new(DocPos::new(0, 1), DocPos::new(5, 100)),
+    );
+    assert_eq!(pos, DocPos::new(0, 1));
+    assert_eq!(doc.blocks.len(), 1);
+    assert_eq!(doc.blocks[0].text(), "H");
+}
+
+#[test]
 fn split_block_inherits_attributes() {
     let mut doc = RichDoc::from_blocks(vec![Block {
         runs: vec![TextRun::plain("HelloWorld")],

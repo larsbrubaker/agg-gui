@@ -174,6 +174,50 @@ fn empty_block_reserves_a_line() {
     assert!(layout.blocks[0].height > 0.0);
 }
 
+#[test]
+fn fragment_byte_offsets_track_flattened_block() {
+    let f = font();
+    let r = resolver(Arc::clone(&f));
+    // Two differently-styled runs, no whitespace between => one word, two
+    // fragments on one line (distinct styles prevent fragment merging).
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![
+            sized("abc", 16.0),
+            TextRun::new(
+                "DEF",
+                InlineStyle {
+                    bold: true,
+                    font_size: Some(16.0),
+                    ..Default::default()
+                },
+            ),
+        ],
+        ..Block::new()
+    }]);
+    let layout = super::layout_doc(&doc, 1000.0, 16.0, &r);
+    let line = &layout.blocks[0].lines[0];
+    assert_eq!(line.start_byte, 0);
+    assert_eq!(line.end_byte, 6);
+    assert_eq!(line.fragments[0].start_byte, 0);
+    // Second fragment begins right after "abc".
+    assert_eq!(line.fragments[1].start_byte, 3);
+}
+
+#[test]
+fn wrapped_line_byte_ranges_skip_dropped_space() {
+    let f = font();
+    let r = resolver(Arc::clone(&f));
+    let doc = RichDoc::from_blocks(vec![Block::from_run(sized("alpha beta", 16.0))]);
+    // Narrow enough to wrap between the two words.
+    let layout = super::layout_doc(&doc, 60.0, 16.0, &r);
+    let lines = &layout.blocks[0].lines;
+    assert!(lines.len() >= 2, "expected a wrap");
+    assert_eq!(lines[0].start_byte, 0);
+    assert_eq!(lines[0].end_byte, "alpha".len());
+    // Second line starts after the dropped space (byte 6, past "alpha ").
+    assert_eq!(lines[1].start_byte, "alpha ".len());
+}
+
 // ---------------------------------------------------------------------------
 // Phase-1 proof: lay out a document mirroring the owner's reference image and
 // assert the visible invariants.  Phase 2 registers an actual demo window; this

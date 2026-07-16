@@ -319,6 +319,14 @@ pub fn remove_range(doc: &mut RichDoc, range: DocRange) -> DocPos {
         return a;
     }
 
+    // Clamp the high endpoint's block into range so the primitive is total — a
+    // range whose `end` names a block past the document (as a select-all to
+    // `end_pos` of a shrunk doc might) never indexes out of bounds.
+    let b = DocPos {
+        block: b.block.min(doc.blocks.len().saturating_sub(1)),
+        byte: b.byte,
+    };
+
     if a.block == b.block {
         if let Some(block) = doc.blocks.get_mut(a.block) {
             let start = block.ensure_boundary(a.byte);

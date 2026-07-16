@@ -4,6 +4,16 @@
 //! any subsystem — text editing, layout, graph editing — can participate in a
 //! common, extensible undo stack.
 //!
+//! Two complementary models live here:
+//!
+//! * [`UndoBuffer`] — a command-history stack (do/undo/redo per named command),
+//!   the general-purpose mechanism used by most subsystems.
+//! * [`undoer::Undoer`] — a time-coalescing *state snapshot* undoer (a faithful
+//!   port of egui's `Undoer<State>`).  It suits editors that would rather diff
+//!   whole-state snapshots than author explicit commands — the RichTextEdit
+//!   widget snapshots `{RichDoc, caret}` through it, and the dialogs demo
+//!   snapshots its `{toggle, text}`.
+//!
 //! # Usage
 //!
 //! ```rust,ignore
@@ -20,6 +30,10 @@
 //!     move || v2.set(0),
 //! )));
 //! ```
+
+pub mod undoer;
+
+pub use undoer::{Settings, Undoer};
 
 // ---------------------------------------------------------------------------
 // IUndoRedoCommand — the core trait

@@ -137,7 +137,7 @@ pub use theme::{
 };
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
-pub use undo::{DoUndoActions, UndoBuffer, UndoRedoCommand};
+pub use undo::{DoUndoActions, Settings as UndoerSettings, UndoBuffer, Undoer, UndoRedoCommand};
 #[cfg(feature = "reflect")]
 pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{
@@ -156,7 +156,8 @@ pub use widgets::{
     MarkdownView, MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection,
     MenuShortcut, ModalSheet, NodeIcon, Padding, PerformanceView, Popup, PopupClickOutcome,
     PopupCloseBehavior, PopupMenu, ProgressBar, QrView, RadioGroup, Rebuilder, RectAlign,
-    Resize, RichCommand, RichDoc, RichTextView, RunMode, RunModeDesc, RunModeRow, Scene,
+    Resize, RichCommand, RichDoc, RichEditHandle, RichTextEdit, RichTextView, RunMode, RunModeDesc,
+    RunModeRow, Scene, SharedResolver,
     SceneTransform, ScrollBarColor, ScrollBarKind,
     ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
     SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter, Stack, TabView, Table,

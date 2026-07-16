@@ -54,6 +54,13 @@ pub struct LineFragment {
     pub width: f64,
     pub ascent: f64,
     pub descent: f64,
+    /// Byte offset into the owning block's **flattened** text where this
+    /// fragment's `text` begins.  Within a line, kept fragments are
+    /// byte-contiguous (dropped soft-wrap spaces only occur *between* lines),
+    /// so this plus `text.len()` yields the fragment's exclusive byte end.  The
+    /// interactive editor uses it to map caret [`DocPos`](super::DocPos) byte
+    /// offsets to/from pixel geometry.
+    pub start_byte: usize,
 }
 
 /// One visual line within a block.
@@ -70,6 +77,13 @@ pub struct LineLayout {
     pub align_dx: f64,
     /// Baseline distance measured downward from the top of the line box.
     pub baseline_from_top: f64,
+    /// Byte offset (into the block's flattened text) of the first character on
+    /// this line, and one past the last.  A soft-wrapped line's `end_byte`
+    /// excludes the trailing space that was dropped at the wrap point, so a
+    /// caret byte in that gap falls between `end_byte` of one line and
+    /// `start_byte` of the next.  Both are 0 for an empty block's reserved line.
+    pub start_byte: usize,
+    pub end_byte: usize,
 }
 
 /// Layout of one block/paragraph.
@@ -206,6 +220,8 @@ fn layout_block(
             descent: font.descender_px(size),
             align_dx: 0.0,
             baseline_from_top: 0.0,
+            start_byte: 0,
+            end_byte: 0,
         });
     }
 
@@ -241,6 +257,8 @@ struct Piece {
     ascent: f64,
     descent: f64,
     is_ws: bool,
+    /// Byte offset of this piece within the block's flattened text.
+    start_byte: usize,
 }
 
 /// Split a block's runs into whitespace / non-whitespace pieces, resolving the
@@ -248,6 +266,8 @@ struct Piece {
 /// block boundaries in the model).
 fn tokenize(block: &Block, default_font_size: f64, resolver: &FontResolver) -> Vec<Piece> {
     let mut pieces = Vec::new();
+    // Byte offset of the current run's start within the block's flattened text.
+    let mut run_start = 0usize;
     for run in &block.runs {
         if run.text.is_empty() {
             continue;
@@ -256,6 +276,9 @@ fn tokenize(block: &Block, default_font_size: f64, resolver: &FontResolver) -> V
         let size = run_size(&run.style, default_font_size);
         let ascent = font.ascender_px(size);
         let descent = font.descender_px(size);
+        // `split_ws` covers the run contiguously, so the offset of each chunk
+        // within the run is the running sum of preceding chunk lengths.
+        let mut chunk_off = 0usize;
         for chunk in split_ws(&run.text) {
             let is_ws = chunk.chars().next().map(|c| c.is_whitespace()).unwrap_or(false);
             let width = measure_advance(&font, chunk, size);
@@ -268,8 +291,11 @@ fn tokenize(block: &Block, default_font_size: f64, resolver: &FontResolver) -> V
                 ascent,
                 descent,
                 is_ws,
+                start_byte: run_start + chunk_off,
             });
+            chunk_off += chunk.len();
         }
+        run_start += run.text.len();
     }
     pieces
 }
@@ -373,9 +399,16 @@ fn finish_pieces(pieces: Vec<Piece>) -> LineLayout {
             width: p.width,
             ascent: p.ascent,
             descent: p.descent,
+            start_byte: p.start_byte,
         });
         x += p.width;
     }
+    // Byte span covered by this line: first fragment's start to the last
+    // fragment's byte end (kept fragments on a line are byte-contiguous).
+    let (start_byte, end_byte) = match (fragments.first(), fragments.last()) {
+        (Some(first), Some(last)) => (first.start_byte, last.start_byte + last.text.len()),
+        _ => (0, 0),
+    };
     LineLayout {
         fragments,
         width: x,
@@ -384,6 +417,8 @@ fn finish_pieces(pieces: Vec<Piece>) -> LineLayout {
         descent,
         align_dx: 0.0,
         baseline_from_top: 0.0,
+        start_byte,
+        end_byte,
     }
 }
 

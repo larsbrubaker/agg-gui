@@ -2,7 +2,7 @@
 //!
 //! Both mirror their egui counterparts:
 //! - `undo_redo` snapshots the *whole* demo state `{toggle, text}` through a
-//!   single time-coalescing [`Undoer`](super::undoer::Undoer) (egui's
+//!   single time-coalescing [`Undoer`](agg_gui::undo::Undoer) (egui's
 //!   `undo_redo.rs`), so Undo/Redo revert both controls together.
 //! - `window_options` drives the *real* host [`agg_gui::Window`] flags via
 //!   shared cells (see [`WindowOptionCells`]); `app_builder` wires the same
@@ -21,7 +21,7 @@ use agg_gui::{
     Separator, Size, SizedBox, TextField, Widget,
 };
 
-use super::undoer::Undoer;
+use agg_gui::undo::Undoer;
 
 // ---------------------------------------------------------------------------
 // Undo Redo
