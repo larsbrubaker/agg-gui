@@ -36,6 +36,7 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 // ---------------------------------------------------------------------------
 
 mod backbuffer_scale;
+mod caret_deadline;
 mod color_dialog_overlay;
 mod color_wheel_picker;
 /// A point drawn at Y=10 in a 100×100 buffer must be near the BOTTOM of the
