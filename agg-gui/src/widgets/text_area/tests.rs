@@ -555,6 +555,47 @@ fn first_line_top_not_clipped_at_scroll_top() {
     );
 }
 
+#[test]
+fn external_cursor_move_scrolls_into_view_on_layout() {
+    // Bug 2: setting the cursor straight through the shared TextEditState (as
+    // the demo's "start"/"end" buttons do) bypasses the edit funnel, so the
+    // widget must notice the external move at layout time and scroll it in.
+    let state = Rc::new(RefCell::new(TextEditState {
+        text: (0..30).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"),
+        cursor: 0,
+        anchor: 0,
+        epoch: 0,
+    }));
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_font_size(13.0)
+            .with_edit_state(Rc::clone(&state)),
+        200.0,
+        80.0,
+    );
+    assert_eq!(ta.scroll_offset(), 0.0, "first layout leaves the view at the top");
+
+    // External caret jump to the document end — text unchanged (no epoch bump),
+    // only the cursor/anchor moved.
+    {
+        let mut st = state.borrow_mut();
+        let end = st.text.len();
+        st.cursor = end;
+        st.anchor = end;
+    }
+    ta.layout(Size::new(200.0, 80.0));
+    assert!(
+        ta.scroll_offset() > 0.0,
+        "external cursor move must scroll on layout: off={}",
+        ta.scroll_offset()
+    );
+    let y = ta.pos_for_cursor(ta.cursor()).y;
+    assert!(
+        (0.0..=80.0).contains(&y),
+        "caret must be on-screen after the external move: y={y}"
+    );
+}
+
 // ── (i) Home / End / PageUp / PageDown navigation ───────────────────────────
 //
 // Bug 3: plain Home/End move within the visual (wrapped) line; Ctrl/Cmd+Home

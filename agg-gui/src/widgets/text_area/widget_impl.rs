@@ -181,6 +181,16 @@ impl Widget for TextArea {
         let inner_w = (w - self.padding * 2.0).max(1.0);
         self.refresh_wrap(inner_w);
         self.sync_scroll();
+        // Catch cursor moves made straight through the shared TextEditState
+        // (e.g. the demo's "start"/"end" buttons) that bypass the edit funnel
+        // and thus never ran ensure_cursor_visible. The first layout only
+        // records the baseline so seeding a caret at the end doesn't force an
+        // unexpected scroll before the user interacts.
+        let cursor = self.edit.borrow().cursor;
+        if matches!(self.last_layout_cursor, Some(prev) if prev != cursor) {
+            self.ensure_cursor_visible();
+        }
+        self.last_layout_cursor = Some(cursor);
         Size::new(w, h)
     }
 

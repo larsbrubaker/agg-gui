@@ -312,6 +312,14 @@ pub struct TextArea {
     /// [`content_top_y`](Self::content_top_y). See `text_area/scroll.rs`.
     vbar: ScrollbarAxis,
 
+    /// Cursor byte offset observed at the previous `layout`. `None` until the
+    /// first layout. A change between layouts that the widget's own edit funnel
+    /// didn't already scroll for (i.e. an *external* mutation of the shared
+    /// [`TextEditState`], as the demo's "start"/"end" buttons do) triggers
+    /// [`ensure_cursor_visible`](Self::ensure_cursor_visible) so programmatic
+    /// caret moves scroll into view just like typed navigation.
+    last_layout_cursor: Option<usize>,
+
     /// Ephemeral input state.
     focused: bool,
     hovered: bool,
@@ -347,6 +355,7 @@ impl TextArea {
                 enabled: true,
                 ..ScrollbarAxis::default()
             },
+            last_layout_cursor: None,
             focused: false,
             hovered: false,
             selecting_drag: false,
