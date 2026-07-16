@@ -59,7 +59,7 @@ parity work against egui 0.34.3. Includes a few semver-relevant changes — see
   `collapsible`, `auto-size`, and `title` that track live state.
 - **Smaller widget features** — `Checkbox` indeterminate/tri-state, password
   reveal, `DragValue` suffix, value-cell binding, and intrinsic minimum width so
-  numbers never clip, `ProgressBar` animate (spinner), and a horizontal
+  numbers never clip, `ProgressBar` animate (brightness pulse), and a horizontal
   `RadioGroup`.
 - **`Font::characters()`** — enumerate a font's real glyph coverage; the Font
   Book demo was rebuilt on top of it.
