@@ -83,6 +83,24 @@ impl App {
             .map(|path| widget_at_path_ref(self.root.as_ref(), path).type_name())
     }
 
+    /// Whether the focused widget accepts typed text (a `TextField`, `TextArea`,
+    /// `RichTextEdit`, or a `DragValue` in its edit mode).
+    ///
+    /// Web shells use this to decide when to focus the hidden DOM `<textarea>`
+    /// that backs IME composition *and* clipboard events: without it focused,
+    /// the browser never delivers `copy` / `cut` / `paste` events to a
+    /// canvas-only app, so the in-canvas editors get no clipboard bridge.
+    ///
+    /// Delegates straight to [`Widget::accepts_text_input`] on the focused
+    /// widget rather than matching type-name strings, so any new editor that
+    /// overrides the trait is enrolled automatically (a hardcoded name list
+    /// would silently miss it and reintroduce exactly the wasm clipboard bug).
+    pub fn focused_is_text_input(&self) -> bool {
+        self.focus
+            .as_deref()
+            .is_some_and(|path| widget_at_path_ref(self.root.as_ref(), path).accepts_text_input())
+    }
+
     /// Register a legacy global key handler invoked only after the widget tree
     /// has ignored the key. Prefer widget-owned key handling for new behavior.
     ///

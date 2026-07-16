@@ -20,11 +20,15 @@ pub fn wasm_clipboard_set(text: &str) {
 
 #[wasm_bindgen]
 pub fn text_input_focused() -> bool {
+    // Delegate the "is this an editable text widget" decision to agg-gui so
+    // every editor (TextField, TextArea, RichTextEdit) is enrolled in one
+    // place. RichTextEdit was previously omitted here, which left it without
+    // the hidden-textarea focus that browsers require to deliver copy / cut /
+    // paste events — so clipboard shortcuts silently did nothing in it.
     crate::DEMO_APP.with(|cell| {
         cell.borrow()
             .as_ref()
-            .and_then(|app| app.focused_widget_type_name())
-            .map(|name| matches!(name, "TextField" | "TextArea"))
+            .map(|app| app.focused_is_text_input())
             .unwrap_or(false)
     })
 }

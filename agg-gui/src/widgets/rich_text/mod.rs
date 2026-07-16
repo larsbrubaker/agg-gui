@@ -95,6 +95,7 @@ pub mod commands;
 pub mod editor;
 pub mod layout;
 pub mod model;
+pub mod rich_clipboard;
 pub mod view;
 
 pub use commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand, MAX_INDENT};
