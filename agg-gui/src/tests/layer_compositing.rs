@@ -200,6 +200,45 @@ fn test_push_layer_fractional_scale() {
     );
 }
 
+/// Regression: `pop_layer`'s composite blit must be clipped to the scissor
+/// that was active in the parent when `push_layer` was called.  A layer sized
+/// larger than the clipped content (e.g. a window's opacity group whose layer
+/// spans the whole window but whose parent clip excludes the title bar) must
+/// not paint outside that clip.  Before the fix `composite_framebuffers`
+/// ignored the clip entirely and the layer overpainted its siblings.
+#[test]
+fn test_pop_layer_composite_respects_parent_clip() {
+    let mut fb = Framebuffer::new(20, 20);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.clear(Color::white());
+
+    // Parent clip: left half only, full height.
+    ctx.clip_rect(0.0, 0.0, 10.0, 20.0);
+
+    // Layer covers the FULL 20×20 and fills it opaque red.
+    ctx.push_layer(20.0, 20.0);
+    ctx.set_fill_color(Color::rgba(1.0, 0.0, 0.0, 1.0));
+    ctx.begin_path();
+    ctx.rect(0.0, 0.0, 20.0, 20.0);
+    ctx.fill();
+    ctx.pop_layer();
+
+    drop(ctx);
+
+    // Inside the clip → red composited through.
+    assert!(
+        is_red(sample(&fb, 3, 10)),
+        "inside the parent clip must be red; got {:?}",
+        sample(&fb, 3, 10)
+    );
+    // Outside the clip (x >= 10) → the composite must NOT have painted; stays white.
+    assert!(
+        is_white(sample(&fb, 15, 10)),
+        "outside the parent clip must stay white; got {:?}",
+        sample(&fb, 15, 10)
+    );
+}
+
 /// Regression: `draw_image_rgba` (the RGBA backbuffer blit lane) must honor
 /// the active `global_alpha`.  Before the fix it composited at a hardcoded
 /// alpha of 1.0, so backbuffered Labels/buttons inside a faded subtree stayed
