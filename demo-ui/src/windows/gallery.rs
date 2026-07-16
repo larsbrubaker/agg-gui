@@ -259,9 +259,16 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
         selected: Rc<Cell<usize>>,
         font: Arc<Font>,
     ) -> Box<dyn Widget> {
+        // Mirror egui's `SelectableLabel`: only the chosen value carries the
+        // accent surface. A ghost button paints transparent when inactive and
+        // flips to the accent fill via `active_fn`, so exactly one of the three
+        // reads as selected instead of all three looking highlighted.
+        let active = Rc::clone(&selected);
         Box::new(
             Button::new(label, font)
                 .with_font_size(12.0)
+                .with_ghost()
+                .with_active_fn(move || active.get() == value)
                 .on_click(move || selected.set(value)),
         )
     }
