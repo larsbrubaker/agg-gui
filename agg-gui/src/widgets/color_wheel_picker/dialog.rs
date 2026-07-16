@@ -10,7 +10,7 @@
 
 use crate::geometry::{Rect, Size};
 use crate::widget::Widget;
-use crate::widgets::window::Window;
+use crate::widgets::window::{ClickAwayAction, CloseReason, Window};
 
 use super::{picker_height, picker_width, ColorWheelPicker};
 
@@ -30,21 +30,29 @@ pub fn color_wheel_picker_dialog(
 }
 
 /// Like [`color_wheel_picker_dialog`] but forwards the window's title-bar ×
-/// button (and Escape, which routes through the same [`Window`] close path) to
-/// `on_close`.
+/// button, Escape, and click-away dismissals (each routes through the same
+/// [`Window`] close path) to `on_close`, tagged with the [`CloseReason`].
 ///
 /// The picker's own Cancel button fires `ColorWheelPicker::on_cancel`; the
-/// window chrome's close affordance is a *separate* route that bypasses it.
+/// window chrome's close affordances are a *separate* route that bypasses it.
 /// Hosts that must unwind state when the dialog is dismissed by any means — the
 /// RichTextEdit demo cancels its live colour preview — wire `on_close` to the
-/// same teardown as `on_cancel`, so closing via × or Escape can't strand the
-/// preview session.
+/// same teardown, so closing via × / Escape / click-away can't strand the
+/// preview session. The `CloseReason` lets the host commit a live change on
+/// [`CloseReason::ClickAway`] while still cancelling on Escape / ×.
+///
+/// This variant enables [`ClickAwayAction::Close`] so a press outside the dialog
+/// dismisses it (and is swallowed, never leaking to widgets underneath).
 pub fn color_wheel_picker_dialog_with_on_close(
     picker: ColorWheelPicker,
     title: impl Into<String>,
-    on_close: impl FnMut() + 'static,
+    on_close: impl FnMut(CloseReason) + 'static,
 ) -> Box<dyn Widget> {
-    Box::new(build_window(picker, title).on_close(on_close))
+    Box::new(
+        build_window(picker, title)
+            .with_click_away(ClickAwayAction::Close)
+            .on_close(on_close),
+    )
 }
 
 /// Shared builder: wrap `picker` in a modal, auto-sized, non-resizable window.

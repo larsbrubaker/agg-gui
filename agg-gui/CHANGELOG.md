@@ -26,6 +26,12 @@ parity work against egui 0.34.3. Includes a few semver-relevant changes — see
   `DEFAULT_COLUMN_GAP = 4.0` (mirroring egui's `item_spacing`) instead of `0.0`.
   Adjacent controls now breathe by default; restore the old joined/segmented
   look with `.with_gap(0.0)`. The constants are re-exported from the crate root.
+- **`Window::on_close` now receives a `CloseReason`.** The callback signature
+  changed from `FnMut()` to `FnMut(CloseReason)` so a host can react to *how*
+  the window closed (× button, Escape, or click-away). `on_close` shipped only
+  in the never-tagged 0.2.2-era code, so this lands as part of 0.3.0's new
+  public surface rather than a break against a published release; update any
+  `.on_close(|| …)` call to `.on_close(|_reason| …)`.
 
 ### Added
 
@@ -55,6 +61,16 @@ parity work against egui 0.34.3. Includes a few semver-relevant changes — see
   the handle's preview session (`begin/commit/cancel_preview`): the selection
   recolours as the wheel is dragged, commits on Select, and restores on
   Cancel / × / Escape.
+- **Modal window click-away + `CloseReason`** — `CloseReason`
+  (`CloseButton` / `Escape` / `ClickAway`), `ClickAwayAction`
+  (`None` / `Close`), and `Window::with_click_away(...)`. A modal window can now
+  opt into dismissing on a pointer press outside its bounds (the press is
+  swallowed, never activating the widget underneath). The floating colour dialog
+  enables this: pressing outside it **commits** a live colour change as one undo
+  step when the user recoloured (Ctrl+Z reverts it), or closes silently when
+  nothing changed — while Escape / × still cancel. A modal window is also now
+  draggable across the whole app viewport rather than being caged to the small
+  overlay slot it nests in.
 - **Scene pan/zoom container** — a `Scene` widget that hosts content as a
   first-class child under a `child_transform`, added via the new
   `Widget::child_transform` hook for scaled subtrees (focus, click-to-focus, and

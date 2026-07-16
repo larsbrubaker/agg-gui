@@ -115,4 +115,4 @@ pub use text_field_core::TextEditState;
 pub use toggle_switch::ToggleSwitch;
 pub use tooltip::Tooltip;
 pub use tree_view::{NodeIcon, TreeView};
-pub use window::Window;
+pub use window::{ClickAwayAction, CloseReason, Window};

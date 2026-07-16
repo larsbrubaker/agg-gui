@@ -31,6 +31,7 @@ use crate::widgets::button::Button;
 use crate::widgets::color_wheel_picker::{color_wheel_picker_dialog_with_on_close, ColorWheelPicker};
 use crate::widgets::primitives::SizedBox;
 use crate::widgets::rebuilder::Rebuilder;
+use crate::widgets::window::CloseReason;
 
 use super::super::commands::RichCommand;
 use super::super::editor::RichEditHandle;
@@ -176,11 +177,19 @@ fn build_picker_dialog(
         PickerKind::Highlight => "Highlight colour",
         _ => "Text colour",
     };
-    // The window's × button and Escape close the dialog through a route that
-    // bypasses the picker's Cancel button; forward that close to the SAME
-    // teardown so the preview session can't dangle.
-    color_wheel_picker_dialog_with_on_close(widget, title, move || {
-        close_handle.cancel_preview();
+    // The window's × button, Escape, and click-away close the dialog through a
+    // route that bypasses the picker's Cancel button; forward each to the right
+    // teardown so the preview session can't dangle:
+    //   * click-away → commit the live change (one undo step) when the user
+    //     actually recoloured, else close silently (no undo residue);
+    //   * × / Escape → cancel, restoring the pre-dialog colour.
+    color_wheel_picker_dialog_with_on_close(widget, title, move |reason| {
+        match reason {
+            CloseReason::ClickAway if close_handle.is_preview_dirty() => {
+                close_handle.commit_preview();
+            }
+            _ => close_handle.cancel_preview(),
+        }
         close_picker.set(PickerKind::None);
         crate::animation::request_draw();
     })

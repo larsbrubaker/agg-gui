@@ -163,7 +163,12 @@ pub struct Window {
     drag_start_bounds: Rect,
 
     close_hovered: bool,
-    on_close: Option<Box<dyn FnMut()>>,
+    on_close: Option<Box<dyn FnMut(CloseReason)>>,
+
+    /// What an outside pointer press does to this (modal) window. `None` swallows
+    /// it and stays open; `Close` dismisses via [`Window::close`] with
+    /// [`CloseReason::ClickAway`]. Only consulted while `modal` is set.
+    click_away: ClickAwayAction,
 
     /// Whether the window is currently maximized (fills the full canvas).
     maximized: bool,
@@ -306,6 +311,7 @@ impl Window {
             drag_start_bounds: Rect::default(),
             close_hovered: false,
             on_close: None,
+            click_away: ClickAwayAction::None,
             maximized: false,
             pre_maximize_bounds: Rect::new(60.0, 60.0, 360.0, 280.0),
             maximize_hovered: false,
@@ -382,6 +388,16 @@ impl Window {
         if !self.constrain {
             return;
         }
+        // A modal window is constrained to the whole app VIEWPORT rather than the
+        // (often tiny) overlay slot it nests in: `clamp_modal_into_viewport`
+        // pulls it fully on-screen during the clip-free global-overlay paint and
+        // folds any correction back into `bounds`, so a drag can travel across
+        // the entire app and the paint clamp keeps it visible. Applying the
+        // slot-based clamp here would re-cage it to the parent slot — the exact
+        // "locked to a dimension less than the app" bug we're fixing.
+        if self.modal {
+            return;
+        }
         let cw = self.canvas_size.width;
         let ch = self.canvas_size.height;
         // **Policy: keep the TITLE BAR grabbable**, not the whole window.
@@ -437,14 +453,18 @@ impl Window {
     /// unwind in-flight state (e.g. cancelling a live colour preview). Before
     /// this was factored out, only the × button ran it, so an Escape/close of
     /// the colour dialog left its preview session dangling.
-    fn close(&mut self) {
+    ///
+    /// `reason` distinguishes the dismissal route (× button, Escape, click-away)
+    /// so `on_close` can react differently — the colour dialog commits a live
+    /// change on click-away but cancels it on Escape / ×.
+    fn close(&mut self, reason: CloseReason) {
         self.visible = false;
         self.visibility_anim.set_target(0.0);
         if let Some(ref cell) = self.visible_cell {
             cell.set(false);
         }
         if let Some(cb) = self.on_close.as_mut() {
-            cb();
+            cb(reason);
         }
         crate::animation::request_draw();
     }
@@ -673,87 +693,6 @@ impl Window {
         self.bounds = snap(Rect::new(x, y, w, h));
         self.clamp_to_canvas();
     }
-
-    /// Snap pass for a title-bar drag.  Skipped entirely when the
-    /// global toggle is off — cheap when not in use.  Replaces
-    /// `self.bounds` with the engine's snapped result and writes the
-    /// guide list for `SnapOverlay` to paint.
-    pub(crate) fn apply_move_snap(&mut self) {
-        if !crate::snap::is_enabled() {
-            crate::snap::clear_guides();
-            return;
-        }
-        let targets = crate::snap::targets_snapshot();
-        let result = crate::snap::compute_snap(
-            self.bounds,
-            self.snap_id,
-            &targets,
-            crate::snap::DEFAULT_THRESHOLD,
-            crate::snap::SnapMode::Move,
-        );
-        self.bounds = snap(result.rect);
-        crate::snap::set_guides(result.guides);
-    }
-
-    /// Snap pass for an edge / corner resize drag.  Only edges that
-    /// the active handle is allowed to move can snap — the engine
-    /// enforces that internally via `SnapMode::Resize`.
-    pub(crate) fn apply_resize_snap(&mut self, dir: ResizeDir) {
-        if !crate::snap::is_enabled() {
-            crate::snap::clear_guides();
-            return;
-        }
-        let targets = crate::snap::targets_snapshot();
-        let edge = resize_dir_to_snap_edge(dir);
-        let result = crate::snap::compute_snap(
-            self.bounds,
-            self.snap_id,
-            &targets,
-            crate::snap::DEFAULT_THRESHOLD,
-            crate::snap::SnapMode::Resize(edge),
-        );
-        self.bounds = snap(result.rect);
-        crate::snap::set_guides(result.guides);
-    }
-}
-
-/// Map an internal `ResizeDir` to the snap engine's compass-direction
-/// enum.  Kept private — the snap engine owns its own enum so the
-/// engine isn't coupled to the Window widget.
-fn resize_dir_to_snap_edge(dir: ResizeDir) -> crate::snap::ResizeEdge {
-    use crate::snap::ResizeEdge as E;
-    match dir {
-        ResizeDir::N => E::North,
-        ResizeDir::NE => E::NorthEast,
-        ResizeDir::E => E::East,
-        ResizeDir::SE => E::SouthEast,
-        ResizeDir::S => E::South,
-        ResizeDir::SW => E::SouthWest,
-        ResizeDir::W => E::West,
-        ResizeDir::NW => E::NorthWest,
-    }
-}
-
-impl crate::snap::Snappable for Window {
-    fn snap_id(&self) -> crate::snap::SnapId {
-        self.snap_id
-    }
-    fn snap_rect(&self) -> Rect {
-        self.bounds
-    }
-    fn set_snap_rect(&mut self, r: Rect) {
-        self.bounds = snap(r);
-    }
-    fn is_snap_source(&self) -> bool {
-        self.requested_visible() && !self.maximized
-    }
-    fn is_snap_target(&self) -> bool {
-        // Maximized windows fill the canvas — pulling siblings to
-        // their edges would just glue everything to the canvas
-        // perimeter, which isn't useful as a layout aid.  Hidden
-        // windows aren't valid targets either.
-        self.requested_visible() && !self.maximized
-    }
 }
 
 /// Map a resize direction to the appropriate OS cursor icon.
@@ -772,8 +711,12 @@ fn resize_cursor(dir: ResizeDir) -> CursorIcon {
 
 mod builder;
 pub mod chrome;
+mod close;
 mod paint;
+mod snap_glue;
 mod widget_impl;
+
+pub use close::{ClickAwayAction, CloseReason};
 
 pub use chrome::{
     paint_chevron, paint_chrome_body, paint_chrome_border, paint_chrome_shadow,

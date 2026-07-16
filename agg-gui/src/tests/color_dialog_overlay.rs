@@ -378,7 +378,7 @@ fn build_closeable_dialog_app(closed: Rc<Cell<bool>>) -> App {
     let picker = ColorWheelPicker::new(Color::rgb(0.2, 0.45, 0.88), Arc::clone(&font))
         .with_show_alpha(true)
         .with_font_size(12.0);
-    let dialog = crate::color_wheel_picker_dialog_with_on_close(picker, "Text colour", move || {
+    let dialog = crate::color_wheel_picker_dialog_with_on_close(picker, "Text colour", move |_| {
         closed.set(true)
     });
     let root = Stack::new().with_hit_children_only(false).add(dialog);

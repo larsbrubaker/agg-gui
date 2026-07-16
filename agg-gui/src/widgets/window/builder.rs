@@ -10,7 +10,7 @@ use std::rc::Rc;
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor};
 
-use super::{Window, VISIBILITY_FADE_SECS};
+use super::{ClickAwayAction, CloseReason, Window, VISIBILITY_FADE_SECS};
 
 impl Window {
     /// Treat the window's content as live: invalidate the backbuffer
@@ -243,8 +243,23 @@ impl Window {
         self
     }
 
-    pub fn on_close(mut self, cb: impl FnMut() + 'static) -> Self {
+    /// Register a callback fired whenever the window closes, receiving the
+    /// [`CloseReason`] (× button, Escape, or click-away) so the host can react
+    /// per route — the colour dialog commits a live change on click-away but
+    /// cancels it on Escape / ×.
+    pub fn on_close(mut self, cb: impl FnMut(CloseReason) + 'static) -> Self {
         self.on_close = Some(Box::new(cb));
+        self
+    }
+
+    /// Set what a modal window does when the pointer is pressed *outside* its
+    /// bounds. Default [`ClickAwayAction::None`] swallows the press and keeps the
+    /// window open (unchanged behaviour for ordinary modal windows);
+    /// [`ClickAwayAction::Close`] dismisses via [`Window::close`] with
+    /// [`CloseReason::ClickAway`] and swallows the press. Only takes effect when
+    /// the window is also [`with_modal(true)`](Self::with_modal).
+    pub fn with_click_away(mut self, action: ClickAwayAction) -> Self {
+        self.click_away = action;
         self
     }
 }
