@@ -54,6 +54,14 @@ pub struct CommonStyle {
 }
 
 impl CommonStyle {
+    /// A `CommonStyle` in which every attribute agrees with `style` — the
+    /// summary of a single uniform run.  Used by the editor to report the
+    /// *pending* caret style (a toggled format awaiting the next keystroke) to
+    /// the toolbar, where no run yet carries it.
+    pub fn of_style(style: &InlineStyle) -> Self {
+        Self::from_style(style)
+    }
+
     /// Seed a `CommonStyle` where every attribute agrees with `style`.
     fn from_style(style: &InlineStyle) -> Self {
         Self {

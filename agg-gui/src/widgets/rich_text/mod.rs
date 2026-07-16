@@ -22,11 +22,13 @@
 //! and a demo window.
 
 pub mod commands;
+pub mod editor;
 pub mod layout;
 pub mod model;
 pub mod view;
 
 pub use commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand, MAX_INDENT};
+pub use editor::{RichEditCore, RichEditHandle, RichTextEdit};
 pub use layout::{
     layout_doc, BlockLayout, DocLayout, FontResolver, LineFragment, LineLayout, INDENT_PX,
     LINE_SPACING, LIST_GUTTER_PX, MARKER_GAP_PX,
