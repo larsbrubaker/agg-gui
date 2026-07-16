@@ -220,6 +220,20 @@ impl Widget for FontPreviewCombo {
         self.combo.is_focusable()
     }
 
+    // Forward the size constraints to the inner combo. `ComboBox::layout`
+    // returns the FULL available width and relies on its PARENT to clamp
+    // against `max_size()` (a flex row reads the child's `max_size().width`).
+    // Without these delegations the wrapper reports the default `Size::MAX`,
+    // so a flex parent (the RichText toolbar row) lets the combo stretch
+    // across the whole row and `with_max_size` has no visible effect.
+    fn min_size(&self) -> Size {
+        self.combo.min_size()
+    }
+
+    fn max_size(&self) -> Size {
+        self.combo.max_size()
+    }
+
     fn type_name(&self) -> &'static str {
         "FontPicker"
     }
@@ -285,5 +299,19 @@ mod tests {
         target.set(None);
         combo.layout(Size::new(150.0, 24.0));
         assert_eq!(combo.combo.selected(), 3);
+    }
+
+    /// Regression guard for the RichText toolbar's flex-fill bug:
+    /// `with_max_size` must reach the inner combo AND be visible to a parent
+    /// through the wrapper's own `max_size()` — a `FlexRow` clamps a fixed
+    /// child's slot against `child.max_size().width`. Before the fix the
+    /// wrapper reported the default `Size::MAX`, so the family dropdown
+    /// stretched across the whole toolbar row.
+    #[test]
+    fn with_max_size_is_visible_through_wrapper() {
+        let combo = font_preview_combo(test_font(), 12.0, 0, None, |_| {})
+            .with_max_size(Size::new(180.0, 26.0));
+        assert_eq!(Widget::max_size(&combo).width, 180.0);
+        assert_eq!(Widget::max_size(&combo).height, 26.0);
     }
 }

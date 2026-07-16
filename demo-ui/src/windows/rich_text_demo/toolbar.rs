@@ -220,7 +220,12 @@ fn family_combo(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
                 click_handle.exec(&RichCommand::SetFontFamily(name.clone()));
             }
         })
-        .with_max_size(agg_gui::Size::new(150.0, 26.0))
+        // Keep the family dropdown compact: the per-family preview label can be
+        // wide, so cap it at a fixed width instead of letting the flex row
+        // stretch it across the whole toolbar. `FontPreviewCombo` forwards this
+        // `max_size` to its inner `ComboBox`, which the `FlexRow` reads to clamp
+        // the slot — see `font_picker::FontPreviewCombo::max_size`.
+        .with_max_size(agg_gui::Size::new(180.0, 26.0))
         .with_reflect(move || family_reflection_index(&reflect_handle)),
     )
 }
@@ -278,4 +283,65 @@ fn redo_button(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
             .with_enabled_fn(move || enabled_handle.can_redo())
             .on_click(move || click_handle.redo()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use agg_gui::widgets::rich_text::{InlineStyle, RichDoc};
+    use agg_gui::{RichTextEdit, SharedResolver};
+
+    fn test_font() -> Arc<Font> {
+        const BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+        Arc::new(Font::from_bytes(BYTES.to_vec()).expect("load test font"))
+    }
+
+    /// Build the toolbar over a throwaway editor handle. Structural only — no
+    /// layout or paint runs, so the trivial resolver below is never invoked.
+    fn build_toolbar(font: &Arc<Font>) -> Box<dyn Widget> {
+        let resolver: SharedResolver = {
+            let f = Arc::clone(font);
+            Rc::new(move |_: &InlineStyle| Arc::clone(&f))
+        };
+        let editor = RichTextEdit::new(RichDoc::default(), resolver);
+        let handle = editor.handle();
+        let picker = Rc::new(Cell::new(PickerKind::None));
+        rich_toolbar(font, handle, picker)
+    }
+
+    fn child_type_names(w: &dyn Widget) -> Vec<&'static str> {
+        w.children().iter().map(|c| c.type_name()).collect()
+    }
+
+    /// Regression guard for the font-preview refactor (commit 878be6d): the
+    /// family dropdown switched to a `FontPreviewCombo`, and the size ComboBox
+    /// plus the text-colour and highlight buttons must NOT be dropped. A tree
+    /// walk by `type_name` pins the exact control roster of both rows so a
+    /// future refactor cannot silently lose one.
+    #[test]
+    fn toolbar_keeps_full_control_roster() {
+        let toolbar = build_toolbar(&test_font());
+        assert_eq!(toolbar.children().len(), 2, "toolbar has two rows");
+
+        // Row 1: B / I / U / S, family preview combo (FontPicker), size combo
+        // (ComboBox), then the text-colour and highlight swatch buttons.
+        assert_eq!(
+            child_type_names(toolbar.children()[0].as_ref()),
+            [
+                "Button", "Button", "Button", "Button", "FontPicker", "ComboBox", "Button",
+                "Button",
+            ],
+            "row 1 lost a control (size combo or a colour button)"
+        );
+
+        // Row 2: 3 alignments + ordered/bullet lists + outdent/indent + undo/redo.
+        assert_eq!(
+            child_type_names(toolbar.children()[1].as_ref()),
+            vec!["Button"; 9],
+            "row 2 control roster changed"
+        );
+    }
 }
