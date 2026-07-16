@@ -445,10 +445,10 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
                     .with_child(Box::new(
                         DragValue::new(scalar.get(), 0.0, 360.0, Arc::clone(&font))
                             .with_decimals(0)
-                            .on_change({
-                                let scalar = Rc::clone(&scalar);
-                                move |x| scalar.set(x)
-                            }),
+                            // Bind to the shared scalar so the Slider and this
+                            // DragValue always show the same value: `layout()`
+                            // re-reads the cell each frame and drags write back.
+                            .with_value_cell(Rc::clone(&scalar)),
                     )),
             ),
         ),
@@ -658,15 +658,14 @@ fn gallery_controls(
             FlexRow::new()
                 .with_gap(6.0)
                 .add(Box::new(
-                    SizedBox::new().with_width(56.0).with_height(28.0).with_child(
+                    // Wide enough for the drag arrows plus a "0.00"–"1.00"
+                    // label at the 13px font; the old 56px clipped "0.94".
+                    SizedBox::new().with_width(76.0).with_height(28.0).with_child(
                         Box::new(
                             DragValue::new(opacity.get(), 0.0, 1.0, Arc::clone(font))
                                 .with_speed(0.01)
                                 .with_decimals(2)
-                                .on_change({
-                                    let opacity = Rc::clone(opacity);
-                                    move |v| opacity.set(v)
-                                }),
+                                .with_value_cell(Rc::clone(opacity)),
                         ),
                     ),
                 ))
