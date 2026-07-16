@@ -117,6 +117,17 @@ impl Window {
         self
     }
 
+    /// Make this window an app-modal layer while it is visible.  The `App`
+    /// routes every pointer and keyboard event into the window's subtree,
+    /// so a floating dialog swallows all input over its bounds instead of
+    /// leaking clicks to widgets underneath.  Off by default — only floating
+    /// dialogs (e.g. [`color_wheel_picker_dialog`](crate::color_wheel_picker_dialog))
+    /// opt in; ordinary windows keep normal per-window hit-testing.
+    pub fn with_modal(mut self, modal: bool) -> Self {
+        self.modal = modal;
+        self
+    }
+
     /// Opt this window in/out of the generic retained GL-FBO backbuffer.
     /// Disabling renders directly into the inherited parent target.
     pub fn with_gl_backbuffer(mut self, enabled: bool) -> Self {
