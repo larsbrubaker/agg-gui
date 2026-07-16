@@ -49,6 +49,22 @@ pub fn current_paint_clip() -> Option<Rect> {
 /// `cache.dirty == false` skip the re-raster entirely and just blit the
 /// existing bitmap — identical fast path to MatterCAD's `DoubleBuffer`.
 pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
+    // Widgets that defer to the global-overlay pass (modal dialogs) paint
+    // nothing here — neither their own body nor their children — so an
+    // ancestor's clip can't truncate them. Their `paint_global_overlay`
+    // re-enters via `paint_subtree_forced` during the clip-free overlay walk.
+    if widget.is_visible() && widget.defer_paint_to_overlay() {
+        return;
+    }
+    paint_subtree_forced(widget, ctx);
+}
+
+/// Paint `widget` and its descendants ignoring [`Widget::defer_paint_to_overlay`]
+/// for `widget` itself. This is the entry point a deferred widget calls from its
+/// `paint_global_overlay` to render its subtree during the clip-escaping global
+/// overlay pass. Deferred *descendants* (rare) still route through
+/// [`paint_subtree`] and thus keep deferring.
+pub(crate) fn paint_subtree_forced(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if !widget.is_visible() {
         if paint_subtree_unified_backbuffer(widget, ctx, true) {
             return;

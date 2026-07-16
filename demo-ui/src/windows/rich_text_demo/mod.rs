@@ -40,7 +40,7 @@ use crate::windows::system_fonts::{
 };
 
 /// Which colour the floating picker is currently editing (if any).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PickerKind {
     None,
     TextColor,
@@ -214,30 +214,60 @@ fn build_picker(
         return Box::new(SizedBox::new().with_width(0.0).with_height(0.0));
     }
     let allow_none = kind == PickerKind::Highlight;
-    let initial = Color::rgb(0.2, 0.45, 0.88);
+
+    // Snapshot the committed document + selection and suspend undo feeding for
+    // the duration of the dialog. Live previewing exec's a fresh `SetTextColor`
+    // / `SetHighlight` on every drag frame, so without this the rapid mutations
+    // would each seed an undo step and a Cancel would leave a stray entry.
+    // `commit_preview` (Select) collapses the whole drag into one undo step;
+    // `cancel_preview` (Cancel / Escape / close) restores this exact snapshot.
+    handle.begin_preview();
+
+    // Seed the wheel from the selection's current colour so the dialog opens on
+    // what's already there. The selection stays visible (the editor paints its
+    // band even while unfocused) so the user sees what they are recolouring.
+    let common = handle.common_style_of_selection();
+    let initial = match kind {
+        PickerKind::TextColor => match common.text_color {
+            Some(Some(c)) => c,
+            // Uniform default / mixed: fall back to a neutral starting colour.
+            _ => Color::rgb(0.2, 0.45, 0.88),
+        },
+        PickerKind::Highlight => match common.highlight {
+            Some(Some(c)) => c,
+            // Uniform "no highlight" opens on pass-through (alpha 0 → the
+            // picker checks its "No Color" box).
+            Some(None) => Color::rgba(0.0, 0.0, 0.0, 0.0),
+            // Mixed highlight: a sensible default the user can adjust.
+            None => Color::rgb(1.0, 0.92, 0.23),
+        },
+        PickerKind::None => unreachable!("guarded above"),
+    };
+
+    let change_handle = handle.clone();
     let sel_handle = handle.clone();
+    let cancel_handle = handle.clone();
+    let close_handle = handle.clone();
     let sel_picker = Rc::clone(picker);
     let cancel_picker = Rc::clone(picker);
+    let close_picker = Rc::clone(picker);
+
     let widget = ColorWheelPicker::new(initial, Arc::clone(font))
         .with_allow_none(allow_none)
         .with_show_alpha(true)
         .with_font_size(12.0)
+        // Live preview: recolour the selection in context as the user drags.
+        .on_change(move |opt| apply_color(&change_handle, kind, opt))
+        // Select = commit: apply the final colour, then bank one undo step.
         .on_select(move |opt| {
-            match kind {
-                PickerKind::TextColor => {
-                    if let Some(c) = opt {
-                        sel_handle.exec(&RichCommand::SetTextColor(c));
-                    }
-                }
-                PickerKind::Highlight => {
-                    sel_handle.exec(&RichCommand::SetHighlight(opt));
-                }
-                PickerKind::None => {}
-            }
+            apply_color(&sel_handle, kind, opt);
+            sel_handle.commit_preview();
             sel_picker.set(PickerKind::None);
             agg_gui::animation::request_draw();
         })
+        // Cancel button = restore the pre-dialog snapshot.
         .on_cancel(move || {
+            cancel_handle.cancel_preview();
             cancel_picker.set(PickerKind::None);
             agg_gui::animation::request_draw();
         });
@@ -245,7 +275,30 @@ fn build_picker(
         PickerKind::Highlight => "Highlight colour",
         _ => "Text colour",
     };
-    agg_gui::color_wheel_picker_dialog(widget, title)
+    // The window's × button and Escape close the dialog through a route that
+    // bypasses the picker's Cancel button, so forward that close to the SAME
+    // teardown — otherwise the preview session would dangle (undo suspended
+    // forever, the previewed colour stuck) and the swatch would stay dead.
+    agg_gui::color_wheel_picker_dialog_with_on_close(widget, title, move || {
+        close_handle.cancel_preview();
+        close_picker.set(PickerKind::None);
+        agg_gui::animation::request_draw();
+    })
+}
+
+/// Apply a picker colour to the selection for the given `kind`. Text colour
+/// only applies a concrete colour (a text run always has one); highlight also
+/// forwards `None` — the picker's "No Color" choice removes the highlight.
+fn apply_color(handle: &RichEditHandle, kind: PickerKind, opt: Option<Color>) {
+    match kind {
+        PickerKind::TextColor => {
+            if let Some(c) = opt {
+                handle.exec(&RichCommand::SetTextColor(c));
+            }
+        }
+        PickerKind::Highlight => handle.exec(&RichCommand::SetHighlight(opt)),
+        PickerKind::None => {}
+    }
 }
 
 // ── RichEditHost: re-invalidate the editor's layout on font-cache changes ──
@@ -395,5 +448,122 @@ mod tests {
             "editor backbuffer cache must populate after a framework paint — \
              the cached LCD/RGBA path did not engage"
         );
+    }
+
+    // ── Live preview: every dialog-dismissal route unwinds the session ──────
+    //
+    // The window's × button and Escape are a close route SEPARATE from the
+    // picker's Cancel button. If they don't cancel the preview, the session
+    // dangles forever (undo suspended, preview colour stuck, swatch dead).
+    // These drive the REAL demo overlay through the App pipeline.
+
+    use agg_gui::{App, Key, MouseButton, Modifiers};
+
+    /// World-space rect of the dialog window inside the aligned overlay slot
+    /// (Stack → Rebuilder → Window). Mirrors the accumulation the framework's
+    /// hit-test does when routing a click down the tree.
+    fn dialog_window_world(app: &App) -> Rect {
+        let rb = &app.root().children()[1];
+        let win = &rb.children()[0];
+        let rbb = rb.bounds();
+        let wb = win.bounds();
+        Rect::new(rbb.x + wb.x, rbb.y + wb.y, wb.width, wb.height)
+    }
+
+    /// Build the real overlay over an editor whose whole (red) document is
+    /// selected, open the text-colour dialog, and preview blue live — exactly
+    /// what a wheel drag does. Returns the app, a shared handle, the picker
+    /// cell, and the original colour to restore to.
+    fn open_text_color_preview() -> (App, RichEditHandle, Rc<Cell<PickerKind>>, Color) {
+        agg_gui::device_scale::set_device_scale(1.0);
+        agg_gui::ux_scale::set_ux_scale(1.0);
+
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let doc = RichDoc::from_blocks(vec![Block::from_run(TextRun::new(
+            "hello",
+            InlineStyle {
+                text_color: Some(red),
+                ..Default::default()
+            },
+        ))]);
+        let mut editor = RichTextEdit::new(doc, make_resolver(Arc::clone(&font))).with_font_size(16.0);
+        let handle = editor.handle();
+        // Select the whole doc so a colour preview actually mutates runs.
+        editor.on_event(&Event::KeyDown {
+            key: Key::Char('a'),
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        });
+
+        let picker_cell = Rc::new(Cell::new(PickerKind::None));
+        let overlay = color_picker_overlay(&font, handle.clone(), Rc::clone(&picker_cell));
+        let editor_holder = SizedBox::new()
+            .with_width(400.0)
+            .with_height(300.0)
+            .with_child(Box::new(RichEditHost::new(editor)));
+        let root = Stack::new()
+            .with_hit_children_only(false)
+            .add(Box::new(editor_holder))
+            .add_aligned(overlay);
+        let mut app = App::new(Box::new(root));
+
+        // Open the dialog (Rebuilder rebuilds → begin_preview) and drag to blue.
+        picker_cell.set(PickerKind::TextColor);
+        app.layout(Size::new(420.0, 520.0));
+        assert!(handle.is_previewing(), "opening the dialog begins a preview");
+        handle.exec(&RichCommand::SetTextColor(Color::rgb(0.0, 0.0, 1.0)));
+        app.layout(Size::new(420.0, 520.0));
+        assert_eq!(
+            handle.common_style_of_selection().text_color,
+            Some(Some(Color::rgb(0.0, 0.0, 1.0))),
+            "preview must mutate the document live"
+        );
+
+        (app, handle, picker_cell, red)
+    }
+
+    fn assert_preview_unwound(handle: &RichEditHandle, picker_cell: &Rc<Cell<PickerKind>>, red: Color) {
+        assert!(
+            !handle.is_previewing(),
+            "closing the dialog must end the preview session (undo would stay dead otherwise)"
+        );
+        assert_eq!(
+            picker_cell.get(),
+            PickerKind::None,
+            "closing the dialog must clear the picker cell so the swatch works again"
+        );
+        assert_eq!(
+            handle.common_style_of_selection().text_color,
+            Some(Some(red)),
+            "closing the dialog must restore the pre-dialog colour"
+        );
+    }
+
+    #[test]
+    fn window_close_button_cancels_live_preview() {
+        let (mut app, handle, picker_cell, red) = open_text_color_preview();
+
+        // Click the window's × button.
+        let wb = dialog_window_world(&app);
+        let close = Point::new(wb.x + wb.width - 10.0, wb.y + wb.height - 14.0);
+        let screen_y = 520.0 - close.y;
+        app.on_mouse_down(close.x, screen_y, MouseButton::Left, Modifiers::default());
+        app.on_mouse_up(close.x, screen_y, MouseButton::Left, Modifiers::default());
+        app.layout(Size::new(420.0, 520.0));
+
+        assert_preview_unwound(&handle, &picker_cell, red);
+    }
+
+    #[test]
+    fn escape_cancels_live_preview() {
+        let (mut app, handle, picker_cell, red) = open_text_color_preview();
+
+        app.on_key_down(Key::Escape, Modifiers::default());
+        app.layout(Size::new(420.0, 520.0));
+
+        assert_preview_unwound(&handle, &picker_cell, red);
     }
 }

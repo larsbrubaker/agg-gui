@@ -162,6 +162,99 @@ fn undo_coalesces_rapid_typing_into_one_step() {
     assert!(!core.can_undo(), "typing coalesced into one undo step");
 }
 
+// ── Live colour preview: undo hygiene ─────────────────────────────────────
+//
+// A colour dialog previews by exec-ing `SetTextColor` every drag frame. The
+// preview session (`begin_preview` → `commit_preview` / `cancel_preview`)
+// suspends undo feeding so the drag collapses into ONE undo step on commit and
+// leaves NO stray entry on cancel.
+
+fn colored(text: &str, color: crate::color::Color) -> TextRun {
+    TextRun::new(
+        text,
+        InlineStyle {
+            text_color: Some(color),
+            ..Default::default()
+        },
+    )
+}
+
+#[test]
+fn preview_commit_collapses_drag_into_one_undo_step() {
+    let red = crate::color::Color::rgb(1.0, 0.0, 0.0);
+    let blue = crate::color::Color::rgb(0.0, 0.0, 1.0);
+    let green = crate::color::Color::rgb(0.0, 1.0, 0.0);
+    let doc = RichDoc::from_blocks(vec![Block::from_run(colored("hello", red))]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.select_all();
+    core.feed_undo(0.0); // baseline undo point (red)
+    assert!(!core.can_undo());
+
+    // Dialog opens: capture the committed state + suspend feeding.
+    core.begin_preview();
+    assert!(core.is_previewing());
+
+    // Drag: rapid live previews. Feeding is suspended, so none snapshot.
+    core.exec(&RichCommand::SetTextColor(blue));
+    core.feed_undo(0.1);
+    core.exec(&RichCommand::SetTextColor(green));
+    core.feed_undo(0.2);
+
+    // Select: commit + resume, then settle into exactly one undo point.
+    core.commit_preview();
+    assert!(!core.is_previewing());
+    core.feed_undo(3.0);
+    core.feed_undo(4.5);
+    assert!(core.can_undo(), "the committed colour change is undoable");
+
+    // A single undo reverts the whole drag back to the original colour, and
+    // there is nothing left to undo — the drag collapsed into one step.
+    assert!(core.undo());
+    assert_eq!(core.common_style_of_selection().text_color, Some(Some(red)));
+    assert!(!core.can_undo(), "the drag must collapse into a single undo step");
+}
+
+#[test]
+fn preview_cancel_restores_and_leaves_no_undo_residue() {
+    let red = crate::color::Color::rgb(1.0, 0.0, 0.0);
+    let blue = crate::color::Color::rgb(0.0, 0.0, 1.0);
+    let doc = RichDoc::from_blocks(vec![Block::from_run(colored("hello", red))]);
+    let mut core = RichEditCore::new(doc, 16.0);
+    core.select_all();
+    core.feed_undo(0.0); // baseline undo point (red)
+    assert!(!core.can_undo());
+
+    core.begin_preview();
+    // Preview to a different colour, feeding at times that WOULD stabilise into
+    // an undo point (gap ≥ stable_time) if suspension were broken.
+    core.exec(&RichCommand::SetTextColor(blue));
+    core.feed_undo(0.1);
+    core.feed_undo(2.0);
+    assert_eq!(
+        core.common_style_of_selection().text_color,
+        Some(Some(blue)),
+        "the preview updates the document live"
+    );
+
+    // Cancel: restore the captured snapshot + resume.
+    core.cancel_preview();
+    assert!(!core.is_previewing());
+    assert_eq!(
+        core.common_style_of_selection().text_color,
+        Some(Some(red)),
+        "cancel restores the original colour"
+    );
+
+    // Resume feeding: the restored state equals the committed baseline, so no
+    // stray undo entry survives the cancelled preview.
+    core.feed_undo(3.0);
+    core.feed_undo(4.5);
+    assert!(
+        !core.can_undo(),
+        "a cancelled preview must leave no undo residue"
+    );
+}
+
 #[test]
 fn clipboard_round_trip_across_blocks() {
     // Multi-block selection flattens to text with `\n`; re-inserting it rebuilds
