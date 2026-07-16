@@ -31,8 +31,9 @@ use std::sync::Arc;
 
 use agg_gui::widgets::rich_text::{Block, InlineStyle, ListKind, TextRun};
 use agg_gui::{
-    Color, ColorWheelPicker, DrawCtx, Event, EventResult, FlexColumn, Font, Point, Rebuilder, Rect,
-    RichCommand, RichDoc, RichEditHandle, RichTextEdit, Size, SizedBox, Stack, Widget,
+    CloseReason, Color, ColorWheelPicker, DrawCtx, Event, EventResult, FlexColumn, Font, Point,
+    Rebuilder, Rect, RichCommand, RichDoc, RichEditHandle, RichTextEdit, Size, SizedBox, Stack,
+    Widget,
 };
 
 use crate::windows::system_fonts::{
@@ -283,12 +284,19 @@ fn build_picker(
         PickerKind::Highlight => "Highlight colour",
         _ => "Text colour",
     };
-    // The window's × button and Escape close the dialog through a route that
-    // bypasses the picker's Cancel button, so forward that close to the SAME
-    // teardown — otherwise the preview session would dangle (undo suspended
-    // forever, the previewed colour stuck) and the swatch would stay dead.
-    agg_gui::color_wheel_picker_dialog_with_on_close(widget, title, move || {
-        close_handle.cancel_preview();
+    // The window's × button, Escape, and click-away close the dialog through a
+    // route that bypasses the picker's Cancel button, so forward each to the
+    // right teardown — otherwise the preview session would dangle (undo
+    // suspended forever, the previewed colour stuck) and the swatch would stay
+    // dead. Click-away commits a changed colour as one undo step (Ctrl+Z
+    // reverts it); an untouched session closes silently; × / Escape cancel.
+    agg_gui::color_wheel_picker_dialog_with_on_close(widget, title, move |reason| {
+        match reason {
+            CloseReason::ClickAway if close_handle.is_preview_dirty() => {
+                close_handle.commit_preview();
+            }
+            _ => close_handle.cancel_preview(),
+        }
         close_picker.set(PickerKind::None);
         agg_gui::animation::request_draw();
     })

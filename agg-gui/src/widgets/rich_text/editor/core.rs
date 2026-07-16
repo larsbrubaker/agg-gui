@@ -57,6 +57,13 @@ pub struct RichEditCore {
     /// colour) so a mixed-colour selection — or a highlight that was `None` —
     /// is restored exactly.
     preview_snapshot: Option<EditSnapshot>,
+    /// Set the moment a preview session actually mutates the document (a live
+    /// colour drag exec'd `SetTextColor` / `SetHighlight`), so a host can tell
+    /// a *changed* session apart from one where the user opened the dialog and
+    /// dismissed it without touching anything. The click-away dismissal uses
+    /// this to choose commit (banked as one undo step) vs. a silent cancel.
+    /// Cleared when a session starts, commits, or cancels.
+    preview_dirty: bool,
     /// Bumped whenever `doc` changes — the view invalidates its layout cache.
     doc_rev: u64,
     /// Bumped on any caret / anchor / doc change — the view repaints.
@@ -75,6 +82,7 @@ impl RichEditCore {
             undoer: Undoer::default(),
             undo_suspended: false,
             preview_snapshot: None,
+            preview_dirty: false,
             doc_rev: 0,
             rev: 0,
         }
@@ -96,6 +104,7 @@ impl RichEditCore {
         // clobber the freshly-loaded doc — and leaving undo suspended would keep
         // `feed_undo` a no-op forever (dead undo).
         self.preview_snapshot = None;
+        self.preview_dirty = false;
         self.undo_suspended = false;
         self.bump_doc();
     }
@@ -422,6 +431,12 @@ impl RichEditCore {
         } else {
             apply_command(&mut self.doc, sel, cmd);
             self.pending_style = None;
+            // A mutation while a preview session is live means the user actually
+            // changed something (a colour drag) — record that so a click-away
+            // dismissal knows to commit rather than silently cancel.
+            if self.preview_snapshot.is_some() {
+                self.preview_dirty = true;
+            }
             self.bump_doc();
         }
     }
@@ -480,6 +495,8 @@ impl RichEditCore {
     pub fn begin_preview(&mut self) {
         if self.preview_snapshot.is_none() {
             self.preview_snapshot = Some(self.snapshot());
+            // Fresh session starts clean; the first previewing `exec` sets this.
+            self.preview_dirty = false;
         }
         self.undo_suspended = true;
     }
@@ -488,6 +505,7 @@ impl RichEditCore {
     /// the whole drag collapses into a single undo step.
     pub fn commit_preview(&mut self) {
         self.preview_snapshot = None;
+        self.preview_dirty = false;
         self.undo_suspended = false;
     }
 
@@ -499,12 +517,20 @@ impl RichEditCore {
         if let Some(snap) = self.preview_snapshot.take() {
             self.apply_snapshot(snap);
         }
+        self.preview_dirty = false;
         self.undo_suspended = false;
     }
 
     /// Whether a live preview is currently active (test/introspection hook).
     pub fn is_previewing(&self) -> bool {
         self.preview_snapshot.is_some()
+    }
+
+    /// Whether the active preview session has mutated the document since it
+    /// began. Drives the colour dialog's click-away dismissal: a dirty session
+    /// commits (one undo step); a clean one cancels silently (no undo residue).
+    pub fn is_preview_dirty(&self) -> bool {
+        self.preview_dirty
     }
 
     pub fn can_undo(&self) -> bool {
@@ -681,5 +707,13 @@ impl RichEditHandle {
     /// (in tests) that every dialog-dismissal route unwinds the session.
     pub fn is_previewing(&self) -> bool {
         self.core.borrow().is_previewing()
+    }
+
+    /// Whether the active preview session has changed the document. The colour
+    /// dialog's click-away handler reads this to decide whether to commit the
+    /// live change (one undo step) or cancel it silently. See
+    /// [`RichEditCore::is_preview_dirty`].
+    pub fn is_preview_dirty(&self) -> bool {
+        self.core.borrow().is_preview_dirty()
     }
 }

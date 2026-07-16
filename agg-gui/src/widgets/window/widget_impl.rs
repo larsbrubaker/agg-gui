@@ -1,5 +1,17 @@
 use super::*;
 
+impl Window {
+    /// Whether `local` (window-local, Y-up) lies within this window's bounds.
+    /// Used by the click-away path to tell an inside press from an outside one
+    /// once the modal grab has routed it here regardless of position.
+    fn point_in_local_bounds(&self, local: Point) -> bool {
+        local.x >= 0.0
+            && local.x <= self.bounds.width
+            && local.y >= 0.0
+            && local.y <= self.bounds.height
+    }
+}
+
 impl Widget for Window {
     fn type_name(&self) -> &'static str {
         "Window"
@@ -576,6 +588,22 @@ impl Widget for Window {
                 if matches!(*button, MouseButton::Left | MouseButton::Middle) =>
             {
                 let is_left_click = *button == MouseButton::Left;
+
+                // Click-away dismissal: while this window holds the modal grab,
+                // the App routes EVERY press to our subtree — including presses
+                // OUTSIDE our bounds (they arrive here with an out-of-range local
+                // `pos`). If click-away is enabled, close through the unified
+                // `close()` path with `ClickAway` and swallow the press so it
+                // never activates whatever sat underneath. Gated on the press
+                // landing outside our bounds so inner clicks route normally.
+                if self.modal
+                    && self.click_away == ClickAwayAction::Close
+                    && !self.point_in_local_bounds(*pos)
+                {
+                    self.close(CloseReason::ClickAway);
+                    return EventResult::Consumed;
+                }
+
                 // Press-to-raise: any direct press on this window brings it forward.
                 self.raise_request.set(true);
                 // Z-order changes are visible; repaint.
@@ -586,7 +614,7 @@ impl Widget for Window {
 
                 // Close button — highest priority.
                 if is_left_click && self.in_close_button(*pos) {
-                    self.close();
+                    self.close(CloseReason::CloseButton);
                     return EventResult::Consumed;
                 }
 
@@ -715,7 +743,7 @@ impl Widget for Window {
             Event::KeyDown {
                 key: Key::Escape, ..
             } if self.modal => {
-                self.close();
+                self.close(CloseReason::Escape);
                 EventResult::Consumed
             }
 
