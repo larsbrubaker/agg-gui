@@ -66,3 +66,49 @@ fn test_programmatic_focus_request_unmatched_id() {
         "an unmatched request is still consumed"
     );
 }
+
+/// The web clipboard bridge focuses a hidden `<textarea>` only while a text
+/// widget is focused; that focus is what makes browsers deliver copy / cut /
+/// paste DOM events. A focused `RichTextEdit` must therefore report as a text
+/// input — regression guard for the WASM demo where it was omitted and its
+/// clipboard shortcuts silently no-op'd.
+#[test]
+fn rich_text_edit_is_a_focused_text_input() {
+    use crate::widgets::rich_text::{uniform_resolver, RichDoc, RichTextEdit};
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+
+    const FIELD_ID: u64 = 7777;
+    let mut root = Container::new().with_padding(4.0);
+    root.children_mut().push(Box::new(
+        RichTextEdit::new(RichDoc::new(), uniform_resolver(Arc::clone(&font)))
+            .with_font_size(14.0)
+            .with_focus_id(FIELD_ID),
+    ));
+
+    let mut app = App::new(Box::new(root));
+    app.layout(Size::new(200.0, 200.0));
+    assert!(
+        !app.focused_is_text_input(),
+        "nothing focused before a request"
+    );
+
+    crate::focus::request_focus(FIELD_ID);
+    app.layout(Size::new(200.0, 200.0));
+
+    assert_eq!(app.focused_widget_type_name(), Some("RichTextEdit"));
+    assert!(
+        app.focused_is_text_input(),
+        "a focused RichTextEdit must count as a text input for the clipboard bridge"
+    );
+}
+
+/// The text-input classifier must agree with each editor's `type_name`.
+#[test]
+fn text_input_classifier_covers_all_editors() {
+    use crate::widget::is_text_input_type_name;
+    assert!(is_text_input_type_name("TextField"));
+    assert!(is_text_input_type_name("TextArea"));
+    assert!(is_text_input_type_name("RichTextEdit"));
+    assert!(!is_text_input_type_name("Button"));
+}
