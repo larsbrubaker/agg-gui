@@ -73,6 +73,14 @@ fn make_resolver(base: Arc<Font>) -> agg_gui::SharedResolver {
             if let Some(font) = load_font_by_name(&candidate) {
                 return font;
             }
+            // Not loaded yet: enqueue an async fetch for this variant. The
+            // catalog loads faces lazily, so without this a bold/italic run
+            // would fall back to `base` forever because its face is never
+            // requested. When the bytes arrive, `install_font_bytes` bumps the
+            // font-cache epoch and `RichEditHost` re-invalidates layout, so the
+            // run re-resolves to the real face and re-rasters (see the
+            // module-level "font resolver" notes).
+            request_font(&candidate);
         }
         Arc::clone(&base)
     })
@@ -352,6 +360,9 @@ mod tests {
     use super::*;
 
     const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+    /// A second, distinct real face used to stand in for a loaded variant so the
+    /// resolver test can prove it returns the installed face rather than `base`.
+    const VARIANT_FONT: &[u8] = include_bytes!("../../../../demo/assets/Poppins.ttf");
 
     /// Painting the host through the framework must ENGAGE the editor's cached
     /// LCD/RGBA backbuffer. The host forwards `backbuffer_cache_mut`, so
@@ -394,6 +405,108 @@ mod tests {
             engaged,
             "editor backbuffer cache must populate after a framework paint — \
              the cached LCD/RGBA path did not engage"
+        );
+    }
+
+    /// Regression for the reported bug: a bold run rendered in the regular
+    /// weight even though the catalog ships a real bold face. Root cause was the
+    /// resolver returning `base` on a cache miss without ever requesting the
+    /// variant load, so its bytes were never fetched. Once the variant is loaded
+    /// the resolver must return the real bold face rather than falling back.
+    #[test]
+    fn bold_run_resolves_to_variant_once_loaded() {
+        use crate::windows::system_fonts::install_font_bytes;
+
+        // A family name unique to this test keeps the thread-local font cache
+        // isolated from sibling tests (cargo reuses worker threads).
+        let family = "RtBoldResolveTest";
+        let base = Arc::new(Font::from_slice(TEST_FONT).expect("base font must load"));
+        let resolver = make_resolver(Arc::clone(&base));
+        let style = InlineStyle {
+            bold: true,
+            font_family: Some(family.to_string()),
+            ..Default::default()
+        };
+
+        // Before the variant loads there is nothing to resolve to but `base`.
+        let before = resolver(&style);
+        assert!(
+            Arc::ptr_eq(&before, &base),
+            "an unloaded bold face must fall back to the base font"
+        );
+
+        // Install the bold face (any distinct real font under the variant name).
+        install_font_bytes(
+            &format!("{family} Bold"),
+            VARIANT_FONT.to_vec(),
+            None,
+            None,
+        )
+        .expect("installing the bold variant must succeed");
+
+        // Now the resolver must pick the real bold face, not the regular base.
+        let after = resolver(&style);
+        assert!(
+            !Arc::ptr_eq(&after, &base),
+            "a loaded bold face must resolve to the variant, not the base font"
+        );
+    }
+
+    /// The fix's core mechanism: resolving a run whose variant face is not yet
+    /// loaded must enqueue an async fetch for it (via the platform hook and the
+    /// pending-request queue). Without this the bold bytes are never requested
+    /// and the run stays in the regular weight forever.
+    #[test]
+    fn unloaded_bold_variant_enqueues_font_request() {
+        use crate::windows::system::{init_cells, SystemCells};
+        use crate::windows::system_fonts::take_pending_font_request;
+        use std::cell::{Cell, RefCell};
+
+        // Clear any residual queue state from earlier work on this thread.
+        while take_pending_font_request().is_some() {}
+
+        // Register cells with a recording font-request hook; only `platform`
+        // matters here, the rest are placeholders.
+        let requested: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let rec = Rc::clone(&requested);
+        let platform = crate::PlatformHooks::native(0, || {})
+            .with_font_requester(move |name, _path| rec.borrow_mut().push(name.to_string()));
+        init_cells(SystemCells {
+            font_name: Rc::new(RefCell::new(None)),
+            font_index: Rc::new(Cell::new(0)),
+            font_size_scale: Rc::new(Cell::new(1.0)),
+            lcd_enabled: Rc::new(Cell::new(false)),
+            hinting_enabled: Rc::new(Cell::new(false)),
+            gamma: Rc::new(Cell::new(1.0)),
+            width_scale: Rc::new(Cell::new(1.0)),
+            interval: Rc::new(Cell::new(0.0)),
+            faux_weight: Rc::new(Cell::new(0.0)),
+            faux_italic: Rc::new(Cell::new(0.0)),
+            primary_weight: Rc::new(Cell::new(1.0 / 3.0)),
+            system_tab: Rc::new(Cell::new(0)),
+            platform,
+        });
+
+        let base = Arc::new(Font::from_slice(TEST_FONT).expect("base font must load"));
+        let resolver = make_resolver(Arc::clone(&base));
+
+        // Default family (Nunito) + bold, with the Bold face not loaded.
+        let _ = resolver(&InlineStyle {
+            bold: true,
+            ..Default::default()
+        });
+
+        let mut names = Vec::new();
+        while let Some((name, _path)) = take_pending_font_request() {
+            names.push(name);
+        }
+        assert!(
+            names.iter().any(|n| n == "Nunito Bold"),
+            "resolving a bold run must enqueue a fetch for the Nunito Bold face; got {names:?}"
+        );
+        assert!(
+            requested.borrow().iter().any(|n| n == "Nunito Bold"),
+            "the platform font-request hook must be invoked for Nunito Bold"
         );
     }
 }
