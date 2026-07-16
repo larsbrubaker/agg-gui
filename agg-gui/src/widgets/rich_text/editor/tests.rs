@@ -337,3 +337,55 @@ fn double_mouse_down_event_selects_word() {
     ed.on_event(&down);
     assert_eq!(ed.core.borrow().selected_plain_text(), "world");
 }
+
+// ── Text-rendering pipeline: LCD routing ───────────────────────────────────
+
+/// The editor must follow the System LCD setting exactly like `Label` /
+/// `TextField` / `TextArea`: an `LcdCoverage` backbuffer when LCD is on, a
+/// grayscale `Rgba` backbuffer when it is off.
+#[test]
+fn backbuffer_mode_follows_lcd_setting() {
+    use crate::widget::BackbufferMode;
+    // Standard density so the high-scale hard cap in `lcd_enabled` doesn't mask
+    // the explicit override under test.
+    crate::device_scale::set_device_scale(1.0);
+    crate::ux_scale::set_ux_scale(1.0);
+
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![sized("hello", 16.0)],
+        ..Block::new()
+    }]);
+    let ed = laid_out_editor(doc, 400.0, 120.0);
+
+    crate::font_settings::set_lcd_enabled(true);
+    assert_eq!(ed.backbuffer_mode(), BackbufferMode::LcdCoverage);
+
+    crate::font_settings::set_lcd_enabled(false);
+    assert_eq!(ed.backbuffer_mode(), BackbufferMode::Rgba);
+
+    crate::font_settings::clear_lcd_enabled_override();
+}
+
+/// An async font arrival reshapes the layout via `invalidate_layout` WITHOUT
+/// advancing `core.rev()`, so the paint signature must fold in the layout
+/// generation or the backbuffer would keep blitting the stale fallback-font
+/// bitmap. Bumping the generation must change the sig.
+#[test]
+fn invalidate_layout_changes_cache_sig() {
+    let doc = RichDoc::from_blocks(vec![Block {
+        runs: vec![sized("hello", 16.0)],
+        ..Block::new()
+    }]);
+    let mut ed = laid_out_editor(doc, 400.0, 120.0);
+
+    let before = ed.cache_sig();
+    // No document/caret change — `core.rev()` is untouched.
+    let rev_before = ed.core.borrow().rev();
+    ed.invalidate_layout();
+    assert_eq!(ed.core.borrow().rev(), rev_before, "rev must not change");
+    let after = ed.cache_sig();
+    assert_ne!(
+        before, after,
+        "invalidate_layout must change the cache sig so an async font arrival re-rasters"
+    );
+}

@@ -209,6 +209,30 @@ pub fn set_hinting_enabled(on: bool) {
     bump_typography_epoch();
 }
 
+/// Snap a text baseline Y coordinate to the pixel grid **when the global
+/// hinting toggle is on**, otherwise return it unchanged.
+///
+/// This is the *line-level* companion to the per-glyph Y snap that
+/// [`crate::text::shape_text`] applies (`(y + 0.5).floor()`).  Multi-line
+/// editors (`TextArea`, `RichTextEdit`) compute each visual line's baseline
+/// from fractional scroll / alignment / metric math; snapping the line
+/// baseline up front keeps whole-line pitch uniform and lands stems on pixel
+/// rows so the editors render exactly as crisply as `Label` under the same
+/// System settings.  When hinting is off they intentionally degrade the same
+/// way `Label` does (fractional baseline, softer verticals).
+///
+/// Coordinates are **logical**; at device scale 1 that is also the physical
+/// pixel grid.  At higher scales LCD is disabled anyway and the LCD composite
+/// path does its own physical rounding, so gating on the logical grid here is
+/// the right granularity.
+pub fn snap_baseline_y(y: f64) -> f64 {
+    if hinting_enabled() {
+        (y + 0.5).floor()
+    } else {
+        y
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Typography-style parameters
 // ---------------------------------------------------------------------------
@@ -355,6 +379,31 @@ mod tests {
         assert!(!hinting_enabled());
         set_hinting_enabled(true);
         assert!(hinting_enabled());
+        set_hinting_enabled(false);
+    }
+
+    #[test]
+    fn test_snap_baseline_y_lands_on_integer_when_hinting_on() {
+        // With hinting on, a fractional baseline must snap onto the pixel grid
+        // (integer Y at scale 1) — the same treatment `text::shape_text` gives
+        // each glyph, applied at the line level for the multi-line editors.
+        set_hinting_enabled(true);
+        for &raw in &[0.0, 3.2, 3.5, 3.7, 12.49, 12.5, 100.99, -0.4] {
+            let snapped = snap_baseline_y(raw);
+            assert_eq!(
+                snapped.fract(),
+                0.0,
+                "snap_baseline_y({raw}) = {snapped} is not on the pixel grid"
+            );
+            assert_eq!(snapped, (raw + 0.5).floor());
+        }
+
+        // With hinting off, the baseline is passed through unchanged so the
+        // editors degrade exactly like `Label` (softer verticals, no snap).
+        set_hinting_enabled(false);
+        assert_eq!(snap_baseline_y(3.7), 3.7);
+        assert_eq!(snap_baseline_y(12.25), 12.25);
+
         set_hinting_enabled(false);
     }
 

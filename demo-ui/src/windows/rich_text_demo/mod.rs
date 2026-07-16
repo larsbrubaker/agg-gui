@@ -307,6 +307,19 @@ impl Widget for RichEditHost {
         self.editor.needs_draw()
     }
 
+    // Forward the backbuffer hooks so the framework runs the cached LCD/RGBA
+    // path (`paint_subtree_backbuffered`) for the editor. Without this the host
+    // node returns `None`, the framework paints it directly, and the editor's
+    // own cache never engages — it re-`fill_text`s every frame. The framework
+    // renders `RichEditHost::paint` (which delegates to `editor.paint`) into the
+    // offscreen buffer and blits it, then runs `paint_overlay` (caret + bar).
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut agg_gui::widget::BackbufferCache> {
+        self.editor.backbuffer_cache_mut()
+    }
+    fn backbuffer_mode(&self) -> agg_gui::widget::BackbufferMode {
+        self.editor.backbuffer_mode()
+    }
+
     fn measure_min_height(&self, available_w: f64) -> f64 {
         self.editor.measure_min_height(available_w)
     }
@@ -331,5 +344,56 @@ impl Widget for RichEditHost {
     }
     fn hit_test(&self, local: Point) -> bool {
         self.editor.hit_test(local)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+
+    /// Painting the host through the framework must ENGAGE the editor's cached
+    /// LCD/RGBA backbuffer. The host forwards `backbuffer_cache_mut`, so
+    /// `paint_subtree_backbuffered` rasterises the editor (bg + selection +
+    /// styled runs) into an offscreen buffer whose pixels then populate the
+    /// cache. If the host stopped forwarding, the framework would paint it
+    /// directly, the editor would `fill_text` every frame, and the cache would
+    /// stay empty — this test pins the wiring so it can't silently regress.
+    #[test]
+    fn host_engages_editor_backbuffer_cache() {
+        // Standard density so LCD is available; either mode still populates
+        // pixels (the assertion only cares that the cache path ran).
+        agg_gui::device_scale::set_device_scale(1.0);
+        agg_gui::ux_scale::set_ux_scale(1.0);
+
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+        let resolver = make_resolver(Arc::clone(&font));
+        let editor = RichTextEdit::new(seed_doc(), resolver).with_font_size(16.0);
+        let mut host = RichEditHost::new(editor);
+
+        host.layout(Size::new(400.0, 300.0));
+
+        // Forwarding wired up: the host node exposes the editor's cache.
+        assert!(
+            host.backbuffer_cache_mut().is_some(),
+            "RichEditHost must forward backbuffer_cache_mut to the editor"
+        );
+
+        let mut fb = agg_gui::Framebuffer::new(400, 300);
+        {
+            let mut ctx = agg_gui::GfxCtx::new(&mut fb);
+            agg_gui::widget::paint_subtree(&mut host, &mut ctx);
+        }
+
+        let engaged = host
+            .backbuffer_cache_mut()
+            .map(|c| c.pixels.is_some())
+            .unwrap_or(false);
+        assert!(
+            engaged,
+            "editor backbuffer cache must populate after a framework paint — \
+             the cached LCD/RGBA path did not engage"
+        );
     }
 }

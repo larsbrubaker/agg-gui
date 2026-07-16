@@ -96,3 +96,48 @@ fn double_mouse_down_event_selects_word() {
     ta.on_event(&down);
     assert_eq!(ta.selected_text(), "world");
 }
+
+// ── Text-rendering pipeline: LCD routing + baseline snapping ────────────────
+
+/// The editor must follow the System LCD setting the same way `Label` /
+/// `TextField` do: an `LcdCoverage` backbuffer when LCD is on, a grayscale
+/// `Rgba` backbuffer when it is off. Toggling the global flag changes the
+/// render-path decision on the next frame.
+#[test]
+fn backbuffer_mode_follows_lcd_setting() {
+    use crate::widget::BackbufferMode;
+    // Standard density so the high-scale hard cap in `lcd_enabled` doesn't mask
+    // the explicit override under test.
+    crate::device_scale::set_device_scale(1.0);
+    crate::ux_scale::set_ux_scale(1.0);
+
+    let ta = laid_out("hello", 400.0, 120.0);
+
+    crate::font_settings::set_lcd_enabled(true);
+    assert_eq!(ta.backbuffer_mode(), BackbufferMode::LcdCoverage);
+
+    crate::font_settings::set_lcd_enabled(false);
+    assert_eq!(ta.backbuffer_mode(), BackbufferMode::Rgba);
+
+    crate::font_settings::clear_lcd_enabled_override();
+}
+
+/// With hinting on, every visual line's baseline lands on an integer pixel row
+/// at scale 1 — the same crisp-vertical treatment `Label` gets — so multi-line
+/// text does not blur across two rows.
+#[test]
+fn line_baselines_snap_to_pixel_grid_when_hinting_on() {
+    // Font size chosen so the raw (unsnapped) baseline is fractional, proving
+    // the snap is doing real work rather than coincidentally landing integer.
+    let mut ta = TextArea::new(font())
+        .with_text("line one\nline two\nline three")
+        .with_font_size(13.0);
+    ta.layout(Size::new(400.0, 200.0));
+
+    crate::font_settings::set_hinting_enabled(true);
+    for i in 0..ta.visual_line_count() {
+        let y = ta.line_baseline_y(i);
+        assert_eq!(y.fract(), 0.0, "line {i} baseline {y} not on the pixel grid");
+    }
+    crate::font_settings::set_hinting_enabled(false);
+}
