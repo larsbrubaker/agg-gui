@@ -42,17 +42,28 @@ pub fn set(fingerprint: String, fragment: Vec<Block>) {
     });
 }
 
-/// Return a clone of the stored fragment when its fingerprint equals `plain`
+/// Return a clone of the stored fragment when its fingerprint matches `plain`
 /// (the text just read from the system clipboard); otherwise `None`.
 ///
-/// Cloning (not taking) lets the same Copy be pasted repeatedly.
+/// Line endings are normalized on *both* sides before comparing: native
+/// clipboards (arboard on Windows in particular) round-trip `\n` as `\r\n`, so a
+/// byte-exact match would spuriously fail on multi-line copies and drop the
+/// styled fragment. Cloning (not taking) lets the same Copy be pasted
+/// repeatedly.
 pub fn matching(plain: &str) -> Option<Vec<Block>> {
+    let plain = normalize_newlines(plain);
     SLOT.with(|slot| {
         slot.borrow()
             .as_ref()
-            .filter(|p| p.fingerprint == plain)
+            .filter(|p| normalize_newlines(&p.fingerprint) == plain)
             .map(|p| p.blocks.clone())
     })
+}
+
+/// Collapse `\r\n` and lone `\r` to `\n` so fingerprints compare equal
+/// regardless of the platform clipboard's line-ending convention.
+fn normalize_newlines(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 /// Drop any stored payload. Test-only hook so a fingerprint-mismatch case can't

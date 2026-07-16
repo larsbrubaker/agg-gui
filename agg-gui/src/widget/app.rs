@@ -83,18 +83,22 @@ impl App {
             .map(|path| widget_at_path_ref(self.root.as_ref(), path).type_name())
     }
 
-    /// Whether the focused widget is a text-entry widget (`TextField`,
-    /// `TextArea`, or `RichTextEdit`).
+    /// Whether the focused widget accepts typed text (a `TextField`, `TextArea`,
+    /// `RichTextEdit`, or a `DragValue` in its edit mode).
     ///
     /// Web shells use this to decide when to focus the hidden DOM `<textarea>`
     /// that backs IME composition *and* clipboard events: without it focused,
     /// the browser never delivers `copy` / `cut` / `paste` events to a
-    /// canvas-only app, so the in-canvas editors get no clipboard bridge. The
-    /// classification lives here (not in the shell) so every shell agrees and a
-    /// new editor type is enrolled in one place.
+    /// canvas-only app, so the in-canvas editors get no clipboard bridge.
+    ///
+    /// Delegates straight to [`Widget::accepts_text_input`] on the focused
+    /// widget rather than matching type-name strings, so any new editor that
+    /// overrides the trait is enrolled automatically (a hardcoded name list
+    /// would silently miss it and reintroduce exactly the wasm clipboard bug).
     pub fn focused_is_text_input(&self) -> bool {
-        self.focused_widget_type_name()
-            .is_some_and(is_text_input_type_name)
+        self.focus
+            .as_deref()
+            .is_some_and(|path| widget_at_path_ref(self.root.as_ref(), path).accepts_text_input())
     }
 
     /// Register a legacy global key handler invoked only after the widget tree
@@ -684,12 +688,4 @@ impl App {
         let next_path = all[next_idx].clone();
         self.set_focus(Some(next_path));
     }
-}
-
-/// Classify a widget [`type_name`](Widget::type_name) as a text-entry widget for
-/// the web clipboard / IME focus bridge. Kept next to
-/// [`App::focused_is_text_input`] so the list of editors has a single home; the
-/// string literals must match each widget's `type_name`.
-pub fn is_text_input_type_name(name: &str) -> bool {
-    matches!(name, "TextField" | "TextArea" | "RichTextEdit")
 }

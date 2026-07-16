@@ -678,7 +678,7 @@ mod paint;
 mod tree;
 mod tree_inspector;
 
-pub use app::{is_text_input_type_name, App};
+pub use app::App;
 pub use backbuffer::{
     BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec, BackbufferState,
     CompositingLayer,

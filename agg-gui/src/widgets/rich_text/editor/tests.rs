@@ -285,6 +285,34 @@ fn styled_run_and_list_block_survive_copy_paste() {
     );
 }
 
+/// A native clipboard (arboard on Windows) may hand back `\r\n` for text we
+/// copied with `\n`. The fingerprint match normalizes line endings, so a styled
+/// multi-line copy still pastes styled after that round trip.
+#[test]
+fn crlf_mangled_clipboard_still_matches_fingerprint() {
+    crate::widgets::rich_text::rich_clipboard::clear();
+    let doc = RichDoc::from_blocks(vec![
+        Block::from_run(TextRun::new("one", red_24_bold())),
+        Block::from_run(TextRun::new("two", red_24_bold())),
+    ]);
+    let mut src = laid_out_editor(doc, 400.0, 200.0);
+    src.on_event(&Event::FocusGained);
+    src.core.borrow_mut().select_all();
+    src.on_event(&ctrl('c'));
+
+    // Simulate the OS clipboard normalizing "one\ntwo" to CRLF line endings.
+    crate::clipboard::set_text("one\r\ntwo");
+
+    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
+    dst.on_event(&Event::FocusGained);
+    dst.on_event(&ctrl('v'));
+
+    let doc = dst.core.borrow().doc().clone();
+    assert_eq!(doc.blocks.len(), 2);
+    assert!(doc.blocks[0].runs[0].style.bold, "styled fragment reused");
+    assert!(doc.blocks[1].runs[0].style.bold);
+}
+
 /// When the system clipboard text no longer matches our stored fingerprint
 /// (something was copied elsewhere in between), paste falls back to inserting
 /// the external plain text in the caret's inherited style.

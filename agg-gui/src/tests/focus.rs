@@ -103,12 +103,21 @@ fn rich_text_edit_is_a_focused_text_input() {
     );
 }
 
-/// The text-input classifier must agree with each editor's `type_name`.
+/// The clipboard bridge gates on `Widget::accepts_text_input` — the property
+/// `focused_is_text_input` delegates to. Editors opt in via the trait; a Button
+/// (focusable, but not text-bearing) never does. Guards the trait delegation
+/// against a regression back to a hardcoded type-name list.
 #[test]
-fn text_input_classifier_covers_all_editors() {
-    use crate::widget::is_text_input_type_name;
-    assert!(is_text_input_type_name("TextField"));
-    assert!(is_text_input_type_name("TextArea"));
-    assert!(is_text_input_type_name("RichTextEdit"));
-    assert!(!is_text_input_type_name("Button"));
+fn accepts_text_input_gates_the_clipboard_bridge() {
+    use crate::widget::Widget;
+    use crate::widgets::rich_text::{uniform_resolver, RichDoc, RichTextEdit};
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let editor = RichTextEdit::new(RichDoc::new(), uniform_resolver(Arc::clone(&font)));
+    assert!(editor.accepts_text_input(), "RichTextEdit accepts text input");
+    let button = Button::new("ok", Arc::clone(&font));
+    assert!(
+        !button.accepts_text_input(),
+        "a Button does not accept text input"
+    );
 }
