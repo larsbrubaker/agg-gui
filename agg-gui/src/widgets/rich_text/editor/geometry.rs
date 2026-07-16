@@ -32,11 +32,6 @@ impl RichTextEdit {
         self.bounds.height - self.padding + self.vbar.offset
     }
 
-    /// Inner content width (widget width minus horizontal padding).
-    pub(crate) fn inner_width(&self) -> f64 {
-        (self.bounds.width - self.padding * 2.0).max(0.0)
-    }
-
     /// Inner content height (widget height minus vertical padding).
     pub(crate) fn inner_height(&self) -> f64 {
         (self.bounds.height - self.padding * 2.0).max(0.0)

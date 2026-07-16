@@ -170,6 +170,16 @@ impl RichTextEdit {
         self.core.borrow().doc().plain_text()
     }
 
+    /// Force the cached layout to be rebuilt on the next frame.  The layout is
+    /// otherwise cached against `(width, doc_revision)` and does **not** observe
+    /// the demo's asynchronous font catalog; call this when a newly-loaded font
+    /// should be picked up (e.g. after the font-cache epoch advances).
+    pub fn invalidate_layout(&mut self) {
+        self.layout = None;
+        self.layout_width = -1.0;
+        self.layout_doc_rev = u64::MAX;
+    }
+
     // ── Layout cache ──────────────────────────────────────────────────────
 
     /// Rebuild the cached layout when the width or document revision changed.
