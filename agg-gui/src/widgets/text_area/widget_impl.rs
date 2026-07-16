@@ -146,6 +146,22 @@ impl Widget for TextArea {
         self.base.max_size
     }
 
+    fn backbuffer_cache_mut(&mut self) -> Option<&mut BackbufferCache> {
+        Some(&mut self.cache)
+    }
+
+    fn backbuffer_mode(&self) -> BackbufferMode {
+        // Same decision as `Label` / `TextField`: LCD-subpixel coverage buffer
+        // when the global toggle is on (default at scale ≤ 1.25), grayscale
+        // RGBA otherwise. `backbuffer_mode`'s mode-flip detection in
+        // `paint_subtree_backbuffered` re-rasters when the toggle changes.
+        if crate::font_settings::lcd_enabled() {
+            BackbufferMode::LcdCoverage
+        } else {
+            BackbufferMode::Rgba
+        }
+    }
+
     fn measure_min_height(&self, available_w: f64) -> f64 {
         // Wrap our text at the supplied width and report the total
         // visual height + vertical padding.  This is what an
@@ -191,6 +207,15 @@ impl Widget for TextArea {
             self.ensure_cursor_visible();
         }
         self.last_layout_cursor = Some(cursor);
+
+        // Drop the cached bitmap when any painted input changed (text, cursor,
+        // selection, scroll, focus/hover, size, alignment). Blink phase and the
+        // floating scrollbar are excluded — they paint in `paint_overlay`.
+        let sig = self.cache_sig();
+        if self.last_sig.as_ref() != Some(&sig) {
+            self.last_sig = Some(sig);
+            self.cache.invalidate();
+        }
         Size::new(w, h)
     }
 
@@ -311,13 +336,14 @@ impl Widget for TextArea {
             4.0,
         );
         ctx.stroke();
-
-        // Vertical scroll bar (floating overlay), drawn over the content but
-        // inside the border. Uses the global scroll style for consistency.
-        self.paint_scrollbar(ctx);
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        // Vertical scroll bar (floating overlay). Painted here — after the
+        // cache blit — so its hover/fade animation stays live without forcing
+        // the text bitmap to re-raster each animation frame.
+        self.paint_scrollbar(ctx);
+
         // Cursor blink (drawn in overlay so the blink doesn't
         // invalidate a cached text bitmap).  500 ms half-cycle.
         if !self.focused {

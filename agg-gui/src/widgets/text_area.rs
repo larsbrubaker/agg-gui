@@ -52,7 +52,7 @@ use crate::focus::FocusId;
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{measure_advance, measure_text_metrics, Font};
-use crate::widget::Widget;
+use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 use crate::widgets::scrollbar::ScrollbarAxis;
 use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
 use crate::widgets::text_field_core::{
@@ -252,6 +252,32 @@ fn split_keep_newlines(text: &str) -> impl Iterator<Item = &str> + '_ {
 
 // ─── TextArea widget ─────────────────────────────────────────────────────────
 
+/// Snapshot of every input that affects the cached backbuffer bitmap
+/// (background + selection band + wrapped text + border). `layout` compares
+/// the current sig against the last one and drops the LCD/RGBA cache on any
+/// difference, so typing / selecting / scrolling re-rasterise but an idle
+/// (blinking-only) frame just re-blits the cached pixels.
+///
+/// Deliberately excludes cursor-blink phase and the floating scrollbar — both
+/// paint in `paint_overlay` after the cache blit, so they never force a
+/// re-raster. Typography- and theme-driven invalidation (font swap, LCD/hinting
+/// toggle, dark/light flip) is handled by the framework via the epoch checks in
+/// `paint_subtree_backbuffered`, so this sig only tracks the widget's own state.
+#[derive(Clone, PartialEq)]
+struct TextAreaSig {
+    epoch: u64,
+    cursor: usize,
+    anchor: usize,
+    focused: bool,
+    hovered: bool,
+    offset_bits: u64,
+    w_bits: u64,
+    h_bits: u64,
+    h_align: TextHAlign,
+    v_align: TextVAlign,
+    font_size_bits: u64,
+}
+
 /// A multiline text editor that fills its available area.
 pub struct TextArea {
     bounds: Rect,
@@ -338,6 +364,16 @@ pub struct TextArea {
     multi_click: MultiClickTracker,
     select_granularity: SelectGranularity,
     select_pivot: (usize, usize),
+
+    /// Per-widget CPU bitmap cache. Routes the whole editor (bg + selection +
+    /// text) through the same LCD-subpixel / grayscale pipeline as `Label` and
+    /// `TextField`: `paint_subtree_backbuffered` renders this subtree into an
+    /// `LcdBuffer` (LCD on) or RGBA `Framebuffer` (LCD off) and blits it, so the
+    /// editor gets the app's best text rendering by default and follows the
+    /// System settings live.
+    cache: BackbufferCache,
+    /// Last painted signature; a change invalidates [`Self::cache`] in `layout`.
+    last_sig: Option<TextAreaSig>,
 }
 
 impl TextArea {
@@ -376,6 +412,26 @@ impl TextArea {
             multi_click: MultiClickTracker::default(),
             select_granularity: SelectGranularity::default(),
             select_pivot: (0, 0),
+            cache: BackbufferCache::default(),
+            last_sig: None,
+        }
+    }
+
+    /// Build the backbuffer-cache invalidation signature from current state.
+    fn cache_sig(&self) -> TextAreaSig {
+        let st = self.edit.borrow();
+        TextAreaSig {
+            epoch: st.epoch,
+            cursor: st.cursor,
+            anchor: st.anchor,
+            focused: self.focused,
+            hovered: self.hovered,
+            offset_bits: self.vbar.offset.to_bits(),
+            w_bits: self.bounds.width.to_bits(),
+            h_bits: self.bounds.height.to_bits(),
+            h_align: self.resolved_h_align(),
+            v_align: self.resolved_v_align(),
+            font_size_bits: self.font_size.to_bits(),
         }
     }
 
@@ -714,7 +770,10 @@ impl TextArea {
         let descent = self.font.descender_px(self.font_size);
         let line_top = self.line_top_y(i);
         let line_bottom = line_top - self.cached_line_h;
-        line_bottom + (self.cached_line_h - (ascent + descent)) * 0.5 + descent
+        let baseline = line_bottom + (self.cached_line_h - (ascent + descent)) * 0.5 + descent;
+        // Snap to the pixel grid when hinting is on so multi-line text lands
+        // stems on physical rows exactly like `Label` (no-op when hinting off).
+        crate::font_settings::snap_baseline_y(baseline)
     }
 }
 
