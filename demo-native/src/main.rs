@@ -474,6 +474,19 @@ fn main() {
                     &screenshot_capture_seq,
                 );
             }
+            // A scheduled draw deadline elapsed (`request_draw_after` /
+            // `next_draw_deadline`): the deadline is read-and-cleared when the
+            // `WaitUntil` was armed, so the timer wake itself must drive the
+            // frame. `AboutToWait`'s `wants_draw()` check alone is not enough —
+            // the scheduled-draw channel (tooltip grace-close, scrollbar fades,
+            // ProgressBar, Undoer in-flux) never sets `needs_draw`, and even the
+            // cursor-blink channel isn't reliably observed on a bare timer wake.
+            // Forcing a redraw here wakes every deadline consumer; the caret
+            // blinks on its own timer with the mouse untouched.
+            Event::NewEvents(winit::event::StartCause::ResumeTimeReached { .. }) => {
+                window.request_redraw();
+            }
+
             Event::AboutToWait => {
                 // Continuous run mode keeps the app repainting unconditionally
                 // (used by perf graphs etc.).  Continuous SCREENSHOT capture
