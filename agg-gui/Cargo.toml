@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.70"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
