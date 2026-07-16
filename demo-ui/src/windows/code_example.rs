@@ -185,7 +185,7 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
                 code_line("}", fg, &font),
                 code_line("", fg, &font),
                 code_line("impl CodeExample {", kw, &font),
-                code_line("    fn ui(&mut self, ui: &mut egui::Ui) {", fn_, &font),
+                code_line("    fn ui(&mut self, font: &Arc<Font>) -> Box<dyn Widget> {", fn_, &font),
                 code_line("        // Saves us from writing `&mut self.name` etc", dim, &font),
                 code_line("        let Self { name, age } = self;", fg, &font),
             ],
@@ -198,7 +198,7 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(
         row(
             code_box(
-                vec![code_line("ui.heading(\"Example\");", fg, &font)],
+                vec![code_line("Label::new(\"Example\", font)", fg, &font)],
                 code_bg,
             ),
             Box::new(Label::new("Example", Arc::clone(&font)).with_font_size(18.0)),

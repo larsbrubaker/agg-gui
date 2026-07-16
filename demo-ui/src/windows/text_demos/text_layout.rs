@@ -505,7 +505,7 @@ pub fn text_layout(font: Arc<Font>) -> Box<dyn Widget> {
     col.push(
         Box::new(
             Label::new(
-                "A live LayoutJob-style playground modeled on egui's Text Layout demo.",
+                "A live rich text layout playground.",
                 Arc::clone(&font),
             )
             .with_font_size(12.0)
