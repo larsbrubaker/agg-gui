@@ -655,6 +655,95 @@ fn invalidate_layout_changes_cache_sig() {
     );
 }
 
+// ── Caret-blink redraw cadence ──────────────────────────────────────────────
+
+/// A focused, idle editor must not spin the render loop: `needs_draw` stays
+/// `false` between 500 ms blink boundaries and `next_draw_deadline` reports the
+/// exact next boundary so the host wakes twice a second instead.
+#[test]
+fn focused_idle_editor_does_not_redraw_every_frame() {
+    use std::time::Duration;
+    use web_time::Instant;
+
+    let mut ed = laid_out_editor(plain_doc(&["hello"]), 400.0, 120.0);
+    ed.focused = true;
+    let now = Instant::now();
+    ed.focus_time = Some(now);
+    ed.blink_last_phase.set(0);
+
+    assert!(
+        !ed.needs_draw(),
+        "idle focused editor should not report a per-frame draw need"
+    );
+    let deadline = ed
+        .next_draw_deadline()
+        .expect("focused editor schedules a blink wake");
+    let remaining = deadline.saturating_duration_since(now);
+    assert!(
+        remaining > Duration::ZERO && remaining <= Duration::from_millis(500),
+        "next blink deadline should be within one 500 ms interval, got {remaining:?}"
+    );
+}
+
+#[test]
+fn blink_boundary_requests_one_draw_then_reschedules() {
+    use std::time::Duration;
+    use web_time::Instant;
+
+    let mut ed = laid_out_editor(plain_doc(&["hello"]), 400.0, 120.0);
+    ed.focused = true;
+    ed.focus_time = Some(Instant::now() - Duration::from_millis(600));
+    ed.blink_last_phase.set(0);
+    assert!(
+        ed.needs_draw(),
+        "a crossed blink boundary should request exactly one draw"
+    );
+    ed.blink_last_phase.set(1);
+    assert!(
+        !ed.needs_draw(),
+        "after painting the new phase the editor should go idle again"
+    );
+}
+
+#[test]
+fn unfocused_editor_is_quiet() {
+    let ed = laid_out_editor(plain_doc(&["hello"]), 400.0, 120.0);
+    assert!(!ed.needs_draw(), "unfocused editor must not request draws");
+    assert!(
+        ed.next_draw_deadline().is_none(),
+        "unfocused editor schedules no wake"
+    );
+}
+
+// ── Wheel scrolling speed ───────────────────────────────────────────────────
+
+/// One wheel notch scrolls ≈ 3 visual-line heights (Windows convention), not a
+/// single pixel.
+#[test]
+fn one_wheel_notch_scrolls_about_three_lines() {
+    let blocks: Vec<String> = (0..40).map(|i| format!("line {i}")).collect();
+    let refs: Vec<&str> = blocks.iter().map(String::as_str).collect();
+    let mut ed = laid_out_editor(plain_doc(&refs), 400.0, 100.0);
+    assert!(ed.max_scroll_y() > 0.0, "content should overflow the viewport");
+
+    let line_h = ed
+        .visual_lines()
+        .first()
+        .map(|&(_, _, _, h)| h)
+        .expect("laid-out editor has visual lines");
+    assert!(line_h > 0.0);
+
+    let before = ed.scroll_offset();
+    // One notch downward: negative delta_y increases the offset.
+    assert!(ed.scroll_by_wheel(-1.0), "a notch should move the offset");
+    let moved = ed.scroll_offset() - before;
+    let expected = 3.0 * line_h;
+    assert!(
+        (moved - expected).abs() < 0.5,
+        "one notch should scroll ~3 lines: moved {moved}, expected {expected}"
+    );
+}
+
 /// A `RichTextEdit` added **directly** as a tree child — with no host wrapper
 /// forwarding `backbuffer_cache_mut` — must still engage the cached LCD/RGBA
 /// backbuffer path when painted through the framework. The widget forwards the

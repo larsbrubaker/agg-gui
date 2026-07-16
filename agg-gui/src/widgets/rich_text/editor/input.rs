@@ -21,6 +21,11 @@ use super::RichTextEdit;
 impl RichTextEdit {
     /// Central event dispatch (called from `Widget::on_event`).
     pub(super) fn handle_event(&mut self, event: &Event) -> EventResult {
+        // While the right-click menu is open it captures events (see
+        // `has_active_modal`); route them through it first.
+        if let Some(result) = self.route_context_menu(event) {
+            return result;
+        }
         match event {
             Event::MouseMove { pos } => {
                 let bar_hover_changed = match self.scrollbar_on_mouse_move(*pos) {
@@ -65,6 +70,18 @@ impl RichTextEdit {
                 self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
+            }
+            Event::MouseDown {
+                button: MouseButton::Right,
+                pos,
+                ..
+            } => {
+                if self.context_menu_enabled {
+                    self.open_context_menu(*pos);
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             Event::MouseUp {
                 button: MouseButton::Left,
@@ -200,7 +217,10 @@ impl RichTextEdit {
     /// plain text into the system clipboard so external apps get text. Returns
     /// `true` when something was selected (Cut uses this to know whether to
     /// delete). A collapsed selection leaves both clipboards untouched.
-    fn copy_selection(&mut self) -> bool {
+    ///
+    /// `pub(super)` so the right-click context menu (`context_menu.rs`) shares
+    /// the exact styled-clipboard behaviour instead of duplicating it.
+    pub(super) fn copy_selection(&mut self) -> bool {
         let (text, fragment) = {
             let core = self.core.borrow();
             (core.selected_plain_text(), core.selected_fragment())
@@ -217,7 +237,10 @@ impl RichTextEdit {
     /// fingerprint of our last styled Copy/Cut (same session, clipboard
     /// unchanged), reinsert the styled fragment; otherwise insert the external
     /// plain text, inheriting the caret's style.
-    fn paste_clipboard(&mut self) {
+    ///
+    /// `pub(super)` so the right-click context menu shares this exact paste
+    /// behaviour rather than duplicating it.
+    pub(super) fn paste_clipboard(&mut self) {
         let Some(text) = crate::clipboard::get_text() else {
             return;
         };

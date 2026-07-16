@@ -380,6 +380,11 @@ impl Widget for TextArea {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // While the right-click menu is open it captures events (see
+        // `has_active_modal`); route them through it first.
+        if let Some(result) = self.route_context_menu(event) {
+            return result;
+        }
         match event {
             Event::MouseMove { pos } => {
                 // Scroll bar takes priority: continue a thumb drag, or update
@@ -427,6 +432,18 @@ impl Widget for TextArea {
                 self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
+            }
+            Event::MouseDown {
+                button: MouseButton::Right,
+                pos,
+                ..
+            } => {
+                if self.context_menu_enabled {
+                    self.open_context_menu(*pos);
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             Event::MouseUp {
                 button: MouseButton::Left,
@@ -537,35 +554,16 @@ impl Widget for TextArea {
                         self.insert_str("    ");
                     }
                     Key::Char('a') | Key::Char('A') if cmd => {
-                        // Select-all — set anchor to start, cursor to
-                        // end.  Common Ctrl+A shortcut.
-                        let len = self.edit.borrow().text.len();
-                        self.move_cursor_to(0, false);
-                        self.move_cursor_to(len, true);
+                        self.select_all_text();
                     }
                     Key::Char('c') | Key::Char('C') if cmd => {
-                        let st = self.edit.borrow();
-                        let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
-                        if hi > lo {
-                            let sel = st.text[lo..hi].to_string();
-                            drop(st);
-                            clipboard_set(&sel);
-                        }
+                        self.clipboard_copy();
                     }
                     Key::Char('x') | Key::Char('X') if cmd => {
-                        let st = self.edit.borrow();
-                        let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
-                        if hi > lo {
-                            let sel = st.text[lo..hi].to_string();
-                            drop(st);
-                            clipboard_set(&sel);
-                            self.delete(0);
-                        }
+                        self.clipboard_cut();
                     }
                     Key::Char('v') | Key::Char('V') if cmd => {
-                        if let Some(t) = clipboard_get() {
-                            self.insert_str(&t);
-                        }
+                        self.clipboard_paste();
                     }
                     Key::Char(c) if !cmd => {
                         let mut s = [0u8; 4];
@@ -602,7 +600,46 @@ impl Widget for TextArea {
     }
 
     fn needs_draw(&self) -> bool {
-        // Focused → cursor blink; scrollbar animating → fade/expand tween.
-        self.focused || self.scrollbar_animating()
+        // Scrollbar fade/expand tween is a genuine per-frame animation while it
+        // runs, so it keeps requesting frames.  The cursor blink, by contrast,
+        // is transition-scheduled: report dirty only when wall-clock time has
+        // crossed a 500 ms flip boundary since the last painted phase.  An idle
+        // focused editor therefore wakes twice a second (see
+        // `next_draw_deadline`) instead of every frame.
+        if self.scrollbar_animating() {
+            return true;
+        }
+        if !self.focused {
+            return false;
+        }
+        let Some(t) = self.focus_time else {
+            return false;
+        };
+        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        current_phase != self.blink_last_phase.get()
+    }
+
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        if !self.focused {
+            return None;
+        }
+        let t = self.focus_time?;
+        let ms = t.elapsed().as_millis() as u64;
+        let next_phase = (ms / 500) + 1;
+        Some(t + std::time::Duration::from_millis(next_phase * 500))
+    }
+
+    /// While the right-click menu is open it must capture every event (clicks
+    /// outside dismiss it, Escape closes it).
+    fn has_active_modal(&self) -> bool {
+        self.context_menu.is_open()
+    }
+
+    /// The context menu paints at app level so it can overflow the editor
+    /// bounds and clamp to the viewport.
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        let font = crate::font_settings::current_system_font()
+            .unwrap_or_else(|| Arc::clone(&self.font));
+        self.context_menu.paint(ctx, font, self.font_size);
     }
 }

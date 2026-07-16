@@ -83,6 +83,19 @@ impl Widget for TextField {
         Some(t + std::time::Duration::from_millis(next_phase * 500))
     }
 
+    /// While the right-click menu is open it must capture every event (clicks
+    /// outside dismiss it, Escape closes it) even though the field is small.
+    fn has_active_modal(&self) -> bool {
+        self.context_menu.is_open()
+    }
+
+    /// The context menu paints at app level so it can overflow the field bounds
+    /// and clamp to the viewport.
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        let font = self.active_font();
+        self.context_menu.paint(ctx, font, self.font_size);
+    }
+
     fn margin(&self) -> Insets {
         self.base.margin
     }
@@ -323,6 +336,11 @@ impl Widget for TextField {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // While the right-click menu is open it captures events (see
+        // `has_active_modal`); route them through it first.
+        if let Some(result) = self.route_context_menu(event) {
+            return result;
+        }
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
@@ -385,6 +403,19 @@ impl Widget for TextField {
                 self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
+            }
+
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Right,
+                ..
+            } => {
+                if self.context_menu_enabled {
+                    self.open_context_menu(*pos);
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
 
             Event::MouseUp {

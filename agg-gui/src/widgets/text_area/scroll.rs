@@ -126,7 +126,19 @@ impl TextArea {
         if self.max_scroll_y() <= 0.0 {
             return false;
         }
-        self.vbar.scroll_by(-delta_y, self.inner_height())
+        // Windows convention: one wheel notch scrolls 3 lines. `delta_y` arrives
+        // in line-units (1.0 == one notch; the platform adapter pre-scales
+        // trackpad pixel deltas into fractional line-units), so scaling by
+        // 3 * line-height gives a crisp 3-line notch while keeping pixel-precise
+        // trackpad panning smooth. This is more content-aware than ScrollView's
+        // flat 40 px/line, which felt slow for the editors' larger line pitch.
+        let line_h = if self.cached_line_h > 0.0 {
+            self.cached_line_h
+        } else {
+            self.font_size * 1.35
+        };
+        self.vbar
+            .scroll_by(-delta_y * 3.0 * line_h, self.inner_height())
     }
 
     /// Begin a thumb drag if `pos` is on the thumb. Returns `true` when a drag

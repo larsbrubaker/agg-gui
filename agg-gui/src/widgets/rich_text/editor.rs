@@ -40,6 +40,7 @@ use super::model::RichDoc;
 use super::view::SharedResolver;
 
 pub mod core;
+mod context_menu;
 mod geometry;
 mod input;
 mod paint;
@@ -108,6 +109,11 @@ pub struct RichTextEdit {
     /// [`RichEditSig`] makes such a reshape invalidate the backbuffer too,
     /// otherwise the cache would keep blitting the stale fallback-font bitmap.
     layout_gen: u64,
+
+    /// Default-on right-click Cut/Copy/Paste/Select-All menu. Opt out with
+    /// [`with_context_menu(false)`](Self::with_context_menu).
+    context_menu: crate::widgets::text_context_menu::TextContextMenu,
+    context_menu_enabled: bool,
 }
 
 /// Snapshot of every input that affects the cached backbuffer bitmap
@@ -160,7 +166,16 @@ impl RichTextEdit {
             cache: BackbufferCache::default(),
             last_sig: None,
             layout_gen: 0,
+            context_menu: crate::widgets::text_context_menu::TextContextMenu::new(),
+            context_menu_enabled: true,
         }
+    }
+
+    /// Enable or disable the default right-click Cut/Copy/Paste/Select-All
+    /// context menu. On by default.
+    pub fn with_context_menu(mut self, v: bool) -> Self {
+        self.context_menu_enabled = v;
+        self
     }
 
     /// Build the backbuffer-cache invalidation signature from current state.
@@ -421,10 +436,49 @@ impl Widget for RichTextEdit {
     }
 
     fn needs_draw(&self) -> bool {
-        self.focused || self.scrollbar_animating()
+        // Scrollbar fade/expand tween genuinely animates every frame while it
+        // runs.  The caret blink is transition-scheduled instead: report dirty
+        // only when wall-clock time crosses a 500 ms flip boundary since the
+        // last painted phase, so an idle focused editor wakes twice a second
+        // (see `next_draw_deadline`) rather than every frame.
+        if self.scrollbar_animating() {
+            return true;
+        }
+        if !self.focused {
+            return false;
+        }
+        let Some(t) = self.focus_time else {
+            return false;
+        };
+        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        current_phase != self.blink_last_phase.get()
+    }
+
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        if !self.focused {
+            return None;
+        }
+        let t = self.focus_time?;
+        let ms = t.elapsed().as_millis() as u64;
+        let next_phase = (ms / 500) + 1;
+        Some(t + std::time::Duration::from_millis(next_phase * 500))
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         self.handle_event(event)
+    }
+
+    /// While the right-click menu is open it must capture every event (clicks
+    /// outside dismiss it, Escape closes it).
+    fn has_active_modal(&self) -> bool {
+        self.context_menu.is_open()
+    }
+
+    /// The context menu paints at app level so it can overflow the editor
+    /// bounds and clamp to the viewport.
+    fn paint_global_overlay(&mut self, ctx: &mut dyn crate::draw_ctx::DrawCtx) {
+        let font = self.context_menu_font();
+        let size = self.core.borrow().default_font_size();
+        self.context_menu.paint(ctx, font, size);
     }
 }

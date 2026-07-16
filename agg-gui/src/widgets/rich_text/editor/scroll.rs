@@ -86,7 +86,26 @@ impl RichTextEdit {
         if self.max_scroll_y() <= 0.0 {
             return false;
         }
-        self.vbar.scroll_by(-delta_y, self.inner_height())
+        // Windows convention: one wheel notch scrolls 3 lines. `delta_y` arrives
+        // in line-units (1.0 == one notch; the platform adapter pre-scales
+        // trackpad pixel deltas into fractional line-units), so scaling by
+        // 3 * line-height gives a crisp 3-line notch while keeping pixel-precise
+        // trackpad panning smooth — more content-aware than ScrollView's flat
+        // 40 px/line, which felt slow for the editor's line pitch.
+        let line_h = self.wheel_line_height();
+        self.vbar
+            .scroll_by(-delta_y * 3.0 * line_h, self.inner_height())
+    }
+
+    /// A representative visual-line height for wheel scrolling. Rich text has
+    /// variable line heights, so use the first laid-out line as the notch unit,
+    /// falling back to the 16 px base size when no layout exists yet.
+    fn wheel_line_height(&self) -> f64 {
+        self.visual_lines()
+            .first()
+            .map(|&(_, _, _, h)| h)
+            .filter(|h| *h > 0.0)
+            .unwrap_or(16.0 * 1.35)
     }
 
     pub(crate) fn scrollbar_begin_drag(&mut self, pos: Point) -> bool {
