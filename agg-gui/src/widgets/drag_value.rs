@@ -11,6 +11,8 @@
 //!
 //! Typical use-case: property panels, inspector rows, compact parameter editors.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -91,6 +93,15 @@ pub struct DragValue {
     hovered: bool,
     on_change: Option<Box<dyn FnMut(f64)>>,
 
+    /// Optional external mirror of `value`.  When `Some`, `layout()` re-reads
+    /// the cell every frame so a second widget that writes the same cell (the
+    /// gallery's Slider driving the shared scalar) updates this DragValue live;
+    /// drag/edit commits write back.  Mirrors [`Slider::with_value_cell`].
+    value_cell: Option<Rc<Cell<f64>>>,
+    /// Text last pushed into `value_label`, so the `layout()` cell re-read only
+    /// invalidates the label's cache when the displayed value actually changes.
+    last_value_text: String,
+
     /// Formatted-value text lives in a `Label` field — DragValue draws
     /// bg + border + arrow triangles; the label handles the value text
     /// (including its own LCD cache).  Kept as a typed field rather
@@ -106,7 +117,7 @@ impl DragValue {
     pub fn new(value: f64, min: f64, max: f64, font: Arc<Font>) -> Self {
         let clamped = value.clamp(min, max);
         let initial_text = format_value(clamped, 2);
-        let value_label = Label::new(initial_text, Arc::clone(&font))
+        let value_label = Label::new(initial_text.clone(), Arc::clone(&font))
             .with_font_size(13.0)
             .with_align(LabelAlign::Center);
         Self {
@@ -133,6 +144,8 @@ impl DragValue {
             edit_cursor: 0,
             hovered: false,
             on_change: None,
+            value_cell: None,
+            last_value_text: initial_text,
             value_label,
         }
     }
@@ -182,6 +195,22 @@ impl DragValue {
         self
     }
 
+    /// Bind this DragValue's value to an external `Rc<Cell<f64>>`.
+    ///
+    /// The cell becomes the source-of-truth: `layout()` re-reads it every frame
+    /// so any other widget (or code path) that writes the cell drives this
+    /// DragValue live, and drag/edit commits write back to the cell.  This is
+    /// the DragValue counterpart to [`Slider::with_value_cell`](crate::widgets::Slider::with_value_cell)
+    /// and is what keeps the gallery's Slider and DragValue showing the same
+    /// number when either one is moved.
+    pub fn with_value_cell(mut self, cell: Rc<Cell<f64>>) -> Self {
+        let v = cell.get().clamp(self.min, self.max);
+        self.value = v;
+        self.sync_label();
+        self.value_cell = Some(cell);
+        self
+    }
+
     pub fn with_margin(mut self, m: Insets) -> Self {
         self.base.margin = m;
         self
@@ -223,7 +252,18 @@ impl DragValue {
     }
 
     fn sync_label(&mut self) {
-        self.value_label.set_text(self.display_text());
+        let text = self.display_text();
+        self.last_value_text = text.clone();
+        self.value_label.set_text(text);
+    }
+
+    /// Push the current value into the bound cell, if any.  Keeps sibling
+    /// widgets (the gallery Slider/progress bar) in sync when this DragValue
+    /// is the one being edited or dragged.
+    fn write_back(&self) {
+        if let Some(cell) = &self.value_cell {
+            cell.set(self.value);
+        }
     }
 
     fn apply_step_and_clamp(&self, raw: f64) -> f64 {
@@ -240,6 +280,7 @@ impl DragValue {
         let raw = self.drag_start_value + delta;
         self.value = self.apply_step_and_clamp(raw);
         self.sync_label();
+        self.write_back();
         let v = self.value;
         if let Some(cb) = self.on_change.as_mut() {
             cb(v);
@@ -259,6 +300,7 @@ impl DragValue {
         }
         // Always sync label back to actual value (parse success or failure).
         self.sync_label();
+        self.write_back();
         let v = self.value;
         if let Some(cb) = self.on_change.as_mut() {
             cb(v);
@@ -327,6 +369,29 @@ impl Widget for DragValue {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Re-read the external cell every frame so a sibling widget (the gallery
+        // Slider) that writes the same cell drives this DragValue live.  Skip
+        // while the user is actively dragging or editing here, so their in-flight
+        // interaction isn't fought back by the value they're producing.
+        if !self.dragging && !self.editing {
+            if let Some(cell) = &self.value_cell {
+                let raw = cell.get();
+                if !raw.is_nan() {
+                    let clamped = raw.clamp(self.min, self.max);
+                    if clamped != self.value {
+                        self.value = clamped;
+                        let text = self.display_text();
+                        // Only invalidate the Label cache when the shown value
+                        // actually changed, then request a repaint so the new
+                        // number lands on screen.
+                        if text != self.last_value_text {
+                            self.sync_label();
+                            crate::animation::request_draw();
+                        }
+                    }
+                }
+            }
+        }
         Size::new(available.width, WIDGET_H)
     }
 
@@ -613,5 +678,58 @@ mod tests {
     fn no_suffix_matches_plain_value() {
         let dv = DragValue::new(1.5, 0.0, 10.0, test_font()).with_decimals(2);
         assert_eq!(dv.display_text(), "1.50");
+    }
+
+    /// Regression (Widget Gallery): a DragValue bound to a shared cell must
+    /// re-read that cell every `layout()` so a *sibling* widget writing the
+    /// same cell (e.g. the gallery Slider) drives this DragValue's displayed
+    /// value live.  Before the fix the DragValue captured its value at build
+    /// time and only ever wrote via `on_change`, so it read stale (the reported
+    /// "slider at 140, DragValue reads 205").
+    #[test]
+    fn value_cell_tracks_external_writes_after_layout() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let cell = Rc::new(Cell::new(42.0_f64));
+        let mut dv = DragValue::new(cell.get(), 0.0, 360.0, test_font())
+            .with_decimals(0)
+            .with_value_cell(Rc::clone(&cell));
+
+        assert_eq!(dv.value_label.text_str(), "42");
+
+        // A sibling (the Slider) writes a new value into the shared cell.
+        cell.set(140.0);
+        // The next layout pass must pick it up and refresh the label text.
+        let _ = dv.layout(Size::new(120.0, 24.0));
+
+        assert_eq!(dv.value(), 140.0, "DragValue value must follow the cell");
+        assert_eq!(
+            dv.value_label.text_str(),
+            "140",
+            "DragValue label text must repaint to the cell's value"
+        );
+    }
+
+    /// The value cell is bidirectional: a drag on the DragValue writes back to
+    /// the cell so the Slider (and progress bar) follow it too.
+    #[test]
+    fn drag_writes_back_to_value_cell() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let cell = Rc::new(Cell::new(10.0_f64));
+        let mut dv = DragValue::new(cell.get(), 0.0, 360.0, test_font())
+            .with_decimals(0)
+            .with_value_cell(Rc::clone(&cell));
+
+        // Simulate a confirmed drag that moves the value.
+        dv.drag_start_x = 0.0;
+        dv.drag_start_value = 10.0;
+        dv.dragging = true;
+        dv.update_from_drag(5.0); // speed 1.0 → +5 units
+
+        assert_eq!(dv.value(), 15.0);
+        assert_eq!(cell.get(), 15.0, "drag must write back to the shared cell");
     }
 }

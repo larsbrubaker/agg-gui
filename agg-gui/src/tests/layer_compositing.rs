@@ -235,6 +235,127 @@ fn test_backbuffer_rgba_blit_honors_global_alpha() {
     );
 }
 
+/// A minimal opacity-scope wrapper that mirrors the Widget Gallery's
+/// `GalleryScope`: it requests a whole-subtree compositing layer at a fixed
+/// alpha so its child renders into an offscreen buffer that is composited back
+/// once at that alpha.
+struct AlphaScope {
+    bounds: crate::Rect,
+    children: Vec<Box<dyn crate::widget::Widget>>,
+    alpha: f64,
+}
+
+impl crate::widget::Widget for AlphaScope {
+    fn type_name(&self) -> &'static str {
+        "AlphaScope"
+    }
+    fn bounds(&self) -> crate::Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: crate::Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn crate::widget::Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn crate::widget::Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, avail: crate::Size) -> crate::Size {
+        if let Some(c) = self.children.first_mut() {
+            let s = c.layout(avail);
+            c.set_bounds(crate::Rect::new(0.0, 0.0, s.width, s.height));
+        }
+        // Reserve the full extent so the compositing layer is sized correctly
+        // (a zero-sized scope would collapse the layer to 1×1 and clip the child).
+        self.bounds = crate::Rect::new(0.0, 0.0, avail.width, avail.height);
+        avail
+    }
+    fn paint(&mut self, _ctx: &mut dyn crate::draw_ctx::DrawCtx) {}
+    fn on_event(&mut self, _e: &crate::event::Event) -> crate::event::EventResult {
+        crate::event::EventResult::Ignored
+    }
+    fn compositing_layer(&mut self) -> Option<crate::widget::CompositingLayer> {
+        Some(crate::widget::CompositingLayer::new(0.0, 0.0, 0.0, 0.0, self.alpha))
+    }
+}
+
+/// Regression for the Widget Gallery "Opacity" fade: LCD-backbuffered text
+/// inside a compositing layer must fade by the layer alpha **exactly once**.
+///
+/// The bug this guards against is a double alpha application — where the
+/// per-draw `global_alpha` multiply in `draw_lcd_backbuffer_arc` stacks on top
+/// of the whole-layer composite alpha, giving text `alpha²` while vector shapes
+/// get `alpha¹` (text renders visibly washed out relative to its widgets).
+///
+/// Contract: content painted inside an alpha compositing layer paints at full
+/// opacity into the offscreen buffer (`global_alpha == 1.0` there); the layer
+/// composite applies the alpha once on `pop_layer`.  Black text at layer
+/// alpha 0.5 over white must land at mid-gray (~128), never ~191 (0.25).
+#[test]
+fn test_lcd_text_in_alpha_layer_fades_once() {
+    use crate::widget::{paint_subtree, Widget};
+    use crate::widgets::Label;
+    use crate::{Rect, Size};
+
+    crate::theme::set_visuals(crate::theme::Visuals::light());
+    crate::font_settings::set_lcd_enabled(true);
+
+    let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
+    let mk_label = || {
+        let mut l = Label::new("HHHH", Arc::clone(&font))
+            .with_font_size(20.0)
+            .with_color(Color::rgba(0.0, 0.0, 0.0, 1.0));
+        let _ = l.layout(Size::new(80.0, 30.0));
+        l.set_bounds(Rect::new(0.0, 0.0, 80.0, 30.0));
+        l
+    };
+
+    // Faded render: label inside a 0.5 compositing layer.
+    let mut scope = AlphaScope {
+        bounds: Rect::default(),
+        children: vec![Box::new(mk_label())],
+        alpha: 0.5,
+    };
+    let _ = scope.layout(Size::new(80.0, 30.0));
+    let mut fb = Framebuffer::new(80, 30);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.clear(Color::white());
+    paint_subtree(&mut scope, &mut ctx);
+    drop(ctx);
+
+    // Full-opacity reference render for comparison.
+    let mut label_ref = mk_label();
+    let mut fb_ref = Framebuffer::new(80, 30);
+    let mut ctx_ref = GfxCtx::new(&mut fb_ref);
+    ctx_ref.clear(Color::white());
+    paint_subtree(&mut label_ref, &mut ctx_ref);
+    drop(ctx_ref);
+
+    let mut darkest_faded = 255u8;
+    let mut darkest_full = 255u8;
+    for y in 0..30 {
+        for x in 0..80 {
+            darkest_faded = darkest_faded.min(sample(&fb, x, y)[0]);
+            darkest_full = darkest_full.min(sample(&fb_ref, x, y)[0]);
+        }
+    }
+
+    crate::font_settings::clear_lcd_enabled_override();
+
+    // Sanity: full-opacity black text is near-black.
+    assert!(
+        darkest_full < 40,
+        "full-opacity black text must be near-black; got {darkest_full}"
+    );
+    // Single alpha over white: 0.5 → ~128.  Double alpha (0.25) → ~191.
+    assert!(
+        (100..=150).contains(&darkest_faded),
+        "text in a 0.5 alpha layer must fade ONCE (mid-gray ~128); got \
+         {darkest_faded} (≥160 would indicate a double alpha application)"
+    );
+}
+
 /// Regression: the two-plane `draw_lcd_backbuffer_arc` blit must honor the
 /// active `global_alpha` so LCD-cached text inside a faded subtree fades with
 /// the rest of the group.
