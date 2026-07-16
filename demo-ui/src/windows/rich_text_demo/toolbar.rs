@@ -200,26 +200,42 @@ fn color_button(
     )
 }
 
-/// Font-family dropdown (the whole system catalog). Selecting a family applies
-/// it to the selection via [`RichCommand::SetFontFamily`]; the resolver in the
-/// parent window maps family + bold/italic to a concrete face.
+/// Font-family dropdown (the whole system catalog). Each family renders in its
+/// own face via the shared [`font_preview_combo`](crate::font_picker::font_preview_combo)
+/// builder — preview faces load lazily and refresh as they arrive. Selecting a
+/// family applies it via [`RichCommand::SetFontFamily`] (the resolver in the
+/// parent window maps family + bold/italic to a concrete face) WITHOUT touching
+/// the System window's font. The dropdown also reflects the selection's current
+/// family each frame; a mixed selection leaves the last family shown.
 fn family_combo(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
-    let names = font_option_names();
     let default_idx = font_option_index("Arial").unwrap_or(0);
     let click_handle = handle.clone();
-    let names_owned: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+    let reflect_handle = handle.clone();
+    let names_owned: Vec<String> = font_option_names().iter().map(|s| s.to_string()).collect();
     Box::new(
-        ComboBox::new(names_owned.clone(), default_idx, Arc::clone(font))
-            .with_font_size(12.0)
-            .with_max_size(agg_gui::Size::new(150.0, 26.0))
-            .on_change(move |idx| {
-                if let Some(name) = names_owned.get(idx) {
-                    // Load the face on demand so the resolver can pick it up.
-                    crate::windows::rich_text_demo::request_font(name);
-                    click_handle.exec(&RichCommand::SetFontFamily(name.clone()));
-                }
-            }),
+        crate::font_picker::font_preview_combo(Arc::clone(font), 12.0, default_idx, None, move |idx| {
+            if let Some(name) = names_owned.get(idx) {
+                // Load the face on demand so the resolver can pick it up.
+                crate::windows::rich_text_demo::request_font(name);
+                click_handle.exec(&RichCommand::SetFontFamily(name.clone()));
+            }
+        })
+        .with_max_size(agg_gui::Size::new(150.0, 26.0))
+        .with_reflect(move || family_reflection_index(&reflect_handle)),
     )
+}
+
+/// Map the selection's common family to a catalog index for the family
+/// dropdown to highlight. `Some(Some(name))` is a consistent explicit family;
+/// `Some(None)` is the default family (`Nunito`, the resolver's fallback);
+/// `None` is a mixed selection, for which we return `None` so the dropdown
+/// keeps its last highlight rather than flipping to a wrong one.
+fn family_reflection_index(handle: &RichEditHandle) -> Option<usize> {
+    match handle.common_style_of_selection().font_family {
+        Some(Some(name)) => font_option_index(&name),
+        Some(None) => font_option_index(crate::windows::DEFAULT_FONT_NAME),
+        None => None,
+    }
 }
 
 /// Font-size dropdown.
