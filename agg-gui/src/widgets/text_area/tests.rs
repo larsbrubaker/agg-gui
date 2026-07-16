@@ -535,6 +535,182 @@ fn key_intercept_edit_scrolls_caret_into_view() {
     );
 }
 
+#[test]
+fn first_line_top_not_clipped_at_scroll_top() {
+    // Bug 1: at scroll offset 0 the first visual line's glyph top
+    // (baseline + ascent) must not poke above the padded inner-rect clip edge,
+    // otherwise the ascenders of the first line are visibly cut off. Asserts
+    // via `line_baseline_y`, the very helper `paint` uses to place glyphs.
+    let mut ta = multiline(12, 200.0, 80.0);
+    ta.set_cursor_to_start();
+    ta.ensure_cursor_visible();
+    assert_eq!(ta.scroll_offset(), 0.0, "scrolled to the very top");
+
+    let inner_top = ta.bounds.height - ta.padding; // Y-up clip top edge
+    let ascent = ta.font.ascender_px(ta.font_size);
+    let glyph_top = ta.line_baseline_y(0) + ascent;
+    assert!(
+        glyph_top <= inner_top + 0.01,
+        "first line ascenders clipped: glyph_top={glyph_top} > inner_top={inner_top}"
+    );
+}
+
+#[test]
+fn external_cursor_move_scrolls_into_view_on_layout() {
+    // Bug 2: setting the cursor straight through the shared TextEditState (as
+    // the demo's "start"/"end" buttons do) bypasses the edit funnel, so the
+    // widget must notice the external move at layout time and scroll it in.
+    let state = Rc::new(RefCell::new(TextEditState {
+        text: (0..30).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"),
+        cursor: 0,
+        anchor: 0,
+        epoch: 0,
+    }));
+    let mut ta = laid_out(
+        TextArea::new(font())
+            .with_font_size(13.0)
+            .with_edit_state(Rc::clone(&state)),
+        200.0,
+        80.0,
+    );
+    assert_eq!(ta.scroll_offset(), 0.0, "first layout leaves the view at the top");
+
+    // External caret jump to the document end — text unchanged (no epoch bump),
+    // only the cursor/anchor moved.
+    {
+        let mut st = state.borrow_mut();
+        let end = st.text.len();
+        st.cursor = end;
+        st.anchor = end;
+    }
+    ta.layout(Size::new(200.0, 80.0));
+    assert!(
+        ta.scroll_offset() > 0.0,
+        "external cursor move must scroll on layout: off={}",
+        ta.scroll_offset()
+    );
+    let y = ta.pos_for_cursor(ta.cursor()).y;
+    assert!(
+        (0.0..=80.0).contains(&y),
+        "caret must be on-screen after the external move: y={y}"
+    );
+}
+
+// ── (i) Home / End / PageUp / PageDown navigation ───────────────────────────
+//
+// Bug 3: plain Home/End move within the visual (wrapped) line; Ctrl/Cmd+Home
+// and +End jump to the document bounds; PageUp/PageDown move a viewport of
+// lines. Shift extends the selection. All end with the caret scrolled visible.
+
+/// Dispatch one focused KeyDown with explicit modifiers.
+fn key_mods(ta: &mut TextArea, k: Key, mods: Modifiers) {
+    ta.on_event(&Event::KeyDown {
+        key: k,
+        modifiers: mods,
+    });
+}
+
+fn shift() -> Modifiers {
+    Modifiers {
+        shift: true,
+        ..Default::default()
+    }
+}
+fn ctrl() -> Modifiers {
+    Modifiers {
+        ctrl: true,
+        ..Default::default()
+    }
+}
+
+/// Move the caret to an absolute byte offset straight through the shared state.
+fn place_cursor(ta: &TextArea, pos: usize) {
+    let mut st = ta.edit.borrow_mut();
+    st.cursor = pos;
+    st.anchor = pos;
+}
+
+#[test]
+fn home_moves_to_visual_line_start_end_to_line_end() {
+    let mut ta = multiline(5, 200.0, 300.0); // fits; no scrolling involved
+    ta.on_event(&Event::FocusGained);
+    let line = 2usize;
+    let (start, end) = (ta.cached_lines[line].start, ta.cached_lines[line].end);
+    place_cursor(&ta, start + 2);
+    key(&mut ta, Key::Home);
+    assert_eq!(ta.cursor(), start, "Home → start of the visual line");
+    key(&mut ta, Key::End);
+    assert_eq!(ta.cursor(), end, "End → end of the visual line");
+}
+
+#[test]
+fn ctrl_home_and_ctrl_end_jump_to_document_bounds() {
+    let mut ta = multiline(12, 200.0, 80.0);
+    ta.on_event(&Event::FocusGained);
+    place_cursor(&ta, ta.cached_lines[6].start);
+    key_mods(&mut ta, Key::Home, ctrl());
+    assert_eq!(ta.cursor(), 0, "Ctrl+Home → document start");
+    assert_eq!(ta.scroll_offset(), 0.0, "Ctrl+Home scrolls to the top");
+    key_mods(&mut ta, Key::End, ctrl());
+    assert_eq!(ta.cursor(), ta.text().len(), "Ctrl+End → document end");
+    assert!(
+        ta.scroll_offset() > 0.0,
+        "Ctrl+End scrolls the caret into view: off={}",
+        ta.scroll_offset()
+    );
+}
+
+#[test]
+fn shift_home_extends_selection_to_line_start() {
+    let mut ta = multiline(5, 200.0, 300.0);
+    ta.on_event(&Event::FocusGained);
+    let line = 2usize;
+    let start = ta.cached_lines[line].start;
+    place_cursor(&ta, start + 3);
+    key_mods(&mut ta, Key::Home, shift());
+    assert_eq!(ta.cursor(), start);
+    assert_eq!(
+        ta.selection(),
+        Some((start, start + 3)),
+        "Shift+Home selects back to the line start"
+    );
+}
+
+#[test]
+fn page_down_and_page_up_move_by_viewport_and_scroll() {
+    let mut ta = multiline(30, 200.0, 80.0);
+    ta.on_event(&Event::FocusGained);
+    let page = ta.page_lines();
+    assert!(page >= 1, "viewport holds at least one line");
+
+    ta.set_cursor_to_start();
+    ta.ensure_cursor_visible();
+    assert_eq!(ta.scroll_offset(), 0.0);
+
+    key(&mut ta, Key::PageDown);
+    assert_eq!(
+        ta.line_for_cursor(ta.cursor()),
+        page,
+        "PageDown advances one viewport of lines"
+    );
+    let y = ta.pos_for_cursor(ta.cursor()).y;
+    assert!(
+        (0.0..=80.0).contains(&y),
+        "caret visible after PageDown: y={y}"
+    );
+
+    // From the document end, PageUp climbs back one viewport of lines.
+    ta.set_cursor_to_end();
+    ta.ensure_cursor_visible();
+    let last = ta.visual_line_count() - 1;
+    key(&mut ta, Key::PageUp);
+    assert_eq!(
+        ta.line_for_cursor(ta.cursor()),
+        last - page,
+        "PageUp climbs one viewport of lines"
+    );
+}
+
 // ── (g) highlight segmentation ──────────────────────────────────────────────
 //
 // The highlighter paint path must split a line into gap-free, non-overlapping

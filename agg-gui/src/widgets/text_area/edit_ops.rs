@@ -79,19 +79,25 @@ impl TextArea {
 
     /// Cursor one visual line up / down.  `dir` = −1 for up, +1 for down.
     pub(super) fn move_line(&mut self, dir: i32, with_selection: bool) {
+        self.move_lines(dir as isize, with_selection);
+    }
+
+    /// Cursor `delta` visual lines up (negative) or down (positive), preserving
+    /// the pixel column. Clamps to the first/last visual line. Shared by arrow
+    /// navigation ([`move_line`](Self::move_line)) and PageUp/PageDown.
+    pub(super) fn move_lines(&mut self, delta: isize, with_selection: bool) {
         if self.cached_lines.is_empty() {
             return;
         }
         let cursor = self.edit.borrow().cursor;
-        let cur_line = self.line_for_cursor(cursor);
-        let target_line = if dir < 0 {
-            cur_line.saturating_sub(1)
-        } else {
-            (cur_line + 1).min(self.cached_lines.len() - 1)
-        };
+        let cur_line = self.line_for_cursor(cursor) as isize;
+        let last = self.cached_lines.len() as isize - 1;
+        let target_line = (cur_line + delta).clamp(0, last);
         if target_line == cur_line {
             return;
         }
+        let cur_line = cur_line as usize;
+        let target_line = target_line as usize;
         // Preserve horizontal position (pixel column, not byte column),
         // measured relative to the current line's aligned start so left /
         // center / right alignment all keep the caret in the same column.

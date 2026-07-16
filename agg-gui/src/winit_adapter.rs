@@ -61,8 +61,8 @@ pub fn key(k: &WinitKey) -> Option<Key> {
         WinitKey::Named(NamedKey::End) => Key::End,
         WinitKey::Named(NamedKey::Delete) => Key::Delete,
         WinitKey::Named(NamedKey::Insert) => Key::Insert,
-        WinitKey::Named(NamedKey::PageUp) => Key::Other("PageUp".into()),
-        WinitKey::Named(NamedKey::PageDown) => Key::Other("PageDown".into()),
+        WinitKey::Named(NamedKey::PageUp) => Key::PageUp,
+        WinitKey::Named(NamedKey::PageDown) => Key::PageDown,
         WinitKey::Character(s) => Key::Char(s.chars().next()?),
         _ => return None,
     })
@@ -206,6 +206,14 @@ mod tests {
             ),
             Key::Char('v')
         );
+    }
+
+    #[test]
+    fn page_keys_map_to_dedicated_variants() {
+        // Multiline editors rely on these delivering as real navigation keys
+        // (not `Key::Other`) so their PageUp/PageDown handlers fire.
+        assert_eq!(key(&WinitKey::Named(NamedKey::PageUp)), Some(Key::PageUp));
+        assert_eq!(key(&WinitKey::Named(NamedKey::PageDown)), Some(Key::PageDown));
     }
 
     #[test]

@@ -312,6 +312,14 @@ pub struct TextArea {
     /// [`content_top_y`](Self::content_top_y). See `text_area/scroll.rs`.
     vbar: ScrollbarAxis,
 
+    /// Cursor byte offset observed at the previous `layout`. `None` until the
+    /// first layout. A change between layouts that the widget's own edit funnel
+    /// didn't already scroll for (i.e. an *external* mutation of the shared
+    /// [`TextEditState`], as the demo's "start"/"end" buttons do) triggers
+    /// [`ensure_cursor_visible`](Self::ensure_cursor_visible) so programmatic
+    /// caret moves scroll into view just like typed navigation.
+    last_layout_cursor: Option<usize>,
+
     /// Ephemeral input state.
     focused: bool,
     hovered: bool,
@@ -347,6 +355,7 @@ impl TextArea {
                 enabled: true,
                 ..ScrollbarAxis::default()
             },
+            last_layout_cursor: None,
             focused: false,
             hovered: false,
             selecting_drag: false,
@@ -676,6 +685,21 @@ impl TextArea {
         let line_top = self.line_top_y(line_idx);
         let line_bottom = line_top - self.cached_line_h;
         Point::new(x, line_bottom)
+    }
+
+    /// Glyph baseline Y (Y-up) for visual line `i`, vertically centring the
+    /// font's full vertical extent within the 1.35× line cell.
+    ///
+    /// `descent` is a POSITIVE quantity here (see [`Font::descender_px`]), so
+    /// the text block's height is `ascent + descent`. Getting this wrong pushes
+    /// the block up and clips line 0's ascenders against the padded inner-rect
+    /// clip, so paint and the clip-safety test share this single helper.
+    fn line_baseline_y(&self, i: usize) -> f64 {
+        let ascent = self.font.ascender_px(self.font_size);
+        let descent = self.font.descender_px(self.font_size);
+        let line_top = self.line_top_y(i);
+        let line_bottom = line_top - self.cached_line_h;
+        line_bottom + (self.cached_line_h - (ascent + descent)) * 0.5 + descent
     }
 }
 

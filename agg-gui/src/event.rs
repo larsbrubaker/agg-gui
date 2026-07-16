@@ -45,6 +45,10 @@ pub enum Key {
     ArrowDown,
     Home,
     End,
+    /// Page-up / page-down — scroll the caret by one viewport height of lines
+    /// in a multiline editor.
+    PageUp,
+    PageDown,
     Tab,
     Enter,
     Escape,

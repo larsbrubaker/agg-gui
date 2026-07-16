@@ -181,6 +181,16 @@ impl Widget for TextArea {
         let inner_w = (w - self.padding * 2.0).max(1.0);
         self.refresh_wrap(inner_w);
         self.sync_scroll();
+        // Catch cursor moves made straight through the shared TextEditState
+        // (e.g. the demo's "start"/"end" buttons) that bypass the edit funnel
+        // and thus never ran ensure_cursor_visible. The first layout only
+        // records the baseline so seeding a caret at the end doesn't force an
+        // unexpected scroll before the user interacts.
+        let cursor = self.edit.borrow().cursor;
+        if matches!(self.last_layout_cursor, Some(prev) if prev != cursor) {
+            self.ensure_cursor_visible();
+        }
+        self.last_layout_cursor = Some(cursor);
         Size::new(w, h)
     }
 
@@ -241,17 +251,11 @@ impl Widget for TextArea {
 
         // ── Text ───────────────────────────────────────────────────
         ctx.set_fill_color(v.text_color);
-        // Tight metrics for baseline positioning — the glyph baseline
-        // sits `descent` above each line's bottom edge.
-        let m = ctx.measure_text("Ag").unwrap_or_default();
         for (i, line) in self.cached_lines.iter().enumerate() {
             if line.text.is_empty() {
                 continue;
             }
-            let line_top = self.line_top_y(i);
-            let line_bottom = line_top - self.cached_line_h;
-            let baseline_y =
-                line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
+            let baseline_y = self.line_baseline_y(i);
             let x0 = self.line_x_start(line);
             match &self.highlighter {
                 // Syntax-highlighted path: paint each coloured run at its
@@ -280,10 +284,7 @@ impl Widget for TextArea {
                     TextHAlign::Center => slack * 0.5,
                     TextHAlign::Right => slack,
                 };
-            let line_top = self.line_top_y(0);
-            let line_bottom = line_top - self.cached_line_h;
-            let baseline_y =
-                line_bottom + (self.cached_line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
+            let baseline_y = self.line_baseline_y(0);
             ctx.fill_text(&self.hint, hint_x, baseline_y);
         }
 
@@ -464,16 +465,36 @@ impl Widget for TextArea {
                         self.move_line(1, shift);
                     }
                     Key::Home => {
-                        let cur = self.edit.borrow().cursor;
-                        let line = self.line_for_cursor(cur);
-                        let start = self.cached_lines[line].start;
-                        self.move_cursor_to(start, shift);
+                        // Ctrl/Cmd+Home → document start; plain Home → start of
+                        // the current visual (wrapped) line.
+                        let target = if cmd {
+                            0
+                        } else {
+                            let cur = self.edit.borrow().cursor;
+                            let line = self.line_for_cursor(cur);
+                            self.cached_lines[line].start
+                        };
+                        self.move_cursor_to(target, shift);
                     }
                     Key::End => {
-                        let cur = self.edit.borrow().cursor;
-                        let line = self.line_for_cursor(cur);
-                        let end = self.cached_lines[line].end;
-                        self.move_cursor_to(end, shift);
+                        // Ctrl/Cmd+End → document end; plain End → end of the
+                        // current visual (wrapped) line.
+                        let target = if cmd {
+                            self.edit.borrow().text.len()
+                        } else {
+                            let cur = self.edit.borrow().cursor;
+                            let line = self.line_for_cursor(cur);
+                            self.cached_lines[line].end
+                        };
+                        self.move_cursor_to(target, shift);
+                    }
+                    Key::PageUp => {
+                        let n = self.page_lines() as isize;
+                        self.move_lines(-n, shift);
+                    }
+                    Key::PageDown => {
+                        let n = self.page_lines() as isize;
+                        self.move_lines(n, shift);
                     }
                     Key::Backspace => {
                         self.delete(-1);
