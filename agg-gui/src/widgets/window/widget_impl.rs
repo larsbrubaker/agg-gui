@@ -487,6 +487,33 @@ impl Widget for Window {
         super::paint::finish_paint(self, ctx);
     }
 
+    /// Modal windows paint via the global-overlay pass (see
+    /// [`paint_global_overlay`](Self::paint_global_overlay)) so an ancestor's
+    /// clip — a scrolled container, the host window's content region — can't
+    /// truncate the dialog. Non-modal windows keep the ordinary inline paint.
+    fn defer_paint_to_overlay(&self) -> bool {
+        self.modal
+    }
+
+    /// Paint a modal window during the clip-free global overlay walk. The walk
+    /// has already translated `ctx` to this window's local origin without
+    /// pushing any ancestor clip, so re-entering the normal paint path here via
+    /// [`paint_subtree_forced`] renders the whole dialog (chrome + content)
+    /// above and outside everything that would otherwise clip it. We first
+    /// clamp the window into the viewport so it can't open partially off-screen.
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if !self.modal || !self.is_visible() {
+            return;
+        }
+        let (dx, dy) = self.clamp_modal_into_viewport(ctx);
+        ctx.save();
+        if dx != 0.0 || dy != 0.0 {
+            ctx.translate(dx, dy);
+        }
+        crate::widget::paint_subtree_forced(self, ctx);
+        ctx.restore();
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         if !self.requested_visible() {
             return EventResult::Ignored;

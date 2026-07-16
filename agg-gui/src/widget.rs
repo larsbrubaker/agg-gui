@@ -442,6 +442,24 @@ pub trait Widget {
     /// widget tree's Z order.
     fn paint_global_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
 
+    /// Opt this widget's *entire subtree* out of the normal inline paint pass so
+    /// it renders in [`paint_global_overlay`](Self::paint_global_overlay)
+    /// instead — the same clip-escaping global pass used by menus and tooltips.
+    ///
+    /// When this returns `true` and the widget is visible, [`paint_subtree`]
+    /// skips it during the ordinary tree walk (nothing, including children, is
+    /// painted inline), and the widget is expected to paint itself in its
+    /// `paint_global_overlay` via [`paint_subtree_forced`]. Because the global
+    /// overlay walk applies only per-widget translations (never ancestor
+    /// clips), the subtree then floats above and outside any ancestor's clip —
+    /// which is exactly what a modal dialog nested inside a scrolled/clipped
+    /// container needs so it can't be truncated by its host.
+    ///
+    /// Default `false`: ordinary widgets paint inline as usual.
+    fn defer_paint_to_overlay(&self) -> bool {
+        false
+    }
+
     /// Return a clip rectangle (in local coordinates) that constrains all child
     /// painting.  `paint_subtree` applies this clip before recursing into
     /// children, then restores the previous clip state afterward.  The clip does
@@ -684,6 +702,7 @@ pub use backbuffer::{
     CompositingLayer,
 };
 pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
+pub(crate) use paint::paint_subtree_forced;
 pub use tree::{
     active_modal_path, dispatch_event, dispatch_event_broadcast, dispatch_event_dyn,
     dispatch_unconsumed_key, global_overlay_hit_path, hit_test_subtree, mark_subtree_dirty,

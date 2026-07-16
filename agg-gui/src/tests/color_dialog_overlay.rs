@@ -187,3 +187,213 @@ fn test_color_dialog_body_click_does_not_leak_to_combo() {
         "clicking the dialog body must not close the dialog"
     );
 }
+
+// ── Bug 1: the modal dialog must PAINT outside an ancestor's clip ───────────
+//
+// The dialog's *input* already escapes ancestor bounds via the modal path
+// (tests above). Its *painting* must too: a modal `Window` renders through the
+// clip-free global-overlay pass, so a host that clips its content region (a
+// ScrollView, the RichTextEdit demo's content area) can't truncate the dialog.
+
+use crate::widgets::window::Window;
+
+/// A parent that clips its single child to a small local rectangle — stands in
+/// for the scrolled / clipped container the real dialog is nested inside.
+struct ClipParent {
+    bounds: Rect,
+    clip: Rect,
+    child_rect: Rect,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for ClipParent {
+    fn type_name(&self) -> &'static str {
+        "ClipParent"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        Some((self.clip.x, self.clip.y, self.clip.width, self.clip.height))
+    }
+    fn layout(&mut self, available: Size) -> Size {
+        self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+        let cr = self.child_rect;
+        let child = &mut self.children[0];
+        // Give the child room to size itself; `Window` keeps its own bounds
+        // (its `set_bounds` is a no-op once non-zero), `FillBox` adopts `cr`.
+        child.layout(available);
+        child.set_bounds(cr);
+        available
+    }
+    fn paint(&mut self, _ctx: &mut dyn crate::draw_ctx::DrawCtx) {}
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
+/// A solid-colour box painting its full bounds — a *non-deferred* child used to
+/// prove `ClipParent` genuinely clips ordinary content.
+struct FillBox {
+    bounds: Rect,
+    color: Color,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for FillBox {
+    fn type_name(&self) -> &'static str {
+        "FillBox"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, available: Size) -> Size {
+        self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+        available
+    }
+    fn paint(&mut self, ctx: &mut dyn crate::draw_ctx::DrawCtx) {
+        ctx.set_fill_color(self.color);
+        ctx.begin_path();
+        ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
+        ctx.fill();
+    }
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
+fn unit_scale() {
+    crate::device_scale::set_device_scale(1.0);
+    crate::ux_scale::set_ux_scale(1.0);
+}
+
+/// Lay out + paint an app into a white-cleared framebuffer via the real
+/// pipeline (`App::paint` runs the global-overlay pass).
+fn paint_app(app: &mut App, vp: Size) -> Framebuffer {
+    app.layout(vp);
+    let mut fb = Framebuffer::new(vp.width as u32, vp.height as u32);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::rgba(1.0, 1.0, 1.0, 1.0));
+        app.paint(&mut ctx);
+    }
+    fb
+}
+
+/// Control: an ordinary (non-modal) child IS clipped by `ClipParent`, so a
+/// point outside the 100×100 clip stays the clear colour. This pins that the
+/// clip is real — otherwise the modal test below would prove nothing.
+#[test]
+fn test_clip_parent_actually_clips_plain_child() {
+    unit_scale();
+    let fill = FillBox {
+        bounds: Rect::default(),
+        color: Color::rgb(0.9, 0.1, 0.1),
+        children: Vec::new(),
+    };
+    let clip = ClipParent {
+        bounds: Rect::default(),
+        clip: Rect::new(0.0, 0.0, 100.0, 100.0),
+        child_rect: Rect::new(60.0, 60.0, 220.0, 160.0),
+        children: vec![Box::new(fill)],
+    };
+    let root = Stack::new().with_hit_children_only(false).add(Box::new(clip));
+    let mut app = App::new(Box::new(root));
+    let fb = paint_app(&mut app, Size::new(420.0, 520.0));
+
+    // Inside the clip and inside the fill → painted red.
+    assert!(
+        super::is_red(super::sample(&fb, 90, 90)),
+        "plain child inside the clip must paint; got {:?}",
+        super::sample(&fb, 90, 90)
+    );
+    // Outside the clip (x=200) but inside the child's rect → clipped away.
+    assert!(
+        super::is_white(super::sample(&fb, 200, 120)),
+        "plain child must be CLIPPED outside the 100x100 clip rect; got {:?}",
+        super::sample(&fb, 200, 120)
+    );
+}
+
+/// The fix: a modal `color_wheel_picker_dialog` hosted under the same clipping
+/// parent paints its full extent — a point OUTSIDE the parent's clip but inside
+/// the dialog body renders the dialog's fill instead of the clear colour.
+#[test]
+fn test_modal_dialog_paints_outside_ancestor_clip() {
+    unit_scale();
+    let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
+    let picker = ColorWheelPicker::new(Color::rgb(0.2, 0.45, 0.88), Arc::clone(&font))
+        .with_show_alpha(true)
+        .with_font_size(12.0);
+    let dialog = crate::color_wheel_picker_dialog(picker, "Text colour");
+    let clip = ClipParent {
+        bounds: Rect::default(),
+        clip: Rect::new(0.0, 0.0, 100.0, 100.0),
+        child_rect: Rect::new(60.0, 60.0, 220.0, 300.0),
+        children: vec![dialog],
+    };
+    let root = Stack::new().with_hit_children_only(false).add(Box::new(clip));
+    let mut app = App::new(Box::new(root));
+    let fb = paint_app(&mut app, Size::new(420.0, 520.0));
+
+    // (200, 120) is outside the 100×100 clip yet well inside the dialog body
+    // (window rect ≈ x∈[60,280], y∈[60,446]). With the overlay-paint fix this
+    // must be the dialog's opaque fill, not the clear white.
+    let px = super::sample(&fb, 200, 120);
+    assert!(
+        !super::is_white(px) && px[3] > 200,
+        "modal dialog must paint OUTSIDE the ancestor clip (overlay pass); \
+         got {px:?} at (200,120)"
+    );
+}
+
+/// The dialog must also be clamped into the live viewport so it can't open
+/// partially off-screen. A modal window positioned so its right edge spills
+/// past the viewport is pulled back in during the overlay paint.
+#[test]
+fn test_modal_dialog_clamped_into_viewport() {
+    unit_scale();
+    let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
+    let content = FillBox {
+        bounds: Rect::default(),
+        color: Color::rgb(0.2, 0.6, 0.9),
+        children: Vec::new(),
+    };
+    // Right edge at 250 + 200 = 450, past the 400-wide viewport by 50px.
+    let win = Window::new("Dlg", Arc::clone(&font), Box::new(content))
+        .with_bounds(Rect::new(250.0, 60.0, 200.0, 150.0))
+        .with_auto_size(false)
+        .with_resizable(false)
+        .with_constrain(false)
+        .with_modal(true);
+    let root = Stack::new()
+        .with_hit_children_only(false)
+        .add(Box::new(win));
+    let mut app = App::new(Box::new(root));
+    let _ = paint_app(&mut app, Size::new(400.0, 400.0));
+
+    let bx = app.root().children()[0].bounds().x;
+    assert!(
+        (bx - 200.0).abs() < 1.5,
+        "modal window must be clamped so it fits the 400px viewport \
+         (expected bounds.x ≈ 200, the window is 200 wide); got {bx}"
+    );
+}
