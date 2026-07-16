@@ -455,16 +455,36 @@ impl Widget for TextArea {
                         self.move_line(1, shift);
                     }
                     Key::Home => {
-                        let cur = self.edit.borrow().cursor;
-                        let line = self.line_for_cursor(cur);
-                        let start = self.cached_lines[line].start;
-                        self.move_cursor_to(start, shift);
+                        // Ctrl/Cmd+Home → document start; plain Home → start of
+                        // the current visual (wrapped) line.
+                        let target = if cmd {
+                            0
+                        } else {
+                            let cur = self.edit.borrow().cursor;
+                            let line = self.line_for_cursor(cur);
+                            self.cached_lines[line].start
+                        };
+                        self.move_cursor_to(target, shift);
                     }
                     Key::End => {
-                        let cur = self.edit.borrow().cursor;
-                        let line = self.line_for_cursor(cur);
-                        let end = self.cached_lines[line].end;
-                        self.move_cursor_to(end, shift);
+                        // Ctrl/Cmd+End → document end; plain End → end of the
+                        // current visual (wrapped) line.
+                        let target = if cmd {
+                            self.edit.borrow().text.len()
+                        } else {
+                            let cur = self.edit.borrow().cursor;
+                            let line = self.line_for_cursor(cur);
+                            self.cached_lines[line].end
+                        };
+                        self.move_cursor_to(target, shift);
+                    }
+                    Key::PageUp => {
+                        let n = self.page_lines() as isize;
+                        self.move_lines(-n, shift);
+                    }
+                    Key::PageDown => {
+                        let n = self.page_lines() as isize;
+                        self.move_lines(n, shift);
                     }
                     Key::Backspace => {
                         self.delete(-1);

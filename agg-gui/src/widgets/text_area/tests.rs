@@ -555,6 +555,121 @@ fn first_line_top_not_clipped_at_scroll_top() {
     );
 }
 
+// ── (i) Home / End / PageUp / PageDown navigation ───────────────────────────
+//
+// Bug 3: plain Home/End move within the visual (wrapped) line; Ctrl/Cmd+Home
+// and +End jump to the document bounds; PageUp/PageDown move a viewport of
+// lines. Shift extends the selection. All end with the caret scrolled visible.
+
+/// Dispatch one focused KeyDown with explicit modifiers.
+fn key_mods(ta: &mut TextArea, k: Key, mods: Modifiers) {
+    ta.on_event(&Event::KeyDown {
+        key: k,
+        modifiers: mods,
+    });
+}
+
+fn shift() -> Modifiers {
+    Modifiers {
+        shift: true,
+        ..Default::default()
+    }
+}
+fn ctrl() -> Modifiers {
+    Modifiers {
+        ctrl: true,
+        ..Default::default()
+    }
+}
+
+/// Move the caret to an absolute byte offset straight through the shared state.
+fn place_cursor(ta: &TextArea, pos: usize) {
+    let mut st = ta.edit.borrow_mut();
+    st.cursor = pos;
+    st.anchor = pos;
+}
+
+#[test]
+fn home_moves_to_visual_line_start_end_to_line_end() {
+    let mut ta = multiline(5, 200.0, 300.0); // fits; no scrolling involved
+    ta.on_event(&Event::FocusGained);
+    let line = 2usize;
+    let (start, end) = (ta.cached_lines[line].start, ta.cached_lines[line].end);
+    place_cursor(&ta, start + 2);
+    key(&mut ta, Key::Home);
+    assert_eq!(ta.cursor(), start, "Home → start of the visual line");
+    key(&mut ta, Key::End);
+    assert_eq!(ta.cursor(), end, "End → end of the visual line");
+}
+
+#[test]
+fn ctrl_home_and_ctrl_end_jump_to_document_bounds() {
+    let mut ta = multiline(12, 200.0, 80.0);
+    ta.on_event(&Event::FocusGained);
+    place_cursor(&ta, ta.cached_lines[6].start);
+    key_mods(&mut ta, Key::Home, ctrl());
+    assert_eq!(ta.cursor(), 0, "Ctrl+Home → document start");
+    assert_eq!(ta.scroll_offset(), 0.0, "Ctrl+Home scrolls to the top");
+    key_mods(&mut ta, Key::End, ctrl());
+    assert_eq!(ta.cursor(), ta.text().len(), "Ctrl+End → document end");
+    assert!(
+        ta.scroll_offset() > 0.0,
+        "Ctrl+End scrolls the caret into view: off={}",
+        ta.scroll_offset()
+    );
+}
+
+#[test]
+fn shift_home_extends_selection_to_line_start() {
+    let mut ta = multiline(5, 200.0, 300.0);
+    ta.on_event(&Event::FocusGained);
+    let line = 2usize;
+    let start = ta.cached_lines[line].start;
+    place_cursor(&ta, start + 3);
+    key_mods(&mut ta, Key::Home, shift());
+    assert_eq!(ta.cursor(), start);
+    assert_eq!(
+        ta.selection(),
+        Some((start, start + 3)),
+        "Shift+Home selects back to the line start"
+    );
+}
+
+#[test]
+fn page_down_and_page_up_move_by_viewport_and_scroll() {
+    let mut ta = multiline(30, 200.0, 80.0);
+    ta.on_event(&Event::FocusGained);
+    let page = ta.page_lines();
+    assert!(page >= 1, "viewport holds at least one line");
+
+    ta.set_cursor_to_start();
+    ta.ensure_cursor_visible();
+    assert_eq!(ta.scroll_offset(), 0.0);
+
+    key(&mut ta, Key::PageDown);
+    assert_eq!(
+        ta.line_for_cursor(ta.cursor()),
+        page,
+        "PageDown advances one viewport of lines"
+    );
+    let y = ta.pos_for_cursor(ta.cursor()).y;
+    assert!(
+        (0.0..=80.0).contains(&y),
+        "caret visible after PageDown: y={y}"
+    );
+
+    // From the document end, PageUp climbs back one viewport of lines.
+    ta.set_cursor_to_end();
+    ta.ensure_cursor_visible();
+    let last = ta.visual_line_count() - 1;
+    key(&mut ta, Key::PageUp);
+    assert_eq!(
+        ta.line_for_cursor(ta.cursor()),
+        last - page,
+        "PageUp climbs one viewport of lines"
+    );
+}
+
 // ── (g) highlight segmentation ──────────────────────────────────────────────
 //
 // The highlighter paint path must split a line into gap-free, non-overlapping

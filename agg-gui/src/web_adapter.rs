@@ -37,6 +37,8 @@ pub fn key(name: &str) -> Option<Key> {
         "ArrowDown" => Key::ArrowDown,
         "Home" => Key::Home,
         "End" => Key::End,
+        "PageUp" => Key::PageUp,
+        "PageDown" => Key::PageDown,
         "Tab" => Key::Tab,
         "Enter" => Key::Enter,
         "Escape" => Key::Escape,
@@ -117,6 +119,8 @@ fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
             | Key::Delete
             | Key::Home
             | Key::End
+            | Key::PageUp
+            | Key::PageDown
             | Key::Enter
     )
 }

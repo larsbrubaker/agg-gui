@@ -56,6 +56,16 @@ impl TextArea {
         self.vbar.offset
     }
 
+    /// Number of whole visual lines that fit in the viewport — the distance
+    /// PageUp/PageDown move the caret. Always at least 1 so the caret advances
+    /// even in a viewport shorter than one line.
+    pub(crate) fn page_lines(&self) -> usize {
+        if self.cached_line_h <= 0.0 {
+            return 1;
+        }
+        ((self.inner_height() / self.cached_line_h).floor() as usize).max(1)
+    }
+
     fn scroll_style(&self) -> ScrollBarStyle {
         current_scroll_style()
     }
