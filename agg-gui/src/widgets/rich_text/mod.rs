@@ -11,6 +11,7 @@
 //!   helpers ([`style_at`], [`range_common_style`], [`CommonStyle`]).
 //! * [`layout`] — width-constrained, per-run-font layout producing paint-ready
 //!   line/fragment geometry ([`DocLayout`]).
+//! * [`view`] — [`RichTextView`], the phase-1 read-only display widget.
 //!
 //! # Phase plan
 //!
@@ -23,6 +24,7 @@
 pub mod commands;
 pub mod layout;
 pub mod model;
+pub mod view;
 
 pub use commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand, MAX_INDENT};
 pub use layout::{BlockLayout, DocLayout, FontResolver, LineFragment, LineLayout};
@@ -30,3 +32,4 @@ pub use model::{
     insert_text, merge_block_with_prev, remove_range, split_block, Block, DocPos, DocRange,
     InlineStyle, ListKind, RichDoc, TextRun,
 };
+pub use view::{uniform_resolver, RichTextView, SharedResolver};

@@ -88,7 +88,7 @@ pub use reserve_inset::{ReserveInset, ReservedEdge};
 pub use resize::Resize;
 pub use rich_text::{
     apply_command, range_common_style, style_at, Block, CommonStyle, DocPos, DocRange, InlineStyle,
-    ListKind, RichCommand, RichDoc, TextRun,
+    ListKind, RichCommand, RichDoc, RichTextView, TextRun,
 };
 pub use scene::{Scene, SceneTransform};
 pub use scroll_view::{
