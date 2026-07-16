@@ -120,7 +120,11 @@ pub fn style_at(doc: &RichDoc, pos: DocPos) -> InlineStyle {
         }
         acc += len;
     }
-    block.runs.last().unwrap().style.clone()
+    block
+        .runs
+        .last()
+        .map(|r| r.style.clone())
+        .unwrap_or_default()
 }
 
 /// Summarise the styles across `range`.  An empty range reports the style at

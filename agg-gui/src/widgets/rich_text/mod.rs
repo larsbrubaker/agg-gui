@@ -27,7 +27,10 @@ pub mod model;
 pub mod view;
 
 pub use commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand, MAX_INDENT};
-pub use layout::{BlockLayout, DocLayout, FontResolver, LineFragment, LineLayout};
+pub use layout::{
+    layout_doc, BlockLayout, DocLayout, FontResolver, LineFragment, LineLayout, INDENT_PX,
+    LINE_SPACING, LIST_GUTTER_PX, MARKER_GAP_PX,
+};
 pub use model::{
     insert_text, merge_block_with_prev, remove_range, split_block, Block, DocPos, DocRange,
     InlineStyle, ListKind, RichDoc, TextRun,
