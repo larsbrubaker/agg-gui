@@ -187,6 +187,31 @@ pub fn font_asset_by_index(idx: usize) -> Option<&'static FontAsset> {
     FONT_OPTIONS.get(idx)
 }
 
+/// Whether the catalog ships a bold face for `family` — i.e. a `"{family} Bold"`,
+/// `"{family} SemiBold"`, or `"{family} Bold Italic"` entry. Mirrors the bold
+/// candidates the resolver tries (see `rich_text_demo::variant_candidates`), so
+/// the toolbar can disable the Bold toggle for families with no real bold face
+/// rather than silently rendering the regular weight.
+pub fn family_has_bold(family: &str) -> bool {
+    let bold = format!("{family} Bold");
+    let semibold = format!("{family} SemiBold");
+    let bold_italic = format!("{family} Bold Italic");
+    FONT_OPTIONS
+        .iter()
+        .any(|o| o.name == bold || o.name == semibold || o.name == bold_italic)
+}
+
+/// Whether the catalog ships an italic face for `family` — i.e. a
+/// `"{family} Italic"` or `"{family} Bold Italic"` entry. Companion to
+/// [`family_has_bold`] for the toolbar's Italic toggle.
+pub fn family_has_italic(family: &str) -> bool {
+    let italic = format!("{family} Italic");
+    let bold_italic = format!("{family} Bold Italic");
+    FONT_OPTIONS
+        .iter()
+        .any(|o| o.name == italic || o.name == bold_italic)
+}
+
 pub fn font_asset_by_name(name: &str) -> Option<&'static FontAsset> {
     FONT_OPTIONS.iter().find(|o| o.name == name)
 }
@@ -310,4 +335,37 @@ fn refresh_default_svg_fonts() {
         let fontdb = agg_gui::svg_fontdb_from_font_data(fonts, Some(DEFAULT_FONT_NAME));
         agg_gui::set_default_svg_parse_options(SvgParseOptions::new().with_fontdb(fontdb));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nunito is the only family that ships a full Bold + Bold-Italic set, so it
+    /// reports both capabilities. This is the default family, so a default-styled
+    /// selection keeps B and I enabled.
+    #[test]
+    fn nunito_has_bold_and_italic() {
+        assert!(family_has_bold("Nunito"));
+        assert!(family_has_italic("Nunito"));
+        assert!(family_has_bold(DEFAULT_FONT_NAME));
+        assert!(family_has_italic(DEFAULT_FONT_NAME));
+    }
+
+    /// Arial / Georgia ship a real Italic but no Bold face, so the Italic toggle
+    /// stays enabled while Bold is disabled for them.
+    #[test]
+    fn italic_only_families_report_no_bold() {
+        for family in ["Arial", "Georgia", "Verdana", "Times New Roman"] {
+            assert!(family_has_italic(family), "{family} should have italic");
+            assert!(!family_has_bold(family), "{family} should not have bold");
+        }
+    }
+
+    /// A display family with only a single regular face reports neither.
+    #[test]
+    fn single_face_family_has_no_variants() {
+        assert!(!family_has_bold("Pacifico"));
+        assert!(!family_has_italic("Pacifico"));
+    }
 }
