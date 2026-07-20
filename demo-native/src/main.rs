@@ -17,10 +17,12 @@
 //! # Scope
 //!
 //! Currently covers: window creation, wgpu device/surface init, per-frame
-//! flush via `WgpuGfxCtx::end_frame`, resize, mouse/keyboard/wheel input,
-//! and disk-backed state persistence (window size + open-windows + per-tab
-//! open-positions diffed via `AutoSave`).  Future: fullscreen toggle,
-//! screenshot capture, MSAA selection, touch events, hi-DPI scale tracking.
+//! flush via `WgpuGfxCtx::end_frame`, resize, mouse/keyboard/wheel/touch
+//! input (raw touches forwarded to agg-gui core, which owns gesture
+//! aggregation and primary-finger mouse emulation), and disk-backed state
+//! persistence (window size + open-windows + per-tab open-positions diffed
+//! via `AutoSave`).  Future: fullscreen toggle, screenshot capture, MSAA
+//! selection, hi-DPI scale tracking.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -409,6 +411,35 @@ fn main() {
                         app.on_mouse_up(cursor_x, cursor_y, btn, current_mods);
                     }
                 }
+            }
+            // Touchscreen input.  winit registers for touch on Windows,
+            // which suppresses the OS's mouse promotion — so without this
+            // arm a touchscreen does nothing at all.  Raw touches only:
+            // agg-gui core aggregates multi-finger gestures AND replays
+            // the primary finger as mouse events (`touch_emulation.rs`),
+            // mirroring the wasm shell.  `location` is already in the
+            // same physical-pixel space as `CursorMoved`.  Device id is
+            // pinned to 0: winit's `DeviceId` is opaque, and telling two
+            // touchscreens apart isn't worth a lossy hash of it.
+            Event::WindowEvent {
+                event: WindowEvent::Touch(touch),
+                ..
+            } => {
+                let dev = agg_gui::TouchDeviceId(0);
+                let tid = agg_gui::TouchId(touch.id);
+                let (x, y) = (touch.location.x, touch.location.y);
+                let force = touch.force.map(|f| f.normalized() as f32);
+                match touch.phase {
+                    winit::event::TouchPhase::Started => {
+                        app.on_touch_start(dev, tid, x, y, force)
+                    }
+                    winit::event::TouchPhase::Moved => app.on_touch_move(dev, tid, x, y, force),
+                    winit::event::TouchPhase::Ended => app.on_touch_end(dev, tid),
+                    winit::event::TouchPhase::Cancelled => app.on_touch_cancel(dev, tid),
+                }
+                // Touch events arrive outside the mouse arms' redraw
+                // signalling — request a frame so gestures render live.
+                window.request_redraw();
             }
             Event::WindowEvent {
                 event:

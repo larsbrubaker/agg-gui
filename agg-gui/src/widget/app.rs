@@ -35,6 +35,11 @@ pub struct App {
     /// through [`App::on_touch_start/move/end/cancel`]; widgets read the
     /// per-frame aggregate via [`crate::current_multi_touch`].
     touch_state: crate::touch_state::TouchState,
+    /// Primary-finger mouse emulation (tap = left click, drag =
+    /// middle-drag pan).  Fed by the same `on_touch_*` entry points;
+    /// its commands are replayed through `on_mouse_*` so shells only
+    /// ever forward raw touches.  See [`crate::touch_emulation`].
+    touch_mouse_emu: crate::touch_emulation::TouchMouseEmu,
     /// Last `async_state_epoch` `App::paint` observed.  At the top of
     /// each paint, if the current epoch differs we explicitly mark
     /// every widget dirty via `mark_subtree_dirty`, so a freshly-
@@ -57,6 +62,7 @@ impl App {
             viewport_size: Size::new(1.0, 1.0),
             global_key_handler: None,
             touch_state: crate::touch_state::TouchState::new(),
+            touch_mouse_emu: crate::touch_emulation::TouchMouseEmu::new(),
             last_async_state_epoch: 0,
         }
     }
@@ -497,11 +503,12 @@ impl App {
     // --- Touch ingestion ---
     //
     // Raw touches go into the multi-touch gesture recogniser; widgets
-    // read `current_multi_touch()` each frame.  Platform shells ALSO
-    // route the first finger through the existing `on_mouse_*` entry
-    // points so widgets that only understand mouse input keep working
-    // without changes.  Coordinates are the same physical-pixel Y-down
-    // units the mouse entry points accept.
+    // read `current_multi_touch()` each frame.  The primary finger is
+    // ALSO replayed through the `on_mouse_*` entry points by the
+    // core-owned `TouchMouseEmu` (see `crate::touch_emulation`), so
+    // widgets that only understand mouse input keep working and
+    // platform shells forward raw touches only.  Coordinates are the
+    // same physical-pixel Y-down units the mouse entry points accept.
     // --- Private helpers ---
 
     /// If the click path passes through a `Window` widget, move that window to

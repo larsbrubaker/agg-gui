@@ -19,7 +19,9 @@
 //!
 //! # Interaction
 //!
-//!   - **Left-drag**: rotate + scale about the widget centre, **relative
+//!   - **Left-drag or middle-drag** (a one-finger touch drag arrives as a
+//!     synthetic middle-drag — see `agg_gui::touch_emulation`): rotate +
+//!     scale about the widget centre, **relative
 //!     to the mouse-down point**.  Unlike the C++ `lion.cpp` reference,
 //!     which snaps the lion's angle / scale to the raw cursor vector on
 //!     every event, we record the cursor position (and the current
@@ -360,7 +362,12 @@ impl Widget for LionView {
         match event {
             Event::MouseDown { button, pos, .. } => {
                 match button {
-                    MouseButton::Left => {
+                    // Middle is accepted alongside Left because the
+                    // touch shells synthesize a finger drag as a
+                    // middle-button drag — consuming it here means one
+                    // finger rotates the lion instead of scrolling the
+                    // enclosing window.
+                    MouseButton::Left | MouseButton::Middle => {
                         self.drag = Drag::Rotate;
                         // Capture the grip point so subsequent moves
                         // translate into deltas from here — no snap.
@@ -433,6 +440,56 @@ impl Widget for LionView {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agg_gui::Modifiers;
+
+    fn view() -> LionView {
+        let mut v = LionView::new(Rc::new(Cell::new(1.0)));
+        v.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+        v
+    }
+
+    fn drag(v: &mut LionView, button: MouseButton) -> (EventResult, EventResult) {
+        // Down off-centre, then move to a different polar angle around
+        // the widget centre (200, 150) so a rotate must change `angle`.
+        let down = v.on_event(&Event::MouseDown {
+            pos: Point::new(300.0, 150.0),
+            button,
+            modifiers: Modifiers::default(),
+        });
+        let mv = v.on_event(&Event::MouseMove {
+            pos: Point::new(300.0, 250.0),
+        });
+        (down, mv)
+    }
+
+    /// The touch shells synthesize a finger drag as a MIDDLE-button
+    /// drag — the lion must treat it as rotate/scale or one-finger
+    /// touch does nothing (the drag falls through to ScrollView).
+    #[test]
+    fn middle_drag_rotates() {
+        let mut v = view();
+        let before = v.angle;
+        let (down, mv) = drag(&mut v, MouseButton::Middle);
+        assert_eq!(down, EventResult::Consumed);
+        assert_eq!(mv, EventResult::Consumed);
+        assert_ne!(v.angle, before, "middle-drag must rotate the lion");
+    }
+
+    /// Regression guard: the classic left-drag rotate still works.
+    #[test]
+    fn left_drag_rotates() {
+        let mut v = view();
+        let before = v.angle;
+        let (down, mv) = drag(&mut v, MouseButton::Left);
+        assert_eq!(down, EventResult::Consumed);
+        assert_eq!(mv, EventResult::Consumed);
+        assert_ne!(v.angle, before, "left-drag must rotate the lion");
+    }
+}
+
 // ── Demo window entry point ──────────────────────────────────────────────────
 
 pub fn lion_demo(font: Arc<Font>) -> Box<dyn Widget> {
@@ -444,9 +501,10 @@ pub fn lion_demo(font: Arc<Font>) -> Box<dyn Widget> {
 
     let alp_label = Label::new("Alpha", Arc::clone(&font)).with_font_size(12.0);
     let note = Label::new(
-        "Left-drag: rotate + scale (relative to click).  Wheel / pinch: \
-         zoom.  Two-finger twist: rotate.  Right-drag: skew.  MSAA is off; \
-         smooth silhouette = halo-AA edges; fresh tess2 every frame.",
+        "Left-drag or one-finger drag: rotate + scale (relative to \
+         start).  Wheel / pinch: zoom.  Two-finger twist: rotate.  \
+         Right-drag: skew.  MSAA is off; smooth silhouette = halo-AA \
+         edges; fresh tess2 every frame.",
         Arc::clone(&font),
     )
     .with_font_size(11.0)

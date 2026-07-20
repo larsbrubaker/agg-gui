@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "demo-web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "server.ts"],
+      "cwd": "demo",
+      "port": 3001
+    }
+  ]
+}

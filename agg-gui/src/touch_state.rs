@@ -8,9 +8,10 @@
 //!
 //! Widgets that want to react to gestures read the current frame's
 //! aggregate via [`current_multi_touch`], a thread-local written by
-//! [`App::publish_multi_touch`] at the start of each paint.  Single-
-//! finger touches continue to flow through the regular mouse-emulation
-//! path, so existing widgets keep working with no changes.
+//! `App::paint` at the start of each frame.  Single-finger touches are
+//! replayed through the regular mouse pipeline by the core-owned
+//! [`crate::touch_emulation::TouchMouseEmu`], so existing widgets keep
+//! working with no changes.
 //!
 //! The API shape deliberately mirrors egui's (`zoom_delta`,
 //! `rotation_delta`, `translation_delta`, `num_touches`, `center_pos`)
@@ -122,6 +123,21 @@ pub struct TouchState {
     topology_changed: bool,
 }
 
+/// Fold an angle (radians) into the canonical `[-pi, pi]` range.  Used to
+/// keep each finger's per-frame rotation step honest across the atan2 ±pi
+/// seam before the steps are averaged.
+fn wrap_angle(a: f32) -> f32 {
+    use std::f32::consts::PI;
+    let mut a = a;
+    while a > PI {
+        a -= 2.0 * PI;
+    }
+    while a < -PI {
+        a += 2.0 * PI;
+    }
+    a
+}
+
 impl TouchState {
     pub fn new() -> Self {
         Self::default()
@@ -212,7 +228,16 @@ impl TouchState {
             let pr = (pdx * pdx + pdy * pdy).sqrt();
             if pr > 1.0 && r > 1.0 {
                 zoom_sum += r / pr;
-                rotation_sum += dy.atan2(dx) - pdy.atan2(pdx);
+                // Normalise EACH finger's angular step into `[-pi, pi]`
+                // before summing.  A real two-finger twist sweeps every
+                // finger's polar angle around the centroid, so on every
+                // half-turn one finger crosses the atan2 ±pi seam: its raw
+                // `atan2(dy,dx) - atan2(pdy,pdx)` jumps by ~±2pi (a true
+                // +2° step reads as -358°).  Averaging that with the other
+                // finger's correct step yields ~-178°, and post-average
+                // normalisation cannot recover the intended small delta.
+                // Wrapping per finger keeps each contribution honest.
+                rotation_sum += wrap_angle(dy.atan2(dx) - pdy.atan2(pdx));
                 zoom_count += 1;
             }
         }
@@ -224,16 +249,10 @@ impl TouchState {
         let (zoom_delta, rotation_delta) = if self.topology_changed || zoom_count == 0 {
             (1.0, 0.0)
         } else {
-            // Normalise rotation to `[-pi, pi]` so wrap-around at the
-            // ±pi seam doesn't flip sign of the delta.
-            let mut rot = rotation_sum / zoom_count as f32;
-            use std::f32::consts::PI;
-            while rot > PI {
-                rot -= 2.0 * PI;
-            }
-            while rot < -PI {
-                rot += 2.0 * PI;
-            }
+            // Per-finger deltas are already wrapped, so their average is
+            // well-behaved; this final wrap is a cheap belt-and-braces
+            // clamp for the pathological many-finger case.
+            let rot = wrap_angle(rotation_sum / zoom_count as f32);
             (zoom_sum / zoom_count as f32, rot)
         };
 
@@ -349,4 +368,248 @@ pub fn last_touch_event_age() -> Option<std::time::Duration> {
 pub fn clear_last_touch_event_for_testing() {
     LAST_TOUCH_EVENT_AT.with(|c| c.set(None));
     TOUCH_SEEN_THIS_SESSION.with(|c| c.set(false));
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DEV: TouchDeviceId = TouchDeviceId(0);
+
+    /// Two fingers land, then `update_gesture` runs once.  This is the
+    /// baseline (topology-changed) frame: it should emit a `MultiTouchInfo`
+    /// with num_touches = 2 but zeroed deltas so newly-arrived fingers
+    /// never contribute a spurious one-frame jump.
+    #[test]
+    fn two_fingers_land_emits_zeroed_baseline_frame() {
+        let mut ts = TouchState::new();
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(DEV, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.update_gesture();
+
+        let info = ts.current().expect("two fingers should produce a gesture");
+        assert_eq!(info.num_touches, 2);
+        assert_eq!(info.zoom_delta, 1.0, "topology frame must not zoom");
+        assert_eq!(info.rotation_delta, 0.0, "topology frame must not rotate");
+        assert_eq!(info.translation_delta.x, 0.0);
+        assert_eq!(info.translation_delta.y, 0.0);
+    }
+
+    /// Pinch-out: after the baseline frame, both fingers move apart
+    /// symmetrically (spread doubles), so `zoom_delta` should equal the
+    /// spread ratio and rotation should stay ~0.
+    #[test]
+    fn pinch_out_reports_spread_ratio() {
+        let mut ts = TouchState::new();
+        // Baseline: fingers 100px apart, centroid at (150,100).
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(DEV, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.update_gesture(); // latches baseline, zeroed deltas
+
+        // Spread to 200px apart around the same centroid.
+        ts.on_move(DEV, TouchId(0), Point::new(50.0, 100.0), None);
+        ts.on_move(DEV, TouchId(1), Point::new(250.0, 100.0), None);
+        ts.update_gesture();
+
+        let info = ts.current().expect("gesture present");
+        // Each finger's distance from the centroid went 50 -> 100, so the
+        // per-finger ratio (and hence the average) is exactly 2.0.
+        assert!(
+            (info.zoom_delta - 2.0).abs() < 1e-3,
+            "zoom_delta = {} (expected ~2.0)",
+            info.zoom_delta
+        );
+        assert!(
+            info.rotation_delta.abs() < 1e-3,
+            "pure pinch must not rotate, got {}",
+            info.rotation_delta
+        );
+    }
+
+    /// Pure rotation: both fingers rotate 30° CCW (Y-up) around a fixed
+    /// centroid at constant radius.  The code computes
+    /// `atan2(dy,dx) - atan2(pdy,pdx)` on the raw coordinates, so a CCW
+    /// step in Y-up space yields a POSITIVE `rotation_delta` — matching the
+    /// documented "positive = CCW in Y-up" convention.  Zoom must stay ~1.
+    #[test]
+    fn pure_rotation_reports_signed_angle_ccw_positive() {
+        let mut ts = TouchState::new();
+        // Fingers on a vertical line through centroid (100,100), r = 100.
+        // Vertical orientation keeps both fingers away from the atan2 ±pi
+        // seam so no per-finger wrap corrupts the average.
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 200.0), None); // angle +90°
+        ts.on_start(DEV, TouchId(1), Point::new(100.0, 0.0), None); //  angle -90°
+        ts.update_gesture(); // baseline
+
+        // Rotate both +30° CCW (Y-up) about the centroid.
+        //   finger 0: 90° -> 120°  => (50, 186.60254)
+        //   finger 1: -90° -> -60° => (150, 13.39746)
+        ts.on_move(DEV, TouchId(0), Point::new(50.0, 186.602_54), None);
+        ts.on_move(DEV, TouchId(1), Point::new(150.0, 13.397_46), None);
+        ts.update_gesture();
+
+        let info = ts.current().expect("gesture present");
+        let expected = 30.0_f32.to_radians();
+        assert!(
+            (info.rotation_delta - expected).abs() < 1e-3,
+            "rotation_delta = {} (expected ~+{} rad, +30° CCW)",
+            info.rotation_delta,
+            expected
+        );
+        assert!(
+            (info.zoom_delta - 1.0).abs() < 1e-3,
+            "pure rotation must not zoom, got {}",
+            info.zoom_delta
+        );
+    }
+
+    /// Pure translation: both fingers shift by the same offset, so the
+    /// centroid moves by exactly that offset while the per-finger geometry
+    /// is unchanged (zoom ~1, rotation ~0).
+    #[test]
+    fn pure_translation_reports_centroid_offset() {
+        let mut ts = TouchState::new();
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(DEV, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.update_gesture(); // baseline
+
+        // Shift both by (+10, +20).
+        ts.on_move(DEV, TouchId(0), Point::new(110.0, 120.0), None);
+        ts.on_move(DEV, TouchId(1), Point::new(210.0, 120.0), None);
+        ts.update_gesture();
+
+        let info = ts.current().expect("gesture present");
+        assert!(
+            (info.translation_delta.x - 10.0).abs() < 1e-3
+                && (info.translation_delta.y - 20.0).abs() < 1e-3,
+            "translation_delta = ({},{}) (expected ~(10,20))",
+            info.translation_delta.x,
+            info.translation_delta.y
+        );
+        assert!(
+            (info.zoom_delta - 1.0).abs() < 1e-3,
+            "pure translation must not zoom, got {}",
+            info.zoom_delta
+        );
+        assert!(
+            info.rotation_delta.abs() < 1e-3,
+            "pure translation must not rotate, got {}",
+            info.rotation_delta
+        );
+    }
+
+    /// Lifting one finger drops below the two-finger minimum: `current()`
+    /// must become `None` and `active_count` must reflect the remaining
+    /// finger.
+    #[test]
+    fn finger_lift_clears_gesture() {
+        let mut ts = TouchState::new();
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(DEV, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.update_gesture();
+        assert!(ts.current().is_some(), "two fingers -> gesture");
+        assert_eq!(ts.active_count(), 2);
+
+        ts.on_end_or_cancel(DEV, TouchId(1));
+        assert!(
+            ts.current().is_none(),
+            "one finger left -> no multi-touch gesture"
+        );
+        assert_eq!(ts.active_count(), 1);
+    }
+
+    /// A third finger arriving mid-gesture flags a topology change, so the
+    /// very next `update_gesture` must emit zeroed deltas (no spurious jump)
+    /// even though the centroid/geometry shifted as the finger landed.
+    #[test]
+    fn third_finger_join_resets_deltas() {
+        let mut ts = TouchState::new();
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(DEV, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.update_gesture(); // baseline
+
+        // Establish a real (non-zero) gesture first.
+        ts.on_move(DEV, TouchId(0), Point::new(50.0, 100.0), None);
+        ts.on_move(DEV, TouchId(1), Point::new(250.0, 100.0), None);
+        ts.update_gesture();
+        let mid = ts.current().expect("gesture present");
+        assert!(mid.zoom_delta > 1.5, "sanity: mid-gesture was a pinch-out");
+
+        // Third finger lands off-centre; next frame must be zeroed.
+        ts.on_start(DEV, TouchId(2), Point::new(150.0, 300.0), None);
+        ts.update_gesture();
+        let info = ts.current().expect("three fingers -> gesture");
+        assert_eq!(info.num_touches, 3);
+        assert_eq!(info.zoom_delta, 1.0, "topology reset must zero zoom");
+        assert_eq!(info.rotation_delta, 0.0, "topology reset must zero rotation");
+        assert_eq!(info.translation_delta.x, 0.0);
+        assert_eq!(info.translation_delta.y, 0.0);
+    }
+
+    /// Regression: one finger crosses the atan2 ±pi seam during a small
+    /// real two-finger twist.  Both fingers rotate +4° CCW around a fixed
+    /// centroid at (200,200), but finger A sits at 178° and steps to 182°
+    /// — crossing the seam so its raw per-frame delta reads as ≈ -356°.
+    /// Finger B (at -2° -> +2°) reads a clean +4°.  Before the fix the sum
+    /// was normalised only AFTER averaging, so the frame delta collapsed to
+    /// ≈ -176° instead of +4°.  Per-finger normalisation must repair this.
+    #[test]
+    fn seam_crossing_finger_does_not_flip_rotation() {
+        let mut ts = TouchState::new();
+        // Baseline: A at 178°, B at -2°, radius 100 about centroid (200,200).
+        ts.on_start(DEV, TouchId(0), Point::new(100.060917, 203.489950), None); // A: 178°
+        ts.on_start(DEV, TouchId(1), Point::new(299.939083, 196.510050), None); // B: -2°
+        ts.update_gesture(); // baseline (zeroed deltas)
+
+        // Both fingers step +4° CCW: A 178°->182° (crosses +pi seam),
+        // B -2°->+2°.
+        ts.on_move(DEV, TouchId(0), Point::new(100.060917, 196.510050), None); // A: 182°
+        ts.on_move(DEV, TouchId(1), Point::new(299.939083, 203.489950), None); // B: +2°
+        ts.update_gesture();
+
+        let info = ts.current().expect("gesture present");
+        let expected = 4.0_f32.to_radians();
+        assert!(
+            (info.rotation_delta - expected).abs() < 1e-3,
+            "rotation_delta = {} (expected ~+{} rad, +4° CCW); a seam-crossing \
+             finger must not flip the averaged rotation",
+            info.rotation_delta,
+            expected
+        );
+        assert!(
+            (info.zoom_delta - 1.0).abs() < 1e-3,
+            "pure rotation must not zoom, got {}",
+            info.zoom_delta
+        );
+    }
+
+    /// Two `update_gesture` calls with no movement in between: the second
+    /// frame (topology already cleared) must read as no-op deltas because
+    /// each finger's current position equals its latched baseline.
+    #[test]
+    fn no_movement_yields_identity_deltas() {
+        let mut ts = TouchState::new();
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(DEV, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.update_gesture(); // baseline (topology_changed frame)
+        ts.update_gesture(); // steady state, no on_move between
+
+        let info = ts.current().expect("gesture present");
+        assert!(
+            (info.zoom_delta - 1.0).abs() < 1e-6,
+            "no movement -> zoom 1.0, got {}",
+            info.zoom_delta
+        );
+        assert!(
+            info.rotation_delta.abs() < 1e-6,
+            "no movement -> rotation 0, got {}",
+            info.rotation_delta
+        );
+        assert_eq!(info.translation_delta.x, 0.0);
+        assert_eq!(info.translation_delta.y, 0.0);
+    }
 }

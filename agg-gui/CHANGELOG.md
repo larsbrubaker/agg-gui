@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Added
+
+- **`touch_emulation` module** — the primary-finger touch→mouse emulation
+  (tap = left click, drag past 8 px = middle-button pan) moved from the web
+  shell's JS into core as the unit-tested `TouchMouseEmu` state machine.
+  `App::on_touch_start/move/end/cancel` now replay its commands through the
+  `on_mouse_*` pipeline automatically, so every platform shell gets identical
+  single-finger behaviour by forwarding raw touches only.
+
+### Breaking / behavioural changes
+
+- **Platform shells must no longer synthesize mouse events from touches.**
+  Shells that mirrored the old JS contract (manually calling `on_mouse_*` for
+  the primary finger around `on_touch_*`) will double-fire events — delete the
+  shell-side emulation and forward raw touches.
+- `touch_state::note_touch_event` now runs *before* the synthetic mouse events
+  a touch produces, so `last_touch_event_age()` reliably identifies them as
+  touch-synthesised (previously the very first touch's mouse-move looked like
+  desktop input).
+
+### Fixed
+
+- **Two-finger twist no longer jumps wildly at the ±π seam.** The gesture
+  recogniser normalised rotation only after averaging per-finger deltas, so a
+  finger sweeping through the atan2 seam (every half-turn of a real twist)
+  corrupted that frame's `rotation_delta` by nearly ±π. Each finger's delta is
+  now wrapped into `[-π, π]` before averaging.
+- **Pinch gestures no longer fire a phantom left click** when the first finger
+  moved less than the tap threshold before release.
+- **A second finger now releases the in-flight middle-drag pan immediately**,
+  so two-finger zoom/rotate no longer scrolls the surrounding view through the
+  first finger.
+
 ## [0.3.0] - 2026-07-16
 
 Large feature release centred on rich-text editing, multiline text input, a

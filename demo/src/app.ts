@@ -346,26 +346,18 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // --- Touch support ---
 //
-// Single-touch taps are forwarded as mouse button 0 on release.  Once the
-// finger moves far enough to count as scrolling, we synthesize a middle-button
-// drag instead of wheel ticks so ScrollView captures the gesture and pans by
-// the exact finger delta on both axes.
+// Raw touches only: every finger is forwarded to the wasm module, and
+// agg-gui core does the rest — the multi-touch recogniser aggregates
+// 2+ fingers into pinch / rotate / pan, and `touch_emulation.rs`
+// replays the primary finger as mouse events (tap = left click, drag =
+// middle-button pan).  This shell must NOT synthesize mouse events
+// itself, or they would fire twice.
 //
 // `touch-action: none` on the canvas (index.html) prevents the browser
 // from stealing these events for scrolling or pinch-to-zoom.
 
 type TouchFn = (id: number, x: number, y: number, force: number) => void;
 type TouchEndFn = (id: number) => void;
-
-/// Tracks which `Touch.identifier` the mouse emulation is currently
-/// following.  When that touch lifts, we release the mouse; a second
-/// finger arriving (or the first being replaced) never promotes itself
-/// to mouse, matching the "drag starts with one finger" contract.
-let primaryTouchId: number | null = null;
-let primaryTouchStart: [number, number] | null = null;
-let primaryTouchLast: [number, number] | null = null;
-let primaryTouchScrolling = false;
-const TOUCH_SCROLL_THRESHOLD = 8;
 
 function touchPos(t: Touch): [number, number] {
   const rect = canvas.getBoundingClientRect();
@@ -377,22 +369,9 @@ canvas.addEventListener("touchstart", (e) => {
   if (!wasmModule) return;
   e.preventDefault();
   canvas.focus();
-  // Forward every new touch to the multi-touch aggregator; all
-  // fingers, not just the first, contribute to pinch / rotate / pan.
   for (const t of Array.from(e.changedTouches)) {
     const [x, y] = touchPos(t);
     (wasmModule["on_touch_start"] as TouchFn)(t.identifier, x, y, t.force ?? 0);
-  }
-  // Track the first finger for tap/scroll mouse emulation.  Once a
-  // primary is established, later touches skip this.
-  if (primaryTouchId === null && e.touches.length >= 1) {
-    const t = e.touches[0];
-    primaryTouchId = t.identifier;
-    const [x, y] = touchPos(t);
-    primaryTouchStart = [x, y];
-    primaryTouchLast = [x, y];
-    primaryTouchScrolling = false;
-    (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
   }
 }, { passive: false });
 
@@ -402,23 +381,6 @@ canvas.addEventListener("touchmove", (e) => {
   for (const t of Array.from(e.changedTouches)) {
     const [x, y] = touchPos(t);
     (wasmModule["on_touch_move"] as TouchFn)(t.identifier, x, y, t.force ?? 0);
-    // Primary finger also drives the mouse cursor.
-    if (t.identifier === primaryTouchId) {
-      if (primaryTouchStart && primaryTouchLast) {
-        const dx = x - primaryTouchStart[0];
-        const dy = y - primaryTouchStart[1];
-        if (!primaryTouchScrolling && Math.hypot(dx, dy) >= TOUCH_SCROLL_THRESHOLD) {
-          primaryTouchScrolling = true;
-          (wasmModule["on_mouse_down"] as MouseXYBFn)(
-            primaryTouchStart[0],
-            primaryTouchStart[1],
-            1,
-          );
-        }
-        (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
-        primaryTouchLast = [x, y];
-      }
-    }
   }
 }, { passive: false });
 
@@ -427,23 +389,10 @@ canvas.addEventListener("touchend", (e) => {
   e.preventDefault();
   for (const t of Array.from(e.changedTouches)) {
     (wasmModule["on_touch_end"] as TouchEndFn)(t.identifier);
-    if (t.identifier === primaryTouchId) {
-      const [x, y] = touchPos(t);
-      if (!primaryTouchScrolling) {
-        (wasmModule["on_mouse_down"] as MouseXYBFn)(x, y, 0);
-        (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 0);
-        syncMobileKeyboard();
-      } else {
-        (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 1);
-        syncMobileKeyboard();
-      }
-      (wasmModule["on_mouse_leave"] as VoidFn)();
-      primaryTouchId = null;
-      primaryTouchStart = null;
-      primaryTouchLast = null;
-      primaryTouchScrolling = false;
-    }
   }
+  // A tap may have focused a text field (core synthesizes the click
+  // during on_touch_end above) — sync the hidden-textarea fallback.
+  syncMobileKeyboard();
 }, { passive: false });
 
 canvas.addEventListener("touchcancel", (e) => {
@@ -451,17 +400,6 @@ canvas.addEventListener("touchcancel", (e) => {
   e.preventDefault();
   for (const t of Array.from(e.changedTouches)) {
     (wasmModule["on_touch_cancel"] as TouchEndFn)(t.identifier);
-    if (t.identifier === primaryTouchId) {
-      const [x, y] = touchPos(t);
-      if (primaryTouchScrolling) {
-        (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, 1);
-      }
-      (wasmModule["on_mouse_leave"] as VoidFn)();
-      primaryTouchId = null;
-      primaryTouchStart = null;
-      primaryTouchLast = null;
-      primaryTouchScrolling = false;
-    }
   }
 });
 
