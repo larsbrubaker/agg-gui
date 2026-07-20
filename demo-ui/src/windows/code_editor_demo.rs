@@ -323,6 +323,9 @@ impl Widget for LineGutter {
 }
 
 #[cfg(test)]
+mod scroll_bench;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use agg_gui::find_widget_by_type;
