@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use agg_gui::{
     measure_text_metrics, Color, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, HAnchor,
-    Hyperlink, Label, Rect, ScrollView, Separator, Size, SizedBox, TextArea, TextEditState, Widget,
+    Hyperlink, Label, Rect, Separator, Size, SizedBox, TextArea, TextEditState, Widget,
 };
 
 const SOURCE_URL: &str =
@@ -129,18 +129,17 @@ pub fn code_editor(font: Arc<Font>) -> Box<dyn Widget> {
         .add(Box::new(gutter))
         .add_flex(Box::new(editor), 1.0);
 
-    col.push(
-        Box::new(
-            SizedBox::new()
-                .with_height(360.0)
-                .with_child(Box::new(editor_row)),
-        ),
-        0.0,
-    );
+    // Fill the window's remaining height: the editor row takes all space left
+    // after the fixed header + separator, so it grows and shrinks with the
+    // window. The TextArea scrolls its contents internally, so the window never
+    // needs an outer vertical scrollbar. (Previously this was pinned to a
+    // fixed-height SizedBox inside a vertical ScrollView, which froze the
+    // editor at 360 px regardless of window size.)
+    col.push(Box::new(editor_row), 1.0);
 
     col.push(Box::new(SizedBox::new().with_height(8.0)), 0.0);
 
-    Box::new(ScrollView::new(Box::new(col)))
+    Box::new(col)
 }
 
 // ── Rust syntax highlighter ─────────────────────────────────────────────────
@@ -320,5 +319,61 @@ impl Widget for LineGutter {
 
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agg_gui::find_widget_by_type;
+
+    fn test_font() -> Arc<Font> {
+        const BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+        Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"))
+    }
+
+    fn text_area_height(content: &dyn Widget) -> f64 {
+        find_widget_by_type(content, "TextArea")
+            .expect("code editor content must contain a TextArea")
+            .bounds()
+            .height
+    }
+
+    /// The editor must stretch to fill the window's remaining height and track
+    /// resizes — laying the content out at a taller available size must give the
+    /// TextArea a taller bounds. Regression for the "editor stays 360 px tall"
+    /// bug (the fixed-height SizedBox + outer ScrollView froze the height).
+    #[test]
+    fn editor_fills_window_height_and_tracks_resize() {
+        let mut small = code_editor(test_font());
+        small.layout(Size::new(600.0, 500.0));
+        let h_small = text_area_height(small.as_ref());
+
+        let mut large = code_editor(test_font());
+        large.layout(Size::new(600.0, 800.0));
+        let h_large = text_area_height(large.as_ref());
+
+        assert!(
+            h_large > h_small + 100.0,
+            "TextArea must grow with the window height: {h_small} px at a 500 px \
+             window vs {h_large} px at an 800 px window"
+        );
+    }
+
+    /// The line-number gutter must stay the same height as the editor at any
+    /// window size, so the numbers keep tracking the code.
+    #[test]
+    fn gutter_matches_editor_height() {
+        let mut content = code_editor(test_font());
+        content.layout(Size::new(600.0, 720.0));
+        let editor_h = text_area_height(content.as_ref());
+        let gutter_h = find_widget_by_type(content.as_ref(), "LineGutter")
+            .expect("code editor content must contain a LineGutter")
+            .bounds()
+            .height;
+        assert!(
+            (gutter_h - editor_h).abs() < 1.0,
+            "gutter height {gutter_h} must match editor height {editor_h}"
+        );
     }
 }
