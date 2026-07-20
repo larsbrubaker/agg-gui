@@ -20,9 +20,10 @@
 //! flush via `WgpuGfxCtx::end_frame`, resize, mouse/keyboard/wheel/touch
 //! input (raw touches forwarded to agg-gui core, which owns gesture
 //! aggregation and primary-finger mouse emulation), and disk-backed state
-//! persistence (window size + open-windows + per-tab open-positions diffed
-//! via `AutoSave`).  Future: fullscreen toggle, screenshot capture, MSAA
-//! selection, hi-DPI scale tracking.
+//! persistence (window size stored in **physical px** + open-windows + per-tab
+//! open-positions diffed via `AutoSave`; the size round-trips through
+//! `PhysicalSize` on restore and is sanitised by `window_size`).  Future:
+//! fullscreen toggle, screenshot capture, MSAA selection.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -30,12 +31,16 @@ use std::sync::Arc;
 
 use agg_gui::{winit_adapter, App, DrawCtx, Modifiers, Size};
 use demo_wgpu::{begin_frame, render_app_frame, WgpuCubeWidget, WgpuGfxCtx};
-use winit::dpi::LogicalSize;
+use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Icon, Window, WindowAttributes};
+use winit::window::{Icon, WindowAttributes};
 
+mod gpu;
 mod screen_share;
+mod window_size;
+
+use gpu::{acquire_frame, Gpu};
 
 const STATE_FILE_NAME: &str = ".agg-gui-demo-state";
 
@@ -101,85 +106,6 @@ fn install_demo_font_asset(name: &str, path: &str) {
     }
 }
 
-struct Gpu {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    surface: wgpu::Surface<'static>,
-    surface_format: wgpu::TextureFormat,
-    config: wgpu::SurfaceConfiguration,
-}
-
-impl Gpu {
-    fn new(window: Arc<Window>) -> Self {
-        let size = window.inner_size();
-        let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        instance_desc.backends = wgpu::Backends::PRIMARY;
-        let instance = wgpu::Instance::new(instance_desc);
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("create surface");
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .expect("request adapter");
-
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("demo-native-wgpu"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("request device");
-
-        let caps = surface.get_capabilities(&adapter);
-        // Prefer a non-sRGB format so the existing colour math (which assumes
-        // linear-space writes) doesn't get gamma-corrected by the surface.
-        let surface_format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
-            .unwrap_or(caps.formats[0]);
-
-        let config = wgpu::SurfaceConfiguration {
-            // `RENDER_ATTACHMENT` for the deferred 2-D + bar-grid passes;
-            // `COPY_SRC` so `WgpuGfxCtx::read_screenshot` can blit the
-            // post-render surface contents to a staging buffer for the
-            // capture-pixels path.  The Take-Screenshot button needs this.
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            format: surface_format,
-            width: size.width.max(1),
-            height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
-            desired_maximum_frame_latency: 2,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-        };
-        surface.configure(&device, &config);
-
-        Self {
-            device: Arc::new(device),
-            queue: Arc::new(queue),
-            surface,
-            surface_format,
-            config,
-        }
-    }
-
-    fn resize(&mut self, w: u32, h: u32) {
-        if w == 0 || h == 0 {
-            return;
-        }
-        self.config.width = w;
-        self.config.height = h;
-        self.surface.configure(&self.device, &self.config);
-    }
-}
-
 #[allow(deprecated)]
 fn main() {
     let event_loop = EventLoop::new().expect("event loop");
@@ -203,10 +129,22 @@ fn main() {
     // so we can apply it as initial attributes; full UI state is also handed
     // to `build_demo_ui` below to restore open windows / panels / positions.
     let initial_state = load_saved_state();
-    let (start_w, start_h) = match initial_state.as_ref() {
-        Some(s) => (s.window_w.unwrap_or(1280), s.window_h.unwrap_or(720)),
-        None => (1280, 720),
-    };
+    // The saved size is PHYSICAL px (see the save site in the `Resized` arm).
+    // Sanitise it against the primary monitor so an already-corrupted state
+    // file — e.g. the DPI-ratchet bug that grew the size past the GPU's max
+    // texture dimension every launch — recovers instead of panicking
+    // `Surface::configure`.
+    let saved_size = initial_state.as_ref().and_then(|s| match (s.window_w, s.window_h) {
+        (Some(w), Some(h)) => Some((w, h)),
+        _ => None,
+    });
+    // Provisional sanitise WITHOUT monitor info: winit 0.30 exposes monitors on
+    // the `Window` (and `ActiveEventLoop`), not the pre-run `EventLoop`, so the
+    // real display size isn't available until the window exists.  The fallback
+    // ceiling already floors tiny values and caps an over-large size below the
+    // GPU max; we refine against the actual monitor right after creation.
+    let (mut start_w, mut start_h) =
+        window_size::sanitize_restored_window_size(saved_size, None);
     let start_maximized = initial_state
         .as_ref()
         .map(|s| s.window_maximized)
@@ -219,7 +157,10 @@ fn main() {
     let window_attributes = WindowAttributes::default()
         .with_title("agg-gui — Demo (wgpu)")
         .with_window_icon(app_window_icon())
-        .with_inner_size(LogicalSize::new(start_w, start_h))
+        // PHYSICAL px: the saved size was stored in physical pixels, so restore
+        // in the same unit — using `LogicalSize` here re-multiplies by the
+        // monitor scale factor on every launch (the DPI-ratchet crash).
+        .with_inner_size(PhysicalSize::new(start_w, start_h))
         .with_maximized(start_maximized)
         .with_visible(false);
 
@@ -229,6 +170,23 @@ fn main() {
             .expect("create window"),
     );
     agg_gui::set_device_scale(window.scale_factor());
+
+    // Refine the restored size against the window's real monitor now that it
+    // exists.  This shrinks a size larger than the display (e.g. a state file
+    // corrupted by the old DPI-ratchet bug) back onto the monitor before the
+    // window is shown.  The window is still hidden, so any resize here is
+    // invisible; `gpu.resize` (and the surface clamp) cover the case where
+    // `request_inner_size` is applied asynchronously.
+    if let Some(monitor) = window.primary_monitor().or_else(|| window.current_monitor()) {
+        let m = monitor.size();
+        let (w, h) =
+            window_size::sanitize_restored_window_size(saved_size, Some((m.width, m.height)));
+        if (w, h) != (start_w, start_h) {
+            let _ = window.request_inner_size(PhysicalSize::new(w, h));
+            start_w = w;
+            start_h = h;
+        }
+    }
 
     let mut gpu = Gpu::new(Arc::clone(&window));
     let init_w = gpu.config.width as f32;
@@ -363,6 +321,11 @@ fn main() {
                     let is_max = window.is_maximized();
                     window_maximized.set(is_max);
                     if !is_max {
+                        // winit's `Resized` reports PHYSICAL px. This is the
+                        // canonical stored unit — it must round-trip via
+                        // `PhysicalSize` on restore (see window creation), never
+                        // `LogicalSize`, or the size ratchets up by the DPI
+                        // scale factor every launch.
                         last_windowed_w = win_w;
                         last_windowed_h = win_h;
                     }
@@ -695,87 +658,4 @@ fn paint_frame(
     }
 
     frame.present();
-}
-
-/// How to handle the result of `Surface::get_current_texture`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum SurfaceAcquire {
-    /// Texture is usable — render into it.
-    Present,
-    /// Surface configuration is stale (`Outdated`/`Lost`): reconfigure with
-    /// the current config and try once more THIS frame.
-    Reconfigure,
-    /// Transient (`Timeout`/`Occluded`/`Validation`): skip the frame.
-    Skip,
-}
-
-/// Decide how to handle a surface-acquire status.  Split out as a pure
-/// function so the resize-recovery policy is unit-testable without a live GPU
-/// surface (the no-payload variants are constructible in tests).
-///
-/// The key case is `Outdated`/`Lost`.  These fire right after a window resize
-/// reconfigures the swapchain — the previously acquired textures no longer
-/// match.  The old code lumped them into the catch-all `None` skip, so the
-/// frame was dropped and the freshly-resized surface stayed BLACK until some
-/// unrelated event (mouse move, hover) happened to request another redraw.
-/// Reconfiguring and retrying in the same frame paints the new swapchain
-/// immediately, so the resize lands a visible frame on the first try.
-fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAcquire {
-    use wgpu::CurrentSurfaceTexture as T;
-    match status {
-        T::Success(_) | T::Suboptimal(_) => SurfaceAcquire::Present,
-        T::Outdated | T::Lost => SurfaceAcquire::Reconfigure,
-        T::Timeout | T::Occluded | T::Validation => SurfaceAcquire::Skip,
-    }
-}
-
-/// Acquire the next surface texture, recovering from a stale swapchain by
-/// reconfiguring and retrying once.  Returns `None` (skip frame) only for
-/// genuinely transient failures so the caller never paints into a stale view.
-fn acquire_frame(gpu: &Gpu) -> Option<wgpu::SurfaceTexture> {
-    use wgpu::CurrentSurfaceTexture as T;
-    let first = gpu.surface.get_current_texture();
-    match surface_acquire_action(&first) {
-        SurfaceAcquire::Present => match first {
-            T::Success(f) | T::Suboptimal(f) => Some(f),
-            _ => None,
-        },
-        SurfaceAcquire::Skip => None,
-        SurfaceAcquire::Reconfigure => {
-            // `configure` takes `&self`; the config is unchanged (the resize
-            // handler already updated width/height) — we just re-bind it.
-            gpu.surface.configure(&gpu.device, &gpu.config);
-            match gpu.surface.get_current_texture() {
-                T::Success(f) | T::Suboptimal(f) => Some(f),
-                _ => None,
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{surface_acquire_action, SurfaceAcquire};
-    use wgpu::CurrentSurfaceTexture as T;
-
-    #[test]
-    fn stale_swapchain_reconfigures_instead_of_skipping() {
-        // This is the resize-black-screen regression: Outdated/Lost must drive
-        // a reconfigure-and-retry, NOT a silent skip.
-        assert_eq!(
-            surface_acquire_action(&T::Outdated),
-            SurfaceAcquire::Reconfigure
-        );
-        assert_eq!(
-            surface_acquire_action(&T::Lost),
-            SurfaceAcquire::Reconfigure
-        );
-    }
-
-    #[test]
-    fn transient_failures_skip_the_frame() {
-        assert_eq!(surface_acquire_action(&T::Timeout), SurfaceAcquire::Skip);
-        assert_eq!(surface_acquire_action(&T::Occluded), SurfaceAcquire::Skip);
-        assert_eq!(surface_acquire_action(&T::Validation), SurfaceAcquire::Skip);
-    }
 }
