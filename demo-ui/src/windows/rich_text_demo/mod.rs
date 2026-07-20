@@ -222,7 +222,10 @@ fn build_picker(
         // Nothing open — an empty, zero-size layer.
         return Box::new(SizedBox::new().with_width(0.0).with_height(0.0));
     }
-    let allow_none = kind == PickerKind::Highlight;
+    // The "No Color (Pass Through)" checkbox is OFF for both rich-text pickers:
+    // the owner reported it as confusing in this context. The core
+    // `ColorWheelPicker` still supports it via `with_allow_none` for other hosts.
+    let allow_none = false;
 
     // Snapshot the committed document + selection and suspend undo feeding for
     // the duration of the dialog. Live previewing exec's a fresh `SetTextColor`
@@ -244,11 +247,11 @@ fn build_picker(
         },
         PickerKind::Highlight => match common.highlight {
             Some(Some(c)) => c,
-            // Uniform "no highlight" opens on pass-through (alpha 0 → the
-            // picker checks its "No Color" box).
-            Some(None) => Color::rgba(0.0, 0.0, 0.0, 0.0),
-            // Mixed highlight: a sensible default the user can adjust.
-            None => Color::rgb(1.0, 0.92, 0.23),
+            // No existing / mixed highlight: open on a visible default. With the
+            // "No Color" checkbox gone (allow_none off) nothing can clear the
+            // picker's pass_through flag, so a zero-alpha seed would strand it
+            // emitting None forever and a highlight could never be applied.
+            _ => Color::rgb(1.0, 0.92, 0.23),
         },
         PickerKind::None => unreachable!("guarded above"),
     };
@@ -303,8 +306,9 @@ fn build_picker(
 }
 
 /// Apply a picker colour to the selection for the given `kind`. Text colour
-/// only applies a concrete colour (a text run always has one); highlight also
-/// forwards `None` — the picker's "No Color" choice removes the highlight.
+/// only applies a concrete colour (a text run always has one); highlight
+/// forwards `opt` through `SetHighlight`, which clears on `None` (the picker no
+/// longer offers a "No Color" choice here, so `opt` is always `Some`).
 fn apply_color(handle: &RichEditHandle, kind: PickerKind, opt: Option<Color>) {
     match kind {
         PickerKind::TextColor => {

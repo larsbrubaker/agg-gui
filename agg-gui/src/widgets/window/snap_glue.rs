@@ -17,14 +17,27 @@ impl Window {
             return;
         }
         let targets = crate::snap::targets_snapshot();
+        // The registry and guides live in canvas-absolute space (see
+        // `widget_impl`'s `register_target`). A nested modal dialog's `bounds`
+        // are slot-local, so translate into canvas space by the cached slot
+        // offset before snapping, then translate the snapped rect back.  Zero
+        // offset for a top-level window makes this a no-op.
+        let (ox, oy) = self.world_offset.get();
+        let candidate = Rect::new(
+            self.bounds.x + ox,
+            self.bounds.y + oy,
+            self.bounds.width,
+            self.bounds.height,
+        );
         let result = crate::snap::compute_snap(
-            self.bounds,
+            candidate,
             self.snap_id,
             &targets,
             crate::snap::DEFAULT_THRESHOLD,
             crate::snap::SnapMode::Move,
         );
-        self.bounds = snap(result.rect);
+        let r = result.rect;
+        self.bounds = snap(Rect::new(r.x - ox, r.y - oy, r.width, r.height));
         crate::snap::set_guides(result.guides);
     }
 
@@ -38,14 +51,25 @@ impl Window {
         }
         let targets = crate::snap::targets_snapshot();
         let edge = resize_dir_to_snap_edge(dir);
+        // Same canvas-absolute translation as `apply_move_snap` — resize snaps
+        // against the same registry, so a nested dialog's slot-local bounds must
+        // be lifted into canvas space and the result folded back.
+        let (ox, oy) = self.world_offset.get();
+        let candidate = Rect::new(
+            self.bounds.x + ox,
+            self.bounds.y + oy,
+            self.bounds.width,
+            self.bounds.height,
+        );
         let result = crate::snap::compute_snap(
-            self.bounds,
+            candidate,
             self.snap_id,
             &targets,
             crate::snap::DEFAULT_THRESHOLD,
             crate::snap::SnapMode::Resize(edge),
         );
-        self.bounds = snap(result.rect);
+        let r = result.rect;
+        self.bounds = snap(Rect::new(r.x - ox, r.y - oy, r.width, r.height));
         crate::snap::set_guides(result.guides);
     }
 }

@@ -262,6 +262,22 @@ pub struct Window {
     /// `Snappable` uses it to skip self-matches in the snap engine's
     /// target list.
     snap_id: crate::snap::SnapId,
+
+    /// Canvas-absolute origin offset of the slot this window nests in —
+    /// i.e. `canvas_absolute_origin − bounds.origin`, in logical Y-up units.
+    /// Zero for a top-level window (bounds already canvas-absolute); non-zero
+    /// for a modal dialog nested in an overlay slot, where `bounds` are
+    /// slot-local.
+    ///
+    /// The snap engine and its registry both work in canvas-absolute space, but
+    /// `apply_move_snap` runs during `on_event` with no `DrawCtx` to derive the
+    /// ancestor offset. So we cache it here at modal-paint time (see
+    /// [`paint::clamp_modal_into_viewport`]) where the accumulated root
+    /// transform is available, and the snap path folds it into both the snap
+    /// candidate and the registered target rect. The cached value is at worst
+    /// one frame stale relative to the drag; the host slot rarely moves while
+    /// the user drags the dialog, so this is acceptable.
+    world_offset: Cell<(f64, f64)>,
 }
 
 impl Window {
@@ -342,6 +358,7 @@ impl Window {
             on_raised: None,
             live_content: false,
             snap_id: crate::snap::next_snap_id(),
+            world_offset: Cell::new((0.0, 0.0)),
         }
     }
 

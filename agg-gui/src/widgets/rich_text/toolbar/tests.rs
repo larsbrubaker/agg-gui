@@ -178,6 +178,74 @@ fn bold_toggle_reflects_tri_state() {
     assert_eq!(toolbar.common_style_of_selection().bold, Some(false));
 }
 
+// ── Colour picker: "No Color" checkbox is OFF in the rich-text host ────────
+
+/// Recursively collect every descendant `type_name` under `w` (inclusive of
+/// the built dialog subtree), so a test can assert on the presence/absence of a
+/// particular control anywhere in the overlay's widget tree.
+fn descendant_type_names(w: &dyn Widget, out: &mut Vec<&'static str>) {
+    out.push(w.type_name());
+    for c in w.children() {
+        descendant_type_names(c.as_ref(), out);
+    }
+}
+
+/// Open the toolbar's colour picker for the swatch at `row1_index` and return
+/// the flattened `type_name`s of the whole overlay subtree. The picker cell is
+/// flipped by clicking the swatch; a re-layout drives the overlay `Rebuilder`
+/// to build the dialog before we introspect it.
+fn open_picker_type_names(row1_index: usize) -> Vec<&'static str> {
+    let (mut toolbar, handle) = toolbar_over(RichDoc::from_blocks(vec![Block::plain("hi")]));
+    handle.select_all();
+    toolbar.layout(Size::new(600.0, 100.0));
+
+    {
+        let col = &mut toolbar.children_mut()[0];
+        let row1 = &mut col.children_mut()[0];
+        let swatch = &mut row1.children_mut()[row1_index];
+        let b = swatch.bounds();
+        let pos = Point::new(b.width * 0.5, b.height * 0.5);
+        swatch.on_event(&Event::MouseDown { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+        swatch.on_event(&Event::MouseUp { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+    }
+    toolbar.layout(Size::new(600.0, 100.0));
+    assert!(handle.is_previewing(), "opening the swatch begins a preview session");
+
+    let mut names = Vec::new();
+    descendant_type_names(toolbar.children()[1].as_ref(), &mut names);
+    names
+}
+
+/// The Highlight picker must NOT expose the "No Color (Pass Through)" checkbox
+/// in the rich-text toolbar: the user reported it as confusing here. (The core
+/// `ColorWheelPicker` still supports it via `with_allow_none` for other hosts.)
+///
+/// The checkbox is the picker's only `Checkbox` child, so its absence anywhere
+/// in the built overlay subtree proves `allow_none` is off.
+#[test]
+fn highlight_picker_has_no_no_color_checkbox() {
+    // Row 1 without families: B/I/U/S(0-3), size combo(4), text-colour(5),
+    // highlight(6).
+    let names = open_picker_type_names(6);
+    assert!(
+        !names.contains(&"Checkbox"),
+        "Highlight picker must not build a \"No Color (Pass Through)\" checkbox; \
+         tree was {names:?}"
+    );
+}
+
+/// The Text-colour picker must likewise omit the checkbox (it never applied a
+/// `None` colour anyway, and the toggle is confusing).
+#[test]
+fn text_color_picker_has_no_no_color_checkbox() {
+    let names = open_picker_type_names(5);
+    assert!(
+        !names.contains(&"Checkbox"),
+        "Text-colour picker must not build a \"No Color (Pass Through)\" checkbox; \
+         tree was {names:?}"
+    );
+}
+
 // ── Drop guard: dropping mid-preview unwinds the session ───────────────────
 
 /// Dropping the toolbar while its colour dialog is open mid-preview must cancel

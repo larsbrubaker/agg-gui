@@ -199,6 +199,15 @@ pub(super) fn clamp_modal_into_viewport(window: &mut Window, ctx: &dyn DrawCtx) 
     ctx.root_transform().transform(&mut ox, &mut oy);
     let root_x = ox / scale;
     let root_y = oy / scale;
+    // Cache the slot's canvas-absolute origin offset for the snap path, which
+    // has no DrawCtx during `on_event`. `root_x/root_y` is the window's local
+    // (0,0) in canvas space; subtracting the slot-local `bounds.origin` yields
+    // the ancestor (slot) offset — zero for a top-level window. Captured BEFORE
+    // the clamp shifts `bounds` below so both terms are in the same (pre-clamp)
+    // frame. See `Window::world_offset`.
+    window
+        .world_offset
+        .set((root_x - window.bounds.x, root_y - window.bounds.y));
     let max_x = (vp.width - window.bounds.width).max(0.0);
     let max_y = (vp.height - window.bounds.height).max(0.0);
     let dx = root_x.clamp(0.0, max_x) - root_x;

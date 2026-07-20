@@ -478,7 +478,19 @@ impl Widget for Window {
         {
             use crate::snap::Snappable;
             if self.is_snap_target() {
-                crate::snap::register_target(self.snap_id, self.bounds);
+                // Register in canvas-absolute space so peers (whose bounds are
+                // canvas-absolute) snap against our TRUE on-screen edges. A
+                // nested modal dialog's `bounds` are slot-local; lift them by the
+                // cached slot offset (zero for a top-level window). The offset is
+                // captured at modal-paint time and is at worst one frame stale.
+                let (ox, oy) = self.world_offset.get();
+                let abs = Rect::new(
+                    self.bounds.x + ox,
+                    self.bounds.y + oy,
+                    self.bounds.width,
+                    self.bounds.height,
+                );
+                crate::snap::register_target(self.snap_id, abs);
             } else {
                 crate::snap::unregister_target(self.snap_id);
             }

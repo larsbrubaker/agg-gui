@@ -104,17 +104,21 @@ fn initial_color(handle: &RichEditHandle, kind: PickerKind) -> Color {
         },
         PickerKind::Highlight => match common.highlight {
             Some(Some(c)) => c,
-            // Uniform "no highlight" opens on pass-through (alpha 0).
-            Some(None) => Color::rgba(0.0, 0.0, 0.0, 0.0),
-            None => Color::rgb(1.0, 0.92, 0.23),
+            // No existing / mixed highlight: open on a visible default. (The old
+            // alpha-0 seed pre-checked the "No Color" box; with that box gone,
+            // `allow_none` is off and nothing can clear the picker's
+            // `pass_through` flag — a zero-alpha seed would strand it emitting
+            // `None` forever, so a highlight could never be applied.)
+            _ => Color::rgb(1.0, 0.92, 0.23),
         },
         PickerKind::None => Color::rgb(0.2, 0.45, 0.88),
     }
 }
 
 /// Apply a picker colour to the selection for `kind`.  Text colour only applies
-/// a concrete colour; highlight also forwards `None` (the "No Color" choice
-/// removes the highlight).
+/// a concrete colour; highlight forwards `opt` through `SetHighlight`, which
+/// clears the highlight on `None` (the picker no longer offers a "No Color"
+/// choice here, so in practice `opt` is always `Some`).
 fn apply_color(handle: &RichEditHandle, kind: PickerKind, opt: Option<Color>) {
     match kind {
         PickerKind::TextColor => {
@@ -136,7 +140,10 @@ fn build_picker_dialog(
     if kind == PickerKind::None {
         return Box::new(SizedBox::new().with_width(0.0).with_height(0.0));
     }
-    let allow_none = kind == PickerKind::Highlight;
+    // The "No Color (Pass Through)" checkbox is OFF for both rich-text pickers:
+    // the owner reported it as confusing in this context. The core
+    // `ColorWheelPicker` still supports it via `with_allow_none` for other hosts.
+    let allow_none = false;
 
     // Snapshot the committed document + selection and suspend undo feeding for
     // the duration of the dialog: live previewing exec's a fresh colour on every
@@ -193,4 +200,54 @@ fn build_picker_dialog(
         close_picker.set(PickerKind::None);
         crate::animation::request_draw();
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widgets::rich_text::model::{Block, InlineStyle, RichDoc};
+    use crate::widgets::rich_text::view::SharedResolver;
+    use crate::widgets::rich_text::RichTextEdit;
+
+    const FONT_BYTES: &[u8] = include_bytes!("../../../../../demo/assets/CascadiaCode.ttf");
+
+    fn handle_over(doc: RichDoc) -> RichEditHandle {
+        let font = Arc::new(Font::from_slice(FONT_BYTES).expect("test font loads"));
+        let resolver: SharedResolver = Rc::new(move |_: &InlineStyle| Arc::clone(&font));
+        let editor = RichTextEdit::new(doc, resolver);
+        let handle = editor.handle();
+        handle.select_all();
+        handle
+    }
+
+    /// Regression: with the "No Color" checkbox removed (`allow_none` off), the
+    /// highlight picker must NOT open in pass-through. It previously seeded an
+    /// alpha-0 colour to pre-check that box; with the box gone nothing can clear
+    /// the picker's `pass_through` flag, so a zero-alpha seed would strand it
+    /// emitting `None` forever — the user could never apply a highlight to
+    /// un-highlighted text. The seed must therefore be a visible default.
+    #[test]
+    fn highlight_seed_over_plain_text_is_visible_not_pass_through() {
+        let handle = handle_over(RichDoc::from_blocks(vec![Block::plain("hi")]));
+        // Sanity: a plain selection reports a uniform "no highlight".
+        assert_eq!(
+            handle.common_style_of_selection().highlight,
+            Some(None),
+            "plain text is uniformly un-highlighted"
+        );
+
+        let seed = initial_color(&handle, PickerKind::Highlight);
+        assert!(seed.a > 0.0, "highlight seed must be opaque, got alpha {}", seed.a);
+
+        // Build the picker exactly as production does (allow_none off) and prove
+        // it is NOT stuck in pass-through — it yields a concrete colour.
+        let font = Arc::new(Font::from_slice(FONT_BYTES).expect("test font loads"));
+        let picker = ColorWheelPicker::new(seed, font)
+            .with_allow_none(false)
+            .with_show_alpha(true);
+        assert!(
+            picker.current_color().is_some(),
+            "highlight picker must not open in pass-through (would emit None forever)"
+        );
+    }
 }

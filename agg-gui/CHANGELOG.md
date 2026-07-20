@@ -28,8 +28,22 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   touch-synthesised (previously the very first touch's mouse-move looked like
   desktop input).
 
+### Changed
+
+- **Rich-text colour pickers no longer show "No Color (Pass Through)".** The
+  checkbox confused the rich-text flow; the core `ColorWheelPicker` keeps the
+  feature behind `with_allow_none` for other hosts. The Highlight picker's
+  seed over un-highlighted text is now a visible default instead of
+  transparent (an alpha-0 seed would have stranded the picker emitting `None`
+  with the checkbox gone).
+
 ### Fixed
 
+- **Nested modal windows snap in canvas space.** A modal dialog hosted in an
+  overlay slot (e.g. the rich-text colour panel) fed its slot-local bounds to
+  the snap engine and registry, so it snapped to phantom edges and corrupted
+  other windows' snap targets. The window now caches its canvas-absolute
+  offset at paint time and snaps/registers in canvas space.
 - **Two-finger twist no longer jumps wildly at the ±π seam.** The gesture
   recogniser normalised rotation only after averaging per-finger deltas, so a
   finger sweeping through the atan2 seam (every half-turn of a real twist)
