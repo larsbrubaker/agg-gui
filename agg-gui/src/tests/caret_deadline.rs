@@ -7,9 +7,11 @@
 //! * `App::next_draw_deadline` must surface a focused editor's next 500 ms flip
 //!   boundary — walked up through the container tree — so the native shell can
 //!   arm `ControlFlow::WaitUntil(t)`. An unfocused tree schedules no wake.
-//! * The loop-facing accessor read-and-clears the `animation` scheduled-draw
-//!   channel and re-arms cleanly across successive boundaries, so a shell that
-//!   consumes the deadline every iteration keeps getting the next one.
+//! * The loop-facing accessor reads the `animation` scheduled-draw channel
+//!   *non-destructively* and re-arms cleanly across successive boundaries, so a
+//!   shell that reads the deadline every idle iteration keeps arming the same
+//!   pending wake (the reactive-host lost-wakeup fix). The channel drains only
+//!   on a frame clear or when the deadline comes due (surfaced via `wants_draw`).
 
 use super::*;
 use crate::text::Font;
@@ -77,12 +79,13 @@ fn focused_editor_deadline_reaches_app_root() {
     );
 }
 
-/// The loop-facing accessor drains the `animation` scheduled-draw channel and
-/// re-arms across two boundaries. A shell reads `next_draw_deadline()` every
-/// iteration; each read must reflect only what the latest frame registered, so
-/// the second arm supersedes the first and a drained channel reports `None`.
+/// The loop-facing accessor reads the `animation` scheduled-draw channel
+/// **non-destructively** and re-arms cleanly across boundaries. A shell reads
+/// `next_draw_deadline()` every idle iteration; successive reads must report
+/// the SAME pending deadline (so an intervening non-repainting event cannot
+/// strand the wake), and the channel drains only on a frame clear.
 #[test]
-fn loop_accessor_clears_and_rearms_scheduled_channel() {
+fn loop_accessor_is_nondestructive_and_rearms_scheduled_channel() {
     // A plain (unfocused) tree contributes no widget deadline, isolating the
     // animation scheduled-draw channel that `App::next_draw_deadline` merges.
     let root = Container::new().with_padding(4.0);
@@ -95,19 +98,30 @@ fn loop_accessor_clears_and_rearms_scheduled_channel() {
         "no scheduled draw after a clear"
     );
 
-    // First boundary armed (as a widget would during paint).
+    // A boundary armed (as a widget would during paint).
     crate::animation::request_draw_after(Duration::from_millis(500));
     let first = app
         .next_draw_deadline()
         .expect("scheduled draw should be surfaced");
 
-    // The accessor read-and-clears: a second read with nothing re-armed is None.
-    assert!(
-        app.next_draw_deadline().is_none(),
-        "the scheduled channel must be cleared once consumed"
+    // Reading is non-destructive: a second idle read still sees the SAME
+    // pending deadline, so the host re-arms `WaitUntil` idempotently and can
+    // never lose the scheduled wake (the reactive-host lost-wakeup fix).
+    let again = app
+        .next_draw_deadline()
+        .expect("the scheduled deadline must persist across reads (lost-wakeup fix)");
+    assert_eq!(
+        first, again,
+        "successive idle reads report the same pending deadline"
     );
 
-    // Next frame re-arms the following boundary; the accessor serves it fresh.
+    // A frame clear (start of paint) drains the channel; the next frame re-arms
+    // the following boundary and the accessor serves it fresh.
+    crate::animation::clear_draw_request();
+    assert!(
+        app.next_draw_deadline().is_none(),
+        "a frame clear drains the scheduled channel"
+    );
     crate::animation::request_draw_after(Duration::from_millis(500));
     let second = app
         .next_draw_deadline()

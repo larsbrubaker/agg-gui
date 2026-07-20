@@ -300,10 +300,13 @@ impl App {
     pub fn next_draw_deadline(&self) -> Option<web_time::Instant> {
         // Two schedule channels feed the host's WaitUntil: per-widget
         // deadlines (cursor blink) from the tree walk, and the global
-        // `animation::request_draw_after` thread-local (read-and-clear;
-        // callers re-arm each frame). Serve the earliest.
+        // `animation::request_draw_after` thread-local. Both are read
+        // non-destructively so a host can re-arm `WaitUntil` idempotently
+        // every idle iteration — an intervening non-repainting event can no
+        // longer strand the scheduled wake. A due global deadline surfaces
+        // separately through `animation::wants_draw`. Serve the earliest.
         let widget = self.root.next_draw_deadline();
-        let scheduled = crate::animation::take_next_draw_deadline();
+        let scheduled = crate::animation::peek_next_draw_deadline();
         match (widget, scheduled) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (deadline, None) | (None, deadline) => deadline,

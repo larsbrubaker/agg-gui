@@ -495,4 +495,54 @@ mod tests {
         );
         assert!(r.y >= 0.0 && r.y + r.height <= viewport.height, "vertically inside: {r:?}");
     }
+
+    /// Reactive-host regression for the scheduled-draw lost-wakeup fix. After
+    /// the controller arms its hover delay in one tooltip pass, the deadline
+    /// must surface through [`crate::animation::wants_draw`] on its own once it
+    /// comes due — with no second explicit paint request. That is exactly the
+    /// signal a reactive host needs to draw the frame that reveals the tip.
+    ///
+    /// Deliberately uses the REAL wall clock (no test clock) with a short
+    /// initial delay: the controller's `should_show` reads `tooltip_now()`
+    /// while the arm goes through `animation::request_draw_after`
+    /// (`Instant::now`). Those are independent clocks, so pinning the test
+    /// clock would let real time drift past the animation deadline while the
+    /// controller thinks no time passed. Sharing one wall clock keeps the two
+    /// machines consistent; the sleep is kept short.
+    #[test]
+    fn armed_hover_delay_surfaces_through_wants_draw() {
+        reset_tooltip_test_state();
+        reset();
+        set_tooltip_test_clock(None); // real wall clock drives both machines
+        super::super::timings::set_tooltip_timings(
+            super::super::timings::TooltipTimings::from_initial_delay(Duration::from_millis(20)),
+        );
+        let _g = Guard;
+
+        let mut app = App::new(Box::new(Tipped::new("Bold")));
+        app.layout(Size::new(800.0, 600.0));
+
+        hover(&mut app, 400.0, 300.0);
+        // Simulate the start-of-frame clear, then run the tooltip pass that
+        // arms the hover delay via `request_draw_after`.
+        crate::animation::clear_draw_request();
+        app.update_tooltips_for_test();
+
+        assert!(
+            crate::animation::peek_next_draw_deadline().is_some(),
+            "the tooltip pass armed a scheduled draw for the hover delay"
+        );
+        assert!(
+            !crate::animation::wants_draw(),
+            "the hover delay has not elapsed yet, so no immediate draw"
+        );
+
+        std::thread::sleep(Duration::from_millis(40));
+
+        assert!(
+            crate::animation::wants_draw(),
+            "once the hover delay is due, wants_draw() surfaces it so a \
+             reactive host draws the frame that shows the tip"
+        );
+    }
 }

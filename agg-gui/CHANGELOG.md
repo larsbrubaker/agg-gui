@@ -66,6 +66,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- **Scheduled draws could be silently lost in reactive hosts.** The
+  scheduled-draw channel (`animation::request_draw_after`) was read
+  destructively, so a reactive host armed `ControlFlow::WaitUntil` from a
+  read-and-cleared deadline. Any intervening event that did not itself repaint
+  (cursor jitter, `ModifiersChanged`, IME/focus chatter, spurious wake) left
+  the next idle iteration with an empty cell and replaced `WaitUntil` with a
+  plain `Wait`, stranding the wake — so tooltips (and historically cursor
+  blink, scrollbar fades, grace-close) never fired in Reactive run mode though
+  they worked in Continuous. The channel is now read non-destructively
+  (`peek_next_draw_deadline`) so hosts re-arm `WaitUntil` idempotently every
+  idle iteration, and a due deadline surfaces through `wants_draw()` — making
+  it indistinguishable from an immediate `request_draw`, so no host can lose
+  it.
 - **Nested modal windows snap in canvas space.** A modal dialog hosted in an
   overlay slot (e.g. the rich-text colour panel) fed its slot-local bounds to
   the snap engine and registry, so it snapped to phantom edges and corrupted

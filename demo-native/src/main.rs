@@ -511,15 +511,13 @@ fn main() {
                     &screenshot_capture_seq,
                 );
             }
-            // A scheduled draw deadline elapsed (`request_draw_after` /
-            // `next_draw_deadline`): the deadline is read-and-cleared when the
-            // `WaitUntil` was armed, so the timer wake itself must drive the
-            // frame. `AboutToWait`'s `wants_draw()` check alone is not enough —
-            // the scheduled-draw channel (tooltip grace-close, scrollbar fades,
-            // ProgressBar, Undoer in-flux) never sets `needs_draw`, and even the
-            // cursor-blink channel isn't reliably observed on a bare timer wake.
-            // Forcing a redraw here wakes every deadline consumer; the caret
-            // blinks on its own timer with the mouse untouched.
+            // A scheduled `WaitUntil` deadline fired. Belt-and-braces only:
+            // correctness no longer depends on catching this event, because
+            // the scheduled channel is now read non-destructively
+            // (`peek_next_draw_deadline`) and a due deadline surfaces through
+            // `wants_draw()` in the next `AboutToWait` regardless. Requesting a
+            // redraw here just trims the latency between the deadline and the
+            // frame that honours it.
             Event::NewEvents(winit::event::StartCause::ResumeTimeReached { .. }) => {
                 window.request_redraw();
             }
@@ -558,6 +556,11 @@ fn main() {
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
                     frame_history.borrow_mut().push(last_frame_ms as f32);
                 }
+                // `wants_draw()` now covers due scheduled deadlines, so Poll
+                // when it (or continuous mode) is true. Otherwise re-arm
+                // `WaitUntil` from the non-destructive peek: this runs every
+                // idle iteration and is idempotent, so an intervening
+                // non-repainting event can no longer lose the scheduled wake.
                 let want_next = continuous || app.wants_draw();
                 elwt.set_control_flow(if want_next {
                     ControlFlow::Poll

@@ -263,16 +263,19 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
                 );
             }
 
-            // A scheduled draw deadline elapsed (`request_draw_after`):
-            // the deadline was consumed when WaitUntil was armed, so the
-            // timer wake itself must trigger the frame — without this,
-            // every scheduled-draw consumer (tooltip delays, demo
-            // drivers) stalls after its first deadline.
+            // A scheduled `WaitUntil` deadline fired. Belt-and-braces only:
+            // the scheduled channel is read non-destructively
+            // (`peek_next_draw_deadline`) and a due deadline surfaces through
+            // `wants_draw()` on the next `AboutToWait`, so correctness no
+            // longer depends on catching this event — it only trims latency.
             Event::NewEvents(winit::event::StartCause::ResumeTimeReached { .. }) => {
                 window.request_redraw();
             }
 
             Event::AboutToWait => {
+                // `wants_draw()` covers due scheduled deadlines; otherwise
+                // re-arm `WaitUntil` from the non-destructive peek every idle
+                // iteration (idempotent — cannot lose the scheduled wake).
                 if app.wants_draw() {
                     window.request_redraw();
                     elwt.set_control_flow(ControlFlow::Poll);
