@@ -14,6 +14,7 @@ use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::widgets::multi_click::SelectGranularity;
 use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary};
 
+use super::super::commands::RichCommand;
 use super::super::model::DocPos;
 use super::scroll::ScrollMove;
 use super::RichTextEdit;
@@ -202,6 +203,20 @@ impl RichTextEdit {
             Key::Char(c) if !cmd => {
                 let mut buf = [0u8; 4];
                 self.core.borrow_mut().insert(c.encode_utf8(&mut buf));
+            }
+            // Tab / Shift+Tab indent or outdent every touched block, reusing the
+            // toolbar's exact commands (a list item's "level" is `block.indent`,
+            // so the same command covers list items and plain blocks). Consuming
+            // these keeps the App from stealing focus mid-edit; Ctrl/Meta+Tab is
+            // left Ignored so it stays a focus-traversal escape hatch (the App
+            // routes it directly anyway — this is defence in depth).
+            Key::Tab if !cmd => {
+                let command = if shift {
+                    RichCommand::Outdent
+                } else {
+                    RichCommand::Indent
+                };
+                self.core.borrow_mut().exec(&command);
             }
             _ => return EventResult::Ignored,
         }

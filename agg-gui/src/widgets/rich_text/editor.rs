@@ -54,6 +54,8 @@ mod tests;
 mod handle_api_tests;
 #[cfg(test)]
 mod preview_dirty_tests;
+#[cfg(test)]
+mod tab_indent_tests;
 
 /// An interactive, styled rich-text editor.
 pub struct RichTextEdit {

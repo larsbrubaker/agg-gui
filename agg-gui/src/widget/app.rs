@@ -323,7 +323,14 @@ impl App {
     /// Key pressed. Delivered to the focused widget first, then to the visible
     /// widget tree as an unconsumed key if focus ignores it.
     pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
-        if key == Key::Tab {
+        // Ctrl/Meta+Tab is a *direct* focus-traversal escape hatch: it advances
+        // focus without ever offering the event to the focused widget, so a
+        // widget that consumes plain Tab (e.g. the rich-text editor indenting)
+        // can never trap keyboard focus. Plain Tab / Shift+Tab are instead
+        // dispatched to the focused widget first (below) and only fall through
+        // to traversal when it Ignores them — that "consume Tab to opt out" is
+        // the established way for an editor to keep Tab for itself.
+        if key == Key::Tab && (mods.ctrl || mods.meta) {
             self.advance_focus(!mods.shift);
             return;
         }
@@ -345,6 +352,13 @@ impl App {
             EventResult::Ignored
         };
         if !result.is_consumed() {
+            // A plain Tab / Shift+Tab the focused widget didn't consume falls
+            // back to focus traversal — the default — instead of the
+            // unconsumed-key / global-handler path other keys take.
+            if key == Key::Tab {
+                self.advance_focus(!mods.shift);
+                return;
+            }
             let result = dispatch_unconsumed_key(self.root.as_mut(), &key, mods);
             if !result.is_consumed() {
                 if let Some(ref mut handler) = self.global_key_handler {

@@ -42,6 +42,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `on_mouse_*` pipeline automatically, so every platform shell gets identical
   single-finger behaviour by forwarding raw touches only.
 
+- **Tab / Shift+Tab indent in the rich-text editor.** A focused `RichTextEdit`
+  now maps **Tab** → increase indent and **Shift+Tab** → decrease indent for
+  every block the selection touches (a list item's level is its block indent),
+  reusing the toolbar's Increase/Decrease-indent commands and landing as one
+  undo step each. The keys are consumed so focus traversal no longer fires
+  mid-edit; **Ctrl/Meta+Tab** still traverses focus as the escape hatch. This is
+  now general: `App::on_key_down` offers plain Tab / Shift+Tab to the focused
+  widget first and only advances focus when the widget ignores it.
+
 ### Breaking / behavioural changes
 
 - **Platform shells must no longer synthesize mouse events from touches.**
