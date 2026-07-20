@@ -167,7 +167,8 @@ pub use widgets::{
     ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
     SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter, Stack, TabView, Table,
     TableBuilder, TableColumn, TableRows, TextArea, TextEditState, TextField, TextHAlign,
-    TextVAlign, ToggleSwitch, Tooltip, TopMenu, TreeView, Window,
+    TextVAlign, ToggleSwitch, Tooltip, TooltipTimings, TopMenu, TreeView, Window,
+    set_tooltip_timings, tooltip_timings,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

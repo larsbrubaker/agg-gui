@@ -22,7 +22,6 @@
 //! it closes.
 
 use std::time::Duration;
-use web_time::Instant;
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
@@ -31,9 +30,8 @@ use crate::geometry::{Point, Rect, Size};
 use crate::widget::{dispatch_event_dyn, hit_test_subtree, paint_subtree, Widget};
 
 use super::render::current_tooltip_viewport;
-use super::{
-    Tooltip, SCREEN_MARGIN, TOOLTIP_GAP, TOOLTIP_INITIAL_DELAY, TOOLTIP_PAD_X, TOOLTIP_PAD_Y,
-};
+use super::timings::{tooltip_now, tooltip_timings};
+use super::{Tooltip, SCREEN_MARGIN, TOOLTIP_GAP, TOOLTIP_PAD_X, TOOLTIP_PAD_Y};
 
 /// Grace period the interactive tip stays open after the pointer leaves both
 /// the anchor and the tip, so crossing the small gap between them (or a
@@ -46,7 +44,8 @@ const INTERACTIVE_MAX_WIDTH: f64 = 320.0;
 impl Tooltip {
     /// Advance the open/close state machine. Called once per overlay paint.
     ///
-    /// Opens after [`TOOLTIP_INITIAL_DELAY`] of anchor hover; stays open while
+    /// Opens after [`TooltipTimings::initial_delay`](super::TooltipTimings) of
+    /// anchor hover; stays open while
     /// the pointer is over the anchor or the tip; closes once it has left both
     /// for [`TOOLTIP_CLOSE_GRACE`]. Schedules wall-clock wakeups so the delayed
     /// transitions happen without continuous repainting.
@@ -54,13 +53,14 @@ impl Tooltip {
         if !self.tip_open {
             if self.hovered {
                 if let Some(started) = self.hover_started_at {
-                    let elapsed = started.elapsed();
-                    if elapsed >= TOOLTIP_INITIAL_DELAY {
+                    let initial = tooltip_timings().initial_delay;
+                    let elapsed = tooltip_now().saturating_duration_since(started);
+                    if elapsed >= initial {
                         self.tip_open = true;
                         self.close_requested_at = None;
                         crate::animation::request_draw();
                     } else {
-                        crate::animation::request_draw_after(TOOLTIP_INITIAL_DELAY - elapsed);
+                        crate::animation::request_draw_after(initial - elapsed);
                     }
                 }
             }
@@ -74,7 +74,7 @@ impl Tooltip {
 
         match self.close_requested_at {
             Some(since) => {
-                let elapsed = since.elapsed();
+                let elapsed = tooltip_now().saturating_duration_since(since);
                 if elapsed >= TOOLTIP_CLOSE_GRACE {
                     self.close_tip();
                     crate::animation::request_draw();
@@ -83,7 +83,7 @@ impl Tooltip {
                 }
             }
             None => {
-                self.close_requested_at = Some(Instant::now());
+                self.close_requested_at = Some(tooltip_now());
                 crate::animation::request_draw_after(TOOLTIP_CLOSE_GRACE);
             }
         }
@@ -231,13 +231,13 @@ impl Tooltip {
                 self.cursor = *pos;
 
                 if self.hovered && !was {
-                    self.hover_started_at = Some(Instant::now());
-                    crate::animation::request_draw_after(TOOLTIP_INITIAL_DELAY);
+                    self.hover_started_at = Some(tooltip_now());
+                    crate::animation::request_draw_after(tooltip_timings().initial_delay);
                 }
                 if self.hovered || self.tip_hovered {
                     self.close_requested_at = None;
                 } else if self.tip_open && self.close_requested_at.is_none() {
-                    self.close_requested_at = Some(Instant::now());
+                    self.close_requested_at = Some(tooltip_now());
                     crate::animation::request_draw_after(TOOLTIP_CLOSE_GRACE);
                 }
                 crate::animation::request_draw();

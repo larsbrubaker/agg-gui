@@ -16,7 +16,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   tooltip out of the box; Undo/Redo include the editor's real key binding. Opt out
   with `RichTextToolbar::with_tooltips(false)`. `Tooltip` also forwards its child's
   size constraints, so wrapping a constrained control (e.g. a `ComboBox`) no longer
-  drops its `max_size`.
+  drops its `max_size`. Tooltips now honour proper hover timing driven by system
+  settings where available: an initial hover delay (seeded on native Windows from
+  `SPI_GETMOUSEHOVERTIME`), a much shorter *reshow* delay when moving directly
+  between adjacent tipped controls, hide-on-press / hide-on-leave, and an autopop
+  timeout that dismisses a tip left sitting under a still pointer. Configure via
+  `set_tooltip_timings(TooltipTimings { .. })`.
 - **`touch_emulation` module** — the primary-finger touch→mouse emulation
   (tap = left click, drag past 8 px = middle-button pan) moved from the web
   shell's JS into core as the unit-tested `TouchMouseEmu` state machine.

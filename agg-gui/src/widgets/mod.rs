@@ -113,6 +113,6 @@ pub use text_context_menu::{TextContextMenu, TextMenuAction};
 pub use text_field::{TextField, TextFieldTheme};
 pub use text_field_core::TextEditState;
 pub use toggle_switch::ToggleSwitch;
-pub use tooltip::Tooltip;
+pub use tooltip::{set_tooltip_timings, tooltip_timings, Tooltip, TooltipTimings};
 pub use tree_view::{NodeIcon, TreeView};
 pub use window::{ClickAwayAction, CloseReason, Window};

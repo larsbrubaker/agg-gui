@@ -26,8 +26,16 @@
 
 mod interactive;
 mod render;
+mod timings;
 
 pub(crate) use render::{begin_tooltip_frame, paint_global_tooltips};
+pub use timings::{set_tooltip_timings, tooltip_timings, TooltipTimings};
+#[doc(hidden)]
+pub use timings::{
+    advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock,
+};
+
+use timings::{last_tooltip_visible_at, note_tooltip_visible, tooltip_now};
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -43,12 +51,10 @@ use crate::widget::{current_mouse_world, Widget};
 
 use render::{submit_tooltip, TooltipRequest};
 
-/// Standard initial hover delay before the tooltip appears.
-///
-/// Windows common controls default to roughly 500ms. MatterCAD uses
-/// 0.6s. Use 500ms and make it wall-clock based so the delay is not
-/// dependent on redraw frequency.
-const TOOLTIP_INITIAL_DELAY: Duration = Duration::from_millis(500);
+/// Compile-time default initial hover delay, kept as a stable reference for
+/// tests and for interactive-tip code paths. Runtime code reads the (possibly
+/// OS-overridden) value via [`tooltip_timings`]; this equals the default there.
+const TOOLTIP_INITIAL_DELAY: Duration = timings::DEFAULT_INITIAL_DELAY;
 pub(super) const TOOLTIP_FONT_SIZE: f64 = 12.0;
 pub(super) const TOOLTIP_PAD_X: f64 = 8.0;
 pub(super) const TOOLTIP_PAD_Y: f64 = 6.0;
@@ -88,6 +94,19 @@ pub struct Tooltip {
     /// to invalidate when the delayed tooltip appears or disappears,
     /// not just when hover state changes.
     tooltip_visible: bool,
+    /// Delay to apply for the current hover, captured when the pointer entered:
+    /// the full initial delay, or the shorter reshow delay if another tip was
+    /// visible within the reshow window (move-along-the-toolbar).
+    pending_delay: Duration,
+    /// When the current tip became visible, used to auto-dismiss after
+    /// [`TooltipTimings::autopop`].
+    tip_shown_at: Option<Instant>,
+    /// Suppresses (re)showing until the pointer leaves and re-enters. Set on any
+    /// mouse press over the child and on autopop, mirroring Windows: a click or a
+    /// timed-out tip stays hidden until you move off and back onto the control.
+    suppressed: bool,
+    /// Whether a mouse button is currently held; tips never show while pressed.
+    pointer_down: bool,
     /// Last known cursor position in local coordinates.
     cursor: Point,
 
@@ -136,6 +155,10 @@ impl Tooltip {
             hover_started_at: None,
             hovered: false,
             tooltip_visible: false,
+            pending_delay: TOOLTIP_INITIAL_DELAY,
+            tip_shown_at: None,
+            suppressed: false,
+            pointer_down: false,
             cursor: Point::ORIGIN,
             font,
             lines: text_to_lines(text),
@@ -231,20 +254,102 @@ impl Tooltip {
         self
     }
 
-    fn show_tip(&self) -> bool {
-        self.hovered
-            && self
-                .hover_started_at
-                .map(|started| started.elapsed() >= TOOLTIP_INITIAL_DELAY)
-                .unwrap_or(false)
+    /// Delay to apply for a hover starting now: the shorter reshow delay when a
+    /// tip was visible within the reshow window, otherwise the full initial
+    /// delay. Captured at pointer-enter into [`Self::pending_delay`].
+    fn effective_delay(&self) -> Duration {
+        let t = tooltip_timings();
+        match last_tooltip_visible_at() {
+            Some(at) if tooltip_now().saturating_duration_since(at) <= t.reshow_window() => {
+                t.reshow_delay
+            }
+            _ => t.initial_delay,
+        }
     }
 
+    /// Whether the tip should be visible right now, ignoring autopop (handled
+    /// separately in [`Self::update_visibility`]).
+    fn should_show_tip(&self) -> bool {
+        if self.suppressed || self.pointer_down || !self.hovered {
+            return false;
+        }
+        match self.hover_started_at {
+            Some(started) => {
+                tooltip_now().saturating_duration_since(started) >= self.pending_delay
+            }
+            None => false,
+        }
+    }
+
+    /// Advance the lightweight tip's visibility state machine. Applies autopop,
+    /// flips [`Self::tooltip_visible`], warms the shared reshow window, and
+    /// schedules the wall-clock wake that drives the delayed show / auto-dismiss
+    /// without continuous repainting. Returns whether the tip is now visible.
+    ///
+    /// Split out from `paint_overlay` so the state machine is unit-testable
+    /// without a `DrawCtx`.
+    fn update_visibility(&mut self) -> bool {
+        // Auto-dismiss a tip that has sat open too long, and keep it hidden
+        // until the pointer leaves and re-enters (Windows AUTOPOP behaviour).
+        if self.tooltip_visible {
+            if let Some(shown) = self.tip_shown_at {
+                let autopop = tooltip_timings().autopop;
+                let elapsed = tooltip_now().saturating_duration_since(shown);
+                if elapsed >= autopop {
+                    self.hide_tip();
+                    self.suppressed = true;
+                    return false;
+                }
+                // Re-arm the autopop wake every visible frame: the deadline is
+                // read-and-cleared by the host each frame, so an intervening
+                // repaint would otherwise drop it and the dismiss never fires.
+                crate::animation::request_draw_after(autopop - elapsed);
+            }
+        }
+
+        if self.should_show_tip() {
+            if !self.tooltip_visible {
+                self.tooltip_visible = true;
+                self.tip_shown_at = Some(tooltip_now());
+                crate::animation::request_draw();
+                // Wake at the autopop deadline so a still pointer still dismisses.
+                crate::animation::request_draw_after(tooltip_timings().autopop);
+            }
+            note_tooltip_visible();
+            return true;
+        }
+
+        if self.tooltip_visible {
+            self.hide_tip();
+        } else if let Some(remaining) = self.remaining_delay() {
+            // Not yet time to show: schedule the wake at the show deadline.
+            if remaining.is_zero() {
+                crate::animation::request_draw();
+            } else {
+                crate::animation::request_draw_after(remaining);
+            }
+        }
+        false
+    }
+
+    /// Time left before the pending show fires, or `None` when no show is
+    /// pending (not hovered, suppressed, or a button is held).
     fn remaining_delay(&self) -> Option<Duration> {
-        if !self.hovered {
+        if !self.hovered || self.suppressed || self.pointer_down {
             return None;
         }
-        let elapsed = self.hover_started_at?.elapsed();
-        Some(TOOLTIP_INITIAL_DELAY.saturating_sub(elapsed))
+        let elapsed = tooltip_now().saturating_duration_since(self.hover_started_at?);
+        Some(self.pending_delay.saturating_sub(elapsed))
+    }
+
+    /// Hide the tip and clear its display timer, invalidating so the overlay
+    /// clears on the next paint.
+    fn hide_tip(&mut self) {
+        if self.tooltip_visible {
+            crate::animation::request_draw();
+        }
+        self.tooltip_visible = false;
+        self.tip_shown_at = None;
     }
 
     fn active_lines(&self) -> Vec<TooltipLine> {
@@ -352,29 +457,10 @@ impl Widget for Tooltip {
             return;
         }
 
-        let should_show = self.show_tip();
-
-        if self.hovered && !should_show {
-            if let Some(remaining) = self.remaining_delay() {
-                if remaining.is_zero() {
-                    crate::animation::request_draw();
-                } else {
-                    crate::animation::request_draw_after(remaining);
-                }
-            }
-        }
-
-        if should_show != self.tooltip_visible {
-            self.tooltip_visible = should_show;
-            // The visible tooltip is a global overlay, but the request
-            // is produced by this widget during paint.  Bump the normal
-            // invalidation path so retained ancestors and the global
-            // tooltip queue redraw when the delayed tooltip appears or
-            // disappears.
-            crate::animation::request_draw();
-        }
-
-        if !should_show {
+        // Advance the delay/reshow/autopop state machine. It handles its own
+        // invalidation and schedules the wall-clock wake for the delayed show
+        // or auto-dismiss, so no busy-repaint loop is needed.
+        if !self.update_visibility() {
             return;
         }
 
@@ -431,14 +517,18 @@ impl Widget for Tooltip {
                 self.hovered = self.hit_test(*pos);
                 self.cursor = *pos;
                 if self.hovered && !was {
-                    self.hover_started_at = Some(Instant::now());
-                    crate::animation::request_draw_after(TOOLTIP_INITIAL_DELAY);
-                } else if !self.hovered {
+                    // Entering: start the hover timer, picking the reshow delay
+                    // when the subsystem is still warm from a recent tip.
+                    self.hover_started_at = Some(tooltip_now());
+                    self.pending_delay = self.effective_delay();
+                    self.suppressed = false;
+                    crate::animation::request_draw_after(self.pending_delay);
+                } else if !self.hovered && was {
+                    // Leaving: reset so the next entry re-arms cleanly and any
+                    // press/autopop suppression clears.
                     self.hover_started_at = None;
-                    if self.tooltip_visible {
-                        self.tooltip_visible = false;
-                        crate::animation::request_draw();
-                    }
+                    self.suppressed = false;
+                    self.hide_tip();
                 }
                 if self.hovered != was {
                     crate::animation::request_draw();
@@ -448,13 +538,29 @@ impl Widget for Tooltip {
                     .map(|child| child.on_event(event))
                     .unwrap_or(EventResult::Ignored)
             }
+            Event::MouseDown { .. } => {
+                // A press over the control hides the tip and keeps it hidden
+                // until the pointer leaves and re-enters.
+                self.pointer_down = true;
+                self.suppressed = true;
+                self.hide_tip();
+                self.children
+                    .first_mut()
+                    .map(|child| child.on_event(event))
+                    .unwrap_or(EventResult::Ignored)
+            }
+            Event::MouseUp { .. } => {
+                self.pointer_down = false;
+                self.children
+                    .first_mut()
+                    .map(|child| child.on_event(event))
+                    .unwrap_or(EventResult::Ignored)
+            }
             Event::MouseWheel { .. } => {
                 self.hovered = false;
                 self.hover_started_at = None;
-                if self.tooltip_visible {
-                    self.tooltip_visible = false;
-                    crate::animation::request_draw();
-                }
+                self.suppressed = false;
+                self.hide_tip();
                 self.children
                     .first_mut()
                     .map(|child| child.on_event(event))

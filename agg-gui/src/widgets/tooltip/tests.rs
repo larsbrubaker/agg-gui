@@ -222,3 +222,175 @@ fn interactive_forwards_click_into_content() {
     assert_eq!(t.on_event(&click), EventResult::Consumed);
     assert_eq!(clicks.load(Ordering::SeqCst), 1);
 }
+
+// --- Lightweight tooltip timing state machine ----------------------------
+//
+// These drive the delay/reshow/autopop/press-hide behaviour against an
+// injected clock so no real time passes. `ClockGuard` pins the clock at a
+// base instant and resets all tooltip timing globals on drop (including on a
+// test panic via unwind) so sibling tests are unaffected.
+
+struct ClockGuard;
+
+impl Drop for ClockGuard {
+    fn drop(&mut self) {
+        reset_tooltip_test_state();
+    }
+}
+
+/// Pin the tooltip clock at `base` and clear the shared reshow window / timings.
+fn pin_clock(base: Instant) -> ClockGuard {
+    reset_tooltip_test_state();
+    set_tooltip_test_clock(Some(base));
+    ClockGuard
+}
+
+fn text_tooltip() -> Tooltip {
+    let mut t = Tooltip::new(
+        Box::new(ClickChild::new(Arc::new(AtomicUsize::new(0)))),
+        "tip",
+        test_font(),
+    );
+    t.layout(Size::new(20.0, 20.0));
+    t
+}
+
+fn move_to(t: &mut Tooltip, x: f64, y: f64) {
+    t.on_event(&Event::MouseMove {
+        pos: Point::new(x, y),
+    });
+}
+
+#[test]
+fn no_tip_before_initial_delay() {
+    let _g = pin_clock(Instant::now());
+    let timings = tooltip_timings();
+    let mut t = text_tooltip();
+
+    move_to(&mut t, 10.0, 10.0); // enter
+    assert!(!t.update_visibility());
+
+    // Just short of the initial delay: still hidden.
+    advance_tooltip_test_clock(timings.initial_delay - Duration::from_millis(1));
+    assert!(!t.update_visibility());
+}
+
+#[test]
+fn tip_appears_after_initial_delay() {
+    let _g = pin_clock(Instant::now());
+    let timings = tooltip_timings();
+    let mut t = text_tooltip();
+
+    move_to(&mut t, 10.0, 10.0); // enter
+    advance_tooltip_test_clock(timings.initial_delay);
+    assert!(t.update_visibility());
+    assert!(t.tooltip_visible);
+}
+
+#[test]
+fn reshow_delay_applies_between_controls_within_window() {
+    let base = Instant::now();
+    let _g = pin_clock(base);
+    let timings = tooltip_timings();
+
+    // Control A: hover long enough to show its tip, warming the subsystem.
+    let mut a = text_tooltip();
+    move_to(&mut a, 10.0, 10.0);
+    advance_tooltip_test_clock(timings.initial_delay);
+    assert!(a.update_visibility());
+    move_to(&mut a, 100.0, 100.0); // leave A (tip hides, window stays warm)
+
+    // A short move to control B, still inside the reshow window.
+    advance_tooltip_test_clock(timings.reshow_delay);
+    let mut b = text_tooltip();
+    move_to(&mut b, 10.0, 10.0); // enter B
+    assert_eq!(
+        b.pending_delay, timings.reshow_delay,
+        "moving between tipped controls should use the reshow delay"
+    );
+
+    // B is not shown before the (short) reshow delay elapses...
+    assert!(!b.update_visibility());
+    // ...but appears once it does — well before a full initial delay.
+    advance_tooltip_test_clock(timings.reshow_delay);
+    assert!(b.update_visibility());
+}
+
+#[test]
+fn full_initial_delay_after_reshow_window_expires() {
+    let base = Instant::now();
+    let _g = pin_clock(base);
+    let timings = tooltip_timings();
+
+    // Control A shows and warms the subsystem, then the pointer leaves.
+    let mut a = text_tooltip();
+    move_to(&mut a, 10.0, 10.0);
+    advance_tooltip_test_clock(timings.initial_delay);
+    assert!(a.update_visibility());
+    move_to(&mut a, 100.0, 100.0); // leave A
+
+    // Idle past the reshow window so the subsystem goes cold again.
+    advance_tooltip_test_clock(timings.reshow_window() + Duration::from_millis(1));
+    let mut b = text_tooltip();
+    move_to(&mut b, 10.0, 10.0);
+    assert_eq!(
+        b.pending_delay, timings.initial_delay,
+        "after the reshow window expires the full initial delay applies again"
+    );
+}
+
+#[test]
+fn press_hides_tip_and_suppresses_reshow() {
+    let _g = pin_clock(Instant::now());
+    let timings = tooltip_timings();
+    let mut t = text_tooltip();
+
+    move_to(&mut t, 10.0, 10.0);
+    advance_tooltip_test_clock(timings.initial_delay);
+    assert!(t.update_visibility());
+
+    // A press over the control hides the tip immediately...
+    t.on_event(&Event::MouseDown {
+        pos: Point::new(10.0, 10.0),
+        button: MouseButton::Left,
+        modifiers: Default::default(),
+    });
+    assert!(!t.tooltip_visible);
+
+    // ...and it stays hidden while still hovering, even after more time.
+    t.on_event(&Event::MouseUp {
+        pos: Point::new(10.0, 10.0),
+        button: MouseButton::Left,
+        modifiers: Default::default(),
+    });
+    advance_tooltip_test_clock(timings.initial_delay);
+    assert!(!t.update_visibility());
+}
+
+#[test]
+fn autopop_dismisses_tip_after_timeout() {
+    let _g = pin_clock(Instant::now());
+    let timings = tooltip_timings();
+    let mut t = text_tooltip();
+
+    move_to(&mut t, 10.0, 10.0);
+    advance_tooltip_test_clock(timings.initial_delay);
+    assert!(t.update_visibility());
+
+    // Pointer just sits there: after the autopop timeout the tip dismisses.
+    advance_tooltip_test_clock(timings.autopop);
+    assert!(!t.update_visibility());
+    assert!(!t.tooltip_visible);
+
+    // It does not re-show while the pointer stays put (suppressed until re-entry).
+    advance_tooltip_test_clock(timings.initial_delay);
+    assert!(!t.update_visibility());
+}
+
+#[test]
+fn custom_timings_from_initial_delay_derive_reshow_and_autopop() {
+    let initial = Duration::from_millis(300);
+    let derived = TooltipTimings::from_initial_delay(initial);
+    assert_eq!(derived.reshow_delay, initial / 5);
+    assert_eq!(derived.autopop, initial * 10);
+}
