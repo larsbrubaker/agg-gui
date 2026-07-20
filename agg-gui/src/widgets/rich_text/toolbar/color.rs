@@ -39,6 +39,7 @@ use super::PickerKind;
 
 const ICON_TEXT_COLOR: &str = "\u{F031}"; // "font"
 const ICON_HIGHLIGHT: &str = "\u{F043}"; // "tint"
+const ICON_REMOVE_HIGHLIGHT: &str = "\u{F12D}"; // "eraser"
 
 /// The text-colour swatch button (Font Awesome "font" glyph).
 pub(super) fn text_color_button(font: &Arc<Font>, picker: &Rc<Cell<PickerKind>>) -> Box<dyn Widget> {
@@ -48,6 +49,22 @@ pub(super) fn text_color_button(font: &Arc<Font>, picker: &Rc<Cell<PickerKind>>)
 /// The highlight swatch button (Font Awesome "tint" glyph).
 pub(super) fn highlight_button(font: &Arc<Font>, picker: &Rc<Cell<PickerKind>>) -> Box<dyn Widget> {
     color_button(font, ICON_HIGHLIGHT, picker, PickerKind::Highlight)
+}
+
+/// The Remove-highlight button (Font Awesome "eraser" glyph). A momentary action
+/// that clears the selection's highlight through `SetHighlight(None)` — the sole
+/// UI route to un-highlight text now that the colour picker dropped its "No
+/// Color (Pass Through)" checkbox. Routes through the same `handle.exec` command
+/// path the picker's apply uses (see [`apply_color`]).
+pub(super) fn remove_highlight_button(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
+    let click_handle = handle.clone();
+    Box::new(
+        Button::new(ICON_REMOVE_HIGHLIGHT, Arc::clone(font))
+            .with_font_size(13.0)
+            .with_subtle()
+            .with_active_fn(|| false)
+            .on_click(move || click_handle.exec(&RichCommand::SetHighlight(None))),
+    )
 }
 
 /// A colour swatch button that opens the floating picker for `kind`.

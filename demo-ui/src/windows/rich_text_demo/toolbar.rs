@@ -47,6 +47,7 @@ const ICON_UNDO: &str = "\u{F0E2}";
 const ICON_REDO: &str = "\u{F01E}";
 const ICON_TEXT_COLOR: &str = "\u{F031}"; // "font"
 const ICON_HIGHLIGHT: &str = "\u{F043}"; // "tint"
+const ICON_REMOVE_HIGHLIGHT: &str = "\u{F12D}"; // "eraser"
 
 /// Build the two-row toolbar.
 pub fn rich_toolbar(
@@ -109,6 +110,7 @@ fn row_one(
 
     row = row.add(color_button(font, ICON_TEXT_COLOR, picker, PickerKind::TextColor));
     row = row.add(color_button(font, ICON_HIGHLIGHT, picker, PickerKind::Highlight));
+    row = row.add(remove_highlight_button(font, handle));
 
     Box::new(row)
 }
@@ -263,6 +265,21 @@ fn color_button(
     )
 }
 
+/// A momentary button that clears the selection's highlight via
+/// `SetHighlight(None)` — the sole UI route to un-highlight text now that the
+/// colour picker dropped its "No Color" checkbox. Mirrors the library toolbar's
+/// [`remove_highlight_button`](agg_gui::widgets::rich_text::toolbar).
+fn remove_highlight_button(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
+    let click_handle = handle.clone();
+    Box::new(
+        Button::new(ICON_REMOVE_HIGHLIGHT, Arc::clone(font))
+            .with_font_size(13.0)
+            .with_subtle()
+            .with_active_fn(|| false)
+            .on_click(move || click_handle.exec(&RichCommand::SetHighlight(None))),
+    )
+}
+
 /// Font-family dropdown (the whole system catalog). Each family renders in its
 /// own face via the shared [`font_preview_combo`](crate::font_picker::font_preview_combo)
 /// builder — preview faces load lazily and refresh as they arrive. Selecting a
@@ -400,9 +417,9 @@ mod tests {
             child_type_names(toolbar.children()[0].as_ref()),
             [
                 "Button", "Button", "Button", "Button", "FontPicker", "ComboBox", "Button",
-                "Button",
+                "Button", "Button",
             ],
-            "row 1 lost a control (size combo or a colour button)"
+            "row 1 lost a control (size combo, a colour button, or remove-highlight)"
         );
 
         // Row 2: 3 alignments + ordered/bullet lists + outdent/indent + undo/redo.

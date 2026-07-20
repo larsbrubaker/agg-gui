@@ -5,15 +5,20 @@
 
 use std::sync::Arc;
 
+use crate::color::Color;
 use crate::event::{Event, Modifiers, MouseButton};
 use crate::geometry::{Point, Size};
 use crate::text::Font;
 use crate::widget::Widget;
+use crate::widgets::rich_text::commands::RichCommand;
 use crate::widgets::rich_text::model::{Block, InlineStyle, RichDoc, TextRun};
 use crate::widgets::rich_text::view::SharedResolver;
 use crate::widgets::rich_text::{RichEditHandle, RichTextEdit};
 
 use super::RichTextToolbar;
+
+/// Font Awesome "eraser" glyph the Remove-highlight button renders.
+const ICON_ERASER: &str = "\u{F12D}";
 
 const FONT_BYTES: &[u8] = include_bytes!("../../../../../demo/assets/CascadiaCode.ttf");
 
@@ -59,8 +64,8 @@ fn full_roster_with_families() {
     assert_eq!(rows.len(), 2, "two rows");
     assert_eq!(
         child_type_names(rows[0]),
-        ["Button", "Button", "Button", "Button", "ComboBox", "ComboBox", "Button", "Button"],
-        "row 1: B/I/U/S, family combo, size combo, text-colour, highlight"
+        ["Button", "Button", "Button", "Button", "ComboBox", "ComboBox", "Button", "Button", "Button"],
+        "row 1: B/I/U/S, family combo, size combo, text-colour, highlight, remove-highlight"
     );
     assert_eq!(child_type_names(rows[1]), vec!["Button"; 9], "row 2 roster");
 }
@@ -98,8 +103,8 @@ fn family_omitted_when_no_families() {
     let rows = rows(&toolbar);
     assert_eq!(
         child_type_names(rows[0]),
-        ["Button", "Button", "Button", "Button", "ComboBox", "Button", "Button"],
-        "row 1 without a family combo: B/I/U/S, size combo, two colour swatches"
+        ["Button", "Button", "Button", "Button", "ComboBox", "Button", "Button", "Button"],
+        "row 1 without a family combo: B/I/U/S, size combo, two colour swatches, remove-highlight"
     );
     let combo_count = child_type_names(rows[0]).iter().filter(|t| **t == "ComboBox").count();
     assert_eq!(combo_count, 1, "only the size ComboBox, no family ComboBox");
@@ -243,6 +248,63 @@ fn text_color_picker_has_no_no_color_checkbox() {
         !names.contains(&"Checkbox"),
         "Text-colour picker must not build a \"No Color (Pass Through)\" checkbox; \
          tree was {names:?}"
+    );
+}
+
+// ── Remove-highlight button clears the selection's highlight ───────────────
+
+/// Recursively test whether any descendant of `w` is a widget carrying a
+/// `("text", glyph)` property — i.e. a `Label` (or a `Button`'s label child)
+/// rendering `glyph`. Used to prove the eraser button exists in the tree.
+fn descendant_renders_glyph(w: &dyn Widget, glyph: &str) -> bool {
+    if w.properties().iter().any(|(k, v)| *k == "text" && v == glyph) {
+        return true;
+    }
+    w.children().iter().any(|c| descendant_renders_glyph(c.as_ref(), glyph))
+}
+
+/// The Remove-highlight button is the sole UI route to `SetHighlight(None)` now
+/// that the colour picker dropped its "No Color" checkbox. It must (a) exist in
+/// the toolbar tree (its eraser glyph) and (b) clear a highlighted selection to
+/// a uniform "no highlight" when clicked.
+#[test]
+fn remove_highlight_button_clears_selection_highlight() {
+    let (mut toolbar, handle) = toolbar_over(RichDoc::from_blocks(vec![Block::plain("hi")]));
+    handle.select_all();
+
+    // Apply a highlight so the selection reports a concrete, uniform colour.
+    let yellow = Color::from_rgb8(255, 240, 60);
+    handle.exec(&RichCommand::SetHighlight(Some(yellow)));
+    assert_eq!(
+        handle.common_style_of_selection().highlight,
+        Some(Some(yellow)),
+        "selection is uniformly highlighted before the click"
+    );
+
+    toolbar.layout(Size::new(600.0, 100.0));
+
+    // The eraser button must be present in the built toolbar tree.
+    assert!(
+        descendant_renders_glyph(toolbar.children()[0].as_ref(), ICON_ERASER),
+        "toolbar row must contain the Remove-highlight (eraser) button"
+    );
+
+    // Row 1 (no families): B/I/U/S(0-3), size(4), text-colour(5), highlight(6),
+    // remove-highlight(7).
+    let button = {
+        let col = &mut toolbar.children_mut()[0];
+        let row1 = &mut col.children_mut()[0];
+        &mut row1.children_mut()[7]
+    };
+    let b = button.bounds();
+    let pos = Point::new(b.width * 0.5, b.height * 0.5);
+    button.on_event(&Event::MouseDown { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+    button.on_event(&Event::MouseUp { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+
+    assert_eq!(
+        handle.common_style_of_selection().highlight,
+        Some(None),
+        "clicking Remove highlight cleared the selection's highlight to None"
     );
 }
 

@@ -35,7 +35,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   feature behind `with_allow_none` for other hosts. The Highlight picker's
   seed over un-highlighted text is now a visible default instead of
   transparent (an alpha-0 seed would have stranded the picker emitting `None`
-  with the checkbox gone).
+  with the checkbox gone). The rich-text toolbar gained a **Remove-highlight**
+  button (Font Awesome eraser) that issues `SetHighlight(None)` — the sole UI
+  route to un-highlight text now that the checkbox is gone.
 
 ### Fixed
 

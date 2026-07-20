@@ -415,6 +415,7 @@ impl RichTextToolbar {
         }
         if self.cfg.highlight {
             row = row.add(color::highlight_button(&self.font, &self.picker));
+            row = row.add(color::remove_highlight_button(&self.font, &self.handle));
         }
         Box::new(row)
     }
