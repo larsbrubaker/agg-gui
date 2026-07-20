@@ -241,6 +241,18 @@ impl Widget for FontPreviewCombo {
     fn properties(&self) -> Vec<(&'static str, String)> {
         self.combo.properties()
     }
+
+    // Forward hover-help to the inner combo so `with_tooltip` /
+    // `set_tooltip_text` attach a tip even though this wrapper carries no
+    // `WidgetBase` of its own — the central tooltip controller then reads it
+    // back through the same combo.
+    fn tooltip_text(&self) -> Option<&str> {
+        self.combo.tooltip_text()
+    }
+
+    fn set_tooltip_text(&mut self, text: Option<String>) {
+        self.combo.set_tooltip_text(text);
+    }
 }
 
 #[cfg(test)]

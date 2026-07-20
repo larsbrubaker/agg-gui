@@ -10,18 +10,28 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
-- **Rich-text toolbar tooltips (on by default).** Every `RichTextToolbar` control
-  (Bold/Italic/Underline/Strikethrough, alignment, lists, indent, undo/redo, font
-  size/family, text & highlight colour, remove-highlight) now carries a hover
-  tooltip out of the box; Undo/Redo include the editor's real key binding. Opt out
-  with `RichTextToolbar::with_tooltips(false)`. `Tooltip` also forwards its child's
-  size constraints, so wrapping a constrained control (e.g. a `ComboBox`) no longer
-  drops its `max_size`. Tooltips now honour proper hover timing driven by system
-  settings where available: an initial hover delay (seeded on native Windows from
-  `SPI_GETMOUSEHOVERTIME`), a much shorter *reshow* delay when moving directly
-  between adjacent tipped controls, hide-on-press / hide-on-leave, and an autopop
-  timeout that dismisses a tip left sitting under a still pointer. Configure via
-  `set_tooltip_timings(TooltipTimings { .. })`.
+- **First-class tooltip system.** Any widget can now declare hover help with no
+  wrapper: `WidgetBase` carries an optional `tooltip` string, exposed through the
+  universal `Widget::with_tooltip("…")` builder (and `set_tooltip_text` on a
+  `&mut dyn Widget`) — every widget that embeds a `WidgetBase` opts in for free,
+  and the controller reads it back via `Widget::tooltip_text`. A single central
+  controller in the `App`'s per-frame pass finds the deepest hovered tipped
+  widget, runs one app-wide timing state machine (so only one tip is ever
+  visible), and paints the tip in the global-overlay pass with edge-aware
+  placement (prefer below-right of the pointer, flip/clamp at the viewport edge).
+  Timing is system-driven where available: an initial hover delay (seeded on
+  native Windows from `SPI_GETMOUSEHOVERTIME`), a much shorter *reshow* delay when
+  moving directly between adjacent tipped controls, hide-on-press / hide-on-leave,
+  and an autopop timeout that dismisses a tip left sitting under a still pointer —
+  configure via `set_tooltip_timings(TooltipTimings { .. })`. The `Tooltip`
+  wrapper is now the **rich-content** path (a custom child widget tree as the tip,
+  à la egui `on_hover_ui`); it shares the same timing state, so simple text tips
+  should use `with_tooltip`. The `RichTextToolbar` and the demo toolbar were
+  migrated to `with_tooltip` (every control still self-documents; opt out with
+  `RichTextToolbar::with_tooltips(false)`, and Undo/Redo still include the
+  editor's real key binding). `Tooltip` also forwards its child's size
+  constraints, so wrapping a constrained control (e.g. a `ComboBox`) no longer
+  drops its `max_size`.
 - **`touch_emulation` module** — the primary-finger touch→mouse emulation
   (tap = left click, drag past 8 px = middle-button pan) moved from the web
   shell's JS into core as the unit-tested `TouchMouseEmu` state machine.

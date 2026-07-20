@@ -86,7 +86,6 @@ use crate::platform::primary_modifier_label;
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::flex::FlexColumn;
-use crate::widgets::tooltip::Tooltip;
 
 use super::commands::CommonStyle;
 use super::editor::RichEditHandle;
@@ -373,16 +372,17 @@ impl RichTextToolbar {
         self.root = root;
     }
 
-    /// Wrap `w` in a hover [`Tooltip`] labelled `text` when tooltips are enabled
-    /// (the default); otherwise return it untouched.  Centralises the toolbar's
-    /// default-on tooltip policy so every control participates uniformly and a
-    /// single [`with_tooltips`](Self::with_tooltips) toggle gates them all.
-    fn tip(&self, w: Box<dyn Widget>, text: impl Into<String>) -> Box<dyn Widget> {
+    /// Attach hover-help `text` to `w` via its [`WidgetBase`] when tooltips are
+    /// enabled (the default); otherwise return it untouched.  The central
+    /// tooltip controller (see [`crate::widgets::tooltip::controller`]) shows the
+    /// tip on hover — no wrapper widget.  Centralises the toolbar's default-on
+    /// policy so every control participates uniformly and a single
+    /// [`with_tooltips`](Self::with_tooltips) toggle gates them all.
+    fn tip(&self, mut w: Box<dyn Widget>, text: impl Into<String>) -> Box<dyn Widget> {
         if self.cfg.tooltips {
-            Box::new(Tooltip::new(w, text, Arc::clone(&self.font)))
-        } else {
-            w
+            w.set_tooltip_text(Some(text.into()));
         }
+        w
     }
 
     /// Row 1: inline character formatting, font family + size, colours.

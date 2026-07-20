@@ -225,6 +225,11 @@ impl App {
         let viewport = self.viewport_size;
         crate::widgets::combo_box::begin_combo_popup_frame(viewport);
         crate::widgets::tooltip::begin_tooltip_frame(viewport);
+        // Central tooltip pass: find the deepest hovered widget carrying a
+        // `with_tooltip` string and drive the app-wide tip state machine. Any
+        // resulting tip is submitted to the tooltip queue and painted below in
+        // the global-overlay drain, above all clips.
+        self.drive_tooltip_controller();
         // Recompute the multi-touch aggregate once per paint and publish
         // to the thread-local — widgets read it during `on_event` or
         // `paint` without an explicit `&App` reference.
@@ -602,6 +607,27 @@ impl App {
             .or_else(|| hit_test_subtree(self.root.as_ref(), pos))
     }
 
+    /// Feed the central tooltip controller from the current hover path: the
+    /// deepest hovered widget whose [`Widget::tooltip_text`] is `Some` supplies
+    /// the tip (its index-path identity + text), anchored at the pointer.
+    fn drive_tooltip_controller(&self) {
+        let target = self
+            .hovered
+            .as_deref()
+            .and_then(|path| deepest_tipped(self.root.as_ref(), path));
+        crate::widgets::tooltip::controller::drive(target, current_mouse_world());
+    }
+
+    /// Test hook: run the central tooltip pass without a full paint (no
+    /// `DrawCtx` needed). Mirrors what [`paint`](Self::paint) does after
+    /// `begin_tooltip_frame`, so a test can drive hover + clock + this and then
+    /// assert controller state.
+    #[cfg(test)]
+    pub fn update_tooltips_for_test(&self) {
+        crate::widgets::tooltip::begin_tooltip_frame(self.viewport_size);
+        self.drive_tooltip_controller();
+    }
+
     fn dispatch_mouse_move(&mut self, pos: Point) {
         let new_hit = self.compute_hit(pos);
 
@@ -695,4 +721,27 @@ impl App {
         let next_path = all[next_idx].clone();
         self.set_focus(Some(next_path));
     }
+}
+
+/// Walk the hover `path` from `root` and return the **deepest** widget along it
+/// whose [`Widget::tooltip_text`] is `Some`, as `(identity_path, text)`. The
+/// identity is the path prefix down to that widget, which the controller uses
+/// to detect target changes (moving to a different tipped control ⇒ reshow).
+/// A shallower tipped ancestor is used only when no deeper descendant has a tip.
+fn deepest_tipped(root: &dyn Widget, path: &[usize]) -> Option<(Vec<usize>, String)> {
+    let mut widget: &dyn Widget = root;
+    let mut best: Option<(usize, String)> = None;
+    if let Some(t) = widget.tooltip_text() {
+        best = Some((0, t.to_string()));
+    }
+    for (i, &idx) in path.iter().enumerate() {
+        let Some(child) = widget.children().get(idx) else {
+            break;
+        };
+        widget = child.as_ref();
+        if let Some(t) = widget.tooltip_text() {
+            best = Some((i + 1, t.to_string()));
+        }
+    }
+    best.map(|(depth, text)| (path[..depth].to_vec(), text))
 }

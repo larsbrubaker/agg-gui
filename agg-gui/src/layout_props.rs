@@ -332,7 +332,7 @@ impl std::ops::BitAnd for VAnchor {
 ///     pub fn with_max_size(mut self, s: Size)    -> Self { self.base.max_size = s; self }
 /// }
 /// ```
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct WidgetBase {
     /// Space outside this widget's bounds (read by the parent during layout).
@@ -359,6 +359,16 @@ pub struct WidgetBase {
     /// [`pixel_bounds::default_enforce_integer_bounds`] at construction;
     /// later global changes do NOT retroactively alter existing widgets.
     pub enforce_integer_bounds: bool,
+    /// Optional hover-help text.  When `Some`, the central tooltip controller
+    /// (see [`crate::widgets::tooltip`]) shows this string after the initial
+    /// hover delay whenever this widget is the deepest hovered tipped widget —
+    /// no wrapper needed.  This is the universal storage behind
+    /// [`Widget::with_tooltip`](crate::widget::Widget::with_tooltip) /
+    /// [`Widget::tooltip_text`](crate::widget::Widget::tooltip_text): any widget
+    /// that embeds a `WidgetBase` opts in for free.
+    ///
+    /// A `String` here is why `WidgetBase` is `Clone` but not `Copy`.
+    pub tooltip: Option<String>,
 }
 
 impl WidgetBase {
@@ -373,6 +383,7 @@ impl WidgetBase {
             min_size: Size::ZERO,
             max_size: Size::MAX,
             enforce_integer_bounds: crate::pixel_bounds::default_enforce_integer_bounds(),
+            tooltip: None,
         }
     }
 
@@ -396,6 +407,11 @@ impl WidgetBase {
     }
     pub fn with_max_size(mut self, s: Size) -> Self {
         self.max_size = s;
+        self
+    }
+    /// Attach hover-help text read by the central tooltip controller.
+    pub fn with_tooltip(mut self, text: impl Into<String>) -> Self {
+        self.tooltip = Some(text.into());
         self
     }
 

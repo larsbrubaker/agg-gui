@@ -40,34 +40,17 @@ fn toolbar_over(doc: RichDoc) -> (RichTextToolbar, RichEditHandle) {
     (RichTextToolbar::new(handle.clone(), font), handle)
 }
 
-/// A control's own `type_name`, peering through the hover-`Tooltip` wrapper that
-/// every control now carries by default — so roster assertions keep reading the
-/// underlying `Button` / `ComboBox`, not the wrapper.
-fn unwrap_tip(w: &dyn Widget) -> &dyn Widget {
-    if w.type_name() == "Tooltip" {
-        w.children()[0].as_ref()
-    } else {
-        w
-    }
-}
-
+/// Controls are no longer wrapped in a `Tooltip`: each carries its tip directly
+/// on its `WidgetBase`, so a control's `type_name` is read straight off the
+/// child. (Kept as a named helper for the roster assertions below.)
 fn child_type_names(w: &dyn Widget) -> Vec<&'static str> {
-    w.children()
-        .iter()
-        .map(|c| unwrap_tip(c.as_ref()).type_name())
-        .collect()
+    w.children().iter().map(|c| c.type_name()).collect()
 }
 
-/// The tip text a control carries, or `None` when it is not wrapped in a
-/// `Tooltip`. Reads the `Tooltip`'s `("tooltip", text)` inspector property.
+/// The tip text a control carries via the first-class tooltip system
+/// (`WidgetBase::tooltip`, read through [`Widget::tooltip_text`]), or `None`.
 fn tip_text(w: &dyn Widget) -> Option<String> {
-    if w.type_name() != "Tooltip" {
-        return None;
-    }
-    w.properties()
-        .into_iter()
-        .find(|(k, _)| *k == "tooltip")
-        .map(|(_, v)| v)
+    w.tooltip_text().map(str::to_string)
 }
 
 /// The two-row `FlexColumn` root and its rows.
@@ -176,8 +159,8 @@ fn default_controls_carry_expected_tooltips() {
     assert_eq!(row2[8].as_deref(), Some(format!("Redo ({m}+Y)").as_str()));
 }
 
-/// `with_tooltips(false)` ships a bare strip: no control is wrapped in a
-/// `Tooltip` anywhere in the toolbar tree.
+/// `with_tooltips(false)` ships a bare strip: no control anywhere in the toolbar
+/// tree carries a tip (and, as before, nothing is wrapped in a `Tooltip`).
 #[test]
 fn with_tooltips_false_wraps_nothing() {
     let (toolbar, _h) = toolbar_over(RichDoc::from_blocks(vec![Block::plain("hi")]));
@@ -191,6 +174,15 @@ fn with_tooltips_false_wraps_nothing() {
         !names.contains(&"Tooltip"),
         "with_tooltips(false) must not wrap any control; tree was {names:?}"
     );
+    assert!(
+        !any_descendant_has_tip(toolbar.children()[0].as_ref()),
+        "with_tooltips(false) must not set a tip on any control"
+    );
+}
+
+/// Whether any widget in the subtree carries a first-class tooltip.
+fn any_descendant_has_tip(w: &dyn Widget) -> bool {
+    w.tooltip_text().is_some() || w.children().iter().any(|c| any_descendant_has_tip(c.as_ref()))
 }
 
 // ── Command dispatch through a real handle ─────────────────────────────────

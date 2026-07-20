@@ -18,7 +18,7 @@ use std::sync::Arc;
 use agg_gui::platform::primary_modifier_label;
 use agg_gui::widgets::rich_text::{CommonStyle, ListKind};
 use agg_gui::{
-    Button, ComboBox, FlexRow, Font, RichCommand, RichEditHandle, TextHAlign, Tooltip, Widget,
+    Button, ComboBox, FlexRow, Font, RichCommand, RichEditHandle, TextHAlign, Widget,
 };
 
 use super::PickerKind;
@@ -62,10 +62,14 @@ pub fn rich_toolbar(
     Box::new(col)
 }
 
-/// Wrap `w` in a hover [`Tooltip`] labelled `text`. The demo mirrors the library
-/// toolbar's default-on tooltips ([`RichTextToolbar::with_tooltips`](agg_gui::widgets::rich_text::toolbar)).
-fn tip(w: Box<dyn Widget>, text: impl Into<String>, font: &Arc<Font>) -> Box<dyn Widget> {
-    Box::new(Tooltip::new(w, text, Arc::clone(font)))
+/// Attach hover-help `text` to `w` via the first-class tooltip system
+/// (`Widget::set_tooltip_text` → `WidgetBase::tooltip`); the central controller
+/// shows it on hover, no wrapper widget. Mirrors the library toolbar's
+/// default-on tooltips ([`RichTextToolbar::with_tooltips`](agg_gui::widgets::rich_text::toolbar)).
+/// `_font` is retained so call sites read uniformly with the library toolbar.
+fn tip(mut w: Box<dyn Widget>, text: impl Into<String>, _font: &Arc<Font>) -> Box<dyn Widget> {
+    w.set_tooltip_text(Some(text.into()));
+    w
 }
 
 /// Row 1: inline character formatting, font family + size, colours.

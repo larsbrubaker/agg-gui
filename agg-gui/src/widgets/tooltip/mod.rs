@@ -24,6 +24,7 @@
 //! )
 //! ```
 
+pub mod controller;
 mod interactive;
 mod render;
 mod timings;

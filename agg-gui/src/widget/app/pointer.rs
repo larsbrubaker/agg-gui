@@ -76,6 +76,9 @@ impl App {
         }
         let pos = super::keyboard_scroll::lift_to_world(screen);
         set_current_mouse_world(pos);
+        // A press hides any visible central tooltip and keeps it suppressed
+        // until the pointer leaves and re-enters a tipped widget.
+        crate::widgets::tooltip::controller::on_pointer_down();
         // Count this press so widgets running their own multi-click gesture
         // (Scene's background double-click) can detect an intervening press
         // even when a hosted child consumes it before it can bubble.
@@ -152,6 +155,7 @@ impl App {
         }
         let pos = super::keyboard_scroll::lift_to_world(screen);
         set_current_mouse_world(pos);
+        crate::widgets::tooltip::controller::on_pointer_up();
         let event = Event::MouseUp {
             pos,
             button,

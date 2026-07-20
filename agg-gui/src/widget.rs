@@ -604,6 +604,49 @@ pub trait Widget {
         None
     }
 
+    /// Hover-help text for the central tooltip controller, or `None`.
+    ///
+    /// This is the universal accessor the App's per-frame tooltip pass reads to
+    /// find the deepest hovered tipped widget. The default reads the embedded
+    /// [`WidgetBase::tooltip`], so **every widget that embeds a `WidgetBase`
+    /// participates for free** — set the text with
+    /// [`with_tooltip`](Self::with_tooltip) (chaining) or
+    /// [`set_tooltip_text`](Self::set_tooltip_text) (on a `&mut dyn Widget`).
+    /// A widget with no `WidgetBase`, or one that stores its tip elsewhere,
+    /// overrides this directly.
+    fn tooltip_text(&self) -> Option<&str> {
+        self.widget_base().and_then(|b| b.tooltip.as_deref())
+    }
+
+    /// Builder sugar: attach hover-help text, returning `self` for chaining.
+    ///
+    /// Available on every widget that embeds a [`WidgetBase`] with **zero
+    /// per-widget code** — it writes through [`widget_base_mut`](Self::widget_base_mut).
+    /// A widget without a `WidgetBase` silently ignores the call (there is
+    /// nowhere to store the text); such widgets should expose their own tip API.
+    /// Excluded from the trait object vtable via `where Self: Sized`, so the
+    /// trait stays object-safe.
+    fn with_tooltip(mut self, text: impl Into<String>) -> Self
+    where
+        Self: Sized,
+    {
+        if let Some(base) = self.widget_base_mut() {
+            base.tooltip = Some(text.into());
+        }
+        self
+    }
+
+    /// Object-safe setter counterpart of [`with_tooltip`](Self::with_tooltip),
+    /// callable on a `&mut dyn Widget` / `Box<dyn Widget>` (used by builders
+    /// that assemble a control tree from boxed widgets, e.g. toolbars). Writes
+    /// through [`widget_base_mut`](Self::widget_base_mut); a no-op for widgets
+    /// without a `WidgetBase`. Pass `None` to clear.
+    fn set_tooltip_text(&mut self, text: Option<String>) {
+        if let Some(base) = self.widget_base_mut() {
+            base.tooltip = text;
+        }
+    }
+
     /// Whether [`paint_subtree`] should snap this widget's incoming
     /// translation to the physical pixel grid.
     ///
