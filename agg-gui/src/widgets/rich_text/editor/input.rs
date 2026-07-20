@@ -176,6 +176,11 @@ impl RichTextEdit {
                 let target = self.pos_by_visual_line(caret, n);
                 self.core.borrow_mut().set_caret(target, shift);
             }
+            // Ctrl (or Alt) + Backspace/Delete removes a whole word, mirroring
+            // egui's `delete_previous_word` / `delete_next_word`. The span is
+            // exactly what a Ctrl+Arrow motion traverses (same `word_target`).
+            Key::Backspace if cmd || modifiers.alt => self.delete_word_backward(),
+            Key::Delete if cmd || modifiers.alt => self.delete_word_forward(),
             Key::Backspace => self.core.borrow_mut().backspace(),
             Key::Delete => self.core.borrow_mut().delete_forward(),
             Key::Enter => self.core.borrow_mut().split(),
@@ -339,6 +344,46 @@ impl RichTextEdit {
             }
             DocPos::new(caret.block, i)
         }
+    }
+
+    /// Delete from the caret back to the previous word boundary
+    /// (Ctrl/Alt+Backspace). An active selection takes precedence — only it is
+    /// removed, exactly as plain [`backspace`](RichEditCore::backspace) does.
+    /// The boundary is [`word_target`](Self::word_target)'s, so the deleted span
+    /// matches a Ctrl+ArrowLeft motion, including a merge into the previous block
+    /// when the caret sits at a block start.
+    fn delete_word_backward(&mut self) {
+        if !self.core.borrow().selection().is_empty() {
+            self.core.borrow_mut().backspace();
+            return;
+        }
+        let caret = self.core.borrow().caret();
+        let target = self.word_target(caret, -1);
+        if target == caret {
+            return;
+        }
+        // Select caret → target, then let `backspace` remove the selection: this
+        // is one document mutation (one `bump_doc`), hence one undo step, and
+        // reuses the cross-block merge path when `target` lies in a prior block.
+        self.core.borrow_mut().set_selection(caret, target);
+        self.core.borrow_mut().backspace();
+    }
+
+    /// Delete from the caret forward to the next word boundary
+    /// (Ctrl/Alt+Delete). Selection precedence and single-undo-step semantics
+    /// mirror [`delete_word_backward`](Self::delete_word_backward).
+    fn delete_word_forward(&mut self) {
+        if !self.core.borrow().selection().is_empty() {
+            self.core.borrow_mut().delete_forward();
+            return;
+        }
+        let caret = self.core.borrow().caret();
+        let target = self.word_target(caret, 1);
+        if target == caret {
+            return;
+        }
+        self.core.borrow_mut().set_selection(caret, target);
+        self.core.borrow_mut().delete_forward();
     }
 
     /// Caret/selection update for a fresh pointer press. `clicks` is the

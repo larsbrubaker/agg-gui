@@ -496,12 +496,23 @@ impl Widget for TextArea {
                 }
                 let shift = modifiers.shift;
                 let cmd = modifiers.ctrl || modifiers.meta;
+                // Word-wise navigation/deletion: Ctrl or Alt, matching egui
+                // (`alt || ctrl`) and TextField.
+                let word = modifiers.ctrl || modifiers.alt;
                 match key {
                     Key::ArrowLeft => {
-                        self.move_char(-1, shift);
+                        if word {
+                            self.move_word(-1, shift);
+                        } else {
+                            self.move_char(-1, shift);
+                        }
                     }
                     Key::ArrowRight => {
-                        self.move_char(1, shift);
+                        if word {
+                            self.move_word(1, shift);
+                        } else {
+                            self.move_char(1, shift);
+                        }
                     }
                     Key::ArrowUp => {
                         self.move_line(-1, shift);
@@ -542,16 +553,39 @@ impl Widget for TextArea {
                         self.move_lines(n, shift);
                     }
                     Key::Backspace => {
-                        self.delete(-1);
+                        if word {
+                            self.delete_word(-1);
+                        } else {
+                            self.delete(-1);
+                        }
                     }
                     Key::Delete => {
-                        self.delete(1);
+                        if word {
+                            self.delete_word(1);
+                        } else {
+                            self.delete(1);
+                        }
                     }
                     Key::Enter => {
                         self.insert_str("\n");
                     }
                     Key::Tab => {
-                        self.insert_str("    ");
+                        // Code-editor Tab: Shift+Tab always outdents; a plain
+                        // Tab over a multi-line selection indents every touched
+                        // line, otherwise it inserts a single indent (replacing
+                        // any within-line selection).
+                        let multi_line = {
+                            let st = self.edit.borrow();
+                            let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
+                            hi > lo && st.text[lo..hi].contains('\n')
+                        };
+                        if shift {
+                            self.outdent_selection();
+                        } else if multi_line {
+                            self.indent_selection();
+                        } else {
+                            self.insert_str("    ");
+                        }
                     }
                     Key::Char('a') | Key::Char('A') if cmd => {
                         self.select_all_text();

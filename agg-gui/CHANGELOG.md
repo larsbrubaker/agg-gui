@@ -10,6 +10,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- **`TextArea` standard code-editor keyboard set.** Word-wise caret movement and
+  selection (Ctrl/Alt+Left/Right, with Shift to extend), word-wise deletion
+  (Ctrl/Alt+Backspace/Delete, deleting an active selection first), and
+  Tab/Shift+Tab line indent/outdent: a plain Tab over a multi-line selection
+  indents every touched line while Shift+Tab outdents (one leading tab or up to
+  four leading spaces per line), with the selection preserved across the change.
+  The Code Editor demo inherits all of it.
 - **First-class tooltip system.** Any widget can now declare hover help with no
   wrapper: `WidgetBase` carries an optional `tooltip` string, exposed through the
   universal `Widget::with_tooltip("…")` builder (and `set_tooltip_text` on a
@@ -50,6 +57,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   mid-edit; **Ctrl/Meta+Tab** still traverses focus as the escape hatch. This is
   now general: `App::on_key_down` offers plain Tab / Shift+Tab to the focused
   widget first and only advances focus when the widget ignores it.
+
+- **Word-wise deletion in the rich-text editor.** A focused `RichTextEdit` now
+  maps **Ctrl/Alt+Backspace** → delete to the previous word boundary and
+  **Ctrl/Alt+Delete** → delete to the next, mirroring egui's
+  `delete_previous_word` / `delete_next_word`. The span removed is exactly what a
+  Ctrl+Arrow motion traverses (same word boundaries), including a merge into the
+  adjacent block at a block edge; an active selection is deleted verbatim, and
+  each word delete is a single undo step.
 
 ### Breaking / behavioural changes
 

@@ -34,7 +34,6 @@
 //!     used by the demo for the Ctrl/Cmd+Y "toggle case of selection" shortcut.
 //!
 //! Deferred (known gaps, filed for later polish):
-//!   * word-boundary jumps (Ctrl+arrows) across wrapped visual lines;
 //!   * undo / redo;
 //!   * input-method composition;
 //!   * BiDi and RTL layout.
@@ -56,7 +55,8 @@ use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 use crate::widgets::scrollbar::ScrollbarAxis;
 use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
 use crate::widgets::text_field_core::{
-    next_char_boundary, paragraph_range_at, prev_char_boundary, word_range_at, TextEditState,
+    next_char_boundary, next_word_boundary, paragraph_range_at, prev_char_boundary,
+    prev_word_boundary, word_range_at, TextEditState,
 };
 
 /// Horizontal alignment of the wrapped text content inside a [`TextArea`]'s

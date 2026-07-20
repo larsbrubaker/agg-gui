@@ -1,10 +1,14 @@
-//! Double-click word / triple-click line selection tests for [`TextArea`].
+//! Selection + code-editor keyboard tests for [`TextArea`], kept separate from
+//! `tests.rs` (which is near the 800-line cap) but exercising the same
+//! production widget.
 //!
-//! Kept separate from `tests.rs` (which is near the 800-line cap) but exercises
-//! the same production widget: the pointer-selection funnels
-//! (`begin_pointer_selection` / `extend_selection_drag`) that `widget_impl`
-//! drives on mouse down and drag, plus a real `MouseDown` event path so the
-//! multi-click counting is covered end to end.
+//! Covers the pointer-selection funnels (`begin_pointer_selection` /
+//! `extend_selection_drag`) that `widget_impl` drives on mouse down and drag
+//! (plus a real `MouseDown` event path so multi-click counting is covered end
+//! to end), and the standard keyboard set routed through real `KeyDown`
+//! events: word-wise caret movement/selection (Ctrl/Alt+arrows, +Shift),
+//! word-wise deletion (Ctrl/Alt+Backspace/Delete, selection-first), and
+//! Tab/Shift+Tab line indent/outdent.
 
 use std::sync::Arc;
 
@@ -140,4 +144,162 @@ fn line_baselines_snap_to_pixel_grid_when_hinting_on() {
         assert_eq!(y.fract(), 0.0, "line {i} baseline {y} not on the pixel grid");
     }
     crate::font_settings::set_hinting_enabled(false);
+}
+
+// ── Code-editor keyboard set ────────────────────────────────────────────────
+
+fn key_mods(ta: &mut TextArea, k: Key, mods: Modifiers) {
+    ta.on_event(&Event::KeyDown {
+        key: k,
+        modifiers: mods,
+    });
+}
+
+fn ctrl() -> Modifiers {
+    Modifiers {
+        ctrl: true,
+        ..Default::default()
+    }
+}
+
+fn ctrl_shift() -> Modifiers {
+    Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Default::default()
+    }
+}
+
+fn shift_mod() -> Modifiers {
+    Modifiers {
+        shift: true,
+        ..Default::default()
+    }
+}
+
+/// Place the caret at an absolute byte offset (collapsed selection).
+fn place_cursor(ta: &TextArea, pos: usize) {
+    let mut st = ta.edit.borrow_mut();
+    st.cursor = pos;
+    st.anchor = pos;
+}
+
+/// Set an `[anchor, cursor]` selection straight through the shared state.
+fn place_selection(ta: &TextArea, anchor: usize, cursor: usize) {
+    let mut st = ta.edit.borrow_mut();
+    st.anchor = anchor;
+    st.cursor = cursor;
+}
+
+#[test]
+fn ctrl_right_and_left_move_by_word() {
+    let mut ta = laid_out("hello world foo", 400.0, 120.0);
+    place_cursor(&ta, 0);
+    key_mods(&mut ta, Key::ArrowRight, ctrl());
+    assert_eq!(ta.cursor(), 5); // end of "hello"
+    key_mods(&mut ta, Key::ArrowRight, ctrl());
+    assert_eq!(ta.cursor(), 11); // end of "world"
+    key_mods(&mut ta, Key::ArrowLeft, ctrl());
+    assert_eq!(ta.cursor(), 6); // start of "world"
+    assert_eq!(ta.selection(), None, "plain word move collapses the selection");
+}
+
+#[test]
+fn ctrl_shift_right_extends_selection_by_word() {
+    let mut ta = laid_out("hello world", 400.0, 120.0);
+    place_cursor(&ta, 0);
+    key_mods(&mut ta, Key::ArrowRight, ctrl_shift());
+    assert_eq!(ta.cursor(), 5);
+    assert_eq!(ta.selection(), Some((0, 5)), "Shift keeps the anchor put");
+    key_mods(&mut ta, Key::ArrowRight, ctrl_shift());
+    assert_eq!(ta.selection(), Some((0, 11)));
+}
+
+#[test]
+fn ctrl_backspace_deletes_previous_word() {
+    let mut ta = laid_out("hello world", 400.0, 120.0);
+    place_cursor(&ta, 11);
+    key_mods(&mut ta, Key::Backspace, ctrl());
+    assert_eq!(ta.text(), "hello ");
+    assert_eq!(ta.cursor(), 6);
+}
+
+#[test]
+fn ctrl_delete_deletes_next_word() {
+    let mut ta = laid_out("hello world", 400.0, 120.0);
+    place_cursor(&ta, 0);
+    key_mods(&mut ta, Key::Delete, ctrl());
+    assert_eq!(ta.text(), " world");
+    assert_eq!(ta.cursor(), 0);
+}
+
+#[test]
+fn word_delete_removes_active_selection_first() {
+    // With a selection present, Ctrl+Backspace deletes the selection, not the
+    // word before it (standard precedence).
+    let mut ta = laid_out("hello world", 400.0, 120.0);
+    place_selection(&ta, 0, 5); // "hello"
+    key_mods(&mut ta, Key::Backspace, ctrl());
+    assert_eq!(ta.text(), " world");
+    assert_eq!(ta.cursor(), 0);
+    assert_eq!(ta.selection(), None);
+}
+
+#[test]
+fn tab_indents_every_line_of_a_multiline_selection() {
+    // Select from col 0 of line 1 into line 2 so two lines are touched. Tab
+    // indents both and the same text stays selected.
+    let mut ta = laid_out("aa\nbb\ncc", 400.0, 200.0);
+    place_selection(&ta, 0, 4);
+    key_mods(&mut ta, Key::Tab, Modifiers::default());
+    assert_eq!(ta.text(), "    aa\n    bb\ncc");
+    // Anchor stayed at the line start (indent falls inside), cursor rode +8.
+    assert_eq!(ta.selection(), Some((0, 12)));
+}
+
+#[test]
+fn shift_tab_outdents_every_line_of_a_multiline_selection() {
+    let mut ta = laid_out("    aa\n    bb\ncc", 400.0, 200.0);
+    place_selection(&ta, 0, 12);
+    key_mods(&mut ta, Key::Tab, shift_mod());
+    assert_eq!(ta.text(), "aa\nbb\ncc");
+    assert_eq!(ta.selection(), Some((0, 4)), "same text stays selected");
+}
+
+#[test]
+fn shift_tab_outdents_the_caret_line_without_a_selection() {
+    let mut ta = laid_out("    ab", 400.0, 120.0);
+    place_cursor(&ta, 6);
+    key_mods(&mut ta, Key::Tab, shift_mod());
+    assert_eq!(ta.text(), "ab");
+    assert_eq!(ta.cursor(), 2, "caret column shifts left by the removed indent");
+}
+
+#[test]
+fn shift_tab_removes_only_the_spaces_present_when_fewer_than_a_tab() {
+    // Two leading spaces: outdent removes just those two, not a full tab width.
+    let mut ta = laid_out("  ab", 400.0, 120.0);
+    place_cursor(&ta, 4);
+    key_mods(&mut ta, Key::Tab, shift_mod());
+    assert_eq!(ta.text(), "ab");
+    assert_eq!(ta.cursor(), 2);
+}
+
+#[test]
+fn shift_tab_removes_a_single_leading_tab() {
+    let mut ta = laid_out("\tab", 400.0, 120.0);
+    place_cursor(&ta, 3);
+    key_mods(&mut ta, Key::Tab, shift_mod());
+    assert_eq!(ta.text(), "ab");
+    assert_eq!(ta.cursor(), 2);
+}
+
+#[test]
+fn tab_without_multiline_selection_inserts_spaces() {
+    // A within-line selection is replaced by a single indent (legacy behavior).
+    let mut ta = laid_out("abcd", 400.0, 120.0);
+    place_selection(&ta, 1, 3); // "bc"
+    key_mods(&mut ta, Key::Tab, Modifiers::default());
+    assert_eq!(ta.text(), "a    d");
+    assert_eq!(ta.cursor(), 5);
 }
