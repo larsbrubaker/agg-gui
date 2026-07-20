@@ -31,7 +31,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `RichTextToolbar::with_tooltips(false)`, and Undo/Redo still include the
   editor's real key binding). `Tooltip` also forwards its child's size
   constraints, so wrapping a constrained control (e.g. a `ComboBox`) no longer
-  drops its `max_size`.
+  drops its `max_size`. **Host contract:** tips render with the crate-wide
+  system font and follow it live — hosts must install one at startup via
+  `font_settings::set_system_font` (the library ships no font; with none
+  installed the timing machine runs but nothing paints).
 - **`touch_emulation` module** — the primary-finger touch→mouse emulation
   (tap = left click, drag past 8 px = middle-button pan) moved from the web
   shell's JS into core as the unit-tested `TouchMouseEmu` state machine.

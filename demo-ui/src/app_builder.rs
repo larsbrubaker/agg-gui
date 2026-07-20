@@ -144,7 +144,7 @@ pub fn build_demo_ui(
         primary_weight: primary_weight_cell,
         msaa_samples: msaa_samples_cell,
         system_tab: system_tab_cell,
-    } = crate::font_init::init(initial_state.as_ref(), platform.clone());
+    } = crate::font_init::init(&font, initial_state.as_ref(), platform.clone());
     let all_specs_count = DEMOS.len() + TESTS.len();
     let reset_cells: Vec<Rc<Cell<Option<Rect>>>> = (0..all_specs_count)
         .map(|_| Rc::new(Cell::new(None)))

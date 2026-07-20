@@ -100,6 +100,14 @@ pub(super) fn submit_tooltip(request: TooltipRequest) {
     TOOLTIP_QUEUE.with(|q| q.borrow_mut().push(request));
 }
 
+/// Font of the most recently queued tip, for tests that pin which face a tip
+/// paints with (e.g. asserting the central controller re-reads the live system
+/// font every paint). Pointer identity distinguishes two same-bytes fonts.
+#[cfg(test)]
+pub(super) fn last_submitted_font() -> Option<Arc<Font>> {
+    TOOLTIP_QUEUE.with(|q| q.borrow().last().map(|r| Arc::clone(&r.font)))
+}
+
 /// Last viewport published by [`begin_tooltip_frame`]. Interactive
 /// tooltips read this to keep their surface on-screen.
 pub(super) fn current_tooltip_viewport() -> Size {

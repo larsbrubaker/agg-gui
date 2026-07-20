@@ -10,6 +10,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
+
+use agg_gui::Font;
 
 use crate::api::PlatformHooks;
 use crate::state::SavedState;
@@ -36,7 +39,16 @@ pub struct FontInitCells {
 /// Build every typography cell from `initial_state`, push values into
 /// `font_settings::set_*`, register the cells with the windows module's
 /// thread-local registry, and trigger the first font load by index.
-pub fn init(initial_state: Option<&SavedState>, platform: PlatformHooks) -> FontInitCells {
+///
+/// `default_font` is the already-loaded bootstrap font the shell hands to
+/// `build_demo_ui`. It is installed as the crate-wide system font whenever the
+/// saved font name is absent or unknown — see the `set_system_font` call below
+/// for why tooltips depend on this.
+pub fn init(
+    default_font: &Arc<Font>,
+    initial_state: Option<&SavedState>,
+    platform: PlatformHooks,
+) -> FontInitCells {
     let font_name = Rc::new(RefCell::new(
         initial_state.and_then(|s| s.font_name.clone()),
     ));
@@ -114,6 +126,26 @@ pub fn init(initial_state: Option<&SavedState>, platform: PlatformHooks) -> Font
         windows::request_font_by_index(&cells, resolved_font_idx);
     }
 
+    // Tooltips (and any other library feature that paints with the crate-wide
+    // system font) require `font_settings::current_system_font()` to be `Some`.
+    // The catalog fonts load asynchronously via the platform hook, so on a
+    // fresh launch — or when the saved font name is unknown — nothing would
+    // install a system font until the user opened the System window, and the
+    // central tooltip controller would silently paint nothing (see
+    // `agg_gui::widgets::tooltip::controller`). Install the already-loaded
+    // default font synchronously so tips render from the first frame. A valid
+    // saved font's async load replaces it when ready (see
+    // `system_fonts::install_font_bytes`, which sets the system font once the
+    // bytes for the saved name arrive).
+    let saved_font_resolves = font_name
+        .borrow()
+        .as_deref()
+        .and_then(windows::font_option_index)
+        .is_some();
+    if !saved_font_resolves {
+        agg_gui::font_settings::set_system_font(Some(Arc::clone(default_font)));
+    }
+
     FontInitCells {
         font_name,
         font_size_scale,
@@ -127,5 +159,38 @@ pub fn init(initial_state: Option<&SavedState>, platform: PlatformHooks) -> Font
         primary_weight,
         msaa_samples,
         system_tab,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::PlatformHooks;
+
+    const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+
+    /// A fresh launch with NO saved state must leave the crate-wide system font
+    /// installed, so the central tooltip controller has a font to paint with.
+    ///
+    /// Regression: previously nothing installed a system font until the user
+    /// opened the System window's font selector, so `current_system_font()`
+    /// stayed `None` on a clean launch and tooltips never appeared.
+    #[test]
+    fn fresh_launch_installs_default_system_font() {
+        // The system font is a thread-local; isolate this test thread and
+        // restore it afterwards so parallel demo-ui tests are not polluted.
+        agg_gui::font_settings::set_system_font(None);
+        let default_font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+
+        // `None` initial state = brand-new profile, no remembered font name.
+        let _cells = init(&default_font, None, PlatformHooks::native(0, || {}));
+
+        assert!(
+            agg_gui::font_settings::current_system_font().is_some(),
+            "a fresh launch with no saved font must install the default as the system \
+             font so tooltips can paint"
+        );
+
+        agg_gui::font_settings::set_system_font(None);
     }
 }

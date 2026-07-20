@@ -26,14 +26,20 @@
 //! hide-on-leave. It reuses [`super::timings`] wholesale rather than
 //! duplicating the delays.
 //!
-//! # Font
+//! # Font — host contract (required)
 //!
 //! The tip text is painted with the crate-wide font override
-//! ([`font_settings::current_system_font`](crate::font_settings::current_system_font)) —
-//! the same live font every host installs (the demo sets it from the System
-//! window). When no override is installed the state machine still runs but the
-//! tip cannot be painted; that only happens in headless setups, where tests
-//! install a font explicitly.
+//! ([`font_settings::current_system_font`](crate::font_settings::current_system_font)),
+//! read live on every paint so a tip re-renders in the new face the instant the
+//! host swaps the system font. **This library is deliberately font-free: it
+//! ships no bundled fallback.** Every host MUST call
+//! [`font_settings::set_system_font`](crate::font_settings::set_system_font) with
+//! a real font at startup, before any tip can appear. When no font is installed
+//! the state machine still runs (timing, visibility) but [`Controller::submit`]
+//! paints *nothing* — the tip is silently invisible. That is a host-setup bug,
+//! not a headless-only edge case: the demos install their default font in
+//! `demo-ui::font_init::init` precisely so tips are never blank. Tests install a
+//! font explicitly via the same API.
 
 use std::time::Duration;
 use web_time::Instant;
@@ -196,8 +202,12 @@ impl Controller {
     /// When visible, compute the placed panel rect (for tests) and submit the
     /// tip to the shared render queue so it paints in the global-overlay pass.
     fn submit(&mut self) {
+        // Host contract: a system font MUST be installed via
+        // `font_settings::set_system_font` before a tip can paint (this library
+        // ships no bundled fallback — see the module docs). Re-read live every
+        // paint so a tip follows a mid-session font swap. When none is present
+        // there is nothing to paint; keep the state machine state and bail.
         let Some(font) = crate::font_settings::current_system_font() else {
-            // No font installed: keep state, but there is nothing to paint.
             self.last_rect = None;
             return;
         };
@@ -412,6 +422,50 @@ mod tests {
         drive(Some((vec![1], "B".into())), anchor);
         assert!(is_visible());
         assert_eq!(visible_text().as_deref(), Some("B"), "exactly one tip: B's");
+    }
+
+    /// (c) A visible tip re-renders with the CURRENT system font: swapping the
+    /// crate-wide font mid-hover makes the very next paint submit the new face.
+    /// Pins the "font read live every paint" contract the module docs promise —
+    /// the controller must never cache the font it first painted with.
+    #[test]
+    fn visible_tip_follows_live_system_font_swap() {
+        let _g = pin();
+        let timings = tooltip_timings();
+        let anchor = Some(Point::new(100.0, 100.0));
+
+        // Two distinct fonts (same bytes) tell apart by Arc pointer identity.
+        let font_a = Arc::new(Font::from_bytes(FONT_BYTES.to_vec()).expect("font a"));
+        let font_b = Arc::new(Font::from_bytes(FONT_BYTES.to_vec()).expect("font b"));
+        assert!(!Arc::ptr_eq(&font_a, &font_b));
+
+        // Install A, hover, and let the tip appear: it submits with font A.
+        crate::font_settings::set_system_font(Some(Arc::clone(&font_a)));
+        drive(Some((vec![0], "Tip".into())), anchor);
+        advance_tooltip_test_clock(timings.initial_delay);
+        drive(Some((vec![0], "Tip".into())), anchor);
+        assert!(is_visible(), "tip visible after the initial delay");
+        let submitted_a =
+            super::super::render::last_submitted_font().expect("tip submitted a request");
+        assert!(
+            Arc::ptr_eq(&submitted_a, &font_a),
+            "tip first paints with the installed font A"
+        );
+
+        // Swap the system font live and paint again WITHOUT re-hovering: the
+        // controller must re-read the font and submit B, not the cached A.
+        crate::font_settings::set_system_font(Some(Arc::clone(&font_b)));
+        drive(Some((vec![0], "Tip".into())), anchor);
+        let submitted_b =
+            super::super::render::last_submitted_font().expect("tip re-submitted after swap");
+        assert!(
+            Arc::ptr_eq(&submitted_b, &font_b),
+            "still-visible tip re-renders with the NEW system font B"
+        );
+        assert!(
+            !Arc::ptr_eq(&submitted_b, &font_a),
+            "the swapped tip must not keep painting with the old font A"
+        );
     }
 
     /// (d) A tipped widget hovered at the right viewport edge paints its tip
