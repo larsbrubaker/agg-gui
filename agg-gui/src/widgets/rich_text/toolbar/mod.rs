@@ -7,7 +7,9 @@
 //! bold/italic/underline/strike, alignment, lists, indent/outdent, undo/redo, a
 //! font-size dropdown, and text/highlight colours — all wired to the same
 //! shared editor core the widget renders.  Every control group can be toggled
-//! off through the builder; all are on by default.
+//! off through the builder; all are on by default.  Every control also carries a
+//! hover tooltip out of the box (gate them with
+//! [`with_tooltips`](RichTextToolbar::with_tooltips)).
 //!
 //! # Layout
 //!
@@ -80,9 +82,11 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::platform::primary_modifier_label;
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::flex::FlexColumn;
+use crate::widgets::tooltip::Tooltip;
 
 use super::commands::CommonStyle;
 use super::editor::RichEditHandle;
@@ -136,6 +140,8 @@ struct ToolbarConfig {
     font_size: bool,
     text_color: bool,
     highlight: bool,
+    /// Attach a hover tooltip to every control. On by default.
+    tooltips: bool,
 }
 
 impl Default for ToolbarConfig {
@@ -152,6 +158,7 @@ impl Default for ToolbarConfig {
             font_size: true,
             text_color: true,
             highlight: true,
+            tooltips: true,
         }
     }
 }
@@ -276,6 +283,16 @@ impl RichTextToolbar {
         self
     }
 
+    /// Enable/disable the hover tooltips carried by **every** control (Bold,
+    /// alignment, colours, undo/redo, …).  On by default — the toolbar ships
+    /// self-documenting.  Pass `false` for a bare strip when the embedding app
+    /// provides its own help affordance.
+    pub fn with_tooltips(mut self, on: bool) -> Self {
+        self.cfg.tooltips = on;
+        self.rebuild();
+        self
+    }
+
     /// Replace the font-size steps (points) offered by the size dropdown.
     pub fn with_font_sizes(mut self, sizes: Vec<f64>) -> Self {
         self.font_sizes = sizes;
@@ -356,89 +373,158 @@ impl RichTextToolbar {
         self.root = root;
     }
 
+    /// Wrap `w` in a hover [`Tooltip`] labelled `text` when tooltips are enabled
+    /// (the default); otherwise return it untouched.  Centralises the toolbar's
+    /// default-on tooltip policy so every control participates uniformly and a
+    /// single [`with_tooltips`](Self::with_tooltips) toggle gates them all.
+    fn tip(&self, w: Box<dyn Widget>, text: impl Into<String>) -> Box<dyn Widget> {
+        if self.cfg.tooltips {
+            Box::new(Tooltip::new(w, text, Arc::clone(&self.font)))
+        } else {
+            w
+        }
+    }
+
     /// Row 1: inline character formatting, font family + size, colours.
     fn build_row1(&self) -> Box<dyn Widget> {
         let mut row = controls::new_row();
         let check = self.variant_check.as_ref();
         if self.cfg.bold {
-            row = row.add(controls::style_toggle(
-                &self.font,
-                &self.handle,
-                controls::ICON_BOLD,
-                |c| c.bold,
-                super::commands::RichCommand::ToggleBold,
-                Some(Variant::Bold),
-                check,
+            row = row.add(self.tip(
+                controls::style_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_BOLD,
+                    |c| c.bold,
+                    super::commands::RichCommand::ToggleBold,
+                    Some(Variant::Bold),
+                    check,
+                ),
+                "Bold",
             ));
         }
         if self.cfg.italic {
-            row = row.add(controls::style_toggle(
-                &self.font,
-                &self.handle,
-                controls::ICON_ITALIC,
-                |c| c.italic,
-                super::commands::RichCommand::ToggleItalic,
-                Some(Variant::Italic),
-                check,
+            row = row.add(self.tip(
+                controls::style_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_ITALIC,
+                    |c| c.italic,
+                    super::commands::RichCommand::ToggleItalic,
+                    Some(Variant::Italic),
+                    check,
+                ),
+                "Italic",
             ));
         }
         if self.cfg.underline {
-            row = row.add(controls::style_toggle(
-                &self.font,
-                &self.handle,
-                controls::ICON_UNDERLINE,
-                |c| c.underline,
-                super::commands::RichCommand::ToggleUnderline,
-                None,
-                None,
+            row = row.add(self.tip(
+                controls::style_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_UNDERLINE,
+                    |c| c.underline,
+                    super::commands::RichCommand::ToggleUnderline,
+                    None,
+                    None,
+                ),
+                "Underline",
             ));
         }
         if self.cfg.strikethrough {
-            row = row.add(controls::style_toggle(
-                &self.font,
-                &self.handle,
-                controls::ICON_STRIKE,
-                |c| c.strikethrough,
-                super::commands::RichCommand::ToggleStrikethrough,
-                None,
-                None,
+            row = row.add(self.tip(
+                controls::style_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_STRIKE,
+                    |c| c.strikethrough,
+                    super::commands::RichCommand::ToggleStrikethrough,
+                    None,
+                    None,
+                ),
+                "Strikethrough",
             ));
         }
         if let Some(families) = &self.families {
-            row = row.add(controls::family_combo(&self.font, &self.handle, families));
+            row = row.add(self.tip(
+                controls::family_combo(&self.font, &self.handle, families),
+                "Font family",
+            ));
         }
         if self.cfg.font_size {
-            row = row.add(controls::size_combo(&self.font, &self.handle, &self.font_sizes));
+            row = row.add(self.tip(
+                controls::size_combo(&self.font, &self.handle, &self.font_sizes),
+                "Font size",
+            ));
         }
         if self.cfg.text_color {
-            row = row.add(color::text_color_button(&self.font, &self.picker));
+            row = row.add(self.tip(
+                color::text_color_button(&self.font, &self.picker),
+                "Text color",
+            ));
         }
         if self.cfg.highlight {
-            row = row.add(color::highlight_button(&self.font, &self.picker));
-            row = row.add(color::remove_highlight_button(&self.font, &self.handle));
+            row = row.add(self.tip(
+                color::highlight_button(&self.font, &self.picker),
+                "Highlight color",
+            ));
+            row = row.add(self.tip(
+                color::remove_highlight_button(&self.font, &self.handle),
+                "Remove highlight",
+            ));
         }
         Box::new(row)
     }
 
     /// Row 2: alignment, lists, indent, history.
     fn build_row2(&self) -> Box<dyn Widget> {
+        let modifier = primary_modifier_label();
         let mut row = controls::new_row();
         if self.cfg.alignment {
-            row = row.add(controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_LEFT, TextHAlign::Left));
-            row = row.add(controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_CENTER, TextHAlign::Center));
-            row = row.add(controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_RIGHT, TextHAlign::Right));
+            row = row.add(self.tip(
+                controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_LEFT, TextHAlign::Left),
+                "Align left",
+            ));
+            row = row.add(self.tip(
+                controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_CENTER, TextHAlign::Center),
+                "Align center",
+            ));
+            row = row.add(self.tip(
+                controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_RIGHT, TextHAlign::Right),
+                "Align right",
+            ));
         }
         if self.cfg.lists {
-            row = row.add(controls::list_toggle(&self.font, &self.handle, controls::ICON_LIST_OL, ListKind::Ordered));
-            row = row.add(controls::list_toggle(&self.font, &self.handle, controls::ICON_LIST_UL, ListKind::Bullet));
+            row = row.add(self.tip(
+                controls::list_toggle(&self.font, &self.handle, controls::ICON_LIST_OL, ListKind::Ordered),
+                "Numbered list",
+            ));
+            row = row.add(self.tip(
+                controls::list_toggle(&self.font, &self.handle, controls::ICON_LIST_UL, ListKind::Bullet),
+                "Bulleted list",
+            ));
         }
         if self.cfg.indent {
-            row = row.add(controls::command_button(&self.font, &self.handle, controls::ICON_OUTDENT, super::commands::RichCommand::Outdent));
-            row = row.add(controls::command_button(&self.font, &self.handle, controls::ICON_INDENT, super::commands::RichCommand::Indent));
+            row = row.add(self.tip(
+                controls::command_button(&self.font, &self.handle, controls::ICON_OUTDENT, super::commands::RichCommand::Outdent),
+                "Decrease indent",
+            ));
+            row = row.add(self.tip(
+                controls::command_button(&self.font, &self.handle, controls::ICON_INDENT, super::commands::RichCommand::Indent),
+                "Increase indent",
+            ));
         }
         if self.cfg.history {
-            row = row.add(controls::undo_button(&self.font, &self.handle));
-            row = row.add(controls::redo_button(&self.font, &self.handle));
+            // Undo/redo are the only toolbar actions with a real key binding
+            // (the editor binds `{mod}+Z` / `{mod}+Y`), so they get a shortcut hint.
+            row = row.add(self.tip(
+                controls::undo_button(&self.font, &self.handle),
+                format!("Undo ({modifier}+Z)"),
+            ));
+            row = row.add(self.tip(
+                controls::redo_button(&self.font, &self.handle),
+                format!("Redo ({modifier}+Y)"),
+            ));
         }
         Box::new(row)
     }

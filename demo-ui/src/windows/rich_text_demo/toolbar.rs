@@ -15,9 +15,10 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use agg_gui::platform::primary_modifier_label;
 use agg_gui::widgets::rich_text::{CommonStyle, ListKind};
 use agg_gui::{
-    Button, ComboBox, FlexRow, Font, RichCommand, RichEditHandle, TextHAlign, Widget,
+    Button, ComboBox, FlexRow, Font, RichCommand, RichEditHandle, TextHAlign, Tooltip, Widget,
 };
 
 use super::PickerKind;
@@ -61,6 +62,12 @@ pub fn rich_toolbar(
     Box::new(col)
 }
 
+/// Wrap `w` in a hover [`Tooltip`] labelled `text`. The demo mirrors the library
+/// toolbar's default-on tooltips ([`RichTextToolbar::with_tooltips`](agg_gui::widgets::rich_text::toolbar)).
+fn tip(w: Box<dyn Widget>, text: impl Into<String>, font: &Arc<Font>) -> Box<dyn Widget> {
+    Box::new(Tooltip::new(w, text, Arc::clone(font)))
+}
+
 /// Row 1: inline character formatting, font family + size, colours.
 fn row_one(
     font: &Arc<Font>,
@@ -72,64 +79,55 @@ fn row_one(
     // Bold / Italic gate on the current family actually shipping that variant
     // (`family_has_bold` / `family_has_italic`); Underline / Strikethrough are
     // synthetic and stay always-enabled.
-    row = row.add(style_toggle(
+    row = row.add(tip(
+        style_toggle(font, handle, ICON_BOLD, |c| c.bold, RichCommand::ToggleBold, Some(family_has_bold)),
+        "Bold",
         font,
-        handle,
-        ICON_BOLD,
-        |c| c.bold,
-        RichCommand::ToggleBold,
-        Some(family_has_bold),
     ));
-    row = row.add(style_toggle(
+    row = row.add(tip(
+        style_toggle(font, handle, ICON_ITALIC, |c| c.italic, RichCommand::ToggleItalic, Some(family_has_italic)),
+        "Italic",
         font,
-        handle,
-        ICON_ITALIC,
-        |c| c.italic,
-        RichCommand::ToggleItalic,
-        Some(family_has_italic),
     ));
-    row = row.add(style_toggle(
+    row = row.add(tip(
+        style_toggle(font, handle, ICON_UNDERLINE, |c| c.underline, RichCommand::ToggleUnderline, None),
+        "Underline",
         font,
-        handle,
-        ICON_UNDERLINE,
-        |c| c.underline,
-        RichCommand::ToggleUnderline,
-        None,
     ));
-    row = row.add(style_toggle(
+    row = row.add(tip(
+        style_toggle(font, handle, ICON_STRIKE, |c| c.strikethrough, RichCommand::ToggleStrikethrough, None),
+        "Strikethrough",
         font,
-        handle,
-        ICON_STRIKE,
-        |c| c.strikethrough,
-        RichCommand::ToggleStrikethrough,
-        None,
     ));
 
-    row = row.add(family_combo(font, handle));
-    row = row.add(size_combo(font, handle));
+    row = row.add(tip(family_combo(font, handle), "Font family", font));
+    row = row.add(tip(size_combo(font, handle), "Font size", font));
 
-    row = row.add(color_button(font, ICON_TEXT_COLOR, picker, PickerKind::TextColor));
-    row = row.add(color_button(font, ICON_HIGHLIGHT, picker, PickerKind::Highlight));
-    row = row.add(remove_highlight_button(font, handle));
+    row = row.add(tip(color_button(font, ICON_TEXT_COLOR, picker, PickerKind::TextColor), "Text color", font));
+    row = row.add(tip(color_button(font, ICON_HIGHLIGHT, picker, PickerKind::Highlight), "Highlight color", font));
+    row = row.add(tip(remove_highlight_button(font, handle), "Remove highlight", font));
 
     Box::new(row)
 }
 
 /// Row 2: alignment, lists, indent, undo/redo.
 fn row_two(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
+    let modifier = primary_modifier_label();
     let mut row = FlexRow::new().with_gap(4.0);
 
-    row = row.add(align_toggle(font, handle, ICON_ALIGN_LEFT, TextHAlign::Left));
-    row = row.add(align_toggle(font, handle, ICON_ALIGN_CENTER, TextHAlign::Center));
-    row = row.add(align_toggle(font, handle, ICON_ALIGN_RIGHT, TextHAlign::Right));
+    row = row.add(tip(align_toggle(font, handle, ICON_ALIGN_LEFT, TextHAlign::Left), "Align left", font));
+    row = row.add(tip(align_toggle(font, handle, ICON_ALIGN_CENTER, TextHAlign::Center), "Align center", font));
+    row = row.add(tip(align_toggle(font, handle, ICON_ALIGN_RIGHT, TextHAlign::Right), "Align right", font));
 
-    row = row.add(list_toggle(font, handle, ICON_LIST_OL, ListKind::Ordered));
-    row = row.add(list_toggle(font, handle, ICON_LIST_UL, ListKind::Bullet));
-    row = row.add(command_button(font, handle, ICON_OUTDENT, RichCommand::Outdent));
-    row = row.add(command_button(font, handle, ICON_INDENT, RichCommand::Indent));
+    row = row.add(tip(list_toggle(font, handle, ICON_LIST_OL, ListKind::Ordered), "Numbered list", font));
+    row = row.add(tip(list_toggle(font, handle, ICON_LIST_UL, ListKind::Bullet), "Bulleted list", font));
+    row = row.add(tip(command_button(font, handle, ICON_OUTDENT, RichCommand::Outdent), "Decrease indent", font));
+    row = row.add(tip(command_button(font, handle, ICON_INDENT, RichCommand::Indent), "Increase indent", font));
 
-    row = row.add(undo_button(font, handle));
-    row = row.add(redo_button(font, handle));
+    // Undo/redo are the only actions with a real key binding (the editor binds
+    // `{mod}+Z` / `{mod}+Y`), so they get a shortcut hint.
+    row = row.add(tip(undo_button(font, handle), format!("Undo ({modifier}+Z)"), font));
+    row = row.add(tip(redo_button(font, handle), format!("Redo ({modifier}+Y)"), font));
 
     Box::new(row)
 }
@@ -397,8 +395,22 @@ mod tests {
         rich_toolbar(font, handle, picker)
     }
 
+    /// A control's own `type_name`, peering through the hover-`Tooltip` wrapper
+    /// every control now carries so the roster assertion reads the underlying
+    /// control, not the wrapper.
+    fn unwrap_tip(w: &dyn Widget) -> &dyn Widget {
+        if w.type_name() == "Tooltip" {
+            w.children()[0].as_ref()
+        } else {
+            w
+        }
+    }
+
     fn child_type_names(w: &dyn Widget) -> Vec<&'static str> {
-        w.children().iter().map(|c| c.type_name()).collect()
+        w.children()
+            .iter()
+            .map(|c| unwrap_tip(c.as_ref()).type_name())
+            .collect()
     }
 
     /// Regression guard for the font-preview refactor (commit 878be6d): the

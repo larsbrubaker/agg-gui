@@ -291,6 +291,39 @@ impl Widget for Tooltip {
         self.base.v_anchor
     }
 
+    /// Forward the wrapped child's size constraints so the tooltip is a
+    /// transparent layout wrapper. Without this a constrained child — e.g. a
+    /// [`ComboBox`](crate::widgets::combo_box::ComboBox) whose `max_size` caps its
+    /// width — would lose that cap when wrapped and placed in a `FlexRow`, because
+    /// the row reads the *wrapper's* constraints, not the child's, and would let
+    /// the combo stretch across the whole row.
+    fn min_size(&self) -> Size {
+        self.children
+            .first()
+            .map(|c| c.min_size())
+            .unwrap_or(Size::ZERO)
+    }
+    fn max_size(&self) -> Size {
+        self.children
+            .first()
+            .map(|c| c.max_size())
+            .unwrap_or(Size::MAX)
+    }
+
+    /// Expose the tip text to the inspector and to tests, so a tooltip's presence
+    /// and message can be asserted by walking the widget tree (there is no public
+    /// downcast for `dyn Widget`).
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![(
+            "tooltip",
+            self.lines
+                .iter()
+                .map(|l| l.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )]
+    }
+
     fn is_focusable(&self) -> bool {
         self.children
             .first()

@@ -40,8 +40,34 @@ fn toolbar_over(doc: RichDoc) -> (RichTextToolbar, RichEditHandle) {
     (RichTextToolbar::new(handle.clone(), font), handle)
 }
 
+/// A control's own `type_name`, peering through the hover-`Tooltip` wrapper that
+/// every control now carries by default — so roster assertions keep reading the
+/// underlying `Button` / `ComboBox`, not the wrapper.
+fn unwrap_tip(w: &dyn Widget) -> &dyn Widget {
+    if w.type_name() == "Tooltip" {
+        w.children()[0].as_ref()
+    } else {
+        w
+    }
+}
+
 fn child_type_names(w: &dyn Widget) -> Vec<&'static str> {
-    w.children().iter().map(|c| c.type_name()).collect()
+    w.children()
+        .iter()
+        .map(|c| unwrap_tip(c.as_ref()).type_name())
+        .collect()
+}
+
+/// The tip text a control carries, or `None` when it is not wrapped in a
+/// `Tooltip`. Reads the `Tooltip`'s `("tooltip", text)` inspector property.
+fn tip_text(w: &dyn Widget) -> Option<String> {
+    if w.type_name() != "Tooltip" {
+        return None;
+    }
+    w.properties()
+        .into_iter()
+        .find(|(k, _)| *k == "tooltip")
+        .map(|(_, v)| v)
 }
 
 /// The two-row `FlexColumn` root and its rows.
@@ -108,6 +134,63 @@ fn family_omitted_when_no_families() {
     );
     let combo_count = child_type_names(rows[0]).iter().filter(|t| **t == "ComboBox").count();
     assert_eq!(combo_count, 1, "only the size ComboBox, no family ComboBox");
+}
+
+// ── Tooltips: on by default, opt out with `with_tooltips(false)` ────────────
+
+/// Every control is wrapped in a hover `Tooltip` by default, carrying a sensible
+/// short label. A representative sweep across both rows pins the contract: row 1
+/// character/colour controls and row 2 block/history controls each read the
+/// expected tip, and Undo/Redo include the editor's real key binding.
+#[test]
+fn default_controls_carry_expected_tooltips() {
+    let (toolbar, _h) = toolbar_over(RichDoc::from_blocks(vec![Block::plain("hi")]));
+    let toolbar = toolbar.with_families(vec!["Sans".into(), "Serif".into()], None);
+    let rows = rows(&toolbar);
+
+    // Row 1 (with families): B/I/U/S, family combo, size combo, text-colour,
+    // highlight, remove-highlight.
+    let row1: Vec<Option<String>> = rows[0].children().iter().map(|c| tip_text(c.as_ref())).collect();
+    assert_eq!(row1[0].as_deref(), Some("Bold"));
+    assert_eq!(row1[1].as_deref(), Some("Italic"));
+    assert_eq!(row1[2].as_deref(), Some("Underline"));
+    assert_eq!(row1[3].as_deref(), Some("Strikethrough"));
+    assert_eq!(row1[4].as_deref(), Some("Font family"));
+    assert_eq!(row1[5].as_deref(), Some("Font size"));
+    assert_eq!(row1[6].as_deref(), Some("Text color"));
+    assert_eq!(row1[7].as_deref(), Some("Highlight color"));
+    assert_eq!(row1[8].as_deref(), Some("Remove highlight"));
+
+    // Row 2: align L/C/R, ordered/bullet lists, outdent/indent, undo/redo.
+    let row2: Vec<Option<String>> = rows[1].children().iter().map(|c| tip_text(c.as_ref())).collect();
+    assert_eq!(row2[0].as_deref(), Some("Align left"));
+    assert_eq!(row2[1].as_deref(), Some("Align center"));
+    assert_eq!(row2[2].as_deref(), Some("Align right"));
+    assert_eq!(row2[3].as_deref(), Some("Numbered list"));
+    assert_eq!(row2[4].as_deref(), Some("Bulleted list"));
+    assert_eq!(row2[5].as_deref(), Some("Decrease indent"));
+    assert_eq!(row2[6].as_deref(), Some("Increase indent"));
+    // Undo/Redo carry the platform primary-modifier + the bound key.
+    let m = crate::platform::primary_modifier_label();
+    assert_eq!(row2[7].as_deref(), Some(format!("Undo ({m}+Z)").as_str()));
+    assert_eq!(row2[8].as_deref(), Some(format!("Redo ({m}+Y)").as_str()));
+}
+
+/// `with_tooltips(false)` ships a bare strip: no control is wrapped in a
+/// `Tooltip` anywhere in the toolbar tree.
+#[test]
+fn with_tooltips_false_wraps_nothing() {
+    let (toolbar, _h) = toolbar_over(RichDoc::from_blocks(vec![Block::plain("hi")]));
+    let toolbar = toolbar
+        .with_families(vec!["Sans".into(), "Serif".into()], None)
+        .with_tooltips(false);
+
+    let mut names = Vec::new();
+    descendant_type_names(toolbar.children()[0].as_ref(), &mut names);
+    assert!(
+        !names.contains(&"Tooltip"),
+        "with_tooltips(false) must not wrap any control; tree was {names:?}"
+    );
 }
 
 // ── Command dispatch through a real handle ─────────────────────────────────

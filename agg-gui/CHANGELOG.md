@@ -10,6 +10,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- **Rich-text toolbar tooltips (on by default).** Every `RichTextToolbar` control
+  (Bold/Italic/Underline/Strikethrough, alignment, lists, indent, undo/redo, font
+  size/family, text & highlight colour, remove-highlight) now carries a hover
+  tooltip out of the box; Undo/Redo include the editor's real key binding. Opt out
+  with `RichTextToolbar::with_tooltips(false)`. `Tooltip` also forwards its child's
+  size constraints, so wrapping a constrained control (e.g. a `ComboBox`) no longer
+  drops its `max_size`.
 - **`touch_emulation` module** — the primary-finger touch→mouse emulation
   (tap = left click, drag past 8 px = middle-button pan) moved from the web
   shell's JS into core as the unit-tested `TouchMouseEmu` state machine.
