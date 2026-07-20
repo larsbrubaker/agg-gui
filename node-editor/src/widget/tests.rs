@@ -10,6 +10,26 @@ use super::tests_common::{fixture, fixture_with_typed_handle, mk_node, seed_node
 use super::*;
 use agg_gui::{Modifiers, MouseButton, Point};
 
+/// Serializes tests that touch the **process-global** visuals epoch
+/// (`agg_gui::VISUALS_EPOCH`, an `AtomicU64` bumped by `set_visuals`,
+/// hashed into the backbuffer fingerprint at `mod.rs`
+/// `current_visuals_epoch().hash(...)`).
+///
+/// Cargo runs tests on a thread pool, so without this lock a test that
+/// *mutates* the epoch (`theme_change_invalidates_paint_fingerprint`)
+/// can bump it in the middle of a test that asserts the fingerprint is
+/// *stable* across an epoch read
+/// (`unchanged_model_does_not_invalidate_the_backbuffer`): the epoch
+/// changes between `state.dirty = false` and `layout()`, the
+/// fingerprint legitimately shifts, and the unchanged-model assertion
+/// flakes. Holding this lock in every epoch-mutating / epoch-stability
+/// test makes those pairs mutually exclusive without weakening either
+/// assertion.
+///
+/// `unwrap_or_else(|p| p.into_inner())` recovers a poisoned lock so a
+/// panic in one guarded test doesn't cascade failures into the others.
+static VISUALS_EPOCH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn editor_exposes_node_children_after_layout() {
     let (model, memory) = fixture_with_typed_handle();
@@ -100,6 +120,9 @@ fn adding_a_node_invalidates_the_backbuffer() {
 /// mode" even though `current_visuals()` has already swapped.
 #[test]
 fn theme_change_invalidates_paint_fingerprint() {
+    // Mutates the process-global visuals epoch; serialize against the
+    // epoch-stability test. See `VISUALS_EPOCH_LOCK`.
+    let _epoch_guard = VISUALS_EPOCH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let (model, memory) = fixture_with_typed_handle();
     let mut editor = NodeEditor::new(model);
     editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
@@ -143,6 +166,10 @@ fn moving_a_node_invalidates_the_backbuffer() {
 
 #[test]
 fn unchanged_model_does_not_invalidate_the_backbuffer() {
+    // Asserts the fingerprint is stable across a `layout()` that hashes
+    // the process-global visuals epoch; serialize against tests that
+    // mutate that epoch. See `VISUALS_EPOCH_LOCK`.
+    let _epoch_guard = VISUALS_EPOCH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let (model, memory) = fixture_with_typed_handle();
     let mut editor = NodeEditor::new(model);
     editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
