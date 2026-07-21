@@ -254,6 +254,12 @@ impl Widget for TextArea {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        // TEMPORARY env-gated (AGG_PAINT_TIMING) per-section timing; see the emit
+        // at the end of this fn (strip frames only). Cheap when off.
+        use crate::widget::paint_timing as pt;
+        let mut tt = pt::TextAreaPaintTiming::default();
+        let mut t = pt::start();
+
         let v = ctx.visuals();
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -299,6 +305,8 @@ impl Widget for TextArea {
         // width, opaque) so the changed lines' old pixels are replaced while the
         // retained buffer keeps every other row. Otherwise bake the rounded fill
         // into the cache.
+        tt.head_ms = pt::ms(&t);
+        t = pt::start();
         ctx.set_fill_color(v.widget_bg);
         ctx.begin_path();
         if strip.is_some() {
@@ -311,11 +319,13 @@ impl Widget for TextArea {
             ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
         }
         ctx.fill();
+        tt.bg_fill_ms = pt::ms(&t);
 
         // Clip content to the padded inner width and the (band-expanded, or
         // strip-narrowed) inner height so overflow text can't leak sideways
         // across the border. Text that bleeds into the top/bottom padding while
         // scrolling is covered by the padding-ring fill in `paint_overlay`.
+        t = pt::start();
         ctx.clip_rect(
             self.padding,
             clip_lo,
@@ -325,9 +335,12 @@ impl Widget for TextArea {
 
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(self.font_size);
+        tt.clip_ms = pt::ms(&t);
 
         // ── Selection highlight ───────────────────────────────────
+        t = pt::start();
         let st = self.edit.borrow().clone();
+        tt.state_clone_ms = pt::ms(&t); t = pt::start(); // sel_loop
         if st.cursor != st.anchor {
             let lo = st.cursor.min(st.anchor);
             let hi = st.cursor.max(st.anchor);
@@ -366,6 +379,8 @@ impl Widget for TextArea {
         }
 
         // ── Text ───────────────────────────────────────────────────
+        tt.sel_loop_ms = pt::ms(&t);
+        t = pt::start();
         ctx.set_fill_color(v.text_color);
         for (i, line) in self.cached_lines.iter().enumerate() {
             if line.text.is_empty() {
@@ -377,6 +392,7 @@ impl Widget for TextArea {
             if line_top < clip_lo || line_top - self.cached_line_h > clip_hi {
                 continue;
             }
+            tt.painted_lines += 1;
             let baseline_y = self.line_baseline_y(i);
             let x0 = self.line_x_start(line);
             match &self.highlighter {
@@ -384,18 +400,22 @@ impl Widget for TextArea {
                 // measured x offset; gaps stay in the ambient text colour.
                 Some(hl) => {
                     let spans = hl(&line.text);
+                    let th = pt::start();
                     self.paint_highlighted_line(ctx, &line.text, &spans, x0, baseline_y, v.text_color);
+                    tt.hl_ms += pt::ms(&th);
                 }
                 None => {
                     ctx.fill_text(&line.text, x0, baseline_y);
                 }
             }
         }
+        tt.text_loop_ms = pt::ms(&t);
 
         // ── Hint / placeholder when empty ──────────────────────────
         // Shown whenever the buffer is empty (egui shows hint text until the
         // first character is typed, regardless of focus), and honours the
         // same content alignment as real text.
+        t = pt::start();
         if st.text.is_empty() && !self.hint.is_empty() {
             ctx.set_fill_color(v.text_dim);
             let hint_w = measure_advance(&self.font, &self.hint, self.font_size);
@@ -425,6 +445,9 @@ impl Widget for TextArea {
         // so a later full re-raster is never mistaken for a strip repaint.
         self.render_band_offset.set(None);
         self.render_dirty_lines.set(None);
+
+        tt.tail_ms = pt::ms(&t);
+        if strip.is_some() && pt::enabled() { tt.emit(); }
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {

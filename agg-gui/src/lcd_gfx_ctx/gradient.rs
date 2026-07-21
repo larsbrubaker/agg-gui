@@ -9,7 +9,7 @@ use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
 use crate::draw_ctx::{FillRule, LinearGradientPaint, PatternPaint, RadialGradientPaint};
-use crate::lcd_coverage::{rect_to_pixel_clip, LcdBuffer, LcdMaskBuilder};
+use crate::lcd_coverage::{build_bounded_mask, rect_to_pixel_clip, LcdBuffer};
 
 pub(super) fn fill_linear_gradient(
     buffer: &mut LcdBuffer,
@@ -82,14 +82,19 @@ fn fill_sampled_gradient<F>(
 ) where
     F: FnMut(f64, f64) -> Color,
 {
-    let mut builder = LcdMaskBuilder::new(buffer.width(), buffer.height())
-        .with_clip(clip)
-        .with_fill_rule(fill_rule);
-    builder.with_paths(transform, |add| add(path));
-    let mask = builder.finalize();
+    // Bound the coverage mask to the transformed path's bbox instead of the
+    // whole buffer — same O(bbox) win and pixel-identical output as the
+    // solid `fill_path` (see `build_bounded_mask`).  The colour callback
+    // receives buffer-space `(dx, dy)`, so the gradient sampling below is
+    // unchanged; only the mask's size and composite origin move.
+    let Some((mask, bbox_x, bbox_y)) =
+        build_bounded_mask(buffer.width(), buffer.height(), path, transform, clip, fill_rule)
+    else {
+        return;
+    };
     let clip_i = clip.map(rect_to_pixel_clip);
 
-    buffer.composite_mask_with_color(&mask, 0, 0, clip_i, |dx, dy| {
+    buffer.composite_mask_with_color(&mask, bbox_x, bbox_y, clip_i, |dx, dy| {
         let mut lx = dx as f64 + 0.5;
         let mut ly = dy as f64 + 0.5;
         transform.inverse_transform(&mut lx, &mut ly);

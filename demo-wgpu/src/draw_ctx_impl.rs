@@ -335,6 +335,7 @@ impl DrawCtx for WgpuGfxCtx {
         &mut self,
         color: &std::sync::Arc<Vec<u8>>,
         alpha: &std::sync::Arc<Vec<u8>>,
+        content_version: u64,
         w: u32,
         h: u32,
         dst_x: f64,
@@ -342,7 +343,9 @@ impl DrawCtx for WgpuGfxCtx {
         dst_w: f64,
         dst_h: f64,
     ) {
-        self.draw_lcd_backbuffer_arc_impl(color, alpha, w, h, dst_x, dst_y, dst_w, dst_h);
+        self.draw_lcd_backbuffer_arc_impl(
+            color, alpha, content_version, w, h, dst_x, dst_y, dst_w, dst_h,
+        );
     }
 
     // ── Transform ─────────────────────────────────────────────────────────────

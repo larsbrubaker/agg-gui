@@ -152,6 +152,14 @@ pub struct BackbufferCache {
     /// repaint (first raster, resize, re-anchor, theme flip). Transient — the
     /// widget reads it during `paint` and must not rely on it afterwards.
     pub partial_allowed: bool,
+    /// Stamped with a globally-unique value (see [`next_content_version`]) on
+    /// every raster that changes the published `pixels` / `lcd_alpha` content.
+    /// It lets backends that cache GPU textures by buffer *identity* detect an
+    /// in-place content change: the dirty-strip path updates the retained planes
+    /// through `Arc::make_mut`, which keeps the byte-buffer address stable, so a
+    /// pointer-keyed texture cache would otherwise miss the edit. Pairing the
+    /// buffer pointer with this version disambiguates. `0` means "never rastered".
+    pub content_version: u64,
 }
 
 impl BackbufferCache {
@@ -167,6 +175,7 @@ impl BackbufferCache {
             async_state_epoch: 0,
             lcd_buffer: None,
             partial_allowed: false,
+            content_version: 0,
         }
     }
 
@@ -174,6 +183,20 @@ impl BackbufferCache {
     pub fn invalidate(&mut self) {
         self.dirty = true;
     }
+}
+
+/// Monotone, process-global content-revision counter for backbuffer caches.
+///
+/// Every raster that changes a cache's published pixels stamps
+/// [`BackbufferCache::content_version`] with a fresh value from here. Making it
+/// *global* (rather than per-cache) means a `(buffer_ptr, version)` pair can
+/// never collide across surface lifetimes — a freed buffer's address may be
+/// reused by a different cache, but the version it carries will always differ.
+/// That keeps a pointer-keyed GPU texture cache ABA-proof. Starts at 1 so `0`
+/// stays reserved for "never rastered".
+pub(crate) fn next_content_version() -> u64 {
+    static NEXT_CONTENT_VERSION: AtomicU64 = AtomicU64::new(1);
+    NEXT_CONTENT_VERSION.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Default for BackbufferCache {
@@ -285,6 +308,13 @@ pub struct BackbufferBand {
     /// Vertical blit offset in logical pixels (live offset − band anchor).
     /// Positive shifts the band content up (Y-up), revealing lower content.
     pub blit_dy: f64,
+    /// Widget-local Y-up logical `(lo, hi)` extent of the rows the widget will
+    /// repaint *if* the framework grants a partial (`partial_allowed`) re-raster
+    /// this paint. `None` means a granted partial would still repaint the whole
+    /// band (no confined strip). The framework uses this to limit the top-down
+    /// plane update to exactly those rows, so it must cover byte-for-byte the
+    /// same extent the widget fills and clips during its strip repaint.
+    pub dirty_strip_y: Option<(f64, f64)>,
 }
 
 /// Offscreen compositing layer requested by a widget for itself and its

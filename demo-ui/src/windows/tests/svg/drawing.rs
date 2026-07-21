@@ -55,7 +55,17 @@ pub(super) fn draw_lcd_column(
         Ok(pixels) => {
             let (dx, dy, dw, dh) =
                 native_rect(img_w as f64 * zoom, img_h as f64 * zoom, x, y, w, h);
-            ctx.draw_lcd_backbuffer_arc(&pixels.color, &pixels.alpha, img_w, img_h, dx, dy, dw, dh);
+            ctx.draw_lcd_backbuffer_arc(
+                &pixels.color,
+                &pixels.alpha,
+                0,
+                img_w,
+                img_h,
+                dx,
+                dy,
+                dw,
+                dh,
+            );
         }
         Err(err) => draw_small_text(ctx, err, x + 8.0, y + h * 0.5, 9.0, v.text_dim),
     }

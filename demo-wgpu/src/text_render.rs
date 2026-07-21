@@ -21,7 +21,7 @@ use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::text::shape_glyphs;
 
-use crate::{ArcTextureEntry, DrawCommand, WgpuGfxCtx};
+use crate::{DrawCommand, LcdArcTextureEntry, WgpuGfxCtx};
 
 impl WgpuGfxCtx {
     /// Implementation of `DrawCtx::fill_text`.
@@ -174,7 +174,10 @@ impl WgpuGfxCtx {
         if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 {
             return;
         }
-        let (texture, view) = self.lcd_arc_get_or_upload(mask, mask_w, mask_h);
+        // Masks are immutable, content-addressed CPU rasters — they never
+        // mutate in place, so pass `version == 0` to select Arc-identity
+        // verification (see `lcd_arc_get_or_upload`).
+        let (texture, view) = self.lcd_arc_get_or_upload(mask, 0, mask_w, mask_h);
         self.push_lcd_mask_command(texture, view, mask_w, mask_h, src_color, dst_x, dst_y);
     }
 
@@ -185,6 +188,7 @@ impl WgpuGfxCtx {
         &mut self,
         color: &Arc<Vec<u8>>,
         alpha: &Arc<Vec<u8>>,
+        content_version: u64,
         w: u32,
         h: u32,
         dst_x: f64,
@@ -199,8 +203,12 @@ impl WgpuGfxCtx {
         if color.len() < needed || alpha.len() < needed {
             return;
         }
-        let (color_tex, color_view) = self.lcd_arc_get_or_upload(color, w, h);
-        let (alpha_tex, alpha_view) = self.lcd_arc_get_or_upload(alpha, w, h);
+        // Both planes carry the same `content_version` — an in-place strip edit
+        // (`Arc::make_mut`) keeps each plane's buffer address stable while
+        // bumping the version, so the cache reuses the texture allocation and
+        // re-uploads only when the content actually changed.
+        let (color_tex, color_view) = self.lcd_arc_get_or_upload(color, content_version, w, h);
+        let (alpha_tex, alpha_view) = self.lcd_arc_get_or_upload(alpha, content_version, w, h);
 
         // Snap both corners to the integer pixel grid — subpixel phase pattern
         // only valid at 1:1 texel-to-pixel mapping.  BOTH corners must run
@@ -310,47 +318,168 @@ impl WgpuGfxCtx {
     }
 
     /// Get-or-upload a single `Arc<Vec<u8>>` 3-byte plane into a 4-byte RGBA
-    /// texture.  Sweeps stale entries (Arc dropped → weak.upgrade fails) on
-    /// each call so GPU memory tracks the CPU-side image cache.
-    fn lcd_arc_get_or_upload(
+    /// texture, keyed on the `Vec`'s heap **buffer address**.
+    ///
+    /// `version` selects the cache-validity policy (see [`LcdArcTextureEntry`]):
+    /// - `version != 0` — a mutable backbuffer plane. The globally-unique
+    ///   `content_version` is the source of truth: a matching version means the
+    ///   content is unchanged (reuse, no upload); a mismatch means an in-place
+    ///   `Arc::make_mut` edit happened, so re-upload into the *existing* texture
+    ///   allocation. This is ABA-proof because a recycled buffer address always
+    ///   carries a version this entry has never seen.
+    /// - `version == 0` — an immutable, content-addressed mask. Those buffers
+    ///   never relocate, so validity is checked by Arc pointer identity via the
+    ///   stored `weak`.
+    pub(crate) fn lcd_arc_get_or_upload(
         &mut self,
         data: &Arc<Vec<u8>>,
+        version: u64,
         w: u32,
         h: u32,
     ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
-        let key = Arc::as_ptr(data) as *const u8 as usize;
+        // Key on the byte buffer, NOT `Arc::as_ptr`: `Arc::make_mut` relocates
+        // the control block on every in-place edit but leaves the buffer put.
+        let key = data.as_ref().as_ptr() as usize;
 
-        // Sweep dead entries.
+        // Arc-identity is only consulted on the immutable-mask (version == 0)
+        // path; skip the upgrade/downgrade churn for the hot backbuffer path.
+        let arc_identity_matches = version == 0
+            && self
+                .lcd_arc_texture_cache
+                .get(&key)
+                .and_then(|e| e.weak.upgrade())
+                .is_some_and(|a| Arc::ptr_eq(&a, data));
+
+        // Decide BEFORE sweeping dead entries: a live backbuffer whose Arc was
+        // relocated by `make_mut` leaves a dead `Weak` but a perfectly valid
+        // texture — sweeping first would destroy it and force a needless upload.
+        let meta = self
+            .lcd_arc_texture_cache
+            .get(&key)
+            .map(|e| LcdEntryMeta { version: e.version, w: e.w, h: e.h });
+        let action = lcd_cache_decide(meta, version, w, h, arc_identity_matches);
+
+        let result = match action {
+            LcdCacheAction::Reuse => {
+                // The stored weak may be dead after a relocation; refresh it so
+                // liveness tracking (and the sweep below) stays accurate.
+                let e = self
+                    .lcd_arc_texture_cache
+                    .get_mut(&key)
+                    .expect("Reuse implies a present entry");
+                e.weak = Arc::downgrade(data);
+                (Arc::clone(&e.texture), e.view.clone())
+            }
+            LcdCacheAction::Rewrite => {
+                // Same allocation, changed content: overwrite the existing
+                // texture's pixels (full-plane write; row-granular upload is a
+                // possible later optimization).
+                let (texture, view) = {
+                    let e = self
+                        .lcd_arc_texture_cache
+                        .get(&key)
+                        .expect("Rewrite implies a present entry");
+                    (Arc::clone(&e.texture), e.view.clone())
+                };
+                write_lcd_plane(&self.queue, &texture, data.as_slice(), w, h);
+                let e = self
+                    .lcd_arc_texture_cache
+                    .get_mut(&key)
+                    .expect("Rewrite implies a present entry");
+                e.weak = Arc::downgrade(data);
+                e.version = version;
+                (texture, view)
+            }
+            LcdCacheAction::Replace => {
+                let (texture, view) =
+                    upload_lcd_texture(&self.device, &self.queue, data.as_slice(), w, h);
+                self.lcd_arc_texture_cache.insert(
+                    key,
+                    LcdArcTextureEntry {
+                        weak: Arc::downgrade(data),
+                        texture: Arc::clone(&texture),
+                        view: view.clone(),
+                        w,
+                        h,
+                        version,
+                    },
+                );
+                (texture, view)
+            }
+        };
+
+        // Sweep dead entries AFTER the touch, but never the entry we just used
+        // (its weak may legitimately be dead post-relocation while its texture
+        // is live and about to be drawn).
         let dead_keys: Vec<usize> = self
             .lcd_arc_texture_cache
             .iter()
-            .filter(|(_, e)| e.weak.strong_count() == 0)
+            .filter(|(k, e)| **k != key && e.weak.strong_count() == 0)
             .map(|(k, _)| *k)
             .collect();
         for k in dead_keys {
             self.lcd_arc_texture_cache.remove(&k);
         }
 
-        if let Some(entry) = self.lcd_arc_texture_cache.get(&key) {
-            if entry.weak.upgrade().is_some() && entry.w == w && entry.h == h {
-                return (Arc::clone(&entry.texture), entry.view.clone());
+        result
+    }
+}
+
+/// The three outcomes of an LCD texture-cache lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LcdCacheAction {
+    /// Entry is valid — return the existing texture, no GPU upload.
+    Reuse,
+    /// Entry's allocation is the right size but its content is stale — overwrite
+    /// the existing texture's pixels (reusing the allocation).
+    Rewrite,
+    /// No usable entry (missing or wrong dimensions) — create a new texture.
+    Replace,
+}
+
+/// The subset of an [`LcdArcTextureEntry`] the pure decision reads.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LcdEntryMeta {
+    pub(crate) version: u64,
+    pub(crate) w: u32,
+    pub(crate) h: u32,
+}
+
+/// Pure hit/miss/version decision for the LCD texture cache, factored out of
+/// [`WgpuGfxCtx::lcd_arc_get_or_upload`] so it is unit-testable without a GPU.
+///
+/// `entry` is the metadata of the entry currently stored under the buffer-
+/// address key (or `None` if absent). `arc_identity_matches` is only meaningful
+/// on the immutable-mask (`version == 0`) path — the caller sets it from a
+/// `Weak::upgrade` + `Arc::ptr_eq` check. Dimensions are always verified: any
+/// size change forces [`LcdCacheAction::Replace`].
+pub(crate) fn lcd_cache_decide(
+    entry: Option<LcdEntryMeta>,
+    version: u64,
+    w: u32,
+    h: u32,
+    arc_identity_matches: bool,
+) -> LcdCacheAction {
+    match entry {
+        None => LcdCacheAction::Replace,
+        Some(e) if e.w != w || e.h != h => LcdCacheAction::Replace,
+        Some(e) => {
+            if version != 0 {
+                // Mutable backbuffer: version is authoritative.
+                if e.version == version {
+                    LcdCacheAction::Reuse
+                } else {
+                    LcdCacheAction::Rewrite
+                }
+            } else if arc_identity_matches {
+                // Immutable mask, same live Arc → texture is still valid.
+                LcdCacheAction::Reuse
+            } else {
+                // Immutable mask whose buffer address was recycled by a new
+                // Arc (old one freed): reuse the allocation, upload new content.
+                LcdCacheAction::Rewrite
             }
         }
-
-        // Stale or missing — re-upload.
-        self.lcd_arc_texture_cache.remove(&key);
-        let (texture, view) = upload_lcd_texture(&self.device, &self.queue, data.as_slice(), w, h);
-        self.lcd_arc_texture_cache.insert(
-            key,
-            ArcTextureEntry {
-                weak: Arc::downgrade(data),
-                texture: Arc::clone(&texture),
-                view: view.clone(),
-                w,
-                h,
-            },
-        );
-        (texture, view)
     }
 }
 
@@ -377,7 +506,6 @@ fn upload_lcd_texture(
     w: u32,
     h: u32,
 ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
-    let rgba = rgb_to_rgba(rgb, w, h);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
@@ -392,9 +520,19 @@ fn upload_lcd_texture(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
+    write_lcd_plane(queue, &texture, rgb, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (Arc::new(texture), view)
+}
+
+/// Write a 3-channel LCD coverage plane into an existing `Rgba8Unorm` texture
+/// (RGB→RGBA expanded).  Shared by the fresh-upload and in-place-rewrite paths;
+/// the caller guarantees `texture`'s dimensions match `(w, h)`.
+fn write_lcd_plane(queue: &wgpu::Queue, texture: &wgpu::Texture, rgb: &[u8], w: u32, h: u32) {
+    let rgba = rgb_to_rgba(rgb, w, h);
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
-            texture: &texture,
+            texture,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
@@ -411,6 +549,4 @@ fn upload_lcd_texture(
             depth_or_array_layers: 1,
         },
     );
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    (Arc::new(texture), view)
 }

@@ -175,6 +175,44 @@ impl LcdBuffer {
         flip_plane(&self.alpha, self.width, self.height)
     }
 
+    /// Copy a **top-down** row range of both planes into caller-provided
+    /// top-down destination planes, in place — the strip-update companion to
+    /// [`Self::color_plane_flipped`] / [`Self::alpha_plane_flipped`].
+    ///
+    /// Row space: `row_start..row_end` are TOP-DOWN row indices (row 0 = visual
+    /// top), half-open. `dst_color` / `dst_alpha` are full-size top-down planes
+    /// (`len == width * height * 3`). For each top-down row `r` in the range we
+    /// copy `width * 3` bytes from the Y-up source row `height - 1 - r` into the
+    /// same top-down row `r` of the destination — the same Y-up→top-down flip
+    /// [`flip_plane`] performs, but restricted to a band of rows so a dirty-strip
+    /// edit never rewrites the untouched majority of the buffer.
+    ///
+    /// Rows outside the range are left untouched (they already hold the
+    /// previously-flipped content the caller is reusing via `Arc::make_mut`).
+    pub fn copy_rows_flipped_into(
+        &self,
+        row_start: u32,
+        row_end: u32,
+        dst_color: &mut [u8],
+        dst_alpha: &mut [u8],
+    ) {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        let row_bytes = w * 3;
+        debug_assert_eq!(dst_color.len(), row_bytes * h, "dst_color must be full-size");
+        debug_assert_eq!(dst_alpha.len(), row_bytes * h, "dst_alpha must be full-size");
+        let start = row_start.min(self.height) as usize;
+        let end = row_end.min(self.height) as usize;
+        for r in start..end {
+            // Top-down dst row `r` pulls from Y-up src row `h - 1 - r`.
+            let src_y = h - 1 - r;
+            let so = src_y * row_bytes;
+            let dof = r * row_bytes;
+            dst_color[dof..dof + row_bytes].copy_from_slice(&self.color[so..so + row_bytes]);
+            dst_alpha[dof..dof + row_bytes].copy_from_slice(&self.alpha[so..so + row_bytes]);
+        }
+    }
+
     /// Collapse both planes into a single top-row-first straight-alpha
     /// RGBA8 image suitable for the existing blit pipeline (one texture,
     /// standard `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend).
@@ -260,11 +298,14 @@ impl LcdBuffer {
     /// fills / outlines) or open their own `LcdMaskBuilder` scope when
     /// they need to batch many paths into one mask.
     ///
-    /// First-cut implementation: rasterizes at the buffer's full size.
-    /// A later optimization can compute the path's bbox and size the
-    /// scratch tightly — measurable win for small paths in large
-    /// buffers, but architecturally identical and not required for
-    /// correctness.
+    /// The coverage mask is sized to the transformed path's bounding box,
+    /// not the whole buffer, via [`build_bounded_mask`].  A single small
+    /// fill (e.g. a 1400×22 strip-background rect on a 1400×1492 band
+    /// buffer) used to allocate + rasterize + 5-tap filter a full-buffer
+    /// mask, making per-fill cost O(buffer) — measured at ~40 ms for that
+    /// strip.  Bounding to the bbox makes it O(bbox); the output is
+    /// byte-identical (see `build_bounded_mask` for the equivalence
+    /// argument and `fill_path_bbox_tests` for the pixel checks).
     pub fn fill_path(
         &mut self,
         path: &mut PathStorage,
@@ -273,22 +314,17 @@ impl LcdBuffer {
         clip: Option<(f64, f64, f64, f64)>,
         fill_rule: FillRule,
     ) {
-        if self.width == 0 || self.height == 0 {
+        let Some((mask, bbox_x, bbox_y)) =
+            build_bounded_mask(self.width, self.height, path, transform, clip, fill_rule)
+        else {
             return;
-        }
-        let mut builder = LcdMaskBuilder::new(self.width, self.height)
-            .with_clip(clip)
-            .with_fill_rule(fill_rule);
-        builder.with_paths(transform, |add| {
-            add(path);
-        });
-        let mask = builder.finalize();
+        };
         // Convert clip → integer pixel rect for composite-time enforcement.
         // The gray-buffer raster clip should already have zeroed coverage
         // outside, but the 5-tap filter can leak ±2 subpixels at clip
         // edges; composite-time clip catches that.
         let clip_i = clip.map(rect_to_pixel_clip);
-        self.composite_mask(&mask, color, 0, 0, clip_i);
+        self.composite_mask(&mask, color, bbox_x, bbox_y, clip_i);
     }
 
     /// Composite an [`LcdMask`] into this buffer using per-channel
@@ -577,10 +613,12 @@ fn flip_plane(src: &[u8], width: u32, height: u32) -> Vec<u8> {
 mod filter;
 mod mask;
 #[cfg(test)]
+mod fill_path_bbox_tests;
+#[cfg(test)]
 mod tests;
 
 pub use mask::{
-    composite_lcd_mask, identity_xform, rasterize_gray_mask, rasterize_lcd_mask,
+    build_bounded_mask, composite_lcd_mask, identity_xform, rasterize_gray_mask, rasterize_lcd_mask,
     rasterize_lcd_mask_multi, rasterize_text_gray_cached, rasterize_text_lcd_cached,
     rect_to_pixel_clip, CachedLcdText, LcdMask, LcdMaskBuilder,
 };

@@ -470,6 +470,7 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         &mut self,
         color: &Arc<Vec<u8>>,
         alpha: &Arc<Vec<u8>>,
+        _content_version: u64,
         w: u32,
         h: u32,
         dst_x: f64,
@@ -477,6 +478,8 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         _dst_w: f64,
         _dst_h: f64,
     ) {
+        // Software backend composites straight from the CPU planes every frame,
+        // so it has no texture cache to key on `_content_version`.
         // Per-channel premultiplied src-over directly onto the active
         // framebuffer.  Preserves LCD chroma: each subpixel's alpha
         // drives the src-over of that subpixel's colour into the

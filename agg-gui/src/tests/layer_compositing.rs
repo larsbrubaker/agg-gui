@@ -416,7 +416,7 @@ fn test_lcd_backbuffer_blit_honors_global_alpha() {
     let alpha = Arc::new(alpha);
 
     ctx.set_global_alpha(0.5);
-    ctx.draw_lcd_backbuffer_arc(&color, &alpha, 4, 4, 0.0, 0.0, 4.0, 4.0);
+    ctx.draw_lcd_backbuffer_arc(&color, &alpha, 0, 4, 4, 0.0, 0.0, 4.0, 4.0);
 
     drop(ctx);
 

@@ -764,6 +764,7 @@ mod app;
 mod backbuffer;
 pub(crate) mod keyboard_scroll;
 mod paint;
+pub(crate) mod paint_timing;
 mod tree;
 mod tree_inspector;
 
@@ -772,6 +773,7 @@ pub use backbuffer::{
     BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,
     BackbufferState, CompositingLayer,
 };
+pub(crate) use backbuffer::next_content_version;
 pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
 pub(crate) use paint::paint_subtree_forced;
 pub use tree::{

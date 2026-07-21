@@ -25,6 +25,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use agg_gui::widget::paint_subtree;
 use agg_gui::{
     measure_text_metrics, App, Framebuffer, GfxCtx, Size, TextArea, TextEditState, Widget,
 };
@@ -45,10 +46,13 @@ fn big_document(copies: usize) -> String {
     s
 }
 
-/// Build an `App` whose root is a `TextArea` configured exactly like the demo's
-/// editor (same font, size, padding, highlighter) and seeded with `text`,
-/// returning the shared `TextEditState` handle so a benchmark can drive edits.
-fn editor_app_with_state(text: &str) -> (App, Rc<RefCell<TextEditState>>) {
+/// Build a `TextArea` configured exactly like the demo's editor (same font,
+/// size, padding, highlighter) and seeded with `text`, returning both the bare
+/// widget and the shared `TextEditState` handle. The bare widget is what the
+/// strip-engagement probe drives through `paint_subtree` directly (App does not
+/// expose a typed handle to its root, so the strip counters can only be read off
+/// a `TextArea` we still own).
+fn build_editor(text: &str) -> (TextArea, Rc<RefCell<TextEditState>>) {
     let code_font = code_font();
     let state = Rc::new(RefCell::new(TextEditState {
         text: text.to_string(),
@@ -61,7 +65,28 @@ fn editor_app_with_state(text: &str) -> (App, Rc<RefCell<TextEditState>>) {
         .with_padding(EDITOR_PADDING)
         .with_edit_state(Rc::clone(&state))
         .with_highlighter(rust_highlighter);
+    (editor, state)
+}
+
+/// Build an `App` whose root is a `TextArea` configured exactly like the demo's
+/// editor (same font, size, padding, highlighter) and seeded with `text`,
+/// returning the shared `TextEditState` handle so a benchmark can drive edits.
+fn editor_app_with_state(text: &str) -> (App, Rc<RefCell<TextEditState>>) {
+    let (editor, state) = build_editor(text);
     (App::new(Box::new(editor)), state)
+}
+
+/// Apply one single-character edit through the shared `TextEditState` exactly as
+/// the demo's KeyDown funnels do: insert `x` at the caret, advance the collapsed
+/// caret past it, and bump the edit epoch. This is the mutation the felt edit
+/// latency follows; the following `layout` + `paint` is what actually costs.
+fn apply_edit(state: &Rc<RefCell<TextEditState>>) {
+    let mut st = state.borrow_mut();
+    let at = st.cursor.min(st.text.len());
+    st.text.insert(at, 'x');
+    st.cursor = at + 1;
+    st.anchor = st.cursor;
+    st.epoch = st.epoch.wrapping_add(1);
 }
 
 /// Build an `App` whose root is a `TextArea` configured exactly like the demo's
@@ -223,18 +248,116 @@ fn code_editor_scroll_probe() {
             app.paint(&mut ctx); // prime the backbuffer cache
         }
         mean_ms(4, 40, || {
-            {
-                let mut st = state.borrow_mut();
-                let at = st.cursor.min(st.text.len());
-                st.text.insert(at, 'x');
-                st.cursor = at + 1;
-                st.anchor = st.cursor;
-                st.epoch = st.epoch.wrapping_add(1);
-            }
+            apply_edit(&state);
             app.layout(Size::new(w, h_large));
             let mut ctx = GfxCtx::new(&mut fb);
             app.paint(&mut ctx);
         })
+    };
+
+    // ── EDIT DECOMPOSITION: split the felt edit frame into layout vs paint ─────
+    // `edit_ms` above lumps `app.layout` and `app.paint` together. To locate the
+    // ~58 ms excess over the warm blit floor, time the two calls separately from
+    // the SAME primed loop (one edit per iteration, then layout, then paint), so
+    // the split is over identical frames. Reported as means over 40 iters after
+    // 4 warmup — same shape as `edit_ms`.
+    let edit_iters = 40usize;
+    let (edit_layout_ms, edit_paint_ms) = {
+        let (mut app, state) = editor_app_with_state(&big);
+        app.layout(Size::new(w, h_large));
+        {
+            let mut ctx = GfxCtx::new(&mut fb);
+            app.paint(&mut ctx); // prime the backbuffer cache
+        }
+        for _ in 0..4 {
+            apply_edit(&state);
+            app.layout(Size::new(w, h_large));
+            let mut ctx = GfxCtx::new(&mut fb);
+            app.paint(&mut ctx);
+        }
+        let mut layout_acc = 0.0_f64;
+        let mut paint_acc = 0.0_f64;
+        for _ in 0..edit_iters {
+            apply_edit(&state);
+            let t = Instant::now();
+            app.layout(Size::new(w, h_large));
+            layout_acc += t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            {
+                let mut ctx = GfxCtx::new(&mut fb);
+                app.paint(&mut ctx);
+            }
+            paint_acc += t.elapsed().as_secs_f64();
+        }
+        (
+            layout_acc * 1000.0 / edit_iters as f64,
+            paint_acc * 1000.0 / edit_iters as f64,
+        )
+    };
+
+    // Control: edit + layout only (no paint). Cross-checks `edit_layout_ms` —
+    // it should land near it (paint is what a control leaves out), confirming the
+    // layout number isn't distorted by loop bookkeeping.
+    let edit_nopaint_control_ms = {
+        let (mut app, state) = editor_app_with_state(&big);
+        app.layout(Size::new(w, h_large));
+        {
+            let mut ctx = GfxCtx::new(&mut fb);
+            app.paint(&mut ctx); // prime the backbuffer cache
+        }
+        mean_ms(4, edit_iters, || {
+            apply_edit(&state);
+            app.layout(Size::new(w, h_large));
+        })
+    };
+
+    // Strip engagement: verify EVERY edit frame took the dirty-line-strip path
+    // (not a full band re-raster). The strip counters live on the `TextArea`, and
+    // App exposes only a `&dyn Widget` root with no downcast — so this runs a bare
+    // `TextArea` through the production `paint_subtree` path (the same path
+    // `App::paint` funnels its root through) with the identical per-iteration work
+    // as `edit_ms`: mutate the shared state, `layout`, `paint`. No `mark_dirty` —
+    // exactly like `edit_ms`, which relies on `layout`'s sig change to invalidate.
+    // Every timed iteration bumps `raster_count` (each strip re-raster still calls
+    // `paint` once) AND `strip_raster_count`; so both deltas should equal
+    // `edit_iters`. A strip delta below that means the probe's edit is NOT taking
+    // the strip path (it fell back to a full band raster).
+    // Also time the bare `TextArea` + `paint_subtree` loop (mean ms/iteration
+    // over the same 40 timed edits). This isolates the TextArea+paint_subtree
+    // cost from App-level extras at zero extra cost — the loop already runs the
+    // exact per-iteration work `edit_ms` does, minus the `App` wrapper.
+    let (edit_strip_delta, edit_raster_delta, edit_bare_paint_ms) = {
+        let (mut editor, state) = build_editor(&big);
+        editor.layout(Size::new(w, h_large));
+        {
+            let mut ctx = GfxCtx::new(&mut fb);
+            paint_subtree(&mut editor, &mut ctx); // prime → 1 full raster, 0 strips
+        }
+        // Warm up the same 4 frames the timed loops discard.
+        for _ in 0..4 {
+            apply_edit(&state);
+            editor.layout(Size::new(w, h_large));
+            let mut ctx = GfxCtx::new(&mut fb);
+            paint_subtree(&mut editor, &mut ctx);
+        }
+        let raster_before = editor.debug_raster_count();
+        let strip_before = editor.debug_strip_raster_count();
+        let mut bare_acc = 0.0_f64;
+        for _ in 0..edit_iters {
+            apply_edit(&state);
+            editor.layout(Size::new(w, h_large));
+            let t = Instant::now();
+            {
+                let mut ctx = GfxCtx::new(&mut fb);
+                paint_subtree(&mut editor, &mut ctx);
+            }
+            bare_acc += t.elapsed().as_secs_f64();
+        }
+        (
+            editor.debug_strip_raster_count() - strip_before,
+            editor.debug_raster_count() - raster_before,
+            bare_acc * 1000.0 / edit_iters as f64,
+        )
     };
 
     // Re-raster frame via ±1px height (same cost driver as a scroll: full
@@ -313,6 +436,24 @@ fn code_editor_scroll_probe() {
     eprintln!("  scroll (wheel + layout + paint)             : {scroll_wheel_ms:8.3} ms  <- user-felt");
     eprintln!("  edit   (1 char + layout + paint)            : {edit_ms:8.3} ms  <- user-felt");
     eprintln!("  scroll (±1px height re-raster, cross-check) : {reraster_full_large_ms:8.3} ms");
+    eprintln!("-----------------------------------------------------------------");
+    eprintln!("EDIT DECOMPOSITION (1 char/frame, full doc, large viewport)");
+    eprintln!("  edit: app.layout only                       : {edit_layout_ms:8.3} ms");
+    eprintln!("  edit: app.paint only                        : {edit_paint_ms:8.3} ms");
+    eprintln!("  edit: layout+paint (sum cross-check)        : {:8.3} ms", edit_layout_ms + edit_paint_ms);
+    eprintln!("  edit: edit+layout, NO paint (control)       : {edit_nopaint_control_ms:8.3} ms");
+    eprintln!("  edit: bare paint_subtree loop               : {edit_bare_paint_ms:8.3} ms");
+    eprintln!(
+        "  strip engagement (over {edit_iters} timed edits)     : strip_delta={edit_strip_delta}, raster_delta={edit_raster_delta}"
+    );
+    if edit_strip_delta < edit_iters as u64 {
+        eprintln!(
+            "  *** WARNING: strip_delta {edit_strip_delta} < {edit_iters} iters — the strip path is NOT"
+        );
+        eprintln!("      fully engaging; the probe's edit is falling back to a full band raster.");
+    } else {
+        eprintln!("  (strip path engaged on every timed edit, as expected)");
+    }
     eprintln!("-----------------------------------------------------------------");
     eprintln!("COMPONENTS (full doc)");
     eprintln!(

@@ -104,6 +104,8 @@ mod text_render;
 
 #[cfg(test)]
 mod layer_text_readback_tests;
+#[cfg(test)]
+mod lcd_arc_cache_tests;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
@@ -132,6 +134,34 @@ pub(crate) struct ArcTextureEntry {
     pub(crate) view: wgpu::TextureView,
     pub(crate) w: u32,
     pub(crate) h: u32,
+}
+
+/// One entry in the **LCD** Arc-keyed wgpu texture cache.
+///
+/// Distinct from [`ArcTextureEntry`] because the LCD cache is keyed on the
+/// source `Vec`'s heap **buffer address** (`data.as_ref().as_ptr()`), not on
+/// `Arc::as_ptr`.  The TextArea dirty-strip path mutates a retained LCD plane
+/// *in place* via `Arc::make_mut`; when a `Weak` is outstanding that relocates
+/// the Arc control block (so `Arc::as_ptr` changes every keystroke) while only
+/// *moving* the `Vec` header — the byte buffer stays put.  Keying on the buffer
+/// address therefore keeps the entry stable across in-place edits so the texture
+/// allocation is reused instead of destroyed and rebuilt every keystroke.
+///
+/// `version` is the backbuffer's globally-unique `content_version` (from
+/// `next_content_version()` in agg-gui, one atomic counter across all caches).
+/// A freed buffer address can be recycled by an unrelated allocation, but the
+/// version it carries will always differ from any this entry has seen, so a
+/// stale entry can never falsely match — the mismatch forces a fresh write.
+/// Dimensions are checked as an additional guard.  Content-addressed *immutable*
+/// masks pass `version == 0` and are instead verified by Arc pointer identity
+/// via the stored `weak` (those buffers never relocate).
+pub(crate) struct LcdArcTextureEntry {
+    pub(crate) weak: Weak<Vec<u8>>,
+    pub(crate) texture: Arc<wgpu::Texture>,
+    pub(crate) view: wgpu::TextureView,
+    pub(crate) w: u32,
+    pub(crate) h: u32,
+    pub(crate) version: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -247,8 +277,8 @@ pub struct WgpuGfxCtx {
     pub(crate) texture_cache_order: VecDeque<u64>,
     /// Arc-pointer-keyed cache for `draw_image_rgba_arc` (Label backbuffers).
     pub(crate) arc_texture_cache: HashMap<usize, ArcTextureEntry>,
-    /// Arc-pointer-keyed cache for LCD coverage masks.
-    pub(crate) lcd_arc_texture_cache: HashMap<usize, ArcTextureEntry>,
+    /// Buffer-address-keyed cache for LCD coverage masks and backbuffer planes.
+    pub(crate) lcd_arc_texture_cache: HashMap<usize, LcdArcTextureEntry>,
 
     // ── layer stack (wired in Phase 8) ────────────────────────────────────────
     pub(crate) layer_stack: Vec<WgpuLayerEntry>,

@@ -256,7 +256,7 @@ fn lcd_backbuffer_in_alpha_layer_writes_alpha() {
 
     ctx.clear(Color::white());
     ctx.push_layer_with_alpha(w as f64, h as f64, 0.5);
-    ctx.draw_lcd_backbuffer_arc(&color, &alpha, pw, ph, 4.0, 4.0, pw as f64, ph as f64);
+    ctx.draw_lcd_backbuffer_arc(&color, &alpha, 0, pw, ph, 4.0, 4.0, pw as f64, ph as f64);
     ctx.pop_layer();
     ctx.flush_to_surface(&target.view);
 

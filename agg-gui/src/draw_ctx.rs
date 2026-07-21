@@ -541,6 +541,13 @@ pub trait DrawCtx {
     /// [`crate::widget::BackbufferMode::LcdCoverage`] cache is ready to
     /// composite onto its parent.
     ///
+    /// `content_version` is a monotone, process-globally-unique content
+    /// revision (see `crate::widget::next_content_version`) stamped whenever
+    /// the published planes change. Backends that key a GPU texture cache on the
+    /// `Arc` buffer *identity* pair it with the pointer so an in-place strip edit
+    /// (which keeps the buffer address stable through `Arc::make_mut`) still
+    /// forces a re-upload. CPU backends ignore it.
+    ///
     /// **Default:** collapses the two planes into a single straight-alpha
     /// RGBA8 image (max of channel alphas, divided back to straight colour)
     /// and forwards to [`draw_image_rgba`].  Correct for any content where
@@ -551,6 +558,7 @@ pub trait DrawCtx {
         &mut self,
         color: &std::sync::Arc<Vec<u8>>,
         alpha: &std::sync::Arc<Vec<u8>>,
+        content_version: u64,
         w: u32,
         h: u32,
         dst_x: f64,
@@ -558,6 +566,7 @@ pub trait DrawCtx {
         dst_w: f64,
         dst_h: f64,
     ) {
+        let _ = content_version; // CPU collapse path is stateless; version unused.
         // Collapse to straight-alpha RGBA8 on the fly.  Matches the same
         // math `LcdBuffer::to_rgba8_top_down_collapsed` uses internally,
         // except applied to a top-down pair rather than a Y-up pair.

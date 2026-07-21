@@ -329,7 +329,7 @@ fn test_gfx_ctx_draw_lcd_backbuffer_arc_preserves_per_channel_chroma() {
         ctx.begin_path();
         ctx.rect(0.0, 0.0, 1.0, 1.0);
         ctx.fill();
-        ctx.draw_lcd_backbuffer_arc(&color, &alpha, 1, 1, 0.0, 0.0, 1.0, 1.0);
+        ctx.draw_lcd_backbuffer_arc(&color, &alpha, 0, 1, 1, 0.0, 0.0, 1.0, 1.0);
     }
     // Per-channel premult src-over: dst.ch = 0 + white_ch * (1 - alpha_ch)
     //   R: 255 * (1 - 50/255)  ≈ 205

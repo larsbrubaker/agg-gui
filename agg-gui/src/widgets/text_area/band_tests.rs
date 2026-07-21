@@ -407,3 +407,71 @@ fn strip_reraster_spares_a_sibling_below() {
         "a strip re-raster's blit leaked over the region below the widget"
     );
 }
+
+#[test]
+fn strip_edit_updates_published_planes_in_place() {
+    // A dirty-strip edit must mutate the retained top-down planes through
+    // `Arc::make_mut` (buffer address stable) rather than allocating fresh Arcs,
+    // and must still bump `content_version` so GPU backends detect the change
+    // despite the pointer being unchanged.
+    let (same_color, same_alpha, version_grew, strips) = stable_window(|| {
+        let mut ta = TextArea::new(font()).with_font_size(13.0).with_text(tall_doc());
+        let mut fb = Framebuffer::new(400, 300);
+        // Prime at the top so line 0 (the edited line) is on-screen.
+        layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
+        let color_ptr0 = ta.cache.pixels.as_ref().map(|a| a.as_ref().as_ptr() as usize);
+        let alpha_ptr0 = ta
+            .cache
+            .lcd_alpha
+            .as_ref()
+            .map(|a| a.as_ref().as_ptr() as usize);
+        let v0 = ta.cache.content_version;
+
+        insert_char_on_top_line(&mut ta);
+        layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
+
+        let color_ptr1 = ta.cache.pixels.as_ref().map(|a| a.as_ref().as_ptr() as usize);
+        let alpha_ptr1 = ta
+            .cache
+            .lcd_alpha
+            .as_ref()
+            .map(|a| a.as_ref().as_ptr() as usize);
+        let v1 = ta.cache.content_version;
+        (
+            color_ptr0.is_some() && color_ptr0 == color_ptr1,
+            alpha_ptr0.is_some() && alpha_ptr0 == alpha_ptr1,
+            v1 > v0,
+            ta.debug_strip_raster_count(),
+        )
+    });
+    assert_eq!(strips, 1, "the edit must take the in-place strip path");
+    assert!(
+        same_color,
+        "a strip edit must update the colour plane in place (stable buffer address)"
+    );
+    assert!(
+        same_alpha,
+        "a strip edit must update the alpha plane in place (stable buffer address)"
+    );
+    assert!(
+        version_grew,
+        "an in-place strip edit must still bump content_version"
+    );
+}
+
+#[test]
+fn full_reraster_bumps_content_version() {
+    // A re-anchor (jump the scroll out of the band) is a full raster, and it too
+    // must change `content_version` so backends re-upload the rebuilt planes.
+    let (grew, strips) = stable_window(|| {
+        let mut ta = TextArea::new(font()).with_font_size(13.0).with_text(tall_doc());
+        let mut fb = Framebuffer::new(400, 300);
+        layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
+        let v0 = ta.cache.content_version;
+        ta.vbar.offset = ta.band.anchor + ta.band.over_bottom + 800.0;
+        layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
+        (ta.cache.content_version > v0, ta.debug_strip_raster_count())
+    });
+    assert_eq!(strips, 0, "a re-anchor is a full raster, not a strip");
+    assert!(grew, "a full re-anchor raster must bump content_version");
+}

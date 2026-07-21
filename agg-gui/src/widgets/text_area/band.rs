@@ -140,6 +140,14 @@ impl TextArea {
             overscan_top: self.band.over_top,
             overscan_bottom: self.band.over_bottom,
             blit_dy: self.vbar.offset - self.band.anchor,
+            // The strip extent the framework will confine the plane update to is
+            // exactly the extent `paint` fills + clips for its strip repaint (see
+            // `dirty_strip_y`), so both sides agree on the affected rows. `None`
+            // when no strip is planned → a granted partial repaints the whole band.
+            dirty_strip_y: self
+                .render_dirty_lines
+                .get()
+                .map(|(first, last)| self.dirty_strip_y(first, last)),
         })
     }
 

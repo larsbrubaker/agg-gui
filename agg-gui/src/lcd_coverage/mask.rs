@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use agg_rust::basics::FillingRule;
+use agg_rust::basics::{is_vertex, FillingRule};
 use agg_rust::color::Gray8;
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_transform::ConvTransform;
@@ -350,6 +350,132 @@ pub fn rect_to_pixel_clip(rect: (f64, f64, f64, f64)) -> (i32, i32, i32, i32) {
         (x + w).ceil() as i32,
         (y + h).ceil() as i32,
     )
+}
+
+/// Device-space (mask-pixel) bounding box of `path` under `transform`,
+/// as `(min_x, min_y, max_x, max_y)`; `None` when the path has no
+/// coordinate-bearing vertices.
+///
+/// Only real vertices (`is_vertex`) contribute — `end_poly` / `stop`
+/// markers carry stale coords.  Curves are **not** flattened here: a
+/// Bézier/arc lies inside the convex hull of its control points, so the
+/// control-point bbox is a conservative superset of the flattened curve
+/// the rasteriser will actually draw.  That keeps this O(vertices) and
+/// still guarantees we never clip painted pixels.
+fn transformed_path_bbox(
+    path: &PathStorage,
+    transform: &TransAffine,
+) -> Option<(f64, f64, f64, f64)> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut any = false;
+    for i in 0..path.total_vertices() {
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let cmd = path.vertex_idx(i, &mut x, &mut y);
+        if !is_vertex(cmd) {
+            continue;
+        }
+        transform.transform(&mut x, &mut y);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+        any = true;
+    }
+    if any {
+        Some((min_x, min_y, max_x, max_y))
+    } else {
+        None
+    }
+}
+
+/// Build an LCD coverage mask sized to the transformed path's bounding box
+/// instead of the whole `buffer_w × buffer_h` target, returning the mask
+/// plus its bottom-left origin `(bbox_x, bbox_y)` in buffer pixel coords.
+///
+/// This is the core of the `fill_path` optimization: a single small fill
+/// (e.g. a strip-background rect) used to allocate + rasterize + 5-tap
+/// filter a full-buffer-sized mask, making per-fill cost O(buffer).  Here
+/// the mask covers only the bbox, so cost is O(bbox).  The result is
+/// composited at `(bbox_x, bbox_y)` — pass those to
+/// [`LcdBuffer::composite_mask`] / [`LcdBuffer::composite_mask_with_color`].
+///
+/// Returns `None` when the padded, clipped bbox is empty (fully off-buffer
+/// or fully clipped away) — the caller then paints nothing, matching the
+/// old code which composited an all-zero mask.
+///
+/// **Equivalence to the full-buffer path (why this is pixel-identical):**
+/// the bbox is padded by 2px on every side.  The 5-tap filter reaches ±2
+/// subpixels horizontally and AGG AA can touch one pixel past a fractional
+/// edge, so 2px of zero padding around the path means the filter reads the
+/// same neighbourhood it would in a full buffer.  `bbox_x`/`bbox_y` are
+/// whole pixels, so shifting the path into mask-local space moves it by a
+/// multiple of 3 subpixels — the filter kernel is translation-invariant at
+/// that granularity, giving byte-identical coverage.  At buffer/clip edges
+/// both the bounded and full-buffer masks read zero beyond the boundary.
+pub fn build_bounded_mask(
+    buffer_w: u32,
+    buffer_h: u32,
+    path: &mut PathStorage,
+    transform: &TransAffine,
+    clip: Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
+) -> Option<(LcdMask, i32, i32)> {
+    if buffer_w == 0 || buffer_h == 0 {
+        return None;
+    }
+    let (min_x, min_y, max_x, max_y) = transformed_path_bbox(path, transform)?;
+
+    // Pad for 5-tap horizontal reach (±2 subpixels) + AA edge fraction.
+    const PAD: f64 = 2.0;
+    let mut x1 = (min_x - PAD).floor() as i32;
+    let mut y1 = (min_y - PAD).floor() as i32;
+    let mut x2 = (max_x + PAD).ceil() as i32;
+    let mut y2 = (max_y + PAD).ceil() as i32;
+
+    // Intersect with the clip rect (buffer pixel coords) if present.  The
+    // composite-time clip still runs, but shrinking the mask here is what
+    // makes a clipped fill cheap.
+    if let Some(c) = clip {
+        let (cx1, cy1, cx2, cy2) = rect_to_pixel_clip(c);
+        x1 = x1.max(cx1);
+        y1 = y1.max(cy1);
+        x2 = x2.min(cx2);
+        y2 = y2.min(cy2);
+    }
+    // Intersect with the buffer rect.
+    x1 = x1.max(0);
+    y1 = y1.max(0);
+    x2 = x2.min(buffer_w as i32);
+    y2 = y2.min(buffer_h as i32);
+    if x1 >= x2 || y1 >= y2 {
+        return None;
+    }
+
+    let bbox_x = x1;
+    let bbox_y = y1;
+    let bbox_w = (x2 - x1) as u32;
+    let bbox_h = (y2 - y1) as u32;
+
+    // Compose the caller's transform with a translation into mask-local
+    // space: apply `transform` first, then shift by (-bbox_x, -bbox_y).
+    // `multiply` in this codebase is post-multiply (self * m = "self then
+    // m"), so `transform.multiply(translation)` translates after the CTM.
+    let mut local = *transform;
+    local.multiply(&TransAffine::new_translation(-bbox_x as f64, -bbox_y as f64));
+    // The builder's clip is in mask-local pixel coords — shift it the same.
+    let local_clip = clip.map(|(cx, cy, cw, ch)| (cx - bbox_x as f64, cy - bbox_y as f64, cw, ch));
+
+    let mut builder = LcdMaskBuilder::new(bbox_w, bbox_h)
+        .with_clip(local_clip)
+        .with_fill_rule(fill_rule);
+    builder.with_paths(&local, |add| {
+        add(path);
+    });
+    Some((builder.finalize(), bbox_x, bbox_y))
 }
 
 // ── LcdMaskBuilder ──────────────────────────────────────────────────────────
