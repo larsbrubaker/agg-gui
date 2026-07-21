@@ -37,6 +37,73 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use web_time::Instant;
 
+// ── Draw-request provenance trace ─────────────────────────────────────────────
+//
+// A thread-local ring buffer of `&'static str` reason tags, appended by the
+// `*_tagged` request helpers below.  It exists to answer one question that a
+// stack-free thread-local signal otherwise makes impossible: *who* keeps the
+// reactive host awake when the app should be idle?  When the quiescence
+// regression guard (demo-ui) finds the app still wants a draw after settling,
+// it drains this buffer and names the culprits in its failure message.
+//
+// Cost: recording is compiled out entirely in release (`debug_assertions`
+// off) so shipping hosts pay nothing.  In debug/test builds each tagged
+// request pushes one pointer-sized tag into a small capped `Vec`.
+
+#[cfg(debug_assertions)]
+std::thread_local! {
+    static DRAW_TRACE: std::cell::RefCell<Vec<&'static str>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Cap on retained trace tags — a soft ring buffer: oldest tags drop once the
+/// cap is hit so a long-running session can't grow the buffer unbounded.
+#[cfg(debug_assertions)]
+const DRAW_TRACE_CAP: usize = 512;
+
+#[cfg(debug_assertions)]
+fn record_draw_trace(reason: &'static str) {
+    DRAW_TRACE.with(|t| {
+        let mut t = t.borrow_mut();
+        if t.len() >= DRAW_TRACE_CAP {
+            t.remove(0);
+        }
+        t.push(reason);
+    });
+}
+
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+fn record_draw_trace(_reason: &'static str) {}
+
+/// Drain and return the recorded draw-request provenance tags (debug builds
+/// only; always empty in release).  Tests call this after driving frames to
+/// name whatever kept the reactive host awake.
+#[doc(hidden)]
+pub fn drain_draw_trace() -> Vec<&'static str> {
+    #[cfg(debug_assertions)]
+    {
+        DRAW_TRACE.with(|t| std::mem::take(&mut *t.borrow_mut()))
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        Vec::new()
+    }
+}
+
+/// [`request_draw`] with a provenance tag — see the trace module docs.  Prefer
+/// this from library call sites so the quiescence guard can attribute wakeups.
+pub fn request_draw_tagged(reason: &'static str) {
+    record_draw_trace(reason);
+    request_draw();
+}
+
+/// [`request_draw_after`] with a provenance tag — see the trace module docs.
+pub fn request_draw_after_tagged(delay: Duration, reason: &'static str) {
+    record_draw_trace(reason);
+    request_draw_after(delay);
+}
+
 std::thread_local! {
     static NEEDS_DRAW:        Cell<bool>            = Cell::new(false);
     static NEXT_DRAW_AT:      Cell<Option<Instant>> = Cell::new(None);

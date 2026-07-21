@@ -119,7 +119,10 @@ impl Controller {
                     if self.visible {
                         self.hide();
                     }
-                    crate::animation::request_draw_after(self.pending_delay);
+                    crate::animation::request_draw_after_tagged(
+                        self.pending_delay,
+                        "tooltip.controller.arm_hover",
+                    );
                 }
                 self.text = text;
             }
@@ -154,7 +157,7 @@ impl Controller {
 
     fn hide(&mut self) {
         if self.visible {
-            crate::animation::request_draw();
+            crate::animation::request_draw_tagged("tooltip.controller.hide");
         }
         self.visible = false;
         self.tip_shown_at = None;
@@ -172,7 +175,10 @@ impl Controller {
                     self.suppressed = true;
                     return false;
                 }
-                crate::animation::request_draw_after(autopop - elapsed);
+                crate::animation::request_draw_after_tagged(
+                    autopop - elapsed,
+                    "tooltip.controller.autopop_rearm",
+                );
             }
         }
 
@@ -180,8 +186,11 @@ impl Controller {
             if !self.visible {
                 self.visible = true;
                 self.tip_shown_at = Some(tooltip_now());
-                crate::animation::request_draw();
-                crate::animation::request_draw_after(tooltip_timings().autopop);
+                crate::animation::request_draw_tagged("tooltip.controller.show");
+                crate::animation::request_draw_after_tagged(
+                    tooltip_timings().autopop,
+                    "tooltip.controller.autopop_arm",
+                );
             }
             note_tooltip_visible();
             return true;
@@ -191,9 +200,12 @@ impl Controller {
             self.hide();
         } else if let Some(remaining) = self.remaining_delay() {
             if remaining.is_zero() {
-                crate::animation::request_draw();
+                crate::animation::request_draw_tagged("tooltip.controller.remaining_zero");
             } else {
-                crate::animation::request_draw_after(remaining);
+                crate::animation::request_draw_after_tagged(
+                    remaining,
+                    "tooltip.controller.remaining",
+                );
             }
         }
         false

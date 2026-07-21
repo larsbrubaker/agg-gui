@@ -124,6 +124,189 @@ fn saved_state_with_backend_open() -> SavedState {
     }
 }
 
+/// Every demo/test window closed, About closed, Inspector absent — the exact
+/// state the user reproduces the runaway repaint in (only the sidebar and
+/// Backend panel visible).
+fn saved_state_all_closed() -> SavedState {
+    let mut s = saved_state_with_backend_open();
+    for ws in s.demos.iter_mut() {
+        ws.open = false;
+    }
+    for ws in s.tests.iter_mut() {
+        ws.open = false;
+    }
+    s.about.open = false;
+    s.inspector = None;
+    s
+}
+
+/// Permanent regression guard for the reactive-mode "continuous repaint with
+/// every window closed" bug. Idle must mean idle: a reactive host that paints
+/// an empty canvas (sidebar + Backend panel only) must go quiescent within a
+/// handful of frames — `wants_draw()` false AND no draw deadline left armed —
+/// otherwise the loop competes with input every frame and burns CPU forever.
+///
+/// A runaway shows as `wants_draw()` staying true on every frame (a widget
+/// re-requesting a draw during paint, or an immediately-due deadline being
+/// re-armed each paint and promoted by `animation::wants_draw`). When that
+/// happens the failure drains the provenance trace so the culprit tags are
+/// named directly in the assertion message.
+#[test]
+fn reactive_demo_with_all_windows_closed_quiesces() {
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let (mut app, _handles) = build_demo_ui(
+        font,
+        Box::new(|_msaa_cell| Box::new(IdleCube::new())),
+        "TestRenderer",
+        "TestBackend",
+        Some(saved_state_all_closed()),
+        PlatformHooks::native(0, || {}),
+    );
+    app.layout(Size::new(1200.0, 900.0));
+    // Discard trace noise from construction / first layout.
+    let _ = agg_gui::animation::drain_draw_trace();
+
+    const MAX_FRAMES: usize = 12;
+    let mut wants = true;
+    for _ in 0..MAX_FRAMES {
+        let mut fb = Framebuffer::new(1200, 900);
+        let mut ctx = GfxCtx::new(&mut fb);
+        app.paint(&mut ctx); // clears draw flags, then repaints
+        // Mirror the reactive host: read wants_draw() once to decide whether
+        // another frame is forced. This also promotes any due deadline, so a
+        // `false` here guarantees no due deadline is pending.
+        wants = app.wants_draw();
+        if !wants {
+            break;
+        }
+    }
+
+    if wants {
+        let trace = agg_gui::animation::drain_draw_trace();
+        let root_needs = app.root().needs_draw();
+        panic!(
+            "reactive demo with ALL windows closed never went idle in {MAX_FRAMES} frames \
+             (continuous-repaint bug). root.needs_draw()={root_needs}; \
+             draw-request provenance tags across the run: {trace:?}"
+        );
+    }
+
+    // Quiesced. With nothing open and nothing focused, no scheduled wake should
+    // remain: a lingering future deadline means something re-arms a periodic
+    // timer forever even on an empty canvas.
+    assert!(
+        agg_gui::animation::peek_next_draw_deadline().is_none(),
+        "empty-canvas reactive demo left a draw deadline armed after quiescing: {:?}",
+        agg_gui::animation::peek_next_draw_deadline()
+    );
+}
+
+/// Paint frames like a reactive host until the app stops asking for more or
+/// `cap` frames elapse. Returns whether it quiesced and the drained trace.
+///
+/// Two independent runaway signatures are caught without any wall-clock sleep:
+/// an immediate re-request keeps `app.wants_draw()` true every frame (looped
+/// here), and a re-armed *scheduled* deadline leaves
+/// `peek_next_draw_deadline()` populated (asserted by the caller). Headless
+/// paints are sub-millisecond, so a sleep would only mask, never expose, a
+/// recurring timer — the armed-deadline check is the reliable probe.
+fn paint_until_idle(app: &mut agg_gui::App, cap: usize) -> (bool, Vec<&'static str>) {
+    let _ = agg_gui::animation::drain_draw_trace();
+    let mut idle = false;
+    for _ in 0..cap {
+        let mut fb = Framebuffer::new(1200, 900);
+        let mut ctx = GfxCtx::new(&mut fb);
+        app.paint(&mut ctx);
+        if !app.wants_draw() {
+            idle = true;
+            break;
+        }
+    }
+    (idle, agg_gui::animation::drain_draw_trace())
+}
+
+/// Matrix regression guard: opening a demo window and then CLOSING it again
+/// must return the app to a fully idle state. This is how a *historic*
+/// continuous-repaint cascade shows up — a widget whose `needs_draw()` is
+/// unconditionally `true` (Multi Touch, Dancing Strings, …) is fine while its
+/// window is open (it animates on purpose), but if closing the window fails to
+/// silence it — because some visibility gate in the tree walk or a global
+/// scheduled-draw deadline leaks past the close — the reactive host keeps
+/// painting an empty canvas forever.
+///
+/// While the window is open we deliberately do NOT require quiescence (animated
+/// demos never idle by design); we only require that after the close the app
+/// settles within a few frames, and that no scheduled deadline is left armed.
+#[test]
+fn each_demo_window_quiesces_after_close() {
+    let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    let (mut app, handles) = build_demo_ui(
+        font,
+        Box::new(|_msaa_cell| Box::new(IdleCube::new())),
+        "TestRenderer",
+        "TestBackend",
+        Some(saved_state_all_closed()),
+        PlatformHooks::native(0, || {}),
+    );
+    app.layout(Size::new(1200.0, 900.0));
+
+    // Scope to the windows with animated / unconditionally-dirty content —
+    // these are where a historic continuous-repaint cascade hides (a widget
+    // whose `needs_draw()` is always true, a never-converging tween, a
+    // per-frame scheduled re-arm). Sweeping all ~40 windows adds minutes of
+    // layout/paint for no extra coverage of the animation-residue risk.
+    const ANIMATED_TITLES: &[&str] = &[
+        "\u{F009} Widget Gallery", // progress bars + assorted animated widgets
+        "\u{F001} Dancing Strings", // needs_draw() == true
+        "\u{F1FC} Painting",
+        "\u{F030} Screenshot", // continuous-capture flag hazard
+        "\u{F1B3} 3D Animation",
+        "\u{F0A4} Multi Touch", // needs_draw() == true
+        "\u{F1FE} Bézier Curve",
+        "\u{F1B2} Interactive Container",
+        "\u{F002} Scene",
+        "\u{F1B0} Lion",
+    ];
+
+    let mut failures: Vec<String> = Vec::new();
+    for (i, spec) in crate::specs::DEMOS
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| ANIMATED_TITLES.contains(&s.title))
+    {
+        let cell = &handles.state.demo_open[i];
+        // Open, lay out, let it run a few frames (arming whatever it arms).
+        cell.set(true);
+        app.layout(Size::new(1200.0, 900.0));
+        let _ = paint_until_idle(&mut app, 6);
+
+        // Close, lay out, and require the app to go idle.
+        cell.set(false);
+        app.layout(Size::new(1200.0, 900.0));
+        let (idle, trace) = paint_until_idle(&mut app, 12);
+        let deadline_armed = agg_gui::animation::peek_next_draw_deadline().is_some();
+        if !idle || deadline_armed {
+            let root_needs = app.root().needs_draw();
+            failures.push(format!(
+                "'{}' (demo #{i}): idle={idle} deadline_armed={deadline_armed} \
+                 root_needs={root_needs} trace={trace:?}",
+                spec.title
+            ));
+        }
+        // Reset per-window transient state so one window's residue can't mask
+        // or contaminate the next window's verdict.
+        agg_gui::animation::clear_draw_request();
+        let _ = agg_gui::animation::drain_draw_trace();
+    }
+
+    assert!(
+        failures.is_empty(),
+        "these demo windows did NOT return the reactive app to idle after being closed \
+         (continuous-repaint cascade). Culprits with drained draw-request trace:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn reactive_demo_goes_idle_after_idle_paint() {
     let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));

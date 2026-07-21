@@ -58,9 +58,12 @@ impl Tooltip {
                     if elapsed >= initial {
                         self.tip_open = true;
                         self.close_requested_at = None;
-                        crate::animation::request_draw();
+                        crate::animation::request_draw_tagged("tooltip.interactive.open");
                     } else {
-                        crate::animation::request_draw_after(initial - elapsed);
+                        crate::animation::request_draw_after_tagged(
+                            initial - elapsed,
+                            "tooltip.interactive.open_arm",
+                        );
                     }
                 }
             }
@@ -77,14 +80,20 @@ impl Tooltip {
                 let elapsed = tooltip_now().saturating_duration_since(since);
                 if elapsed >= TOOLTIP_CLOSE_GRACE {
                     self.close_tip();
-                    crate::animation::request_draw();
+                    crate::animation::request_draw_tagged("tooltip.interactive.close");
                 } else {
-                    crate::animation::request_draw_after(TOOLTIP_CLOSE_GRACE - elapsed);
+                    crate::animation::request_draw_after_tagged(
+                        TOOLTIP_CLOSE_GRACE - elapsed,
+                        "tooltip.interactive.close_grace_rearm",
+                    );
                 }
             }
             None => {
                 self.close_requested_at = Some(tooltip_now());
-                crate::animation::request_draw_after(TOOLTIP_CLOSE_GRACE);
+                crate::animation::request_draw_after_tagged(
+                    TOOLTIP_CLOSE_GRACE,
+                    "tooltip.interactive.close_grace_arm",
+                );
             }
         }
     }
@@ -232,13 +241,19 @@ impl Tooltip {
 
                 if self.hovered && !was {
                     self.hover_started_at = Some(tooltip_now());
-                    crate::animation::request_draw_after(tooltip_timings().initial_delay);
+                    crate::animation::request_draw_after_tagged(
+                        tooltip_timings().initial_delay,
+                        "tooltip.interactive.enter_arm",
+                    );
                 }
                 if self.hovered || self.tip_hovered {
                     self.close_requested_at = None;
                 } else if self.tip_open && self.close_requested_at.is_none() {
                     self.close_requested_at = Some(tooltip_now());
-                    crate::animation::request_draw_after(TOOLTIP_CLOSE_GRACE);
+                    crate::animation::request_draw_after_tagged(
+                        TOOLTIP_CLOSE_GRACE,
+                        "tooltip.interactive.leave_close_arm",
+                    );
                 }
                 crate::animation::request_draw();
 

@@ -40,6 +40,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- **Draw-request provenance trace for diagnosing continuous-repaint cascades.**
+  `animation::request_draw_tagged(reason)` / `request_draw_after_tagged(delay,
+  reason)` record a `&'static str` reason tag into a thread-local ring buffer
+  (debug builds only — compiled out in release, so shipping hosts pay nothing),
+  drained via `animation::drain_draw_trace()`. The ~dozen library re-arm sites
+  that keep a reactive host awake (tooltip controller, tooltip wrapper,
+  interactive tooltip, progress-bar pulse) now tag their requests so a test that
+  catches the app failing to go idle can name *which* signal is holding it hot.
+  Two permanent quiescence regression guards use this (demo-ui
+  `app_builder_tests`): the reactive demo with every window closed must reach
+  `wants_draw() == false` with no scheduled deadline armed, and every animated
+  demo window (Multi Touch, Dancing Strings, …) must return the app to idle
+  after it is closed — pinning the invariant that idle means idle and that the
+  widget-tree `needs_draw()` walk excludes closed / collapsed subtrees.
+
 - **`TextArea` standard code-editor keyboard set.** Word-wise caret movement and
   selection (Ctrl/Alt+Left/Right, with Shift to extend), word-wise deletion
   (Ctrl/Alt+Backspace/Delete, deleting an active selection first), and

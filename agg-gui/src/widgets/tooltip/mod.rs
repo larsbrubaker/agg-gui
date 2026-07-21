@@ -304,7 +304,10 @@ impl Tooltip {
                 // Re-arm the autopop wake every visible frame: the deadline is
                 // read-and-cleared by the host each frame, so an intervening
                 // repaint would otherwise drop it and the dismiss never fires.
-                crate::animation::request_draw_after(autopop - elapsed);
+                crate::animation::request_draw_after_tagged(
+                    autopop - elapsed,
+                    "tooltip.wrapper.autopop_rearm",
+                );
             }
         }
 
@@ -312,9 +315,12 @@ impl Tooltip {
             if !self.tooltip_visible {
                 self.tooltip_visible = true;
                 self.tip_shown_at = Some(tooltip_now());
-                crate::animation::request_draw();
+                crate::animation::request_draw_tagged("tooltip.wrapper.show");
                 // Wake at the autopop deadline so a still pointer still dismisses.
-                crate::animation::request_draw_after(tooltip_timings().autopop);
+                crate::animation::request_draw_after_tagged(
+                    tooltip_timings().autopop,
+                    "tooltip.wrapper.autopop_arm",
+                );
             }
             note_tooltip_visible();
             return true;
@@ -325,9 +331,12 @@ impl Tooltip {
         } else if let Some(remaining) = self.remaining_delay() {
             // Not yet time to show: schedule the wake at the show deadline.
             if remaining.is_zero() {
-                crate::animation::request_draw();
+                crate::animation::request_draw_tagged("tooltip.wrapper.remaining_zero");
             } else {
-                crate::animation::request_draw_after(remaining);
+                crate::animation::request_draw_after_tagged(
+                    remaining,
+                    "tooltip.wrapper.remaining",
+                );
             }
         }
         false
@@ -523,7 +532,10 @@ impl Widget for Tooltip {
                     self.hover_started_at = Some(tooltip_now());
                     self.pending_delay = self.effective_delay();
                     self.suppressed = false;
-                    crate::animation::request_draw_after(self.pending_delay);
+                    crate::animation::request_draw_after_tagged(
+                        self.pending_delay,
+                        "tooltip.wrapper.enter_arm",
+                    );
                 } else if !self.hovered && was {
                     // Leaving: reset so the next entry re-arms cleanly and any
                     // press/autopop suppression clears.

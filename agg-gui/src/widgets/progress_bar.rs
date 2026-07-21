@@ -251,7 +251,10 @@ impl Widget for ProgressBar {
         // and redraws. Gated on `animating` AND actually painting, so the loop
         // idles the instant the bar is culled or reaches 100%.
         if animating {
-            crate::animation::request_draw_after(Duration::from_millis(16));
+            crate::animation::request_draw_after_tagged(
+                Duration::from_millis(16),
+                "progress_bar.pulse",
+            );
         }
 
         // Percentage text centered over bar
