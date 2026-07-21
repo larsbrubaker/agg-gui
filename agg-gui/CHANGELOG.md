@@ -8,6 +8,36 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Performance
+
+- **`TextArea` scroll + edit no longer re-raster the whole LCD backbuffer.**
+  Previously any change — a wheel notch or a single keystroke — invalidated the
+  widget's entire viewport-sized LCD backbuffer and rebuilt it through the
+  supersample + filter + plane-flip pipeline (~120 ms of fixed machinery at
+  1400×1000, independent of text volume). Two changes fix this:
+  - **Over-scan band backbuffer.** The widget now rasters a band covering the
+    viewport plus roughly one viewport of over-scan, anchored in *content* space
+    and excluded from the cache signature. Scrolling within the band is a pure
+    (physical-pixel-quantized) blit-offset change — no re-raster — so the LCD
+    subpixel structure is never resampled; the band re-anchors and rebuilds only
+    when the view leaves it. The band blit is clipped to the widget bounds on
+    every backend so the over-scan margins never paint over sibling widgets.
+    Measured (release, 1400×1000): scroll frame 143 ms → ~27 ms (the warm blit
+    floor).
+  - **Dirty-line-strip edits.** An in-place edit with a collapsed caret now
+    re-rasters only the changed line strip into the *retained* band buffer
+    (background fill + LCD supersample + filter restricted to the strip; no
+    realloc, no full clear) instead of rebuilding the whole band. A same-wrap
+    single-line edit dirties one line; an edit that changes wrapping dirties from
+    the first affected line to the band bottom. Falls back to a full band repaint
+    for anything structural (resize, re-anchor, selection, width re-flow). A
+    strip re-raster reproduces a full re-raster pixel-for-pixel. Measured: single
+    character edit frame ~143 ms → ~81 ms.
+
+  Plumbed through an opt-in `Widget::backbuffer_band` hook (default `None`, so
+  every other widget's paint stays byte-identical) plus a retained
+  `BackbufferCache` LCD buffer used only on the band path.
+
 ### Added
 
 - **`TextArea` standard code-editor keyboard set.** Word-wise caret movement and

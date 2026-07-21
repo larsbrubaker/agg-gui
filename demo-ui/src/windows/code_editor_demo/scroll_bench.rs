@@ -46,8 +46,9 @@ fn big_document(copies: usize) -> String {
 }
 
 /// Build an `App` whose root is a `TextArea` configured exactly like the demo's
-/// editor (same font, size, padding, highlighter) and seeded with `text`.
-fn editor_app(text: &str) -> App {
+/// editor (same font, size, padding, highlighter) and seeded with `text`,
+/// returning the shared `TextEditState` handle so a benchmark can drive edits.
+fn editor_app_with_state(text: &str) -> (App, Rc<RefCell<TextEditState>>) {
     let code_font = code_font();
     let state = Rc::new(RefCell::new(TextEditState {
         text: text.to_string(),
@@ -58,9 +59,15 @@ fn editor_app(text: &str) -> App {
     let editor = TextArea::new(Arc::clone(&code_font))
         .with_font_size(EDITOR_FONT_SIZE)
         .with_padding(EDITOR_PADDING)
-        .with_edit_state(state)
+        .with_edit_state(Rc::clone(&state))
         .with_highlighter(rust_highlighter);
-    App::new(Box::new(editor))
+    (App::new(Box::new(editor)), state)
+}
+
+/// Build an `App` whose root is a `TextArea` configured exactly like the demo's
+/// editor (same font, size, padding, highlighter) and seeded with `text`.
+fn editor_app(text: &str) -> App {
+    editor_app_with_state(text).0
 }
 
 /// Mean wall-clock time per closure invocation, in milliseconds, after
@@ -200,6 +207,36 @@ fn code_editor_scroll_probe() {
         })
     };
 
+    // ── (b') Single-character EDIT frame the user feels: edit + layout + paint ─
+    // Drive a real edit through the shared `TextEditState` (insert one char at
+    // the caret + advance the edit epoch) exactly as the KeyDown funnels do,
+    // then time the following layout + paint. The KeyDown dispatch itself is
+    // negligible; the felt latency is this re-wrap + re-raster, which is what we
+    // measure. With the over-scan band a naive edit re-rasters the whole band
+    // buffer; the dirty-line-strip path (if present) confines it to the edited
+    // line strip, which is what should bring this near the warm blit floor.
+    let edit_ms = {
+        let (mut app, state) = editor_app_with_state(&big);
+        app.layout(Size::new(w, h_large));
+        {
+            let mut ctx = GfxCtx::new(&mut fb);
+            app.paint(&mut ctx); // prime the backbuffer cache
+        }
+        mean_ms(4, 40, || {
+            {
+                let mut st = state.borrow_mut();
+                let at = st.cursor.min(st.text.len());
+                st.text.insert(at, 'x');
+                st.cursor = at + 1;
+                st.anchor = st.cursor;
+                st.epoch = st.epoch.wrapping_add(1);
+            }
+            app.layout(Size::new(w, h_large));
+            let mut ctx = GfxCtx::new(&mut fb);
+            app.paint(&mut ctx);
+        })
+    };
+
     // Re-raster frame via ±1px height (same cost driver as a scroll: full
     // backbuffer re-raster). Cross-check against the wheel number above.
     let reraster_full_large_ms = {
@@ -274,6 +311,7 @@ fn code_editor_scroll_probe() {
     eprintln!("  cold  (first paint, backbuffer raster)      : {cold_ms:8.3} ms");
     eprintln!("  warm  (no change, cache blit only)          : {warm_ms:8.3} ms");
     eprintln!("  scroll (wheel + layout + paint)             : {scroll_wheel_ms:8.3} ms  <- user-felt");
+    eprintln!("  edit   (1 char + layout + paint)            : {edit_ms:8.3} ms  <- user-felt");
     eprintln!("  scroll (±1px height re-raster, cross-check) : {reraster_full_large_ms:8.3} ms");
     eprintln!("-----------------------------------------------------------------");
     eprintln!("COMPONENTS (full doc)");
@@ -296,7 +334,7 @@ fn code_editor_scroll_probe() {
     // ── Smoke assertion (CI gate, NOT a perf gate) ───────────────────────────
     assert!(painted, "App::paint must produce non-empty output");
     assert!(
-        cold_ms.is_finite() && reraster_full_large_ms.is_finite(),
+        cold_ms.is_finite() && reraster_full_large_ms.is_finite() && edit_ms.is_finite(),
         "timings must be finite"
     );
 }

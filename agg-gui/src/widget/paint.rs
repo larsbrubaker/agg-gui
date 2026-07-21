@@ -396,9 +396,30 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     let (sx, sy) = ctx.transform().scaling_abs();
     let dps_x = sx.max(1e-6);
     let dps_y = sy.max(1e-6);
-    // Physical pixel dimensions of the offscreen render target.
+
+    // Over-scan band (scrolling widgets only — see `Widget::backbuffer_band`).
+    // The band raster covers the viewport plus `overscan_*` extra logical px
+    // above/below, so ordinary scrolling within the band is a pure blit offset.
+    // Quantize the extents and the blit offset to whole PHYSICAL pixels so the
+    // LCD subpixel structure is never resampled by a fractional shift.
+    let band = widget.backbuffer_band();
+    let (over_top_phys, over_bottom_phys, blit_dy_phys) = match band {
+        Some(bd) => (
+            (bd.overscan_top.max(0.0) * dps_y).round() as u32,
+            (bd.overscan_bottom.max(0.0) * dps_y).round() as u32,
+            (bd.blit_dy * dps_y).round(),
+        ),
+        None => (0, 0, 0.0),
+    };
+
+    // Physical pixel dimensions of the offscreen render target. The band grows
+    // only vertically (text scrolls vertically); width is unaffected.
     let w_phys = (b.width * dps_x).ceil().max(1.0) as u32;
-    let h_phys = (b.height * dps_y).ceil().max(1.0) as u32;
+    let base_h_phys = (b.height * dps_y).ceil().max(1.0) as u32;
+    let h_phys = base_h_phys + over_top_phys + over_bottom_phys;
+    // Logical translate that places the widget's own origin above the
+    // bottom over-scan margin inside the taller buffer (physical-aligned).
+    let over_bottom_logical = over_bottom_phys as f64 / dps_y;
     // Logical dimensions used as the blit destination rect.  **Must** be
     // derived from `w_phys / dps` rather than `b.width` so the quad the
     // bitmap is drawn into matches the bitmap's actual pixel extent.  If
@@ -455,6 +476,40 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         //   - `LcdCoverage`: `pixels` = premultiplied colour plane (3 B/px);
         //     `lcd_alpha` = per-channel alpha plane (3 B/px).  The blit
         //     step below picks a compositor based on which is present.
+        //
+        // Over-scan band partial re-raster: if the retained LCD buffer is still
+        // valid (same size / mode / styling epochs and a live cached bitmap),
+        // reuse it so a band widget can repaint ONLY its dirty line strip and
+        // keep every other row of the (up to 2×-viewport) buffer intact —
+        // turning a keystroke from a full re-raster into a small strip fill +
+        // one buffer-sized flip. `partial_allowed` grants the widget that
+        // permission; a full repaint (first raster, resize, re-anchor, theme
+        // flip) leaves it false and rebuilds the whole band. Confined to the
+        // band + LCD path, so no other widget pays for the retained buffer.
+        let partial_reuse = band.is_some()
+            && mode_is_lcd
+            && {
+                let cache = widget.backbuffer_cache_mut().unwrap();
+                cache.pixels.is_some()
+                    && cache.theme_epoch == theme_epoch
+                    && cache.typography_epoch == typography_epoch
+                    && cache.async_state_epoch == async_state_epoch
+                    && cache
+                        .lcd_buffer
+                        .as_ref()
+                        .map_or(false, |b| b.width() == w_phys && b.height() == h_phys)
+            };
+        {
+            widget.backbuffer_cache_mut().unwrap().partial_allowed = partial_reuse;
+        }
+        let reused_buf = if partial_reuse {
+            widget.backbuffer_cache_mut().unwrap().lcd_buffer.take()
+        } else {
+            None
+        };
+        // Buffer to hand back to the cache after this raster (band path only, so
+        // non-band widgets keep dropping their scratch buffer as before).
+        let mut retained_buf: Option<LcdBuffer> = None;
         let (pixels_bytes, lcd_alpha_bytes): (Vec<u8>, Option<Vec<u8>>) = match mode {
             BackbufferMode::Rgba => {
                 let mut fb = Framebuffer::new(w_phys, h_phys);
@@ -465,6 +520,11 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                         // Widgets paint in logical coords — scale the sub ctx
                         // so their drawing lands on the physical pixel grid.
                         sub.scale(dps_x, dps_y);
+                    }
+                    // Band: reserve the bottom over-scan margin so the widget's
+                    // own origin sits above it inside the taller buffer.
+                    if over_bottom_logical != 0.0 {
+                        sub.translate(0.0, over_bottom_logical);
                     }
                     paint_subtree_direct_no_overlay(widget, &mut sub);
                 }
@@ -496,7 +556,10 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                 // Widgets that can't paint their own opaque bg should
                 // use `Rgba` mode or paint through the parent's ctx
                 // directly instead.
-                let mut buf = LcdBuffer::new(w_phys, h_phys);
+                // Reuse the retained band buffer when the widget is doing a
+                // strip-only repaint; otherwise start from a fresh (zeroed)
+                // buffer for a full rebuild.
+                let mut buf = reused_buf.unwrap_or_else(|| LcdBuffer::new(w_phys, h_phys));
                 {
                     let mut sub = crate::lcd_gfx_ctx::LcdGfxCtx::new(&mut buf);
                     if (dps_x - 1.0).abs() > 1e-6 || (dps_y - 1.0).abs() > 1e-6 {
@@ -505,9 +568,19 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
                         // the physical-pixel LCD buffer.
                         sub.scale(dps_x, dps_y);
                     }
+                    // Band: reserve the bottom over-scan margin (see RGBA branch).
+                    if over_bottom_logical != 0.0 {
+                        sub.translate(0.0, over_bottom_logical);
+                    }
                     paint_subtree_direct_no_overlay(widget, &mut sub);
                 }
-                (buf.color_plane_flipped(), Some(buf.alpha_plane_flipped()))
+                let planes = (buf.color_plane_flipped(), Some(buf.alpha_plane_flipped()));
+                // Keep the buffer alive for the next partial re-raster (band
+                // path only). Non-band LCD widgets let it drop.
+                if band.is_some() {
+                    retained_buf = Some(buf);
+                }
+                planes
             }
         };
         let pixels = Arc::new(pixels_bytes);
@@ -522,6 +595,8 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         cache.theme_epoch = theme_epoch;
         cache.typography_epoch = typography_epoch;
         cache.async_state_epoch = async_state_epoch;
+        // Retain (band) or drop (everyone else) the scratch LCD buffer.
+        cache.lcd_buffer = retained_buf;
     }
 
     // Blit the cached bitmap onto the outer ctx.  Two paths:
@@ -544,14 +619,37 @@ fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     // up/downscale blur).
     let img_w = cache.width;
     let img_h = cache.height;
-    match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
-        (Some(color), Some(alpha)) => {
-            ctx.draw_lcd_backbuffer_arc(color, alpha, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+    if band.is_some() {
+        // Band blit: shift the taller buffer by the (physical-quantized) scroll
+        // residual minus the bottom over-scan margin, then clip to the widget's
+        // bounds so the over-scan margins never paint over sibling widgets. The
+        // shift goes through `ctx.translate` (not the `dst_y` arg) so it scales
+        // with the CTM and lands on physical pixels on every backend. `dst_h`
+        // stays the full buffer height, keeping the blit a 1:1 (unscaled) copy.
+        let shift_logical = (blit_dy_phys - over_bottom_phys as f64) / dps_y;
+        ctx.save();
+        ctx.clip_rect(0.0, 0.0, b.width, b.height);
+        ctx.translate(0.0, shift_logical);
+        match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
+            (Some(color), Some(alpha)) => {
+                ctx.draw_lcd_backbuffer_arc(color, alpha, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+            }
+            (Some(bmp), None) => {
+                ctx.draw_image_rgba_arc(bmp, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+            }
+            _ => {}
         }
-        (Some(bmp), None) => {
-            ctx.draw_image_rgba_arc(bmp, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+        ctx.restore();
+    } else {
+        match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
+            (Some(color), Some(alpha)) => {
+                ctx.draw_lcd_backbuffer_arc(color, alpha, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+            }
+            (Some(bmp), None) => {
+                ctx.draw_image_rgba_arc(bmp, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+            }
+            _ => {}
         }
-        _ => {}
     }
     let _ = has_bitmap;
 

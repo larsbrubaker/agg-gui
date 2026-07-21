@@ -375,6 +375,21 @@ pub trait Widget {
         None
     }
 
+    /// Opt into over-scan band caching for a *scrolling* backbuffered widget.
+    ///
+    /// When this returns `Some`, `paint_subtree_backbuffered` rasters a band
+    /// taller than the widget bounds (viewport + over-scan) and composites it at
+    /// a blit offset, so scrolling within the band re-blits instead of
+    /// re-rasterising. See [`BackbufferBand`] for the full contract (units,
+    /// physical-pixel quantization, bounds clipping, invalidation).
+    ///
+    /// Only consulted when [`backbuffer_cache_mut`](Self::backbuffer_cache_mut)
+    /// returns `Some`. Default `None` keeps the byte-identical bounds-sized
+    /// raster + 1:1 blit path for every other widget.
+    fn backbuffer_band(&self) -> Option<BackbufferBand> {
+        None
+    }
+
     /// Storage format for this widget's backbuffer.  Ignored unless
     /// [`backbuffer_cache_mut`] returns `Some`.  Default
     /// [`BackbufferMode::Rgba`] — correct for any widget.
@@ -754,8 +769,8 @@ mod tree_inspector;
 
 pub use app::App;
 pub use backbuffer::{
-    BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec, BackbufferState,
-    CompositingLayer,
+    BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,
+    BackbufferState, CompositingLayer,
 };
 pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
 pub(crate) use paint::paint_subtree_forced;

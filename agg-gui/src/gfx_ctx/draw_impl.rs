@@ -502,9 +502,22 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // fades with the group.  Multiplying colour and alpha by the same
         // factor keeps the plane premultiplied-consistent.
         let ga = self.state.global_alpha.clamp(0.0, 1.0) as f32;
+        // Honor the active clip (screen-space Y-up AABB) so over-scan band
+        // backbuffers (see `Widget::backbuffer_band`) crop their margins to the
+        // widget bounds instead of painting over sibling widgets.
+        let clip = self.state.clip;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
         let fw = fb.width() as i32;
         let fh = fb.height() as i32;
+        let (cx1, cy1, cx2, cy2) = match clip {
+            Some((cx, cy, cw, ch)) => (
+                cx.floor() as i32,
+                cy.floor() as i32,
+                (cx + cw).ceil() as i32,
+                (cy + ch).ceil() as i32,
+            ),
+            None => (0, 0, fw, fh),
+        };
         let fw_u = fw as usize;
         let pixels = fb.pixels_mut();
 
@@ -512,13 +525,13 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
             // Top-row-first src → Y-up dst: src row 0 (visually top)
             // lands at dst_y + h - 1 (the visually-top dst row).
             let dy = sy + (h_u - 1 - src_y) as i32;
-            if dy < 0 || dy >= fh {
+            if dy < 0 || dy >= fh || dy < cy1 || dy >= cy2 {
                 continue;
             }
             let dy_u = dy as usize;
             for src_x in 0..w_u {
                 let dx = sx + src_x as i32;
-                if dx < 0 || dx >= fw {
+                if dx < 0 || dx >= fw || dx < cx1 || dx >= cx2 {
                     continue;
                 }
                 let ci = (src_y * w_u + src_x) * 3;
@@ -702,10 +715,14 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // group — without this the blit composited at full opacity regardless
         // of `set_global_alpha`.
         let ga = self.state.global_alpha;
+        // Honor the active clip (screen-space Y-up AABB) so image blits are
+        // scissored like every other primitive. Over-scan band backbuffers
+        // (see `Widget::backbuffer_band`) rely on this to crop their margins to
+        // the widget bounds; ordinary full-image blits set no tighter clip than
+        // their bounds, so this is a no-op for them.
+        let clip = self.state.clip;
         let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
-        // No extra scissor here — the image blit path's clipping is handled
-        // by its caller; the composite clip param is used by the layer pop.
-        composite_framebuffers(fb, &scaled, screen_x, screen_y, ga, None);
+        composite_framebuffers(fb, &scaled, screen_x, screen_y, ga, clip);
     }
 }
 

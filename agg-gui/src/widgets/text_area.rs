@@ -253,16 +253,21 @@ fn split_keep_newlines(text: &str) -> impl Iterator<Item = &str> + '_ {
 // ─── TextArea widget ─────────────────────────────────────────────────────────
 
 /// Snapshot of every input that affects the cached backbuffer bitmap
-/// (background + selection band + wrapped text + border). `layout` compares
-/// the current sig against the last one and drops the LCD/RGBA cache on any
-/// difference, so typing / selecting / scrolling re-rasterise but an idle
-/// (blinking-only) frame just re-blits the cached pixels.
+/// (background + selection band + wrapped text). `layout` compares the current
+/// sig against the last one and drops the LCD/RGBA cache on any difference, so
+/// typing / selecting re-rasterise but an idle (blinking-only) frame just
+/// re-blits the cached pixels.
 ///
-/// Deliberately excludes cursor-blink phase and the floating scrollbar — both
-/// paint in `paint_overlay` after the cache blit, so they never force a
-/// re-raster. Typography- and theme-driven invalidation (font swap, LCD/hinting
-/// toggle, dark/light flip) is handled by the framework via the epoch checks in
-/// `paint_subtree_backbuffered`, so this sig only tracks the widget's own state.
+/// Deliberately excludes cursor-blink phase, the floating scrollbar, and the
+/// border — all paint in `paint_overlay` after the cache blit, so they never
+/// force a re-raster. It also excludes the *raw* scroll offset: the widget
+/// rasters an over-scan band anchored in content space, so plain scrolling
+/// within the band only moves the blit offset. Only the band *anchor* and its
+/// margins are tracked here, so re-anchoring (offset left the band) still
+/// re-rasters exactly once. Typography- and theme-driven invalidation (font
+/// swap, LCD/hinting toggle, dark/light flip) is handled by the framework via
+/// the epoch checks in `paint_subtree_backbuffered`, so this sig only tracks the
+/// widget's own state.
 #[derive(Clone, PartialEq)]
 struct TextAreaSig {
     epoch: u64,
@@ -270,7 +275,15 @@ struct TextAreaSig {
     anchor: usize,
     focused: bool,
     hovered: bool,
-    offset_bits: u64,
+    /// The band anchor (content-space offset the backbuffer is rastered at) and
+    /// its over-scan extents — NOT the live scroll offset. Scrolling within the
+    /// band leaves these unchanged, so the cache stays valid and only the blit
+    /// offset moves; re-anchoring (offset left the band) changes the anchor and
+    /// forces one re-raster. `band_active` distinguishes the bounds-sized path.
+    band_active: bool,
+    band_anchor_bits: u64,
+    band_over_top_bits: u64,
+    band_over_bottom_bits: u64,
     w_bits: u64,
     h_bits: u64,
     h_align: TextHAlign,
@@ -375,6 +388,32 @@ pub struct TextArea {
     /// Last painted signature; a change invalidates [`Self::cache`] in `layout`.
     last_sig: Option<TextAreaSig>,
 
+    /// Over-scan band state (anchor + margins) so scrolling within the band is a
+    /// pure blit offset instead of a re-raster. Recomputed each `layout`; see
+    /// `text_area/band.rs`.
+    band: band::BandState,
+    /// `Some(anchor)` only while painting into the band buffer, so content
+    /// geometry uses the band's fixed anchor there while hit-test / caret /
+    /// scroll math outside paint keep using the live offset. See
+    /// [`Self::content_top_y`].
+    render_band_offset: Cell<Option<f64>>,
+    /// Count of real backbuffer re-rasters (bumped in `paint`). Introspection
+    /// hook for the band tests — scrolling within a band must not bump it.
+    raster_count: Cell<u64>,
+    /// Count of *partial* (dirty-line-strip) re-rasters (bumped in `paint` when
+    /// it repaints only the edited strip). Introspection hook for the edit
+    /// tests — a localized edit must bump this, a re-anchor must not.
+    strip_raster_count: Cell<u64>,
+    /// Visual-line index range `(first, last)` that changed in the last
+    /// `refresh_wrap` re-wrap, plus whether the total line count changed.
+    /// `None` when nothing re-wrapped or the width changed (full re-flow).
+    /// Feeds [`Self::plan_dirty_strip`]. Transient (recomputed each layout).
+    wrap_change: Option<(usize, usize, bool)>,
+    /// Inclusive visual-line range to repaint into the retained band buffer for
+    /// a strip-only edit; `None` means repaint the whole band. Set in `layout`
+    /// (see [`Self::plan_dirty_strip`]), consumed + cleared in `paint`.
+    render_dirty_lines: Cell<Option<(usize, usize)>>,
+
     /// Default-on right-click Cut/Copy/Paste/Select-All menu. Opt out with
     /// [`with_context_menu(false)`](Self::with_context_menu).
     context_menu: crate::widgets::text_context_menu::TextContextMenu,
@@ -419,6 +458,12 @@ impl TextArea {
             select_pivot: (0, 0),
             cache: BackbufferCache::default(),
             last_sig: None,
+            band: band::BandState::default(),
+            render_band_offset: Cell::new(None),
+            raster_count: Cell::new(0),
+            strip_raster_count: Cell::new(0),
+            wrap_change: None,
+            render_dirty_lines: Cell::new(None),
             context_menu: crate::widgets::text_context_menu::TextContextMenu::new(),
             context_menu_enabled: true,
         }
@@ -433,7 +478,10 @@ impl TextArea {
             anchor: st.anchor,
             focused: self.focused,
             hovered: self.hovered,
-            offset_bits: self.vbar.offset.to_bits(),
+            band_active: self.band.active,
+            band_anchor_bits: self.band.anchor.to_bits(),
+            band_over_top_bits: self.band.over_top.to_bits(),
+            band_over_bottom_bits: self.band.over_bottom.to_bits(),
             w_bits: self.bounds.width.to_bits(),
             h_bits: self.bounds.height.to_bits(),
             h_align: self.resolved_h_align(),
@@ -608,9 +656,24 @@ impl TextArea {
         // catches that case so the cache never blits stale wrapping.
         let same_epoch = self.cached_epoch == st.epoch;
         if same_width && same_epoch && !self.cached_lines.is_empty() {
+            // No re-wrap: leave `wrap_change` as `layout` reset it, so a second
+            // `refresh_wrap` in the same pass (via `sync_scroll`) can't clobber
+            // the change range the first, re-wrapping call recorded.
             return;
         }
         let lines = wrap_text_indexed(&self.font, &st.text, self.font_size, inner_w.max(1.0));
+        // Diff old vs new visual lines to find the changed range, so an in-place
+        // edit can re-raster just that strip. Runs whenever we re-wrap over an
+        // existing wrap (a fresh build has nothing to diff). The re-wrap flag
+        // `mark_dirty` sets clears `cached_wrap_width`, so we can't tell an edit
+        // from a genuine width change here — but `plan_dirty_strip` rejects the
+        // strip when the width actually changed (its `w_bits` guard), so a
+        // width re-flow safely falls back to a full band repaint.
+        self.wrap_change = if self.cached_lines.is_empty() {
+            None
+        } else {
+            band::diff_line_range(&self.cached_lines, &lines)
+        };
         self.cached_lines = lines;
         self.cached_wrap_width = inner_w;
         self.cached_epoch = st.epoch;
@@ -671,7 +734,12 @@ impl TextArea {
     /// lines come into view. Every geometry query (paint, hit-test, cursor
     /// overlay, scroll-to-cursor) routes through here, so they all agree.
     fn content_top_y(&self) -> f64 {
-        self.bounds.height - self.padding - self.v_align_shift() + self.vbar.offset
+        // While rastering the over-scan band, positioning uses the band's fixed
+        // anchor (set in `paint`), so the cached bitmap is stable as the user
+        // scrolls and only the blit offset moves. Everywhere else (hit-test,
+        // caret overlay, scroll math) uses the live offset.
+        let offset = self.render_band_offset.get().unwrap_or(self.vbar.offset);
+        self.bounds.height - self.padding - self.v_align_shift() + offset
     }
 
     /// Y coordinate (Y-up) of the top edge of visual line `i`.
@@ -691,105 +759,18 @@ impl TextArea {
         self.padding + shift
     }
 
-    /// Locate the (line_index, byte_pos_in_text) that the given cursor
-    /// byte offset lives on.  Returns `(0, 0)` on empty content.
-    fn line_for_cursor(&self, byte_pos: usize) -> usize {
-        for (i, l) in self.cached_lines.iter().enumerate() {
-            if byte_pos >= l.start && byte_pos <= l.end {
-                return i;
-            }
-        }
-        self.cached_lines.len().saturating_sub(1)
-    }
-
-    /// Hit-test a widget-local point to a text byte offset.  Clamps to
-    /// `[0, text.len()]` at the edges.  `local` is Y-UP.
-    fn byte_offset_at(&self, local: Point) -> usize {
-        if self.cached_lines.is_empty() || self.cached_line_h <= 0.0 {
-            return 0;
-        }
-        // Visual lines stack top-to-bottom; Y-up flips their y coords.
-        // Line 0 sits at the top (high Y), line N at the bottom (low Y).
-        // `content_top_y` folds in the vertical-alignment shift.
-        let rel_from_top = self.content_top_y() - local.y;
-        let mut line_idx = (rel_from_top / self.cached_line_h).floor() as isize;
-        if line_idx < 0 {
-            line_idx = 0;
-        }
-        if line_idx as usize >= self.cached_lines.len() {
-            line_idx = self.cached_lines.len() as isize - 1;
-        }
-        let line = &self.cached_lines[line_idx as usize];
-        // X hit test: walk chars in the line's rendered text and pick
-        // the nearest grapheme boundary. The line's x start folds in the
-        // horizontal-alignment shift.
-        let pad_x = self.line_x_start(line);
-        let rel_x = (local.x - pad_x).max(0.0);
-        let txt = &line.text;
-        let mut best_byte = 0usize;
-        let mut best_delta = f64::INFINITY;
-        let mut acc = 0.0_f64;
-        let mut prev_byte = 0usize;
-        for (i, _c) in txt.char_indices().chain(std::iter::once((txt.len(), ' '))) {
-            let w_here = if i > prev_byte {
-                measure_advance(&self.font, &txt[prev_byte..i], self.font_size)
-            } else {
-                0.0
-            };
-            acc += w_here;
-            let d = (acc - rel_x).abs();
-            if d < best_delta {
-                best_delta = d;
-                best_byte = i;
-            }
-            prev_byte = i;
-        }
-        line.start + best_byte
-    }
-
-    /// Screen position (widget-local, Y-UP) of the given cursor byte
-    /// offset.  Returns the bottom-left corner of the cursor glyph
-    /// cell.
-    fn pos_for_cursor(&self, byte_pos: usize) -> Point {
-        if self.cached_lines.is_empty() {
-            return Point::ORIGIN;
-        }
-        let line_idx = self.line_for_cursor(byte_pos);
-        let line = &self.cached_lines[line_idx];
-        let offset = byte_pos.saturating_sub(line.start).min(line.text.len());
-        let x = self.line_x_start(line)
-            + measure_advance(&self.font, &line.text[..offset], self.font_size);
-        // Y-up: line i top-edge folds in the vertical-alignment shift.
-        let line_top = self.line_top_y(line_idx);
-        let line_bottom = line_top - self.cached_line_h;
-        Point::new(x, line_bottom)
-    }
-
-    /// Glyph baseline Y (Y-up) for visual line `i`, vertically centring the
-    /// font's full vertical extent within the 1.35× line cell.
-    ///
-    /// `descent` is a POSITIVE quantity here (see [`Font::descender_px`]), so
-    /// the text block's height is `ascent + descent`. Getting this wrong pushes
-    /// the block up and clips line 0's ascenders against the padded inner-rect
-    /// clip, so paint and the clip-safety test share this single helper.
-    fn line_baseline_y(&self, i: usize) -> f64 {
-        let ascent = self.font.ascender_px(self.font_size);
-        let descent = self.font.descender_px(self.font_size);
-        let line_top = self.line_top_y(i);
-        let line_bottom = line_top - self.cached_line_h;
-        let baseline = line_bottom + (self.cached_line_h - (ascent + descent)) * 0.5 + descent;
-        // Snap to the pixel grid when hinting is on so multi-line text lands
-        // stems on physical rows exactly like `Label` (no-op when hinting off).
-        crate::font_settings::snap_baseline_y(baseline)
-    }
 }
 
+mod band;
 mod callbacks;
 mod context_menu;
 mod edit_ops;
+mod geometry;
 mod scroll;
 mod widget_impl;
 
+#[cfg(test)]
+mod band_tests;
 #[cfg(test)]
 mod selection_tests;
 #[cfg(test)]

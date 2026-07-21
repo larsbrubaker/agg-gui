@@ -138,6 +138,20 @@ pub struct BackbufferCache {
     /// otherwise mark widgets dirty.  Mismatch forces a re-raster
     /// so freshly-loaded data lands in newly-laid-out bounds.
     pub async_state_epoch: u64,
+    /// Retained `LcdCoverage` planes (Y-up) kept alive between paints so an
+    /// over-scan-band widget can *partially* re-raster only the edited line
+    /// strip into the existing pixels instead of rebuilding the whole (up to
+    /// 2×-viewport) buffer on every keystroke. Only populated on the band path
+    /// (see [`crate::widget::Widget::backbuffer_band`]); `None` for every other
+    /// widget, so the extra memory and reuse machinery never touch them.
+    pub lcd_buffer: Option<crate::lcd_coverage::LcdBuffer>,
+    /// Set by the framework immediately before a band widget's `paint`: `true`
+    /// means the retained [`Self::lcd_buffer`] was reused unchanged (same size,
+    /// mode and styling epochs), so the widget may repaint only its dirty line
+    /// strip and leave the rest of the buffer intact. `false` forces a full
+    /// repaint (first raster, resize, re-anchor, theme flip). Transient — the
+    /// widget reads it during `paint` and must not rely on it afterwards.
+    pub partial_allowed: bool,
 }
 
 impl BackbufferCache {
@@ -151,6 +165,8 @@ impl BackbufferCache {
             theme_epoch: 0,
             typography_epoch: 0,
             async_state_epoch: 0,
+            lcd_buffer: None,
+            partial_allowed: false,
         }
     }
 
@@ -224,6 +240,51 @@ impl Default for BackbufferState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Over-scan band request for a scrolling backbuffered widget.
+///
+/// Returned by [`crate::widget::Widget::backbuffer_band`]. It lets a widget
+/// (today only [`crate::widgets::TextArea`]) raster a *band* of content taller
+/// than its own viewport — the visible rect plus an extra `overscan_top` above
+/// and `overscan_bottom` below — so that ordinary scrolling within the band
+/// becomes a pure blit-offset change instead of a full backbuffer re-raster.
+///
+/// # Contract
+///
+/// * **Units.** `overscan_top` / `overscan_bottom` are extra logical pixels of
+///   content rastered above / below the widget bounds. `blit_dy` is the
+///   vertical blit offset in logical pixels (positive shifts the band's content
+///   *up* in Y-up, revealing lower content). The band is anchored in content
+///   space by the widget; `blit_dy` is the residual between the live scroll
+///   offset and the anchor the band was rastered at.
+/// * **Quantization.** The framework quantizes both the overscan extents and
+///   `blit_dy` to whole *physical* pixels before sizing the buffer, translating
+///   the raster, and translating the blit — so the LCD subpixel structure is
+///   never resampled. The widget may pass raw (unquantized) logical values.
+/// * **Who clips.** The framework clips the band blit to the widget's bounds on
+///   every backend, so the over-scan margins never paint over sibling widgets.
+///   The widget is responsible for painting opaque content across the *whole*
+///   band (including the over-scan margins) so no gap shows through as the band
+///   is scrolled, and for painting any fixed chrome (border) in `paint_overlay`
+///   so it does not scroll with the band.
+/// * **Invalidation.** The widget must keep the band's anchor (and hence the
+///   rastered content) out of its backbuffer-cache signature, so scrolling
+///   within the band does not invalidate the cache. It must re-anchor and
+///   invalidate only when the live offset leaves the band (or the size /
+///   content / style changes).
+///
+/// Returning `None` (the default) opts out entirely and keeps the byte-for-byte
+/// original bounds-sized raster + 1:1 blit path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BackbufferBand {
+    /// Extra logical pixels of content rastered above the widget's top edge.
+    pub overscan_top: f64,
+    /// Extra logical pixels of content rastered below the widget's bottom edge.
+    pub overscan_bottom: f64,
+    /// Vertical blit offset in logical pixels (live offset − band anchor).
+    /// Positive shifts the band content up (Y-up), revealing lower content.
+    pub blit_dy: f64,
 }
 
 /// Offscreen compositing layer requested by a widget for itself and its
