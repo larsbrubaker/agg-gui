@@ -120,6 +120,22 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- **Trailing spaces didn't move the insertion caret in the text editors.**
+  Typing spaces at the end of a line left the caret parked on the last visible
+  glyph until a non-space character was typed. The shared text-measurement path
+  (`measure_advance`) was correct — spaces carry a real advance — so the fault
+  was per-editor caret geometry measuring a whitespace-trimmed line instead of
+  the source text. `TextArea` trimmed trailing whitespace from each wrapped
+  line's cached text and clamped the caret to that trimmed length, so
+  `pos_for_cursor` now measures the untrimmed source substring
+  `[line.start..byte_pos]`. `RichTextEdit`'s word-wrap dropped a dangling
+  end-of-line space piece entirely (the same drop that removes a space at a wrap
+  point); the layout now keeps a trailing space at the end of a line so the
+  caret can advance onto it (a space at a genuine wrap point is still dropped).
+  `TextField` (single-line, never trimmed) was already correct and gains a
+  regression guard. All match egui, where trailing spaces advance the caret on
+  the row. Caret x/rect at a trailing space, and a trailing space typed at a
+  wrap boundary, are now covered by tests in each editor.
 - **Scheduled draws could be silently lost in reactive hosts.** The
   scheduled-draw channel (`animation::request_draw_after`) was read
   destructively, so a reactive host armed `ControlFlow::WaitUntil` from a

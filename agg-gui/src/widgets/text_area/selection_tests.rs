@@ -245,6 +245,52 @@ fn word_delete_removes_active_selection_first() {
     assert_eq!(ta.selection(), None);
 }
 
+/// Typing a space at the end of a line must move the caret right by one
+/// space-advance. Regression guard for the trailing-whitespace caret bug:
+/// the wrap layout trims trailing spaces from `WrappedLine.text`, so the
+/// caret x must be measured against the untrimmed source, not the trimmed
+/// visual line.
+#[test]
+fn trailing_space_advances_caret() {
+    let mut ta = laid_out("word", 400.0, 120.0);
+    place_cursor(&ta, 4);
+    let x0 = ta.pos_for_cursor(4).x;
+
+    ta.insert_str(" ");
+    ta.layout(Size::new(400.0, 120.0));
+    let x1 = ta.pos_for_cursor(5).x;
+    assert!(
+        x1 > x0 + 1.0,
+        "caret must advance past the trailing space: x0={x0} x1={x1}"
+    );
+
+    // A second trailing space advances the caret again by the same step.
+    ta.insert_str(" ");
+    ta.layout(Size::new(400.0, 120.0));
+    let x2 = ta.pos_for_cursor(6).x;
+    assert!(
+        (x2 - x1) > 1.0 && ((x2 - x1) - (x1 - x0)).abs() < 0.5,
+        "each trailing space adds one uniform advance: x0={x0} x1={x1} x2={x2}"
+    );
+}
+
+/// A trailing space typed right at a soft-wrap boundary must not panic and
+/// keeps the caret on a valid visual line (matches egui: trailing spaces
+/// consumed at the wrap keep the caret adjacent to the last word).
+#[test]
+fn trailing_space_at_wrap_boundary_no_panic() {
+    // Narrow width forces "aaaa bbbb" to wrap into two visual lines.
+    let mut ta = laid_out("aaaa bbbb", 60.0, 120.0);
+    assert!(ta.visual_line_count() >= 2, "text should wrap");
+    // Caret just after the first word, then type a space at the boundary.
+    place_cursor(&ta, 4);
+    ta.insert_str(" ");
+    ta.layout(Size::new(60.0, 120.0));
+    // Must not panic and must return a finite position.
+    let p = ta.pos_for_cursor(5);
+    assert!(p.x.is_finite() && p.y.is_finite());
+}
+
 #[test]
 fn tab_indents_every_line_of_a_multiline_selection() {
     // Select from col 0 of line 1 into line 2 so two lines are touched. Tab

@@ -57,6 +57,8 @@ mod preview_dirty_tests;
 #[cfg(test)]
 mod tab_indent_tests;
 #[cfg(test)]
+mod trailing_space_tests;
+#[cfg(test)]
 mod word_delete_tests;
 
 /// An interactive, styled rich-text editor.

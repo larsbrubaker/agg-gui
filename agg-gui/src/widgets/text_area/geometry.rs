@@ -75,9 +75,23 @@ impl TextArea {
         }
         let line_idx = self.line_for_cursor(byte_pos);
         let line = &self.cached_lines[line_idx];
-        let offset = byte_pos.saturating_sub(line.start).min(line.text.len());
+        // Measure against the *source* substring, not `line.text`: the wrap
+        // layout trims trailing whitespace from `line.text`, so a caret sitting
+        // after typed trailing spaces would otherwise collapse back to the last
+        // glyph. `[line.start..byte_pos]` preserves those space advances (they
+        // have no visible glyph but still move the pen) so the caret tracks each
+        // space, matching egui. Falls back to the trimmed text on the (shouldn't
+        // happen) chance byte_pos isn't a source char boundary.
+        let seg_end = byte_pos.clamp(line.start, line.end);
         let x = self.line_x_start(line)
-            + measure_advance(&self.font, &line.text[..offset], self.font_size);
+            + {
+                let st = self.edit.borrow();
+                let seg = st.text.get(line.start..seg_end).unwrap_or_else(|| {
+                    let offset = byte_pos.saturating_sub(line.start).min(line.text.len());
+                    &line.text[..offset]
+                });
+                measure_advance(&self.font, seg, self.font_size)
+            };
         // Y-up: line i top-edge folds in the vertical-alignment shift.
         let line_top = self.line_top_y(line_idx);
         let line_bottom = line_top - self.cached_line_h;

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::event::{Event, Modifiers, MouseButton};
+use crate::event::{Event, Key, Modifiers, MouseButton};
 use crate::geometry::Point;
 use crate::widget::Widget;
 
@@ -77,6 +77,42 @@ fn triple_click_selects_whole_field() {
     press(&mut f, x);
     press(&mut f, x);
     assert_eq!(f.selection(), text);
+}
+
+/// Typing a space at the end of the field must move the caret right by one
+/// space-advance. TextField is single-line and never trims, so this is a
+/// regression guard against a future measurement change re-introducing the
+/// trailing-whitespace caret bug that affected the wrapped editors.
+#[test]
+fn trailing_space_advances_caret() {
+    let mut f = laid_out("word");
+    // Caret at end of "word".
+    f.on_event(&Event::KeyDown {
+        key: Key::End,
+        modifiers: Modifiers::default(),
+    });
+    let x0 = f.caret_x();
+
+    let type_space = |f: &mut TextField| {
+        f.on_event(&Event::KeyDown {
+            key: Key::Char(' '),
+            modifiers: Modifiers::default(),
+        });
+    };
+
+    type_space(&mut f);
+    let x1 = f.caret_x();
+    assert!(
+        x1 > x0 + 1.0,
+        "caret must advance past the trailing space: x0={x0} x1={x1}"
+    );
+
+    type_space(&mut f);
+    let x2 = f.caret_x();
+    assert!(
+        (x2 - x1) > 1.0 && ((x2 - x1) - (x1 - x0)).abs() < 0.5,
+        "each trailing space adds one uniform advance: x0={x0} x1={x1} x2={x2}"
+    );
 }
 
 /// A double-click landing on the last glyph of a word (near its right edge)

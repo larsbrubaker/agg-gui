@@ -380,6 +380,14 @@ fn wrap(pieces: Vec<Piece>, avail: f64) -> Vec<LineLayout> {
         cur_w += word_w;
         cur.extend(word);
     }
+    // A space still pending at the very end is a *trailing* space (typed after
+    // the last word, with no following word to wrap against). Unlike a space at
+    // a wrap point — which is dropped above — this one must stay in the line so
+    // the caret can advance onto it (spaces have no glyph but still move the
+    // pen). Matches egui, where trailing spaces advance the cursor on the row.
+    if let (Some(sp), false) = (pending_space.take(), cur.is_empty()) {
+        cur.push(sp);
+    }
     if !cur.is_empty() {
         lines.push(finish_pieces(cur));
     }

@@ -289,25 +289,6 @@ impl Widget for TextField {
             return;
         }
 
-        let (text, cursor) = {
-            let st = self.edit.borrow();
-            let masking = self.masking_active();
-            let text = if masking {
-                const BULLET: char = '•';
-                let n = st.text.chars().count();
-                BULLET.to_string().repeat(n)
-            } else {
-                st.text.clone()
-            };
-            let cursor = if masking {
-                const BULLET_LEN: usize = 3;
-                st.text[..st.cursor].chars().count() * BULLET_LEN
-            } else {
-                st.cursor
-            };
-            (text, cursor)
-        };
-
         let h = self.bounds.height;
         let pad = self.padding;
         let v = ctx.visuals();
@@ -317,8 +298,7 @@ impl Widget for TextField {
         ctx.set_font_size(self.font_size);
         let m = ctx.measure_text("Ag").unwrap_or_default();
         let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
-        let text_x = pad - self.scroll_x;
-        let cx = text_x + measure_advance(&font, &text[..cursor], self.font_size);
+        let cx = self.caret_x();
         let top = baseline_y + m.ascent;
         let bot = baseline_y - m.descent;
 
@@ -468,5 +448,26 @@ impl Widget for TextField {
 
             _ => EventResult::Ignored,
         }
+    }
+}
+
+impl TextField {
+    /// X pixel position (widget-local) of the caret's vertical line, folding in
+    /// the horizontal scroll offset and password masking. Because this measures
+    /// the actual text prefix `text[..cursor]` (never a trimmed one), trailing
+    /// spaces advance the caret glyph-by-glyph like every other character —
+    /// matching egui. Shared by the overlay paint and the caret regression test.
+    pub(crate) fn caret_x(&self) -> f64 {
+        let st = self.edit.borrow();
+        let font = self.active_font();
+        let advance = if self.masking_active() {
+            const BULLET: char = '•';
+            let n = st.text[..st.cursor].chars().count();
+            let masked = BULLET.to_string().repeat(n);
+            measure_advance(&font, &masked, self.font_size)
+        } else {
+            measure_advance(&font, &st.text[..st.cursor], self.font_size)
+        };
+        self.padding - self.scroll_x + advance
     }
 }
