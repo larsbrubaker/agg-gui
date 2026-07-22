@@ -211,7 +211,17 @@ function forwardKeyDown(e: KeyboardEvent, fromMobileTextInput = false) {
   // Ctrl+V / Meta+V: don't intercept here — we handle paste via the 'paste'
   // DOM event so we get the system clipboard text synchronously.
   if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) return;
-  if (e.key !== "Tab") e.preventDefault();
+  // Capture Tab. The canvas hosts a full application that owns Tab: it is a
+  // real editing key (RichTextEdit/TextArea indent) and drives in-app focus
+  // traversal. The original code let Tab keep its browser default "so focus
+  // cycles" back when the demo was just HTML tab buttons — but now that
+  // default yanks DOM focus off the canvas, and every subsequent keydown
+  // bypasses this listener until the user re-clicks the canvas (keyboard goes
+  // dead). Prevent it. Escape routes out of the canvas remain: Ctrl+Tab is the
+  // in-app traversal escape hatch, browser-level Ctrl+Tab tab-switching is
+  // OS/browser-reserved (unaffected by preventDefault on plain Tab), and
+  // clicking outside the canvas still moves focus away.
+  e.preventDefault();
   (wasmModule["on_key_down"] as KeyFn)(e.key, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
 }
 
