@@ -202,15 +202,45 @@ function forwardKeyDown(e: KeyboardEvent, fromMobileTextInput = false) {
     !e.metaKey &&
     !e.altKey
   ) {
-    // Virtual keyboards deliver printable text through beforeinput/input.
-    // Let that path own insertion so we don't double-insert on browsers that
-    // also fire keydown for printable keys.
-    e.preventDefault();
+    // Printable key on the hidden textarea: let the browser's DEFAULT text
+    // insertion run. Do NOT call preventDefault here — canceling keydown also
+    // cancels the very insertion that produces the 'beforeinput'/'input'
+    // events, so the character would be lost entirely (only keydown fires, no
+    // keypress/beforeinput/input). The swallow-and-preventDefault variant is
+    // exactly the regression that shipped once and left every desktop editor
+    // dead. By returning without preventDefault, the insertion flows into the
+    // textarea, the 'beforeinput' handler intercepts insertText (preventDefaults
+    // it, forwards the text via sendTextInput, clears the value), and the
+    // 'input' handler stays the fallback for browsers that skip beforeinput.
+    // Returning here (instead of forwarding to wasm) also avoids double-insert.
     return;
   }
   // Ctrl+V / Meta+V: don't intercept here — we handle paste via the 'paste'
   // DOM event so we get the system clipboard text synchronously.
   if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) return;
+  // Plain Ctrl+C / Meta+C and Ctrl+X / Meta+X: forward to the app FIRST so it
+  // copies or cuts the current selection into its internal clipboard buffer
+  // (on_key_down runs synchronously, ahead of the browser's default action),
+  // then return WITHOUT preventDefault so the browser's copy/cut command
+  // proceeds and fires the 'copy'/'cut' DOM event — which handleCopy/handleCut
+  // intercept to push that buffer to the system clipboard. Canceling the keydown
+  // here would cancel the copy/cut command, the DOM event would never fire, and
+  // the chord would never reach the system clipboard (mirrors Ctrl+V above).
+  //
+  // Require !shift && !alt so ONLY the bare copy/cut chords take this
+  // no-preventDefault path. Shifted/alt'd variants (e.g. Ctrl+Shift+C =
+  // Chrome's Inspect-Element chord, Ctrl+Alt+letter) fall through to the
+  // capture-all preventDefault below, exactly as before — otherwise we'd let
+  // their browser defaults through and regress that behaviour.
+  if (
+    (e.ctrlKey || e.metaKey) &&
+    !e.shiftKey &&
+    !e.altKey &&
+    (e.key === "c" || e.key === "C" || e.key === "x" || e.key === "X")
+  ) {
+    (wasmModule["on_key_down"] as KeyFn)(e.key, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
+    return;
+  }
   // Capture Tab. The canvas hosts a full application that owns Tab: it is a
   // real editing key (RichTextEdit/TextArea indent) and drives in-app focus
   // traversal. The original code let Tab keep its browser default "so focus

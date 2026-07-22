@@ -418,6 +418,25 @@ impl Widget for RichEditHost {
     fn hit_test(&self, local: Point) -> bool {
         self.editor.hit_test(local)
     }
+
+    // Forward the right-click context-menu hooks. The editor implements both
+    // (returning `context_menu.is_open()` / painting the menu at app level), but
+    // the trait defaults are `false` / no-op: without forwarding, an open menu
+    // never goes modal (so clicks don't route to it) and never paints (so it's
+    // invisible) — which is exactly why this demo's menu didn't appear while the
+    // unwrapped TextEdit/Code Editor menus did.
+    fn has_active_modal(&self) -> bool {
+        self.editor.has_active_modal()
+    }
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        self.editor.paint_global_overlay(ctx);
+    }
+    // Forward the caret-blink redraw deadline. The default walks children (this
+    // host has none) and returns `None`, so the focused editor's blink would
+    // never schedule a wake through the host.
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        self.editor.next_draw_deadline()
+    }
 }
 
 #[cfg(test)]
@@ -470,6 +489,42 @@ mod tests {
             engaged,
             "editor backbuffer cache must populate after a framework paint — \
              the cached LCD/RGBA path did not engage"
+        );
+    }
+
+    /// Right-clicking the editor *through the host wrapper* must open the
+    /// context menu AND make the host report an active modal. The editor
+    /// implements `has_active_modal` (returns `context_menu.is_open()`), but the
+    /// trait default is `false`; if the host doesn't forward it, the open menu
+    /// never captures events and — because `paint_global_overlay` is likewise a
+    /// no-op by default — never paints. This pins the forwarding so the menu the
+    /// demo's users right-click for can't silently vanish again.
+    #[test]
+    fn host_forwards_context_menu_modal_state() {
+        agg_gui::widget::set_current_viewport(Size::new(800.0, 600.0));
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+        let resolver = make_resolver(Arc::clone(&font));
+        let doc = RichDoc::from_blocks(vec![Block::from_run(TextRun::plain("hello world"))]);
+        let editor = RichTextEdit::new(doc, resolver).with_font_size(16.0);
+        let mut host = RichEditHost::new(editor);
+
+        host.layout(Size::new(400.0, 120.0));
+        host.on_event(&Event::FocusGained);
+
+        let r = host.on_event(&Event::MouseDown {
+            pos: Point::new(20.0, 60.0),
+            button: MouseButton::Right,
+            modifiers: Modifiers::default(),
+        });
+        assert_eq!(
+            r,
+            EventResult::Consumed,
+            "a right-click on the editor must be consumed (opens the menu)"
+        );
+        assert!(
+            host.has_active_modal(),
+            "RichEditHost must forward has_active_modal so the open context menu \
+             captures events; the trait default false leaves the menu inert"
         );
     }
 

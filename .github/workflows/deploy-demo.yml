@@ -56,9 +56,11 @@ jobs:
           path: demo/dist
 
   # Browser smoke test — boots the built WASM demo in headless Chrome and
-  # asserts a real, non-blank canvas paints.  Deploy is gated on this so a
-  # broken WASM build (panic on init, blank canvas, font-load failure,
-  # shader regression) cannot ship to GitHub Pages.
+  # asserts a real, non-blank canvas paints (screenshot) plus that desktop
+  # typing and the Ctrl+C system-clipboard chord work (keyboard).  Deploy is
+  # gated on this so a broken WASM build (panic on init, blank canvas,
+  # font-load failure, shader regression) or an input regression (dead editors,
+  # broken clipboard chords) cannot ship to GitHub Pages.
   test:
     needs: build
     runs-on: ubuntu-latest
@@ -91,8 +93,8 @@ jobs:
           cp -r demo/dist/public/pkg/. demo/public/pkg/
           cp -r demo/dist/public/dist/. demo/public/dist/
 
-      - name: Run screenshot test
-        run: cd demo && bunx playwright test screenshot
+      - name: Run browser tests
+        run: cd demo && bunx playwright test screenshot keyboard
 
       - name: Upload screenshot artifact on failure
         if: failure()
