@@ -43,6 +43,7 @@ mod color_wheel_picker;
 /// A point drawn at Y=10 in a 100×100 buffer must be near the BOTTOM of the
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.
+mod draw_report;
 mod drawing;
 mod flex_gap;
 mod focus;

@@ -465,6 +465,61 @@ fn test_combo_popup_open_does_not_keep_requesting_redraw() {
     );
 }
 
+/// The hardened `ComboBox::needs_draw` gates on `is_visible()` and ORs in the
+/// children's needs, matching the other containers.  Guard the failure mode
+/// that hardening could introduce: the children-OR branch must NOT spuriously
+/// fire on a freshly built, idle combo (open or closed), or the host would be
+/// trapped in exactly the continuous-redraw runaway this work targets.
+#[test]
+fn test_combo_needs_draw_idle_does_not_spuriously_fire() {
+    use crate::text::Font;
+    use crate::widgets::{ScrollBarStyle, ScrollBarVisibility};
+    use std::sync::Arc;
+
+    crate::set_scroll_style(ScrollBarStyle::default());
+    crate::set_scroll_visibility(ScrollBarVisibility::VisibleWhenNeeded);
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let combo = ComboBox::new(
+        vec![
+            "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
+        ],
+        0,
+        font,
+    );
+
+    let mut app = App::new(Box::new(combo));
+    let viewport = Size::new(180.0, 220.0);
+    app.layout(viewport);
+
+    // Closed + idle: the children-OR branch must not report a draw need.
+    assert!(
+        !app.root().needs_draw(),
+        "a closed idle combo must not want a draw"
+    );
+
+    // Open it and settle one paint; still idle (no scrollbar animation).
+    app.on_mouse_down(
+        12.0,
+        viewport.height - 12.0,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        12.0,
+        viewport.height - 12.0,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    let mut fb = Framebuffer::new(viewport.width as u32, viewport.height as u32);
+    let mut ctx = GfxCtx::new(&mut fb);
+    app.paint(&mut ctx);
+
+    assert!(
+        !app.root().needs_draw(),
+        "an open but idle combo must not keep requesting draws via the children-OR branch"
+    );
+}
+
 #[test]
 fn test_combo_popup_uses_root_transform_inside_layer() {
     use crate::text::Font;

@@ -151,5 +151,12 @@ pub struct DemoHandles {
     /// swaps a real WebRTC-backed transport into `screen_share.transport` and
     /// fills `screen_share.phone_url` once its server / peer id is known.
     pub screen_share: crate::screen_share::ScreenShareHandles,
+    /// Set to `true` by the Ctrl+Shift+D global key handler.  The platform
+    /// shell polls this each frame, and when set builds
+    /// `agg_gui::debug_draw_report(app.root())`, emits it (stderr + a log file
+    /// on native, console on web), and clears the flag.  The handler can't
+    /// build the report itself — it runs inside `App` event dispatch, which
+    /// already holds the widget tree the report must walk.
+    pub debug_report_requested: Rc<Cell<bool>>,
     pub state: StateAccessor,
 }

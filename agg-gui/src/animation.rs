@@ -341,6 +341,20 @@ pub fn request_draw_after(delay: Duration) {
     });
 }
 
+/// Side-effect-free snapshot of the two draw signals for diagnostics.
+///
+/// Returns `(immediate_flag, next_deadline)` read straight from the
+/// thread-local cells.  Unlike [`wants_draw`], this does **not** pump
+/// cross-thread async wakeups and does **not** promote or clear a due
+/// deadline — reading it can never perturb the very runaway a caller is
+/// trying to capture.  Used by [`crate::debug_draw_report`].
+#[doc(hidden)]
+pub fn peek_draw_signals() -> (bool, Option<Instant>) {
+    let flag = NEEDS_DRAW.with(|c| c.get());
+    let deadline = NEXT_DRAW_AT.with(|c| c.get());
+    (flag, deadline)
+}
+
 /// Non-destructive read of the earliest pending scheduled-draw deadline.
 ///
 /// Hosts arm `ControlFlow::WaitUntil(t)` from this on every idle iteration.

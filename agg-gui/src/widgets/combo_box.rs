@@ -358,7 +358,10 @@ impl Widget for ComboBox {
     }
 
     fn needs_draw(&self) -> bool {
-        self.scrollbar.animation_active()
+        if !self.is_visible() {
+            return false;
+        }
+        self.scrollbar.animation_active() || self.children().iter().any(|c| c.needs_draw())
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {

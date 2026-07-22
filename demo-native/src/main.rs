@@ -43,6 +43,7 @@ mod window_size;
 use gpu::{acquire_frame, Gpu};
 
 const STATE_FILE_NAME: &str = ".agg-gui-demo-state";
+const DEBUG_LOG_FILE_NAME: &str = ".agg-gui-draw-debug.log";
 
 const APP_ICON_SIZE: u32 = 256;
 const APP_ICON_RGBA: &[u8] = include_bytes!("../assets/app-icon-256.rgba");
@@ -93,6 +94,44 @@ fn state_file_path() -> std::path::PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|d| d.join(STATE_FILE_NAME)))
         .unwrap_or_else(|| std::path::PathBuf::from(STATE_FILE_NAME))
+}
+
+/// Path of the draw-diagnostic log, kept next to the state file so a captured
+/// report survives the console scrolling away (or the app closing).
+fn debug_log_path() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(DEBUG_LOG_FILE_NAME)))
+        .unwrap_or_else(|| std::path::PathBuf::from(DEBUG_LOG_FILE_NAME))
+}
+
+/// Build the draw report for the live tree, print it to stderr, and append it
+/// (with a wall-clock timestamp) to [`debug_log_path`].  `label` distinguishes
+/// a manual Ctrl+Shift+D capture from an auto-detected runaway.  This is the
+/// one-keypress evidence path for the intermittent "reactive host never
+/// quiesces" bug.
+fn emit_draw_report(app: &App, label: &str) {
+    let report = agg_gui::debug_draw_report(app.root());
+    eprintln!("\n[agg-gui draw report — {label}]\n{report}");
+    let path = debug_log_path();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    use std::io::Write as _;
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            let _ = writeln!(f, "==== {label} @ unix {stamp}s ====\n{report}");
+            eprintln!("[agg-gui] draw report appended to {}", path.display());
+        }
+        Err(err) => {
+            eprintln!("[agg-gui] failed to write draw report to {}: {err}", path.display());
+        }
+    }
 }
 
 fn load_saved_state() -> Option<demo_ui::SavedState> {
@@ -296,7 +335,15 @@ fn main() {
     // `handles.screenshot_continuous` is consumed by `ImageView::paint` via
     // its own clone — the harness no longer needs to read it directly.
     let _screenshot_continuous = Rc::clone(&handles.screenshot_continuous);
+    let debug_report_requested = Rc::clone(&handles.debug_report_requested);
     let state_accessor = handles.state;
+
+    // Runaway-repaint auto-detector: fed one signal per rendered frame in the
+    // AboutToWait loop below.  `input_since_frame` latches whenever an input
+    // event arrived since the last frame, so legitimate input-driven repaints
+    // don't trip the detector.
+    let mut runaway = demo_ui::RunawayDetector::new(demo_ui::DEFAULT_RUNAWAY_THRESHOLD);
+    let mut input_since_frame = false;
 
     let mut win_w = gpu.config.width;
     let mut win_h = gpu.config.height;
@@ -387,6 +434,7 @@ fn main() {
             } => {
                 cursor_x = position.x;
                 cursor_y = position.y;
+                input_since_frame = true;
                 app.on_mouse_move(cursor_x, cursor_y);
                 winit_adapter::apply_cursor(&window, agg_gui::current_cursor_icon());
             }
@@ -407,6 +455,7 @@ fn main() {
                 ..
             } => {
                 let btn = winit_adapter::mouse_button(button);
+                input_since_frame = true;
                 match state {
                     ElementState::Pressed => {
                         mouse_buttons_down = mouse_buttons_down.saturating_add(1);
@@ -431,6 +480,7 @@ fn main() {
                 event: WindowEvent::Touch(touch),
                 ..
             } => {
+                input_since_frame = true;
                 let dev = agg_gui::TouchDeviceId(0);
                 let tid = agg_gui::TouchId(touch.id);
                 let (x, y) = (touch.location.x, touch.location.y);
@@ -454,6 +504,7 @@ fn main() {
                     },
                 ..
             } => {
+                input_since_frame = true;
                 if key_event.state == ElementState::Pressed {
                     if let Some(key) = winit_adapter::key_event(&key_event, current_mods) {
                         app.on_key_down(key, current_mods);
@@ -477,6 +528,7 @@ fn main() {
                 // scrolling feels on their machine; if it feels backwards,
                 // the OS preference is the source of truth — don't add a
                 // sign flip here.
+                input_since_frame = true;
                 let (mut dx, mut dy) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
                     MouseScrollDelta::PixelDelta(d) => (d.x / 40.0, d.y / 40.0),
@@ -523,6 +575,12 @@ fn main() {
             }
 
             Event::AboutToWait => {
+                // Manual draw-report capture: Ctrl+Shift+D latched this via the
+                // demo-ui global key handler; build + emit it here where we
+                // hold `app` (the handler runs inside App dispatch and can't).
+                if debug_report_requested.replace(false) {
+                    emit_draw_report(&app, "manual Ctrl+Shift+D");
+                }
                 // Continuous run mode keeps the app repainting unconditionally
                 // (used by perf graphs etc.).  Continuous SCREENSHOT capture
                 // is driven from inside `ImageView::paint` in the screenshot
@@ -555,7 +613,21 @@ fn main() {
                     );
                     last_frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
                     frame_history.borrow_mut().push(last_frame_ms as f32);
+
+                    // A real runaway manifests here: reactive frames rendered
+                    // every idle iteration with no intervening input.  Fire the
+                    // report ONCE (latched) so it's captured even if the user
+                    // doesn't notice the spinning.
+                    let reactive = run_mode.get() == demo_ui::RunMode::Reactive;
+                    if runaway.note_frame(reactive, input_since_frame) {
+                        emit_draw_report(&app, "AUTO-DETECTED RUNAWAY");
+                    }
+                } else {
+                    // Loop went idle — reset the counter and clear the latch so
+                    // a later runaway is caught fresh.
+                    runaway.note_idle();
                 }
+                input_since_frame = false;
                 // `wants_draw()` now covers due scheduled deadlines, so Poll
                 // when it (or continuous mode) is true. Otherwise re-arm
                 // `WaitUntil` from the non-destructive peek: this runs every

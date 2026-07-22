@@ -60,6 +60,12 @@ thread_local! {
     static STATE_ACCESSOR:    RefCell<Option<demo_ui::StateAccessor>>                          = RefCell::new(None);
     static FRAME_HISTORY:     RefCell<Option<Rc<RefCell<demo_ui::FrameHistory>>>>              = RefCell::new(None);
     static RUN_MODE:          RefCell<Option<Rc<Cell<demo_ui::RunMode>>>>                      = RefCell::new(None);
+    /// Set by the Ctrl+Shift+D global key handler (in shared demo-ui).
+    /// `render` polls it and logs `debug_draw_report` to the browser console.
+    /// (The native shell additionally appends to a log file; the browser has
+    /// no equivalent filesystem, so wasm is console-only — the auto-detector
+    /// is native-only for the same reason.)
+    static DEBUG_REPORT_REQUESTED: RefCell<Option<Rc<Cell<bool>>>>                             = RefCell::new(None);
     static FRAME_COUNT:       Cell<u32> = Cell::new(0);
     static MOUSE_BUTTONS_DOWN: Cell<u32> = Cell::new(0);
     static AUTO_SAVE:         RefCell<agg_gui::persistence::AutoSave> = RefCell::new(agg_gui::persistence::AutoSave::new());
@@ -299,6 +305,8 @@ fn ensure_demo_app() {
             SCREEN_SIZE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screen_size)));
             FRAME_HISTORY.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.frame_history)));
             RUN_MODE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.run_mode)));
+            DEBUG_REPORT_REQUESTED
+                .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.debug_report_requested)));
             CUBE_VISIBLE.with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.cube_visible)));
             SCREENSHOT_REQUEST
                 .with(|c| *c.borrow_mut() = Some(Rc::clone(&handles.screenshot_request)));
@@ -413,6 +421,24 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
         }
     });
     CUBE_SCREEN_RECT.with(|r| r.set(agg_gui::Rect::default()));
+
+    // Manual draw-report capture (Ctrl+Shift+D). Poll before the render borrow
+    // so building the report can take its own `DEMO_APP` borrow. Console-only
+    // on the web (no filesystem for a log file).
+    let want_report = DEBUG_REPORT_REQUESTED
+        .with(|c| c.borrow().as_ref().map(|r| r.replace(false)).unwrap_or(false));
+    if want_report {
+        DEMO_APP.with(|app_cell| {
+            if let Ok(borrow) = app_cell.try_borrow() {
+                if let Some(app) = borrow.as_ref() {
+                    let report = agg_gui::debug_draw_report(app.root());
+                    web_sys::console::log_1(&JsValue::from_str(&format!(
+                        "[agg-gui draw report — manual Ctrl+Shift+D]\n{report}"
+                    )));
+                }
+            }
+        });
+    }
 
     // Continuous capture re-arming is driven by `ImageView::paint` inside
     // the screenshot demo — keeping it scoped to "screenshot window is

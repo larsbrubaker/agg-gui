@@ -40,6 +40,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- **Live draw-report hotkey + runaway auto-detector in the demos.**
+  `agg_gui::debug_draw_report(root)` returns a diagnostic string — raw
+  `needs_draw` flag (read side-effect-free via `animation::peek_draw_signals`,
+  so reading it never perturbs the runaway), the next scheduled deadline with
+  remaining time, the drained draw-trace tags deduplicated with counts, and
+  every visible widget whose `needs_draw()` is `true` (child-index path +
+  `<- self` marker on the driver). Press **Ctrl+Shift+D** in either demo to
+  emit it: native prints to stderr and appends it (timestamped) to
+  `.agg-gui-draw-debug.log` next to the state file; web logs it to the browser
+  console. A pure `RunawayDetector` also auto-fires the report once (tagged
+  `AUTO-DETECTED RUNAWAY`) after 240 consecutive input-free reactive frames
+  (~4 s), so an intermittent "reactive host never quiesces" runaway is captured
+  even when unnoticed. Auto-detection + the log file are native-only (no browser
+  filesystem).
+
 - **Draw-request provenance trace for diagnosing continuous-repaint cascades.**
   `animation::request_draw_tagged(reason)` / `request_draw_after_tagged(delay,
   reason)` record a `&'static str` reason tag into a thread-local ring buffer

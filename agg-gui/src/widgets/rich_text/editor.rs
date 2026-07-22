@@ -429,7 +429,10 @@ impl Widget for RichTextEdit {
         let time = self.start.elapsed().as_secs_f64();
         let in_flux = self.core.borrow_mut().feed_undo(time);
         if in_flux {
-            crate::animation::request_draw_after(std::time::Duration::from_millis(120));
+            crate::animation::request_draw_after_tagged(
+                std::time::Duration::from_millis(120),
+                "rich_text::editor undo-settle",
+            );
         }
 
         // Scroll external (toolbar/undo-driven) caret moves into view.

@@ -144,7 +144,8 @@ pub use undo::{DoUndoActions, Settings as UndoerSettings, UndoBuffer, Undoer, Un
 pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
-    find_widget_by_id, find_widget_by_id_mut, find_widget_by_type, App, BackbufferKind,
+    debug_draw_report, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type, App,
+    BackbufferKind,
     BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay, Widget, WidgetBaseEdit,
     WidgetBaseField,
 };

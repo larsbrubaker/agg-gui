@@ -663,8 +663,14 @@ pub fn build_demo_ui(
         demo_entries.iter().map(|e| Rc::clone(&e.open)).collect();
     let test_open_cells: Vec<Rc<Cell<bool>>> =
         test_entries.iter().map(|e| Rc::clone(&e.open)).collect();
+    // Ctrl+Shift+D: request a draw diagnostic report.  The handler only
+    // latches the request — the platform shell polls the cell each frame and
+    // builds/emits the report with access to `app.root()` (unavailable here,
+    // inside App event dispatch).
+    let debug_report_requested = Rc::new(Cell::new(false));
     app.set_global_key_handler({
         let on_org = on_organize_key;
+        let debug_report = Rc::clone(&debug_report_requested);
         move |key: Key, mods: Modifiers| {
             if mods.ctrl && mods.shift {
                 match key {
@@ -679,6 +685,10 @@ pub fn build_demo_ui(
                         for c in &test_open_cells {
                             c.set(false);
                         }
+                        return true;
+                    }
+                    Key::Char('D') | Key::Char('d') => {
+                        debug_report.set(true);
                         return true;
                     }
                     _ => {}
@@ -765,6 +775,7 @@ pub fn build_demo_ui(
         screenshot_continuous: Rc::clone(&screenshot_continuous),
         screenshot_capture_seq: Rc::clone(&screenshot_capture_seq),
         screen_share: screen_share.clone(),
+        debug_report_requested,
         state: state_accessor,
     };
     (app, handles)

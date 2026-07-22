@@ -9,6 +9,7 @@ mod content;
 mod font_init;
 mod font_picker;
 mod rendering_test;
+mod runaway_detector;
 mod screen_codec;
 mod screen_share;
 mod shell;
@@ -22,6 +23,7 @@ mod windows;
 pub use api::{DemoHandles, PlatformHooks, PlatformKind};
 pub use app_builder::build_demo_ui;
 pub use backend_panel::{FrameHistory, RunMode};
+pub use runaway_detector::{RunawayDetector, DEFAULT_RUNAWAY_THRESHOLD};
 pub use screen_codec::{FrameDecoder, FrameEncoder};
 pub use screen_share::{
     NullScreenTransport, QueuedScreenTransport, ScreenFrame, ScreenShareHandles,
