@@ -126,6 +126,7 @@ const triggerTs   = debounce(() => { pendingTs   = true; rebuild(); }, 200);
 for (const dir of [
   join(PROJECT_ROOT, "agg-gui", "src"),
   join(PROJECT_ROOT, "demo-wasm", "src"),
+  join(PROJECT_ROOT, "demo-ui", "src"),
   join(PROJECT_ROOT, "demo-native", "src"),
 ]) {
   watch(dir, { recursive: true }, (_, f) => {
