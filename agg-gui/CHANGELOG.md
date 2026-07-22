@@ -8,6 +8,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-22
+
+### Changed
+
+- Depend on `agg-rust` 1.1.0 and `clipper2-rust` 1.1.0.
+
 ### Performance
 
 - **`TextArea` scroll + edit no longer re-raster the whole LCD backbuffer.**
@@ -333,4 +339,5 @@ parity work against egui 0.34.3. Includes a few semver-relevant changes — see
 - `Stack` no longer panics when a raise-requesting child sits beyond the
   parallel `aligned` vec.
 
+[0.4.0]: https://github.com/larsbrubaker/agg-gui/releases/tag/v0.4.0
 [0.3.0]: https://github.com/larsbrubaker/agg-gui/releases/tag/v0.3.0

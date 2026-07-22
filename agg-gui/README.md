@@ -34,7 +34,7 @@ Optional features:
 
 ```toml
 [dependencies]
-agg-gui = { version = "0.2", features = ["winit-adapter", "clipboard"] }
+agg-gui = { version = "0.4", features = ["winit-adapter", "clipboard"] }
 ```
 
 ## Widgets And Layout
@@ -54,6 +54,7 @@ agg-gui = { version = "0.2", features = ["winit-adapter", "clipboard"] }
 | `ToggleSwitch` | Animated on/off toggle |
 | `TextField` | Full text editing: cursor, selection, clipboard, undo/redo |
 | `TextArea` | Multi-line text editing |
+| `RichTextEdit` / `RichTextToolbar` | Styled text editing with a builder-configurable formatting toolbar (bold/italic/lists/colors/history) and programmatic `RichEditHandle` APIs |
 | `Hyperlink` | Underlined link text with click callback |
 | `ImageView` | Image display widget |
 | `ScrollView` | Vertical scroll with drag-thumb and mouse-wheel support |
@@ -67,7 +68,7 @@ agg-gui = { version = "0.2", features = ["winit-adapter", "clipboard"] }
 | `TreeView` | Hierarchical list with expand/collapse and drag-and-drop |
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
-| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives |
+| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; any widget also gets a hover tooltip via `with_tooltip(...)` |
 | `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
 | `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |
 | `Separator` | Horizontal or vertical rule |

@@ -43,9 +43,9 @@ cargo add agg-gui
 
 ```toml
 [dependencies]
-agg-gui = "0.2"
+agg-gui = "0.4"
 # Optional: winit event-type adapters (for desktop hosts)
-# agg-gui = { version = "0.2", features = ["winit-adapter", "clipboard"] }
+# agg-gui = { version = "0.4", features = ["winit-adapter", "clipboard"] }
 ```
 
 Only the `agg-gui` library crate is published — the demo crates
@@ -70,6 +70,7 @@ Only the `agg-gui` library crate is published — the demo crates
 | `ToggleSwitch` | Animated on/off toggle |
 | `TextField` | Full text editing: cursor, selection, clipboard, undo/redo |
 | `TextArea` | Multi-line text editing |
+| `RichTextEdit` / `RichTextToolbar` | Styled text editing with a builder-configurable formatting toolbar (bold/italic/lists/colors/history) and programmatic `RichEditHandle` APIs |
 | `Hyperlink` | Underlined link text with click callback |
 | `ImageView` | Image display widget |
 | `ScrollView` | Vertical scroll with drag-thumb and mouse-wheel support |
@@ -84,7 +85,7 @@ Only the `agg-gui` library crate is published — the demo crates
 | `TreeView` | Hierarchical list with expand/collapse and drag-and-drop |
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
-| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives |
+| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; any widget also gets a hover tooltip via `with_tooltip(...)` |
 | `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
 | `Rebuilder` | Regenerates a child subtree from a builder closure when a shared version cell changes — for dynamic content sets (option lists, variable row counts) |
 | `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |

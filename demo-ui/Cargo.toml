@@ -1,8 +1,8 @@
-[package]
+﻿[package]
 name = "demo-ui"
 version = "0.1.0"
 edition = "2021"
-description = "Shared demo UI builders — identical widget trees for native and WASM"
+description = "Shared demo UI builders â€” identical widget trees for native and WASM"
 
 [features]
 default = ["reflect"]
@@ -10,7 +10,7 @@ reflect = ["agg-gui/reflect"]
 
 [dependencies]
 agg-gui    = { path = "../agg-gui" }
-agg-rust   = "1.0.2"
+agg-rust   = "1.1.0"
 png        = "0.17"
 dark-light = "1"
 web-time   = "1"
