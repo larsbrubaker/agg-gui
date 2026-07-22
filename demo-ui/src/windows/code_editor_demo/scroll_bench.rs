@@ -14,7 +14,8 @@
 //! into a software `GfxCtx`, exactly the traversal the real app uses; the
 //! `TextArea` internally allocates its `LcdBuffer` backbuffer on the way.
 //!
-//! Run: `cargo test -p demo-ui code_editor_scroll_probe -- --nocapture`
+//! Ignored in default test sweeps (slow). Run explicitly:
+//! `cargo test -p demo-ui --release code_editor_scroll_probe -- --ignored --nocapture`
 //! Numbers come from whatever profile the test was built in — see the printed
 //! `profile=` field (debug is what `cargo dev` users feel; deps are opt-level 2
 //! but demo-ui / agg-gui own code is unoptimized in debug).
@@ -127,7 +128,12 @@ fn any_painted(fb: &Framebuffer) -> bool {
     fb.pixels().iter().any(|&b| b != 0)
 }
 
+/// Ignored by default: this is a measurement probe, not a gate — it takes
+/// ~17.5 minutes in a debug-profile `cargo test -p demo-ui` sweep and only
+/// smoke-asserts. Run it explicitly for perf work:
+/// `cargo test -p demo-ui --release code_editor_scroll_probe -- --ignored --nocapture`
 #[test]
+#[ignore = "slow measurement probe; run explicitly with --release ... -- --ignored --nocapture"]
 fn code_editor_scroll_probe() {
     // ── Setup ────────────────────────────────────────────────────────────────
     let profile = if cfg!(debug_assertions) {
