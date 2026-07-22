@@ -21,9 +21,13 @@
 //!     legible under both app themes.
 //!   * The gutter numbers source lines. Our `TextArea` always word-wraps, so a
 //!     line long enough to wrap would push later numbers out of alignment; the
-//!     sample fits the width, so this doesn't bite in practice.
+//!     sample fits the width, so this doesn't bite in practice. The gutter does
+//!     track the editor's vertical scroll: the `TextArea` publishes its offset
+//!     through a shared cell ([`agg_gui::TextArea::with_scroll_watch`]) that the
+//!     gutter reads each paint, so the numbers stay aligned with the scrolled
+//!     text and only the visible band is drawn.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -143,11 +147,18 @@ pub fn code_editor(font: Arc<Font>) -> Box<dyn Widget> {
     );
     col.push(Box::new(Separator::horizontal()), 0.0);
 
+    // Shared vertical-scroll offset: the TextArea publishes its viewport offset
+    // here every time it moves, and the sibling gutter reads it each paint so
+    // the line numbers follow the scrolled text (they cannot otherwise see the
+    // editor's internal scroll state).
+    let scroll_watch = Rc::new(Cell::new(0.0));
+
     // Editor area: line-number gutter + highlighted editable buffer.
     let editor = TextArea::new(Arc::clone(&code_font))
         .with_font_size(EDITOR_FONT_SIZE)
         .with_padding(EDITOR_PADDING)
         .with_edit_state(Rc::clone(&state))
+        .with_scroll_watch(Rc::clone(&scroll_watch))
         .with_highlighter(rust_highlighter);
 
     let gutter = LineGutter::new(
@@ -155,6 +166,7 @@ pub fn code_editor(font: Arc<Font>) -> Box<dyn Widget> {
         Arc::clone(&code_font),
         EDITOR_FONT_SIZE,
         EDITOR_PADDING,
+        scroll_watch,
     );
 
     let editor_row = FlexRow::new()
@@ -277,6 +289,35 @@ struct LineGutter {
     font_size: f64,
     padding: f64,
     width: f64,
+    /// Live mirror of the editor's vertical scroll offset (px from the top),
+    /// published by the sibling `TextArea` via `with_scroll_watch`.
+    scroll_watch: Rc<Cell<f64>>,
+}
+
+/// Inclusive 0-based range of source-line indices whose baseline band intersects
+/// the gutter's visible `[0, viewport_h]` region, given the current scroll.
+///
+/// Line `i`'s painted band (Y-up) spans `[top - line_h, top]` where
+/// `top = viewport_h - padding - i*line_h + scroll_y`, so lines scrolled off the
+/// top (small `i`) and below the bottom (large `i`) are excluded. Bounding the
+/// range this way keeps the paint loop at one `fill_text` per *visible* line
+/// instead of one per source line (249 for the sample), and — with the matching
+/// `+ scroll_y` baseline shift in `paint` — is what makes the numbers track the
+/// editor's scroll. A partially visible line at either edge is still included.
+fn visible_gutter_lines(
+    scroll_y: f64,
+    viewport_h: f64,
+    padding: f64,
+    line_h: f64,
+    count: usize,
+) -> (usize, usize) {
+    if count == 0 || line_h <= 0.0 {
+        return (0, 0);
+    }
+    let first = ((scroll_y - padding) / line_h).floor().max(0.0) as usize;
+    let last = (((scroll_y + viewport_h - padding) / line_h).ceil().max(0.0) as usize)
+        .min(count - 1);
+    (first.min(last), last)
 }
 
 impl LineGutter {
@@ -285,6 +326,7 @@ impl LineGutter {
         font: Arc<Font>,
         font_size: f64,
         padding: f64,
+        scroll_watch: Rc<Cell<f64>>,
     ) -> Self {
         Self {
             bounds: Rect::default(),
@@ -294,6 +336,7 @@ impl LineGutter {
             font_size,
             padding,
             width: 0.0,
+            scroll_watch,
         }
     }
 
@@ -348,13 +391,18 @@ impl Widget for LineGutter {
         let m = ctx.measure_text("Ag").unwrap_or_default();
 
         let count = self.line_count();
+        // Follow the editor's scroll and only paint the lines actually in view
+        // (the sample is 249 lines — iterating them all would issue 249
+        // fill_texts per frame for a handful of visible numbers).
+        let scroll_y = self.scroll_watch.get();
+        let (first, last) = visible_gutter_lines(scroll_y, h, self.padding, line_h, count);
         ctx.set_fill_color(num_color);
-        for i in 0..count {
+        for i in first..=last {
             let num = format!("{}", i + 1);
             let num_w = measure_text_metrics(&self.font, &num, self.font_size).width;
             // Right-align within the gutter, leaving an 8px right margin.
             let x = (w - 8.0 - num_w).max(0.0);
-            let line_top = h - self.padding - i as f64 * line_h;
+            let line_top = h - self.padding - i as f64 * line_h + scroll_y;
             let line_bottom = line_top - line_h;
             let baseline_y = line_bottom + (line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
             ctx.fill_text(&num, x, baseline_y);
@@ -514,5 +562,37 @@ mod tests {
             (gutter_h - editor_h).abs() < 1.0,
             "gutter height {gutter_h} must match editor height {editor_h}"
         );
+    }
+
+    /// The visible-range helper must follow the editor's scroll: at the top it
+    /// yields the first viewport's worth of lines starting at line 1; scrolled
+    /// to the bottom of a 249-line file it must include line 249 and exclude
+    /// line 1. This is the demo half of the "gutter shows only lines 1..~33 no
+    /// matter how far you scroll" regression.
+    #[test]
+    fn gutter_visible_range_tracks_scroll() {
+        let line_h = EDITOR_FONT_SIZE * 1.35;
+        let padding = EDITOR_PADDING;
+        let count = 249;
+        let viewport_h = 33.0 * line_h; // ~33 lines tall
+
+        // At the top: numbering starts at line 1 (index 0), ~one viewport shown,
+        // and the last line of the file is nowhere near visible.
+        let (first, last) = visible_gutter_lines(0.0, viewport_h, padding, line_h, count);
+        assert_eq!(first, 0, "top of document starts at line 1");
+        assert!(
+            (30..=35).contains(&(last + 1)),
+            "a ~33-line viewport shows about 33 numbers, got last line {}",
+            last + 1
+        );
+        assert!(last < count - 1, "line 249 must not be visible from the top");
+
+        // Scrolled to the bottom: line 249 (index 248) is visible and line 1 is
+        // scrolled out — the behaviour the bug lacked.
+        let content_h = count as f64 * line_h;
+        let max_scroll = content_h - viewport_h;
+        let (first, last) = visible_gutter_lines(max_scroll, viewport_h, padding, line_h, count);
+        assert_eq!(last, count - 1, "bottom of document must show line 249");
+        assert!(first > 0, "line 1 must be scrolled out of view at the bottom");
     }
 }

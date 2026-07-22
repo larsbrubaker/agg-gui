@@ -56,6 +56,20 @@ impl TextArea {
         self.vbar.offset
     }
 
+    /// Publish this widget's live vertical scroll offset (in px from the top,
+    /// the same value [`scroll_offset`](Self::scroll_offset) reports) into a
+    /// shared cell whenever it changes. Exists so a *sibling* widget outside the
+    /// editor's subtree can mirror the viewport — the Code Editor demo's
+    /// line-number gutter uses it to keep the numbers aligned with the scrolled
+    /// text, which it otherwise cannot see. The cell is refreshed at every offset
+    /// mutation (wheel, thumb drag, scroll-to-caret, relayout clamp), so it is
+    /// current before the next frame paints.
+    pub fn with_scroll_watch(mut self, watch: Rc<Cell<f64>>) -> Self {
+        watch.set(self.vbar.offset);
+        self.scroll_watch = Some(watch);
+        self
+    }
+
     /// Number of whole visual lines that fit in the viewport — the distance
     /// PageUp/PageDown move the caret. Always at least 1 so the caret advances
     /// even in a viewport shorter than one line.
@@ -73,12 +87,23 @@ impl TextArea {
         current_scroll_visibility()
     }
 
+    /// Mirror the current `vbar.offset` into the optional scroll-watch cell.
+    /// Called from every site that moves the offset so a sibling widget (the
+    /// line-number gutter) never paints a frame behind the text. See
+    /// [`TextArea::with_scroll_watch`].
+    fn publish_scroll_offset(&self) {
+        if let Some(watch) = &self.scroll_watch {
+            watch.set(self.vbar.offset);
+        }
+    }
+
     /// Refresh the axis with the current content height and re-clamp the offset.
     /// Called each layout after the wrap cache is rebuilt.
     pub(crate) fn sync_scroll(&mut self) {
         self.vbar.enabled = true;
         self.vbar.content = self.content_height();
         self.vbar.clamp_offset(self.inner_height());
+        self.publish_scroll_offset();
     }
 
     /// Vertical track geometry in widget-local Y-up coords. The bar hugs the
@@ -117,6 +142,7 @@ impl TextArea {
             off = bottom - inner_h; // caret below → scroll down just enough
         }
         self.vbar.offset = off.clamp(0.0, self.max_scroll_y());
+        self.publish_scroll_offset();
     }
 
     /// Wheel handler. Positive `delta_y` means "see content above" (decrease
@@ -137,8 +163,11 @@ impl TextArea {
         } else {
             self.font_size * 1.35
         };
-        self.vbar
-            .scroll_by(-delta_y * 3.0 * line_h, self.inner_height())
+        let moved = self
+            .vbar
+            .scroll_by(-delta_y * 3.0 * line_h, self.inner_height());
+        self.publish_scroll_offset();
+        moved
     }
 
     /// Begin a thumb drag if `pos` is on the thumb. Returns `true` when a drag
@@ -159,7 +188,9 @@ impl TextArea {
         let vp = self.inner_height();
         let style = self.scroll_style();
         if self.vbar.dragging {
-            ScrollMove::Dragging(self.vbar.drag_to(pos, vp, style, geom))
+            let moved = self.vbar.drag_to(pos, vp, style, geom);
+            self.publish_scroll_offset();
+            ScrollMove::Dragging(moved)
         } else {
             ScrollMove::Hover(self.vbar.update_hover(pos, vp, style, geom))
         }

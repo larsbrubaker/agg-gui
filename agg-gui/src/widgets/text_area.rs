@@ -354,6 +354,14 @@ pub struct TextArea {
     /// [`content_top_y`](Self::content_top_y). See `text_area/scroll.rs`.
     vbar: ScrollbarAxis,
 
+    /// Optional publish channel mirroring `vbar.offset`. Sibling widgets that
+    /// live outside this widget's subtree — e.g. the Code Editor demo's
+    /// line-number gutter — have no access to the internal scroll state, yet
+    /// must follow the viewport pixel-for-pixel. Whenever the offset moves the
+    /// widget writes it here so the sibling can read the same value it paints
+    /// with. See [`with_scroll_watch`](Self::with_scroll_watch).
+    scroll_watch: Option<Rc<Cell<f64>>>,
+
     /// Cursor byte offset observed at the previous `layout`. `None` until the
     /// first layout. A change between layouts that the widget's own edit funnel
     /// didn't already scroll for (i.e. an *external* mutation of the shared
@@ -447,6 +455,7 @@ impl TextArea {
                 enabled: true,
                 ..ScrollbarAxis::default()
             },
+            scroll_watch: None,
             last_layout_cursor: None,
             focused: false,
             hovered: false,
@@ -777,3 +786,5 @@ mod selection_tests;
 mod tests;
 #[cfg(test)]
 mod redraw_tests;
+#[cfg(test)]
+mod scroll_watch_tests;
