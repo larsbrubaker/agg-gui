@@ -35,6 +35,29 @@ pub(crate) enum ScrollMove {
     Hover(bool),
 }
 
+/// Shared read-out of a [`TextArea`]'s scroll state for a *sibling* widget that
+/// must mirror the editor's viewport (e.g. a line-number gutter) but lives
+/// outside its subtree and so cannot see the internal scroll bar. Published
+/// through [`TextArea::with_scroll_watch`].
+///
+/// The gutter's core problem is that the editor scrolls in *visual-row* pixel
+/// space while it numbers *source* lines; with soft-wrapping the two diverge, so
+/// a bare offset is not enough. `source_line_rows` bridges that: it maps each
+/// source line to the visual row its number should sit on.
+#[derive(Clone, Debug, Default)]
+pub struct TextAreaScrollInfo {
+    /// Vertical scroll offset in px from the top (0 = first row visible), the
+    /// same value [`TextArea::scroll_offset`] reports. Refreshed on every offset
+    /// change (wheel, drag, scroll-to-caret, relayout clamp).
+    pub offset_px: f64,
+    /// For each source line (paragraph), the index of its first wrapped visual
+    /// row. `source_line_rows[i]` is where source line `i`'s number belongs;
+    /// continuation rows of a wrapped line fall between consecutive entries and
+    /// get no number. With no soft-wrapping this degenerates to `rows[i] == i`.
+    /// Refreshed only when the wrap cache rebuilds (not per scroll).
+    pub source_line_rows: Vec<usize>,
+}
+
 impl TextArea {
     /// Inner content height (widget height minus vertical padding).
     pub(crate) fn inner_height(&self) -> f64 {
@@ -56,17 +79,17 @@ impl TextArea {
         self.vbar.offset
     }
 
-    /// Publish this widget's live vertical scroll offset (in px from the top,
-    /// the same value [`scroll_offset`](Self::scroll_offset) reports) into a
-    /// shared cell whenever it changes. Exists so a *sibling* widget outside the
-    /// editor's subtree can mirror the viewport — the Code Editor demo's
-    /// line-number gutter uses it to keep the numbers aligned with the scrolled
-    /// text, which it otherwise cannot see. The cell is refreshed at every offset
-    /// mutation (wheel, thumb drag, scroll-to-caret, relayout clamp), so it is
-    /// current before the next frame paints.
-    pub fn with_scroll_watch(mut self, watch: Rc<Cell<f64>>) -> Self {
-        watch.set(self.vbar.offset);
+    /// Publish this widget's live scroll state into a shared
+    /// [`TextAreaScrollInfo`] whenever it changes, so a *sibling* widget outside
+    /// the editor's subtree can mirror the viewport — the Code Editor demo's
+    /// line-number gutter uses it to keep numbers aligned with the scrolled,
+    /// soft-wrapped text, which it otherwise cannot see. The offset is refreshed
+    /// on every scroll and the source-line-to-row map on every re-wrap, so both
+    /// are current before the next frame paints.
+    pub fn with_scroll_watch(mut self, watch: Rc<RefCell<TextAreaScrollInfo>>) -> Self {
         self.scroll_watch = Some(watch);
+        self.publish_scroll_offset();
+        self.publish_scroll_rows();
         self
     }
 
@@ -87,14 +110,35 @@ impl TextArea {
         current_scroll_visibility()
     }
 
-    /// Mirror the current `vbar.offset` into the optional scroll-watch cell.
-    /// Called from every site that moves the offset so a sibling widget (the
+    /// Mirror the current `vbar.offset` into the scroll-watch binding. Called
+    /// from every site that moves the offset so a sibling widget (the
     /// line-number gutter) never paints a frame behind the text. See
     /// [`TextArea::with_scroll_watch`].
     fn publish_scroll_offset(&self) {
         if let Some(watch) = &self.scroll_watch {
-            watch.set(self.vbar.offset);
+            watch.borrow_mut().offset_px = self.vbar.offset;
         }
+    }
+
+    /// Recompute the source-line-to-visual-row map from the wrap cache and
+    /// publish it. Called only on a real re-wrap (the `refresh_wrap` choke
+    /// point), since wrapping only changes when the text or width does — not on
+    /// scroll. Each source line (paragraph) spans the wrapped rows up to and
+    /// including the one marked `hard_break`, so the first row of the next
+    /// source line is one past each hard break; source line 0 always starts at
+    /// row 0.
+    pub(crate) fn publish_scroll_rows(&self) {
+        let Some(watch) = &self.scroll_watch else {
+            return;
+        };
+        let mut rows = Vec::with_capacity(self.cached_lines.len() + 1);
+        rows.push(0);
+        for (idx, line) in self.cached_lines.iter().enumerate() {
+            if line.hard_break {
+                rows.push(idx + 1);
+            }
+        }
+        watch.borrow_mut().source_line_rows = rows;
     }
 
     /// Refresh the axis with the current content height and re-clamp the offset.

@@ -167,7 +167,8 @@ pub use widgets::{
     SceneTransform, ScrollBarColor, ScrollBarKind,
     ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
     SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter, Stack, TabView, Table,
-    TableBuilder, TableColumn, TableRows, TextArea, TextEditState, TextField, TextHAlign,
+    TableBuilder, TableColumn, TableRows, TextArea, TextAreaScrollInfo, TextEditState, TextField,
+    TextHAlign,
     TextVAlign, ToggleSwitch, Tooltip, TooltipTimings, TopMenu, TreeView, Window,
     set_tooltip_timings, tooltip_timings,
 };

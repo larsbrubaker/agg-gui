@@ -19,22 +19,22 @@
 //!     highlight palette is theme-aware, though (see [`syntax_palette`]): it
 //!     picks a dark or light token set from `ctx.visuals()` so the code stays
 //!     legible under both app themes.
-//!   * The gutter numbers source lines. Our `TextArea` always word-wraps, so a
-//!     line long enough to wrap would push later numbers out of alignment; the
-//!     sample fits the width, so this doesn't bite in practice. The gutter does
-//!     track the editor's vertical scroll: the `TextArea` publishes its offset
-//!     through a shared cell ([`agg_gui::TextArea::with_scroll_watch`]) that the
-//!     gutter reads each paint, so the numbers stay aligned with the scrolled
-//!     text and only the visible band is drawn.
+//!   * The gutter numbers source lines and tracks the editor's vertical scroll,
+//!     including soft-wrapping: the `TextArea` publishes both its pixel offset
+//!     and a source-line-to-visual-row map through a shared
+//!     [`agg_gui::TextAreaScrollInfo`] (via
+//!     [`agg_gui::TextArea::with_scroll_watch`]). The gutter reads it each paint,
+//!     places each number at its source line's first wrapped row (continuation
+//!     rows get no number, as in most editors), and draws only the visible band.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{
     current_visuals, measure_text_metrics, Color, DrawCtx, Event, EventResult, FlexColumn, FlexRow,
-    Font, HAnchor, Hyperlink, Label, Rect, Separator, Size, SizedBox, TextArea, TextEditState,
-    Visuals, Widget,
+    Font, HAnchor, Hyperlink, Label, Rect, Separator, Size, SizedBox, TextArea, TextAreaScrollInfo,
+    TextEditState, Visuals, Widget,
 };
 
 const SOURCE_URL: &str =
@@ -147,11 +147,11 @@ pub fn code_editor(font: Arc<Font>) -> Box<dyn Widget> {
     );
     col.push(Box::new(Separator::horizontal()), 0.0);
 
-    // Shared vertical-scroll offset: the TextArea publishes its viewport offset
-    // here every time it moves, and the sibling gutter reads it each paint so
-    // the line numbers follow the scrolled text (they cannot otherwise see the
-    // editor's internal scroll state).
-    let scroll_watch = Rc::new(Cell::new(0.0));
+    // Shared scroll state: the TextArea publishes its viewport offset and its
+    // source-line-to-visual-row map here, and the sibling gutter reads them each
+    // paint so the line numbers follow the scrolled, soft-wrapped text (the
+    // gutter cannot otherwise see the editor's internal scroll or wrapping).
+    let scroll_watch = Rc::new(RefCell::new(TextAreaScrollInfo::default()));
 
     // Editor area: line-number gutter + highlighted editable buffer.
     let editor = TextArea::new(Arc::clone(&code_font))
@@ -289,35 +289,42 @@ struct LineGutter {
     font_size: f64,
     padding: f64,
     width: f64,
-    /// Live mirror of the editor's vertical scroll offset (px from the top),
-    /// published by the sibling `TextArea` via `with_scroll_watch`.
-    scroll_watch: Rc<Cell<f64>>,
+    /// Live mirror of the editor's scroll offset (px) and its
+    /// source-line-to-visual-row map, published by the sibling `TextArea` via
+    /// `with_scroll_watch`. The row map is what lets the gutter number a
+    /// soft-wrapped file correctly.
+    scroll_watch: Rc<RefCell<TextAreaScrollInfo>>,
 }
 
-/// Inclusive 0-based range of source-line indices whose baseline band intersects
-/// the gutter's visible `[0, viewport_h]` region, given the current scroll.
+/// Half-open `[start, end)` range of source-line indices whose *first* wrapped
+/// visual row falls inside the gutter's visible `[0, viewport_h]` band, given
+/// the current scroll. `rows[i]` is source line `i`'s first visual row (from
+/// [`TextAreaScrollInfo::source_line_rows`]); the editor scrolls in visual-row
+/// space, so numbering must key off rows, not source-line indices — that is the
+/// soft-wrap fix.
 ///
-/// Line `i`'s painted band (Y-up) spans `[top - line_h, top]` where
-/// `top = viewport_h - padding - i*line_h + scroll_y`, so lines scrolled off the
-/// top (small `i`) and below the bottom (large `i`) are excluded. Bounding the
-/// range this way keeps the paint loop at one `fill_text` per *visible* line
-/// instead of one per source line (249 for the sample), and — with the matching
-/// `+ scroll_y` baseline shift in `paint` — is what makes the numbers track the
-/// editor's scroll. A partially visible line at either edge is still included.
+/// A visual row `r` is visible when its Y-up band `[top - line_h, top]` with
+/// `top = viewport_h - padding - r*line_h + scroll_y` intersects `[0, viewport_h]`,
+/// i.e. `lo <= r <= hi` for the `lo`/`hi` below. Because `rows` is sorted, the
+/// matching source lines form a contiguous run found by `partition_point`, which
+/// also bounds the paint loop to the visible band instead of all ~250 lines.
+/// A number whose source line's first row has scrolled above the top is dropped
+/// (its continuation rows stay numberless), matching common editors.
 fn visible_gutter_lines(
     scroll_y: f64,
     viewport_h: f64,
     padding: f64,
     line_h: f64,
-    count: usize,
+    rows: &[usize],
 ) -> (usize, usize) {
-    if count == 0 || line_h <= 0.0 {
+    if rows.is_empty() || line_h <= 0.0 {
         return (0, 0);
     }
-    let first = ((scroll_y - padding) / line_h).floor().max(0.0) as usize;
-    let last = (((scroll_y + viewport_h - padding) / line_h).ceil().max(0.0) as usize)
-        .min(count - 1);
-    (first.min(last), last)
+    let lo = ((scroll_y - padding) / line_h).floor();
+    let hi = ((scroll_y + viewport_h - padding) / line_h).ceil();
+    let start = rows.partition_point(|&r| (r as f64) < lo);
+    let end = rows.partition_point(|&r| (r as f64) <= hi);
+    (start, end)
 }
 
 impl LineGutter {
@@ -326,7 +333,7 @@ impl LineGutter {
         font: Arc<Font>,
         font_size: f64,
         padding: f64,
-        scroll_watch: Rc<Cell<f64>>,
+        scroll_watch: Rc<RefCell<TextAreaScrollInfo>>,
     ) -> Self {
         Self {
             bounds: Rect::default(),
@@ -390,19 +397,21 @@ impl Widget for LineGutter {
         ctx.set_font_size(self.font_size);
         let m = ctx.measure_text("Ag").unwrap_or_default();
 
-        let count = self.line_count();
-        // Follow the editor's scroll and only paint the lines actually in view
-        // (the sample is 249 lines — iterating them all would issue 249
-        // fill_texts per frame for a handful of visible numbers).
-        let scroll_y = self.scroll_watch.get();
-        let (first, last) = visible_gutter_lines(scroll_y, h, self.padding, line_h, count);
+        // Follow the editor's scroll and wrapping: place each source line's
+        // number at its FIRST wrapped visual row (continuation rows stay blank),
+        // and only paint the lines whose first row is in view (the sample is 249
+        // lines — iterating them all would issue 249 fill_texts per frame).
+        let info = self.scroll_watch.borrow();
+        let scroll_y = info.offset_px;
+        let rows = &info.source_line_rows;
+        let (first, last) = visible_gutter_lines(scroll_y, h, self.padding, line_h, rows);
         ctx.set_fill_color(num_color);
-        for i in first..=last {
+        for i in first..last {
             let num = format!("{}", i + 1);
             let num_w = measure_text_metrics(&self.font, &num, self.font_size).width;
             // Right-align within the gutter, leaving an 8px right margin.
             let x = (w - 8.0 - num_w).max(0.0);
-            let line_top = h - self.padding - i as f64 * line_h + scroll_y;
+            let line_top = h - self.padding - rows[i] as f64 * line_h + scroll_y;
             let line_bottom = line_top - line_h;
             let baseline_y = line_bottom + (line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
             ctx.fill_text(&num, x, baseline_y);
@@ -564,35 +573,73 @@ mod tests {
         );
     }
 
-    /// The visible-range helper must follow the editor's scroll: at the top it
-    /// yields the first viewport's worth of lines starting at line 1; scrolled
-    /// to the bottom of a 249-line file it must include line 249 and exclude
-    /// line 1. This is the demo half of the "gutter shows only lines 1..~33 no
-    /// matter how far you scroll" regression.
+    /// With no soft-wrapping (`rows[i] == i`) the helper reproduces the original
+    /// scroll-tracking behaviour: at the top it yields ~one viewport starting at
+    /// line 1; at the bottom of a 249-line file it includes line 249 and excludes
+    /// line 1. Guards the "gutter shows only lines 1..~33 no matter how far you
+    /// scroll" regression.
     #[test]
-    fn gutter_visible_range_tracks_scroll() {
+    fn gutter_visible_range_degenerates_without_wrapping() {
         let line_h = EDITOR_FONT_SIZE * 1.35;
         let padding = EDITOR_PADDING;
         let count = 249;
+        let rows: Vec<usize> = (0..count).collect();
         let viewport_h = 33.0 * line_h; // ~33 lines tall
 
-        // At the top: numbering starts at line 1 (index 0), ~one viewport shown,
-        // and the last line of the file is nowhere near visible.
-        let (first, last) = visible_gutter_lines(0.0, viewport_h, padding, line_h, count);
-        assert_eq!(first, 0, "top of document starts at line 1");
+        // At the top: numbering starts at line 1 (index 0), ~one viewport shown.
+        let (start, end) = visible_gutter_lines(0.0, viewport_h, padding, line_h, &rows);
+        assert_eq!(start, 0, "top of document starts at line 1");
         assert!(
-            (30..=35).contains(&(last + 1)),
-            "a ~33-line viewport shows about 33 numbers, got last line {}",
-            last + 1
+            (30..=35).contains(&end),
+            "a ~33-line viewport shows about 33 numbers, got end {end}"
         );
-        assert!(last < count - 1, "line 249 must not be visible from the top");
+        assert!(end < count, "line 249 must not be visible from the top");
 
-        // Scrolled to the bottom: line 249 (index 248) is visible and line 1 is
-        // scrolled out — the behaviour the bug lacked.
-        let content_h = count as f64 * line_h;
-        let max_scroll = content_h - viewport_h;
-        let (first, last) = visible_gutter_lines(max_scroll, viewport_h, padding, line_h, count);
-        assert_eq!(last, count - 1, "bottom of document must show line 249");
-        assert!(first > 0, "line 1 must be scrolled out of view at the bottom");
+        // At the bottom: line 249 (index 248) visible, line 1 scrolled out.
+        let max_scroll = count as f64 * line_h - viewport_h;
+        let (start, end) = visible_gutter_lines(max_scroll, viewport_h, padding, line_h, &rows);
+        assert_eq!(end, count, "bottom of document must show line 249");
+        assert!(start > 0, "line 1 must be scrolled out at the bottom");
+    }
+
+    /// The soft-wrap fix: when a mid-file source line wraps into extra visual
+    /// rows, the editor scrolls in visual-row space, so the last source line's
+    /// number must still be painted at the visual-row bottom — a naive
+    /// one-row-per-source-line gutter would run out of numbers early and drop it.
+    #[test]
+    fn gutter_visible_range_follows_wrapped_rows() {
+        let line_h = EDITOR_FONT_SIZE * 1.35;
+        let padding = EDITOR_PADDING;
+        let count = 249;
+        // Source line 240 soft-wraps into 3 visual rows (2 extra); every later
+        // line shifts down by those 2 rows. Total visual rows = 251.
+        let wrap_at = 240usize;
+        let rows: Vec<usize> = (0..count)
+            .map(|i| if i <= wrap_at { i } else { i + 2 })
+            .collect();
+        let total_rows = rows[count - 1] + 1; // last line is single-row
+        assert_eq!(total_rows, 251);
+        assert_eq!(
+            rows[wrap_at + 1] - rows[wrap_at],
+            3,
+            "line 240 occupies 3 visual rows"
+        );
+
+        let viewport_h = 33.0 * line_h;
+        // Bottom of the visual-row content — the space the editor really scrolls.
+        let max_scroll = total_rows as f64 * line_h - viewport_h;
+        let (start, end) = visible_gutter_lines(max_scroll, viewport_h, padding, line_h, &rows);
+
+        assert_eq!(
+            end, count,
+            "the last source line (249) must be painted at the visual-row bottom"
+        );
+        assert!(start > 0, "line 1 must be scrolled out at the bottom");
+        // The wrapped line's number sits at its first row; its continuation rows
+        // carry no number, so the paint loop skips over them.
+        assert!(
+            (start..end).contains(&wrap_at),
+            "the wrapped line's number is in view here"
+        );
     }
 }

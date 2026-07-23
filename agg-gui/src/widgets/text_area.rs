@@ -354,13 +354,13 @@ pub struct TextArea {
     /// [`content_top_y`](Self::content_top_y). See `text_area/scroll.rs`.
     vbar: ScrollbarAxis,
 
-    /// Optional publish channel mirroring `vbar.offset`. Sibling widgets that
-    /// live outside this widget's subtree — e.g. the Code Editor demo's
-    /// line-number gutter — have no access to the internal scroll state, yet
-    /// must follow the viewport pixel-for-pixel. Whenever the offset moves the
-    /// widget writes it here so the sibling can read the same value it paints
-    /// with. See [`with_scroll_watch`](Self::with_scroll_watch).
-    scroll_watch: Option<Rc<Cell<f64>>>,
+    /// Optional publish channel exposing scroll state ([`scroll::TextAreaScrollInfo`])
+    /// to a sibling widget outside this subtree — e.g. the Code Editor demo's
+    /// line-number gutter, which has no access to the internal scroll bar yet
+    /// must follow the viewport pixel-for-pixel *and* map its source-line
+    /// numbers onto the wrapped visual rows. See
+    /// [`with_scroll_watch`](Self::with_scroll_watch).
+    scroll_watch: Option<Rc<RefCell<scroll::TextAreaScrollInfo>>>,
 
     /// Cursor byte offset observed at the previous `layout`. `None` until the
     /// first layout. A change between layouts that the widget's own edit funnel
@@ -689,6 +689,10 @@ impl TextArea {
         // Line height — a little slacker than tight metrics so
         // descenders from line N don't kiss ascenders from N+1.
         self.cached_line_h = self.font_size * 1.35;
+        // The wrap just changed, so the source-line-to-row map a sibling gutter
+        // relies on is stale — republish it here (the sole re-wrap choke point,
+        // reached only past the early return above, so scroll-only frames skip it).
+        self.publish_scroll_rows();
     }
 
     /// Force a re-wrap on the next layout.
@@ -769,6 +773,8 @@ impl TextArea {
     }
 
 }
+
+pub use scroll::TextAreaScrollInfo;
 
 mod band;
 mod callbacks;
