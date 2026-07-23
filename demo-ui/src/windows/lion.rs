@@ -247,6 +247,28 @@ impl LionView {
         self.skew_x = pos.x;
         self.skew_y = pos.y;
     }
+
+    /// Fold this frame's multi-touch gesture aggregate into the lion's
+    /// angle / scale.  Split out of `paint` so it is unit-testable
+    /// without a `DrawCtx` (the aggregate is a thread-local, so a test
+    /// just publishes one and calls this).
+    ///
+    /// When two or more fingers are active we consume zoom / rotation
+    /// from `MultiTouchInfo` instead of the single-finger grip math, and
+    /// invalidate the grip so the mouse-up path doesn't re-anchor to a
+    /// stale snapshot.  Per-frame deltas telescope: the product of every
+    /// frame's `zoom_delta` is the spread ratio since the gesture began,
+    /// and the sum of every frame's `rotation_delta` is the total twist,
+    /// so scale and angle track the fingers exactly once frames flow —
+    /// which is precisely what `needs_draw` (below) guarantees.
+    fn fold_multi_touch(&mut self) {
+        if let Some(mt) = agg_gui::current_multi_touch() {
+            self.mouse_scale = (self.mouse_scale * mt.zoom_delta as f64).clamp(0.05, 50.0);
+            self.angle += mt.rotation_delta as f64;
+            self.rotate_grip = None;
+            agg_gui::animation::request_draw();
+        }
+    }
 }
 
 impl Widget for LionView {
@@ -287,18 +309,39 @@ impl Widget for LionView {
         available
     }
 
+    /// Report dirty exactly while a two-finger gesture is live so every
+    /// frame of the pinch / twist both flows AND re-rasters this subtree.
+    ///
+    /// Why this is load-bearing: during a pure two-finger gesture the core
+    /// `TouchMouseEmu` suppresses the primary finger (see
+    /// `agg_gui::touch_emulation` — single-finger emulation is muted the
+    /// moment a second finger lands), so NO mouse events reach the lion.
+    /// With no events nothing marks this window's subtree dirty, so the
+    /// window's GL-FBO backbuffer (see `agg_gui::widget::paint`) blits the
+    /// stale cached bitmap and skips `LionView::paint` entirely — and the
+    /// paint-time `fold_multi_touch` never runs, so the lion ignores the
+    /// gesture.  The Multi Touch demo dodges this by returning `needs_draw`
+    /// -> `true` unconditionally.  Returning `true` only while a gesture is
+    /// active wakes the host loop (`App::wants_draw`) AND, because
+    /// `Window::needs_draw` ORs its children, flips `subtree_needs_draw` in
+    /// the FBO path to force the re-raster.  We must NOT return
+    /// unconditional `true`: the lion is quiescent by design (the idle-
+    /// quiescence work), and starving when idle is correct.  Future gesture
+    /// consumers should copy this pattern.
+    fn needs_draw(&self) -> bool {
+        if !self.is_visible() {
+            return false;
+        }
+        agg_gui::current_multi_touch().is_some()
+            || self.children().iter().any(|c| c.needs_draw())
+    }
+
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         // Fold in this frame's multi-touch gesture BEFORE reading state
-        // into locals.  When two or more fingers are active we consume
-        // zoom / rotation / pan from `MultiTouchInfo` instead of the
-        // single-finger grip math, and invalidate the grip so the
-        // mouse-up path doesn't re-anchor to a stale snapshot.
-        if let Some(mt) = agg_gui::current_multi_touch() {
-            self.mouse_scale = (self.mouse_scale * mt.zoom_delta as f64).clamp(0.05, 50.0);
-            self.angle += mt.rotation_delta as f64;
-            self.rotate_grip = None;
-            agg_gui::animation::request_draw();
-        }
+        // into locals.  `needs_draw` (below) guarantees this method is
+        // reached on every frame of a live gesture even when the core
+        // touch emulation suppresses the primary finger's mouse events.
+        self.fold_multi_touch();
 
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -443,7 +486,8 @@ impl Widget for LionView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agg_gui::Modifiers;
+    use agg_gui::touch_state::set_current;
+    use agg_gui::{Modifiers, MultiTouchInfo, TouchDeviceId};
 
     fn view() -> LionView {
         let mut v = LionView::new(Rc::new(Cell::new(1.0)));
@@ -476,6 +520,57 @@ mod tests {
         assert_eq!(down, EventResult::Consumed);
         assert_eq!(mv, EventResult::Consumed);
         assert_ne!(v.angle, before, "middle-drag must rotate the lion");
+    }
+
+    /// Reproduces the two-finger starvation bug (Lion ignored pinch /
+    /// twist while Multi Touch worked).  With a gesture aggregate live,
+    /// the lion must (a) report `needs_draw` so the cached window subtree
+    /// re-rasters and its `paint`-time fold actually runs, and (b) fold
+    /// the aggregate into angle / scale.  Pre-fix the `needs_draw` half
+    /// failed — the default returns `false` with no pending draw — so the
+    /// paint never fired and the fold was unreachable outside `paint`.
+    #[test]
+    fn multi_touch_gesture_folds_and_requests_draw() {
+        let mut v = view();
+        let angle0 = v.angle;
+        let scale0 = v.mouse_scale;
+
+        set_current(Some(MultiTouchInfo {
+            device_id: TouchDeviceId(0),
+            num_touches: 2,
+            zoom_delta: 1.5,
+            rotation_delta: 0.3,
+            translation_delta: Point::new(0.0, 0.0),
+            force: 0.0,
+            center_pos: Point::new(200.0, 150.0),
+        }));
+
+        // Capture both halves while the aggregate is live, THEN clear the
+        // thread-local BEFORE asserting so a failing assert can't leak
+        // gesture state into a sibling test sharing this harness thread.
+        let reports_draw = v.needs_draw();
+        v.fold_multi_touch();
+        let folded_angle = v.angle;
+        let folded_scale = v.mouse_scale;
+        set_current(None);
+
+        assert!(
+            reports_draw,
+            "a live multi-touch gesture must report needs_draw so the cached \
+             window subtree re-rasters and the paint-time fold runs"
+        );
+        // Tolerance absorbs the `f32` deltas widening to `f64` in the fold
+        // (0.3_f32 as f64 == 0.30000001…), not any behavioural slack.
+        assert!(
+            (folded_angle - (angle0 + 0.3)).abs() < 1e-6,
+            "rotation_delta must add to angle: {folded_angle} vs {}",
+            angle0 + 0.3
+        );
+        assert!(
+            (folded_scale - scale0 * 1.5).abs() < 1e-6,
+            "zoom_delta must multiply mouse_scale: {folded_scale} vs {}",
+            scale0 * 1.5
+        );
     }
 
     /// Regression guard: the classic left-drag rotate still works.
