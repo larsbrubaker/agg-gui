@@ -316,6 +316,15 @@ fn translate_event(event: &Event, new_pos: Point) -> Event {
             pos: new_pos,
             paths: paths.clone(),
         },
+        // Localize the centroid exactly like a mouse `pos`, but leave the
+        // deltas untouched: `translation_delta` (and zoom/rotation) are
+        // displacement vectors, invariant under the pure-translation change
+        // of coordinate frame that descending the tree performs.
+        Event::MultiTouch { info } => {
+            let mut info = *info;
+            info.center_pos = new_pos;
+            Event::MultiTouch { info }
+        }
         other => other.clone(),
     }
 }
@@ -354,4 +363,39 @@ pub fn dispatch_event_broadcast(
         root.mark_dirty();
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::touch_state::{MultiTouchInfo, TouchDeviceId};
+
+    /// `translate_event` must localize a `MultiTouch` centroid exactly like a
+    /// mouse `pos`, while leaving the displacement deltas (translation, zoom,
+    /// rotation) untouched — they are frame-invariant vectors.
+    #[test]
+    fn multi_touch_localizes_center_but_not_deltas() {
+        let info = MultiTouchInfo {
+            device_id: TouchDeviceId(0),
+            num_touches: 2,
+            zoom_delta: 1.5,
+            rotation_delta: 0.3,
+            translation_delta: Point::new(10.0, 5.0),
+            force: 0.0,
+            center_pos: Point::new(100.0, 200.0),
+        };
+        let local = Point::new(7.0, 9.0);
+        let out = translate_event(&Event::MultiTouch { info }, local);
+        let Event::MultiTouch { info: out } = out else {
+            panic!("translate_event changed the event kind");
+        };
+        // Centroid follows the localized position.
+        assert_eq!(out.center_pos.x, 7.0);
+        assert_eq!(out.center_pos.y, 9.0);
+        // Displacement vector unchanged — NOT offset by the localization.
+        assert_eq!(out.translation_delta.x, 10.0);
+        assert_eq!(out.translation_delta.y, 5.0);
+        assert_eq!(out.zoom_delta, 1.5);
+        assert_eq!(out.rotation_delta, 0.3);
+    }
 }

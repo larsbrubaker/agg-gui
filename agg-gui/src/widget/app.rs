@@ -1,5 +1,6 @@
 use super::*;
 
+mod gesture;
 mod pointer;
 mod touch;
 mod tree_paths;
@@ -24,6 +25,16 @@ pub struct App {
     /// cleared on `MouseUp`. While set, `MouseMove` events go to the captured
     /// widget regardless of cursor position — enabling slider drag-outside-bounds.
     captured: Option<Vec<usize>>,
+    /// Gesture-captured widget path. Set on the frame a multi-touch gesture
+    /// begins if the widget under the initial centroid consumes
+    /// `Event::MultiTouch`; the whole gesture then routes there (capture
+    /// semantics) even as the centroid drifts. Cleared when the aggregate
+    /// returns to `None`. See [`super::app::gesture`].
+    gesture_captured: Option<Vec<usize>>,
+    /// Whether last frame's aggregate was `Some` — lets the gesture router
+    /// detect the `None`→`Some` start edge (when it hit-tests) versus an
+    /// ongoing gesture (when it delivers to the captured path only).
+    gesture_in_progress: bool,
     /// Viewport height in pixels — used for Y-down → Y-up conversion.
     viewport_height: f64,
     /// Viewport size in logical pixels from the most recent layout pass.
@@ -58,6 +69,8 @@ impl App {
             focus: None,
             hovered: None,
             captured: None,
+            gesture_captured: None,
+            gesture_in_progress: false,
             viewport_height: 1.0,
             viewport_size: Size::new(1.0, 1.0),
             global_key_handler: None,
@@ -235,6 +248,12 @@ impl App {
         // `paint` without an explicit `&App` reference.
         self.touch_state.update_gesture();
         crate::touch_state::set_current(self.touch_state.current());
+        // Route the aggregate as a captured `Event::MultiTouch` before the
+        // paint traversal runs: a consuming widget marks its cached window
+        // subtree dirty (via the normal Consumed → request_draw → epoch-bump
+        // → mark_dirty chain), so the fold it applied here re-rasters this
+        // same frame.  See `super::app::gesture`.
+        self.dispatch_gesture();
         // Tick the keyboard-driven lift once per paint.  Translates
         // the widget tree (and its global overlays) upward by `lift`
         // pixels so a focused field doesn't disappear behind the

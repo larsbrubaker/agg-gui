@@ -54,6 +54,7 @@ mod label_theme;
 mod layer_compositing;
 mod layout_lcd;
 mod menu_hidpi_scale;
+mod multi_touch_routing;
 mod on_screen_keyboard;
 #[cfg(feature = "reflect")]
 mod reflect_roundtrip;

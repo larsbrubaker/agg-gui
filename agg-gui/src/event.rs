@@ -5,6 +5,7 @@
 //! platform boundary inside [`crate::widget::App`].
 
 use crate::geometry::Point;
+use crate::touch_state::MultiTouchInfo;
 
 /// Which mouse button triggered a `MouseDown` or `MouseUp` event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +119,22 @@ pub enum Event {
         pos: Point,
         paths: Vec<std::path::PathBuf>,
     },
+    /// A two-or-more-finger touch gesture is active this frame.
+    ///
+    /// Routed like a captured pointer: on the frame the gesture begins,
+    /// the framework hit-tests [`MultiTouchInfo::center_pos`] down the
+    /// tree and delivers to the deepest widget that consumes it; that
+    /// widget then receives every subsequent frame's aggregate until the
+    /// gesture ends, even if the centroid drifts outside its bounds
+    /// (standard capture semantics). Widgets accumulate the per-frame
+    /// `zoom_delta` / `rotation_delta` / `translation_delta` into their
+    /// own transform state.
+    ///
+    /// `info.center_pos` is translated into the receiving widget's local
+    /// Y-up space as the event descends, exactly like a mouse `pos`. The
+    /// deltas are displacement vectors and are **not** translated — they
+    /// are the same in every coordinate frame.
+    MultiTouch { info: MultiTouchInfo },
 }
 
 /// What a widget returns from [`crate::widget::Widget::on_event`].

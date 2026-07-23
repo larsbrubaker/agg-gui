@@ -53,6 +53,13 @@ struct MultiTouchView {
     force: f32,
     /// Latest frame's finger count.  Surfaced through the status label.
     num_touches: usize,
+    /// Set by `on_event` when a routed `Event::MultiTouch` was integrated
+    /// this frame, read (and cleared) by `paint`.  The event is delivered
+    /// from `App::paint`'s gesture dispatch *before* the paint traversal, so
+    /// this cleanly tells paint "a gesture happened this frame" — driving
+    /// the stroke thickness and gating the reset-decay branch — without the
+    /// paint-time global read the integrate step used to do.
+    gesture_this_frame: bool,
 }
 
 impl MultiTouchView {
@@ -68,6 +75,7 @@ impl MultiTouchView {
             prev_frame_time: None,
             force: 0.0,
             num_touches: 0,
+            gesture_this_frame: false,
         }
     }
 
@@ -141,31 +149,24 @@ impl Widget for MultiTouchView {
         };
         self.prev_frame_time = Some(now);
 
-        // ── Integrate this frame's gesture deltas ────────────────────────
-        let scale = self.unit_scale();
+        // ── This frame's gesture state ───────────────────────────────────
+        //
+        // The gesture deltas are integrated in `on_event` (routed, captured
+        // `Event::MultiTouch`), which the framework delivers before this
+        // paint runs.  Here we only react to whether that happened: a fresh
+        // gesture thickens the stroke by its pressure; otherwise the reset
+        // animation drifts the accumulators back toward identity.
         let mut stroke_width = 1.0_f32;
-        let had_gesture = if let Some(mt) = agg_gui::current_multi_touch() {
-            self.zoom *= mt.zoom_delta as f64;
-            self.rotation += mt.rotation_delta as f64;
-            // Pan delta comes in widget pixels; store in normalised units
-            // so the accumulator is resolution-independent.
-            if scale > 0.0 {
-                self.translation_x += mt.translation_delta.x / scale;
-                self.translation_y += mt.translation_delta.y / scale;
-            }
-            self.force = mt.force;
-            self.num_touches = mt.num_touches;
-            self.last_touch_time = Some(now);
-            stroke_width += 10.0 * mt.force;
-            true
+        if self.gesture_this_frame {
+            stroke_width += 10.0 * self.force;
+            self.gesture_this_frame = false;
+            agg_gui::animation::request_draw();
         } else {
             self.num_touches = 0;
             self.force = 0.0;
-            self.slowly_reset(now, dt)
-        };
-        if had_gesture {
-            agg_gui::animation::request_draw();
+            self.slowly_reset(now, dt);
         }
+        let scale = self.unit_scale();
 
         // ── Canvas background ────────────────────────────────────────────
         let v = ctx.visuals();
@@ -234,6 +235,27 @@ impl Widget for MultiTouchView {
         // user single-finger-drags over the canvas.  Matches the
         // `Sense::drag()` workaround egui uses for the same reason.
         match _event {
+            // Routed two-finger gesture: integrate the deltas into the same
+            // accumulators the old paint-time global read used to feed.  The
+            // `gesture_this_frame` latch tells `paint` to thicken the stroke
+            // and skip the reset-decay branch this frame.
+            agg_gui::Event::MultiTouch { info } => {
+                self.zoom *= info.zoom_delta as f64;
+                self.rotation += info.rotation_delta as f64;
+                // Pan delta comes in widget pixels; store in normalised units
+                // so the accumulator is resolution-independent.
+                let scale = self.unit_scale();
+                if scale > 0.0 {
+                    self.translation_x += info.translation_delta.x / scale;
+                    self.translation_y += info.translation_delta.y / scale;
+                }
+                self.force = info.force;
+                self.num_touches = info.num_touches;
+                self.last_touch_time = Some(web_time::Instant::now());
+                self.gesture_this_frame = true;
+                agg_gui::animation::request_draw();
+                agg_gui::EventResult::Consumed
+            }
             agg_gui::Event::MouseWheel {
                 delta_y,
                 delta_x,
@@ -297,6 +319,11 @@ pub fn multi_touch(font: Arc<Font>) -> Box<dyn Widget> {
             &mut self.children
         }
         fn layout(&mut self, available: agg_gui::Size) -> agg_gui::Size {
+            // Display-only: the status line reads the per-frame aggregate
+            // straight off the thread-local.  This is a read for *labelling*,
+            // not gesture handling — the actual pinch/rotate/pan integration
+            // is now routed to `MultiTouchView::on_event` — so it is
+            // intentionally left on the global and never needs capture.
             let txt = match agg_gui::current_multi_touch() {
                 Some(mt) => format!("Input source: {}-finger touch", mt.num_touches,),
                 None => {
@@ -364,4 +391,43 @@ pub fn multi_touch(font: Arc<Font>) -> Box<dyn Widget> {
         ));
 
     Box::new(col)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agg_gui::{MultiTouchInfo, Rect, TouchDeviceId};
+
+    /// The integrate step now lands in `on_event` off a routed
+    /// `Event::MultiTouch` (was a paint-time global read): zoom multiplies,
+    /// rotation/translation accumulate, force + finger count are captured,
+    /// and the `gesture_this_frame` latch is raised so `paint` thickens the
+    /// stroke and skips the reset-decay branch.
+    #[test]
+    fn multi_touch_event_integrates_accumulators() {
+        let mut v = MultiTouchView::new();
+        v.set_bounds(Rect::new(0.0, 0.0, 200.0, 200.0));
+        let scale = v.unit_scale(); // min(200,200)/2 = 100
+
+        let result = v.on_event(&Event::MultiTouch {
+            info: MultiTouchInfo {
+                device_id: TouchDeviceId(0),
+                num_touches: 2,
+                zoom_delta: 1.5,
+                rotation_delta: 0.3,
+                translation_delta: Point::new(10.0, 5.0),
+                force: 0.4,
+                center_pos: Point::new(100.0, 100.0),
+            },
+        });
+
+        assert_eq!(result, EventResult::Consumed);
+        assert!((v.zoom - 1.5).abs() < 1e-6, "zoom_delta multiplies: {}", v.zoom);
+        assert!((v.rotation - 0.3).abs() < 1e-6, "rotation accumulates");
+        assert!((v.translation_x - 10.0 / scale).abs() < 1e-6);
+        assert!((v.translation_y - 5.0 / scale).abs() < 1e-6);
+        assert!((v.force - 0.4).abs() < 1e-6);
+        assert_eq!(v.num_touches, 2);
+        assert!(v.gesture_this_frame, "paint reads this to drive the stroke");
+    }
 }
