@@ -128,6 +128,22 @@ impl Window {
         self
     }
 
+    /// Toggle the window frame (chrome).  `true` (default) keeps the full
+    /// title bar + close/maximize buttons + drop shadow + border.  `false`
+    /// makes the window *frameless*: no bar, no buttons, no shadow, no border,
+    /// and the content child fills the entire bounds.
+    ///
+    /// Frameless windows keep every interaction hook — modal event routing,
+    /// focus grab, [`with_click_away`](Self::with_click_away), Escape, and
+    /// [`on_close`](Self::on_close) — so a chrome-less [`TextField`](crate::widgets::TextField)
+    /// can be dropped exactly over a value pill and behave as an in-place
+    /// inline editor (Enter commits, click-away / Escape route through the
+    /// same close path as a framed dialog).
+    pub fn with_chrome(mut self, chrome: bool) -> Self {
+        self.chrome = chrome;
+        self
+    }
+
     /// Opt this window in/out of the generic retained GL-FBO backbuffer.
     /// Disabling renders directly into the inherited parent target.
     pub fn with_gl_backbuffer(mut self, enabled: bool) -> Self {

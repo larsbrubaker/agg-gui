@@ -18,6 +18,7 @@ mod host_hooks;
 mod hover;
 mod node_paint_context;
 pub mod nodes;
+mod overlay_editors;
 mod paint;
 mod popup;
 mod snap_guides;
@@ -34,7 +35,11 @@ mod tests_common;
 #[cfg(test)]
 mod tests_noodle;
 #[cfg(test)]
+mod tests_inline_editor;
+#[cfg(test)]
 mod tests_overlay;
+#[cfg(test)]
+mod tests_value;
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -94,6 +99,17 @@ enum CanvasState {
         from_side: SocketSide,
     },
     /// Click-and-horizontal-drag editing of a numeric property.
+    ///
+    /// Two contracts share this state:
+    ///
+    ///   - **NumberDrag** rows (`click_to_edit == true`) mirror the
+    ///     standalone [`agg_gui::widgets::DragValue`]: a press does not
+    ///     scrub until the pointer moves past a 3px threshold; a plain
+    ///     click (release before the threshold) opens an inline keyboard
+    ///     editor instead. Drag deltas honour `step` snapping.
+    ///   - **Slider** rows (`click_to_edit == false`) keep NodeDesigner
+    ///     parity: the press scrubs immediately (`dragging` starts
+    ///     `true`) with no step snapping and no click-to-edit.
     DraggingProperty {
         node_id: NodeId,
         prop_name: String,
@@ -101,6 +117,23 @@ enum CanvasState {
         start_local_x: f64,
         min: Option<f64>,
         max: Option<f64>,
+        /// Snap interval for drag deltas (`None`/`0.0` = no snap). Only
+        /// applied on the NumberDrag path.
+        step: Option<f64>,
+        /// Decimal places to seed the inline keyboard editor with when a
+        /// NumberDrag row is clicked without dragging.
+        decimals: usize,
+        /// True once the 3px drag threshold has been crossed. Slider rows
+        /// start `true`; NumberDrag rows start `false`.
+        dragging: bool,
+        /// True for NumberDrag rows — a threshold-less release opens the
+        /// inline keyboard editor. False for Slider rows.
+        click_to_edit: bool,
+        /// The clicked row's editor-pill rect in **canvas space**:
+        /// `[top_left_x, top_left_y, width, height]` with `top_left_y` the
+        /// row's TOP edge (Y-up). Captured at press so a click-to-edit
+        /// release can drop the inline editor exactly over the pill.
+        pill_rect: [f64; 4],
     },
 }
 
@@ -192,6 +225,15 @@ pub struct NodeEditor {
     /// drops into `MeshNode`s. Hosts that don't care about file drops
     /// leave the field `None` and the event is simply ignored.
     pub(crate) file_drop_handler: Option<Box<dyn FnMut(&[std::path::PathBuf], [f64; 2])>>,
+    /// The editor's own top-left origin in **app-absolute** logical
+    /// coordinates, captured every paint from the `DrawCtx` root transform.
+    /// Used to hoist an inline editor's pill rect from editor-local space up
+    /// to the screen-level coordinate space a host `overlay_sink` places
+    /// dialogs in — the sink's `FloatingOverlayHost` lives at the app root,
+    /// not inside this pane, so it needs absolute bounds. At worst one frame
+    /// stale (the pane rarely moves between a paint and the click that opens
+    /// an editor).
+    pub(crate) last_abs_origin: Cell<(f64, f64)>,
 }
 
 impl NodeEditor {
@@ -225,6 +267,7 @@ impl NodeEditor {
             overlay_close_flag: None,
             overlay_sink: None,
             file_drop_handler: None,
+            last_abs_origin: Cell::new((0.0, 0.0)),
         }
     }
 
@@ -286,6 +329,29 @@ impl NodeEditor {
             (p.x - self.canvas_offset[0]) / self.canvas_scale,
             (p.y - self.canvas_offset[1]) / self.canvas_scale,
         ]
+    }
+
+    /// Map a canvas-space pill rect `[top_left_x, top_left_y, w, h]` (Y-up,
+    /// `top_left_y` = row TOP edge) to an **editor-local** `Rect` at the
+    /// current pan/zoom. The returned rect is bottom-left origin (agg-gui
+    /// window-bounds convention): `y` is the pill's BOTTOM edge in local
+    /// space. Inverse of `local_to_canvas`, scaled by zoom.
+    fn pill_local_rect(&self, pill: [f64; 4]) -> Rect {
+        let s = self.canvas_scale;
+        let x = pill[0] * s + self.canvas_offset[0];
+        // Canvas bottom edge = top_left_y - h; map to local.
+        let bottom = (pill[1] - pill[3]) * s + self.canvas_offset[1];
+        Rect::new(x, bottom, pill[2] * s, pill[3] * s)
+    }
+
+    /// Same pill rect as [`Self::pill_local_rect`] but hoisted to
+    /// **app-absolute** logical coordinates by adding the editor's captured
+    /// screen origin. This is the space a host `overlay_sink`'s screen-level
+    /// `FloatingOverlayHost` places dialogs in.
+    fn pill_abs_rect(&self, pill: [f64; 4]) -> Rect {
+        let local = self.pill_local_rect(pill);
+        let (ox, oy) = self.last_abs_origin.get();
+        Rect::new(local.x + ox, local.y + oy, local.width, local.height)
     }
 
     /// Compute layouts for every node currently in the model. Layouts

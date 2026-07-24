@@ -8,19 +8,24 @@
 //! The state machine lives in [`super::CanvasState`]; transitions
 //! happen here on mouse down / move / up.
 
-use std::cell::Cell;
-use std::rc::Rc;
-use std::sync::Arc;
-
-use agg_gui::{Color, EventResult, Key, Modifiers, MouseButton, Point};
+use agg_gui::widgets::EditorKind;
+use agg_gui::{EventResult, Key, Modifiers, MouseButton, Point};
 
 use crate::draw::{NodeLayoutInfo, SocketSide, TITLE_HEIGHT};
 use crate::model::{EditorHint, NodeId, PropertyValue};
+
+use super::overlay_editors::scrub_value;
 
 /// Window for double-click detection in milliseconds — matches the
 /// constant `agg_gui::widgets::window::DBL_CLICK_MS` so a click in a
 /// Window title bar and a click in a node title bar feel identical.
 const DBL_CLICK_MS: u128 = 500;
+
+/// Horizontal distance (logical px) a NumberDrag press must travel
+/// before it counts as a scrub rather than a click. Mirrors
+/// `DragValue::DRAG_THRESHOLD` so the row control feels identical to the
+/// standalone widget.
+const PROP_DRAG_THRESHOLD: f64 = 3.0;
 
 use super::{CanvasState, NodeEditor, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 
@@ -108,13 +113,76 @@ impl NodeEditor {
                         self.selected.clear();
                         self.selected.insert(node_id);
                         self.notify_primary_selection(Some(node_id));
+                        // Resolve the numeric editor contract. Slider rows
+                        // keep the immediate-scrub NodeDesigner behaviour;
+                        // every other numeric row (explicit NumberDrag or
+                        // the implicit default) follows the DragValue
+                        // contract — threshold, step snap, click-to-edit.
+                        let attrs = prop.editor_kind.as_ref().and_then(|k| k.number_attrs());
+                        let is_slider =
+                            matches!(prop.editor_kind, Some(EditorKind::Slider(_)));
+                        // Step snapping is a NumberDrag-only behaviour. Slider
+                        // rows keep their historical *continuous* scrub even
+                        // when a step attr is present, so gate the step on
+                        // `!is_slider` — otherwise `scrub_value` would quantise
+                        // a slider drag and contradict the `DraggingProperty`
+                        // doc ("Slider rows ... no step snapping").
+                        let step = if is_slider {
+                            None
+                        } else {
+                            attrs.and_then(|a| a.step.or(if a.integer { Some(1.0) } else { None }))
+                        };
+                        let decimals = attrs
+                            .map(|a| {
+                                if a.integer {
+                                    0
+                                } else {
+                                    a.max_decimal_places.map(|n| n as usize).unwrap_or(2)
+                                }
+                            })
+                            .unwrap_or(2);
+                        // Fall back to the NumberAttrs range when the model's
+                        // PropertyView didn't carry an explicit min/max. These
+                        // two sources can disagree — a host could set a
+                        // PropertyView min above the NumberAttrs max — yielding
+                        // an inverted `min > max` pair. `scrub_value` resolves
+                        // that deliberately (pins to max, no panic); see its
+                        // docs. The debug_assert here surfaces the
+                        // contradiction at its source during development.
+                        let min = prop.min.or_else(|| attrs.and_then(|a| a.min));
+                        let max = prop.max.or_else(|| attrs.and_then(|a| a.max));
+                        debug_assert!(
+                            match (min, max) {
+                                (Some(mn), Some(mx)) => mn <= mx,
+                                _ => true,
+                            },
+                            "numeric row {:?} has inverted bounds: min {:?} > max {:?}",
+                            prop.name,
+                            min,
+                            max
+                        );
                         self.interaction = CanvasState::DraggingProperty {
                             node_id,
                             prop_name: prop.name.clone(),
                             start_value: start,
                             start_local_x: pos.x,
-                            min: prop.min,
-                            max: prop.max,
+                            min,
+                            max,
+                            step,
+                            decimals,
+                            // Slider scrubs from the first pixel; NumberDrag
+                            // waits for the 3px threshold so a plain click
+                            // can open the inline editor instead.
+                            dragging: is_slider,
+                            click_to_edit: !is_slider,
+                            // Canvas-space editor pill rect, so a click-to-edit
+                            // release drops the inline editor exactly over it.
+                            pill_rect: [
+                                prop.top_left[0],
+                                prop.top_left[1],
+                                prop.size[0],
+                                prop.size[1],
+                            ],
                         };
                         return EventResult::Consumed;
                     }
@@ -140,6 +208,26 @@ impl NodeEditor {
                             return EventResult::Consumed;
                         }
                     }
+                    // Text row opens a single-line text editor as a
+                    // floating overlay — mirrors the colour-picker route.
+                    if let PropertyValue::Text(current) = &prop.current {
+                        self.selected.clear();
+                        self.selected.insert(node_id);
+                        self.notify_primary_selection(Some(node_id));
+                        let pill_rect = [
+                            prop.top_left[0],
+                            prop.top_left[1],
+                            prop.size[0],
+                            prop.size[1],
+                        ];
+                        self.open_text_editor(
+                            node_id,
+                            prop.name.clone(),
+                            current.clone(),
+                            pill_rect,
+                        );
+                        return EventResult::Consumed;
+                    }
                 }
                 if let Some(node_id) = self.hit_node(&layouts, canvas_pos) {
                     // (Chevron click is consumed by `ChevronWidget` —
@@ -160,8 +248,17 @@ impl NodeEditor {
                             })
                             .unwrap_or(false);
                         if is_double {
-                            self.toggle_collapsed(node_id);
                             self.last_click = None;
+                            // Give the host first crack at the
+                            // double-click: it may navigate into a
+                            // subgraph / drill into a component. Only
+                            // when it declines (returns false) do we
+                            // apply the built-in collapse toggle.
+                            let handled =
+                                self.model.lock().unwrap().on_node_activated(node_id);
+                            if !handled {
+                                self.toggle_collapsed(node_id);
+                            }
                             return EventResult::Consumed;
                         }
                         self.last_click = Some((pos, now));
@@ -283,27 +380,42 @@ impl NodeEditor {
                 start_local_x,
                 min,
                 max,
+                step,
+                dragging,
+                ..
             } => {
                 let dx = pos.x - *start_local_x;
-                let mut new_value = *start_value + dx;
-                if let Some(mn) = *min {
-                    if new_value < mn {
-                        new_value = mn;
+                // NumberDrag rows don't scrub until the pointer passes the
+                // click/drag threshold — that reserved slack is what lets a
+                // plain click fall through to the inline editor on release.
+                if !*dragging {
+                    if dx.abs() < PROP_DRAG_THRESHOLD {
+                        // Still within the click zone — consume (we own the
+                        // press) but leave the value untouched.
+                        EventResult::Consumed
+                    } else {
+                        *dragging = true;
+                        let value = scrub_value(*start_value, dx, *step, *min, *max);
+                        let id = *node_id;
+                        let name = prop_name.clone();
+                        self.model.lock().unwrap().set_property(
+                            id,
+                            &name,
+                            PropertyValue::Number(value),
+                        );
+                        EventResult::Consumed
                     }
+                } else {
+                    let value = scrub_value(*start_value, dx, *step, *min, *max);
+                    let id = *node_id;
+                    let name = prop_name.clone();
+                    self.model.lock().unwrap().set_property(
+                        id,
+                        &name,
+                        PropertyValue::Number(value),
+                    );
+                    EventResult::Consumed
                 }
-                if let Some(mx) = *max {
-                    if new_value > mx {
-                        new_value = mx;
-                    }
-                }
-                let id = *node_id;
-                let name = prop_name.clone();
-                self.model.lock().unwrap().set_property(
-                    id,
-                    &name,
-                    PropertyValue::Number(new_value),
-                );
-                EventResult::Consumed
             }
             CanvasState::Idle => EventResult::Ignored,
         };
@@ -406,7 +518,32 @@ impl NodeEditor {
                 agg_gui::animation::request_draw();
                 EventResult::Consumed
             }
-            (_, CanvasState::PanningCanvas { .. }) | (_, CanvasState::DraggingProperty { .. }) => {
+            (_, CanvasState::PanningCanvas { .. }) => EventResult::Consumed,
+            (
+                _,
+                CanvasState::DraggingProperty {
+                    node_id,
+                    prop_name,
+                    start_value,
+                    min,
+                    max,
+                    step,
+                    decimals,
+                    dragging,
+                    click_to_edit,
+                    pill_rect,
+                    ..
+                },
+            ) => {
+                // A NumberDrag press released before the drag threshold is
+                // a plain click → open the inline keyboard editor. Slider
+                // rows (and any drag that scrubbed) fall through — the
+                // value already committed live during the move.
+                if click_to_edit && !dragging {
+                    self.open_number_editor(
+                        node_id, prop_name, start_value, min, max, step, decimals, pill_rect,
+                    );
+                }
                 EventResult::Consumed
             }
             (_, _) => EventResult::Ignored,
@@ -487,90 +624,11 @@ impl NodeEditor {
     pub(super) fn notify_primary_selection(&self, id: Option<NodeId>) {
         self.model.lock().unwrap().on_primary_selection_changed(id);
     }
-
-    /// Spawn the [`agg_gui::ColorWheelPicker`] dialog as a floating
-    /// overlay over the canvas.  The picker's callbacks route writes
-    /// back through `set_property` for live preview / commit / cancel
-    /// and flip a shared close-flag that the editor drains on the next
-    /// event or layout pass.
-    pub(super) fn open_color_picker(
-        &mut self,
-        node_id: NodeId,
-        prop_name: String,
-        initial: [f32; 4],
-    ) {
-        let Some(font) = agg_gui::font_settings::current_system_font() else {
-            return;
-        };
-        let initial_color = Color::rgba(initial[0], initial[1], initial[2], initial[3]);
-        let original = initial; // captured for `on_cancel` revert
-
-        let model_change = Arc::clone(&self.model);
-        let model_select = Arc::clone(&self.model);
-        let model_cancel = Arc::clone(&self.model);
-        let name_change = prop_name.clone();
-        let name_select = prop_name.clone();
-        let name_cancel = prop_name;
-        let close_flag = Rc::new(Cell::new(false));
-        let close_select = Rc::clone(&close_flag);
-        let close_cancel = Rc::clone(&close_flag);
-
-        let picker = agg_gui::ColorWheelPicker::new(initial_color, font.clone())
-            .with_allow_none(false)
-            .with_show_alpha(true)
-            .on_change(move |c| {
-                let value = color_to_property(c, original);
-                model_change
-                    .lock()
-                    .unwrap()
-                    .set_property(node_id, &name_change, value);
-            })
-            .on_select(move |c| {
-                let value = color_to_property(c, original);
-                model_select
-                    .lock()
-                    .unwrap()
-                    .set_property(node_id, &name_select, value);
-                close_select.set(true);
-            })
-            .on_cancel(move || {
-                model_cancel.lock().unwrap().set_property(
-                    node_id,
-                    &name_cancel,
-                    PropertyValue::Color(original),
-                );
-                close_cancel.set(true);
-            });
-
-        let dialog = agg_gui::color_wheel_picker_dialog(picker, "Color Picker");
-
-        // If a host sink is installed (AtomArtist's app shell does
-        // this), hand the dialog off so it can live at the
-        // screen-level Stack — that's what lets the user drag the
-        // picker outside the editor pane. Otherwise fall back to the
-        // legacy in-editor overlay path (gallery demo + tests rely
-        // on this).
-        if let Some(sink) = self.overlay_sink.as_mut() {
-            sink(dialog, close_flag);
-        } else {
-            self.overlay = Some(dialog);
-            self.overlay_close_flag = Some(close_flag);
-        }
-        self.backbuffer.invalidate();
-        agg_gui::animation::request_draw();
-    }
 }
 
-/// Pack a picker-side `Option<Color>` back into a `PropertyValue::Color`,
-/// falling back to `original.a = 0.0` for the pass-through ("No Color")
-/// case so hosts that don't model pass-through still see a sensible
-/// zero-alpha colour.
-fn color_to_property(c: Option<Color>, original: [f32; 4]) -> PropertyValue {
-    match c {
-        Some(col) => PropertyValue::Color([col.r, col.g, col.b, col.a]),
-        None => PropertyValue::Color([original[0], original[1], original[2], 0.0]),
-    }
-}
+// The floating overlay editors (`open_color_picker`, `open_text_editor`,
+// `open_number_editor`) plus the shared numeric helpers live in
+// `overlay_editors.rs` to keep this file under the 800-line guardrail.
 
 /// True when `canvas_pos` lands inside the title-bar strip of the given
 /// node's layout. The title bar occupies the top [`TITLE_HEIGHT`] of

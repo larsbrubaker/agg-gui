@@ -14,6 +14,15 @@ pub(super) struct Memory {
     pub noodles: Vec<NoodleView>,
     pub zoom: f64,
     pub last_selection: Option<NodeId>,
+    /// Records the most recent `set_property` write so tests can assert
+    /// what a value editor committed / reverted.
+    pub last_property: Option<(NodeId, String, PropertyValue)>,
+    /// Node ids passed to `on_node_activated`, in call order — lets the
+    /// double-click tests assert activation fired once with the right id.
+    pub activated: Vec<NodeId>,
+    /// Value `on_node_activated` returns. `false` (the default) keeps the
+    /// widget's built-in collapse toggle; `true` suppresses it.
+    pub activation_handled: bool,
 }
 
 impl NodeGraphModel for Memory {
@@ -68,12 +77,18 @@ impl NodeGraphModel for Memory {
         });
         self.noodles.len() < before
     }
-    fn set_property(&mut self, _id: NodeId, _name: &str, _value: PropertyValue) {}
+    fn set_property(&mut self, id: NodeId, name: &str, value: PropertyValue) {
+        self.last_property = Some((id, name.to_string(), value));
+    }
     fn on_canvas_zoom_changed(&mut self, zoom: f64) {
         self.zoom = zoom;
     }
     fn on_primary_selection_changed(&mut self, id: Option<NodeId>) {
         self.last_selection = id;
+    }
+    fn on_node_activated(&mut self, node: NodeId) -> bool {
+        self.activated.push(node);
+        self.activation_handled
     }
 }
 

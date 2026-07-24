@@ -18,6 +18,34 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
     // bounds.height == TITLE_H when collapsed (adjusted on toggle).
     let h = window.bounds.height;
 
+    // Frameless (chrome == false): no shadow, no title bar, no border. Paint
+    // an opaque rounded body so the value pill underneath doesn't bleed
+    // through the inline editor, then a thin accent outline so the user can
+    // see the row is in edit mode. The content child (the chrome-less
+    // TextField) paints on top through the normal child-paint pass, clipped
+    // to the full bounds by `clip_children_rect`.
+    if !window.chrome {
+        window.foreground_layer_active.set(false);
+        if ctx.supports_compositing_layers() {
+            ctx.push_layer(w, h);
+            window.foreground_layer_active.set(true);
+        }
+        let radius = 3.0;
+        ctx.set_fill_color(v.window_fill);
+        ctx.begin_path();
+        ctx.rounded_rect(0.0, 0.0, w, h, radius);
+        ctx.fill();
+        let mut edge = v.accent;
+        edge.a = 0.80;
+        ctx.set_stroke_color(edge);
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.rounded_rect(0.5, 0.5, w - 1.0, h - 1.0, radius);
+        ctx.stroke();
+        ctx.set_layer_rounded_clip(0.0, 0.0, w, h, radius);
+        return;
+    }
+
     // Drop shadow + body fill go through the shared chrome helpers so
     // every "framed" widget (Window, NodeWidget, etc.) renders the same
     // halo + rounded body.

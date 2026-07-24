@@ -160,7 +160,15 @@ impl Widget for Window {
             self.fade_out_active.set(false);
         }
 
-        let (outset_left, outset_bottom, outset_right, outset_top) = Self::layer_outsets();
+        // Frameless windows draw no drop shadow, so they need no outset halo
+        // around the FBO — a shadow-sized border would just waste texture and
+        // offset the field from the pill it must sit exactly over.
+        let (outset_left, outset_bottom, outset_right, outset_top) = if self.chrome {
+            Self::layer_outsets()
+        } else {
+            (0.0, 0.0, 0.0, 0.0)
+        };
+        let rounded_clip = if self.chrome { Some(CORNER_R) } else { Some(3.0) };
         BackbufferSpec {
             kind: BackbufferKind::GlFbo,
             cached: true,
@@ -171,7 +179,7 @@ impl Widget for Window {
                 top: outset_top,
                 bottom: outset_bottom,
             },
-            rounded_clip: Some(CORNER_R),
+            rounded_clip,
         }
     }
 
@@ -187,7 +195,7 @@ impl Widget for Window {
             return None;
         }
         let w = self.bounds.width;
-        let content_h = (self.bounds.height - TITLE_H).max(0.0);
+        let content_h = (self.bounds.height - self.chrome_h()).max(0.0);
         // Clip to content area: y=0 (bottom) up to content_h, full width.
         Some((0.0, 0.0, w, content_h))
     }
@@ -390,7 +398,8 @@ impl Widget for Window {
         }
 
         // When collapsed, bounds.height == TITLE_H (set during toggle).
-        let content_h = (self.bounds.height - TITLE_H).max(0.0);
+        // Frameless windows reserve no title strip, so content fills bounds.
+        let content_h = (self.bounds.height - self.chrome_h()).max(0.0);
 
         if let Some(child) = self.children.first_mut() {
             if !self.collapsed {
@@ -540,6 +549,71 @@ impl Widget for Window {
 
     fn on_event(&mut self, event: &Event) -> EventResult {
         if !self.requested_visible() {
+            return EventResult::Ignored;
+        }
+
+        // Frameless windows are thin hosts for an inline editor (a chrome-less
+        // TextField sized to a value pill). They have no title bar, resize
+        // handles, or chrome buttons, so — apart from the modal click-away /
+        // Escape dismissals — every event routes straight to the content
+        // child. That is what lets the field place its cursor and receive
+        // typing when a host dispatches events to us directly (the node
+        // editor's in-pane overlay path), mirroring what the framework's
+        // subtree walk already does for a child mounted in the main tree.
+        if !self.chrome {
+            if let Event::MouseDown { pos, .. } = event {
+                if self.modal
+                    && self.click_away == ClickAwayAction::Close
+                    && !self.point_in_local_bounds(*pos)
+                {
+                    // Click-away: the on_close callback decides commit vs
+                    // revert from the `ClickAway` reason.
+                    self.close(CloseReason::ClickAway);
+                    return EventResult::Consumed;
+                }
+            }
+            if let Event::KeyDown {
+                key: Key::Escape, ..
+            } = event
+            {
+                if self.modal {
+                    self.close(CloseReason::Escape);
+                    return EventResult::Consumed;
+                }
+            }
+            // This forward only re-delivers events the child IGNORED via the
+            // framework's normal subtree routing (e.g. hover moves) — a benign
+            // duplicate. Cursor placement (MouseDown) is single-dispatch: the
+            // subtree walk hands it to the child first, which consumes it, so
+            // it never reaches this fallback twice.
+            if let Some(child) = self.children.first_mut() {
+                let cb = child.bounds();
+                let forwarded = match event {
+                    Event::MouseDown {
+                        pos,
+                        button,
+                        modifiers,
+                    } => Event::MouseDown {
+                        pos: Point::new(pos.x - cb.x, pos.y - cb.y),
+                        button: *button,
+                        modifiers: *modifiers,
+                    },
+                    Event::MouseUp {
+                        pos,
+                        button,
+                        modifiers,
+                    } => Event::MouseUp {
+                        pos: Point::new(pos.x - cb.x, pos.y - cb.y),
+                        button: *button,
+                        modifiers: *modifiers,
+                    },
+                    Event::MouseMove { pos } => Event::MouseMove {
+                        pos: Point::new(pos.x - cb.x, pos.y - cb.y),
+                    },
+                    other => other.clone(),
+                };
+                return child.on_event(&forwarded);
+            }
             return EventResult::Ignored;
         }
 

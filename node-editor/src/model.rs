@@ -16,10 +16,11 @@
 //!
 //! # Property editing
 //!
-//! Inline canvas editing (sliders, toggles) covers `Number` and `Bool`.
-//! Anything else round-trips through [`PropertyValue::Other`] and is
-//! displayed but not directly editable in the canvas — hosts surface
-//! richer editors elsewhere (typically an inspector pane).
+//! Inline canvas editing covers `Number` (drag), `Bool` (toggle),
+//! `Color` (swatch → popup picker), and `Text` (single-line text
+//! editor). Anything else round-trips through [`PropertyValue::Other`]
+//! and is displayed but not directly editable in the canvas — hosts
+//! surface richer editors elsewhere (typically an inspector pane).
 
 use agg_gui::Color;
 
@@ -47,6 +48,12 @@ pub enum PropertyValue {
     /// A 4-component RGBA color, components in 0..=1. The canvas paints
     /// a swatch; richer pickers live in host-side panels.
     Color([f32; 4]),
+    /// An inline-editable single-line string. The canvas paints the
+    /// text in a pill and opens a floating single-line text editor on
+    /// click (mirroring how `Color` opens the colour-wheel popup).
+    /// Hosts map their editable-string fields here; read-only or
+    /// multi-line strings stay in [`PropertyValue::Other`].
+    Text(String),
     /// Anything not covered by the above variants. The host provides a
     /// short display string so the canvas can render the row's value
     /// area; clicking does nothing (hosts route richer editing
@@ -60,10 +67,11 @@ pub enum PropertyValue {
 
 impl PropertyValue {
     /// True when the value can be edited directly on the canvas (drag,
-    /// toggle, etc.). Color / Matrix / Path / Geometry round-trip
-    /// through richer host-side editors.
+    /// toggle, text entry). `Text` opens a single-line text editor on
+    /// click. Color / Matrix / Path / Geometry round-trip through
+    /// richer host-side (popup / panel) editors.
     pub fn is_editable_inline(&self) -> bool {
-        matches!(self, Self::Number(_) | Self::Bool(_))
+        matches!(self, Self::Number(_) | Self::Bool(_) | Self::Text(_))
     }
 }
 
@@ -296,4 +304,22 @@ pub trait NodeGraphModel {
     /// Hosts use this to drive companion UI (3-D viewport outline,
     /// inspector pane) without polling.
     fn on_primary_selection_changed(&mut self, _id: Option<NodeId>) {}
+
+    /// Called when the user double-clicks a node.  Return `true` if the
+    /// model handled the activation (e.g. it navigated into a subgraph
+    /// / drilled into a component), in which case the widget suppresses
+    /// its default double-click behaviour (the collapse toggle).  Return
+    /// `false` — the default — to let the widget fall through to its
+    /// built-in collapse toggle.
+    ///
+    /// Hosts that want double-click-to-drill-in (AtomArtist's
+    /// component navigation) override this; hosts that don't get the
+    /// unchanged collapse behaviour for free.
+    ///
+    /// Caution: the widget holds this model's mutex for the duration of
+    /// the callback, so the implementation must **not** re-lock the same
+    /// model `Arc` — the mutex is non-reentrant and would deadlock.
+    fn on_node_activated(&mut self, _node: NodeId) -> bool {
+        false
+    }
 }

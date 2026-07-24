@@ -747,6 +747,7 @@ fn format_value(v: &PropertyValue) -> String {
             }
         }
         PropertyValue::Color(_) => String::new(),
+        PropertyValue::Text(s) => s.clone(),
         PropertyValue::Other { display } => display.clone(),
     }
 }

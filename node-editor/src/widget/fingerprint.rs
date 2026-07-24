@@ -54,6 +54,10 @@ fn hash_prop_layout<H: std::hash::Hasher>(p: &PropLayout, h: &mut H) {
                 v.to_bits().hash(h);
             }
         }
+        PropertyValue::Text(s) => {
+            4u8.hash(h);
+            s.hash(h);
+        }
         PropertyValue::Other { display } => {
             3u8.hash(h);
             display.hash(h);

@@ -72,6 +72,7 @@ impl ValueEditorWidget {
             PropertyValue::Number(n) => RowValue::Number(*n),
             PropertyValue::Bool(b) => RowValue::Bool(*b),
             PropertyValue::Color(c) => RowValue::Color(*c),
+            PropertyValue::Text(s) => RowValue::Text(s.as_str()),
             PropertyValue::Other { display } => RowValue::Display(display.as_str()),
         }
     }
@@ -88,6 +89,7 @@ impl ValueEditorWidget {
             PropertyValue::Number(_) => EditorKind::NumberDrag(Default::default()),
             PropertyValue::Bool(_) => EditorKind::Toggle,
             PropertyValue::Color(_) => EditorKind::ColorPicker,
+            PropertyValue::Text(_) => EditorKind::StringSingleLine,
             PropertyValue::Other { .. } => EditorKind::Display,
         }
     }

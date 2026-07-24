@@ -204,6 +204,16 @@ pub struct Window {
     /// windows leave this `false` and hit-test normally.
     modal: bool,
 
+    /// Chrome toggle. `true` (default) draws the full window frame — title
+    /// bar, close/maximize buttons, drop shadow, and border — and reserves
+    /// [`TITLE_H`] at the top for the bar.  `false` makes the window
+    /// *frameless*: no title bar, no buttons, no shadow, no border, and the
+    /// content child fills the whole bounds. Frameless windows keep the modal
+    /// event routing, focus grab, click-away, Escape, and `on_close`
+    /// machinery — they are the substrate for an in-place inline editor
+    /// (a chrome-less `TextField` positioned exactly over a value pill).
+    chrome: bool,
+
     /// When true, the window bounds adopt the content's preferred size each
     /// layout pass (width + height).  Keeps the title-bar top edge pinned so
     /// the window appears to grow/shrink downward.  User resize is disabled
@@ -346,6 +356,7 @@ impl Window {
             canvas_size: Size::new(0.0, 0.0),
             constrain: true,
             modal: false,
+            chrome: true,
             auto_size: false,
             resizable: true,
             resizable_h: true,
@@ -513,11 +524,28 @@ impl Window {
         self.requested_visible() || self.fade_out_active.get()
     }
 
+    /// Vertical space reserved at the top of the window for the title bar.
+    /// Zero when frameless (`chrome == false`) so the content child fills the
+    /// whole bounds and no strip is stolen for a bar that isn't drawn.
+    fn chrome_h(&self) -> f64 {
+        if self.chrome {
+            TITLE_H
+        } else {
+            0.0
+        }
+    }
+
     fn title_bar_bottom(&self) -> f64 {
         self.bounds.height - TITLE_H
     }
 
     fn in_title_bar(&self, local: Point) -> bool {
+        // A frameless window has no title bar to grab — a press anywhere in
+        // its body must reach the content child (cursor placement in the
+        // inline editor), never start a window drag.
+        if !self.chrome {
+            return false;
+        }
         local.y >= self.title_bar_bottom()
             && local.y <= self.bounds.height
             && local.x >= 0.0
@@ -532,6 +560,9 @@ impl Window {
     }
 
     fn in_close_button(&self, local: Point) -> bool {
+        if !self.chrome {
+            return false;
+        }
         let c = self.close_center();
         let dx = local.x - c.x;
         let dy = local.y - c.y;
@@ -546,6 +577,9 @@ impl Window {
     }
 
     fn in_maximize_button(&self, local: Point) -> bool {
+        if !self.chrome {
+            return false;
+        }
         let c = self.maximize_center();
         let dx = local.x - c.x;
         let dy = local.y - c.y;

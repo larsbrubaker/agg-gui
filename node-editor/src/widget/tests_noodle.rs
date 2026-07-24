@@ -233,3 +233,171 @@ fn collapsed_node_layout_is_title_height_only() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// on_node_activated — double-click host hook (drill-into-component upstream)
+// ---------------------------------------------------------------------------
+
+/// Fire a left-button `MouseDown` at `pos` through the widget's real
+/// event pipeline (so overlay/popup gating and `on_mouse_down` both
+/// run, exactly as in production).
+fn mouse_down(editor: &mut NodeEditor, x: f64, y: f64) {
+    editor.on_event(&agg_gui::Event::MouseDown {
+        pos: agg_gui::Point::new(x, y),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+}
+
+/// Fire a left-button `MouseUp` at `pos` — production double-clicks are
+/// down/up/down/up, so the activation tests interleave these between the
+/// two downs for fidelity.
+fn mouse_up(editor: &mut NodeEditor, x: f64, y: f64) {
+    editor.on_event(&agg_gui::Event::MouseUp {
+        pos: agg_gui::Point::new(x, y),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+}
+
+/// Seed a single node whose title bar sits at a known canvas rect so
+/// the double-click tests can aim at it. With the default pan/zoom
+/// (offset [0,0], scale 1.0) widget-local coords equal canvas coords,
+/// so a click at `(60, 190)` lands inside the title bar of a node whose
+/// top-left is `[50, 200]` (title spans y ∈ [200 - TITLE_HEIGHT, 200]).
+fn seed_single_node(editor: &mut NodeEditor, memory: &Arc<Mutex<super::tests_common::Memory>>) {
+    seed_nodes(editor, memory, vec![mk_node(1, "A", [50.0, 200.0])]);
+}
+
+#[test]
+fn double_click_activation_handled_suppresses_collapse() {
+    // When the host's `on_node_activated` returns true (it navigated
+    // into a subgraph), the widget must NOT toggle collapse.
+    let (model, memory) = fixture_with_typed_handle();
+    memory.lock().unwrap().activation_handled = true;
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+    seed_single_node(&mut editor, &memory);
+
+    // Two rapid clicks on the title bar = a double-click (down/up/
+    // down/up, as the native shell delivers them).
+    mouse_down(&mut editor, 60.0, 190.0);
+    mouse_up(&mut editor, 60.0, 190.0);
+    mouse_down(&mut editor, 60.0, 190.0);
+    mouse_up(&mut editor, 60.0, 190.0);
+
+    assert_eq!(
+        memory.lock().unwrap().activated,
+        vec![NodeId(1)],
+        "activation must fire exactly once with the double-clicked node id"
+    );
+    assert!(
+        !editor.collapsed_nodes.contains(&NodeId(1)),
+        "a handled activation must suppress the default collapse toggle"
+    );
+}
+
+#[test]
+fn double_click_default_model_still_toggles_collapse() {
+    // Default model returns false from on_node_activated → the widget
+    // keeps its original collapse-on-double-click behaviour.
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+    seed_single_node(&mut editor, &memory);
+
+    mouse_down(&mut editor, 60.0, 190.0);
+    mouse_up(&mut editor, 60.0, 190.0);
+    mouse_down(&mut editor, 60.0, 190.0);
+    mouse_up(&mut editor, 60.0, 190.0);
+
+    assert_eq!(
+        memory.lock().unwrap().activated,
+        vec![NodeId(1)],
+        "the hook must still be consulted once even when it declines"
+    );
+    assert!(
+        editor.collapsed_nodes.contains(&NodeId(1)),
+        "an unhandled activation must fall through to the collapse toggle"
+    );
+}
+
+#[test]
+fn single_click_does_not_activate() {
+    // A lone click on the title bar records the first click but must
+    // not fire activation (no double-click) or collapse the node.
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+    seed_single_node(&mut editor, &memory);
+
+    mouse_down(&mut editor, 60.0, 190.0);
+
+    assert!(
+        memory.lock().unwrap().activated.is_empty(),
+        "a single click must not activate the node"
+    );
+    assert!(
+        !editor.collapsed_nodes.contains(&NodeId(1)),
+        "a single click must not collapse the node"
+    );
+}
+
+#[test]
+fn double_click_on_collapsed_node_still_activates() {
+    // The primary drill-in case: a collapsed node's entire rect IS its
+    // title bar, so double-clicking anywhere on it must fire the hook.
+    let (model, memory) = fixture_with_typed_handle();
+    memory.lock().unwrap().activation_handled = true;
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+    seed_single_node(&mut editor, &memory);
+
+    // Collapse the node first, then re-lay so the title-only rect is live.
+    editor.toggle_collapsed(NodeId(1));
+    editor.layout(Size::new(400.0, 300.0));
+    assert!(editor.collapsed_nodes.contains(&NodeId(1)));
+
+    mouse_down(&mut editor, 60.0, 190.0);
+    mouse_up(&mut editor, 60.0, 190.0);
+    mouse_down(&mut editor, 60.0, 190.0);
+    mouse_up(&mut editor, 60.0, 190.0);
+
+    assert_eq!(
+        memory.lock().unwrap().activated,
+        vec![NodeId(1)],
+        "double-clicking a collapsed node must still fire activation"
+    );
+    // Handled activation must not toggle the collapse back off.
+    assert!(
+        editor.collapsed_nodes.contains(&NodeId(1)),
+        "a handled activation must leave the collapse state untouched"
+    );
+}
+
+#[test]
+fn two_downs_far_apart_do_not_activate() {
+    // The drag-guard: the double-click detector requires the second down
+    // within 6px of the first. Two title-bar clicks >6px apart are two
+    // singles, not a double — no activation, no collapse.
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+    seed_single_node(&mut editor, &memory);
+
+    // Both points sit inside the title bar (x ∈ [50, 50+width],
+    // y ∈ [174, 200]) but are 20px apart in x — beyond the 6px window.
+    mouse_down(&mut editor, 60.0, 190.0);
+    mouse_up(&mut editor, 60.0, 190.0);
+    mouse_down(&mut editor, 80.0, 190.0);
+    mouse_up(&mut editor, 80.0, 190.0);
+
+    assert!(
+        memory.lock().unwrap().activated.is_empty(),
+        "clicks farther than the double-click window must not activate"
+    );
+    assert!(
+        !editor.collapsed_nodes.contains(&NodeId(1)),
+        "clicks farther than the double-click window must not collapse"
+    );
+}
