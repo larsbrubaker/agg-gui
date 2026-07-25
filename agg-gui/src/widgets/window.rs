@@ -763,6 +763,7 @@ fn resize_cursor(dir: ResizeDir) -> CursorIcon {
 mod builder;
 pub mod chrome;
 mod close;
+mod events;
 mod paint;
 mod snap_glue;
 mod widget_impl;
