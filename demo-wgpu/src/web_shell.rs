@@ -399,6 +399,29 @@ fn frame() {
         return;
     };
 
+    // App-requested fullscreen toggles (agg_gui::fullscreen). Requests
+    // originate from click/keydown handlers, so the transient user
+    // activation the browser demands is still in effect here.
+    if agg_gui::fullscreen::take_request() {
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            if document.fullscreen_element().is_some() {
+                document.exit_fullscreen();
+            } else {
+                let _ = canvas.request_fullscreen();
+            }
+        }
+    }
+    // Track the live state every tick — Esc leaves fullscreen without
+    // telling the app.
+    let fs_now = web_sys::window()
+        .and_then(|w| w.document())
+        .map(|d| d.fullscreen_element().is_some())
+        .unwrap_or(false);
+    if fs_now != agg_gui::fullscreen::is_active() {
+        agg_gui::fullscreen::set_active(fs_now);
+        mark_dirty();
+    }
+
     // Match the backing store to the CSS size × DPR so rendering is
     // pixel-perfect at any zoom / DPI / orientation. The device scale is
     // re-synced every tick, not just at boot / window-resize: browser

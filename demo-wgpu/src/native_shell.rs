@@ -273,6 +273,15 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
             }
 
             Event::AboutToWait => {
+                // App-requested fullscreen toggles (agg_gui::fullscreen).
+                if agg_gui::fullscreen::take_request() {
+                    let now_fullscreen = window.fullscreen().is_none();
+                    window.set_fullscreen(
+                        now_fullscreen.then_some(winit::window::Fullscreen::Borderless(None)),
+                    );
+                    agg_gui::fullscreen::set_active(now_fullscreen);
+                    window.request_redraw();
+                }
                 // `wants_draw()` covers due scheduled deadlines; otherwise
                 // re-arm `WaitUntil` from the non-destructive peek every idle
                 // iteration (idempotent — cannot lose the scheduled wake).

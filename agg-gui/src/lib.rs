@@ -56,6 +56,7 @@ pub mod draw_ctx;
 pub mod event;
 pub mod focus;
 pub mod font_settings;
+pub mod fullscreen;
 pub mod framebuffer;
 pub mod geometry;
 pub mod gfx_ctx;
@@ -139,38 +140,33 @@ pub use theme::{
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_emulation::{EmuCmd, TouchMouseEmu, TOUCH_SCROLL_THRESHOLD};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
-pub use undo::{DoUndoActions, Settings as UndoerSettings, UndoBuffer, Undoer, UndoRedoCommand};
+pub use undo::{DoUndoActions, Settings as UndoerSettings, UndoBuffer, UndoRedoCommand, Undoer};
 #[cfg(feature = "reflect")]
 pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
     debug_draw_report, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type, App,
-    BackbufferKind,
-    BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay, Widget, WidgetBaseEdit,
-    WidgetBaseField,
+    BackbufferKind, BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay, Widget,
+    WidgetBaseEdit, WidgetBaseField,
 };
 pub use widgets::{
     color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, current_scroll_style,
-    current_scroll_visibility, paint_sparkline,
-    set_scroll_style, set_scroll_visibility, shared_frame_history, shared_run_mode, Button,
-    CellInfo, Checkbox, ClickAwayAction, CloseReason, CollapsingHeader, ColorPicker,
-    ColorWheelPicker, ComboBox, Conditional,
-    Align, Align2, Container, DragValue, FlexColumn, FlexRow, FrameHistory, HandleShape,
-    DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
-    HeaderInfo, Hyperlink, ImageView, InspectorPanel, InspectorSavedState, Label, LabelAlign,
-    MarkdownView, MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection,
-    MenuShortcut, ModalSheet, NodeIcon, Padding, PerformanceView, Popup, PopupClickOutcome,
-    PopupCloseBehavior, PopupMenu, ProgressBar, QrView, RadioGroup, Rebuilder, RectAlign,
-    Resize, RichCommand, RichDoc, RichEditHandle, RichTextEdit, RichTextToolbar, RichTextView,
-    RunMode, RunModeDesc,
-    RunModeRow, Scene, SharedResolver, single_font_resolver,
-    SceneTransform, ScrollBarColor, ScrollBarKind,
-    ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator, SharedFrameHistory, ShortcutKey,
-    SizedBox, Slider, SliderClamping, SliderOrientation, Spacer, Splitter, Stack, TabView, Table,
-    TableBuilder, TableColumn, TableRows, TextArea, TextAreaScrollInfo, TextEditState, TextField,
-    TextHAlign,
-    TextVAlign, ToggleSwitch, Tooltip, TooltipTimings, TopMenu, TreeView, Window,
-    set_tooltip_timings, tooltip_timings,
+    current_scroll_visibility, paint_sparkline, set_scroll_style, set_scroll_visibility,
+    set_tooltip_timings, shared_frame_history, shared_run_mode, single_font_resolver,
+    tooltip_timings, Align, Align2, Button, CellInfo, Checkbox, ClickAwayAction, CloseReason,
+    CollapsingHeader, ColorPicker, ColorWheelPicker, ComboBox, Conditional, Container, DragValue,
+    FlexColumn, FlexRow, FrameHistory, HandleShape, HeaderInfo, Hyperlink, ImageView,
+    InspectorPanel, InspectorSavedState, Label, LabelAlign, MarkdownView, MenuBar, MenuBarStrip,
+    MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut, ModalSheet, NodeIcon, Padding,
+    PerformanceView, Popup, PopupClickOutcome, PopupCloseBehavior, PopupMenu, ProgressBar, QrView,
+    RadioGroup, Rebuilder, RectAlign, Resize, RichCommand, RichDoc, RichEditHandle, RichTextEdit,
+    RichTextToolbar, RichTextView, RunMode, RunModeDesc, RunModeRow, Scene, SceneTransform,
+    ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator,
+    SharedFrameHistory, SharedResolver, ShortcutKey, SizedBox, Slider, SliderClamping,
+    SliderOrientation, Spacer, Splitter, Stack, TabView, Table, TableBuilder, TableColumn,
+    TableRows, TextArea, TextAreaScrollInfo, TextEditState, TextField, TextHAlign, TextVAlign,
+    ToggleSwitch, Tooltip, TooltipTimings, TopMenu, TreeView, Window, DEFAULT_COLUMN_GAP,
+    DEFAULT_ROW_GAP,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.
