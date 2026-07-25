@@ -64,6 +64,11 @@ pub fn key(k: &WinitKey) -> Option<Key> {
         WinitKey::Named(NamedKey::PageUp) => Key::PageUp,
         WinitKey::Named(NamedKey::PageDown) => Key::PageDown,
         WinitKey::Character(s) => Key::Char(s.chars().next()?),
+        // Parity with `web_adapter::key`: any other named key round-trips
+        // as `Key::Other(name)` (the Debug name matches the browser's
+        // `KeyboardEvent.key` for these — "Shift", "Control", "F5", …) so
+        // hosts can bind them (e.g. Shift as a game fire button).
+        WinitKey::Named(other) => Key::Other(format!("{other:?}")),
         _ => return None,
     })
 }
@@ -213,7 +218,10 @@ mod tests {
         // Multiline editors rely on these delivering as real navigation keys
         // (not `Key::Other`) so their PageUp/PageDown handlers fire.
         assert_eq!(key(&WinitKey::Named(NamedKey::PageUp)), Some(Key::PageUp));
-        assert_eq!(key(&WinitKey::Named(NamedKey::PageDown)), Some(Key::PageDown));
+        assert_eq!(
+            key(&WinitKey::Named(NamedKey::PageDown)),
+            Some(Key::PageDown)
+        );
     }
 
     #[test]
