@@ -723,6 +723,20 @@ impl App {
         );
     }
 
+    /// Focus the first focusable widget in paint order.
+    ///
+    /// Apps whose root is a game/canvas widget need this at startup:
+    /// [`on_key_up`](Self::on_key_up) only routes to the focused widget
+    /// (there is no unconsumed-key fallback for releases), so held-key
+    /// state tracking breaks until the user clicks or tabs. Calling this
+    /// right after building the app gives that widget key delivery from
+    /// the first frame. No-op when nothing is focusable.
+    pub fn focus_first(&mut self) {
+        if self.focus.is_none() {
+            self.advance_focus(true);
+        }
+    }
+
     /// Move focus to the next (or previous) focusable widget in paint order.
     fn advance_focus(&mut self, forward: bool) {
         let mut all: Vec<Vec<usize>> = Vec::new();
