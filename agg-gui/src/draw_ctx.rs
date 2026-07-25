@@ -549,11 +549,16 @@ pub trait DrawCtx {
     /// forces a re-upload. CPU backends ignore it.
     ///
     /// **Default:** collapses the two planes into a single straight-alpha
-    /// RGBA8 image (max of channel alphas, divided back to straight colour)
-    /// and forwards to [`draw_image_rgba`].  Correct for any content where
-    /// the three channel alphas agree; lossy of LCD chroma where they
-    /// diverge.  Backends that want full subpixel quality through the
-    /// cache override this with a two-texture shader path.
+    /// RGBA8 image via [`crate::lcd_coverage::collapse_lcd_pixel`]
+    /// (Rec.709 luminance-weighted alpha, lifted so the unpremultiply cannot
+    /// clamp) and forwards to [`draw_image_rgba`].  Lossy of LCD chroma where
+    /// the three channel alphas diverge, but luminance-preserving.  Backends
+    /// that want full subpixel quality through the cache override this with a
+    /// two-texture shader path.
+    ///
+    /// This default is live CPU code, not a fallback stub: `LcdGfxCtx` does not
+    /// override it, so a nested `BackbufferMode::LcdCoverage` widget blitting
+    /// into a parent LCD backbuffer lands here.
     fn draw_lcd_backbuffer_arc(
         &mut self,
         color: &std::sync::Arc<Vec<u8>>,
@@ -567,9 +572,12 @@ pub trait DrawCtx {
         dst_h: f64,
     ) {
         let _ = content_version; // CPU collapse path is stateless; version unused.
-        // Collapse to straight-alpha RGBA8 on the fly.  Matches the same
-        // math `LcdBuffer::to_rgba8_top_down_collapsed` uses internally,
-        // except applied to a top-down pair rather than a Y-up pair.
+        // Collapse to straight-alpha RGBA8 on the fly through the SAME shared
+        // per-pixel rule `LcdBuffer::to_rgba8_top_down_collapsed` uses — only
+        // the row order differs (this pair is already top-down).  Keeping the
+        // math in one place is deliberate: this site kept an independent `max`
+        // collapse after the other was fixed, which is how the "LCD text is
+        // bolder" bug stayed alive on the nested-backbuffer path.
         let w_u = w as usize;
         let h_u = h as usize;
         if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 {
@@ -578,22 +586,12 @@ pub trait DrawCtx {
         let mut rgba = vec![0u8; w_u * h_u * 4];
         for i in 0..(w_u * h_u) {
             let ci = i * 3;
-            let ra = alpha[ci];
-            let ga = alpha[ci + 1];
-            let ba = alpha[ci + 2];
-            let a = ra.max(ga).max(ba);
-            if a == 0 {
-                continue;
-            }
-            let af = a as f32 / 255.0;
-            let rc = color[ci] as f32 / 255.0;
-            let gc = color[ci + 1] as f32 / 255.0;
-            let bc = color[ci + 2] as f32 / 255.0;
             let di = i * 4;
-            rgba[di] = ((rc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-            rgba[di + 1] = ((gc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-            rgba[di + 2] = ((bc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-            rgba[di + 3] = a;
+            let px = crate::lcd_coverage::collapse_lcd_pixel(
+                [color[ci], color[ci + 1], color[ci + 2]],
+                [alpha[ci], alpha[ci + 1], alpha[ci + 2]],
+            );
+            rgba[di..di + 4].copy_from_slice(&px);
         }
         self.draw_image_rgba(&rgba, w, h, dst_x, dst_y, dst_w, dst_h);
     }

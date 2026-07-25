@@ -550,10 +550,32 @@ struct VOut {
 // ---------------------------------------------------------------------------
 // Two-plane cached backbuffer analogue of TEXT_GRAY: collapses the per-channel
 // (premultiplied colour, per-channel alpha) planes into a single premultiplied
-// RGBA sample so the layer texture receives correct alpha.  Alpha is the max
-// of the three channel alphas (matching `LcdBuffer::to_rgba8_top_down_collapsed`
-// on the software side); colour is the premultiplied colour plane as-is.  One
-// pass, ColorWrites::ALL, premultiplied src-over.
+// RGBA sample so the layer texture receives correct alpha.  Alpha is the
+// Rec.709 LUMINANCE-WEIGHTED mean of the three channel alphas; colour is the
+// premultiplied colour plane as-is.  One pass, ColorWrites::ALL, premultiplied
+// src-over.
+//
+// Software counterpart: `agg_gui::lcd_coverage::collapse_lcd_pixel`, which
+// backs both `LcdBuffer::to_rgba8_top_down_collapsed` and the default
+// `DrawCtx::draw_lcd_backbuffer_arc`.  Same weighted alpha, with ONE deliberate
+// difference: that path additionally lifts the alpha to `max(weighted,
+// max_i colour_i)`.  Do NOT port the lift here.  It exists only because the CPU
+// path hands back STRAIGHT alpha and so has to divide colour by alpha, which
+// would clamp for light text; this shader stays PREMULTIPLIED end to end and
+// never divides, so it has no clamp to avoid — and the lift would cost it a
+// `dst * (aa - weighted)` luminance error it currently does not have.
+//
+// Why luminance-weighted and not `max`: the per-channel composite over a uniform
+// destination `d` is `out_i = c_i + d*(1 - a_i)`, while a single-alpha flatten
+// yields `out_i = c_i + d*(1 - aa)`.  The Rec.709-weighted sum of the encoded
+// channels is preserved exactly when `aa` is the Rec.709-weighted mean of the
+// `a_i`, so perceived luminance over any neutral background is right to first
+// order.  `max` over-weights coverage on the two channels below the max and so
+// biases EVERY unequal-alpha pixel dark — every LCD glyph edge, and (for a Label,
+// which paints no opaque background) essentially every text pixel.  That was the
+// "text inside windows renders ~20% bolder when LCD is on" bug, windows being
+// retained compositing layers that always take this path.  Chroma is still
+// collapsed, which is intentional inside a layer.
 // group(0) binding(0): LcbUniforms { resolution, channel(unused), global_alpha }
 // group(1) binding(0): colour plane, binding(1): alpha plane, binding(2): sampler
 
@@ -584,7 +606,7 @@ struct VOut {
 @fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     let c = textureSample(u_color, u_sampler, in.v_uv).rgb;
     let a = textureSample(u_alpha, u_sampler, in.v_uv).rgb;
-    let aa = max(a.r, max(a.g, a.b));
+    let aa = dot(a, vec3<f32>(0.2126, 0.7152, 0.0722));
     // Premultiplied: colour plane is already colour*coverage, so scaling both
     // it and the alpha by global_alpha keeps the sample premult-correct.
     return vec4<f32>(c * u.global_alpha, aa * u.global_alpha);

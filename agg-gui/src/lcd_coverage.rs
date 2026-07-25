@@ -217,15 +217,22 @@ impl LcdBuffer {
     /// RGBA8 image suitable for the existing blit pipeline (one texture,
     /// standard `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blend).
     ///
-    /// The per-channel alphas get collapsed to a single per-pixel alpha
-    /// via `max(R_alpha, G_alpha, B_alpha)`; RGB is recovered by dividing
-    /// the premult colour by that max alpha (straight-alpha form).  This
-    /// conversion is **lossy** when the three subpixel alphas diverge
-    /// (the whole point of the per-channel representation is lost under
-    /// collapse).  It's correct for typical monochrome-text cases where
-    /// all three alphas agree, and degrades gracefully otherwise —
-    /// Phase 5.2's two-plane blit path preserves the full per-channel
-    /// information through upload and shader.
+    /// Per pixel this is [`collapse_lcd_pixel`] — Rec.709 luminance-weighted
+    /// alpha, lifted so the unpremultiply never clamps; see that function for
+    /// the derivation and for why `max` was wrong.
+    ///
+    /// **Relationship to the `lcb_flatten` shader in `demo-wgpu`.**  Both
+    /// collapse to the same weighted alpha, but only this CPU path applies the
+    /// lift, and the difference is not an inconsistency: the shader emits a
+    /// **premultiplied** sample (`vec4(c, aa)`) and never divides by alpha, so
+    /// it has no clamp to protect against.  This path has to hand back
+    /// **straight** alpha for the standard `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`
+    /// blit, and that division is what needs the lift.
+    ///
+    /// The conversion is still **lossy** in chroma when the three
+    /// subpixel alphas diverge — intentionally so, since a flattened
+    /// sample has only one alpha to spend.  The two-plane blit path
+    /// preserves the full per-channel information where it can.
     pub fn to_rgba8_top_down_collapsed(&self) -> Vec<u8> {
         let w = self.width as usize;
         let h = self.height as usize;
@@ -235,21 +242,11 @@ impl LcdBuffer {
             for x in 0..w {
                 let si = (src_y * w + x) * 3;
                 let di = (y * w + x) * 4;
-                let ra = self.alpha[si];
-                let ga = self.alpha[si + 1];
-                let ba = self.alpha[si + 2];
-                let a = ra.max(ga).max(ba);
-                if a == 0 {
-                    continue;
-                } // fully transparent → keep RGBA zero
-                let af = a as f32 / 255.0;
-                let rc = self.color[si] as f32 / 255.0;
-                let gc = self.color[si + 1] as f32 / 255.0;
-                let bc = self.color[si + 2] as f32 / 255.0;
-                out[di] = ((rc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                out[di + 1] = ((gc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                out[di + 2] = ((bc / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                out[di + 3] = a;
+                let px = collapse_lcd_pixel(
+                    [self.color[si], self.color[si + 1], self.color[si + 2]],
+                    [self.alpha[si], self.alpha[si + 1], self.alpha[si + 2]],
+                );
+                out[di..di + 4].copy_from_slice(&px);
             }
         }
         out
@@ -598,6 +595,64 @@ impl LcdBuffer {
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
+/// Collapse one pixel's per-channel (premultiplied colour, alpha) triple into a
+/// single **straight-alpha** RGBA8 pixel.
+///
+/// Shared by [`LcdBuffer::to_rgba8_top_down_collapsed`] and the default
+/// [`crate::draw_ctx::DrawCtx::draw_lcd_backbuffer_arc`] so the two CPU collapse
+/// sites cannot drift apart — they did, and the drift is what let the
+/// "LCD text is bolder" bug survive in one path after being fixed in the other.
+///
+/// The collapsed alpha is the **Rec.709 luminance-weighted mean** of the three
+/// channel alphas, lifted so that no channel's unpremultiply can clamp:
+///
+/// ```text
+/// aa = max( 0.2126*a_r + 0.7152*a_g + 0.0722*a_b,  max_i color_i )
+/// ```
+///
+/// **Why the weighted mean.**  The per-channel composite over a uniform
+/// destination `d` gives `out_i = c_i + d*(1 - a_i)`; a single-alpha flatten
+/// gives `out_i = c_i + d*(1 - aa)`.  The Rec.709-weighted sum of the encoded
+/// channels is preserved exactly when `aa` is the Rec.709-weighted mean of the
+/// `a_i`, so perceived luminance over a neutral background stays correct.
+/// `max` over-weights coverage on the two channels below the max and biases
+/// every unequal-alpha pixel dark — the "LCD text is bolder" bug.
+///
+/// **Why the lift.**  Straight colour is `c_i / aa`, so a channel whose own
+/// alpha exceeds the weighted mean (`c_i > aa`, which happens for LIGHT text on
+/// a dark theme, where `c_i ≈ a_i`) would overshoot 1.0 and get clamped,
+/// silently eating that channel's ink on exactly the near-white glyph edges
+/// that carry it.  Lifting `aa` to at least `max_i c_i` makes the clamp
+/// unreachable.  The trade: where the lift raises `aa` above the weighted mean
+/// the residual luminance error becomes `d * (aa - weighted)`, which scales
+/// with the DESTINATION rather than with the source colour — so it vanishes on
+/// black, stays small on a dark theme, and is far cheaper than the clamp loss
+/// it replaces.  Dark-on-light is untouched: premultiplied colours are tiny
+/// there, so the lift never binds and the collapse stays luminance-exact.
+///
+/// Returns a fully transparent pixel when nothing survives the collapse.
+#[inline]
+pub fn collapse_lcd_pixel(color: [u8; 3], alpha: [u8; 3]) -> [u8; 4] {
+    let weighted =
+        0.2126 * alpha[0] as f32 + 0.7152 * alpha[1] as f32 + 0.0722 * alpha[2] as f32;
+    let lift = color[0].max(color[1]).max(color[2]) as f32;
+    let a = (weighted.max(lift) + 0.5).clamp(0.0, 255.0) as u8;
+    if a == 0 {
+        // Nothing to encode: the lift guarantees `a >= max_i color_i`, so a zero
+        // alpha here means every premultiplied colour byte is zero too.  The
+        // pixel can only be carrying sub-half-byte coverage of a near-black
+        // source, whose contribution rounds away in any case.
+        return [0, 0, 0, 0];
+    }
+    let af = a as f32;
+    [
+        ((color[0] as f32 / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8,
+        ((color[1] as f32 / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8,
+        ((color[2] as f32 / af) * 255.0 + 0.5).clamp(0.0, 255.0) as u8,
+        a,
+    ]
+}
+
 /// Y-flip a 3-byte/pixel plane (Y-up row 0 = bottom → top-row-first).
 fn flip_plane(src: &[u8], width: u32, height: u32) -> Vec<u8> {
     let row_bytes = (width * 3) as usize;
@@ -614,6 +669,8 @@ mod filter;
 mod mask;
 #[cfg(test)]
 mod fill_path_bbox_tests;
+#[cfg(test)]
+mod ink_diag_tests;
 #[cfg(test)]
 mod tests;
 

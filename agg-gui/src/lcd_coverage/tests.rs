@@ -604,3 +604,132 @@ fn test_gray_mask_has_no_chroma() {
         );
     }
 }
+
+/// Rec.709 luminance of a byte-scale RGB triple.
+fn rec709(r: f64, g: f64, b: f64) -> f64 {
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// Alpha triples spanning the interesting cases: a green-heavy edge, a
+/// blue-heavy edge, full coverage, and untouched.  Real LCD glyph edges look
+/// like the first two, which is precisely where a single-alpha collapse has to
+/// make a choice.
+const PROBE_COVS: [[u8; 3]; 4] = [[85, 200, 85], [50, 120, 230], [255, 255, 255], [0, 0, 0]];
+
+/// Composite [`PROBE_COVS`] in `text` onto a fresh, fully transparent buffer and
+/// return `(color_plane, alpha_plane, collapsed_rgba)`.
+///
+/// No background fill: a Label backbuffer paints nothing but its glyphs, so the
+/// transparent case is the one that actually ships.
+fn collapse_probe(text: Color) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let w = PROBE_COVS.len() as u32;
+    let mask = LcdMask {
+        data: PROBE_COVS.iter().flatten().copied().collect(),
+        width: w,
+        height: 1,
+    };
+    let mut buf = LcdBuffer::new(w, 1);
+    buf.composite_mask(&mask, text, 0, 0, None);
+    let color = buf.color_plane().to_vec();
+    let alpha = buf.alpha_plane().to_vec();
+    let rgba = buf.to_rgba8_top_down_collapsed();
+    (color, alpha, rgba)
+}
+
+/// Collapsing a partially-covered LCD backbuffer to single-alpha RGBA must
+/// preserve **perceived luminance** against a neutral destination, in BOTH
+/// polarities.
+///
+/// This is the CPU twin of the `lcb_flatten` shader.  The per-channel composite
+/// over a uniform destination `d` gives `out_i = c_i + d*(1 - a_i)`; a
+/// single-alpha flatten gives `out_i = c_i + d*(1 - aa)`.  The Rec.709-weighted
+/// sum of those two agrees exactly when `aa` is the Rec.709-weighted mean of the
+/// per-channel alphas.  Collapsing with `max` instead over-weights coverage on
+/// the two channels below the max and always errs dark — that was the "text in
+/// windows is ~20% bolder when LCD is on" bug, since every glyph edge (and, for
+/// a Label with no opaque background, every text pixel) has unequal alphas.
+///
+/// **Dark-on-light** pins that bug.  **Light-on-dark** pins the opposite
+/// failure: recovering straight colour divides the premultiplied colour by the
+/// collapsed alpha, and for light text a channel whose own alpha exceeds the
+/// weighted mean has `c_i > aa`, so the division overshoots 1.0 and the clamp
+/// silently eats the excess — losing ink on exactly the near-white glyph edges
+/// that matter on a dark theme.  Lifting the collapsed alpha to
+/// `max(weighted, max_i c_i)` removes the clamp entirely, which the
+/// premultiplied round-trip below asserts directly.
+#[test]
+fn collapsed_backbuffer_luminance_matches_per_channel_composite() {
+    // (label, text colour, destinations to composite against)
+    let arms: [(&str, Color, &[f64]); 2] = [
+        ("dark-on-light", Color::rgba(0.1, 0.1, 0.1, 1.0), &[255.0]),
+        // Black and a near-black 20/255 — see the tolerance note below for why
+        // both are worth running.
+        ("light-on-dark", Color::rgba(0.9, 0.9, 0.9, 1.0), &[0.0, 20.0]),
+    ];
+
+    for (arm, text, dsts) in arms {
+        let (color, alpha, rgba) = collapse_probe(text);
+
+        for x in 0..PROBE_COVS.len() {
+            let pi = x * 3;
+            let qi = x * 4;
+            let cov = PROBE_COVS[x];
+            let a_byte = rgba[qi + 3];
+            let af = a_byte as f64 / 255.0;
+
+            // (1) No channel may clamp: the straight colour must round-trip back
+            // to the premultiplied colour it came from.  This is the property
+            // the alpha lift establishes, and it holds for any destination.
+            for c in 0..3 {
+                let round_trip = rgba[qi + c] as f64 * af;
+                assert!(
+                    (round_trip - color[pi + c] as f64).abs() <= 1.0,
+                    "{arm} pixel {x} (coverage {cov:?}) channel {c}: straight \
+                     colour lost ink to the unpremultiply clamp; round-trip \
+                     {round_trip:.2} != premultiplied {}; collapsed={:?}",
+                    color[pi + c],
+                    &rgba[qi..qi + 4],
+                );
+            }
+
+            // (2) Perceived luminance must survive the collapse.
+            let weighted: f64 = [0.2126f64, 0.7152, 0.0722]
+                .iter()
+                .enumerate()
+                .map(|(c, w)| w * alpha[pi + c] as f64)
+                .sum();
+            let mut expect = [0.0f64; 3];
+
+            for &dst in dsts {
+                for c in 0..3 {
+                    let a = alpha[pi + c] as f64 / 255.0;
+                    expect[c] = color[pi + c] as f64 + dst * (1.0 - a);
+                }
+                let actual: Vec<f64> = (0..3)
+                    .map(|c| rgba[qi + c] as f64 * af + dst * (1.0 - af))
+                    .collect();
+
+                let exp_lum = rec709(expect[0], expect[1], expect[2]);
+                let act_lum = rec709(actual[0], actual[1], actual[2]);
+
+                // Where the lift raises alpha above the weighted mean, the
+                // destination term is weighted by `a` rather than `weighted`,
+                // leaving an inherent `dst * (a - weighted)` residual that NO
+                // single-alpha flatten can avoid.  It scales with the
+                // destination, so it vanishes on black and stays small on a
+                // dark theme — that is the trade the lift makes, and it is far
+                // cheaper than the clamp loss it replaces.
+                let inherent = dst * (a_byte as f64 - weighted).max(0.0) / 255.0;
+                let tol = 2.0 + inherent;
+                assert!(
+                    (act_lum - exp_lum).abs() <= tol,
+                    "{arm} pixel {x} (coverage {cov:?}) over dst {dst}: collapsed \
+                     luminance {act_lum:.2} != per-channel luminance \
+                     {exp_lum:.2} (tolerance {tol:.2}); collapsed={:?} \
+                     per-channel={expect:?}",
+                    &rgba[qi..qi + 4],
+                );
+            }
+        }
+    }
+}

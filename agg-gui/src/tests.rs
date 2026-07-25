@@ -53,6 +53,7 @@ mod keyboard_lift;
 mod label_theme;
 mod layer_compositing;
 mod layout_lcd;
+mod lcd_backbuffer_collapse;
 mod menu_hidpi_scale;
 mod multi_touch_routing;
 mod on_screen_keyboard;

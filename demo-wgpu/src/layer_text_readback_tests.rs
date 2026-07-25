@@ -286,6 +286,132 @@ fn lcd_backbuffer_in_alpha_layer_writes_alpha() {
     assert!(spread <= 12, "flattened backbuffer must be gray; got {darkest_px:?}");
 }
 
+/// Rec.709 luminance of a byte-scale RGB triple.
+fn rec709(r: f64, g: f64, b: f64) -> f64 {
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// The unequal-alpha probe patches — a green-heavy and a blue-heavy LCD edge.
+const PATCHES: [[u8; 3]; 2] = [[85, 200, 85], [50, 120, 230]];
+
+/// Flatten fidelity: a PARTIALLY-covered two-plane backbuffer (per-channel
+/// alphas that differ, as at every LCD glyph edge) blitted inside a layer must
+/// keep the perceived luminance of the per-channel composite, in BOTH
+/// polarities.
+///
+/// The `lcb_flatten` shader collapses the three channel alphas into one.  With
+/// `max` the two channels below the max get over-weighted coverage, biasing
+/// every unequal-alpha pixel dark — this is the "text inside windows is bolder
+/// when LCD is on" bug, since windows are retained layers and this path runs for
+/// all their text.  The Rec.709-weighted mean is the collapse that leaves
+/// `sum_i w_i * out_i` unchanged against a neutral destination.
+///
+/// The light-on-dark arm is a **consistency guard** rather than a bug repro: the
+/// shader emits a premultiplied sample and never unpremultiplies, so it has no
+/// clamp to lose ink to and needs no alpha lift.  Its job is to catch a future
+/// "fix" that ports the CPU side's lift into the shader, where it would be
+/// actively wrong — the lift buys clamp-freedom the shader already has, at the
+/// cost of a `dst * (a - weighted)` luminance error the shader currently avoids.
+#[test]
+fn flattened_lcd_backbuffer_luminance_inside_layer() {
+    let Some((device, queue)) = try_device() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let (w, h) = (64u32, 32u32);
+    let (pw, ph) = (8u32, 8u32);
+
+    // (label, text level, background) — dark text on white, light text on a
+    // near-black 20/255 backdrop.
+    let arms: [(&str, f64, Color); 2] = [
+        ("dark-on-light", 0.1, Color::white()),
+        (
+            "light-on-dark",
+            0.9,
+            Color::rgba(20.0 / 255.0, 20.0 / 255.0, 20.0 / 255.0, 1.0),
+        ),
+    ];
+
+    for (arm, level, bg) in arms {
+        let target = Target::new(Arc::clone(&device), Arc::clone(&queue), w, h);
+        let mut ctx = WgpuGfxCtx::new(
+            Arc::clone(&device),
+            Arc::clone(&queue),
+            wgpu::TextureFormat::Rgba8Unorm,
+            w as f32,
+            h as f32,
+        );
+        ctx.reset(w as f32, h as f32);
+
+        // The colour plane is premultiplied, so colour_c = round(level * alpha_c).
+        let planes: Vec<(Arc<Vec<u8>>, Arc<Vec<u8>>)> = PATCHES
+            .iter()
+            .map(|cov| {
+                let premult: [u8; 3] = [
+                    (cov[0] as f64 * level).round() as u8,
+                    (cov[1] as f64 * level).round() as u8,
+                    (cov[2] as f64 * level).round() as u8,
+                ];
+                let mut color = Vec::with_capacity((pw * ph * 3) as usize);
+                let mut alpha = Vec::with_capacity((pw * ph * 3) as usize);
+                for _ in 0..(pw * ph) {
+                    color.extend_from_slice(&premult);
+                    alpha.extend_from_slice(cov);
+                }
+                (Arc::new(color), Arc::new(alpha))
+            })
+            .collect();
+
+        ctx.clear(bg);
+        // Layer alpha 1.0: the pop composite is then a plain premultiplied
+        // src-over of the flattened sample onto the background, so the readback
+        // is exactly `c + bg*(1 - aa)` and isolates the collapse.
+        ctx.push_layer_with_alpha(w as f64, h as f64, 1.0);
+        for (i, (color, alpha)) in planes.iter().enumerate() {
+            let x = 4.0 + (i as f64) * 24.0;
+            ctx.draw_lcd_backbuffer_arc(
+                color,
+                alpha,
+                (i + 1) as u64,
+                pw,
+                ph,
+                x,
+                8.0,
+                pw as f64,
+                ph as f64,
+            );
+        }
+        ctx.pop_layer();
+        ctx.flush_to_surface(&target.view);
+
+        let data = target.read();
+        let dst = (bg.r as f64 * 255.0).round();
+
+        for (i, cov) in PATCHES.iter().enumerate() {
+            // Sample the patch interior — the edge texels can pick up filtering.
+            let sx = 4 + (i as u32) * 24 + pw / 2;
+            // Y-up dst_y = 8 with height 8 → visual rows h-16..h-8; take the middle.
+            let sy = h - 12;
+            let p = px(&data, w, sx, sy);
+
+            // Per-channel reference: out_c = premult_c + dst*(1 - a_c).
+            let mut expect = [0.0f64; 3];
+            for c in 0..3 {
+                let a = cov[c] as f64 / 255.0;
+                expect[c] = (cov[c] as f64 * level).round() + dst * (1.0 - a);
+            }
+            let exp_lum = rec709(expect[0], expect[1], expect[2]);
+            let act_lum = rec709(p[0] as f64, p[1] as f64, p[2] as f64);
+            assert!(
+                (act_lum - exp_lum).abs() <= 3.0,
+                "{arm} coverage {cov:?}: flattened luminance {act_lum:.2} != \
+                 per-channel luminance {exp_lum:.2}; read back {p:?}, \
+                 per-channel {expect:?}"
+            );
+        }
+    }
+}
+
 /// Layer clip: a layer pushed under a clip covering only the left half must not
 /// composite over the right half on pop.
 #[test]
