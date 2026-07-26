@@ -173,6 +173,20 @@ impl TouchState {
         }
     }
 
+    /// Every active finger's current position, for the per-finger
+    /// registry ([`crate::touch_points`]) that virtual-gamepad widgets
+    /// poll. Positions are app-local (the space touch events arrive
+    /// in after the shell's screen→world conversion).
+    pub fn active_points(&self) -> Vec<crate::touch_points::TouchPoint> {
+        self.active
+            .iter()
+            .map(|((_, id), t)| crate::touch_points::TouchPoint {
+                id: id.0,
+                pos: t.pos,
+            })
+            .collect()
+    }
+
     /// Recompute the per-frame aggregate.  Called by `App` right before
     /// the multi-touch value is published, so every `paint` / `on_event`
     /// in the same frame sees consistent deltas.
@@ -545,7 +559,10 @@ mod tests {
         let info = ts.current().expect("three fingers -> gesture");
         assert_eq!(info.num_touches, 3);
         assert_eq!(info.zoom_delta, 1.0, "topology reset must zero zoom");
-        assert_eq!(info.rotation_delta, 0.0, "topology reset must zero rotation");
+        assert_eq!(
+            info.rotation_delta, 0.0,
+            "topology reset must zero rotation"
+        );
         assert_eq!(info.translation_delta.x, 0.0);
         assert_eq!(info.translation_delta.y, 0.0);
     }

@@ -24,8 +24,11 @@ impl App {
     ) {
         let pos = keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         self.touch_state.on_start(device, id, pos, force);
+        crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
-        let cmds = self.touch_mouse_emu.on_start(device, id, screen_x, screen_y);
+        let cmds = self
+            .touch_mouse_emu
+            .on_start(device, id, screen_x, screen_y);
         self.apply_emu_cmds(cmds);
     }
     pub fn on_touch_move(
@@ -38,6 +41,7 @@ impl App {
     ) {
         let pos = keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         self.touch_state.on_move(device, id, pos, force);
+        crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
         let cmds = self.touch_mouse_emu.on_move(device, id, screen_x, screen_y);
         self.apply_emu_cmds(cmds);
@@ -48,6 +52,7 @@ impl App {
         id: crate::touch_state::TouchId,
     ) {
         self.touch_state.on_end_or_cancel(device, id);
+        crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
         let cmds = self.touch_mouse_emu.on_end(device, id);
         self.apply_emu_cmds(cmds);
@@ -58,6 +63,7 @@ impl App {
         id: crate::touch_state::TouchId,
     ) {
         self.touch_state.on_end_or_cancel(device, id);
+        crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
         let cmds = self.touch_mouse_emu.on_cancel(device, id);
         self.apply_emu_cmds(cmds);
@@ -71,9 +77,7 @@ impl App {
         for cmd in cmds {
             match cmd {
                 EmuCmd::MouseMove(x, y) => self.on_mouse_move(x, y),
-                EmuCmd::MouseDown(x, y, btn) => {
-                    self.on_mouse_down(x, y, btn, Modifiers::default())
-                }
+                EmuCmd::MouseDown(x, y, btn) => self.on_mouse_down(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseUp(x, y, btn) => self.on_mouse_up(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseLeave => self.on_mouse_leave(),
             }

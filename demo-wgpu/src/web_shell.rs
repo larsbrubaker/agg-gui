@@ -224,15 +224,42 @@ fn add_canvas_listener<E>(
     cb.forget();
 }
 
+/// The single web touchscreen, as far as the multi-touch pipeline is
+/// concerned — pointer events don't expose per-digitizer identity.
+const TOUCH_DEVICE: agg_gui::TouchDeviceId = agg_gui::TouchDeviceId(0);
+
 fn install_pointer_listeners() {
     let Some(canvas) = canvas() else {
         return;
     };
 
+    // Touch pointers feed the App's raw-touch entry points (which run
+    // the gesture recogniser, the per-finger registry, and the
+    // primary-finger mouse emulation); only genuine mouse/pen input
+    // takes the direct mouse path — synthesizing mouse events here for
+    // touch would double-fire them. `touch-action: none` stops the
+    // browser from panning/zooming the page out from under the app —
+    // without it the first drag on a mobile page scrolls the canvas
+    // away instead of reaching the widgets.
+    let _ = canvas.style().set_property("touch-action", "none");
+
     {
         let canvas_ref = canvas.clone();
         add_canvas_listener(&canvas, "pointermove", move |e: web_sys::PointerEvent| {
             let (x, y) = pointer_pos(&canvas_ref, &e);
+            if e.pointer_type() == "touch" {
+                with_app(|app| {
+                    app.on_touch_move(
+                        TOUCH_DEVICE,
+                        agg_gui::TouchId(e.pointer_id() as u64),
+                        x,
+                        y,
+                        Some(e.pressure()),
+                    )
+                });
+                mark_dirty();
+                return;
+            }
             with_app(|app| app.on_mouse_move(x, y));
             // Reflect the hovered widget's preferred cursor on the canvas.
             let icon = agg_gui::current_cursor_icon();
@@ -244,16 +271,43 @@ fn install_pointer_listeners() {
         add_canvas_listener(&canvas, "pointerdown", move |e: web_sys::PointerEvent| {
             // Capture so drags keep reporting positions outside the canvas.
             let _ = canvas_ref.set_pointer_capture(e.pointer_id());
+            // A pointerdown is a user gesture — the moment iOS will
+            // grant the tilt-sensor permission an app asked for.
+            service_tilt_permission_gesture();
             let (x, y) = pointer_pos(&canvas_ref, &e);
-            with_app(|app| app.on_mouse_down(x, y, mouse_button(&e), pointer_modifiers(&e)));
+            if e.pointer_type() == "touch" {
+                e.prevent_default();
+                with_app(|app| {
+                    app.on_touch_start(
+                        TOUCH_DEVICE,
+                        agg_gui::TouchId(e.pointer_id() as u64),
+                        x,
+                        y,
+                        Some(e.pressure()),
+                    )
+                });
+            } else {
+                with_app(|app| app.on_mouse_down(x, y, mouse_button(&e), pointer_modifiers(&e)));
+            }
             mark_dirty();
         });
     }
-    for release_event in ["pointerup", "pointercancel"] {
+    for (release_event, cancel) in [("pointerup", false), ("pointercancel", true)] {
         let canvas_ref = canvas.clone();
         add_canvas_listener(&canvas, release_event, move |e: web_sys::PointerEvent| {
             let (x, y) = pointer_pos(&canvas_ref, &e);
-            with_app(|app| app.on_mouse_up(x, y, mouse_button(&e), pointer_modifiers(&e)));
+            if e.pointer_type() == "touch" {
+                let id = agg_gui::TouchId(e.pointer_id() as u64);
+                with_app(|app| {
+                    if cancel {
+                        app.on_touch_cancel(TOUCH_DEVICE, id);
+                    } else {
+                        app.on_touch_end(TOUCH_DEVICE, id);
+                    }
+                });
+            } else {
+                with_app(|app| app.on_mouse_up(x, y, mouse_button(&e), pointer_modifiers(&e)));
+            }
             mark_dirty();
         });
     }
@@ -392,12 +446,111 @@ fn start_raf_loop() {
     schedule(&cb);
 }
 
+// ---------------------------------------------------------------------------
+// Device-tilt plumbing (agg_gui::tilt)
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// Set when the app asked for tilt but the platform gates the
+    /// sensor behind a permission prompt that must run inside a user
+    /// gesture (iOS 13+). The next pointerdown services it.
+    static TILT_PERMISSION_WAIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The display's rotation relative to the device's natural
+/// orientation, in degrees — folds the sensor's device-frame readings
+/// into screen space so apps never care how the phone is held.
+fn screen_angle_degrees() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.screen().ok())
+        .map(|s| s.orientation().angle().unwrap_or(0) as f64)
+        .unwrap_or(0.0)
+}
+
+fn install_tilt_listener() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::<dyn FnMut(web_sys::DeviceOrientationEvent)>::new(
+        |e: web_sys::DeviceOrientationEvent| {
+            let (Some(beta), Some(gamma)) = (e.beta(), e.gamma()) else {
+                return;
+            };
+            // Rotate the device-frame (gamma = lean right, beta = lean
+            // toward the user) into screen space by the display angle.
+            let a = screen_angle_degrees().to_radians();
+            let sx = gamma * a.cos() + beta * a.sin();
+            let sy = -gamma * a.sin() + beta * a.cos();
+            agg_gui::tilt::set_reading(sx, sy);
+            mark_dirty();
+        },
+    );
+    let _ =
+        window.add_event_listener_with_callback("deviceorientation", cb.as_ref().unchecked_ref());
+    cb.forget();
+    agg_gui::tilt::set_enabled(true);
+}
+
+/// iOS 13+ puts `DeviceOrientationEvent.requestPermission` on the
+/// constructor; its presence means the sensor is permission-gated.
+fn device_orientation_needs_permission() -> bool {
+    js_sys::Reflect::get(&js_sys::global(), &"DeviceOrientationEvent".into())
+        .ok()
+        .filter(|c| !c.is_undefined())
+        .and_then(|c| js_sys::Reflect::get(&c, &"requestPermission".into()).ok())
+        .map(|f| f.is_function())
+        .unwrap_or(false)
+}
+
+/// rAF-side: consume an app tilt request — install immediately where
+/// no permission is needed, otherwise arm the next-gesture prompt.
+fn service_tilt_requests() {
+    if !agg_gui::tilt::take_enable_request() {
+        return;
+    }
+    if device_orientation_needs_permission() {
+        TILT_PERMISSION_WAIT.with(|c| c.set(true));
+    } else {
+        install_tilt_listener();
+    }
+}
+
+/// Pointerdown-side: run the iOS permission prompt inside the user
+/// gesture it demands, then install the listener on "granted".
+fn service_tilt_permission_gesture() {
+    if !TILT_PERMISSION_WAIT.with(|c| c.get()) {
+        return;
+    }
+    TILT_PERMISSION_WAIT.with(|c| c.set(false));
+    let request = js_sys::Reflect::get(&js_sys::global(), &"DeviceOrientationEvent".into())
+        .and_then(|ctor| js_sys::Reflect::get(&ctor, &"requestPermission".into()));
+    let Ok(request) = request else {
+        return;
+    };
+    let Ok(promise) = js_sys::Function::from(request).call0(&JsValue::UNDEFINED) else {
+        return;
+    };
+    let Ok(promise) = promise.dyn_into::<js_sys::Promise>() else {
+        return;
+    };
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Ok(v) = wasm_bindgen_futures::JsFuture::from(promise).await {
+            if v.as_string().as_deref() == Some("granted") {
+                install_tilt_listener();
+            }
+        }
+    });
+}
+
 /// One animation-frame tick: size the canvas backing store, then paint if
 /// anything wants a frame.
 fn frame() {
     let Some(canvas) = canvas() else {
         return;
     };
+
+    // App-requested tilt input (agg_gui::tilt).
+    service_tilt_requests();
 
     // App-requested fullscreen toggles (agg_gui::fullscreen). Requests
     // originate from click/keydown handlers, so the transient user
