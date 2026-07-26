@@ -169,24 +169,13 @@ impl App {
             .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);
         self.apply_pending_focus();
-        // Re-evaluate the keyboard-avoidance lift against FRESH bounds.
-        // The focus-change hook runs before the tree has re-laid out (a
-        // just-revealed search panel still reports its hidden-state
-        // zero bounds there), so the lift computed at that instant can
-        // be wildly wrong — and nothing else would ever correct it.
-        // Doing it after every layout self-heals within a frame and
-        // tracks the field if the layout moves it. Gated on the enabled
-        // flag, not `is_visible()` — the slide fraction is still zero on
-        // the very frame the stale lift needs correcting.
-        if crate::widgets::on_screen_keyboard::is_enabled() {
-            if let Some(path) = self.focus.clone() {
-                crate::widget::keyboard_scroll::ensure_focused_visible_above_keyboard(
-                    Some(&path),
-                    logical.width,
-                    self.root.as_mut(),
-                );
-            }
-        }
+        // Re-evaluate the keyboard-avoidance lift against FRESH bounds
+        // (see `keyboard_scroll::relift_after_layout` for the why).
+        crate::widget::keyboard_scroll::relift_after_layout(
+            self.focus.as_deref(),
+            logical.width,
+            self.root.as_mut(),
+        );
     }
 
     /// Service a pending programmatic focus request

@@ -203,6 +203,39 @@ pub(crate) fn notify_focus_change(
     }
 }
 
+/// Post-layout lift re-evaluation, called from `App::layout`.
+///
+/// The focus-change hook runs before the tree has re-laid out (a
+/// just-revealed search panel still reports its hidden-state zero
+/// bounds there), so the lift computed at that instant can be wildly
+/// wrong — and nothing else would ever correct it. Doing it after
+/// every layout self-heals within a frame and tracks the field if the
+/// layout moves it. Gated on the enabled flag, not `is_visible()` —
+/// the slide fraction is still zero on the very frame the stale lift
+/// needs correcting.
+///
+/// Only runs when the focused widget actually ACCEPTS TEXT INPUT —
+/// the same gate [`notify_focus_change`] applies. Without it, any
+/// focused non-text widget that reaches the viewport bottom (a
+/// fullscreen game canvas, an image viewer) gets lifted by the
+/// phantom height of a keyboard that will never slide up.
+pub(crate) fn relift_after_layout(
+    focus: Option<&[usize]>,
+    viewport_width: f64,
+    root: &mut dyn Widget,
+) {
+    if !crate::widgets::on_screen_keyboard::is_enabled() {
+        return;
+    }
+    let Some(path) = focus else {
+        return;
+    };
+    if !mutable_widget_at_path(root, path).accepts_text_input() {
+        return;
+    }
+    ensure_focused_visible_above_keyboard(Some(path), viewport_width, root);
+}
+
 /// Entry point invoked by `App::ensure_focused_visible_above_keyboard`.
 /// Kept here (rather than as a method body in `app.rs`) so the
 /// auto-scroll algorithm sits next to its helpers and the parent
@@ -311,7 +344,12 @@ fn transform_rect_aabb(t: &crate::TransAffine, rect: Rect) -> Rect {
         max_x = max_x.max(x);
         max_y = max_y.max(y);
     }
-    Rect::new(min_x, min_y, (max_x - min_x).max(0.0), (max_y - min_y).max(0.0))
+    Rect::new(
+        min_x,
+        min_y,
+        (max_x - min_x).max(0.0),
+        (max_y - min_y).max(0.0),
+    )
 }
 
 /// Walk UP the focus path (innermost ancestor first), giving each
@@ -451,6 +489,82 @@ mod tests {
             "focused bounds must reflect the parent's child_transform; got {:?}",
             r
         );
+    }
+
+    /// A focused widget that does NOT accept text input must never be
+    /// lifted by the post-layout re-evaluation — a fullscreen game
+    /// canvas is focused for key events and reaches the viewport
+    /// bottom, but no keyboard will ever slide up for it.
+    #[test]
+    fn relift_skips_non_text_focus() {
+        use crate::widget::keyboard_scroll::{
+            lift_target_for_test, relift_after_layout, reset_lift_for_test,
+        };
+        crate::widgets::on_screen_keyboard::set_enabled(true);
+        reset_lift_for_test();
+
+        // A viewport-filling, bottom-touching focusable leaf.
+        let leaf = Leaf {
+            bounds: Rect::new(0.0, 0.0, 640.0, 480.0),
+            children: vec![],
+        };
+        let mut parent = ScaleParent {
+            bounds: Rect::new(0.0, 0.0, 640.0, 480.0),
+            children: vec![Box::new(leaf)],
+            zoom: 1.0,
+            offset: (0.0, 0.0),
+        };
+        relift_after_layout(Some(&[0]), 640.0, &mut parent);
+        assert_eq!(
+            lift_target_for_test(),
+            0.0,
+            "non-text focus must not trigger the keyboard lift"
+        );
+
+        // The same geometry through a text-accepting leaf DOES lift.
+        struct TextLeaf(Leaf);
+        impl Widget for TextLeaf {
+            fn bounds(&self) -> Rect {
+                self.0.bounds
+            }
+            fn set_bounds(&mut self, b: Rect) {
+                self.0.bounds = b;
+            }
+            fn children(&self) -> &[Box<dyn Widget>] {
+                &self.0.children
+            }
+            fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+                &mut self.0.children
+            }
+            fn layout(&mut self, a: Size) -> Size {
+                a
+            }
+            fn paint(&mut self, _: &mut dyn DrawCtx) {}
+            fn on_event(&mut self, _: &Event) -> EventResult {
+                EventResult::Ignored
+            }
+            fn accepts_text_input(&self) -> bool {
+                true
+            }
+        }
+        let text = TextLeaf(Leaf {
+            bounds: Rect::new(0.0, 0.0, 640.0, 24.0),
+            children: vec![],
+        });
+        let mut parent = ScaleParent {
+            bounds: Rect::new(0.0, 0.0, 640.0, 480.0),
+            children: vec![Box::new(text)],
+            zoom: 1.0,
+            offset: (0.0, 0.0),
+        };
+        relift_after_layout(Some(&[0]), 640.0, &mut parent);
+        assert!(
+            lift_target_for_test() > 0.0,
+            "text-input focus at the bottom must still lift"
+        );
+
+        crate::widgets::on_screen_keyboard::set_enabled(false);
+        reset_lift_for_test();
     }
 
     /// Without a child transform the walk still reduces to plain bounds
