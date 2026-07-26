@@ -542,6 +542,70 @@ fn service_tilt_permission_gesture() {
     });
 }
 
+/// Poll the Web Gamepad API and publish the first live pad
+/// (agg_gui::gamepad). Standard mapping: axes[0]/[1] = left stick
+/// (y positive down — already screen convention), buttons by
+/// position. Browsers expose pads only after a first button press.
+fn poll_gamepads() {
+    use agg_gui::gamepad::{buttons, GamepadState};
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(pads) = window.navigator().get_gamepads() else {
+        agg_gui::gamepad::set_state(None);
+        return;
+    };
+    let pad = pads
+        .iter()
+        .find(|p| !p.is_null())
+        .and_then(|p| p.dyn_into::<web_sys::Gamepad>().ok());
+    let Some(pad) = pad else {
+        agg_gui::gamepad::set_state(None);
+        return;
+    };
+    let axes = pad.axes();
+    let axis = |i: u32| axes.get(i).as_f64().unwrap_or(0.0);
+    let btns = pad.buttons();
+    let down = |i: u32| {
+        btns.get(i)
+            .dyn_into::<web_sys::GamepadButton>()
+            .map(|b| b.pressed())
+            .unwrap_or(false)
+    };
+    // Standard-mapping indices → position bits.
+    let pairs = [
+        (0, buttons::SOUTH),
+        (1, buttons::EAST),
+        (2, buttons::WEST),
+        (3, buttons::NORTH),
+        (4, buttons::L1),
+        (5, buttons::R1),
+        (8, buttons::SELECT),
+        (9, buttons::START),
+        (12, buttons::DPAD_UP),
+        (13, buttons::DPAD_DOWN),
+        (14, buttons::DPAD_LEFT),
+        (15, buttons::DPAD_RIGHT),
+    ];
+    let mut mask = 0u32;
+    for (idx, bit) in pairs {
+        if down(idx) {
+            mask |= bit;
+        }
+    }
+    let state = GamepadState {
+        left_x: axis(0),
+        left_y: axis(1),
+        buttons: mask,
+    };
+    agg_gui::gamepad::set_state(Some(state));
+    // Pads have no events — anything held/deflected must keep the
+    // frame loop pumping or the app never sees the change.
+    if state != GamepadState::default() {
+        mark_dirty();
+    }
+}
+
 /// One animation-frame tick: size the canvas backing store, then paint if
 /// anything wants a frame.
 fn frame() {
@@ -551,6 +615,7 @@ fn frame() {
 
     // App-requested tilt input (agg_gui::tilt).
     service_tilt_requests();
+    poll_gamepads();
 
     // App-requested fullscreen toggles (agg_gui::fullscreen). Requests
     // originate from click/keydown handlers, so the transient user

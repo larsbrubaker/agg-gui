@@ -58,6 +58,7 @@ pub mod focus;
 pub mod font_settings;
 pub mod framebuffer;
 pub mod fullscreen;
+pub mod gamepad;
 pub mod geometry;
 pub mod gfx_ctx;
 pub mod gl_renderer;
