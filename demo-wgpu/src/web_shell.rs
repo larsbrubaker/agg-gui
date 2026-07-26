@@ -572,6 +572,36 @@ fn frame() {
         .unwrap_or(false);
     if fs_now != agg_gui::fullscreen::is_active() {
         agg_gui::fullscreen::set_active(fs_now);
+        // Mobile: pin the CURRENT orientation while fullscreen —
+        // tilt-steered games must not spin back to portrait when the
+        // player leans the device. `lock()` only works in fullscreen;
+        // rejections (desktop, unsupported) are swallowed.
+        if agg_gui::input_profile::is_mobile_touch() {
+            if let Some(orientation) = web_sys::window()
+                .and_then(|w| w.screen().ok())
+                .map(|s| s.orientation())
+            {
+                if fs_now {
+                    let landscape = screen_angle_degrees() % 180.0 != 0.0;
+                    let lock = js_sys::Reflect::get(&orientation, &"lock".into())
+                        .ok()
+                        .filter(|f| f.is_function())
+                        .map(js_sys::Function::from);
+                    if let Some(lock) = lock {
+                        let kind = if landscape { "landscape" } else { "portrait" };
+                        if let Ok(p) = lock.call1(&orientation, &kind.into()) {
+                            if let Ok(p) = p.dyn_into::<js_sys::Promise>() {
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let _ = wasm_bindgen_futures::JsFuture::from(p).await;
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    let _ = orientation.unlock();
+                }
+            }
+        }
         mark_dirty();
     }
 
