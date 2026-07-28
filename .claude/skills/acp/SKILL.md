@@ -38,7 +38,9 @@ Write a concise commit message that explains the *why*, not just the *what*:
 
 - Subject line: imperative mood, max 50 chars, no period
 - Body (if needed): blank line after subject, wrap at 72 chars
-- End with the co-author line
+- End with the co-author line, naming the **latest Opus model** — currently
+  Opus 5. Do not copy an older model name out of git history; if a newer Opus
+  has shipped, use that one and update the example below.
 
 ```bash
 git commit -m "$(cat <<'EOF'
@@ -46,7 +48,7 @@ Subject line here
 
 Optional body explaining why.
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 EOF
 )"
 ```
