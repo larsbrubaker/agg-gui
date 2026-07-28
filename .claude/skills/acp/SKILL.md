@@ -24,11 +24,19 @@ Run `git status` and `git diff` to understand all changes.
 
 ## Step 3: Run Tests
 
-Run tests before committing to catch issues early:
+Run tests before committing to catch issues early. This is a Rust workspace:
 
 ```bash
-pytest tests/ --ignore=tests/selenium/ -x -q --tb=short
+cargo test --workspace
 ```
+
+Check `cargo`'s own exit code, not the tail of the output — piping through
+`tail`/`head` masks the failure, and a passing-looking excerpt can hide a
+failed target earlier in the run.
+
+If the change touched formatting, also confirm `cargo fmt --all --check` is
+clean, and remember that reflow can push a file past the 800-line limit that
+`agg-gui/tests/file_line_count.rs` enforces.
 
 If tests fail, launch the `fix-test-failures` skill/agent to diagnose and fix. Do not proceed until tests pass.
 
