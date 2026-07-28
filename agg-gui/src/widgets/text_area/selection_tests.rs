@@ -141,7 +141,11 @@ fn line_baselines_snap_to_pixel_grid_when_hinting_on() {
     crate::font_settings::set_hinting_enabled(true);
     for i in 0..ta.visual_line_count() {
         let y = ta.line_baseline_y(i);
-        assert_eq!(y.fract(), 0.0, "line {i} baseline {y} not on the pixel grid");
+        assert_eq!(
+            y.fract(),
+            0.0,
+            "line {i} baseline {y} not on the pixel grid"
+        );
     }
     crate::font_settings::set_hinting_enabled(false);
 }
@@ -201,7 +205,11 @@ fn ctrl_right_and_left_move_by_word() {
     assert_eq!(ta.cursor(), 11); // end of "world"
     key_mods(&mut ta, Key::ArrowLeft, ctrl());
     assert_eq!(ta.cursor(), 6); // start of "world"
-    assert_eq!(ta.selection(), None, "plain word move collapses the selection");
+    assert_eq!(
+        ta.selection(),
+        None,
+        "plain word move collapses the selection"
+    );
 }
 
 #[test]
@@ -318,7 +326,11 @@ fn shift_tab_outdents_the_caret_line_without_a_selection() {
     place_cursor(&ta, 6);
     key_mods(&mut ta, Key::Tab, shift_mod());
     assert_eq!(ta.text(), "ab");
-    assert_eq!(ta.cursor(), 2, "caret column shifts left by the removed indent");
+    assert_eq!(
+        ta.cursor(),
+        2,
+        "caret column shifts left by the removed indent"
+    );
 }
 
 #[test]

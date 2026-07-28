@@ -99,7 +99,9 @@ pub mod rich_clipboard;
 pub mod toolbar;
 pub mod view;
 
-pub use commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand, MAX_INDENT};
+pub use commands::{
+    apply_command, range_common_style, style_at, CommonStyle, RichCommand, MAX_INDENT,
+};
 pub use editor::{RichEditCore, RichEditHandle, RichTextEdit};
 pub use layout::{
     layout_doc, BlockLayout, DocLayout, FontResolver, LineFragment, LineLayout, INDENT_PX,

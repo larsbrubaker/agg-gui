@@ -80,7 +80,10 @@ fn remove_range_within_block_preserves_styles() {
         ..Block::new()
     }]);
     // Remove "cD" straddling the run boundary.
-    let pos = remove_range(&mut doc, DocRange::new(DocPos::new(0, 2), DocPos::new(0, 4)));
+    let pos = remove_range(
+        &mut doc,
+        DocRange::new(DocPos::new(0, 2), DocPos::new(0, 4)),
+    );
     assert_eq!(pos, DocPos::new(0, 2));
     assert_eq!(doc.blocks[0].text(), "abEF");
     assert_eq!(doc.blocks[0].runs.len(), 2);
@@ -97,7 +100,10 @@ fn remove_range_across_blocks_merges() {
         Block::new_ordered("world"),
     ]);
     // From block 0 byte 2 to block 2 byte 2 -> "He" + "rld".
-    let pos = remove_range(&mut doc, DocRange::new(DocPos::new(0, 2), DocPos::new(2, 2)));
+    let pos = remove_range(
+        &mut doc,
+        DocRange::new(DocPos::new(0, 2), DocPos::new(2, 2)),
+    );
     assert_eq!(pos, DocPos::new(0, 2));
     assert_eq!(doc.blocks.len(), 1);
     assert_eq!(doc.blocks[0].text(), "Herld");

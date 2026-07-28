@@ -263,9 +263,12 @@ pub fn apply_command(doc: &mut RichDoc, range: DocRange, cmd: &RichCommand) {
         RichCommand::ToggleUnderline => {
             toggle_bool(doc, range, |cs| cs.underline, |s, v| s.underline = v)
         }
-        RichCommand::ToggleStrikethrough => {
-            toggle_bool(doc, range, |cs| cs.strikethrough, |s, v| s.strikethrough = v)
-        }
+        RichCommand::ToggleStrikethrough => toggle_bool(
+            doc,
+            range,
+            |cs| cs.strikethrough,
+            |s, v| s.strikethrough = v,
+        ),
         RichCommand::SetFontFamily(family) => {
             for_each_run_in_range(doc, range, |s| s.font_family = Some(family.clone()))
         }

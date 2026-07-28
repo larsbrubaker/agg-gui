@@ -465,7 +465,10 @@ pub fn build_bounded_mask(
     // `multiply` in this codebase is post-multiply (self * m = "self then
     // m"), so `transform.multiply(translation)` translates after the CTM.
     let mut local = *transform;
-    local.multiply(&TransAffine::new_translation(-bbox_x as f64, -bbox_y as f64));
+    local.multiply(&TransAffine::new_translation(
+        -bbox_x as f64,
+        -bbox_y as f64,
+    ));
     // The builder's clip is in mask-local pixel coords — shift it the same.
     let local_clip = clip.map(|(cx, cy, cw, ch)| (cx - bbox_x as f64, cy - bbox_y as f64, cw, ch));
 

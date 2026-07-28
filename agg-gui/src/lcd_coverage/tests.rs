@@ -664,7 +664,11 @@ fn collapsed_backbuffer_luminance_matches_per_channel_composite() {
         ("dark-on-light", Color::rgba(0.1, 0.1, 0.1, 1.0), &[255.0]),
         // Black and a near-black 20/255 — see the tolerance note below for why
         // both are worth running.
-        ("light-on-dark", Color::rgba(0.9, 0.9, 0.9, 1.0), &[0.0, 20.0]),
+        (
+            "light-on-dark",
+            Color::rgba(0.9, 0.9, 0.9, 1.0),
+            &[0.0, 20.0],
+        ),
     ];
 
     for (arm, text, dsts) in arms {

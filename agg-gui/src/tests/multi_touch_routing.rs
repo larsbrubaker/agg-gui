@@ -206,6 +206,10 @@ fn gesture_over_dead_space_delivers_to_neither() {
     // Drift over the left pane: capture was never established, so no delivery.
     move_two_fingers_to(&mut app, 75.0, 100.0);
     paint(&mut app);
-    assert_eq!(left.get(), 0, "no capture means no delivery for this gesture");
+    assert_eq!(
+        left.get(),
+        0,
+        "no capture means no delivery for this gesture"
+    );
     assert_eq!(right.get(), 0);
 }

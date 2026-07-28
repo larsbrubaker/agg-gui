@@ -164,8 +164,14 @@ mod tests {
         tf.select_all_text();
         right_click(&mut tf, 20.0, 14.0);
         assert!(tf.context_menu.is_open());
-        assert_eq!(tf.context_menu.action_enabled(TextMenuAction::Copy), Some(true));
-        assert_eq!(tf.context_menu.action_enabled(TextMenuAction::Cut), Some(false));
+        assert_eq!(
+            tf.context_menu.action_enabled(TextMenuAction::Copy),
+            Some(true)
+        );
+        assert_eq!(
+            tf.context_menu.action_enabled(TextMenuAction::Cut),
+            Some(false)
+        );
         assert_eq!(
             tf.context_menu.action_enabled(TextMenuAction::Paste),
             Some(false)

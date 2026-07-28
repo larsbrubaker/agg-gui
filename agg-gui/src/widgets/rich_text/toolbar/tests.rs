@@ -73,7 +73,10 @@ fn full_roster_with_families() {
     assert_eq!(rows.len(), 2, "two rows");
     assert_eq!(
         child_type_names(rows[0]),
-        ["Button", "Button", "Button", "Button", "ComboBox", "ComboBox", "Button", "Button", "Button"],
+        [
+            "Button", "Button", "Button", "Button", "ComboBox", "ComboBox", "Button", "Button",
+            "Button"
+        ],
         "row 1: B/I/U/S, family combo, size combo, text-colour, highlight, remove-highlight"
     );
     assert_eq!(child_type_names(rows[1]), vec!["Button"; 9], "row 2 roster");
@@ -115,7 +118,10 @@ fn family_omitted_when_no_families() {
         ["Button", "Button", "Button", "Button", "ComboBox", "Button", "Button", "Button"],
         "row 1 without a family combo: B/I/U/S, size combo, two colour swatches, remove-highlight"
     );
-    let combo_count = child_type_names(rows[0]).iter().filter(|t| **t == "ComboBox").count();
+    let combo_count = child_type_names(rows[0])
+        .iter()
+        .filter(|t| **t == "ComboBox")
+        .count();
     assert_eq!(combo_count, 1, "only the size ComboBox, no family ComboBox");
 }
 
@@ -133,7 +139,11 @@ fn default_controls_carry_expected_tooltips() {
 
     // Row 1 (with families): B/I/U/S, family combo, size combo, text-colour,
     // highlight, remove-highlight.
-    let row1: Vec<Option<String>> = rows[0].children().iter().map(|c| tip_text(c.as_ref())).collect();
+    let row1: Vec<Option<String>> = rows[0]
+        .children()
+        .iter()
+        .map(|c| tip_text(c.as_ref()))
+        .collect();
     assert_eq!(row1[0].as_deref(), Some("Bold"));
     assert_eq!(row1[1].as_deref(), Some("Italic"));
     assert_eq!(row1[2].as_deref(), Some("Underline"));
@@ -145,7 +155,11 @@ fn default_controls_carry_expected_tooltips() {
     assert_eq!(row1[8].as_deref(), Some("Remove highlight"));
 
     // Row 2: align L/C/R, ordered/bullet lists, outdent/indent, undo/redo.
-    let row2: Vec<Option<String>> = rows[1].children().iter().map(|c| tip_text(c.as_ref())).collect();
+    let row2: Vec<Option<String>> = rows[1]
+        .children()
+        .iter()
+        .map(|c| tip_text(c.as_ref()))
+        .collect();
     assert_eq!(row2[0].as_deref(), Some("Align left"));
     assert_eq!(row2[1].as_deref(), Some("Align center"));
     assert_eq!(row2[2].as_deref(), Some("Align right"));
@@ -182,7 +196,10 @@ fn with_tooltips_false_wraps_nothing() {
 
 /// Whether any widget in the subtree carries a first-class tooltip.
 fn any_descendant_has_tip(w: &dyn Widget) -> bool {
-    w.tooltip_text().is_some() || w.children().iter().any(|c| any_descendant_has_tip(c.as_ref()))
+    w.tooltip_text().is_some()
+        || w.children()
+            .iter()
+            .any(|c| any_descendant_has_tip(c.as_ref()))
 }
 
 // ── Command dispatch through a real handle ─────────────────────────────────
@@ -202,7 +219,11 @@ fn click_bold_bolds_selection_through_handle() {
     let (mut toolbar, handle) = toolbar_over(RichDoc::from_blocks(vec![Block::plain("hello")]));
     // A real selection so the toggle mutates the document (not just pending).
     handle.select_all();
-    assert_ne!(handle.common_style_of_selection().bold, Some(true), "not bold yet");
+    assert_ne!(
+        handle.common_style_of_selection().bold,
+        Some(true),
+        "not bold yet"
+    );
 
     // Lay out so the button has non-zero bounds for its local hit-test.
     toolbar.layout(Size::new(600.0, 100.0));
@@ -210,8 +231,16 @@ fn click_bold_bolds_selection_through_handle() {
     let button = bold_button(&mut toolbar);
     let b = button.bounds();
     let pos = Point::new(b.width * 0.5, b.height * 0.5);
-    let down = Event::MouseDown { pos, button: MouseButton::Left, modifiers: Modifiers::default() };
-    let up = Event::MouseUp { pos, button: MouseButton::Left, modifiers: Modifiers::default() };
+    let down = Event::MouseDown {
+        pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    };
+    let up = Event::MouseUp {
+        pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    };
     button.on_event(&down);
     button.on_event(&up);
 
@@ -231,7 +260,10 @@ fn click_bold_bolds_selection_through_handle() {
 /// (inactive), and an all-plain one `Some(false)` (inactive).
 #[test]
 fn bold_toggle_reflects_tri_state() {
-    let bold = InlineStyle { bold: true, ..Default::default() };
+    let bold = InlineStyle {
+        bold: true,
+        ..Default::default()
+    };
 
     // Uniform bold selection → active.
     let (toolbar, handle) = toolbar_over(RichDoc::from_blocks(vec![Block::from_run(
@@ -285,11 +317,22 @@ fn open_picker_type_names(row1_index: usize) -> Vec<&'static str> {
         let swatch = &mut row1.children_mut()[row1_index];
         let b = swatch.bounds();
         let pos = Point::new(b.width * 0.5, b.height * 0.5);
-        swatch.on_event(&Event::MouseDown { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
-        swatch.on_event(&Event::MouseUp { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+        swatch.on_event(&Event::MouseDown {
+            pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        swatch.on_event(&Event::MouseUp {
+            pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
     }
     toolbar.layout(Size::new(600.0, 100.0));
-    assert!(handle.is_previewing(), "opening the swatch begins a preview session");
+    assert!(
+        handle.is_previewing(),
+        "opening the swatch begins a preview session"
+    );
 
     let mut names = Vec::new();
     descendant_type_names(toolbar.children()[1].as_ref(), &mut names);
@@ -332,10 +375,15 @@ fn text_color_picker_has_no_no_color_checkbox() {
 /// `("text", glyph)` property — i.e. a `Label` (or a `Button`'s label child)
 /// rendering `glyph`. Used to prove the eraser button exists in the tree.
 fn descendant_renders_glyph(w: &dyn Widget, glyph: &str) -> bool {
-    if w.properties().iter().any(|(k, v)| *k == "text" && v == glyph) {
+    if w.properties()
+        .iter()
+        .any(|(k, v)| *k == "text" && v == glyph)
+    {
         return true;
     }
-    w.children().iter().any(|c| descendant_renders_glyph(c.as_ref(), glyph))
+    w.children()
+        .iter()
+        .any(|c| descendant_renders_glyph(c.as_ref(), glyph))
 }
 
 /// The Remove-highlight button is the sole UI route to `SetHighlight(None)` now
@@ -373,8 +421,16 @@ fn remove_highlight_button_clears_selection_highlight() {
     };
     let b = button.bounds();
     let pos = Point::new(b.width * 0.5, b.height * 0.5);
-    button.on_event(&Event::MouseDown { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
-    button.on_event(&Event::MouseUp { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+    button.on_event(&Event::MouseDown {
+        pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    button.on_event(&Event::MouseUp {
+        pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
 
     assert_eq!(
         handle.common_style_of_selection().highlight,
@@ -403,11 +459,22 @@ fn drop_mid_preview_cancels_session() {
         let swatch = &mut row1.children_mut()[5];
         let b = swatch.bounds();
         let pos = Point::new(b.width * 0.5, b.height * 0.5);
-        swatch.on_event(&Event::MouseDown { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
-        swatch.on_event(&Event::MouseUp { pos, button: MouseButton::Left, modifiers: Modifiers::default() });
+        swatch.on_event(&Event::MouseDown {
+            pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        swatch.on_event(&Event::MouseUp {
+            pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
     }
     toolbar.layout(Size::new(600.0, 100.0));
-    assert!(handle.is_previewing(), "opening the swatch begins a preview session");
+    assert!(
+        handle.is_previewing(),
+        "opening the swatch begins a preview session"
+    );
 
     drop(toolbar);
     assert!(

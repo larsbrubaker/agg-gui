@@ -201,8 +201,11 @@ fn external_text_change_reflows_via_epoch() {
         anchor: 0,
         epoch: 0,
     }));
-    let mut ta =
-        laid_out(TextArea::new(font()).with_edit_state(Rc::clone(&shared)), 80.0, 200.0);
+    let mut ta = laid_out(
+        TextArea::new(font()).with_edit_state(Rc::clone(&shared)),
+        80.0,
+        200.0,
+    );
     let wrapped = ta.visual_line_count();
     assert!(wrapped > 1, "expected multi-line wrap, got {wrapped}");
     {
@@ -233,8 +236,9 @@ fn key_intercept_runs_before_default_and_can_consume() {
     let fired = Rc::new(Cell::new(0u32));
     let fired2 = Rc::clone(&fired);
     let mut ta = laid_out(
-        TextArea::new(font()).with_text("abc").with_key_intercept(
-            move |key, mods| {
+        TextArea::new(font())
+            .with_text("abc")
+            .with_key_intercept(move |key, mods| {
                 // Consume Ctrl/Cmd+Y only; let everything else fall through.
                 if (mods.ctrl || mods.meta) && matches!(key, Key::Char('y') | Key::Char('Y')) {
                     fired2.set(fired2.get() + 1);
@@ -242,8 +246,7 @@ fn key_intercept_runs_before_default_and_can_consume() {
                 } else {
                     false
                 }
-            },
-        ),
+            }),
         200.0,
         80.0,
     );
@@ -302,7 +305,10 @@ fn on_change_fires_for_typing_delete_and_records_latest_text() {
     key(&mut ta, Key::Backspace);
 
     let seen = seen.borrow();
-    assert_eq!(*seen, vec!["h".to_string(), "hi".to_string(), "h".to_string()]);
+    assert_eq!(
+        *seen,
+        vec!["h".to_string(), "hi".to_string(), "h".to_string()]
+    );
 }
 
 #[test]
@@ -346,7 +352,11 @@ fn on_change_fires_for_key_intercept_edit_when_epoch_advances() {
             ..Default::default()
         },
     });
-    assert_eq!(changed.get(), 1, "epoch-advancing intercept must fire on_change");
+    assert_eq!(
+        changed.get(),
+        1,
+        "epoch-advancing intercept must fire on_change"
+    );
     assert_eq!(state.borrow().text, "ABC");
 }
 
@@ -378,7 +388,10 @@ fn on_change_silent_for_intercept_without_text_edit() {
 /// Build a laid-out TextArea whose content is `n` hard-broken lines. The
 /// initial cursor sits at the end (last line), matching `with_text`.
 fn multiline(n: usize, w: f64, h: f64) -> TextArea {
-    let text = (0..n).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+    let text = (0..n)
+        .map(|i| format!("line{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     laid_out(
         TextArea::new(font()).with_font_size(13.0).with_text(text),
         w,
@@ -390,7 +403,10 @@ fn multiline(n: usize, w: f64, h: f64) -> TextArea {
 fn scroll_to_cursor_reveals_last_line_and_first_line() {
     let mut ta = multiline(12, 200.0, 80.0);
     let max = ta.max_scroll_y();
-    assert!(max > 0.0, "12 lines in an 80px box must overflow; max={max}");
+    assert!(
+        max > 0.0,
+        "12 lines in an 80px box must overflow; max={max}"
+    );
 
     // Cursor is at the end → scroll should pin the bottom of the last line to
     // the bottom of the viewport, i.e. offset == max_scroll.
@@ -471,11 +487,20 @@ fn wheel_scrolls_within_bounds_and_clamps() {
 fn caret_visible_segment_clamps_and_hides_off_screen() {
     use super::widget_impl::caret_visible_segment;
     // Inner band [8, 72]. A caret line fully inside is returned unchanged.
-    assert_eq!(caret_visible_segment(20.0, 18.0, 8.0, 72.0), Some((20.0, 38.0)));
+    assert_eq!(
+        caret_visible_segment(20.0, 18.0, 8.0, 72.0),
+        Some((20.0, 38.0))
+    );
     // A caret straddling the bottom edge is clamped up to `inner_lo`.
-    assert_eq!(caret_visible_segment(0.0, 18.0, 8.0, 72.0), Some((8.0, 18.0)));
+    assert_eq!(
+        caret_visible_segment(0.0, 18.0, 8.0, 72.0),
+        Some((8.0, 18.0))
+    );
     // Straddling the top edge is clamped down to `inner_hi`.
-    assert_eq!(caret_visible_segment(64.0, 18.0, 8.0, 72.0), Some((64.0, 72.0)));
+    assert_eq!(
+        caret_visible_segment(64.0, 18.0, 8.0, 72.0),
+        Some((64.0, 72.0))
+    );
     // A line scrolled entirely below the inner rect draws nothing.
     assert_eq!(caret_visible_segment(-40.0, 18.0, 8.0, 72.0), None);
     // Entirely above the inner rect also draws nothing.
@@ -488,7 +513,10 @@ fn key_intercept_edit_scrolls_caret_into_view() {
     // (and bumps the epoch) must scroll it into view, mirroring the built-in
     // edit funnel — otherwise the caret would sit off-screen after the edit.
     let state = Rc::new(RefCell::new(TextEditState {
-        text: (0..30).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"),
+        text: (0..30)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
         cursor: 0,
         anchor: 0,
         epoch: 0,
@@ -561,7 +589,10 @@ fn external_cursor_move_scrolls_into_view_on_layout() {
     // the demo's "start"/"end" buttons do) bypasses the edit funnel, so the
     // widget must notice the external move at layout time and scroll it in.
     let state = Rc::new(RefCell::new(TextEditState {
-        text: (0..30).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"),
+        text: (0..30)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
         cursor: 0,
         anchor: 0,
         epoch: 0,
@@ -573,7 +604,11 @@ fn external_cursor_move_scrolls_into_view_on_layout() {
         200.0,
         80.0,
     );
-    assert_eq!(ta.scroll_offset(), 0.0, "first layout leaves the view at the top");
+    assert_eq!(
+        ta.scroll_offset(),
+        0.0,
+        "first layout leaves the view at the top"
+    );
 
     // External caret jump to the document end — text unchanged (no epoch bump),
     // only the cursor/anchor moved.
@@ -709,78 +744,4 @@ fn page_down_and_page_up_move_by_viewport_and_scroll() {
         last - page,
         "PageUp climbs one viewport of lines"
     );
-}
-
-// ── (g) highlight segmentation ──────────────────────────────────────────────
-//
-// The highlighter paint path must split a line into gap-free, non-overlapping
-// colour segments so every glyph is filled exactly once (no double-paint on
-// AA fringes). These exercise the production `segment_highlight` directly.
-
-use super::widget_impl::segment_highlight;
-use crate::color::Color;
-
-const BASE: Color = Color::rgb(1.0, 1.0, 1.0);
-const RUN: Color = Color::rgb(1.0, 0.0, 0.0);
-
-/// Every byte of the text is covered by exactly one segment, in order, with
-/// no overlaps and no gaps.
-fn assert_covers_once(text: &str, segs: &[(usize, usize, Color)]) {
-    let mut pos = 0usize;
-    for &(s, e, _) in segs {
-        assert_eq!(s, pos, "segment start must abut the previous end: {segs:?}");
-        assert!(e > s, "segment must be non-empty: {segs:?}");
-        pos = e;
-    }
-    assert_eq!(pos, text.len(), "segments must cover the whole line: {segs:?}");
-}
-
-#[test]
-fn segment_highlight_fills_gaps_and_runs_once() {
-    let text = "let x = 1;";
-    // Colour "let" and "1" only; the rest are gaps in the base colour.
-    let spans = [(0usize, 3usize, RUN), (8usize, 9usize, RUN)];
-    let segs = segment_highlight(text, &spans, BASE);
-    assert_covers_once(text, &segs);
-    assert_eq!(
-        segs,
-        vec![
-            (0, 3, RUN),   // "let"
-            (3, 8, BASE),  // " x = "
-            (8, 9, RUN),   // "1"
-            (9, 10, BASE), // ";"
-        ]
-    );
-}
-
-#[test]
-fn segment_highlight_no_spans_is_single_base_run() {
-    let text = "plain";
-    let segs = segment_highlight(text, &[], BASE);
-    assert_eq!(segs, vec![(0, 5, BASE)]);
-}
-
-#[test]
-fn segment_highlight_drops_invalid_and_resolves_overlap() {
-    let text = "abcdef";
-    // Reversed, out-of-range, and non-char-boundary-safe-but-overlapping spans.
-    let spans = [
-        (2usize, 2usize, RUN),  // empty → dropped
-        (4usize, 3usize, RUN),  // reversed → dropped
-        (0usize, 10usize, RUN), // out of range → dropped
-        (0usize, 3usize, RUN),  // valid
-        (2usize, 5usize, BASE), // overlaps the previous → clamped to [3,5)
-    ];
-    let segs = segment_highlight(text, &spans, BASE);
-    assert_covers_once(text, &segs);
-    // First span wins bytes 0..3; the overlapper contributes only 3..5.
-    assert_eq!(
-        segs,
-        vec![(0, 3, RUN), (3, 5, BASE), (5, 6, BASE)]
-    );
-}
-
-#[test]
-fn segment_highlight_empty_text_is_empty() {
-    assert!(segment_highlight("", &[(0, 0, RUN)], BASE).is_empty());
 }

@@ -74,10 +74,11 @@ fn build_app(combo_rect: Rc<Cell<Rect>>, selected: Rc<Cell<usize>>) -> App {
     let dialog = Rebuilder::new(
         || 1_u64,
         move || {
-            let picker = ColorWheelPicker::new(Color::rgb(0.2, 0.45, 0.88), Arc::clone(&build_font))
-                .with_allow_none(true)
-                .with_show_alpha(true)
-                .with_font_size(12.0);
+            let picker =
+                ColorWheelPicker::new(Color::rgb(0.2, 0.45, 0.88), Arc::clone(&build_font))
+                    .with_allow_none(true)
+                    .with_show_alpha(true)
+                    .with_font_size(12.0);
             crate::color_wheel_picker_dialog(picker, "Highlight colour")
         },
     );
@@ -142,8 +143,18 @@ fn test_color_dialog_close_click_does_not_leak_to_combo() {
     assert!(!combo_open(&app), "combo should start closed");
 
     let screen_y = VP_H - close_world.y;
-    app.on_mouse_down(close_world.x, screen_y, MouseButton::Left, Modifiers::default());
-    app.on_mouse_up(close_world.x, screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        close_world.x,
+        screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        close_world.x,
+        screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
 
     assert!(
         !combo_open(&app),
@@ -175,8 +186,18 @@ fn test_color_dialog_body_click_does_not_leak_to_combo() {
     assert!(!combo_open(&app), "combo should start closed");
 
     let screen_y = VP_H - body_world.y;
-    app.on_mouse_down(body_world.x, screen_y, MouseButton::Left, Modifiers::default());
-    app.on_mouse_up(body_world.x, screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        body_world.x,
+        screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        body_world.x,
+        screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
 
     assert!(
         !combo_open(&app),
@@ -315,7 +336,9 @@ fn test_clip_parent_actually_clips_plain_child() {
         child_rect: Rect::new(60.0, 60.0, 220.0, 160.0),
         children: vec![Box::new(fill)],
     };
-    let root = Stack::new().with_hit_children_only(false).add(Box::new(clip));
+    let root = Stack::new()
+        .with_hit_children_only(false)
+        .add(Box::new(clip));
     let mut app = App::new(Box::new(root));
     let fb = paint_app(&mut app, Size::new(420.0, 520.0));
 
@@ -350,7 +373,9 @@ fn test_modal_dialog_paints_outside_ancestor_clip() {
         child_rect: Rect::new(60.0, 60.0, 220.0, 300.0),
         children: vec![dialog],
     };
-    let root = Stack::new().with_hit_children_only(false).add(Box::new(clip));
+    let root = Stack::new()
+        .with_hit_children_only(false)
+        .add(Box::new(clip));
     let mut app = App::new(Box::new(root));
     let fb = paint_app(&mut app, Size::new(420.0, 520.0));
 
@@ -396,8 +421,18 @@ fn test_dialog_close_button_fires_on_close() {
     let wb = app.root().children()[0].bounds();
     let close_world = Point::new(wb.x + wb.width - 10.0, wb.y + wb.height - 14.0);
     let screen_y = VP_H - close_world.y;
-    app.on_mouse_down(close_world.x, screen_y, MouseButton::Left, Modifiers::default());
-    app.on_mouse_up(close_world.x, screen_y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        close_world.x,
+        screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        close_world.x,
+        screen_y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
 
     assert!(
         closed.get(),

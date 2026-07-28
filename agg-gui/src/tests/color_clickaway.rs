@@ -16,7 +16,8 @@ use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect};
 use crate::widget::active_modal_path;
 use crate::widgets::rich_text::{
-    single_font_resolver, Block, RichCommand, RichDoc, RichEditHandle, RichTextEdit, RichTextToolbar,
+    single_font_resolver, Block, RichCommand, RichDoc, RichEditHandle, RichTextEdit,
+    RichTextToolbar,
 };
 use crate::widgets::window::{ClickAwayAction, Window};
 use crate::{ColorWheelPicker, Stack};
@@ -118,7 +119,9 @@ fn build_toolbar_app() -> (App, RichEditHandle) {
         slot: Rect::new(0.0, 460.0, VP_W, 48.0),
         children: vec![Box::new(toolbar)],
     };
-    let root = Stack::new().with_hit_children_only(false).add(Box::new(slot));
+    let root = Stack::new()
+        .with_hit_children_only(false)
+        .add(Box::new(slot));
     (App::new(Box::new(root)), handle)
 }
 
@@ -162,7 +165,10 @@ fn clickaway_commits_changed_color_and_closes() {
     let blue = Color::rgb(0.0, 0.0, 1.0);
     handle.exec(&RichCommand::SetTextColor(blue));
     app.layout(Size::new(VP_W, VP_H));
-    assert!(handle.is_preview_dirty(), "the preview mutated the document");
+    assert!(
+        handle.is_preview_dirty(),
+        "the preview mutated the document"
+    );
 
     // Press OUTSIDE the dialog (to its right). The modal grab routes it to the
     // window, which closes with ClickAway → the toolbar commits the change.
@@ -172,7 +178,10 @@ fn clickaway_commits_changed_color_and_closes() {
     app.layout(Size::new(VP_W, VP_H));
 
     assert!(!modal_open(&app), "click-away must close the dialog");
-    assert!(!handle.is_previewing(), "click-away must end the preview session");
+    assert!(
+        !handle.is_previewing(),
+        "click-away must end the preview session"
+    );
     assert_eq!(
         handle.common_style_of_selection().text_color,
         Some(Some(blue)),
@@ -201,7 +210,10 @@ fn clickaway_without_change_closes_and_keeps_document() {
     app.layout(Size::new(VP_W, VP_H));
 
     assert!(!modal_open(&app), "click-away must close the dialog");
-    assert!(!handle.is_previewing(), "click-away must end the preview session");
+    assert!(
+        !handle.is_previewing(),
+        "click-away must end the preview session"
+    );
     assert_eq!(
         handle.common_style_of_selection().text_color,
         before,
@@ -223,12 +235,28 @@ fn clickaway_right_press_also_dismisses() {
     let w = modal_window_world(&app);
     let outside = Point::new(w.x + w.width + 12.0, w.y + w.height * 0.5);
     let screen_y = VP_H - outside.y;
-    app.on_mouse_down(outside.x, screen_y, MouseButton::Right, Modifiers::default());
-    app.on_mouse_up(outside.x, screen_y, MouseButton::Right, Modifiers::default());
+    app.on_mouse_down(
+        outside.x,
+        screen_y,
+        MouseButton::Right,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        outside.x,
+        screen_y,
+        MouseButton::Right,
+        Modifiers::default(),
+    );
     app.layout(Size::new(VP_W, VP_H));
 
-    assert!(!modal_open(&app), "a right-press outside must close the dialog");
-    assert!(!handle.is_previewing(), "right-press click-away ends the preview");
+    assert!(
+        !modal_open(&app),
+        "a right-press outside must close the dialog"
+    );
+    assert!(
+        !handle.is_previewing(),
+        "right-press click-away ends the preview"
+    );
 }
 
 // ── Click-away must not activate the widget underneath ──────────────────────
@@ -305,7 +333,12 @@ fn clickaway_does_not_activate_widget_underneath() {
     // Park the combo under a point that is OUTSIDE the dialog window, then relayout.
     let w = modal_window_world(&app);
     let over_combo = Point::new(w.x + w.width + 20.0, w.y + w.height * 0.5);
-    combo_rect.set(Rect::new(over_combo.x - 50.0, over_combo.y - 12.0, 100.0, 24.0));
+    combo_rect.set(Rect::new(
+        over_combo.x - 50.0,
+        over_combo.y - 12.0,
+        100.0,
+        24.0,
+    ));
     app.layout(Size::new(VP_W, VP_H));
 
     assert!(!combo_open(&app), "combo starts closed");
@@ -324,7 +357,12 @@ fn clickaway_does_not_activate_widget_underneath() {
 // ── Free dragging across the viewport (unclamped by the slot) ───────────────
 
 fn drag(app: &mut App, from: Point, to: Point) {
-    app.on_mouse_down(from.x, VP_H - from.y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        from.x,
+        VP_H - from.y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     app.on_mouse_move(to.x, VP_H - to.y);
 }
 
@@ -359,7 +397,9 @@ fn modal_drag_escapes_slot_and_clamps_to_viewport() {
         slot: Rect::new(20.0, 20.0, 60.0, 60.0),
         children: vec![Box::new(win)],
     };
-    let root = Stack::new().with_hit_children_only(false).add(Box::new(slot));
+    let root = Stack::new()
+        .with_hit_children_only(false)
+        .add(Box::new(slot));
     let mut app = App::new(Box::new(root));
     paint_once(&mut app);
 

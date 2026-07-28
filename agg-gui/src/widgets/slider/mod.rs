@@ -517,7 +517,6 @@ impl Slider {
         let decimals = self.props.decimals.unwrap_or_else(|| self.auto_decimals());
         format!("{:.*}{}", decimals, self.props.value, self.suffix)
     }
-
 }
 
 impl Widget for Slider {

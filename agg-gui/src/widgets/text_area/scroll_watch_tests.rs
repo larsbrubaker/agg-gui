@@ -39,12 +39,19 @@ fn scroll_watch_offset_mirrors_live_offset() {
 
     // Layout publishes the initial (top-of-document) offset.
     assert_eq!(w.borrow().offset_px, 0.0, "watch starts at the top");
-    assert!(ta.max_scroll_y() > 0.0, "200 lines must overflow an 80px box");
+    assert!(
+        ta.max_scroll_y() > 0.0,
+        "200 lines must overflow an 80px box"
+    );
 
     // A wheel notch moves the offset — the binding must track it, not lag.
     assert!(ta.scroll_by_wheel(-40.0), "wheel must move the offset");
     assert!(ta.scroll_offset() > 0.0);
-    assert_eq!(w.borrow().offset_px, ta.scroll_offset(), "offset after wheel");
+    assert_eq!(
+        w.borrow().offset_px,
+        ta.scroll_offset(),
+        "offset after wheel"
+    );
 
     // Scroll-to-caret (Ctrl+End style jump) must also update the binding.
     ta.set_cursor_to_end();
@@ -75,7 +82,10 @@ fn source_line_rows_maps_wrapped_lines() {
     let rows = w.borrow().source_line_rows.clone();
     assert_eq!(rows.len(), 3, "three source lines");
     assert_eq!(rows[0], 0, "line 1 starts at row 0");
-    assert_eq!(rows[1], 1, "line 2 starts on the row after single-row line 1");
+    assert_eq!(
+        rows[1], 1,
+        "line 2 starts on the row after single-row line 1"
+    );
     let wrapped_rows = rows[2] - rows[1];
     assert!(
         wrapped_rows >= 3,

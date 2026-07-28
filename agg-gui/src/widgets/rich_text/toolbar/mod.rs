@@ -482,35 +482,70 @@ impl RichTextToolbar {
         let mut row = controls::new_row();
         if self.cfg.alignment {
             row = row.add(self.tip(
-                controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_LEFT, TextHAlign::Left),
+                controls::align_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_ALIGN_LEFT,
+                    TextHAlign::Left,
+                ),
                 "Align left",
             ));
             row = row.add(self.tip(
-                controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_CENTER, TextHAlign::Center),
+                controls::align_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_ALIGN_CENTER,
+                    TextHAlign::Center,
+                ),
                 "Align center",
             ));
             row = row.add(self.tip(
-                controls::align_toggle(&self.font, &self.handle, controls::ICON_ALIGN_RIGHT, TextHAlign::Right),
+                controls::align_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_ALIGN_RIGHT,
+                    TextHAlign::Right,
+                ),
                 "Align right",
             ));
         }
         if self.cfg.lists {
             row = row.add(self.tip(
-                controls::list_toggle(&self.font, &self.handle, controls::ICON_LIST_OL, ListKind::Ordered),
+                controls::list_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_LIST_OL,
+                    ListKind::Ordered,
+                ),
                 "Numbered list",
             ));
             row = row.add(self.tip(
-                controls::list_toggle(&self.font, &self.handle, controls::ICON_LIST_UL, ListKind::Bullet),
+                controls::list_toggle(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_LIST_UL,
+                    ListKind::Bullet,
+                ),
                 "Bulleted list",
             ));
         }
         if self.cfg.indent {
             row = row.add(self.tip(
-                controls::command_button(&self.font, &self.handle, controls::ICON_OUTDENT, super::commands::RichCommand::Outdent),
+                controls::command_button(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_OUTDENT,
+                    super::commands::RichCommand::Outdent,
+                ),
                 "Decrease indent",
             ));
             row = row.add(self.tip(
-                controls::command_button(&self.font, &self.handle, controls::ICON_INDENT, super::commands::RichCommand::Indent),
+                controls::command_button(
+                    &self.font,
+                    &self.handle,
+                    controls::ICON_INDENT,
+                    super::commands::RichCommand::Indent,
+                ),
                 "Increase indent",
             ));
         }

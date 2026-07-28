@@ -28,7 +28,9 @@ use crate::color::Color;
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::button::Button;
-use crate::widgets::color_wheel_picker::{color_wheel_picker_dialog_with_on_close, ColorWheelPicker};
+use crate::widgets::color_wheel_picker::{
+    color_wheel_picker_dialog_with_on_close, ColorWheelPicker,
+};
 use crate::widgets::primitives::SizedBox;
 use crate::widgets::rebuilder::Rebuilder;
 use crate::widgets::window::CloseReason;
@@ -42,7 +44,10 @@ const ICON_HIGHLIGHT: &str = "\u{F043}"; // "tint"
 const ICON_REMOVE_HIGHLIGHT: &str = "\u{F12D}"; // "eraser"
 
 /// The text-colour swatch button (Font Awesome "font" glyph).
-pub(super) fn text_color_button(font: &Arc<Font>, picker: &Rc<Cell<PickerKind>>) -> Box<dyn Widget> {
+pub(super) fn text_color_button(
+    font: &Arc<Font>,
+    picker: &Rc<Cell<PickerKind>>,
+) -> Box<dyn Widget> {
     color_button(font, ICON_TEXT_COLOR, picker, PickerKind::TextColor)
 }
 
@@ -56,7 +61,10 @@ pub(super) fn highlight_button(font: &Arc<Font>, picker: &Rc<Cell<PickerKind>>) 
 /// UI route to un-highlight text now that the colour picker dropped its "No
 /// Color (Pass Through)" checkbox. Routes through the same `handle.exec` command
 /// path the picker's apply uses (see [`apply_color`]).
-pub(super) fn remove_highlight_button(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
+pub(super) fn remove_highlight_button(
+    font: &Arc<Font>,
+    handle: &RichEditHandle,
+) -> Box<dyn Widget> {
     let click_handle = handle.clone();
     Box::new(
         Button::new(ICON_REMOVE_HIGHLIGHT, Arc::clone(font))
@@ -254,7 +262,11 @@ mod tests {
         );
 
         let seed = initial_color(&handle, PickerKind::Highlight);
-        assert!(seed.a > 0.0, "highlight seed must be opaque, got alpha {}", seed.a);
+        assert!(
+            seed.a > 0.0,
+            "highlight seed must be opaque, got alpha {}",
+            seed.a
+        );
 
         // Build the picker exactly as production does (allow_none off) and prove
         // it is NOT stuck in pass-through — it yields a concrete colour.

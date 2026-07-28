@@ -83,15 +83,14 @@ impl TextArea {
         // space, matching egui. Falls back to the trimmed text on the (shouldn't
         // happen) chance byte_pos isn't a source char boundary.
         let seg_end = byte_pos.clamp(line.start, line.end);
-        let x = self.line_x_start(line)
-            + {
-                let st = self.edit.borrow();
-                let seg = st.text.get(line.start..seg_end).unwrap_or_else(|| {
-                    let offset = byte_pos.saturating_sub(line.start).min(line.text.len());
-                    &line.text[..offset]
-                });
-                measure_advance(&self.font, seg, self.font_size)
-            };
+        let x = self.line_x_start(line) + {
+            let st = self.edit.borrow();
+            let seg = st.text.get(line.start..seg_end).unwrap_or_else(|| {
+                let offset = byte_pos.saturating_sub(line.start).min(line.text.len());
+                &line.text[..offset]
+            });
+            measure_advance(&self.font, seg, self.font_size)
+        };
         // Y-up: line i top-edge folds in the vertical-alignment shift.
         let line_top = self.line_top_y(line_idx);
         let line_bottom = line_top - self.cached_line_h;

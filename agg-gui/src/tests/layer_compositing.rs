@@ -315,7 +315,9 @@ impl crate::widget::Widget for AlphaScope {
         crate::event::EventResult::Ignored
     }
     fn compositing_layer(&mut self) -> Option<crate::widget::CompositingLayer> {
-        Some(crate::widget::CompositingLayer::new(0.0, 0.0, 0.0, 0.0, self.alpha))
+        Some(crate::widget::CompositingLayer::new(
+            0.0, 0.0, 0.0, 0.0, self.alpha,
+        ))
     }
 }
 

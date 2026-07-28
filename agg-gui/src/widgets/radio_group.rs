@@ -660,7 +660,8 @@ mod tests {
                 .premultiply(&TransAffine::new_rotation(radians));
         }
         fn scale(&mut self, sx: f64, sy: f64) {
-            self.transform.premultiply(&TransAffine::new_scaling(sx, sy));
+            self.transform
+                .premultiply(&TransAffine::new_scaling(sx, sy));
         }
         fn set_transform(&mut self, m: TransAffine) {
             self.transform = m;
@@ -753,7 +754,7 @@ mod tests {
     fn click_selects_the_hit_dot() {
         let mut g = empty_group(8);
         g.layout(Size::new(2000.0, 0.0)); // one row, all dots side by side
-        // Aim at the 3rd dot's centre.
+                                          // Aim at the 3rd dot's centre.
         let (cx, cy, _, _, _) = g.hwrap_items[2];
         let down = Event::MouseDown {
             pos: Point::new(cx, cy),

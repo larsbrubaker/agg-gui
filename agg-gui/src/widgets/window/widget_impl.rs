@@ -156,7 +156,11 @@ impl Widget for Window {
         } else {
             (0.0, 0.0, 0.0, 0.0)
         };
-        let rounded_clip = if self.chrome { Some(CORNER_R) } else { Some(3.0) };
+        let rounded_clip = if self.chrome {
+            Some(CORNER_R)
+        } else {
+            Some(3.0)
+        };
         BackbufferSpec {
             kind: BackbufferKind::GlFbo,
             cached: true,

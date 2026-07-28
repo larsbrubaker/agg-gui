@@ -112,9 +112,8 @@ impl TextArea {
         }
         // Shift an endpoint right by one indent for every inserted line start
         // strictly before it.
-        let shift = |p: usize| -> usize {
-            p + INDENT.len() * starts.iter().filter(|&&s| s < p).count()
-        };
+        let shift =
+            |p: usize| -> usize { p + INDENT.len() * starts.iter().filter(|&&s| s < p).count() };
         st.cursor = shift(st.cursor);
         st.anchor = shift(st.anchor);
         st.note_text_change();
@@ -139,7 +138,10 @@ impl TextArea {
         let removals: Vec<(usize, usize)> = starts
             .iter()
             .map(|&s| {
-                let line_end = st.text[s..].find('\n').map(|i| s + i).unwrap_or(st.text.len());
+                let line_end = st.text[s..]
+                    .find('\n')
+                    .map(|i| s + i)
+                    .unwrap_or(st.text.len());
                 (s, leading_outdent_len(&st.text[s..line_end]))
             })
             .collect();
@@ -372,6 +374,9 @@ fn leading_outdent_len(line: &str) -> usize {
         1
     } else {
         // Every leading space is one byte, so the count is also the byte len.
-        line.chars().take_while(|&c| c == ' ').take(TAB_WIDTH).count()
+        line.chars()
+            .take_while(|&c| c == ' ')
+            .take(TAB_WIDTH)
+            .count()
     }
 }

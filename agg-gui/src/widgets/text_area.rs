@@ -52,8 +52,8 @@ use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::{measure_advance, measure_text_metrics, Font};
 use crate::widget::{BackbufferCache, BackbufferMode, Widget};
-use crate::widgets::scrollbar::ScrollbarAxis;
 use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
+use crate::widgets::scrollbar::ScrollbarAxis;
 use crate::widgets::text_field_core::{
     next_char_boundary, next_word_boundary, paragraph_range_at, prev_char_boundary,
     prev_word_boundary, word_range_at, TextEditState,
@@ -771,7 +771,6 @@ impl TextArea {
         };
         self.padding + shift
     }
-
 }
 
 pub use scroll::TextAreaScrollInfo;
@@ -781,16 +780,19 @@ mod callbacks;
 mod context_menu;
 mod edit_ops;
 mod geometry;
+mod highlight;
 mod scroll;
 mod widget_impl;
 
 #[cfg(test)]
 mod band_tests;
 #[cfg(test)]
-mod selection_tests;
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod redraw_tests;
 #[cfg(test)]
 mod scroll_watch_tests;
+#[cfg(test)]
+mod segment_highlight_tests;
+#[cfg(test)]
+mod selection_tests;
+#[cfg(test)]
+mod tests;

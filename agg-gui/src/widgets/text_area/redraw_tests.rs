@@ -75,7 +75,9 @@ fn blink_boundary_requests_one_draw_then_reschedules() {
         !ta.needs_draw(),
         "after painting the new phase the editor should go idle again"
     );
-    let deadline = ta.next_draw_deadline().expect("still schedules the next flip");
+    let deadline = ta
+        .next_draw_deadline()
+        .expect("still schedules the next flip");
     let remaining = deadline.saturating_duration_since(Instant::now());
     assert!(
         remaining <= Duration::from_millis(500),
@@ -104,7 +106,10 @@ fn one_wheel_notch_scrolls_about_three_lines() {
         .join("\n");
     let mut ta = laid_out(TextArea::new(font()).with_text(&text), 200.0, 100.0);
     let line_h = ta.cached_line_h;
-    assert!(line_h > 0.0, "layout should populate the cached line height");
+    assert!(
+        line_h > 0.0,
+        "layout should populate the cached line height"
+    );
 
     let before = ta.vbar.offset;
     // One notch downward. `delta_y` is in line-units (1.0 == one notch); a

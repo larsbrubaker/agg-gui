@@ -97,7 +97,11 @@ impl TouchMouseEmu {
             self.suppressed = true;
             if self.scrolling {
                 self.scrolling = false;
-                return vec![EmuCmd::MouseUp(self.last_pos.0, self.last_pos.1, MouseButton::Middle)];
+                return vec![EmuCmd::MouseUp(
+                    self.last_pos.0,
+                    self.last_pos.1,
+                    MouseButton::Middle,
+                )];
             }
         }
         Vec::new()
@@ -187,9 +191,15 @@ mod tests {
     #[test]
     fn tap_is_left_click_at_release_point() {
         let mut emu = TouchMouseEmu::new();
-        assert_eq!(emu.on_start(DEV, F1, 100.0, 100.0), vec![EmuCmd::MouseMove(100.0, 100.0)]);
+        assert_eq!(
+            emu.on_start(DEV, F1, 100.0, 100.0),
+            vec![EmuCmd::MouseMove(100.0, 100.0)]
+        );
         // Sub-threshold jitter keeps it a tap and still tracks hover.
-        assert_eq!(emu.on_move(DEV, F1, 103.0, 102.0), vec![EmuCmd::MouseMove(103.0, 102.0)]);
+        assert_eq!(
+            emu.on_move(DEV, F1, 103.0, 102.0),
+            vec![EmuCmd::MouseMove(103.0, 102.0)]
+        );
         assert_eq!(
             emu.on_end(DEV, F1),
             vec![
@@ -213,10 +223,16 @@ mod tests {
             ]
         );
         // Further moves are plain moves.
-        assert_eq!(emu.on_move(DEV, F1, 70.0, 55.0), vec![EmuCmd::MouseMove(70.0, 55.0)]);
+        assert_eq!(
+            emu.on_move(DEV, F1, 70.0, 55.0),
+            vec![EmuCmd::MouseMove(70.0, 55.0)]
+        );
         assert_eq!(
             emu.on_end(DEV, F1),
-            vec![EmuCmd::MouseUp(70.0, 55.0, MouseButton::Middle), EmuCmd::MouseLeave]
+            vec![
+                EmuCmd::MouseUp(70.0, 55.0, MouseButton::Middle),
+                EmuCmd::MouseLeave
+            ]
         );
     }
 
@@ -225,7 +241,7 @@ mod tests {
         let mut emu = TouchMouseEmu::new();
         emu.on_start(DEV, F1, 0.0, 0.0);
         emu.on_move(DEV, F1, 20.0, 0.0); // middle-drag in flight
-        // Second finger lands → the drag must end IMMEDIATELY.
+                                         // Second finger lands → the drag must end IMMEDIATELY.
         assert_eq!(
             emu.on_start(DEV, F2, 100.0, 100.0),
             vec![EmuCmd::MouseUp(20.0, 0.0, MouseButton::Middle)]
@@ -236,7 +252,10 @@ mod tests {
         assert_eq!(emu.on_end(DEV, F1), vec![EmuCmd::MouseLeave]);
         assert_eq!(emu.on_end(DEV, F2), Vec::<EmuCmd>::new());
         // A fresh finger afterwards becomes primary again.
-        assert_eq!(emu.on_start(DEV, F3, 5.0, 5.0), vec![EmuCmd::MouseMove(5.0, 5.0)]);
+        assert_eq!(
+            emu.on_start(DEV, F3, 5.0, 5.0),
+            vec![EmuCmd::MouseMove(5.0, 5.0)]
+        );
     }
 
     #[test]
@@ -250,7 +269,8 @@ mod tests {
         all.extend(emu.on_end(DEV, F2));
         all.extend(emu.on_end(DEV, F1));
         assert!(
-            !all.iter().any(|c| matches!(c, EmuCmd::MouseDown(_, _, MouseButton::Left))),
+            !all.iter()
+                .any(|c| matches!(c, EmuCmd::MouseDown(_, _, MouseButton::Left))),
             "a pinch must never synthesize a left click, got: {all:?}"
         );
     }
@@ -262,7 +282,10 @@ mod tests {
         emu.on_move(DEV, F1, 30.0, 0.0);
         assert_eq!(
             emu.on_cancel(DEV, F1),
-            vec![EmuCmd::MouseUp(30.0, 0.0, MouseButton::Middle), EmuCmd::MouseLeave]
+            vec![
+                EmuCmd::MouseUp(30.0, 0.0, MouseButton::Middle),
+                EmuCmd::MouseLeave
+            ]
         );
     }
 

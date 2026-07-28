@@ -11,9 +11,9 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::widgets::flex::DEFAULT_ROW_GAP;
 use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
+use crate::widgets::flex::DEFAULT_ROW_GAP;
 
 /// Compute `(y, actual_height)` for a child in a `FlexRow` (vertical
 /// cross-axis placement, Y-up).

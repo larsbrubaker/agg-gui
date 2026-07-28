@@ -65,7 +65,11 @@ struct Target {
 
 impl Target {
     fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, w: u32, h: u32) -> Self {
-        assert_eq!((w * 4) % 256, 0, "width must keep bytes_per_row 256-aligned");
+        assert_eq!(
+            (w * 4) % 256,
+            0,
+            "width must keep bytes_per_row 256-aligned"
+        );
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("readback-target"),
             size: wgpu::Extent3d {
@@ -283,7 +287,10 @@ fn lcd_backbuffer_in_alpha_layer_writes_alpha() {
          washed out; got {darkest_px:?}"
     );
     let spread = r.max(g).max(b) - r.min(g).min(b);
-    assert!(spread <= 12, "flattened backbuffer must be gray; got {darkest_px:?}");
+    assert!(
+        spread <= 12,
+        "flattened backbuffer must be gray; got {darkest_px:?}"
+    );
 }
 
 /// Rec.709 luminance of a byte-scale RGB triple.

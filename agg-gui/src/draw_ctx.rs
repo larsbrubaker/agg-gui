@@ -572,12 +572,12 @@ pub trait DrawCtx {
         dst_h: f64,
     ) {
         let _ = content_version; // CPU collapse path is stateless; version unused.
-        // Collapse to straight-alpha RGBA8 on the fly through the SAME shared
-        // per-pixel rule `LcdBuffer::to_rgba8_top_down_collapsed` uses — only
-        // the row order differs (this pair is already top-down).  Keeping the
-        // math in one place is deliberate: this site kept an independent `max`
-        // collapse after the other was fixed, which is how the "LCD text is
-        // bolder" bug stayed alive on the nested-backbuffer path.
+                                 // Collapse to straight-alpha RGBA8 on the fly through the SAME shared
+                                 // per-pixel rule `LcdBuffer::to_rgba8_top_down_collapsed` uses — only
+                                 // the row order differs (this pair is already top-down).  Keeping the
+                                 // math in one place is deliberate: this site kept an independent `max`
+                                 // collapse after the other was fixed, which is how the "LCD text is
+                                 // bolder" bug stayed alive on the nested-backbuffer path.
         let w_u = w as usize;
         let h_u = h as usize;
         if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 {

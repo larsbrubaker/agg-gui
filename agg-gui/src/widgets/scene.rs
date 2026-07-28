@@ -395,10 +395,7 @@ impl Widget for Scene {
             ("zoom", format!("{:.3}", self.transform.zoom)),
             (
                 "scene_rect",
-                format!(
-                    "[{:.1}, {:.1}, {:.1}, {:.1}]",
-                    r.x, r.y, r.width, r.height
-                ),
+                format!("[{:.1}, {:.1}, {:.1}, {:.1}]", r.x, r.y, r.width, r.height),
             ),
             (
                 "zoom_range",

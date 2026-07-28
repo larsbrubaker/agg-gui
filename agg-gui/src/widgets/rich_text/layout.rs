@@ -297,7 +297,11 @@ fn tokenize(block: &Block, default_font_size: f64, resolver: &FontResolver) -> V
         // within the run is the running sum of preceding chunk lengths.
         let mut chunk_off = 0usize;
         for chunk in split_ws(&run.text) {
-            let is_ws = chunk.chars().next().map(|c| c.is_whitespace()).unwrap_or(false);
+            let is_ws = chunk
+                .chars()
+                .next()
+                .map(|c| c.is_whitespace())
+                .unwrap_or(false);
             let width = measure_advance(&font, chunk, size);
             pieces.push(Piece {
                 text: chunk.to_string(),

@@ -218,9 +218,19 @@ fn drag_on_inert_content_pans_scene() {
 
     // Press at screen (100,100), drag to (140,120), release.  `on_mouse_*`
     // take physical Y-DOWN coords; flip against the 200-tall viewport.
-    app.on_mouse_down(100.0, 200.0 - 100.0, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        100.0,
+        200.0 - 100.0,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     app.on_mouse_move(140.0, 200.0 - 120.0);
-    app.on_mouse_up(140.0, 200.0 - 120.0, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(
+        140.0,
+        200.0 - 120.0,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
 
     let after = scene_rect_prop(&app);
     assert_ne!(
@@ -343,7 +353,12 @@ fn app_click(app: &mut App, sx: f64, sy_up: f64) {
     app.on_mouse_up(sx, 200.0 - sy_up, MouseButton::Left, Modifiers::default());
 }
 fn app_drag(app: &mut App, from: (f64, f64), to: (f64, f64)) {
-    app.on_mouse_down(from.0, 200.0 - from.1, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        from.0,
+        200.0 - from.1,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     app.on_mouse_move(to.0, 200.0 - to.1);
     app.on_mouse_up(to.0, 200.0 - to.1, MouseButton::Left, Modifiers::default());
 }

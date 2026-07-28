@@ -102,8 +102,8 @@ impl Scene {
                     .last_bg_click
                     .map(|t| now.duration_since(t).as_millis() < DBL_CLICK_MS)
                     .unwrap_or(false);
-                let consecutive = self.last_bg_click_epoch
-                    == Some(self.pan_press_epoch.wrapping_sub(1));
+                let consecutive =
+                    self.last_bg_click_epoch == Some(self.pan_press_epoch.wrapping_sub(1));
                 if in_time && consecutive {
                     self.last_bg_click = None;
                     self.last_bg_click_epoch = None;

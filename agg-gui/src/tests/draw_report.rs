@@ -123,7 +123,11 @@ fn report_skips_hidden_subtrees() {
     animation::clear_draw_request();
     let _ = animation::drain_draw_trace();
 
-    let root = Node::new("Root").child(Node::new("HiddenBranch").hidden().child(Node::new("HiddenHot").hot()));
+    let root = Node::new("Root").child(
+        Node::new("HiddenBranch")
+            .hidden()
+            .child(Node::new("HiddenHot").hot()),
+    );
 
     let report = crate::debug_draw_report(&root);
     assert!(

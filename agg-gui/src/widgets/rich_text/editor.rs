@@ -34,13 +34,13 @@ use crate::widgets::multi_click::{MultiClickTracker, SelectGranularity};
 use crate::widgets::scrollbar::ScrollbarAxis;
 
 use super::commands::{CommonStyle, RichCommand};
-use super::model::{DocPos, DocRange};
 use super::layout::{layout_doc, DocLayout, FontResolver};
 use super::model::RichDoc;
+use super::model::{DocPos, DocRange};
 use super::view::SharedResolver;
 
-pub mod core;
 mod context_menu;
+pub mod core;
 mod geometry;
 mod input;
 mod paint;
@@ -49,13 +49,15 @@ mod scroll;
 pub use core::{RichEditCore, RichEditHandle};
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod handle_api_tests;
 #[cfg(test)]
 mod preview_dirty_tests;
 #[cfg(test)]
+mod styled_clipboard_tests;
+#[cfg(test)]
 mod tab_indent_tests;
+#[cfg(test)]
+mod tests;
 #[cfg(test)]
 mod trailing_space_tests;
 #[cfg(test)]
@@ -416,9 +418,7 @@ impl Widget for RichTextEdit {
 
     fn layout(&mut self, available: Size) -> Size {
         let w = available.width.max(self.padding * 2.0 + 20.0);
-        let h = available
-            .height
-            .max(self.padding * 2.0 + 20.0);
+        let h = available.height.max(self.padding * 2.0 + 20.0);
         self.bounds = Rect::new(0.0, 0.0, w, h);
         let inner_w = (w - self.padding * 2.0).max(1.0);
         self.ensure_layout(inner_w);

@@ -99,6 +99,7 @@ mod image_blit;
 mod layers;
 pub mod pipelines;
 mod primitives;
+mod screenshot_capture;
 mod shaders;
 mod text_render;
 

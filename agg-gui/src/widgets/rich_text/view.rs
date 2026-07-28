@@ -99,12 +99,7 @@ impl RichTextView {
         }
         let resolver: &FontResolver = &*self.resolver;
         let doc = self.doc.borrow();
-        self.layout = Some(layout_doc(
-            &doc,
-            width,
-            self.default_font_size,
-            resolver,
-        ));
+        self.layout = Some(layout_doc(&doc, width, self.default_font_size, resolver));
         self.layout_width = width;
     }
 }

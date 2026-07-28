@@ -520,7 +520,8 @@ pub trait Widget {
     /// hooks.  Widgets that need an inspector-only transform (rare) override
     /// this directly.
     fn inspector_child_transform(&self) -> crate::TransAffine {
-        self.child_transform().unwrap_or_else(crate::TransAffine::new)
+        self.child_transform()
+            .unwrap_or_else(crate::TransAffine::new)
     }
 
     /// Affine transform (child-local → this widget's local space) that the
@@ -769,13 +770,13 @@ mod tree;
 mod tree_inspector;
 
 pub use app::App;
+pub(crate) use backbuffer::next_content_version;
 pub use backbuffer::{
     BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,
     BackbufferState, CompositingLayer,
 };
-pub(crate) use backbuffer::next_content_version;
-pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
 pub(crate) use paint::paint_subtree_forced;
+pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
 pub use tree::{
     active_modal_path, dispatch_event, dispatch_event_broadcast, dispatch_event_dyn,
     dispatch_unconsumed_key, global_overlay_hit_path, hit_test_subtree, mark_subtree_dirty,
@@ -785,7 +786,6 @@ pub use tree_inspector::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use tree_inspector::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
     debug_draw_report, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type,
-    set_current_mouse_world,
-    set_current_viewport, walk_path_mut, InspectorNode, InspectorOverlay, WidgetBaseEdit,
-    WidgetBaseField,
+    set_current_mouse_world, set_current_viewport, walk_path_mut, InspectorNode, InspectorOverlay,
+    WidgetBaseEdit, WidgetBaseField,
 };

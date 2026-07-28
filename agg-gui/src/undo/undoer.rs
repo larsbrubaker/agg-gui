@@ -182,8 +182,7 @@ where
                                     self.add_undo(current_state);
                                 }
                             } else {
-                                let time_since_flux_start =
-                                    (current_time - flux.start_time) as f32;
+                                let time_since_flux_start = (current_time - flux.start_time) as f32;
                                 if time_since_flux_start >= self.settings.auto_save_interval {
                                     self.add_undo(current_state);
                                 } else {

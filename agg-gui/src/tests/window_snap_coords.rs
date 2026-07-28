@@ -88,7 +88,12 @@ fn modal_window_world(app: &App) -> Rect {
 }
 
 fn drag(app: &mut App, from: Point, to: Point) {
-    app.on_mouse_down(from.x, VP_H - from.y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_down(
+        from.x,
+        VP_H - from.y,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     app.on_mouse_move(to.x, VP_H - to.y);
 }
 
@@ -123,14 +128,18 @@ fn approx_eq(a: f64, b: f64) -> bool {
 fn build(target: Rect, host_origin: Rect, dlg_local: Rect) -> App {
     let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
 
-    let target_content = SizedBox::new().with_width(target.width).with_height(target.height);
+    let target_content = SizedBox::new()
+        .with_width(target.width)
+        .with_height(target.height);
     let target_win = Window::new("Target", Arc::clone(&font), Box::new(target_content))
         .with_bounds(target)
         .with_auto_size(false)
         .with_resizable(false)
         .with_gl_backbuffer(false);
 
-    let dlg_content = SizedBox::new().with_width(dlg_local.width).with_height(dlg_local.height);
+    let dlg_content = SizedBox::new()
+        .with_width(dlg_local.width)
+        .with_height(dlg_local.height);
     let dialog = Window::new("Dlg", Arc::clone(&font), Box::new(dlg_content))
         .with_bounds(dlg_local)
         .with_auto_size(false)
@@ -170,7 +179,10 @@ fn nested_modal_snaps_in_canvas_absolute_space() {
     paint_once(&mut app);
 
     let w0 = modal_window_world(&app);
-    assert!(approx_eq(w0.x, 50.0) && approx_eq(w0.y, 60.0), "dialog starts at canvas (50,60), got {w0:?}");
+    assert!(
+        approx_eq(w0.x, 50.0) && approx_eq(w0.y, 60.0),
+        "dialog starts at canvas (50,60), got {w0:?}"
+    );
 
     // Grab the title bar and drag so the dialog's canvas-absolute LEFT edge lands
     // 3 px shy of the target's left edge (x=200) — within DEFAULT_THRESHOLD (8).
@@ -247,7 +259,9 @@ fn modal_clamp_keeps_dialog_inside_at_both_vertical_edges() {
         bounds: Rect::default(),
         children: vec![Box::new(dialog)],
     };
-    let root = Stack::new().with_hit_children_only(false).add(Box::new(host));
+    let root = Stack::new()
+        .with_hit_children_only(false)
+        .add(Box::new(host));
     let mut app = App::new(Box::new(root));
     paint_once(&mut app);
 

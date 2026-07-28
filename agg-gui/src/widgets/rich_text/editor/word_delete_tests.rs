@@ -59,7 +59,9 @@ fn focused_editor(blocks: &[&str]) -> RichTextEdit {
 }
 
 fn set_caret(ed: &RichTextEdit, block: usize, byte: usize) {
-    ed.core.borrow_mut().set_caret(DocPos::new(block, byte), false);
+    ed.core
+        .borrow_mut()
+        .set_caret(DocPos::new(block, byte), false);
 }
 
 fn text(ed: &RichTextEdit) -> String {
@@ -72,7 +74,11 @@ fn ctrl_backspace_mid_word_deletes_back_to_word_start() {
     let mut ed = focused_editor(&["hello world"]);
     set_caret(&ed, 0, 9);
     ed.on_event(&ctrl_key(Key::Backspace));
-    assert_eq!(text(&ed), "hello ld", "mid-word delete removes to the word start");
+    assert_eq!(
+        text(&ed),
+        "hello ld",
+        "mid-word delete removes to the word start"
+    );
 }
 
 #[test]
@@ -82,7 +88,11 @@ fn ctrl_backspace_at_word_start_deletes_previous_word() {
     let mut ed = focused_editor(&["hello world"]);
     set_caret(&ed, 0, 6);
     ed.on_event(&ctrl_key(Key::Backspace));
-    assert_eq!(text(&ed), "world", "at word start, delete removes the previous word");
+    assert_eq!(
+        text(&ed),
+        "world",
+        "at word start, delete removes the previous word"
+    );
 }
 
 #[test]
@@ -91,7 +101,11 @@ fn ctrl_delete_forward_deletes_next_word() {
     let mut ed = focused_editor(&["hello world"]);
     set_caret(&ed, 0, 0);
     ed.on_event(&ctrl_key(Key::Delete));
-    assert_eq!(text(&ed), "world", "forward word delete removes to the next word");
+    assert_eq!(
+        text(&ed),
+        "world",
+        "forward word delete removes to the next word"
+    );
 }
 
 #[test]
@@ -103,7 +117,11 @@ fn ctrl_backspace_with_selection_deletes_only_the_selection() {
         .borrow_mut()
         .set_selection(DocPos::new(0, 2), DocPos::new(0, 5));
     ed.on_event(&ctrl_key(Key::Backspace));
-    assert_eq!(text(&ed), "he world", "an active selection is deleted verbatim");
+    assert_eq!(
+        text(&ed),
+        "he world",
+        "an active selection is deleted verbatim"
+    );
 }
 
 #[test]
@@ -114,7 +132,11 @@ fn ctrl_backspace_at_block_start_merges_with_previous_block() {
     let mut ed = focused_editor(&["foo", "bar"]);
     set_caret(&ed, 1, 0);
     ed.on_event(&ctrl_key(Key::Backspace));
-    assert_eq!(ed.core.borrow().doc().blocks.len(), 1, "the two blocks merged");
+    assert_eq!(
+        ed.core.borrow().doc().blocks.len(),
+        1,
+        "the two blocks merged"
+    );
     assert_eq!(text(&ed), "foobar", "merged text is the two blocks joined");
 }
 
@@ -130,7 +152,10 @@ fn ctrl_backspace_is_one_undo_step() {
     ed.core.borrow_mut().feed_undo(0.1);
     ed.core.borrow_mut().feed_undo(1.5);
     assert!(ed.core.borrow().can_undo());
-    assert!(ed.core.borrow_mut().undo(), "one undo reverts the word delete");
+    assert!(
+        ed.core.borrow_mut().undo(),
+        "one undo reverts the word delete"
+    );
     assert_eq!(text(&ed), "hello world", "undo restores the deleted word");
     assert!(
         !ed.core.borrow().can_undo(),

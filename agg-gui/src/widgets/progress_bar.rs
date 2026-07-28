@@ -1,4 +1,4 @@
-﻿//! `ProgressBar` — a read-only horizontal progress indicator.
+//! `ProgressBar` — a read-only horizontal progress indicator.
 //!
 //! Supports an optional loading animation (`animate`) that pulses the fill
 //! brightness, mirroring egui's `ProgressBar::animate`. There is deliberately
@@ -415,7 +415,8 @@ mod tests {
                 .premultiply(&TransAffine::new_rotation(radians));
         }
         fn scale(&mut self, sx: f64, sy: f64) {
-            self.transform.premultiply(&TransAffine::new_scaling(sx, sy));
+            self.transform
+                .premultiply(&TransAffine::new_scaling(sx, sy));
         }
         fn set_transform(&mut self, m: TransAffine) {
             self.transform = m;

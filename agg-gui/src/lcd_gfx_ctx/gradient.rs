@@ -87,9 +87,14 @@ fn fill_sampled_gradient<F>(
     // solid `fill_path` (see `build_bounded_mask`).  The colour callback
     // receives buffer-space `(dx, dy)`, so the gradient sampling below is
     // unchanged; only the mask's size and composite origin move.
-    let Some((mask, bbox_x, bbox_y)) =
-        build_bounded_mask(buffer.width(), buffer.height(), path, transform, clip, fill_rule)
-    else {
+    let Some((mask, bbox_x, bbox_y)) = build_bounded_mask(
+        buffer.width(),
+        buffer.height(),
+        path,
+        transform,
+        clip,
+        fill_rule,
+    ) else {
         return;
     };
     let clip_i = clip.map(rect_to_pixel_clip);

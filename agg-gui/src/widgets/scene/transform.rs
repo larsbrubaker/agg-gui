@@ -44,7 +44,10 @@ impl SceneTransform {
 
     /// Map a scene-space point to Scene-local screen space.
     pub fn scene_to_screen(&self, p: Point) -> Point {
-        Point::new(self.zoom * p.x + self.offset.x, self.zoom * p.y + self.offset.y)
+        Point::new(
+            self.zoom * p.x + self.offset.x,
+            self.zoom * p.y + self.offset.y,
+        )
     }
 
     /// This transform as a [`crate::TransAffine`] mapping scene (child) space to

@@ -30,11 +30,9 @@ mod render;
 mod timings;
 
 pub(crate) use render::{begin_tooltip_frame, paint_global_tooltips};
-pub use timings::{set_tooltip_timings, tooltip_timings, TooltipTimings};
 #[doc(hidden)]
-pub use timings::{
-    advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock,
-};
+pub use timings::{advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock};
+pub use timings::{set_tooltip_timings, tooltip_timings, TooltipTimings};
 
 use timings::{last_tooltip_visible_at, note_tooltip_visible, tooltip_now};
 
@@ -275,9 +273,7 @@ impl Tooltip {
             return false;
         }
         match self.hover_started_at {
-            Some(started) => {
-                tooltip_now().saturating_duration_since(started) >= self.pending_delay
-            }
+            Some(started) => tooltip_now().saturating_duration_since(started) >= self.pending_delay,
             None => false,
         }
     }
@@ -333,10 +329,7 @@ impl Tooltip {
             if remaining.is_zero() {
                 crate::animation::request_draw_tagged("tooltip.wrapper.remaining_zero");
             } else {
-                crate::animation::request_draw_after_tagged(
-                    remaining,
-                    "tooltip.wrapper.remaining",
-                );
+                crate::animation::request_draw_after_tagged(remaining, "tooltip.wrapper.remaining");
             }
         }
         false

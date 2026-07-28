@@ -171,7 +171,10 @@ impl Popup {
     /// candidate overflows.
     pub fn rect(&self, viewport: Size) -> Rect {
         let align = self.effective_align(viewport);
-        clamp_rect(align.place_child(self.anchor, self.size, self.gap), viewport)
+        clamp_rect(
+            align.place_child(self.anchor, self.size, self.gap),
+            viewport,
+        )
     }
 
     /// Whether `pos` falls inside the placed popup rect.
@@ -268,7 +271,10 @@ mod tests {
         let inside = inside_point(&p);
         let out = p.on_mouse_down(inside, VIEWPORT);
         assert!(out.inside && !out.closed && out.consumed);
-        assert!(p.is_open(), "click inside keeps a CloseOnClickOutside popup open");
+        assert!(
+            p.is_open(),
+            "click inside keeps a CloseOnClickOutside popup open"
+        );
 
         let out = p.on_mouse_down(Point::new(5.0, 5.0), VIEWPORT);
         assert!(!out.inside && out.closed && out.consumed);
@@ -306,8 +312,14 @@ mod tests {
 
     #[test]
     fn default_close_behavior_matches_egui() {
-        assert_eq!(PopupCloseBehavior::default(), PopupCloseBehavior::CloseOnClick);
-        assert_eq!(Popup::default().close_behavior, PopupCloseBehavior::CloseOnClick);
+        assert_eq!(
+            PopupCloseBehavior::default(),
+            PopupCloseBehavior::CloseOnClick
+        );
+        assert_eq!(
+            Popup::default().close_behavior,
+            PopupCloseBehavior::CloseOnClick
+        );
     }
 
     #[test]
@@ -328,7 +340,11 @@ mod tests {
         p.set_anchor(Rect::new(100.0, 10.0, 40.0, 20.0));
         assert_eq!(p.effective_align(VIEWPORT), RectAlign::TOP_START);
         let r = p.rect(VIEWPORT);
-        assert_eq!(r.y, 10.0 + 20.0 + p.gap, "popup bottom sits gap above the anchor top");
+        assert_eq!(
+            r.y,
+            10.0 + 20.0 + p.gap,
+            "popup bottom sits gap above the anchor top"
+        );
 
         // Plenty of room: the configured align is kept.
         p.set_anchor(Rect::new(100.0, 300.0, 40.0, 20.0));

@@ -23,7 +23,9 @@ use std::rc::Rc;
 use crate::undo::Undoer;
 use crate::widgets::text_field_core::{next_char_boundary, prev_char_boundary};
 
-use super::super::commands::{apply_command, range_common_style, style_at, CommonStyle, RichCommand};
+use super::super::commands::{
+    apply_command, range_common_style, style_at, CommonStyle, RichCommand,
+};
 use super::super::model::{
     extract_range, insert_text, merge_block_with_prev, remove_range, splice_fragment, split_block,
     Block, DocPos, DocRange, InlineStyle, ListKind, RichDoc,
@@ -256,7 +258,11 @@ impl RichEditCore {
             };
             let text = block.text();
             let lo = if bi == a.block { a.byte } else { 0 };
-            let hi = if bi == b.block { b.byte.min(text.len()) } else { text.len() };
+            let hi = if bi == b.block {
+                b.byte.min(text.len())
+            } else {
+                text.len()
+            };
             if bi > a.block {
                 out.push('\n');
             }
@@ -635,9 +641,7 @@ impl RichEditHandle {
     /// `range.end` the moving caret, each clamped onto a valid position — and
     /// request a redraw.
     pub fn set_selection(&self, range: DocRange) {
-        self.core
-            .borrow_mut()
-            .set_selection(range.start, range.end);
+        self.core.borrow_mut().set_selection(range.start, range.end);
         crate::animation::request_draw();
     }
 

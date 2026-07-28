@@ -23,7 +23,9 @@ fn non_password_field_never_masks() {
 
 #[test]
 fn password_field_masks_without_reveal_cell() {
-    let tf = TextField::new(font()).with_password_mode(true).with_text("secret");
+    let tf = TextField::new(font())
+        .with_password_mode(true)
+        .with_text("secret");
     assert!(tf.masking_active());
 }
 

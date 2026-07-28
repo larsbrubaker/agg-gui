@@ -33,11 +33,17 @@ fn preview_dirty_tracks_document_mutation() {
 
     // A fresh session opens clean.
     core.begin_preview();
-    assert!(!core.is_preview_dirty(), "a just-opened preview is not dirty");
+    assert!(
+        !core.is_preview_dirty(),
+        "a just-opened preview is not dirty"
+    );
 
     // The first previewing exec (a colour drag) marks it dirty.
     core.exec(&RichCommand::SetTextColor(blue));
-    assert!(core.is_preview_dirty(), "a previewing colour exec marks dirty");
+    assert!(
+        core.is_preview_dirty(),
+        "a previewing colour exec marks dirty"
+    );
 
     // Committing clears the flag.
     core.commit_preview();
@@ -45,7 +51,10 @@ fn preview_dirty_tracks_document_mutation() {
 
     // A second session that never mutates stays clean, and cancel keeps it so.
     core.begin_preview();
-    assert!(!core.is_preview_dirty(), "reopened session starts clean again");
+    assert!(
+        !core.is_preview_dirty(),
+        "reopened session starts clean again"
+    );
     core.cancel_preview();
     assert!(!core.is_preview_dirty(), "cancel clears the dirty flag");
 }
@@ -93,6 +102,9 @@ fn clean_clickaway_leaves_no_undo_entry() {
     core.feed_undo(3.0);
     core.feed_undo(4.5);
 
-    assert!(!core.can_undo(), "an untouched click-away leaves no undo entry");
+    assert!(
+        !core.can_undo(),
+        "an untouched click-away leaves no undo entry"
+    );
     assert_eq!(core.common_style_of_selection().text_color, Some(Some(red)));
 }

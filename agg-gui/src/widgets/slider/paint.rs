@@ -82,7 +82,13 @@ impl Slider {
         if self.trailing_fill && tx > THUMB_R {
             ctx.set_fill_color(v.accent);
             ctx.begin_path();
-            ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, tx - THUMB_R, TRACK_H, TRACK_H * 0.5);
+            ctx.rounded_rect(
+                THUMB_R,
+                cy - TRACK_H * 0.5,
+                tx - THUMB_R,
+                TRACK_H,
+                TRACK_H * 0.5,
+            );
             ctx.fill();
         }
 

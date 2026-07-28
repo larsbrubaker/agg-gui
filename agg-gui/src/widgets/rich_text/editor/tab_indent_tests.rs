@@ -72,7 +72,11 @@ fn tab_indents_list_item_one_level() {
     let mut ed = laid_out_editor(RichDoc::from_blocks(vec![bullet_block(0)]), 400.0, 120.0);
     ed.on_event(&Event::FocusGained);
     ed.on_event(&tab_event(false));
-    assert_eq!(ed.core.borrow().doc().blocks[0].indent, 1, "Tab indents the list item");
+    assert_eq!(
+        ed.core.borrow().doc().blocks[0].indent,
+        1,
+        "Tab indents the list item"
+    );
     assert_eq!(
         ed.core.borrow().doc().blocks[0].list,
         ListKind::Bullet,
@@ -85,7 +89,11 @@ fn shift_tab_outdents_list_item_one_level() {
     let mut ed = laid_out_editor(RichDoc::from_blocks(vec![bullet_block(2)]), 400.0, 120.0);
     ed.on_event(&Event::FocusGained);
     ed.on_event(&tab_event(true));
-    assert_eq!(ed.core.borrow().doc().blocks[0].indent, 1, "Shift+Tab outdents the list item");
+    assert_eq!(
+        ed.core.borrow().doc().blocks[0].indent,
+        1,
+        "Shift+Tab outdents the list item"
+    );
     assert_eq!(ed.core.borrow().doc().blocks[0].list, ListKind::Bullet);
 }
 
@@ -95,7 +103,11 @@ fn tab_increases_block_indent_outside_a_list() {
     ed.on_event(&Event::FocusGained);
     assert_eq!(ed.core.borrow().doc().blocks[0].indent, 0);
     ed.on_event(&tab_event(false));
-    assert_eq!(ed.core.borrow().doc().blocks[0].indent, 1, "Tab increases block indent");
+    assert_eq!(
+        ed.core.borrow().doc().blocks[0].indent,
+        1,
+        "Tab increases block indent"
+    );
     assert_eq!(
         ed.core.borrow().doc().blocks[0].list,
         ListKind::None,
@@ -113,7 +125,11 @@ fn shift_tab_decreases_block_indent() {
     let mut ed = laid_out_editor(doc, 400.0, 120.0);
     ed.on_event(&Event::FocusGained);
     ed.on_event(&tab_event(true));
-    assert_eq!(ed.core.borrow().doc().blocks[0].indent, 1, "Shift+Tab decreases block indent");
+    assert_eq!(
+        ed.core.borrow().doc().blocks[0].indent,
+        1,
+        "Shift+Tab decreases block indent"
+    );
 }
 
 #[test]
@@ -142,7 +158,8 @@ fn ctrl_tab_is_ignored_and_does_not_indent() {
         "Ctrl+Tab falls through so the App can traverse focus"
     );
     assert_eq!(
-        ed.core.borrow().doc().blocks[0].indent, 0,
+        ed.core.borrow().doc().blocks[0].indent,
+        0,
         "Ctrl+Tab must not change the indent"
     );
 }

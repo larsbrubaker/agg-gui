@@ -134,10 +134,7 @@ impl Align2 {
 
     /// Index of this anchor within [`Align2::ALL`], or 0 if somehow absent.
     pub fn all_index(self) -> usize {
-        Self::ALL
-            .iter()
-            .position(|(a, _)| *a == self)
-            .unwrap_or(0)
+        Self::ALL.iter().position(|(a, _)| *a == self).unwrap_or(0)
     }
 
     /// The absolute point this anchor names inside `rect`.
@@ -543,13 +540,8 @@ mod tests {
 
         // Anchor near the TOP edge: TOP_START overflows upward, flips back down.
         let parent = Rect::new(150.0, 270.0, 40.0, 20.0);
-        let best = RectAlign::find_best_align(
-            candidates(RectAlign::TOP_START),
-            screen,
-            parent,
-            GAP,
-            size,
-        );
+        let best =
+            RectAlign::find_best_align(candidates(RectAlign::TOP_START), screen, parent, GAP, size);
         assert_eq!(best, Some(RectAlign::BOTTOM_START));
 
         // Anchor near the RIGHT edge: RIGHT_START overflows, LEFT_START survives.

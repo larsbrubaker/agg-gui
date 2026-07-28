@@ -68,7 +68,11 @@ impl Widget for ClickChild {
 #[test]
 fn tooltip_forwards_clicks_to_wrapped_child() {
     let clicks = Arc::new(AtomicUsize::new(0));
-    let mut tooltip = Tooltip::new(Box::new(ClickChild::new(clicks.clone())), "tip", test_font());
+    let mut tooltip = Tooltip::new(
+        Box::new(ClickChild::new(clicks.clone())),
+        "tip",
+        test_font(),
+    );
     tooltip.layout(Size::new(20.0, 20.0));
     let event = Event::MouseUp {
         pos: Point::new(10.0, 10.0),

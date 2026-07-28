@@ -50,9 +50,7 @@ use crate::text::measure_advance;
 use super::render::{
     current_tooltip_viewport, panel_size, place_panel, submit_tooltip, TooltipRequest,
 };
-use super::timings::{
-    last_tooltip_visible_at, note_tooltip_visible, tooltip_now, tooltip_timings,
-};
+use super::timings::{last_tooltip_visible_at, note_tooltip_visible, tooltip_now, tooltip_timings};
 use super::{TooltipLine, TooltipLineKind, TOOLTIP_FONT_SIZE};
 
 /// The single app-wide tip state machine. See the module docs.
@@ -426,7 +424,10 @@ mod tests {
         assert!(!is_visible());
         advance_tooltip_test_clock(timings.reshow_delay);
         drive(Some((vec![1], "B".into())), anchor);
-        assert!(!is_visible(), "B not shown until the (short) reshow delay elapses");
+        assert!(
+            !is_visible(),
+            "B not shown until the (short) reshow delay elapses"
+        );
 
         // After only the reshow delay — well short of a full initial delay — B's
         // tip appears, and it is the only tip.
@@ -505,7 +506,10 @@ mod tests {
             r.x + r.width <= viewport.width,
             "right edge inside viewport: {r:?}"
         );
-        assert!(r.y >= 0.0 && r.y + r.height <= viewport.height, "vertically inside: {r:?}");
+        assert!(
+            r.y >= 0.0 && r.y + r.height <= viewport.height,
+            "vertically inside: {r:?}"
+        );
     }
 
     /// Reactive-host regression for the scheduled-draw lost-wakeup fix. After

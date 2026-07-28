@@ -29,7 +29,10 @@ fn resolver() -> SharedResolver {
 /// same core the widget renders.
 #[test]
 fn handle_select_all_then_bold() {
-    let editor = RichTextEdit::new(RichDoc::from_blocks(vec![Block::plain("hello")]), resolver());
+    let editor = RichTextEdit::new(
+        RichDoc::from_blocks(vec![Block::plain("hello")]),
+        resolver(),
+    );
     let handle = editor.handle();
     handle.select_all();
     assert_eq!(
@@ -49,7 +52,11 @@ fn handle_set_selection_clamps() {
     // A wildly out-of-range selection clamps to the single block's extent.
     handle.set_selection(DocRange::new(DocPos::new(9, 9), DocPos::new(0, 99)));
     let sel = handle.selection();
-    assert_eq!(sel.start, DocPos::new(0, 2), "anchor clamped to end of block");
+    assert_eq!(
+        sel.start,
+        DocPos::new(0, 2),
+        "anchor clamped to end of block"
+    );
     assert_eq!(sel.end, DocPos::new(0, 2), "caret clamped to end of block");
     // A collapsed caret set past the end clamps too.
     handle.set_caret(DocPos::new(0, 50));
@@ -86,7 +93,11 @@ fn load_resets_undo_history() {
     core.load(RichDoc::from_blocks(vec![Block::plain("brand new")]));
     assert_eq!(core.doc().plain_text(), "brand new");
     assert!(!core.can_undo(), "load must discard the prior undo history");
-    assert_eq!(core.caret(), DocPos::new(0, 0), "caret reset to document start");
+    assert_eq!(
+        core.caret(),
+        DocPos::new(0, 0),
+        "caret reset to document start"
+    );
 }
 
 /// `load` mid-preview must abandon the session: no dangling snapshot (which
@@ -110,7 +121,10 @@ fn load_during_preview_abandons_session() {
     core.exec(&RichCommand::ToggleBold);
     core.feed_undo(0.1);
     core.feed_undo(2.0);
-    assert!(core.can_undo(), "undo must be functional after load-during-preview");
+    assert!(
+        core.can_undo(),
+        "undo must be functional after load-during-preview"
+    );
 
     // A stale cancel_preview is now a no-op — it must NOT restore the old doc.
     core.cancel_preview();

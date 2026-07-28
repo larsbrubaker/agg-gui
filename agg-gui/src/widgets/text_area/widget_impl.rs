@@ -1,54 +1,9 @@
-﻿use super::*;
-use crate::color::Color;
+use super::*;
 
-/// Split a highlighted line into gap-free, non-overlapping colour segments
-/// covering `[0, text.len())` exactly once.
-///
-/// Bytes covered by a valid span take that span's colour; every uncovered
-/// gap takes `base_color`. This is the segmentation the AA text path needs:
-/// each glyph is emitted by exactly one segment, so highlighted tokens never
-/// accumulate a second alpha pass on their fringes (which made them look
-/// subtly bolder) and no fill work is duplicated.
-///
-/// Spans are validated defensively — reversed, out-of-range, or
-/// non-char-boundary spans are dropped. Spans are processed in start order
-/// and the first span to cover a byte wins any overlap, so the output stays
-/// strictly non-overlapping even if a highlighter hands back sloppy ranges.
-pub(crate) fn segment_highlight(
-    text: &str,
-    spans: &[(usize, usize, Color)],
-    base_color: Color,
-) -> Vec<(usize, usize, Color)> {
-    let len = text.len();
-    let mut valid: Vec<(usize, usize, Color)> = spans
-        .iter()
-        .copied()
-        .filter(|&(s, e, _)| {
-            s < e && e <= len && text.is_char_boundary(s) && text.is_char_boundary(e)
-        })
-        .collect();
-    valid.sort_by_key(|&(s, _, _)| s);
-
-    let mut out: Vec<(usize, usize, Color)> = Vec::new();
-    let mut pos = 0usize;
-    for (s, e, color) in valid {
-        if e <= pos {
-            // Fully behind already-emitted output — first span won this byte.
-            continue;
-        }
-        // Clamp a partially overlapping start up to the emitted frontier.
-        let s = s.max(pos);
-        if s > pos {
-            out.push((pos, s, base_color)); // uncovered gap
-        }
-        out.push((s, e, color));
-        pos = e;
-    }
-    if pos < len {
-        out.push((pos, len, base_color));
-    }
-    out
-}
+/// Highlight segmentation moved to `super::highlight`; re-exported here so the
+/// long-standing `widget_impl::segment_highlight` path (used by the unit tests
+/// and by `paint`'s doc links) keeps resolving.
+pub(crate) use super::highlight::segment_highlight;
 
 /// Clamp the caret's vertical span `[p_y, p_y + line_h]` (Y-up) to the padded
 /// inner band `[inner_lo, inner_hi]`, returning the visible sub-segment. Yields
@@ -68,28 +23,6 @@ pub(crate) fn caret_visible_segment(
     } else {
         None
     }
-}
-
-impl TextArea {
-    /// Paint one wrapped line as gap-free, non-overlapping colour segments so
-    /// every glyph is filled exactly once (see [`segment_highlight`]). Byte
-    /// offsets in `spans` are relative to `text`.
-    fn paint_highlighted_line(
-        &self,
-        ctx: &mut dyn DrawCtx,
-        text: &str,
-        spans: &[(usize, usize, Color)],
-        x0: f64,
-        baseline_y: f64,
-        base_color: Color,
-    ) {
-        for (s, e, color) in segment_highlight(text, spans, base_color) {
-            let x = x0 + measure_advance(&self.font, &text[..s], self.font_size);
-            ctx.set_fill_color(color);
-            ctx.fill_text(&text[s..e], x, baseline_y);
-        }
-    }
-
 }
 
 impl Widget for TextArea {
@@ -286,7 +219,8 @@ impl Widget for TextArea {
             None
         };
         if strip.is_some() {
-            self.strip_raster_count.set(self.strip_raster_count.get() + 1);
+            self.strip_raster_count
+                .set(self.strip_raster_count.get() + 1);
         }
 
         // Vertical extent painted into the buffer: the padded inner rect,
@@ -340,7 +274,8 @@ impl Widget for TextArea {
         // ── Selection highlight ───────────────────────────────────
         t = pt::start();
         let st = self.edit.borrow().clone();
-        tt.state_clone_ms = pt::ms(&t); t = pt::start(); // sel_loop
+        tt.state_clone_ms = pt::ms(&t);
+        t = pt::start(); // sel_loop
         if st.cursor != st.anchor {
             let lo = st.cursor.min(st.anchor);
             let hi = st.cursor.max(st.anchor);
@@ -401,7 +336,14 @@ impl Widget for TextArea {
                 Some(hl) => {
                     let spans = hl(&line.text);
                     let th = pt::start();
-                    self.paint_highlighted_line(ctx, &line.text, &spans, x0, baseline_y, v.text_color);
+                    self.paint_highlighted_line(
+                        ctx,
+                        &line.text,
+                        &spans,
+                        x0,
+                        baseline_y,
+                        v.text_color,
+                    );
                     tt.hl_ms += pt::ms(&th);
                 }
                 None => {
@@ -447,7 +389,9 @@ impl Widget for TextArea {
         self.render_dirty_lines.set(None);
 
         tt.tail_ms = pt::ms(&t);
-        if strip.is_some() && pt::enabled() { tt.emit(); }
+        if strip.is_some() && pt::enabled() {
+            tt.emit();
+        }
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
@@ -485,8 +429,7 @@ impl Widget for TextArea {
         // and skip entirely when the line is fully off-screen.
         let inner_lo = self.padding;
         let inner_hi = (self.bounds.height - self.padding).max(inner_lo);
-        let Some((y0, y1)) =
-            caret_visible_segment(p.y, self.cached_line_h, inner_lo, inner_hi)
+        let Some((y0, y1)) = caret_visible_segment(p.y, self.cached_line_h, inner_lo, inner_hi)
         else {
             return;
         };
@@ -792,8 +735,8 @@ impl Widget for TextArea {
     /// The context menu paints at app level so it can overflow the editor
     /// bounds and clamp to the viewport.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        let font = crate::font_settings::current_system_font()
-            .unwrap_or_else(|| Arc::clone(&self.font));
+        let font =
+            crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font));
         self.context_menu.paint(ctx, font, self.font_size);
     }
 }

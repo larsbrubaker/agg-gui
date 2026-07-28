@@ -230,10 +230,7 @@ fn common_style_block_attrs_mixed_across_blocks() {
     apply_command(&mut doc, block0, &RichCommand::SetAlign(TextHAlign::Center));
     apply_command(&mut doc, block0, &RichCommand::SetList(ListKind::Ordered));
     // Selection spanning both blocks now disagrees on align and list.
-    let span = DocRange::new(
-        DocPos::new(0, 0),
-        DocPos::new(1, doc.blocks[1].text_len()),
-    );
+    let span = DocRange::new(DocPos::new(0, 0), DocPos::new(1, doc.blocks[1].text_len()));
     let cs = range_common_style(&doc, span);
     assert_eq!(cs.align, None, "mixed align must report None");
     assert_eq!(cs.list, None, "mixed list must report None");

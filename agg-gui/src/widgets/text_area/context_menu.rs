@@ -175,6 +175,9 @@ mod tests {
         });
         assert_eq!(r, EventResult::Consumed);
         assert_eq!(crate::clipboard::get_text().as_deref(), Some("hello world"));
-        assert!(!ta.context_menu.is_open(), "activating Copy closes the menu");
+        assert!(
+            !ta.context_menu.is_open(),
+            "activating Copy closes the menu"
+        );
     }
 }

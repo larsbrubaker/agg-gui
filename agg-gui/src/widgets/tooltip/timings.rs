@@ -123,7 +123,9 @@ pub fn set_tooltip_test_clock(now: Option<Instant>) {
 #[doc(hidden)]
 pub fn advance_tooltip_test_clock(by: Duration) {
     TEST_CLOCK.with(|c| {
-        let base = c.get().expect("advance_tooltip_test_clock without a test clock");
+        let base = c
+            .get()
+            .expect("advance_tooltip_test_clock without a test clock");
         c.set(Some(base + by));
     });
 }

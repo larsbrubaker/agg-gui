@@ -206,7 +206,10 @@ fn focused_widget_consuming_tab_keeps_focus() {
     // A second Tab is consumed by the focused widget, so focus stays put.
     app.on_key_down(Key::Tab, Modifiers::default());
     assert!(a_focused.get(), "a Tab-consuming widget retains focus");
-    assert!(!b_focused.get(), "focus must not advance to the second widget");
+    assert!(
+        !b_focused.get(),
+        "focus must not advance to the second widget"
+    );
 }
 
 /// A focused widget that ignores Tab still advances focus, exactly as before.
@@ -246,7 +249,10 @@ fn shift_tab_reverse_traversal_for_ignoring_widget() {
 fn ctrl_tab_advances_focus_past_a_tab_consumer() {
     let (mut app, a_focused, b_focused) = two_spy_app([true, true]);
     app.on_key_down(Key::Tab, Modifiers::default());
-    assert!(a_focused.get(), "first Tab focuses the first (consuming) widget");
+    assert!(
+        a_focused.get(),
+        "first Tab focuses the first (consuming) widget"
+    );
     app.on_key_down(
         Key::Tab,
         Modifiers {
@@ -254,8 +260,14 @@ fn ctrl_tab_advances_focus_past_a_tab_consumer() {
             ..Default::default()
         },
     );
-    assert!(!a_focused.get(), "Ctrl+Tab escapes the Tab-consuming widget");
-    assert!(b_focused.get(), "Ctrl+Tab advances focus to the second widget");
+    assert!(
+        !a_focused.get(),
+        "Ctrl+Tab escapes the Tab-consuming widget"
+    );
+    assert!(
+        b_focused.get(),
+        "Ctrl+Tab advances focus to the second widget"
+    );
 }
 
 /// The clipboard bridge gates on `Widget::accepts_text_input` — the property
@@ -269,7 +281,10 @@ fn accepts_text_input_gates_the_clipboard_bridge() {
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     let editor = RichTextEdit::new(RichDoc::new(), uniform_resolver(Arc::clone(&font)));
-    assert!(editor.accepts_text_input(), "RichTextEdit accepts text input");
+    assert!(
+        editor.accepts_text_input(),
+        "RichTextEdit accepts text input"
+    );
     let button = Button::new("ok", Arc::clone(&font));
     assert!(
         !button.accepts_text_input(),

@@ -1,0 +1,611 @@
+//! Offscreen paint variants: the subtree paint paths that render into an
+//! intermediate target instead of straight onto the caller's `DrawCtx`.
+//!
+//! Split out of [`super`] (`widget/paint.rs`), which keeps the traversal and
+//! dispatch logic; this module holds the three ways a subtree can be rendered
+//! offscreen and then composited back:
+//!
+//! - [`paint_subtree_unified_backbuffer`] — dispatch on
+//!   [`Widget::backbuffer_spec`](crate::widget::Widget::backbuffer_spec),
+//!   routing to the GL or software path (the migration point between the
+//!   unified [`BackbufferSpec`] and the older `backbuffer_cache_mut` API).
+//! - [`paint_subtree_gl_backbuffer`] — retained GL FBO layers, composited by
+//!   the backend and skipped entirely when the cached layer is still valid.
+//! - [`paint_subtree_layer`] — transient compositing layers used for group
+//!   opacity (see [`CompositingLayer`](crate::widget::CompositingLayer)).
+//! - [`paint_subtree_backbuffered`] — CPU raster into a [`Framebuffer`] or an
+//!   [`LcdBuffer`], cached as `Arc` byte planes on the widget and blitted via
+//!   [`DrawCtx::draw_image_rgba_arc`] / `draw_lcd_backbuffer_arc`.
+//!
+//! Cache bookkeeping (dirty flags, size/epoch invalidation, content versions)
+//! lives in `widget/backbuffer.rs`; this module only decides when to re-raster
+//! and how to composite the result. Coordinate conventions are the same
+//! logical Y-up ones documented in [`super`].
+
+use std::sync::Arc;
+
+use crate::framebuffer::Framebuffer;
+use crate::gfx_ctx::GfxCtx;
+use crate::lcd_coverage::LcdBuffer;
+
+use super::*;
+
+pub(super) fn paint_subtree_unified_backbuffer(
+    widget: &mut dyn Widget,
+    ctx: &mut dyn DrawCtx,
+    include_overlay: bool,
+) -> bool {
+    let spec = widget.backbuffer_spec();
+    if spec.kind == BackbufferKind::None {
+        return false;
+    }
+
+    match spec.kind {
+        BackbufferKind::GlFbo if ctx.supports_retained_layers() => {
+            paint_subtree_gl_backbuffer(widget, ctx, include_overlay, spec);
+            true
+        }
+        BackbufferKind::SoftwareRgba | BackbufferKind::SoftwareLcd => {
+            // Existing CPU widgets still use `backbuffer_cache_mut`; the
+            // unified spec provides the migration point without changing their
+            // current behavior.
+            if widget.backbuffer_cache_mut().is_some() {
+                paint_subtree_backbuffered(widget, ctx);
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn paint_subtree_gl_backbuffer(
+    widget: &mut dyn Widget,
+    ctx: &mut dyn DrawCtx,
+    include_overlay: bool,
+    spec: BackbufferSpec,
+) {
+    let b = widget.bounds();
+    let layer_w = (b.width + spec.outsets.left + spec.outsets.right).max(1.0);
+    let layer_h = (b.height + spec.outsets.bottom + spec.outsets.top).max(1.0);
+    let subtree_needs_draw = widget.needs_draw();
+    let theme_epoch = crate::theme::current_visuals_epoch();
+    let typography_epoch = crate::font_settings::current_typography_epoch();
+    let async_state_epoch = crate::animation::async_state_epoch();
+    let (key, needs_draw) = {
+        let Some(state) = widget.backbuffer_state_mut() else {
+            paint_subtree_direct(widget, ctx);
+            return;
+        };
+        let w = layer_w.ceil().max(1.0) as u32;
+        let h = layer_h.ceil().max(1.0) as u32;
+        let changed = state.width != w || state.height != h || state.spec_kind != spec.kind;
+        let style_changed = state.theme_epoch != theme_epoch
+            || state.typography_epoch != typography_epoch
+            || state.async_state_epoch != async_state_epoch;
+        let needs = !spec.cached || state.dirty || changed || style_changed || subtree_needs_draw;
+        if changed {
+            state.width = w;
+            state.height = h;
+            state.spec_kind = spec.kind;
+        }
+        (state.id(), needs)
+    };
+
+    if spec.cached && !needs_draw {
+        ctx.save();
+        ctx.translate(-spec.outsets.left, -spec.outsets.bottom);
+        let composited = ctx.composite_retained_layer(key, layer_w, layer_h, spec.alpha);
+        ctx.restore();
+        if composited {
+            if let Some(state) = widget.backbuffer_state_mut() {
+                state.composite_count = state.composite_count.saturating_add(1);
+            }
+            return;
+        }
+    }
+
+    ctx.save();
+    ctx.translate(-spec.outsets.left, -spec.outsets.bottom);
+    if spec.cached {
+        ctx.push_retained_layer_with_alpha(key, layer_w, layer_h, spec.alpha);
+    } else {
+        ctx.push_layer_with_alpha(layer_w, layer_h, spec.alpha);
+    }
+    ctx.translate(spec.outsets.left, spec.outsets.bottom);
+    paint_subtree_direct_inner(widget, ctx, include_overlay, false);
+    ctx.pop_layer();
+    ctx.restore();
+
+    if let Some(state) = widget.backbuffer_state_mut() {
+        state.dirty = false;
+        state.theme_epoch = theme_epoch;
+        state.typography_epoch = typography_epoch;
+        state.async_state_epoch = async_state_epoch;
+        state.repaint_count = state.repaint_count.saturating_add(1);
+        state.composite_count = state.composite_count.saturating_add(1);
+    }
+}
+
+pub(super) fn paint_subtree_layer(
+    widget: &mut dyn Widget,
+    ctx: &mut dyn DrawCtx,
+    include_overlay: bool,
+    layer: crate::widget::CompositingLayer,
+) {
+    let b = widget.bounds();
+    let layer_w = (b.width + layer.outset_left + layer.outset_right).max(1.0);
+    let layer_h = (b.height + layer.outset_bottom + layer.outset_top).max(1.0);
+
+    ctx.save();
+    ctx.translate(-layer.outset_left, -layer.outset_bottom);
+    ctx.push_layer_with_alpha(layer_w, layer_h, layer.alpha);
+    ctx.translate(layer.outset_left, layer.outset_bottom);
+    paint_subtree_direct_inner(widget, ctx, include_overlay, false);
+    ctx.pop_layer();
+    ctx.restore();
+}
+
+/// Backbuffered paint: re-raster through AGG if dirty, blit the cached
+/// bitmap via `draw_image_rgba_arc` regardless.
+///
+/// # HiDPI
+///
+/// The backing bitmap is allocated at **physical pixel** dimensions
+/// (`bounds × device_scale`) and the sub-ctx running the widget's paint has
+/// a matching `scale(dps, dps)` applied.  This means glyph outlines are
+/// rasterised at the physical grid — "true" HiDPI rendering, not pixel
+/// doubling — and the outer blit then draws the physical-sized image at the
+/// widget's logical rect, which the outer CTM (also scaled by dps) maps 1:1
+/// back to physical pixels.  Net: logical layout, physical rasterisation,
+/// zero upscale blur.
+pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
+    // Snap the outer CTM to the pixel grid BEFORE blitting the cached
+    // bitmap.  `draw_image_rgba_arc` uses a NEAREST filter for Arc-keyed
+    // textures (1:1 blit lane), so a fractional CTM translation shifts
+    // every screen pixel by a sub-texel amount — reading back interpolated
+    // near-black/near-white instead of the crisp AGG output.  Snapping
+    // here restores the "AGG rasterised it, show it at the pixel grid"
+    // contract the old pre-refactor code preserved.
+    ctx.save();
+    ctx.snap_to_pixel();
+
+    // TEMPORARY env-gated per-section timing (AGG_PAINT_TIMING). See
+    // `paint_timing.rs`. Cheap when disabled: every `pt::start()`/`pt::ms()`
+    // reduces to a cached bool load and the accumulators stay untouched.
+    use crate::widget::paint_timing as pt;
+    let timing = pt::enabled();
+    let mut tm = pt::PaintTiming::default();
+
+    let b = widget.bounds();
+    // Rasterise at the CURRENT CTM scale, not the bare device-pixel ratio.
+    // The on-screen footprint of this widget is `bounds × ctm_scale`, where
+    // `ctm_scale = device_scale × ux_scale` at the top level (and may be just
+    // `device_scale` inside an offscreen layer that reset its transform).
+    // Sizing the offscreen bitmap to `device_scale` only — as this code used
+    // to — left the cached bitmap at `1/ux_scale` of its destination quad, so
+    // on mobile (ux_scale ≈ 1.7) every CPU-backbuffered widget (the menu bar,
+    // Labels) rendered shrunken inside its layout slot while sibling
+    // GL-FBO widgets (Windows), which allocate their layer via
+    // `layer_scale_from_transform`, scaled correctly.  Matching the CTM scale
+    // here puts both paths on the same footing and gives a true 1:1 blit.
+    let (sx, sy) = ctx.transform().scaling_abs();
+    let dps_x = sx.max(1e-6);
+    let dps_y = sy.max(1e-6);
+
+    // Over-scan band (scrolling widgets only — see `Widget::backbuffer_band`).
+    // The band raster covers the viewport plus `overscan_*` extra logical px
+    // above/below, so ordinary scrolling within the band is a pure blit offset.
+    // Quantize the extents and the blit offset to whole PHYSICAL pixels so the
+    // LCD subpixel structure is never resampled by a fractional shift.
+    let band = widget.backbuffer_band();
+    let (over_top_phys, over_bottom_phys, blit_dy_phys) = match band {
+        Some(bd) => (
+            (bd.overscan_top.max(0.0) * dps_y).round() as u32,
+            (bd.overscan_bottom.max(0.0) * dps_y).round() as u32,
+            (bd.blit_dy * dps_y).round(),
+        ),
+        None => (0, 0, 0.0),
+    };
+
+    // Physical pixel dimensions of the offscreen render target. The band grows
+    // only vertically (text scrolls vertically); width is unaffected.
+    let w_phys = (b.width * dps_x).ceil().max(1.0) as u32;
+    let base_h_phys = (b.height * dps_y).ceil().max(1.0) as u32;
+    let h_phys = base_h_phys + over_top_phys + over_bottom_phys;
+    // Logical translate that places the widget's own origin above the
+    // bottom over-scan margin inside the taller buffer (physical-aligned).
+    let over_bottom_logical = over_bottom_phys as f64 / dps_y;
+    // Logical dimensions used as the blit destination rect.  **Must** be
+    // derived from `w_phys / dps` rather than `b.width` so the quad the
+    // bitmap is drawn into matches the bitmap's actual pixel extent.  If
+    // `b.width` is non-integer (e.g. 19.5 for a sidebar Label), using
+    // it as `dst_w` stretches a 20-pixel bitmap into a 19.5-pixel quad —
+    // sub-pixel shrink that drops partial-coverage rows at the edges,
+    // which reads as a faint fade along the top / bottom of the glyph.
+    // Pre-HiDPI the blit used the bitmap's integer pixel size directly;
+    // this restores that contract for the logical-units pipeline.
+    let w_logical = w_phys as f64 / dps_x;
+    let h_logical = h_phys as f64 / dps_y;
+
+    // Decide whether to re-raster.  Size change invalidates; so does a
+    // mode swap — if the cache holds `Rgba` bytes but the widget now
+    // wants `LcdCoverage` (or vice versa) we must re-raster through the
+    // correct pipeline.  Mode membership is recorded implicitly by
+    // `cache.lcd_alpha`: `Some` means LCD cache, `None` means Rgba.
+    let mode = widget.backbuffer_mode();
+    let mode_is_lcd = matches!(mode, BackbufferMode::LcdCoverage);
+    let theme_epoch = crate::theme::current_visuals_epoch();
+    let typography_epoch = crate::font_settings::current_typography_epoch();
+    let async_state_epoch = crate::animation::async_state_epoch();
+    let (needs_raster, has_bitmap) = {
+        let cache = widget
+            .backbuffer_cache_mut()
+            .expect("backbuffered widget must return Some from backbuffer_cache_mut");
+        let cache_is_lcd = cache.lcd_alpha.is_some();
+        let needs = cache.dirty
+            || cache.pixels.is_none()
+            || cache.width != w_phys
+            || cache.height != h_phys
+            || cache_is_lcd != mode_is_lcd
+            || cache.theme_epoch != theme_epoch
+            || cache.typography_epoch != typography_epoch
+            || cache.async_state_epoch != async_state_epoch;
+        (needs, cache.pixels.is_some())
+    };
+
+    if needs_raster {
+        // Allocate a fresh render target whose format matches the
+        // widget's chosen backbuffer mode, paint the subtree into it,
+        // then convert to top-down RGBA for the cache (the blit lane
+        // expects `(R, G, B, A)` rows top-first).
+        //
+        // `LcdCoverage` mode now uses an `LcdGfxCtx` over an `LcdBuffer`
+        // — every primitive (fill, stroke, text, image) flows through
+        // the per-channel LCD pipeline, so child widgets that paint
+        // into this widget's backbuffer compose correctly with
+        // LCD-treated text instead of breaking the per-channel
+        // coverage at the first non-text fill (the alpha bug the
+        // search-box screenshot showed before this change).
+        // Each branch produces `(pixels, lcd_alpha)` top-down:
+        //   - `Rgba`: `pixels` = straight-alpha RGBA8; `lcd_alpha` = None.
+        //   - `LcdCoverage`: `pixels` = premultiplied colour plane (3 B/px);
+        //     `lcd_alpha` = per-channel alpha plane (3 B/px).  The blit
+        //     step below picks a compositor based on which is present.
+        //
+        // Over-scan band partial re-raster: if the retained LCD buffer is still
+        // valid (same size / mode / styling epochs and a live cached bitmap),
+        // reuse it so a band widget can repaint ONLY its dirty line strip and
+        // keep every other row of the (up to 2×-viewport) buffer intact —
+        // turning a keystroke from a full re-raster into a small strip fill +
+        // one buffer-sized flip. `partial_allowed` grants the widget that
+        // permission; a full repaint (first raster, resize, re-anchor, theme
+        // flip) leaves it false and rebuilds the whole band. Confined to the
+        // band + LCD path, so no other widget pays for the retained buffer.
+        let partial_reuse = band.is_some() && mode_is_lcd && {
+            let cache = widget.backbuffer_cache_mut().unwrap();
+            cache.pixels.is_some()
+                && cache.theme_epoch == theme_epoch
+                && cache.typography_epoch == typography_epoch
+                && cache.async_state_epoch == async_state_epoch
+                && cache
+                    .lcd_buffer
+                    .as_ref()
+                    .map_or(false, |b| b.width() == w_phys && b.height() == h_phys)
+        };
+        {
+            widget.backbuffer_cache_mut().unwrap().partial_allowed = partial_reuse;
+        }
+        let mut reused_buf = if partial_reuse {
+            widget.backbuffer_cache_mut().unwrap().lcd_buffer.take()
+        } else {
+            None
+        };
+
+        // Is this a *granted, confined* strip update of the retained top-down
+        // planes rather than a full rebuild? Three things must line up:
+        //   1. the framework granted the partial (`partial_reuse`);
+        //   2. the widget planned a confined strip (`band.dirty_strip_y` Some —
+        //      it repaints ONLY those rows, matching the fill+clip in its paint);
+        //   3. the retained published planes are actually reusable (both Some and
+        //      full-size), since we mutate them in place through `Arc::make_mut`.
+        // Any miss → the full path below (fresh flipped planes + new Arcs). The
+        // widget's `partial_allowed`-gated strip repaint stays in lockstep with
+        // this decision because both read the same `render_dirty_lines`.
+        let plane_len = (w_phys as usize) * (h_phys as usize) * 3;
+        let strip_rows: Option<(f64, f64)> = if partial_reuse {
+            let cache = widget.backbuffer_cache_mut().unwrap();
+            let planes_ok = cache
+                .pixels
+                .as_ref()
+                .map_or(false, |p| p.len() == plane_len)
+                && cache
+                    .lcd_alpha
+                    .as_ref()
+                    .map_or(false, |a| a.len() == plane_len);
+            if planes_ok {
+                band.and_then(|b| b.dirty_strip_y)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Strip fast path (LCD band only): paint the edited line strip into the
+        // reused buffer, then copy ONLY those rows of the flipped planes into the
+        // retained Arcs in place. `Arc::make_mut` keeps the byte-buffer address
+        // stable (a Vec move preserves its heap pointer even when outstanding
+        // Weaks force a new Arc), so GPU backends key change detection on
+        // `content_version` — bumped here — rather than pointer identity. No
+        // whole-buffer flip, no fresh plane allocation: the win this step buys.
+        let strip_done = if let (BackbufferMode::LcdCoverage, Some((lo, hi))) = (mode, strip_rows) {
+            let mut buf = reused_buf
+                .take()
+                .expect("strip path requires the retained band buffer");
+            {
+                let t_setup = pt::start();
+                let mut sub = crate::lcd_gfx_ctx::LcdGfxCtx::new(&mut buf);
+                if (dps_x - 1.0).abs() > 1e-6 || (dps_y - 1.0).abs() > 1e-6 {
+                    sub.scale(dps_x, dps_y);
+                }
+                if over_bottom_logical != 0.0 {
+                    sub.translate(0.0, over_bottom_logical);
+                }
+                tm.lcd_ctx_setup_ms += pt::ms(&t_setup);
+                let t_paint = pt::start();
+                paint_subtree_direct_no_overlay(widget, &mut sub);
+                tm.widget_paint_ms += pt::ms(&t_paint);
+            }
+            // Map the widget-local Y-up logical strip (lo, hi) to top-down
+            // physical rows. The sub ctx maps logical y → Y-up physical
+            // `y * dps_y + over_bottom_phys`; the top-down row of a Y-up
+            // physical row `y_phys` is `h_phys - 1 - y_phys`. ±2 rows of slack
+            // absorb AA bleed at the strip rect's top/bottom edges.
+            let y_lo_phys = lo * dps_y + over_bottom_phys as f64;
+            let y_hi_phys = hi * dps_y + over_bottom_phys as f64;
+            let row_start =
+                ((h_phys as f64 - y_hi_phys).floor() as i64 - 2).clamp(0, h_phys as i64) as u32;
+            let row_end =
+                ((h_phys as f64 - y_lo_phys).ceil() as i64 + 2).clamp(0, h_phys as i64) as u32;
+            let cache = widget.backbuffer_cache_mut().unwrap();
+            {
+                // Disjoint field borrows: `pixels` and `lcd_alpha` are distinct
+                // Arcs, both guaranteed Some + full-size by the `strip_rows`
+                // preconditions above.
+                let t_mkmut = pt::start();
+                let dst_color = Arc::make_mut(cache.pixels.as_mut().unwrap());
+                let dst_alpha = Arc::make_mut(cache.lcd_alpha.as_mut().unwrap());
+                tm.make_mut_ms += pt::ms(&t_mkmut);
+                let t_copy = pt::start();
+                buf.copy_rows_flipped_into(row_start, row_end, dst_color, dst_alpha);
+                tm.rowcopy_ms += pt::ms(&t_copy);
+            }
+            tm.plane_update_ms = tm.make_mut_ms + tm.rowcopy_ms;
+            tm.is_strip = true;
+            tm.strip_rows = Some((row_start, row_end));
+            cache.width = w_phys;
+            cache.height = h_phys;
+            cache.dirty = false;
+            cache.theme_epoch = theme_epoch;
+            cache.typography_epoch = typography_epoch;
+            cache.async_state_epoch = async_state_epoch;
+            cache.content_version = next_content_version();
+            cache.lcd_buffer = Some(buf);
+            true
+        } else {
+            false
+        };
+
+        // Buffer to hand back to the cache after this raster (band path only, so
+        // non-band widgets keep dropping their scratch buffer as before).
+        let mut retained_buf: Option<LcdBuffer> = None;
+        if !strip_done {
+            let (pixels_bytes, lcd_alpha_bytes): (Vec<u8>, Option<Vec<u8>>) = match mode {
+                BackbufferMode::Rgba => {
+                    let mut fb = Framebuffer::new(w_phys, h_phys);
+                    {
+                        let mut sub = GfxCtx::new(&mut fb);
+                        sub.set_lcd_mode(false); // RGBA mode never uses LCD text
+                        if (dps_x - 1.0).abs() > 1e-6 || (dps_y - 1.0).abs() > 1e-6 {
+                            // Widgets paint in logical coords — scale the sub ctx
+                            // so their drawing lands on the physical pixel grid.
+                            sub.scale(dps_x, dps_y);
+                        }
+                        // Band: reserve the bottom over-scan margin so the widget's
+                        // own origin sits above it inside the taller buffer.
+                        if over_bottom_logical != 0.0 {
+                            sub.translate(0.0, over_bottom_logical);
+                        }
+                        paint_subtree_direct_no_overlay(widget, &mut sub);
+                    }
+                    // Two conversions to make the bitmap directly blittable:
+                    //   1. Row order — Framebuffer is Y-up, blit lane is top-down.
+                    //   2. Alpha format — AGG writes premultiplied; the blend
+                    //      function expects straight alpha so that half-coverage
+                    //      AA edges composite without the dark-fringe artifact.
+                    let mut pixels = fb.pixels_flipped();
+                    crate::framebuffer::unpremultiply_rgba_inplace(&mut pixels);
+                    (pixels, None)
+                }
+                BackbufferMode::LcdCoverage => {
+                    // The LCD pipeline is strictly WRITE-only.  The buffer
+                    // starts at zero coverage everywhere; the widget paints
+                    // opaque content covering its full bounds (the contract
+                    // for this mode) into it via an `LcdGfxCtx`; then the
+                    // two planes (premultiplied colour + per-channel alpha)
+                    // are cached and composited onto the destination at
+                    // blit time via `draw_lcd_backbuffer_arc` — which
+                    // preserves LCD per-channel chroma through the cache.
+                    //
+                    // We deliberately do NOT read from any destination —
+                    // seeding the buffer from the parent's pixels would
+                    // tie the cache's validity to the widget's current
+                    // screen position (stale on scroll / reparent), stall
+                    // the GPU pipeline on GL (glReadPixels is sync), and
+                    // break on backends that can't read their own target.
+                    // Widgets that can't paint their own opaque bg should
+                    // use `Rgba` mode or paint through the parent's ctx
+                    // directly instead.
+                    // Reuse the retained band buffer when the widget is doing a
+                    // strip-only repaint; otherwise start from a fresh (zeroed)
+                    // buffer for a full rebuild.
+                    let t_setup = pt::start();
+                    let mut buf = reused_buf.unwrap_or_else(|| LcdBuffer::new(w_phys, h_phys));
+                    {
+                        let mut sub = crate::lcd_gfx_ctx::LcdGfxCtx::new(&mut buf);
+                        if (dps_x - 1.0).abs() > 1e-6 || (dps_y - 1.0).abs() > 1e-6 {
+                            // Match the RGBA branch: widgets paint in logical
+                            // coords; the sub ctx's scale transforms them into
+                            // the physical-pixel LCD buffer.
+                            sub.scale(dps_x, dps_y);
+                        }
+                        // Band: reserve the bottom over-scan margin (see RGBA branch).
+                        if over_bottom_logical != 0.0 {
+                            sub.translate(0.0, over_bottom_logical);
+                        }
+                        tm.lcd_ctx_setup_ms += pt::ms(&t_setup);
+                        let t_paint = pt::start();
+                        paint_subtree_direct_no_overlay(widget, &mut sub);
+                        tm.widget_paint_ms += pt::ms(&t_paint);
+                    }
+                    let t_plane = pt::start();
+                    let planes = (buf.color_plane_flipped(), Some(buf.alpha_plane_flipped()));
+                    tm.plane_update_ms += pt::ms(&t_plane);
+                    // Keep the buffer alive for the next partial re-raster (band
+                    // path only). Non-band LCD widgets let it drop.
+                    if band.is_some() {
+                        retained_buf = Some(buf);
+                    }
+                    planes
+                }
+            };
+            let t_arc = pt::start();
+            let pixels = Arc::new(pixels_bytes);
+            let lcd_alpha = lcd_alpha_bytes.map(Arc::new);
+            tm.plane_update_ms += pt::ms(&t_arc);
+
+            let cache = widget.backbuffer_cache_mut().unwrap();
+            cache.pixels = Some(Arc::clone(&pixels));
+            cache.lcd_alpha = lcd_alpha.as_ref().map(Arc::clone);
+            cache.width = w_phys;
+            cache.height = h_phys;
+            cache.dirty = false;
+            cache.theme_epoch = theme_epoch;
+            cache.typography_epoch = typography_epoch;
+            cache.async_state_epoch = async_state_epoch;
+            // Full rebuild replaced the whole plane content (fresh Arcs), so
+            // stamp a new revision uniformly with the strip path — backends
+            // re-upload on any published-content change either way.
+            cache.content_version = next_content_version();
+            // Retain (band) or drop (everyone else) the scratch LCD buffer.
+            cache.lcd_buffer = retained_buf;
+        }
+    }
+
+    tm.did_raster = needs_raster;
+    tm.h_phys = h_phys;
+
+    // Blit the cached bitmap onto the outer ctx.  Two paths:
+    //
+    //   - `Rgba` cache (no `lcd_alpha`): a single RGBA8 texture via the
+    //     standard image-blit lane.  Alpha-aware SrcOver at the blend
+    //     stage handles transparency.
+    //
+    //   - `LcdCoverage` cache (`lcd_alpha` is `Some`): two 3-byte/pixel
+    //     planes — premultiplied colour + per-channel alpha.  The
+    //     backend's `draw_lcd_backbuffer_arc` composites them with
+    //     per-channel src-over, preserving LCD chroma through the
+    //     cache round-trip (grayscale AA on backends that fall back
+    //     to the default trait impl).
+    let cache = widget.backbuffer_cache_mut().unwrap();
+    // Image is physical-sized; dst is logical.  The bitmap was rasterised at
+    // the current CTM scale (`dps_x`/`dps_y`), and the outer CTM applies that
+    // same scale to the logical dst rect, so logical dst × ctm_scale ==
+    // physical dst == bitmap size, giving a 1:1 texel-to-pixel blit (no
+    // up/downscale blur).
+    let img_w = cache.width;
+    let img_h = cache.height;
+    // Content revision for backends keying a GPU texture on buffer identity: an
+    // in-place strip edit keeps the plane pointer stable, so the version is what
+    // signals "re-upload" (see `draw_lcd_backbuffer_arc`).
+    let content_version = cache.content_version;
+    if band.is_some() {
+        // Band blit: shift the taller buffer by the (physical-quantized) scroll
+        // residual minus the bottom over-scan margin, then clip to the widget's
+        // bounds so the over-scan margins never paint over sibling widgets. The
+        // shift goes through `ctx.translate` (not the `dst_y` arg) so it scales
+        // with the CTM and lands on physical pixels on every backend. `dst_h`
+        // stays the full buffer height, keeping the blit a 1:1 (unscaled) copy.
+        let shift_logical = (blit_dy_phys - over_bottom_phys as f64) / dps_y;
+        ctx.save();
+        ctx.clip_rect(0.0, 0.0, b.width, b.height);
+        ctx.translate(0.0, shift_logical);
+        let t_blit = pt::start();
+        match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
+            (Some(color), Some(alpha)) => {
+                ctx.draw_lcd_backbuffer_arc(
+                    color,
+                    alpha,
+                    content_version,
+                    img_w,
+                    img_h,
+                    0.0,
+                    0.0,
+                    w_logical,
+                    h_logical,
+                );
+            }
+            (Some(bmp), None) => {
+                ctx.draw_image_rgba_arc(bmp, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+            }
+            _ => {}
+        }
+        tm.blit_ms += pt::ms(&t_blit);
+        ctx.restore();
+    } else {
+        let t_blit = pt::start();
+        match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
+            (Some(color), Some(alpha)) => {
+                ctx.draw_lcd_backbuffer_arc(
+                    color,
+                    alpha,
+                    content_version,
+                    img_w,
+                    img_h,
+                    0.0,
+                    0.0,
+                    w_logical,
+                    h_logical,
+                );
+            }
+            (Some(bmp), None) => {
+                ctx.draw_image_rgba_arc(bmp, img_w, img_h, 0.0, 0.0, w_logical, h_logical);
+            }
+            _ => {}
+        }
+        tm.blit_ms += pt::ms(&t_blit);
+    }
+    let _ = has_bitmap;
+
+    // Overlay paint runs AFTER the cache blit and paints directly onto
+    // the outer ctx.  Widgets use this for content that changes too
+    // often to be worth caching — the canonical case is `TextField`'s
+    // blinking cursor, which flips twice per second and would otherwise
+    // invalidate the cache 2×/s.  With overlay, cursor is drawn fresh
+    // each frame onto the already-blitted bg+text; the cache only
+    // invalidates when the text/focus/selection actually changes.
+    //
+    // `paint_subtree_direct` has the same overlay call after children
+    // (see its own body); this keeps the two paint paths consistent.
+    let t_overlay = pt::start();
+    widget.paint_overlay(ctx);
+    tm.overlay_ms += pt::ms(&t_overlay);
+
+    if timing {
+        tm.emit();
+    }
+
+    ctx.restore(); // pops the snap_to_pixel save above.
+}

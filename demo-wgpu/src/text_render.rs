@@ -353,10 +353,11 @@ impl WgpuGfxCtx {
         // Decide BEFORE sweeping dead entries: a live backbuffer whose Arc was
         // relocated by `make_mut` leaves a dead `Weak` but a perfectly valid
         // texture — sweeping first would destroy it and force a needless upload.
-        let meta = self
-            .lcd_arc_texture_cache
-            .get(&key)
-            .map(|e| LcdEntryMeta { version: e.version, w: e.w, h: e.h });
+        let meta = self.lcd_arc_texture_cache.get(&key).map(|e| LcdEntryMeta {
+            version: e.version,
+            w: e.w,
+            h: e.h,
+        });
         let action = lcd_cache_decide(meta, version, w, h, arc_identity_matches);
 
         let result = match action {

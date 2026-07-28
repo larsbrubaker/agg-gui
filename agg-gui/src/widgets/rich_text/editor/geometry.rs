@@ -63,10 +63,7 @@ impl RichTextEdit {
         let mut best_delta = f64::INFINITY;
         for frag in &line.fragments {
             let txt = &frag.text;
-            for (i, _) in txt
-                .char_indices()
-                .chain(std::iter::once((txt.len(), ' ')))
-            {
+            for (i, _) in txt.char_indices().chain(std::iter::once((txt.len(), ' '))) {
                 let x = frag.x + measure_advance(&frag.font, &txt[..i], frag.font_size);
                 let d = (x - rel_x).abs();
                 if d < best_delta {
@@ -128,7 +125,11 @@ impl RichTextEdit {
         let text_left = self.padding + bl.text_left + line.align_dx;
         let x = text_left + self.x_in_line(line, pos.byte);
         let y_bottom = self.doc_top_yup() - (y_top + height);
-        Some(CaretGeom { x, y_bottom, height })
+        Some(CaretGeom {
+            x,
+            y_bottom,
+            height,
+        })
     }
 
     /// Hit-test a widget-local Y-up point to a caret [`DocPos`].
@@ -209,7 +210,14 @@ impl RichTextEdit {
             // Already at the extreme — move to line edge for a natural feel.
             let (bi, li, _, _) = vlines[cur as usize];
             let line = &layout.blocks[bi].lines[li];
-            return DocPos::new(bi, if delta < 0 { line.start_byte } else { line.end_byte });
+            return DocPos::new(
+                bi,
+                if delta < 0 {
+                    line.start_byte
+                } else {
+                    line.end_byte
+                },
+            );
         }
         // Current caret's pixel column (x offset from its line's text start).
         let (cbi, cli, _, _) = vlines[cur as usize];

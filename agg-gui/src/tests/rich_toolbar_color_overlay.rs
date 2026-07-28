@@ -14,7 +14,9 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Modifiers, MouseButton};
 use crate::geometry::{Point, Rect};
 use crate::widgets::rich_text::toolbar::RichTextToolbar;
-use crate::widgets::rich_text::{single_font_resolver, Block, RichDoc, RichEditHandle, RichTextEdit};
+use crate::widgets::rich_text::{
+    single_font_resolver, Block, RichDoc, RichEditHandle, RichTextEdit,
+};
 use crate::Stack;
 use std::sync::Arc;
 
@@ -86,7 +88,9 @@ fn build_app() -> (App, RichEditHandle) {
         child_rect: Rect::new(0.0, 380.0, VP_W, 60.0),
         children: vec![Box::new(toolbar)],
     };
-    let root = Stack::new().with_hit_children_only(false).add(Box::new(clip));
+    let root = Stack::new()
+        .with_hit_children_only(false)
+        .add(Box::new(clip));
     (App::new(Box::new(root)), handle)
 }
 

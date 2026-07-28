@@ -199,8 +199,16 @@ impl LcdBuffer {
         let w = self.width as usize;
         let h = self.height as usize;
         let row_bytes = w * 3;
-        debug_assert_eq!(dst_color.len(), row_bytes * h, "dst_color must be full-size");
-        debug_assert_eq!(dst_alpha.len(), row_bytes * h, "dst_alpha must be full-size");
+        debug_assert_eq!(
+            dst_color.len(),
+            row_bytes * h,
+            "dst_color must be full-size"
+        );
+        debug_assert_eq!(
+            dst_alpha.len(),
+            row_bytes * h,
+            "dst_alpha must be full-size"
+        );
         let start = row_start.min(self.height) as usize;
         let end = row_end.min(self.height) as usize;
         for r in start..end {
@@ -633,8 +641,7 @@ impl LcdBuffer {
 /// Returns a fully transparent pixel when nothing survives the collapse.
 #[inline]
 pub fn collapse_lcd_pixel(color: [u8; 3], alpha: [u8; 3]) -> [u8; 4] {
-    let weighted =
-        0.2126 * alpha[0] as f32 + 0.7152 * alpha[1] as f32 + 0.0722 * alpha[2] as f32;
+    let weighted = 0.2126 * alpha[0] as f32 + 0.7152 * alpha[1] as f32 + 0.0722 * alpha[2] as f32;
     let lift = color[0].max(color[1]).max(color[2]) as f32;
     let a = (weighted.max(lift) + 0.5).clamp(0.0, 255.0) as u8;
     if a == 0 {
@@ -665,17 +672,17 @@ fn flip_plane(src: &[u8], width: u32, height: u32) -> Vec<u8> {
     out
 }
 
-mod filter;
-mod mask;
 #[cfg(test)]
 mod fill_path_bbox_tests;
+mod filter;
 #[cfg(test)]
 mod ink_diag_tests;
+mod mask;
 #[cfg(test)]
 mod tests;
 
 pub use mask::{
-    build_bounded_mask, composite_lcd_mask, identity_xform, rasterize_gray_mask, rasterize_lcd_mask,
-    rasterize_lcd_mask_multi, rasterize_text_gray_cached, rasterize_text_lcd_cached,
-    rect_to_pixel_clip, CachedLcdText, LcdMask, LcdMaskBuilder,
+    build_bounded_mask, composite_lcd_mask, identity_xform, rasterize_gray_mask,
+    rasterize_lcd_mask, rasterize_lcd_mask_multi, rasterize_text_gray_cached,
+    rasterize_text_lcd_cached, rect_to_pixel_clip, CachedLcdText, LcdMask, LcdMaskBuilder,
 };

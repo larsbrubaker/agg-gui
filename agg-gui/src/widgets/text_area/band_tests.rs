@@ -109,7 +109,10 @@ fn scrolling_within_the_band_does_not_reraster() {
         layout_and_paint(&mut ta, &mut fb, 200.0, 150.0);
         (ta.debug_raster_count() - after_first, ta.scroll_offset())
     });
-    assert_eq!(delta, 0, "scrolling within the band must re-blit, not re-raster");
+    assert_eq!(
+        delta, 0,
+        "scrolling within the band must re-blit, not re-raster"
+    );
     assert!(offset > 0.0, "the offset actually advanced");
 }
 
@@ -189,7 +192,10 @@ fn leaving_the_band_reanchors_and_rerasters_once() {
         count_after_jump, 2,
         "leaving the band must re-anchor and re-raster exactly once"
     );
-    assert!(anchor_err < 1.0, "the band re-anchored around the new offset");
+    assert!(
+        anchor_err < 1.0,
+        "the band re-anchored around the new offset"
+    );
     assert_eq!(count_after_idle, 2, "an unchanged frame re-blits only");
 }
 
@@ -233,7 +239,9 @@ fn insert_char_on_top_line(ta: &mut TextArea) {
 #[test]
 fn single_line_edit_rerasters_only_the_strip() {
     let (rasters, strips) = stable_window(|| {
-        let mut ta = TextArea::new(font()).with_font_size(13.0).with_text(tall_doc());
+        let mut ta = TextArea::new(font())
+            .with_font_size(13.0)
+            .with_text(tall_doc());
         let mut fb = Framebuffer::new(400, 300);
         // Keep the view pinned at the top so the edited line 0 is on-screen.
         layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
@@ -255,7 +263,9 @@ fn single_line_edit_rerasters_only_the_strip() {
 #[test]
 fn reanchor_is_a_full_raster_not_a_strip() {
     let strips = stable_window(|| {
-        let mut ta = TextArea::new(font()).with_font_size(13.0).with_text(tall_doc());
+        let mut ta = TextArea::new(font())
+            .with_font_size(13.0)
+            .with_text(tall_doc());
         let mut fb = Framebuffer::new(400, 300);
         layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
         // Jump out of the band: the re-anchor must NOT be treated as a strip.
@@ -263,7 +273,10 @@ fn reanchor_is_a_full_raster_not_a_strip() {
         layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
         ta.debug_strip_raster_count()
     });
-    assert_eq!(strips, 0, "a re-anchor re-rasters the whole band, not a strip");
+    assert_eq!(
+        strips, 0,
+        "a re-anchor re-rasters the whole band, not a strip"
+    );
 }
 
 #[test]
@@ -279,7 +292,9 @@ fn strip_reraster_matches_a_full_reraster_pixel_for_pixel() {
         // blit + overlay pass — matching editor B and isolating the band buffer
         // content (the thing the strip re-raster must reconstruct) from
         // AA accumulation of repeated overlay compositing.
-        let mut a = TextArea::new(font()).with_font_size(13.0).with_text(tall_doc());
+        let mut a = TextArea::new(font())
+            .with_font_size(13.0)
+            .with_text(tall_doc());
         let mut fb_prime = Framebuffer::new(w as u32, h as u32);
         layout_and_paint(&mut a, &mut fb_prime, w, h);
         insert_char_on_top_line(&mut a);
@@ -415,11 +430,17 @@ fn strip_edit_updates_published_planes_in_place() {
     // and must still bump `content_version` so GPU backends detect the change
     // despite the pointer being unchanged.
     let (same_color, same_alpha, version_grew, strips) = stable_window(|| {
-        let mut ta = TextArea::new(font()).with_font_size(13.0).with_text(tall_doc());
+        let mut ta = TextArea::new(font())
+            .with_font_size(13.0)
+            .with_text(tall_doc());
         let mut fb = Framebuffer::new(400, 300);
         // Prime at the top so line 0 (the edited line) is on-screen.
         layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
-        let color_ptr0 = ta.cache.pixels.as_ref().map(|a| a.as_ref().as_ptr() as usize);
+        let color_ptr0 = ta
+            .cache
+            .pixels
+            .as_ref()
+            .map(|a| a.as_ref().as_ptr() as usize);
         let alpha_ptr0 = ta
             .cache
             .lcd_alpha
@@ -430,7 +451,11 @@ fn strip_edit_updates_published_planes_in_place() {
         insert_char_on_top_line(&mut ta);
         layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
 
-        let color_ptr1 = ta.cache.pixels.as_ref().map(|a| a.as_ref().as_ptr() as usize);
+        let color_ptr1 = ta
+            .cache
+            .pixels
+            .as_ref()
+            .map(|a| a.as_ref().as_ptr() as usize);
         let alpha_ptr1 = ta
             .cache
             .lcd_alpha
@@ -464,7 +489,9 @@ fn full_reraster_bumps_content_version() {
     // A re-anchor (jump the scroll out of the band) is a full raster, and it too
     // must change `content_version` so backends re-upload the rebuilt planes.
     let (grew, strips) = stable_window(|| {
-        let mut ta = TextArea::new(font()).with_font_size(13.0).with_text(tall_doc());
+        let mut ta = TextArea::new(font())
+            .with_font_size(13.0)
+            .with_text(tall_doc());
         let mut fb = Framebuffer::new(400, 300);
         layout_and_paint(&mut ta, &mut fb, 400.0, 300.0);
         let v0 = ta.cache.content_version;

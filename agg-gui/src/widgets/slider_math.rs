@@ -163,10 +163,20 @@ pub fn value_from_normalized(normalized: f64, min: f64, max: f64, spec: &SliderS
             let zero_cutoff = logarithmic_zero_cutoff(min, max);
             if normalized < zero_cutoff {
                 // negative
-                value_from_normalized(remap(normalized, 0.0, zero_cutoff, 0.0, 1.0), min, 0.0, spec)
+                value_from_normalized(
+                    remap(normalized, 0.0, zero_cutoff, 0.0, 1.0),
+                    min,
+                    0.0,
+                    spec,
+                )
             } else {
                 // positive
-                value_from_normalized(remap(normalized, zero_cutoff, 1.0, 0.0, 1.0), 0.0, max, spec)
+                value_from_normalized(
+                    remap(normalized, zero_cutoff, 1.0, 0.0, 1.0),
+                    0.0,
+                    max,
+                    spec,
+                )
             }
         }
     } else {
@@ -418,7 +428,10 @@ mod tests {
     fn logarithmic_spanning_infinity() {
         let spec = log_spec();
         // 0..=∞ maps normalized 1.0 to ∞ and 0.0 to 0.0.
-        assert_eq!(value_from_normalized(1.0, 0.0, f64::INFINITY, &spec), f64::INFINITY);
+        assert_eq!(
+            value_from_normalized(1.0, 0.0, f64::INFINITY, &spec),
+            f64::INFINITY
+        );
         assert_eq!(value_from_normalized(0.0, 0.0, f64::INFINITY, &spec), 0.0);
         // A midpoint stays finite and positive.
         let mid = value_from_normalized(0.5, 0.0, f64::INFINITY, &spec);

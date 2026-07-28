@@ -4,8 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::color::Color;
-use crate::event::{Event, Key, Modifiers, MouseButton};
+use crate::event::{Event, Modifiers, MouseButton};
 use crate::geometry::{Point, Size};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -211,7 +210,10 @@ fn preview_commit_collapses_drag_into_one_undo_step() {
     // there is nothing left to undo — the drag collapsed into one step.
     assert!(core.undo());
     assert_eq!(core.common_style_of_selection().text_color, Some(Some(red)));
-    assert!(!core.can_undo(), "the drag must collapse into a single undo step");
+    assert!(
+        !core.can_undo(),
+        "the drag must collapse into a single undo step"
+    );
 }
 
 #[test]
@@ -325,176 +327,9 @@ fn enter_on_non_empty_list_item_splits_normally() {
 // Programmatic handle-API tests live in `handle_api_tests.rs` (declared from
 // `editor.rs`) to keep this file under the 800-line cap.
 
-// ── Styled clipboard (rich Copy / Cut / Paste) ─────────────────────────────
-
-fn ctrl(c: char) -> Event {
-    Event::KeyDown {
-        key: Key::Char(c),
-        modifiers: Modifiers {
-            ctrl: true,
-            ..Default::default()
-        },
-    }
-}
-
-fn red_24_bold() -> InlineStyle {
-    InlineStyle {
-        bold: true,
-        font_size: Some(24.0),
-        text_color: Some(Color::from_rgb8(255, 0, 0)),
-        ..Default::default()
-    }
-}
-
-/// Copy a styled, bulleted line and paste it into a fresh editor: the bold /
-/// 24pt / red run and the list decoration must all survive the round trip
-/// through the in-process rich clipboard slot.
-#[test]
-fn styled_run_and_list_block_survive_copy_paste() {
-    crate::widgets::rich_text::rich_clipboard::clear();
-    let doc = RichDoc::from_blocks(vec![Block {
-        runs: vec![TextRun::new("Hi", red_24_bold())],
-        list: ListKind::Bullet,
-        ..Block::new()
-    }]);
-    let mut src = laid_out_editor(doc, 400.0, 200.0);
-    src.on_event(&Event::FocusGained);
-    src.core.borrow_mut().select_all();
-    src.on_event(&ctrl('c'));
-
-    // Cross-instance paste into a blank editor.
-    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
-    dst.on_event(&Event::FocusGained);
-    dst.on_event(&ctrl('v'));
-
-    let doc = dst.core.borrow().doc().clone();
-    assert_eq!(doc.blocks.len(), 1);
-    assert_eq!(doc.blocks[0].list, ListKind::Bullet, "list decoration survives");
-    let run = &doc.blocks[0].runs[0];
-    assert_eq!(run.text, "Hi");
-    assert!(run.style.bold, "bold survives");
-    assert_eq!(run.style.font_size, Some(24.0), "point size survives");
-    assert_eq!(
-        run.style.text_color,
-        Some(Color::from_rgb8(255, 0, 0)),
-        "colour survives"
-    );
-}
-
-/// A native clipboard (arboard on Windows) may hand back `\r\n` for text we
-/// copied with `\n`. The fingerprint match normalizes line endings, so a styled
-/// multi-line copy still pastes styled after that round trip.
-#[test]
-fn crlf_mangled_clipboard_still_matches_fingerprint() {
-    crate::widgets::rich_text::rich_clipboard::clear();
-    let doc = RichDoc::from_blocks(vec![
-        Block::from_run(TextRun::new("one", red_24_bold())),
-        Block::from_run(TextRun::new("two", red_24_bold())),
-    ]);
-    let mut src = laid_out_editor(doc, 400.0, 200.0);
-    src.on_event(&Event::FocusGained);
-    src.core.borrow_mut().select_all();
-    src.on_event(&ctrl('c'));
-
-    // Simulate the OS clipboard normalizing "one\ntwo" to CRLF line endings.
-    crate::clipboard::set_text("one\r\ntwo");
-
-    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
-    dst.on_event(&Event::FocusGained);
-    dst.on_event(&ctrl('v'));
-
-    let doc = dst.core.borrow().doc().clone();
-    assert_eq!(doc.blocks.len(), 2);
-    assert!(doc.blocks[0].runs[0].style.bold, "styled fragment reused");
-    assert!(doc.blocks[1].runs[0].style.bold);
-}
-
-/// When the system clipboard text no longer matches our stored fingerprint
-/// (something was copied elsewhere in between), paste falls back to inserting
-/// the external plain text in the caret's inherited style.
-#[test]
-fn fingerprint_mismatch_falls_back_to_plain_text() {
-    crate::widgets::rich_text::rich_clipboard::clear();
-    let doc = RichDoc::from_blocks(vec![Block::from_run(TextRun::new("Hi", red_24_bold()))]);
-    let mut src = laid_out_editor(doc, 400.0, 200.0);
-    src.on_event(&Event::FocusGained);
-    src.core.borrow_mut().select_all();
-    src.on_event(&ctrl('c'));
-
-    // Simulate an external app overwriting the system clipboard: the rich slot
-    // still holds the styled fragment, but its fingerprint no longer matches.
-    crate::clipboard::set_text("external");
-
-    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
-    dst.on_event(&Event::FocusGained);
-    dst.on_event(&ctrl('v'));
-
-    let doc = dst.core.borrow().doc().clone();
-    assert_eq!(doc.blocks[0].text(), "external");
-    // Inserted as plain text — no bold carried over from the stale fragment.
-    assert!(!doc.blocks[0].runs[0].style.bold);
-}
-
-/// External plain text (never copied from a RichTextEdit) pastes as plain text.
-#[test]
-fn external_plain_text_pastes_unstyled() {
-    crate::widgets::rich_text::rich_clipboard::clear();
-    crate::clipboard::set_text("hello world");
-    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
-    dst.on_event(&Event::FocusGained);
-    dst.on_event(&ctrl('v'));
-    let doc = dst.core.borrow().doc().clone();
-    assert_eq!(doc.blocks[0].text(), "hello world");
-    assert!(!doc.blocks[0].runs[0].style.bold);
-}
-
-/// Cut removes the styled selection and still makes it available for a styled
-/// paste elsewhere.
-#[test]
-fn cut_removes_styled_content_and_keeps_it_for_paste() {
-    crate::widgets::rich_text::rich_clipboard::clear();
-    let doc = RichDoc::from_blocks(vec![Block {
-        runs: vec![TextRun::new("keep ", InlineStyle::default()), TextRun::new("cutme", red_24_bold())],
-        ..Block::new()
-    }]);
-    let mut src = laid_out_editor(doc, 400.0, 200.0);
-    src.on_event(&Event::FocusGained);
-    // Select just "cutme".
-    src.core.borrow_mut().set_selection(DocPos::new(0, 5), DocPos::new(0, 10));
-    src.on_event(&ctrl('x'));
-    assert_eq!(src.core.borrow().doc().blocks[0].text(), "keep ");
-
-    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
-    dst.on_event(&Event::FocusGained);
-    dst.on_event(&ctrl('v'));
-    let doc = dst.core.borrow().doc().clone();
-    assert_eq!(doc.blocks[0].text(), "cutme");
-    assert!(doc.blocks[0].runs[0].style.bold);
-}
-
-/// A styled paste is a single undo step, matching plain paste.
-#[test]
-fn styled_paste_is_one_undo_step() {
-    crate::widgets::rich_text::rich_clipboard::clear();
-    let doc = RichDoc::from_blocks(vec![Block::from_run(TextRun::new("AB", red_24_bold()))]);
-    let mut src = laid_out_editor(doc, 400.0, 200.0);
-    src.on_event(&Event::FocusGained);
-    src.core.borrow_mut().select_all();
-    src.on_event(&ctrl('c'));
-
-    let mut dst = laid_out_editor(RichDoc::new(), 400.0, 200.0);
-    dst.on_event(&Event::FocusGained);
-    // Baseline undo snapshot for the empty doc, then paste and let it settle.
-    dst.core.borrow_mut().feed_undo(0.0);
-    dst.on_event(&ctrl('v'));
-    dst.core.borrow_mut().feed_undo(0.1);
-    dst.core.borrow_mut().feed_undo(1.5);
-    assert_eq!(dst.core.borrow().doc().blocks[0].text(), "AB");
-
-    assert!(dst.core.borrow_mut().undo(), "one undo reverts the paste");
-    assert_eq!(dst.core.borrow().doc().blocks[0].text(), "");
-    assert!(!dst.core.borrow().can_undo(), "paste was a single undo step");
-}
+// Styled clipboard (rich Copy / Cut / Paste) tests live in
+// `styled_clipboard_tests.rs` (declared from `editor.rs`) to keep this file
+// under the 800-line cap.
 
 // ── Widget geometry (caret hit-testing) ───────────────────────────────────
 
@@ -516,9 +351,7 @@ fn caret_hit_test_round_trips_at_mixed_sizes() {
 
     for byte in [0usize, 3, 6, 7, 9] {
         let pos = DocPos::new(0, byte);
-        let geom = ed
-            .caret_geometry(pos)
-            .expect("caret geometry after layout");
+        let geom = ed.caret_geometry(pos).expect("caret geometry after layout");
         // Sample just inside the caret column, on the caret's line.
         let probe = Point::new(geom.x + 0.5, geom.y_bottom + geom.height * 0.5);
         let hit = ed.hit_test_pos(probe);
@@ -727,7 +560,10 @@ fn one_wheel_notch_scrolls_about_three_lines() {
     let blocks: Vec<String> = (0..40).map(|i| format!("line {i}")).collect();
     let refs: Vec<&str> = blocks.iter().map(String::as_str).collect();
     let mut ed = laid_out_editor(plain_doc(&refs), 400.0, 100.0);
-    assert!(ed.max_scroll_y() > 0.0, "content should overflow the viewport");
+    assert!(
+        ed.max_scroll_y() > 0.0,
+        "content should overflow the viewport"
+    );
 
     let line_h = ed
         .visual_lines()

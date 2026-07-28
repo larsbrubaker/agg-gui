@@ -42,7 +42,11 @@ fn infinite_range_drag_stays_finite() {
     let _ = s.layout(Size::new(300.0, WIDGET_H));
     s.set_bounds(Rect::new(0.0, 0.0, 300.0, WIDGET_H));
     assert!(s.value().is_finite(), "initial value {}", s.value());
-    assert!(!s.format_value().contains("NaN"), "label {}", s.format_value());
+    assert!(
+        !s.format_value().contains("NaN"),
+        "label {}",
+        s.format_value()
+    );
 
     // Click/drag around the middle of the track.
     s.on_event(&mouse_down(150.0, WIDGET_H * 0.5));
@@ -91,7 +95,10 @@ fn vertical_drag_is_monotonic_and_finite() {
     let high = s.value();
     assert!(high.is_finite(), "high {high}");
     // Up = increase (Y-up mapping): dragging toward the top raises the value.
-    assert!(low <= mid && mid <= high, "not monotonic: {low} {mid} {high}");
+    assert!(
+        low <= mid && mid <= high,
+        "not monotonic: {low} {mid} {high}"
+    );
 }
 
 /// Defensive: a `NaN` written into the value cell (a single poisoned frame)
@@ -106,7 +113,11 @@ fn nan_in_value_cell_is_ignored() {
     assert_eq!(s.value(), 10.0);
     cell.set(f64::NAN);
     let _ = s.layout(Size::new(300.0, WIDGET_H));
-    assert_eq!(s.value(), 10.0, "NaN frame should be ignored, kept previous");
+    assert_eq!(
+        s.value(),
+        10.0,
+        "NaN frame should be ignored, kept previous"
+    );
 }
 
 /// Defensive: `set_value(NaN)` is rejected and the previous value kept.

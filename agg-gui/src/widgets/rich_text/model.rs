@@ -417,7 +417,10 @@ pub fn split_block(doc: &mut RichDoc, pos: DocPos) -> DocPos {
 /// of range.
 pub fn merge_block_with_prev(doc: &mut RichDoc, idx: usize) -> DocPos {
     if idx == 0 || idx >= doc.blocks.len() {
-        return DocPos { block: idx, byte: 0 };
+        return DocPos {
+            block: idx,
+            byte: 0,
+        };
     }
     let join_byte = doc.blocks[idx - 1].text_len();
     let block = doc.blocks.remove(idx);
@@ -445,7 +448,11 @@ pub fn extract_range(doc: &RichDoc, range: DocRange) -> Vec<Block> {
             continue;
         };
         let mut block = src.clone();
-        let hi = if bi == b_block { b.byte } else { block.text_len() };
+        let hi = if bi == b_block {
+            b.byte
+        } else {
+            block.text_len()
+        };
         let lo = if bi == a.block { a.byte } else { 0 };
         // Trim the tail first so the head boundary offset stays valid.
         let end = block.ensure_boundary(hi);

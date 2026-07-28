@@ -135,8 +135,16 @@ fn default_draw_lcd_backbuffer_arc_uses_shared_weighted_collapse() {
         let img = ctx
             .last_image
             .expect("default collapse must forward to draw_image_rgba");
-        assert_eq!(ctx.last_dims, Some((w, 1)), "blit dimensions must round-trip");
-        assert_eq!(img.len(), (w as usize) * 4, "one RGBA8 pixel per source pixel");
+        assert_eq!(
+            ctx.last_dims,
+            Some((w, 1)),
+            "blit dimensions must round-trip"
+        );
+        assert_eq!(
+            img.len(),
+            (w as usize) * 4,
+            "one RGBA8 pixel per source pixel"
+        );
 
         for x in 0..COVS.len() {
             let expect = collapse_lcd_pixel(
@@ -145,8 +153,7 @@ fn default_draw_lcd_backbuffer_arc_uses_shared_weighted_collapse() {
             );
             let got = [img[x * 4], img[x * 4 + 1], img[x * 4 + 2], img[x * 4 + 3]];
             assert_eq!(
-                got,
-                expect,
+                got, expect,
                 "level {level} pixel {x} (coverage {:?}): default \
                  draw_lcd_backbuffer_arc diverged from collapse_lcd_pixel",
                 COVS[x],

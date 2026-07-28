@@ -39,8 +39,7 @@ pub(super) fn diff_line_range(
         return None; // identical
     }
     let mut back = 0;
-    while back < min_len - first
-        && old[old.len() - 1 - back].text == new[new.len() - 1 - back].text
+    while back < min_len - first && old[old.len() - 1 - back].text == new[new.len() - 1 - back].text
     {
         back += 1;
     }
@@ -114,7 +113,12 @@ impl TextArea {
         let live = self.vbar.offset;
         let in_band = self.band.active
             && self.band.anchor <= max_scroll
-            && offset_in_band(live, self.band.anchor, self.band.over_top, self.band.over_bottom);
+            && offset_in_band(
+                live,
+                self.band.anchor,
+                self.band.over_top,
+                self.band.over_bottom,
+            );
         if !in_band {
             let anchor = live.clamp(0.0, max_scroll);
             let (over_top, over_bottom) = plan_overscan(anchor, max_scroll, margin);
@@ -225,7 +229,11 @@ impl TextArea {
         // A wrap-count change shifts every line from `first` down, so repaint
         // through the last line (the band clip + per-line culling keep the
         // actual work to the band-visible rows).
-        let end = if count_changed { n - 1 } else { last.min(n - 1) };
+        let end = if count_changed {
+            n - 1
+        } else {
+            last.min(n - 1)
+        };
         let first = first.min(n - 1);
         self.render_dirty_lines.set(Some((first, end.max(first))));
     }

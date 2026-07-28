@@ -73,7 +73,11 @@ pub(super) fn style_toggle(
             let enabled_handle = handle.clone();
             let check = Rc::clone(check);
             button.with_enabled_fn(move || {
-                variant_enabled(&enabled_handle.common_style_of_selection().font_family, &check, v)
+                variant_enabled(
+                    &enabled_handle.common_style_of_selection().font_family,
+                    &check,
+                    v,
+                )
             })
         }
         _ => button,
@@ -212,7 +216,11 @@ pub(super) fn family_combo(
 /// Font-size dropdown over `sizes` (points). Selecting a size applies it via
 /// [`RichCommand::SetFontSize`]. Defaults the closed label to 16 pt (the editor
 /// default) when present, else the first entry.
-pub(super) fn size_combo(font: &Arc<Font>, handle: &RichEditHandle, sizes: &[f64]) -> Box<dyn Widget> {
+pub(super) fn size_combo(
+    font: &Arc<Font>,
+    handle: &RichEditHandle,
+    sizes: &[f64],
+) -> Box<dyn Widget> {
     let labels: Vec<String> = sizes.iter().map(|s| format!("{}", *s as i64)).collect();
     let default_idx = sizes.iter().position(|s| *s == 16.0).unwrap_or(0);
     let sizes = sizes.to_vec();

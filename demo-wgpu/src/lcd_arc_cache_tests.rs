@@ -290,7 +290,11 @@ struct Target {
 
 impl Target {
     fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, w: u32, h: u32) -> Self {
-        assert_eq!((w * 4) % 256, 0, "width must keep bytes_per_row 256-aligned");
+        assert_eq!(
+            (w * 4) % 256,
+            0,
+            "width must keep bytes_per_row 256-aligned"
+        );
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("lcd-cache-readback"),
             size: wgpu::Extent3d {
@@ -396,7 +400,15 @@ fn gpu_in_place_edit_changes_rendered_output() {
     ctx.reset(w as f32, h as f32);
     ctx.clear(agg_gui::color::Color::rgba(0.0, 0.0, 0.0, 1.0));
     ctx.draw_lcd_backbuffer_arc_impl(
-        &color, &alpha, 100, plane_w, plane_h, 8.0, 8.0, plane_w as f64, plane_h as f64,
+        &color,
+        &alpha,
+        100,
+        plane_w,
+        plane_h,
+        8.0,
+        8.0,
+        plane_w as f64,
+        plane_h as f64,
     );
     ctx.flush_to_surface(&target.view);
     let luma_dark = center_luma(&target.read(), w, h);
@@ -416,7 +428,15 @@ fn gpu_in_place_edit_changes_rendered_output() {
     ctx.reset(w as f32, h as f32);
     ctx.clear(agg_gui::color::Color::rgba(0.0, 0.0, 0.0, 1.0));
     ctx.draw_lcd_backbuffer_arc_impl(
-        &color, &alpha, 101, plane_w, plane_h, 8.0, 8.0, plane_w as f64, plane_h as f64,
+        &color,
+        &alpha,
+        101,
+        plane_w,
+        plane_h,
+        8.0,
+        8.0,
+        plane_w as f64,
+        plane_h as f64,
     );
     ctx.flush_to_surface(&target.view);
     let luma_bright = center_luma(&target.read(), w, h);
