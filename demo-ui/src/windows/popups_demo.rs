@@ -135,11 +135,7 @@ impl PopupsDemo {
         // matching egui, where the tooltip is ON the trigger itself.
         let trigger_tooltip: Box<dyn Widget> = Box::new(
             Tooltip::new(
-                Box::new(
-                    SizedBox::new()
-                        .with_width(TRIGGER_W)
-                        .with_height(TRIGGER_H),
-                ),
+                Box::new(SizedBox::new().with_width(TRIGGER_W).with_height(TRIGGER_H)),
                 "Tooltips are popups, too!",
                 Arc::clone(&font),
             )
@@ -620,8 +616,7 @@ fn build_config_column(font: Arc<Font>, cfg: &Config) -> Box<dyn Widget> {
     {
         let behavior_names: Vec<&str> =
             PopupCloseBehavior::ALL.iter().map(|(_, n, _)| *n).collect();
-        let behavior_tips: Vec<&str> =
-            PopupCloseBehavior::ALL.iter().map(|(_, _, d)| *d).collect();
+        let behavior_tips: Vec<&str> = PopupCloseBehavior::ALL.iter().map(|(_, _, d)| *d).collect();
         col.push(
             combo_row(
                 "let close_behavior = PopupCloseBehavior::",
@@ -642,11 +637,9 @@ fn build_config_column(font: Arc<Font>, cfg: &Config) -> Box<dyn Widget> {
             Box::new(
                 FlexRow::new()
                     .with_gap(8.0)
-                    .add(Box::new(
-                        SizedBox::new()
-                            .with_width(CAPTION_W)
-                            .with_child(Box::new(code_label("let popup_open = ", &font))),
-                    ))
+                    .add(Box::new(SizedBox::new().with_width(CAPTION_W).with_child(
+                        Box::new(code_label("let popup_open = ", &font)),
+                    )))
                     .add(Box::new(
                         Checkbox::new("", Arc::clone(&font), open_flag.get())
                             .with_font_size(13.0)

@@ -166,9 +166,11 @@ impl SceneCanvas {
 
         // Live counter readout.
         let count_src = Rc::clone(&counter);
-        children.push(Box::new(CellLabel::new(Arc::clone(&font), 13.0, move || {
-            format!("Clicks: {}", count_src.get())
-        })));
+        children.push(Box::new(CellLabel::new(
+            Arc::clone(&font),
+            13.0,
+            move || format!("Clicks: {}", count_src.get()),
+        )));
         positions.push(Point::new(20.0, CONTENT_H - 120.0));
 
         // A text field — proves keyboard focus reaches inside the Scene: click
@@ -197,10 +199,7 @@ impl SceneCanvas {
             bounds: Rect::default(),
             children,
             positions,
-            rects: vec![
-                (250.0, 150.0, 90.0, 60.0),
-                (300.0, 60.0, 70.0, 40.0),
-            ],
+            rects: vec![(250.0, 150.0, 90.0, 60.0), (300.0, 60.0, 70.0, 40.0)],
             circles: vec![
                 (300.0, 200.0, 34.0),
                 (360.0, 120.0, 22.0),

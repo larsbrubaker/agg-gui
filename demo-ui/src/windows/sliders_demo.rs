@@ -271,12 +271,16 @@ fn push_controls(col: &mut FlexColumn, cfg: &SliderConfig, font: &Arc<Font>) {
         let c = cfg.clone();
         col.push(
             Box::new(
-                Checkbox::new("Toggle trailing color", Arc::clone(font), cfg.trailing_fill.get())
-                    .with_font_size(12.0)
-                    .on_change(move |b| {
-                        c.trailing_fill.set(b);
-                        c.bump_config();
-                    }),
+                Checkbox::new(
+                    "Toggle trailing color",
+                    Arc::clone(font),
+                    cfg.trailing_fill.get(),
+                )
+                .with_font_size(12.0)
+                .on_change(move |b| {
+                    c.trailing_fill.set(b);
+                    c.bump_config();
+                }),
             ),
             0.0,
         );
@@ -297,12 +301,16 @@ fn push_controls(col: &mut FlexColumn, cfg: &SliderConfig, font: &Arc<Font>) {
         col.push(label("Handle shape:", font), 0.0);
         col.push(
             Box::new(
-                RadioGroup::new(vec!["Circle", "Rectangle"], cfg.handle_shape.get(), Arc::clone(font))
-                    .with_font_size(12.0)
-                    .on_change(move |idx| {
-                        c.handle_shape.set(idx);
-                        c.bump_config();
-                    }),
+                RadioGroup::new(
+                    vec!["Circle", "Rectangle"],
+                    cfg.handle_shape.get(),
+                    Arc::clone(font),
+                )
+                .with_font_size(12.0)
+                .on_change(move |idx| {
+                    c.handle_shape.set(idx);
+                    c.bump_config();
+                }),
             ),
             0.0,
         );
@@ -425,12 +433,16 @@ fn push_controls(col: &mut FlexColumn, cfg: &SliderConfig, font: &Arc<Font>) {
         col.push(label("Clamping:", font), 0.0);
         col.push(
             Box::new(
-                RadioGroup::new(vec!["Never", "Edits", "Always"], cfg.clamping.get(), Arc::clone(font))
-                    .with_font_size(12.0)
-                    .on_change(move |idx| {
-                        c.clamping.set(idx);
-                        c.bump_config();
-                    }),
+                RadioGroup::new(
+                    vec!["Never", "Edits", "Always"],
+                    cfg.clamping.get(),
+                    Arc::clone(font),
+                )
+                .with_font_size(12.0)
+                .on_change(move |idx| {
+                    c.clamping.set(idx);
+                    c.bump_config();
+                }),
             ),
             0.0,
         );

@@ -193,8 +193,8 @@ pub fn code_editor(font: Arc<Font>) -> Box<dyn Widget> {
 const KEYWORDS: &[&str] = &[
     "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
     "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
-    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
-    "use", "where", "while",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while",
 ];
 
 /// Per-line tokenizer producing `(start, end, colour)` runs for the given
@@ -506,9 +506,7 @@ mod tests {
     /// flip repaints in the new colours. Mutates the global palette — guarded.
     #[test]
     fn rust_highlighter_follows_active_theme() {
-        let _guard = VISUALS_EPOCH_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _guard = VISUALS_EPOCH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
         // "// x" tokenises to a single comment run spanning the line.
         agg_gui::set_visuals(Visuals::light());

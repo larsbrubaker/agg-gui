@@ -439,14 +439,19 @@ fn code_editor_scroll_probe() {
     eprintln!("WHOLE FRAME (App::paint, full doc, large viewport)");
     eprintln!("  cold  (first paint, backbuffer raster)      : {cold_ms:8.3} ms");
     eprintln!("  warm  (no change, cache blit only)          : {warm_ms:8.3} ms");
-    eprintln!("  scroll (wheel + layout + paint)             : {scroll_wheel_ms:8.3} ms  <- user-felt");
+    eprintln!(
+        "  scroll (wheel + layout + paint)             : {scroll_wheel_ms:8.3} ms  <- user-felt"
+    );
     eprintln!("  edit   (1 char + layout + paint)            : {edit_ms:8.3} ms  <- user-felt");
     eprintln!("  scroll (±1px height re-raster, cross-check) : {reraster_full_large_ms:8.3} ms");
     eprintln!("-----------------------------------------------------------------");
     eprintln!("EDIT DECOMPOSITION (1 char/frame, full doc, large viewport)");
     eprintln!("  edit: app.layout only                       : {edit_layout_ms:8.3} ms");
     eprintln!("  edit: app.paint only                        : {edit_paint_ms:8.3} ms");
-    eprintln!("  edit: layout+paint (sum cross-check)        : {:8.3} ms", edit_layout_ms + edit_paint_ms);
+    eprintln!(
+        "  edit: layout+paint (sum cross-check)        : {:8.3} ms",
+        edit_layout_ms + edit_paint_ms
+    );
     eprintln!("  edit: edit+layout, NO paint (control)       : {edit_nopaint_control_ms:8.3} ms");
     eprintln!("  edit: bare paint_subtree loop               : {edit_bare_paint_ms:8.3} ms");
     eprintln!(

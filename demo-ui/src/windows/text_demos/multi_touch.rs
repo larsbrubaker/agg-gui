@@ -422,7 +422,11 @@ mod tests {
         });
 
         assert_eq!(result, EventResult::Consumed);
-        assert!((v.zoom - 1.5).abs() < 1e-6, "zoom_delta multiplies: {}", v.zoom);
+        assert!(
+            (v.zoom - 1.5).abs() < 1e-6,
+            "zoom_delta multiplies: {}",
+            v.zoom
+        );
         assert!((v.rotation - 0.3).abs() < 1e-6, "rotation accumulates");
         assert!((v.translation_x - 10.0 / scale).abs() < 1e-6);
         assert!((v.translation_y - 5.0 / scale).abs() < 1e-6);

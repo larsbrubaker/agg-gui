@@ -18,6 +18,7 @@ mod frame_demo;
 mod gallery;
 mod helpers;
 mod interaction;
+mod lcd_sample_text;
 mod lion;
 mod menu_demo;
 mod misc;
@@ -28,7 +29,6 @@ mod scene_demo;
 mod screen_share;
 mod screenshot_demo;
 mod scrolling;
-mod lcd_sample_text;
 mod sliders_demo;
 mod system;
 mod system_fonts;
@@ -40,26 +40,26 @@ mod text_edit_demo;
 pub use animation::{bezier_curve, dancing_strings, painting};
 pub use basic::tooltips;
 pub use code_editor_demo::code_editor;
-pub use text_edit_demo::text_edit;
 pub use code_example::code_example;
 pub use font_book::font_book;
 pub use frame_demo::frame_demo;
 pub use gallery::widget_gallery;
 pub use interaction::{drag_and_drop, panels_demo};
 pub use lion::lion_demo;
-pub use scene_demo::scene_demo;
 pub use menu_demo::menu_demo;
 pub use misc::{interactive_container, misc_demos};
 pub use mobile_keyboard::{mobile_keyboard, TITLE as MOBILE_KEYBOARD_TITLE};
 pub use popups_demo::popups_demo;
 pub use rich_text_demo::rich_text_edit;
+pub use scene_demo::scene_demo;
 pub use screen_share::screen_share_demo;
 pub use screenshot_demo::screenshot_demo;
 pub use scrolling::scrolling_demo;
 pub use sliders_demo::sliders;
+use std::sync::Arc;
 pub use system::{
-    cells as system_cells, init_cells as init_system_cells, system_view, try_cells as try_system_cells,
-    SystemCells,
+    cells as system_cells, init_cells as init_system_cells, system_view,
+    try_cells as try_system_cells, SystemCells,
 };
 pub use system_fonts::{
     apply_font_by_index, default_font_index, font_asset_by_name, font_cache_epoch,
@@ -68,14 +68,14 @@ pub use system_fonts::{
     DEFAULT_FONT_NAME, EMOJI_FONT_PATH, FONT_AWESOME_PATH,
 };
 pub use tests::{
-    clipboard_test, cursor_test, input_event_history, input_test, layout_test,
-    manual_layout_test, svg_test, window_resize_sub_windows, ResizeTestWindow,
+    clipboard_test, cursor_test, input_event_history, input_test, layout_test, manual_layout_test,
+    svg_test, window_resize_sub_windows, ResizeTestWindow,
 };
 pub use text_demos::{
     modals_demo, multi_touch, strip_demo, table_demo, text_layout, undo_redo, window_options,
     window_options_with_cells, WindowOptionCells,
 };
-use std::sync::Arc;
+pub use text_edit_demo::text_edit;
 
 use agg_gui::{DrawCtx, Event, EventResult, Font, MarkdownView, Rect, ScrollView, Size, Widget};
 

@@ -504,12 +504,9 @@ pub fn text_layout(font: Arc<Font>) -> Box<dyn Widget> {
     );
     col.push(
         Box::new(
-            Label::new(
-                "A live rich text layout playground.",
-                Arc::clone(&font),
-            )
-            .with_font_size(12.0)
-            .with_wrap(true),
+            Label::new("A live rich text layout playground.", Arc::clone(&font))
+                .with_font_size(12.0)
+                .with_wrap(true),
         ),
         0.0,
     );

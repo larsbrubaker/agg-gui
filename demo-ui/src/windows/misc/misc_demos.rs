@@ -353,12 +353,9 @@ fn build_columns(font: &Arc<Font>, num_columns: &Rc<Cell<f64>>) -> Box<dyn Widge
     let mut row = FlexRow::new().with_gap(8.0);
     for i in 0..n {
         let mut column = FlexColumn::new().with_gap(4.0).add(Box::new(
-            Label::new(
-                format!("Column {} out of {}", i + 1, n),
-                Arc::clone(font),
-            )
-            .with_font_size(11.5)
-            .with_wrap(true),
+            Label::new(format!("Column {} out of {}", i + 1, n), Arc::clone(font))
+                .with_font_size(11.5)
+                .with_wrap(true),
         ));
         if i + 1 == n {
             let num_columns = Rc::clone(num_columns);

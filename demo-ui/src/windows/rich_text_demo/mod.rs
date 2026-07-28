@@ -171,9 +171,11 @@ pub fn rich_text_edit(font: Arc<Font>) -> Box<dyn Widget> {
     // The editor fills the remaining height; its own internal scrollbar handles
     // overflow. Wrapped in a host that refreshes layout when fonts load.
     col.push(
-        Box::new(SizedBox::new().with_height(320.0).with_child(Box::new(
-            RichEditHost::new(editor),
-        ))),
+        Box::new(
+            SizedBox::new()
+                .with_height(320.0)
+                .with_child(Box::new(RichEditHost::new(editor))),
+        ),
         1.0,
     );
 
@@ -535,7 +537,7 @@ mod tests {
     // dangles forever (undo suspended, preview colour stuck, swatch dead).
     // These drive the REAL demo overlay through the App pipeline.
 
-    use agg_gui::{App, Key, MouseButton, Modifiers};
+    use agg_gui::{App, Key, Modifiers, MouseButton};
 
     /// World-space rect of the dialog window inside the aligned overlay slot
     /// (Stack → Rebuilder → Window). Mirrors the accumulation the framework's
@@ -565,7 +567,8 @@ mod tests {
                 ..Default::default()
             },
         ))]);
-        let mut editor = RichTextEdit::new(doc, make_resolver(Arc::clone(&font))).with_font_size(16.0);
+        let mut editor =
+            RichTextEdit::new(doc, make_resolver(Arc::clone(&font))).with_font_size(16.0);
         let handle = editor.handle();
         // Select the whole doc so a colour preview actually mutates runs.
         editor.on_event(&Event::KeyDown {
@@ -591,7 +594,10 @@ mod tests {
         // Open the dialog (Rebuilder rebuilds → begin_preview) and drag to blue.
         picker_cell.set(PickerKind::TextColor);
         app.layout(Size::new(420.0, 520.0));
-        assert!(handle.is_previewing(), "opening the dialog begins a preview");
+        assert!(
+            handle.is_previewing(),
+            "opening the dialog begins a preview"
+        );
         handle.exec(&RichCommand::SetTextColor(Color::rgb(0.0, 0.0, 1.0)));
         app.layout(Size::new(420.0, 520.0));
         assert_eq!(
@@ -603,7 +609,11 @@ mod tests {
         (app, handle, picker_cell, red)
     }
 
-    fn assert_preview_unwound(handle: &RichEditHandle, picker_cell: &Rc<Cell<PickerKind>>, red: Color) {
+    fn assert_preview_unwound(
+        handle: &RichEditHandle,
+        picker_cell: &Rc<Cell<PickerKind>>,
+        red: Color,
+    ) {
         assert!(
             !handle.is_previewing(),
             "closing the dialog must end the preview session (undo would stay dead otherwise)"
@@ -673,13 +683,8 @@ mod tests {
         );
 
         // Install the bold face (any distinct real font under the variant name).
-        install_font_bytes(
-            &format!("{family} Bold"),
-            VARIANT_FONT.to_vec(),
-            None,
-            None,
-        )
-        .expect("installing the bold variant must succeed");
+        install_font_bytes(&format!("{family} Bold"), VARIANT_FONT.to_vec(), None, None)
+            .expect("installing the bold variant must succeed");
 
         // Now the resolver must pick the real bold face, not the regular base.
         let after = resolver(&style);

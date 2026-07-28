@@ -172,9 +172,9 @@ fn reactive_demo_with_all_windows_closed_quiesces() {
         let mut fb = Framebuffer::new(1200, 900);
         let mut ctx = GfxCtx::new(&mut fb);
         app.paint(&mut ctx); // clears draw flags, then repaints
-        // Mirror the reactive host: read wants_draw() once to decide whether
-        // another frame is forced. This also promotes any due deadline, so a
-        // `false` here guarantees no due deadline is pending.
+                             // Mirror the reactive host: read wants_draw() once to decide whether
+                             // another frame is forced. This also promotes any due deadline, so a
+                             // `false` here guarantees no due deadline is pending.
         wants = app.wants_draw();
         if !wants {
             break;
@@ -256,7 +256,7 @@ fn each_demo_window_quiesces_after_close() {
     // per-frame scheduled re-arm). Sweeping all ~40 windows adds minutes of
     // layout/paint for no extra coverage of the animation-residue risk.
     const ANIMATED_TITLES: &[&str] = &[
-        "\u{F009} Widget Gallery", // progress bars + assorted animated widgets
+        "\u{F009} Widget Gallery",  // progress bars + assorted animated widgets
         "\u{F001} Dancing Strings", // needs_draw() == true
         "\u{F1FC} Painting",
         "\u{F030} Screenshot", // continuous-capture flag hazard

@@ -6,9 +6,7 @@
 
 use std::sync::Arc;
 
-use agg_gui::{
-    Color, DrawCtx, Event, EventResult, FlexColumn, Font, Point, Rect, Size, Widget,
-};
+use agg_gui::{Color, DrawCtx, Event, EventResult, FlexColumn, Font, Point, Rect, Size, Widget};
 
 // ---------------------------------------------------------------------------
 // DancingStrings — matches egui's `DancingStrings` demo

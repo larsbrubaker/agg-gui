@@ -264,7 +264,11 @@ fn editor_row(
                     .with_v_anchor(VAnchor::TOP),
             ))
             .add_flex(
-                Box::new(SizedBox::new().with_height(130.0).with_child(Box::new(editor))),
+                Box::new(
+                    SizedBox::new()
+                        .with_height(130.0)
+                        .with_child(Box::new(editor)),
+                ),
                 1.0,
             )
             .add(Box::new(clear)),
@@ -280,8 +284,7 @@ fn readout_block(font: &Arc<Font>, state: &Rc<RefCell<TextEditState>>) -> Box<dy
     Box::new(Rebuilder::new(
         move || {
             let st = ver_state.borrow();
-            (st.cursor as u64)
-                .wrapping_mul(1_000_003)
+            (st.cursor as u64).wrapping_mul(1_000_003)
                 ^ (st.anchor as u64).wrapping_mul(2_000_029)
                 ^ st.epoch.wrapping_mul(4_000_037)
         },

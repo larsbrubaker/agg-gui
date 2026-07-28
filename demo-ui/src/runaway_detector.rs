@@ -83,7 +83,7 @@ mod tests {
         assert!(!d.note_frame(true, false)); // 1
         assert!(!d.note_frame(true, false)); // 2
         assert!(!d.note_frame(true, false)); // 3 (== threshold, not yet over)
-        // One past the threshold: fires exactly once.
+                                             // One past the threshold: fires exactly once.
         assert!(d.note_frame(true, false)); // 4 (> threshold)
         assert!(!d.note_frame(true, false)); // latched — no repeat
         assert!(!d.note_frame(true, false));
@@ -118,7 +118,7 @@ mod tests {
         assert!(!d.note_frame(true, false)); // 2
         assert!(d.note_frame(true, false)); // 3 -> fire
         assert!(!d.note_frame(true, false)); // latched
-        // App goes idle: latch + counter reset.
+                                             // App goes idle: latch + counter reset.
         d.note_idle();
         assert_eq!(d.frames_without_input(), 0);
         // A fresh runaway must fire again.

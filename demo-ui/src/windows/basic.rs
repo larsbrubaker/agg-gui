@@ -209,7 +209,9 @@ fn tooltip_scroll_test(font: Arc<Font>) -> Box<dyn Widget> {
 fn interactive_link_tip(font: Arc<Font>) -> Box<dyn Widget> {
     let mut col = FlexColumn::new().with_gap(4.0);
     col.push(
-        Box::new(Label::new("This tooltip contains a link:", Arc::clone(&font)).with_font_size(12.0)),
+        Box::new(
+            Label::new("This tooltip contains a link:", Arc::clone(&font)).with_font_size(12.0),
+        ),
         0.0,
     );
     let link = Box::new(
@@ -218,9 +220,7 @@ fn interactive_link_tip(font: Arc<Font>) -> Box<dyn Widget> {
             .on_click(|| crate::url::open_url("https://github.com/larsbrubaker/agg-gui")),
     );
     col.push(
-        Box::new(
-            Tooltip::new(link, "The tooltip has a tooltip in it!", font).at_widget(),
-        ),
+        Box::new(Tooltip::new(link, "The tooltip has a tooltip in it!", font).at_widget()),
         0.0,
     );
     Box::new(col)
@@ -242,4 +242,3 @@ fn source_link(font: Arc<Font>) -> Box<dyn Widget> {
             .on_click(|| crate::url::open_url(TOOLTIP_SOURCE_URL)),
     )
 }
-

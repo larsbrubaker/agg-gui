@@ -161,7 +161,15 @@ pub fn tree_section(font: &Arc<Font>) -> Box<dyn Widget> {
         let version = Rc::clone(&version);
         move || {
             let node = root.borrow();
-            build_node(&node, Vec::new(), 0, "root".to_string(), &font, &root, &version)
+            build_node(
+                &node,
+                Vec::new(),
+                0,
+                "root".to_string(),
+                &font,
+                &root,
+                &version,
+            )
         }
     };
 

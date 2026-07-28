@@ -14,9 +14,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use agg_gui::{
-    Color, DrawCtx, Event, EventResult, Rect, Size, Widget,
-};
+use agg_gui::{Color, DrawCtx, Event, EventResult, Rect, Size, Widget};
 
 /// Resolve a child rect inside a container of height `container_h`.
 ///

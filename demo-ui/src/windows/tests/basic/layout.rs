@@ -120,11 +120,9 @@ fn slider_pair_row(
     Box::new(
         FlexRow::new()
             .with_gap(8.0)
-            .add(Box::new(
-                SizedBox::new().with_width(110.0).with_child(Box::new(
-                    Label::new(label, Arc::clone(font)).with_font_size(12.0),
-                )),
-            ))
+            .add(Box::new(SizedBox::new().with_width(110.0).with_child(
+                Box::new(Label::new(label, Arc::clone(font)).with_font_size(12.0)),
+            )))
             .add_flex(slider(a), 1.0)
             .add_flex(slider(b), 1.0),
     )
@@ -215,16 +213,18 @@ pub fn manual_layout_test(font: Arc<Font>) -> Box<dyn Widget> {
         let wt = Rc::clone(&widget_type);
         let radio_row = FlexRow::new()
             .with_gap(8.0)
+            .add(Box::new(SizedBox::new().with_height(66.0).with_child(
+                Box::new(Label::new("Test widget:", Arc::clone(&font)).with_font_size(12.0)),
+            )))
             .add(Box::new(
-                SizedBox::new().with_height(66.0).with_child(Box::new(
-                    Label::new("Test widget:", Arc::clone(&font)).with_font_size(12.0),
-                )),
-            ))
-            .add(Box::new(
-                RadioGroup::new(vec!["Button", "Label", "TextEdit"], wt.get(), Arc::clone(&font))
-                    .with_font_size(12.0)
-                    .with_selected_cell(Rc::clone(&widget_type))
-                    .on_change(move |i| wt.set(i)),
+                RadioGroup::new(
+                    vec!["Button", "Label", "TextEdit"],
+                    wt.get(),
+                    Arc::clone(&font),
+                )
+                .with_font_size(12.0)
+                .with_selected_cell(Rc::clone(&widget_type))
+                .on_change(move |i| wt.set(i)),
             ));
         col.push(Box::new(radio_row), 0.0);
     }

@@ -11,9 +11,9 @@
 
 use super::tests_common::{fixture_with_typed_handle, install_test_font_once, mk_node};
 use super::*;
+use crate::model::{NodeId, PropertyValue, PropertyView};
 use agg_gui::widgets::{EditorKind, NumberAttrs};
 use agg_gui::{Modifiers, MouseButton, Point};
-use crate::model::{NodeId, PropertyValue, PropertyView};
 
 /// Build a node with a single numeric property whose editor is `kind`.
 fn mk_number_node(
@@ -70,7 +70,9 @@ fn seed(
     editor.layout(Size::new(400.0, 400.0));
 }
 
-fn last_number(memory: &std::sync::Arc<std::sync::Mutex<super::tests_common::Memory>>) -> Option<f64> {
+fn last_number(
+    memory: &std::sync::Arc<std::sync::Mutex<super::tests_common::Memory>>,
+) -> Option<f64> {
     memory
         .lock()
         .unwrap()
@@ -104,7 +106,11 @@ fn number_drag_scrubs_value_proportionally() {
     let p = number_row_local(&editor, NodeId(1));
     editor.on_mouse_down(p, MouseButton::Left, Modifiers::default());
     editor.on_mouse_move(Point::new(p.x + 20.0, p.y));
-    editor.on_mouse_up(Point::new(p.x + 20.0, p.y), MouseButton::Left, Modifiers::default());
+    editor.on_mouse_up(
+        Point::new(p.x + 20.0, p.y),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
 
     assert_eq!(
         last_number(&memory),
@@ -206,7 +212,11 @@ fn number_drag_click_opens_inline_editor() {
     editor.on_mouse_down(p, MouseButton::Left, Modifiers::default());
     // A jitter within the threshold must not be treated as a drag.
     editor.on_mouse_move(Point::new(p.x + 2.0, p.y));
-    editor.on_mouse_up(Point::new(p.x + 2.0, p.y), MouseButton::Left, Modifiers::default());
+    editor.on_mouse_up(
+        Point::new(p.x + 2.0, p.y),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
 
     assert!(
         editor.overlay.is_some(),
@@ -248,7 +258,11 @@ fn slider_row_scrubs_immediately_and_never_edits() {
         "a slider must scrub from the first pixel of motion"
     );
 
-    editor.on_mouse_up(Point::new(p.x + 1.0, p.y), MouseButton::Left, Modifiers::default());
+    editor.on_mouse_up(
+        Point::new(p.x + 1.0, p.y),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     assert!(
         editor.overlay.is_none(),
         "a slider row must never open the inline keyboard editor"

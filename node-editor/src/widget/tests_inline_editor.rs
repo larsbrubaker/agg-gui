@@ -72,7 +72,11 @@ fn inline_number_editor_lands_on_pill_rect() {
         0,
         [100.0, 200.0, 60.0, 20.0],
     );
-    let b = editor.overlay.as_ref().expect("editor overlay present").bounds();
+    let b = editor
+        .overlay
+        .as_ref()
+        .expect("editor overlay present")
+        .bounds();
     assert_eq!(b, Rect::new(100.0, 180.0, 60.0, 20.0));
 }
 
@@ -90,7 +94,11 @@ fn inline_number_editor_lands_on_pill_rect_when_zoomed() {
         0,
         [100.0, 200.0, 60.0, 20.0],
     );
-    let b = editor.overlay.as_ref().expect("editor overlay present").bounds();
+    let b = editor
+        .overlay
+        .as_ref()
+        .expect("editor overlay present")
+        .bounds();
     // x = 100*2 + 10 = 210; bottom = (200-20)*2 + 5 = 365; w = 120; h = 40.
     assert_eq!(b, Rect::new(210.0, 365.0, 120.0, 40.0));
 }
@@ -125,7 +133,10 @@ fn inline_number_editor_enter_commits() {
         }
         other => panic!("expected a Number commit, got {:?}", other),
     }
-    assert!(editor.overlay.is_none(), "Enter must close the inline editor");
+    assert!(
+        editor.overlay.is_none(),
+        "Enter must close the inline editor"
+    );
 }
 
 /// Escape reverts to the pre-edit value, undoing the live preview.
@@ -155,7 +166,10 @@ fn inline_number_editor_escape_reverts() {
         }
         other => panic!("expected a Number revert, got {:?}", other),
     }
-    assert!(editor.overlay.is_none(), "Escape must close the inline editor");
+    assert!(
+        editor.overlay.is_none(),
+        "Escape must close the inline editor"
+    );
 }
 
 /// Enter on unparseable text reverts to the pre-edit value (treated like
@@ -211,7 +225,11 @@ fn inline_number_editor_clamps_to_minimum_size() {
         0,
         [100.0, 200.0, 60.0, 20.0],
     );
-    let b = editor.overlay.as_ref().expect("editor overlay present").bounds();
+    let b = editor
+        .overlay
+        .as_ref()
+        .expect("editor overlay present")
+        .bounds();
     assert!(
         b.width >= 60.0 && b.height >= 20.0,
         "overlay must meet the minimum readable size, got {:?}",

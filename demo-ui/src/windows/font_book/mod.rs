@@ -90,7 +90,10 @@ impl Widget for CountLabel {
         ctx.set_font(Arc::clone(&self.font));
         ctx.set_font_size(Self::FONT_SIZE);
         ctx.set_fill_color(v.text_color);
-        let text = format!("The selected font supports {} characters.", self.count.get());
+        let text = format!(
+            "The selected font supports {} characters.",
+            self.count.get()
+        );
         let y = (self.bounds.height - Self::FONT_SIZE) * 0.5;
         ctx.fill_text(&text, 0.0, y);
     }

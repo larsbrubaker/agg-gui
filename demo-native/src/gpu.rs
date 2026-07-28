@@ -173,7 +173,10 @@ mod tests {
             surface_acquire_action(&T::Outdated),
             SurfaceAcquire::Reconfigure
         );
-        assert_eq!(surface_acquire_action(&T::Lost), SurfaceAcquire::Reconfigure);
+        assert_eq!(
+            surface_acquire_action(&T::Lost),
+            SurfaceAcquire::Reconfigure
+        );
     }
 
     #[test]

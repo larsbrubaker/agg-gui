@@ -33,9 +33,9 @@ mod tests;
 #[cfg(test)]
 mod tests_common;
 #[cfg(test)]
-mod tests_noodle;
-#[cfg(test)]
 mod tests_inline_editor;
+#[cfg(test)]
+mod tests_noodle;
 #[cfg(test)]
 mod tests_overlay;
 #[cfg(test)]

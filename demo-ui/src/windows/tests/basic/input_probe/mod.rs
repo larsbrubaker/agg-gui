@@ -229,7 +229,11 @@ impl Widget for ProbeWidget {
                     .map(|m| m.width)
                     .unwrap_or(0.0);
                 ctx.set_fill_color(v.text_dim);
-                ctx.fill_text(&format!(" \u{00d7}{}", entry.count), 8.0 + sw + 2.0, y + 2.0);
+                ctx.fill_text(
+                    &format!(" \u{00d7}{}", entry.count),
+                    8.0 + sw + 2.0,
+                    y + 2.0,
+                );
             }
         }
     }
@@ -263,7 +267,11 @@ impl Widget for ProbeWidget {
                 if !self.contains(*pos) {
                     return EventResult::Ignored;
                 }
-                let interactions = self.state.borrow_mut().classifier.on_down(*button, *pos, now);
+                let interactions = self
+                    .state
+                    .borrow_mut()
+                    .classifier
+                    .on_down(*button, *pos, now);
                 self.log(interactions);
                 if self.kind == ProbeKind::Hover {
                     EventResult::Ignored

@@ -17,9 +17,7 @@ use std::sync::Arc;
 
 use agg_gui::platform::primary_modifier_label;
 use agg_gui::widgets::rich_text::{CommonStyle, ListKind};
-use agg_gui::{
-    Button, ComboBox, FlexRow, Font, RichCommand, RichEditHandle, TextHAlign, Widget,
-};
+use agg_gui::{Button, ComboBox, FlexRow, Font, RichCommand, RichEditHandle, TextHAlign, Widget};
 
 use super::PickerKind;
 use crate::windows::system_fonts::{
@@ -84,22 +82,50 @@ fn row_one(
     // (`family_has_bold` / `family_has_italic`); Underline / Strikethrough are
     // synthetic and stay always-enabled.
     row = row.add(tip(
-        style_toggle(font, handle, ICON_BOLD, |c| c.bold, RichCommand::ToggleBold, Some(family_has_bold)),
+        style_toggle(
+            font,
+            handle,
+            ICON_BOLD,
+            |c| c.bold,
+            RichCommand::ToggleBold,
+            Some(family_has_bold),
+        ),
         "Bold",
         font,
     ));
     row = row.add(tip(
-        style_toggle(font, handle, ICON_ITALIC, |c| c.italic, RichCommand::ToggleItalic, Some(family_has_italic)),
+        style_toggle(
+            font,
+            handle,
+            ICON_ITALIC,
+            |c| c.italic,
+            RichCommand::ToggleItalic,
+            Some(family_has_italic),
+        ),
         "Italic",
         font,
     ));
     row = row.add(tip(
-        style_toggle(font, handle, ICON_UNDERLINE, |c| c.underline, RichCommand::ToggleUnderline, None),
+        style_toggle(
+            font,
+            handle,
+            ICON_UNDERLINE,
+            |c| c.underline,
+            RichCommand::ToggleUnderline,
+            None,
+        ),
         "Underline",
         font,
     ));
     row = row.add(tip(
-        style_toggle(font, handle, ICON_STRIKE, |c| c.strikethrough, RichCommand::ToggleStrikethrough, None),
+        style_toggle(
+            font,
+            handle,
+            ICON_STRIKE,
+            |c| c.strikethrough,
+            RichCommand::ToggleStrikethrough,
+            None,
+        ),
         "Strikethrough",
         font,
     ));
@@ -107,9 +133,21 @@ fn row_one(
     row = row.add(tip(family_combo(font, handle), "Font family", font));
     row = row.add(tip(size_combo(font, handle), "Font size", font));
 
-    row = row.add(tip(color_button(font, ICON_TEXT_COLOR, picker, PickerKind::TextColor), "Text color", font));
-    row = row.add(tip(color_button(font, ICON_HIGHLIGHT, picker, PickerKind::Highlight), "Highlight color", font));
-    row = row.add(tip(remove_highlight_button(font, handle), "Remove highlight", font));
+    row = row.add(tip(
+        color_button(font, ICON_TEXT_COLOR, picker, PickerKind::TextColor),
+        "Text color",
+        font,
+    ));
+    row = row.add(tip(
+        color_button(font, ICON_HIGHLIGHT, picker, PickerKind::Highlight),
+        "Highlight color",
+        font,
+    ));
+    row = row.add(tip(
+        remove_highlight_button(font, handle),
+        "Remove highlight",
+        font,
+    ));
 
     Box::new(row)
 }
@@ -119,19 +157,55 @@ fn row_two(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
     let modifier = primary_modifier_label();
     let mut row = FlexRow::new().with_gap(4.0);
 
-    row = row.add(tip(align_toggle(font, handle, ICON_ALIGN_LEFT, TextHAlign::Left), "Align left", font));
-    row = row.add(tip(align_toggle(font, handle, ICON_ALIGN_CENTER, TextHAlign::Center), "Align center", font));
-    row = row.add(tip(align_toggle(font, handle, ICON_ALIGN_RIGHT, TextHAlign::Right), "Align right", font));
+    row = row.add(tip(
+        align_toggle(font, handle, ICON_ALIGN_LEFT, TextHAlign::Left),
+        "Align left",
+        font,
+    ));
+    row = row.add(tip(
+        align_toggle(font, handle, ICON_ALIGN_CENTER, TextHAlign::Center),
+        "Align center",
+        font,
+    ));
+    row = row.add(tip(
+        align_toggle(font, handle, ICON_ALIGN_RIGHT, TextHAlign::Right),
+        "Align right",
+        font,
+    ));
 
-    row = row.add(tip(list_toggle(font, handle, ICON_LIST_OL, ListKind::Ordered), "Numbered list", font));
-    row = row.add(tip(list_toggle(font, handle, ICON_LIST_UL, ListKind::Bullet), "Bulleted list", font));
-    row = row.add(tip(command_button(font, handle, ICON_OUTDENT, RichCommand::Outdent), "Decrease indent", font));
-    row = row.add(tip(command_button(font, handle, ICON_INDENT, RichCommand::Indent), "Increase indent", font));
+    row = row.add(tip(
+        list_toggle(font, handle, ICON_LIST_OL, ListKind::Ordered),
+        "Numbered list",
+        font,
+    ));
+    row = row.add(tip(
+        list_toggle(font, handle, ICON_LIST_UL, ListKind::Bullet),
+        "Bulleted list",
+        font,
+    ));
+    row = row.add(tip(
+        command_button(font, handle, ICON_OUTDENT, RichCommand::Outdent),
+        "Decrease indent",
+        font,
+    ));
+    row = row.add(tip(
+        command_button(font, handle, ICON_INDENT, RichCommand::Indent),
+        "Increase indent",
+        font,
+    ));
 
     // Undo/redo are the only actions with a real key binding (the editor binds
     // `{mod}+Z` / `{mod}+Y`), so they get a shortcut hint.
-    row = row.add(tip(undo_button(font, handle), format!("Undo ({modifier}+Z)"), font));
-    row = row.add(tip(redo_button(font, handle), format!("Redo ({modifier}+Y)"), font));
+    row = row.add(tip(
+        undo_button(font, handle),
+        format!("Undo ({modifier}+Z)"),
+        font,
+    ));
+    row = row.add(tip(
+        redo_button(font, handle),
+        format!("Redo ({modifier}+Y)"),
+        font,
+    ));
 
     Box::new(row)
 }
@@ -295,13 +369,19 @@ fn family_combo(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
     let reflect_handle = handle.clone();
     let names_owned: Vec<String> = font_option_names().iter().map(|s| s.to_string()).collect();
     Box::new(
-        crate::font_picker::font_preview_combo(Arc::clone(font), 12.0, default_idx, None, move |idx| {
-            if let Some(name) = names_owned.get(idx) {
-                // Load the face on demand so the resolver can pick it up.
-                crate::windows::rich_text_demo::request_font(name);
-                click_handle.exec(&RichCommand::SetFontFamily(name.clone()));
-            }
-        })
+        crate::font_picker::font_preview_combo(
+            Arc::clone(font),
+            12.0,
+            default_idx,
+            None,
+            move |idx| {
+                if let Some(name) = names_owned.get(idx) {
+                    // Load the face on demand so the resolver can pick it up.
+                    crate::windows::rich_text_demo::request_font(name);
+                    click_handle.exec(&RichCommand::SetFontFamily(name.clone()));
+                }
+            },
+        )
         // Keep the family dropdown compact: the per-family preview label can be
         // wide, so cap it at a fixed width instead of letting the flex row
         // stretch it across the whole toolbar. `FontPreviewCombo` forwards this
@@ -327,7 +407,10 @@ fn family_reflection_index(handle: &RichEditHandle) -> Option<usize> {
 
 /// Font-size dropdown.
 fn size_combo(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
-    let labels: Vec<String> = FONT_SIZES.iter().map(|s| format!("{}", *s as i64)).collect();
+    let labels: Vec<String> = FONT_SIZES
+        .iter()
+        .map(|s| format!("{}", *s as i64))
+        .collect();
     // Default to 16 pt (the widget default).
     let default_idx = FONT_SIZES.iter().position(|s| *s == 16.0).unwrap_or(0);
     let click_handle = handle.clone();
@@ -432,8 +515,15 @@ mod tests {
         assert_eq!(
             child_type_names(toolbar.children()[0].as_ref()),
             [
-                "Button", "Button", "Button", "Button", "FontPicker", "ComboBox", "Button",
-                "Button", "Button",
+                "Button",
+                "Button",
+                "Button",
+                "Button",
+                "FontPicker",
+                "ComboBox",
+                "Button",
+                "Button",
+                "Button",
             ],
             "row 1 lost a control (size combo, a colour button, or remove-highlight)"
         );

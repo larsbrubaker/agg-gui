@@ -425,8 +425,12 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
     // Manual draw-report capture (Ctrl+Shift+D). Poll before the render borrow
     // so building the report can take its own `DEMO_APP` borrow. Console-only
     // on the web (no filesystem for a log file).
-    let want_report = DEBUG_REPORT_REQUESTED
-        .with(|c| c.borrow().as_ref().map(|r| r.replace(false)).unwrap_or(false));
+    let want_report = DEBUG_REPORT_REQUESTED.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|r| r.replace(false))
+            .unwrap_or(false)
+    });
     if want_report {
         DEMO_APP.with(|app_cell| {
             if let Ok(borrow) = app_cell.try_borrow() {

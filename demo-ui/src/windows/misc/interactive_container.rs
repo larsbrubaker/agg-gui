@@ -353,7 +353,10 @@ mod tests {
             &mut c,
             Point::new(plus.x + plus.width * 0.5, plus.y + plus.height * 0.5),
         );
-        assert!(!c.hovered, "hover must be false while pointer is over a button");
+        assert!(
+            !c.hovered,
+            "hover must be false while pointer is over a button"
+        );
     }
 
     #[test]

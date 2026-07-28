@@ -161,11 +161,16 @@ pub fn misc_widgets_section(font: &Arc<Font>) -> Box<dyn Widget> {
     let angle_cell = Rc::new(Cell::new(TAU / 3.0)); // 120°
     {
         let ac = Rc::clone(&angle_cell);
-        let drag = DragValue::new(angle_cell.get().to_degrees(), -360.0, 360.0, Arc::clone(font))
-            .with_speed(1.0)
-            .with_decimals(0)
-            .with_suffix("°")
-            .on_change(move |deg| ac.set(deg.to_radians()));
+        let drag = DragValue::new(
+            angle_cell.get().to_degrees(),
+            -360.0,
+            360.0,
+            Arc::clone(font),
+        )
+        .with_speed(1.0)
+        .with_decimals(0)
+        .with_suffix("°")
+        .on_change(move |deg| ac.set(deg.to_radians()));
 
         // Live "≈ Nτ" readout rebuilt whenever the angle changes.
         let readout = {
@@ -293,12 +298,14 @@ pub fn checkboxes_section(font: &Arc<Font>) -> Box<dyn Widget> {
     {
         let cell = Rc::clone(&shared_bool);
         col.push(
-            Box::new(SizedBox::new().with_height(28.0).with_child(Box::new(
-                Checkbox::new("checkbox", Arc::clone(font), shared_bool.get())
-                    .with_font_size(12.5)
-                    .with_state_cell(Rc::clone(&shared_bool))
-                    .on_change(move |v| cell.set(v)),
-            ))),
+            Box::new(
+                SizedBox::new().with_height(28.0).with_child(Box::new(
+                    Checkbox::new("checkbox", Arc::clone(font), shared_bool.get())
+                        .with_font_size(12.5)
+                        .with_state_cell(Rc::clone(&shared_bool))
+                        .on_change(move |v| cell.set(v)),
+                )),
+            ),
             0.0,
         );
     }
@@ -345,21 +352,23 @@ pub fn checkboxes_section(font: &Arc<Font>) -> Box<dyn Widget> {
         let items_ind = items.clone();
         let items_set = items.clone();
         col.push(
-            Box::new(SizedBox::new().with_height(24.0).with_child(Box::new(
-                Checkbox::new("Check/uncheck all", Arc::clone(font), all_cell.get())
-                    .with_font_size(12.5)
-                    .with_state_cell(Rc::clone(&all_cell))
-                    .with_indeterminate_fn(move || {
-                        let any = items_ind.iter().any(|c| c.get());
-                        let all = items_ind.iter().all(|c| c.get());
-                        any && !all
-                    })
-                    .on_change(move |v| {
-                        for c in &items_set {
-                            c.set(v);
-                        }
-                    }),
-            ))),
+            Box::new(
+                SizedBox::new().with_height(24.0).with_child(Box::new(
+                    Checkbox::new("Check/uncheck all", Arc::clone(font), all_cell.get())
+                        .with_font_size(12.5)
+                        .with_state_cell(Rc::clone(&all_cell))
+                        .with_indeterminate_fn(move || {
+                            let any = items_ind.iter().any(|c| c.get());
+                            let all = items_ind.iter().all(|c| c.get());
+                            any && !all
+                        })
+                        .on_change(move |v| {
+                            for c in &items_set {
+                                c.set(v);
+                            }
+                        }),
+                )),
+            ),
             0.0,
         );
     }
@@ -368,14 +377,16 @@ pub fn checkboxes_section(font: &Arc<Font>) -> Box<dyn Widget> {
         let items_snapshot = items.clone();
         let all_c = Rc::clone(&all_cell);
         col.push(
-            Box::new(SizedBox::new().with_height(24.0).with_child(Box::new(
-                Checkbox::new(format!("Item {}", i + 1), Arc::clone(font), item.get())
-                    .with_font_size(12.5)
-                    .with_state_cell(Rc::clone(&item_c))
-                    .on_change(move |_v| {
-                        all_c.set(items_snapshot.iter().all(|c| c.get()));
-                    }),
-            ))),
+            Box::new(
+                SizedBox::new().with_height(24.0).with_child(Box::new(
+                    Checkbox::new(format!("Item {}", i + 1), Arc::clone(font), item.get())
+                        .with_font_size(12.5)
+                        .with_state_cell(Rc::clone(&item_c))
+                        .on_change(move |_v| {
+                            all_c.set(items_snapshot.iter().all(|c| c.get()));
+                        }),
+                )),
+            ),
             0.0,
         );
     }
@@ -451,12 +462,18 @@ pub fn custom_collapsing_section(font: &Arc<Font>) -> Box<dyn Widget> {
     {
         let toggle_cell = Rc::clone(&open);
         col.push(
-            Box::new(SizedBox::new().with_height(24.0).with_child(Box::new(
-                Checkbox::new("Show body (toggle in header row)", Arc::clone(font), open.get())
+            Box::new(
+                SizedBox::new().with_height(24.0).with_child(Box::new(
+                    Checkbox::new(
+                        "Show body (toggle in header row)",
+                        Arc::clone(font),
+                        open.get(),
+                    )
                     .with_font_size(12.5)
                     .with_state_cell(Rc::clone(&toggle_cell))
                     .on_change(move |v| toggle_cell.set(v)),
-            ))),
+                )),
+            ),
             0.0,
         );
     }

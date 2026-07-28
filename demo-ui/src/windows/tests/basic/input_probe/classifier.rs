@@ -565,7 +565,10 @@ mod tests {
         let mut c = InteractionClassifier::new(ProbeKind::Hover);
         assert!(c.on_down(MouseButton::Left, p(5.0, 5.0), 0.0).is_empty());
         // Entering emits HoverEnter (a hover event), but never click/drag.
-        assert!(!c.on_move(p(40.0, 40.0), true, 5.0).iter().any(is_click_or_drag));
+        assert!(!c
+            .on_move(p(40.0, 40.0), true, 5.0)
+            .iter()
+            .any(is_click_or_drag));
         assert!(!c
             .on_up(MouseButton::Left, p(40.0, 40.0), 10.0)
             .iter()

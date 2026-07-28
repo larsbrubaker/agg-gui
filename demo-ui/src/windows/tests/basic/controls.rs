@@ -104,19 +104,13 @@ pub fn clipboard_test(font: Arc<Font>) -> Box<dyn Widget> {
     // egui shows an image next to a 📋 button that copies it. We generate a
     // small RGBA gradient, display it, and copy the identical buffer.
     col.push(
-        Box::new(
-            Label::new("You can also copy images:", Arc::clone(&font)).with_font_size(12.0),
-        ),
+        Box::new(Label::new("You can also copy images:", Arc::clone(&font)).with_font_size(12.0)),
         0.0,
     );
     const IMG_W: u32 = 48;
     const IMG_H: u32 = 48;
     let image_data = Rc::new(generate_test_image(IMG_W, IMG_H));
-    let image_source = Rc::new(RefCell::new(Some((
-        (*image_data).clone(),
-        IMG_W,
-        IMG_H,
-    ))));
+    let image_source = Rc::new(RefCell::new(Some(((*image_data).clone(), IMG_W, IMG_H))));
     let copy_image = Rc::clone(&image_data);
     let image_row = FlexRow::new()
         .with_gap(10.0)
@@ -475,7 +469,11 @@ impl Widget for EventHistoryWidget {
                     .map(|m| m.width)
                     .unwrap_or(0.0);
                 ctx.set_fill_color(v.text_dim);
-                ctx.fill_text(&format!(" \u{00d7}{}", entry.count), 6.0 + sw + 2.0, y + 4.0);
+                ctx.fill_text(
+                    &format!(" \u{00d7}{}", entry.count),
+                    6.0 + sw + 2.0,
+                    y + 4.0,
+                );
             }
         }
     }
@@ -495,15 +493,24 @@ impl Widget for EventHistoryWidget {
                 false,
                 true,
             ),
-            Event::MouseUp { button, .. } => {
-                (format!("MouseUp {button:?}"), format!("MouseUp {button:?}"), false, true)
-            }
-            Event::KeyDown { key, .. } => {
-                (format!("KeyDown {key:?}"), format!("KeyDown {key:?}"), false, true)
-            }
-            Event::KeyUp { key, .. } => {
-                (format!("KeyUp {key:?}"), format!("KeyUp {key:?}"), false, true)
-            }
+            Event::MouseUp { button, .. } => (
+                format!("MouseUp {button:?}"),
+                format!("MouseUp {button:?}"),
+                false,
+                true,
+            ),
+            Event::KeyDown { key, .. } => (
+                format!("KeyDown {key:?}"),
+                format!("KeyDown {key:?}"),
+                false,
+                true,
+            ),
+            Event::KeyUp { key, .. } => (
+                format!("KeyUp {key:?}"),
+                format!("KeyUp {key:?}"),
+                false,
+                true,
+            ),
             // Record wheel but let it bubble so the ScrollView can scroll.
             Event::MouseWheel { delta_y, .. } => (
                 "MouseWheel".to_string(),

@@ -84,7 +84,12 @@ fn open_text_editor_hands_off_to_sink_when_installed() {
     editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
     seed_nodes(&mut editor, &memory, vec![mk_node(1, "N", [0.0, 0.0])]);
 
-    editor.open_text_editor(NodeId(1), "label".to_string(), "hi".to_string(), [0.0, 0.0, 60.0, 20.0]);
+    editor.open_text_editor(
+        NodeId(1),
+        "label".to_string(),
+        "hi".to_string(),
+        [0.0, 0.0, 60.0, 20.0],
+    );
 
     assert!(
         captured.borrow().is_some(),
@@ -107,7 +112,12 @@ fn open_text_editor_uses_local_overlay_when_no_sink() {
     editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
     seed_nodes(&mut editor, &memory, vec![mk_node(1, "N", [0.0, 0.0])]);
 
-    editor.open_text_editor(NodeId(1), "label".to_string(), "hi".to_string(), [0.0, 0.0, 60.0, 20.0]);
+    editor.open_text_editor(
+        NodeId(1),
+        "label".to_string(),
+        "hi".to_string(),
+        [0.0, 0.0, 60.0, 20.0],
+    );
 
     assert!(
         editor.overlay.is_some(),
@@ -131,7 +141,12 @@ fn text_editor_escape_reverts_to_original_value() {
     editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
     seed_nodes(&mut editor, &memory, vec![mk_node(1, "N", [0.0, 0.0])]);
 
-    editor.open_text_editor(NodeId(1), "label".to_string(), "original".to_string(), [0.0, 0.0, 60.0, 20.0]);
+    editor.open_text_editor(
+        NodeId(1),
+        "label".to_string(),
+        "original".to_string(),
+        [0.0, 0.0, 60.0, 20.0],
+    );
     // Stand in for the live keystroke path: on_change commits the
     // in-progress text on every edit.
     memory.lock().unwrap().set_property(
@@ -153,7 +168,10 @@ fn text_editor_escape_reverts_to_original_value() {
             assert_eq!(name, "label");
             assert_eq!(s, "original", "Escape must restore the pre-edit string");
         }
-        other => panic!("expected a revert write of Text(\"original\"), got {:?}", other),
+        other => panic!(
+            "expected a revert write of Text(\"original\"), got {:?}",
+            other
+        ),
     }
     assert!(
         editor.overlay.is_none(),
@@ -240,7 +258,10 @@ fn color_picker_escape_releases_overlay_and_reopens_for_other_node() {
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
-    assert!(editor.overlay.is_some(), "clicking A's colour row opens the picker");
+    assert!(
+        editor.overlay.is_some(),
+        "clicking A's colour row opens the picker"
+    );
 
     // Dismiss via Escape (window chrome).
     editor.on_event(&Event::KeyDown {
@@ -289,7 +310,10 @@ fn color_picker_click_away_releases_overlay_and_reopens_for_other_node() {
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
-    assert!(editor.overlay.is_some(), "clicking A's colour row opens the picker");
+    assert!(
+        editor.overlay.is_some(),
+        "clicking A's colour row opens the picker"
+    );
 
     // Press far outside the dialog (initial window bounds start at
     // (60, 60)); with click-away enabled this dismisses the picker.
@@ -328,7 +352,12 @@ fn text_editor_escape_releases_overlay_and_reopens_for_other_node() {
     editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
     seed_nodes(&mut editor, &memory, vec![mk_node(1, "N", [0.0, 0.0])]);
 
-    editor.open_text_editor(NodeId(1), "label".to_string(), "a".to_string(), [0.0, 0.0, 60.0, 20.0]);
+    editor.open_text_editor(
+        NodeId(1),
+        "label".to_string(),
+        "a".to_string(),
+        [0.0, 0.0, 60.0, 20.0],
+    );
     assert!(editor.overlay.is_some());
     editor.on_event(&Event::KeyDown {
         key: Key::Escape,
@@ -340,7 +369,12 @@ fn text_editor_escape_releases_overlay_and_reopens_for_other_node() {
     );
 
     // Reopen for a different node — must install a fresh overlay.
-    editor.open_text_editor(NodeId(2), "label".to_string(), "b".to_string(), [0.0, 0.0, 60.0, 20.0]);
+    editor.open_text_editor(
+        NodeId(2),
+        "label".to_string(),
+        "b".to_string(),
+        [0.0, 0.0, 60.0, 20.0],
+    );
     assert!(
         editor.overlay.is_some(),
         "the text editor must reopen for a second node after dismissal"

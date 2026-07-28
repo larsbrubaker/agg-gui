@@ -185,8 +185,16 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
                 code_line("}", fg, &font),
                 code_line("", fg, &font),
                 code_line("impl CodeExample {", kw, &font),
-                code_line("    fn ui(&mut self, font: &Arc<Font>) -> Box<dyn Widget> {", fn_, &font),
-                code_line("        // Saves us from writing `&mut self.name` etc", dim, &font),
+                code_line(
+                    "    fn ui(&mut self, font: &Arc<Font>) -> Box<dyn Widget> {",
+                    fn_,
+                    &font,
+                ),
+                code_line(
+                    "        // Saves us from writing `&mut self.name` etc",
+                    dim,
+                    &font,
+                ),
                 code_line("        let Self { name, age } = self;", fg, &font),
             ],
             code_bg,
@@ -328,10 +336,7 @@ pub fn code_example(font: Arc<Font>) -> Box<dyn Widget> {
     // `crate::rust_view_ui(ui, "    }\n}")` after the grid.
     col.push(
         code_box(
-            vec![
-                code_line("    }", fg, &font),
-                code_line("}", fg, &font),
-            ],
+            vec![code_line("    }", fg, &font), code_line("}", fg, &font)],
             code_bg,
         ),
         0.0,

@@ -352,7 +352,8 @@ impl Widget for GlyphGrid {
         // each Tooltip's hover timer intact.
         self.slot_chars.resize(visible.len(), '\0');
         while self.children.len() < visible.len() {
-            self.children.push(Self::build_cell('\0', &self.fallback_font));
+            self.children
+                .push(Self::build_cell('\0', &self.fallback_font));
             self.slot_chars[self.children.len() - 1] = '\0';
         }
         self.children.truncate(visible.len());

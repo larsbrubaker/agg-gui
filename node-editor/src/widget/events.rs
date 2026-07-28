@@ -119,8 +119,7 @@ impl NodeEditor {
                         // the implicit default) follows the DragValue
                         // contract — threshold, step snap, click-to-edit.
                         let attrs = prop.editor_kind.as_ref().and_then(|k| k.number_attrs());
-                        let is_slider =
-                            matches!(prop.editor_kind, Some(EditorKind::Slider(_)));
+                        let is_slider = matches!(prop.editor_kind, Some(EditorKind::Slider(_)));
                         // Step snapping is a NumberDrag-only behaviour. Slider
                         // rows keep their historical *continuous* scrub even
                         // when a step attr is present, so gate the step on
@@ -254,8 +253,7 @@ impl NodeEditor {
                             // subgraph / drill into a component. Only
                             // when it declines (returns false) do we
                             // apply the built-in collapse toggle.
-                            let handled =
-                                self.model.lock().unwrap().on_node_activated(node_id);
+                            let handled = self.model.lock().unwrap().on_node_activated(node_id);
                             if !handled {
                                 self.toggle_collapsed(node_id);
                             }
@@ -541,7 +539,14 @@ impl NodeEditor {
                 // value already committed live during the move.
                 if click_to_edit && !dragging {
                     self.open_number_editor(
-                        node_id, prop_name, start_value, min, max, step, decimals, pill_rect,
+                        node_id,
+                        prop_name,
+                        start_value,
+                        min,
+                        max,
+                        step,
+                        decimals,
+                        pill_rect,
                     );
                 }
                 EventResult::Consumed

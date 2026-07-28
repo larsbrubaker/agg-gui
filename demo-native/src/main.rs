@@ -79,9 +79,9 @@ fn os_tooltip_timings() -> Option<agg_gui::TooltipTimings> {
     if ok == 0 || hover_ms == 0 {
         return None;
     }
-    Some(agg_gui::TooltipTimings::from_initial_delay(Duration::from_millis(
-        hover_ms as u64,
-    )))
+    Some(agg_gui::TooltipTimings::from_initial_delay(
+        Duration::from_millis(hover_ms as u64),
+    ))
 }
 
 #[cfg(not(windows))]
@@ -129,7 +129,10 @@ fn emit_draw_report(app: &App, label: &str) {
             eprintln!("[agg-gui] draw report appended to {}", path.display());
         }
         Err(err) => {
-            eprintln!("[agg-gui] failed to write draw report to {}: {err}", path.display());
+            eprintln!(
+                "[agg-gui] failed to write draw report to {}: {err}",
+                path.display()
+            );
         }
     }
 }
@@ -208,17 +211,18 @@ fn main() {
     // file — e.g. the DPI-ratchet bug that grew the size past the GPU's max
     // texture dimension every launch — recovers instead of panicking
     // `Surface::configure`.
-    let saved_size = initial_state.as_ref().and_then(|s| match (s.window_w, s.window_h) {
-        (Some(w), Some(h)) => Some((w, h)),
-        _ => None,
-    });
+    let saved_size = initial_state
+        .as_ref()
+        .and_then(|s| match (s.window_w, s.window_h) {
+            (Some(w), Some(h)) => Some((w, h)),
+            _ => None,
+        });
     // Provisional sanitise WITHOUT monitor info: winit 0.30 exposes monitors on
     // the `Window` (and `ActiveEventLoop`), not the pre-run `EventLoop`, so the
     // real display size isn't available until the window exists.  The fallback
     // ceiling already floors tiny values and caps an over-large size below the
     // GPU max; we refine against the actual monitor right after creation.
-    let (mut start_w, mut start_h) =
-        window_size::sanitize_restored_window_size(saved_size, None);
+    let (mut start_w, mut start_h) = window_size::sanitize_restored_window_size(saved_size, None);
     let start_maximized = initial_state
         .as_ref()
         .map(|s| s.window_maximized)
@@ -259,7 +263,10 @@ fn main() {
     // window is shown.  The window is still hidden, so any resize here is
     // invisible; `gpu.resize` (and the surface clamp) cover the case where
     // `request_inner_size` is applied asynchronously.
-    if let Some(monitor) = window.primary_monitor().or_else(|| window.current_monitor()) {
+    if let Some(monitor) = window
+        .primary_monitor()
+        .or_else(|| window.current_monitor())
+    {
         let m = monitor.size();
         let (w, h) =
             window_size::sanitize_restored_window_size(saved_size, Some((m.width, m.height)));
@@ -486,9 +493,7 @@ fn main() {
                 let (x, y) = (touch.location.x, touch.location.y);
                 let force = touch.force.map(|f| f.normalized() as f32);
                 match touch.phase {
-                    winit::event::TouchPhase::Started => {
-                        app.on_touch_start(dev, tid, x, y, force)
-                    }
+                    winit::event::TouchPhase::Started => app.on_touch_start(dev, tid, x, y, force),
                     winit::event::TouchPhase::Moved => app.on_touch_move(dev, tid, x, y, force),
                     winit::event::TouchPhase::Ended => app.on_touch_end(dev, tid),
                     winit::event::TouchPhase::Cancelled => app.on_touch_cancel(dev, tid),

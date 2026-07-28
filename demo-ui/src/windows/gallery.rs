@@ -17,8 +17,8 @@ use agg_gui::widget::{paint_subtree, CompositingLayer};
 use agg_gui::{
     Button, Checkbox, CollapsingHeader, Color, ColorPicker, ColorWheelPicker, ComboBox,
     Conditional, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink,
-    ImageView, Label, ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox,
-    Slider, TextField, ToggleSwitch, Tooltip, Widget,
+    ImageView, Label, ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox, Slider,
+    TextField, ToggleSwitch, Tooltip, Widget,
 };
 
 const AGG_GUI_DOCS_URL: &str = "https://docs.rs/agg-gui/";
@@ -443,25 +443,22 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
     );
 
     col.push(
-        grid_row(
-            doc_link("DragValue", "DragValue", &font),
-            {
-                // Bind to the shared scalar so the Slider and this DragValue
-                // always show the same value: `layout()` re-reads the cell each
-                // frame and drags write back. Size the wrapper to the widget's
-                // intrinsic width (value + arrows) rather than a fixed 120px.
-                let dv = DragValue::new(scalar.get(), 0.0, 360.0, Arc::clone(&font))
-                    .with_decimals(0)
-                    .with_value_cell(Rc::clone(&scalar));
-                let w = dv.intrinsic_min_width();
-                Box::new(
-                    SizedBox::new()
-                        .with_width(w)
-                        .with_height(28.0)
-                        .with_child(Box::new(dv)),
-                )
-            },
-        ),
+        grid_row(doc_link("DragValue", "DragValue", &font), {
+            // Bind to the shared scalar so the Slider and this DragValue
+            // always show the same value: `layout()` re-reads the cell each
+            // frame and drags write back. Size the wrapper to the widget's
+            // intrinsic width (value + arrows) rather than a fixed 120px.
+            let dv = DragValue::new(scalar.get(), 0.0, 360.0, Arc::clone(&font))
+                .with_decimals(0)
+                .with_value_cell(Rc::clone(&scalar));
+            let w = dv.intrinsic_min_width();
+            Box::new(
+                SizedBox::new()
+                    .with_width(w)
+                    .with_height(28.0)
+                    .with_child(Box::new(dv)),
+            )
+        }),
         0.0,
     );
 
@@ -605,7 +602,10 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
     let mut outer = FlexColumn::new().with_gap(8.0).with_panel_bg();
     outer.push(Box::new(scope), 0.0);
     outer.push(Box::new(Separator::horizontal()), 0.0);
-    outer.push(gallery_controls(&font, &visible, &interactive, &opacity), 0.0);
+    outer.push(
+        gallery_controls(&font, &visible, &interactive, &opacity),
+        0.0,
+    );
     outer.push(Box::new(Separator::horizontal()), 0.0);
     outer.push(
         Box::new(
