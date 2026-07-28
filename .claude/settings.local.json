@@ -4,5 +4,8 @@
       "Bash(cargo doc *)",
       "Bash(python3 -)"
     ]
+  },
+  "skillOverrides": {
+    "skill-creator": "off"
   }
 }

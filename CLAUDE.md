@@ -27,14 +27,6 @@ Never commit a bug fix that isn't covered by a test.
 - All tests must pass before advancing to the next phase
 - When test failures occur, treat all failures as real bugs, resolve through instrumentation and root cause analysis, never by weakening tests
 
-**Running tests:**
-```bash
-cargo test
-cargo test --lib vec_tests 
-cargo test test_name -- --exact
-cargo test -- --nocapture
-```
-
 ## Coding Standards
 
 ### File length
@@ -50,7 +42,6 @@ cargo test -- --nocapture
 - Add doc comments to functions when they clarify intent, non-obvious behavior, or
   relationships to other parts of the codebase. Skip them when the function name and
   signature already tell the full story.
-- Explain *why*, not *what*. A comment that restates the code is noise.
 
 ### Icons
 - Use **Font Awesome** icons throughout the UI. Render icons via their Unicode
@@ -69,10 +60,6 @@ cargo test -- --nocapture
 - Keep handler functions focused — if a handler grows complex, extract helpers.
 - Avoid unsafe code unless there is no alternative; document every `unsafe` block.
 
-### Names
-Follow Rust conventions (`snake_case` for functions/variables, `PascalCase` for types,
-`SCREAMING_SNAKE_CASE` for constants).
-
 ### Performance
 - **Never guess at performance problems by reading code.** Always measure first.
 - Before optimizing, instrument the real workload and identify the actual bottleneck
@@ -81,17 +68,14 @@ Follow Rust conventions (`snake_case` for functions/variables, `PascalCase` for 
   in the numbers, revert it.
 - **Target: average frame rendering time must stay under 10 ms in the demo.**
 
-### Refactoring
-Improve code when it serves a purpose, not for aesthetics.
-
 ## Shell
 
-This project uses **PowerShell** on Windows for build scripts. Claude Code's shell tool
-runs bash/Linux, so adapt commands accordingly.
+This project uses **PowerShell** on Windows for build scripts. Use the PowerShell tool
+for them; the Bash tool is available separately and takes POSIX syntax.
 
 ## Orchestration pattern
 
-The main session (Fable 5) acts as planner and orchestrator only — it should not
+The main session acts as planner and orchestrator only — it should not
 write or edit code directly. All implementation is delegated to the `implementer`
 subagent, one scoped step at a time. All post-change review is delegated to the
 `reviewer` subagent. The main session handles only planning, architecture decisions,
