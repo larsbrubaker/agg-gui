@@ -464,3 +464,91 @@ fn pop_layer_composite_respects_parent_clip_wgpu() {
         "outside the parent clip must stay black background; got {right:?}"
     );
 }
+
+/// Regression: text inside a layer that the caller has declared opaque must
+/// use LCD **subpixel** rendering, not the grayscale fallback.
+///
+/// Windows push a compositing layer to get rounded-corner clipping, then fill
+/// an opaque body into it. Gating LCD on "is any layer active" therefore
+/// dropped every window's text to grayscale while unlayered panels and menus
+/// kept subpixel — visibly inconsistent text in the same frame. The real
+/// precondition is an opaque destination, which `set_layer_opaque_backdrop`
+/// declares.
+///
+/// Asserted by looking for channel spread: LCD coverage differs per channel on
+/// glyph edges, so at least one edge pixel must show a meaningful R/G/B
+/// difference. The grayscale path writes equal channels everywhere.
+#[test]
+fn lcd_text_in_opaque_backdrop_layer_stays_subpixel() {
+    let Some((device, queue)) = try_device() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let (w, h) = (64u32, 32u32);
+    let target = Target::new(Arc::clone(&device), Arc::clone(&queue), w, h);
+
+    let mut ctx = WgpuGfxCtx::new(
+        Arc::clone(&device),
+        Arc::clone(&queue),
+        wgpu::TextureFormat::Rgba8Unorm,
+        w as f32,
+        h as f32,
+    );
+    ctx.reset(w as f32, h as f32);
+    ctx.set_lcd_mode(true);
+
+    ctx.clear(Color::white());
+    ctx.set_font(font());
+    ctx.set_font_size(22.0);
+
+    // A window's paint order: push the layer, fill an opaque body, declare
+    // the backdrop opaque, then paint text.
+    ctx.push_layer_with_alpha(w as f64, h as f64, 1.0);
+    ctx.set_fill_color(Color::white());
+    ctx.begin_path();
+    ctx.rect(0.0, 0.0, w as f64, h as f64);
+    ctx.fill();
+    ctx.set_layer_opaque_backdrop(true);
+    ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 1.0));
+    ctx.fill_text("HHHH", 4.0, 10.0);
+    ctx.pop_layer();
+    ctx.flush_to_surface(&target.view);
+
+    let data = target.read();
+
+    let mut max_spread = 0u8;
+    let mut darkest = u16::MAX;
+    for y in 0..h {
+        for x in 0..w {
+            let p = px(&data, w, x, y);
+            let lum = p[0] as u16 + p[1] as u16 + p[2] as u16;
+            darkest = darkest.min(lum);
+            let spread = p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2]);
+            max_spread = max_spread.max(spread);
+        }
+    }
+
+    // Subpixel coverage means per-channel differences on glyph edges. The
+    // grayscale fallback produces equal channels, so this is the assertion
+    // that actually distinguishes the two paths.
+    assert!(
+        max_spread > 24,
+        "text over an opaque layer backdrop must render subpixel (per-channel \
+         coverage); max channel spread was only {max_spread}, i.e. grayscale"
+    );
+
+    // ...and it must still be real black text, not washed out. The opaque
+    // path writes colour only, which is correct here because the body fill
+    // already put alpha 1 under every glyph.
+    assert!(
+        darkest < 200,
+        "text should still be dark over the opaque backdrop; darkest luminance \
+         sum was {darkest}"
+    );
+
+    let corner = px(&data, w, w - 1, 0);
+    assert!(
+        corner[0] > 230 && corner[1] > 230 && corner[2] > 230,
+        "background corner must stay white; got {corner:?}"
+    );
+}

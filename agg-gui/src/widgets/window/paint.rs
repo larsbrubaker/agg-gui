@@ -42,6 +42,10 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
         ctx.begin_path();
         ctx.rounded_rect(0.5, 0.5, w - 1.0, h - 1.0, radius);
         ctx.stroke();
+        // Opaque body fill is down — the inline editor's text can use
+        // subpixel rendering from here. Same rationale as the framed path
+        // below.
+        ctx.set_layer_opaque_backdrop(true);
         ctx.set_layer_rounded_clip(0.0, 0.0, w, h, radius);
         return;
     }
@@ -61,6 +65,14 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
     // Window body. Expanded windows leave the top strip to `WindowTitleBar`
     // so the top corner alpha comes from one shape, not overlapping fills.
     super::chrome::paint_chrome_body(ctx, w, h, &style, window.collapsed);
+
+    // The body fill just made this layer opaque, so text painted into it
+    // from here on lands on destination alpha 1 and can use LCD subpixel
+    // rendering. Without this the entire window — title bar and all
+    // content — silently falls back to grayscale text purely because a
+    // compositing layer is active, while unlayered panels and menus keep
+    // subpixel. See `DrawCtx::set_layer_opaque_backdrop`.
+    ctx.set_layer_opaque_backdrop(true);
 
     ctx.set_layer_rounded_clip(0.0, 0.0, w, h, CORNER_R);
 

@@ -53,11 +53,14 @@ impl WgpuGfxCtx {
         // that can't composite a coverage mask.
         if self.has_lcd_mask_composite() {
             let phys_size = self.font_size * ctm_scale;
-            // LCD subpixel geometry is only valid against the final opaque
-            // backbuffer.  Inside a compositing layer we rasterise a grayscale
-            // coverage mask instead — it composites (via the flattened,
-            // alpha-writing path) without chroma fringing or wash-out.
-            let use_lcd = self.lcd_mode && self.layer_stack.is_empty();
+            // LCD subpixel geometry is valid wherever the destination is
+            // opaque: the backbuffer, and equally a layer whose caller has
+            // already covered it with opaque content (a window paints its
+            // body before its text, so glyphs land on alpha 1). Over a
+            // still-transparent layer we rasterise a grayscale mask
+            // instead — it composites via the flattened, alpha-writing
+            // path without chroma fringing or wash-out.
+            let use_lcd = self.lcd_mode && self.text_dst_is_opaque();
             let cached = if use_lcd {
                 agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size)
             } else {
@@ -252,10 +255,12 @@ impl WgpuGfxCtx {
             alpha_view,
             clip: self.current_clip(),
             global_alpha: self.global_alpha as f32,
-            // Inside a compositing layer the 3-pass premultiplied blit leaves
-            // the transparent layer's alpha at 0 (it only writes colour); flatten
-            // to a single alpha-writing pass so the pop composite is correct.
-            flatten: !self.layer_stack.is_empty(),
+            // Over a still-transparent layer the 3-pass premultiplied blit
+            // leaves the layer's alpha at 0 (it only writes colour); flatten
+            // to a single alpha-writing pass so the pop composite is
+            // correct. Where the destination is already opaque the 3-pass
+            // subpixel blit is correct as-is, so keep it.
+            flatten: !self.text_dst_is_opaque(),
         });
     }
 
@@ -311,9 +316,10 @@ impl WgpuGfxCtx {
             view,
             color,
             clip: self.current_clip(),
-            // See `LcbMask.flatten` above — inside a layer, render the coverage
-            // as a single-pass grayscale quad so the layer accumulates alpha.
-            flatten: !self.layer_stack.is_empty(),
+            // See `LcbMask.flatten` above — over a transparent layer render
+            // the coverage as a single-pass grayscale quad so the layer
+            // accumulates alpha; over an opaque destination keep subpixel.
+            flatten: !self.text_dst_is_opaque(),
         });
     }
 

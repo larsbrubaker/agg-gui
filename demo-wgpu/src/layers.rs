@@ -153,6 +153,33 @@ impl WgpuGfxCtx {
         (Arc::new(texture), view)
     }
 
+    /// Mark the innermost layer as fully covered by opaque content.
+    ///
+    /// Backs `DrawCtx::set_layer_opaque_backdrop`. No-op at the top level,
+    /// where the backbuffer is already opaque.
+    pub(crate) fn set_layer_opaque_backdrop_impl(&mut self, opaque: bool) {
+        if let Some(layer) = self.layer_stack.last_mut() {
+            layer.opaque_backdrop = opaque;
+        }
+    }
+
+    /// Whether text drawn right now lands on opaque destination pixels —
+    /// the real precondition for LCD subpixel rendering.
+    ///
+    /// True at the top level (the backbuffer's alpha is pinned at 1) and
+    /// inside a layer whose caller has declared an opaque backdrop. Note
+    /// this asks about the *innermost* layer only: that is the surface
+    /// being drawn into, and an opaque region inside it stays opaque
+    /// regardless of what the enclosing layers look like. A partially
+    /// transparent ancestor fades the whole composite uniformly, which
+    /// preserves the subpixel ratios within the glyph.
+    pub(crate) fn text_dst_is_opaque(&self) -> bool {
+        match self.layer_stack.last() {
+            None => true,
+            Some(layer) => layer.opaque_backdrop,
+        }
+    }
+
     pub(crate) fn push_layer_with_alpha_impl(
         &mut self,
         width: f64,
@@ -214,6 +241,10 @@ impl WgpuGfxCtx {
             retained_key,
             rounded_clip,
             parent_clip,
+            // Starts false: nothing has been drawn into the fresh texture
+            // yet, so it is entirely transparent. Callers opt in after
+            // painting their opaque body.
+            opaque_backdrop: false,
         });
 
         // Reset draw state for the layer's local coordinate system.

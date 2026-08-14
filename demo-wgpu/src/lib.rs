@@ -222,6 +222,17 @@ pub(crate) struct WgpuLayerEntry {
     /// Scissor active in the parent at push time — applied to the composite
     /// blit on pop so the layer can't paint outside the parent's clip.
     pub(crate) parent_clip: Option<[i32; 4]>,
+    /// Set via `set_layer_opaque_backdrop` once the caller has covered this
+    /// layer with opaque content; re-enables LCD subpixel text inside it.
+    ///
+    /// The default (`false`) is the safe one. A fresh layer texture is
+    /// cleared to alpha 0 and the 3-pass subpixel composite writes only
+    /// colour, so glyphs would keep alpha 0 and the pop composite would
+    /// blend them additively toward white — the wash-out this flag's
+    /// absence is designed to avoid. Once opaque content covers the
+    /// region, destination alpha is already 1 where glyphs land and
+    /// subpixel geometry is exactly as valid as against the backbuffer.
+    pub(crate) opaque_backdrop: bool,
 }
 
 /// A retained layer that persists across frames (keyed by `u64` handle).

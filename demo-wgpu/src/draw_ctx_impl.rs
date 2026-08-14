@@ -438,6 +438,10 @@ impl DrawCtx for WgpuGfxCtx {
         self.set_layer_rounded_clip_impl(x, y, w, h, r);
     }
 
+    fn set_layer_opaque_backdrop(&mut self, opaque: bool) {
+        self.set_layer_opaque_backdrop_impl(opaque);
+    }
+
     fn composite_retained_layer(&mut self, key: u64, width: f64, height: f64, alpha: f64) -> bool {
         self.composite_retained_layer_impl(key, width, height, alpha)
     }
