@@ -420,6 +420,84 @@ mod tests {
         assert!(!state.open);
     }
 
+    /// Right-clicking with a menu open dismisses it — the desktop
+    /// convention. Previously only `MouseButton::Left` was matched, so a
+    /// right press fell through as Ignored and left the menu hanging over
+    /// whatever context menu the press was about to raise.
+    ///
+    /// Checked *over a menu row*, not in neutral space: the press must
+    /// dismiss rather than activate the item beneath the cursor.
+    #[test]
+    fn right_click_dismisses_menu() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
+        let mut items = test_items();
+        let mut state = PopupMenuState::default();
+        let viewport = Size::new(400.0, 240.0);
+        state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
+        let first_row = state.layouts(&items, viewport)[0].rows[0].rect;
+        let (result, response) = state.handle_event(
+            &mut items,
+            &Event::MouseDown {
+                pos: Point::new(first_row.x + 10.0, first_row.y + 10.0),
+                button: MouseButton::Right,
+                modifiers: Modifiers::default(),
+            },
+            viewport,
+        );
+        assert_eq!(response, MenuResponse::Closed, "right press must dismiss");
+        assert!(!state.open);
+        assert!(
+            result.is_consumed(),
+            "the dismissing press must be consumed so it cannot also \
+             activate the row underneath it",
+        );
+    }
+
+    /// The middle button dismisses too — the rule is "any non-left
+    /// press", so this pins that the arm isn't right-button-only.
+    #[test]
+    fn middle_click_dismisses_menu() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
+        let mut items = test_items();
+        let mut state = PopupMenuState::default();
+        state.open_at(Point::new(20.0, 160.0), MenuAnchorKind::Context);
+        let (_, response) = state.handle_event(
+            &mut items,
+            &Event::MouseDown {
+                pos: Point::new(390.0, 10.0),
+                button: MouseButton::Middle,
+                modifiers: Modifiers::default(),
+            },
+            Size::new(400.0, 240.0),
+        );
+        assert_eq!(response, MenuResponse::Closed);
+        assert!(!state.open);
+    }
+
+    /// A press of any button while the menu is CLOSED must stay ignored,
+    /// so the new dismiss arm can't swallow right-clicks destined for a
+    /// widget's own context menu.
+    #[test]
+    fn right_click_ignored_when_menu_closed() {
+        let _guard = crate::input_profile::profile_test_lock();
+        reset_env();
+        let mut items = test_items();
+        let mut state = PopupMenuState::default();
+        let (result, response) = state.handle_event(
+            &mut items,
+            &Event::MouseDown {
+                pos: Point::new(50.0, 50.0),
+                button: MouseButton::Right,
+                modifiers: Modifiers::default(),
+            },
+            Size::new(400.0, 240.0),
+        );
+        assert_eq!(response, MenuResponse::None);
+        assert!(!result.is_consumed());
+    }
+
     #[test]
     fn keyboard_navigation_activates_hovered_row() {
         let _guard = crate::input_profile::profile_test_lock();

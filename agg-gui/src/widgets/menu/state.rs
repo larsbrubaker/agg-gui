@@ -159,6 +159,16 @@ impl PopupMenuState {
                 button: MouseButton::Left,
                 ..
             } => self.handle_left_down(items, *pos, viewport),
+            // Any non-left press dismisses — the desktop convention.
+            // Right-clicking with a menu open closes it instead of
+            // leaving it hanging over whatever context menu that press
+            // is about to raise. Consumed so the press only dismisses:
+            // it must not also activate the item underneath it.
+            Event::MouseDown { .. } => {
+                self.close();
+                crate::animation::request_draw();
+                (EventResult::Consumed, MenuResponse::Closed)
+            }
             Event::MouseUp {
                 pos,
                 button: MouseButton::Left,
