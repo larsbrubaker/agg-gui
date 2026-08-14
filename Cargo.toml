@@ -4,10 +4,31 @@ default-members = ["agg-gui", "demo-native", "demo-wgpu", "demo-ui", "node-edito
 resolver = "2"
 
 # ---------------------------------------------------------------------------
-# Optimize dependencies in debug builds so the GL/tess2/rustybuzz render path
-# runs at near-release speed while your own code stays unoptimized (fast
-# incremental compile, usable backtraces).
+# Debug-build optimization. BOTH sections below are required — do not "simplify"
+# by deleting either one.
+#
+# `[profile.dev.package."*"]` applies to DEPENDENCIES ONLY; Cargo does not apply
+# it to workspace members. agg-gui's own rendering code is heavily generic and
+# `#[inline]`, so it is monomorphized into the *calling* crate — the demos here
+# (`demo-native`, `node-editor`, ...) and downstream consumers alike. Those
+# instantiations are codegen'd in the caller and inherit the caller's opt-level,
+# so with workspace members left at 0 the dependency override is silently
+# defeated in exactly the hottest code path.
+#
+# Measured downstream (AtomArtist, same defect): the wgpu render-pass walk in
+# `WgpuGfxCtx::end_frame` ran 118 ms/frame with only the `package."*"` override
+# and 3.7 ms/frame once workspace members also got an opt-level — total frame
+# time 120-200 ms down to ~11 ms, i.e. release parity. Our demos pay the same
+# penalty. `debug-assertions` and debuginfo are untouched, so assertions and
+# backtraces still work.
+#
+# opt-level 1 (not 2) for workspace members is a deliberate balance: it recovers
+# essentially all of the runtime win while keeping incremental compiles fast,
+# since member crates are the ones we recompile constantly.
 # ---------------------------------------------------------------------------
+
+[profile.dev]
+opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
