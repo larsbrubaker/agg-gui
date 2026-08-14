@@ -282,6 +282,59 @@ impl SsaaFramebuffer {
         );
     }
 
+    /// Downsample by a factor chosen at **runtime**, dispatching to the
+    /// pipeline that is correct for it.
+    ///
+    /// Consumers that pick their supersample factor per device — rather
+    /// than baking one in at compile time — need this. A renderer
+    /// running on both a desktop at device-pixel-ratio 1 and a phone at
+    /// ratio 3 cannot use a fixed factor: the offscreen targets are
+    /// sized `factor × device pixels`, so a constant 3× multiplies an
+    /// already-tripled resolution and blows past both the memory budget
+    /// and `max_texture_dimension_2d`. Such a consumer computes its
+    /// factor from the device scale and limits, then hands it here.
+    ///
+    /// Mapping, per the analysis in the individual methods:
+    ///
+    /// | factor | pipeline                        | why                                |
+    /// |--------|---------------------------------|------------------------------------|
+    /// | 0, 1   | [`Self::blit_to`]               | identity — texel centres align     |
+    /// | 2      | [`Self::blit_to`]               | one bilinear tap IS the 2×2 box    |
+    /// | 3      | [`Self::blit_downsample_3x_to`] | 9 taps; bilinear misses 5 of 9     |
+    /// | ≥4     | [`Self::blit_downsample_4x_to`] | 4 bilinear taps = 16-texel box     |
+    ///
+    /// Factors above 4 clamp to the 4× pipeline rather than erroring —
+    /// it degrades gracefully (a partial box) instead of failing a
+    /// frame, and no caller supersamples that far today.
+    #[allow(clippy::too_many_arguments)]
+    pub fn blit_downsample_to(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+        dst_rect: Rect,
+        parent_clip: Option<[i32; 4]>,
+        pipelines: &WgpuPipelines,
+        factor: u32,
+    ) {
+        let pipeline = match factor {
+            0 | 1 | 2 => &pipelines.tex_pipeline,
+            3 => &pipelines.tex_downsample_3x_pipeline,
+            _ => &pipelines.tex_downsample_4x_pipeline,
+        };
+        self.blit_to_inner(
+            device,
+            encoder,
+            target_view,
+            target_size,
+            dst_rect,
+            parent_clip,
+            pipeline,
+            pipelines,
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn blit_to_inner(
         &self,
