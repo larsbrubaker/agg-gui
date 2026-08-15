@@ -34,6 +34,7 @@
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use web_time::Instant;
 
@@ -158,6 +159,77 @@ pub fn pointer_press_epoch() -> u64 {
 /// `wants_draw` / `invalidation_epoch` / `async_state_epoch` read —
 /// see [`pump_async_wakeup`].
 static ASYNC_WAKEUP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+// ── Host waker ───────────────────────────────────────────────────────────────
+//
+// Bumping `ASYNC_WAKEUP_COUNTER` is only half the story for a *reactive* host.
+// The main thread merges the bump in `pump_async_wakeup`, but that runs only
+// when something already made the host read `wants_draw()` / an epoch.  A host
+// parked in winit's `ControlFlow::Wait` (or `WaitUntil` with a far deadline) is
+// not executing at all, so a worker-thread `signal_async_state_change` would
+// sit unobserved until an unrelated OS event happened to wake the loop.
+// Consumers otherwise have to paper over this with a per-frame keep-alive
+// repaint, which burns a core to stay idle.
+//
+// The optional host waker closes that gap: the host installs a cheap,
+// thread-safe nudge (typically `EventLoopProxy::send_event`) once at startup,
+// and `signal_async_state_change` calls it right after the atomic bump so the
+// woken loop is guaranteed to observe the new counter value.
+type HostWaker = Arc<dyn Fn() + Send + Sync>;
+
+/// Process-global waker slot.  Locked only to clone the `Arc` out; the waker
+/// itself always runs with the lock released (see [`signal_async_state_change`]).
+static HOST_WAKER: Mutex<Option<HostWaker>> = Mutex::new(None);
+
+/// Install (or replace) the process-global host waker.
+///
+/// Call this once from a reactive host's startup path, passing a closure that
+/// nudges the event loop awake — on winit that is
+/// `move || { let _ = proxy.send_event(UserEvent::Wake); }`.  Whenever any
+/// thread calls [`signal_async_state_change`], the waker fires *after* the
+/// cross-thread counter has been bumped, so the host is guaranteed to see the
+/// pending wakeup on its next `wants_draw()` read.
+///
+/// Requirements on `waker`:
+/// * **Cheap** — it runs inline on whatever worker thread finished an async
+///   load; do no real work in it, just signal.
+/// * **Thread-safe and non-reentrant** — it may be called from any thread and
+///   must not call back into `signal_async_state_change`.
+/// * **Failure-tolerant** — a closed event loop should be ignored (drop the
+///   `send_event` error) rather than panicking.
+///
+/// Hosts that already pump every tick — the wasm `requestAnimationFrame` loop,
+/// game-style continuous redraw hosts, and the headless test harnesses — do not
+/// need a waker; they reach `pump_async_wakeup` on their own schedule.
+pub fn set_host_waker(waker: impl Fn() + Send + Sync + 'static) {
+    let waker: HostWaker = Arc::new(waker);
+    match HOST_WAKER.lock() {
+        Ok(mut slot) => *slot = Some(waker),
+        // Poison-tolerant, like the rest of this module's best-effort signals:
+        // a panic elsewhere must not permanently disable host wakeups.
+        Err(poisoned) => *poisoned.into_inner() = Some(waker),
+    }
+}
+
+/// Remove any installed host waker, restoring the plain counter-only behaviour.
+///
+/// Hosts call this on shutdown so a dangling `EventLoopProxy` isn't retained;
+/// tests call it to reset this process-global slot between cases.
+pub fn clear_host_waker() {
+    match HOST_WAKER.lock() {
+        Ok(mut slot) => *slot = None,
+        Err(poisoned) => *poisoned.into_inner() = None,
+    }
+}
+
+/// Clone the installed waker out of its lock, if any.  The clone exists so the
+/// call site can release the lock before invoking arbitrary host code.
+fn host_waker() -> Option<HostWaker> {
+    match HOST_WAKER.lock() {
+        Ok(slot) => slot.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    }
+}
 
 /// Merge any pending cross-thread async-wakeup bumps into the calling
 /// thread's draw/invalidation/async-state state.
@@ -291,6 +363,10 @@ pub fn invalidation_epoch() -> u64 {
 /// would have given freshly-decoded SVG badges their natural
 /// dimensions (the user-visible "wrong scale until any other event"
 /// bug).
+///
+/// If a host waker is installed ([`set_host_waker`]), it is invoked after the
+/// cross-thread bump so a reactive host parked in `ControlFlow::Wait` wakes and
+/// observes the already-published counter value.
 pub fn signal_async_state_change() {
     // Cross-thread visible bump.  Main thread merges via pump_async_wakeup.
     ASYNC_WAKEUP_COUNTER.fetch_add(1, Ordering::AcqRel);
@@ -301,6 +377,11 @@ pub fn signal_async_state_change() {
     NEEDS_DRAW.with(|c| c.set(true));
     INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
     ASYNC_STATE_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+    // Nudge a parked reactive host.  Cloned out of the lock first: the waker is
+    // arbitrary host code and must not run while HOST_WAKER is held.
+    if let Some(waker) = host_waker() {
+        waker();
+    }
 }
 
 /// Current async-state epoch.  Backbuffer caches store this and force
@@ -457,6 +538,154 @@ impl Tween {
 impl Default for Tween {
     fn default() -> Self {
         Self::new(0.0, 0.12)
+    }
+}
+
+#[cfg(test)]
+mod host_waker_tests {
+    //! Coverage for the reactive-host waker hook: a worker-thread
+    //! [`signal_async_state_change`] must be able to nudge a host parked in
+    //! `ControlFlow::Wait`.
+    //!
+    //! `HOST_WAKER` and `ASYNC_WAKEUP_COUNTER` are process-global, and other
+    //! tests in this crate call `signal_async_state_change` concurrently — so
+    //! these tests serialize against each other with a local mutex, count
+    //! *their own* invocations rather than reading the global counter after
+    //! the fact, and assert with `>=` where a foreign signal could add more.
+    use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    /// Serializes only these tests; unrelated tests may still signal in
+    /// parallel, which is why every assertion below tolerates extra fires.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn waker_fires_on_signal() {
+        let _guard = serial();
+        let fires = Arc::new(AtomicU64::new(0));
+        let seen = Arc::clone(&fires);
+        set_host_waker(move || {
+            seen.fetch_add(1, Ordering::AcqRel);
+        });
+
+        signal_async_state_change();
+        clear_host_waker();
+
+        assert!(
+            fires.load(Ordering::Acquire) >= 1,
+            "installed waker must run when any thread signals an async change"
+        );
+    }
+
+    #[test]
+    fn waker_sees_counter_already_bumped() {
+        let _guard = serial();
+        let before = ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire);
+        let observed = Arc::new(AtomicU64::new(0));
+        let sink = Arc::clone(&observed);
+        set_host_waker(move || {
+            // Snapshot from inside the waker: the host is woken only after the
+            // bump is published, otherwise it would park again having seen
+            // nothing.
+            sink.store(ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire), Ordering::Release);
+        });
+
+        signal_async_state_change();
+        clear_host_waker();
+
+        assert!(
+            observed.load(Ordering::Acquire) > before,
+            "the counter must be bumped BEFORE the waker runs"
+        );
+    }
+
+    #[test]
+    fn replacing_the_waker_retires_the_old_one() {
+        let _guard = serial();
+        let old_fires = Arc::new(AtomicU64::new(0));
+        let old_sink = Arc::clone(&old_fires);
+        set_host_waker(move || {
+            old_sink.fetch_add(1, Ordering::AcqRel);
+        });
+
+        let new_fires = Arc::new(AtomicU64::new(0));
+        let new_sink = Arc::clone(&new_fires);
+        set_host_waker(move || {
+            new_sink.fetch_add(1, Ordering::AcqRel);
+        });
+        let old_baseline = old_fires.load(Ordering::Acquire);
+
+        signal_async_state_change();
+        clear_host_waker();
+
+        assert!(
+            new_fires.load(Ordering::Acquire) >= 1,
+            "the replacement waker runs"
+        );
+        assert_eq!(
+            old_fires.load(Ordering::Acquire),
+            old_baseline,
+            "the replaced waker no longer runs"
+        );
+    }
+
+    #[test]
+    fn clear_stops_the_waker() {
+        let _guard = serial();
+        let fires = Arc::new(AtomicU64::new(0));
+        let sink = Arc::clone(&fires);
+        set_host_waker(move || {
+            sink.fetch_add(1, Ordering::AcqRel);
+        });
+        clear_host_waker();
+        let baseline = fires.load(Ordering::Acquire);
+
+        signal_async_state_change();
+
+        assert_eq!(
+            fires.load(Ordering::Acquire),
+            baseline,
+            "a cleared waker must not run again"
+        );
+    }
+
+    #[test]
+    fn signal_from_a_worker_thread_wakes_the_host() {
+        let _guard = serial();
+        let fires = Arc::new(AtomicU64::new(0));
+        let sink = Arc::clone(&fires);
+        set_host_waker(move || {
+            sink.fetch_add(1, Ordering::AcqRel);
+        });
+
+        // The whole point of the hook: the signal originates off the main
+        // thread, where thread-local bumps are invisible to the host.
+        std::thread::spawn(signal_async_state_change)
+            .join()
+            .expect("worker thread signalled without panicking");
+        clear_host_waker();
+
+        assert!(
+            fires.load(Ordering::Acquire) >= 1,
+            "a worker-thread signal must reach the host waker"
+        );
+    }
+
+    #[test]
+    fn signalling_without_a_waker_is_a_no_op() {
+        let _guard = serial();
+        clear_host_waker();
+        // Must not panic and must still publish the cross-thread bump.
+        let before = ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire);
+        signal_async_state_change();
+        assert!(
+            ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire) > before,
+            "counter-only behaviour is unchanged when no waker is installed"
+        );
     }
 }
 
