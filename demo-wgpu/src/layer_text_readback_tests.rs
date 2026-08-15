@@ -30,7 +30,7 @@ use crate::WgpuGfxCtx;
 const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
 /// A live headless device + queue, or `None` when no adapter is present.
-fn try_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+pub(crate) fn try_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = wgpu::Backends::all();
     let instance = wgpu::Instance::new(desc);

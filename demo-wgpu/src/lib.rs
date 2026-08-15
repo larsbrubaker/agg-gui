@@ -100,6 +100,10 @@ mod layers;
 pub mod pipelines;
 mod primitives;
 mod screenshot_capture;
+/// Scaled / region capture readback — small-output companion to
+/// `screenshot_capture`'s full-surface readbacks.
+mod screenshot_scaled;
+pub use screenshot_scaled::RectInPixels;
 mod shaders;
 mod text_render;
 
@@ -107,6 +111,8 @@ mod text_render;
 mod layer_text_readback_tests;
 #[cfg(test)]
 mod lcd_arc_cache_tests;
+#[cfg(test)]
+mod screenshot_scaled_tests;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
@@ -361,6 +367,15 @@ pub struct WgpuGfxCtx {
     /// See [`PendingReadback`].
     pub(crate) pending_readback: Option<PendingReadback>,
 
+    /// In-flight async *scaled / region* capture readback — a separate slot so
+    /// periodic small thumbnails and a full-surface screenshot can be in
+    /// flight at the same time.  See `screenshot_scaled`.
+    pub(crate) pending_scaled_readback: Option<PendingReadback>,
+
+    /// Pipeline + sampler + destination texture for the scaled capture blit.
+    /// Built on first scaled capture; `None` until then.
+    pub(crate) scaled_blit: Option<screenshot_scaled::ScaledBlit>,
+
     /// Per-frame chunked buffer pool — see [`buffer_arena`] module docs.
     /// All `DrawCommand`s in a single flush share these three buffers
     /// instead of allocating their own, which is the single biggest lever
@@ -487,6 +502,8 @@ impl WgpuGfxCtx {
             pending_screenshot: None,
             capture_texture: None,
             pending_readback: None,
+            pending_scaled_readback: None,
+            scaled_blit: None,
             frame_arenas,
             aa_step_texture,
             aa_step_view,

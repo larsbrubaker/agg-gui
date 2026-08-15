@@ -612,3 +612,68 @@ struct VOut {
     return vec4<f32>(c * u.global_alpha, aa * u.global_alpha);
 }
 ";
+
+// ---------------------------------------------------------------------------
+// Scaled / region capture blit — used by `screenshot_scaled.rs`.
+//
+// Draws a single fullscreen triangle over a small offscreen RGBA8 texture,
+// sampling a sub-rect of the capture texture through a LINEAR sampler so the
+// downscale comes for free.  No vertex buffer: positions are generated from
+// `vertex_index`, and the UV window comes from the uniform block.
+//
+// Channel order needs no shader work: `textureSample` returns components in
+// RGBA order whatever the source texture's memory layout is (BGRA surfaces
+// included), and the blit target is RGBA8, so the R↔B swap that the CPU-side
+// `poll_capture_readback` does per pixel happens implicitly here.
+//
+// sRGB does need explicit handling.  When the source is an sRGB-format
+// texture the sampler already decoded to linear, so `flags.x` asks the
+// fragment shader to re-encode to sRGB before writing to the (non-sRGB)
+// target.  That makes the stored bytes equal the raw surface bytes — what
+// `read_captured_screenshot` / `poll_capture_readback` hand back today —
+// while the filtering itself still happens in linear space, which is the
+// correct space to average in for a downscale.
+// ---------------------------------------------------------------------------
+
+pub(crate) const SCALED_BLIT_WGSL: &str = "
+struct ScaledBlitUniforms {
+    uv_offset: vec2<f32>,
+    uv_scale: vec2<f32>,
+    flags: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> u: ScaledBlitUniforms;
+@group(1) @binding(0) var u_tex: texture_2d<f32>;
+@group(1) @binding(1) var u_sampler: sampler;
+
+struct VOut {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) v_uv: vec2<f32>,
+}
+
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> VOut {
+    var corners = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 3.0, -1.0),
+        vec2<f32>(-1.0,  3.0)
+    );
+    let p = corners[vi];
+    // NDC -> [0,1] with the Y flip: v=0 is the TOP row of the source texture,
+    // matching the Y-down framebuffer convention of `src_region`.
+    let uv01 = vec2<f32>(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
+    return VOut(vec4<f32>(p, 0.0, 1.0), u.uv_offset + uv01 * u.uv_scale);
+}
+
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
+
+@fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
+    var c = textureSample(u_tex, u_sampler, in.v_uv);
+    if (u.flags.x > 0.5) {
+        c = vec4<f32>(linear_to_srgb(c.rgb), c.a);
+    }
+    return c;
+}
+";
