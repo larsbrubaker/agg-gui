@@ -416,3 +416,49 @@ fn with_id_overrides_default() {
     let e = NodeEditor::new(fixture()).with_id("custom-canvas");
     assert_eq!(e.id(), Some("custom-canvas"));
 }
+
+/// A middle-button canvas pan must report the new offset through
+/// `on_canvas_pan_changed`. Hosts that map a pointer *outside* the
+/// editor into canvas space (AtomArtist's favorites-bar drag-insert)
+/// have no other way to learn the pan, so a silent pan puts every
+/// dropped item in the wrong place.
+#[test]
+fn middle_drag_pan_reports_the_offset_to_the_model() {
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 800.0, 600.0));
+
+    editor.on_mouse_down(
+        Point::new(200.0, 200.0),
+        MouseButton::Middle,
+        Modifiers::default(),
+    );
+    editor.on_mouse_move(Point::new(260.0, 170.0));
+
+    let m = memory.lock().unwrap();
+    assert!(m.pan_calls >= 1, "the pan hook must fire while dragging");
+    assert!(
+        (m.pan[0] - 60.0).abs() < 1e-9 && (m.pan[1] + 30.0).abs() < 1e-9,
+        "model should see the live offset, got {:?}",
+        m.pan
+    );
+    assert_eq!(m.pan, editor.pan(), "hook and accessor must agree");
+}
+
+/// A cursor-anchored wheel zoom moves the *pan* as well as the scale, so
+/// both hooks have to fire — a host that recomputes canvas coordinates
+/// from the pair would otherwise keep a stale offset.
+#[test]
+fn cursor_anchored_zoom_reports_pan_and_zoom_to_the_model() {
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 800.0, 600.0));
+
+    editor.on_wheel(Point::new(300.0, 250.0), 1.0, Modifiers::default());
+
+    let m = memory.lock().unwrap();
+    assert_eq!(m.pan_calls, 1, "zoom moves the pan, so the hook fires");
+    assert_eq!(m.zoom, editor.scale());
+    assert_eq!(m.pan, editor.pan());
+    assert_ne!(m.pan, [0.0, 0.0], "an anchored zoom cannot leave pan at 0");
+}

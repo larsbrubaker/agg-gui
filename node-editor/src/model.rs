@@ -299,6 +299,19 @@ pub trait NodeGraphModel {
     /// hosts that don't care default to a no-op.
     fn on_canvas_zoom_changed(&mut self, _zoom: f64) {}
 
+    /// Called whenever the canvas pan offset changes — the middle /
+    /// space drag that slides the canvas, and the offset shift a
+    /// cursor-anchored zoom applies.  `pan` is the editor-local
+    /// translation applied to canvas space, i.e. the `offset` half of
+    /// `local = canvas * zoom + offset`.
+    ///
+    /// Hosts that need to map a pointer position *outside* the editor
+    /// (a palette / library panel dragging an item onto the canvas)
+    /// into canvas space need the pair `(pan, zoom)`; this is the pan
+    /// half, mirroring [`NodeGraphModel::on_canvas_zoom_changed`].  Hosts that
+    /// don't care default to a no-op.
+    fn on_canvas_pan_changed(&mut self, _pan: [f64; 2]) {}
+
     /// Called when the user changes the primary selected node — the
     /// last-clicked node, or `None` after a click on empty canvas.
     /// Hosts use this to drive companion UI (3-D viewport outline,

@@ -337,6 +337,13 @@ impl NodeEditor {
                     start_offset[0] + (pos.x - start_local.x),
                     start_offset[1] + (pos.y - start_local.y),
                 ];
+                // Hosts that map an outside-the-editor pointer into
+                // canvas space (a library panel dragging onto the
+                // canvas) need the live pan, not just the zoom.
+                self.model
+                    .lock()
+                    .unwrap()
+                    .on_canvas_pan_changed(self.canvas_offset);
                 EventResult::Consumed
             }
             CanvasState::DraggingNode {
@@ -582,7 +589,14 @@ impl NodeEditor {
             pos.y - canvas_before[1] * new_scale,
         ];
         self.canvas_scale = new_scale;
-        self.model.lock().unwrap().on_canvas_zoom_changed(new_scale);
+        {
+            // A cursor-anchored zoom moves the pan too, so both hooks
+            // fire — under one lock, so a host that recomputes from the
+            // pair never sees a half-updated view.
+            let mut model = self.model.lock().unwrap();
+            model.on_canvas_pan_changed(self.canvas_offset);
+            model.on_canvas_zoom_changed(new_scale);
+        }
         agg_gui::animation::request_draw();
         EventResult::Consumed
     }

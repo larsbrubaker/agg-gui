@@ -13,6 +13,11 @@ pub(super) struct Memory {
     pub nodes: Vec<NodeView>,
     pub noodles: Vec<NoodleView>,
     pub zoom: f64,
+    /// Latest pan reported through `on_canvas_pan_changed`, and how many
+    /// times the hook fired — hosts that map an outside-the-editor
+    /// pointer into canvas space depend on it firing for pan *and* zoom.
+    pub pan: [f64; 2],
+    pub pan_calls: usize,
     pub last_selection: Option<NodeId>,
     /// Records the most recent `set_property` write so tests can assert
     /// what a value editor committed / reverted.
@@ -82,6 +87,10 @@ impl NodeGraphModel for Memory {
     }
     fn on_canvas_zoom_changed(&mut self, zoom: f64) {
         self.zoom = zoom;
+    }
+    fn on_canvas_pan_changed(&mut self, pan: [f64; 2]) {
+        self.pan = pan;
+        self.pan_calls += 1;
     }
     fn on_primary_selection_changed(&mut self, id: Option<NodeId>) {
         self.last_selection = id;
