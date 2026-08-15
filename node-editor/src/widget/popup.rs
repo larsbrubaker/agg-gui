@@ -7,7 +7,7 @@
 
 use agg_gui::{Event, MenuEntry, MenuItem, PopupMenu};
 
-use super::{NodeEditor, NodeId, SharedModel};
+use super::{NodeEditor, SharedModel};
 
 /// Subtract `(dx, dy)` from any mouse-position field on `event` so an
 /// overlay positioned at `(dx, dy)` in editor-local space sees events
@@ -59,21 +59,10 @@ impl NodeEditor {
     pub(super) fn handle_popup_action(&mut self, action: &str) {
         match action {
             "delete" => {
-                let to_remove: Vec<NodeId> = self.selected.drain().collect();
-                if to_remove.is_empty() {
-                    return;
-                }
-                {
-                    let mut model = self.model.lock().unwrap();
-                    for id in to_remove {
-                        model.remove_node(id);
-                    }
-                }
-                // Removing nodes changes the layout & cached widget
-                // tree — neither updates without an explicit
-                // invalidate + request_draw.
-                self.backbuffer.invalidate();
-                agg_gui::animation::request_draw();
+                // Shares `NodeEditor::delete_selection` with the Delete
+                // key and the host command queue, so all three paths
+                // remove, invalidate, and repaint identically.
+                self.delete_selection();
             }
             other => {
                 if let Some(type_id) = other.strip_prefix("add.") {

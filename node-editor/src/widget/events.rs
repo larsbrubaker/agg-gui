@@ -611,22 +611,11 @@ impl NodeEditor {
                 // Backspace is the canonical "delete selection" key on
                 // macOS; Delete on Windows / Linux. Accepting both keeps
                 // the muscle memory consistent across platforms.
-                if self.selected.is_empty() {
-                    return EventResult::Ignored;
+                if self.delete_selection() {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
                 }
-                let to_remove: Vec<NodeId> = self.selected.drain().collect();
-                {
-                    let mut model = self.model.lock().unwrap();
-                    for id in to_remove {
-                        model.remove_node(id);
-                    }
-                }
-                // Removing a node invalidates the cached child widget
-                // tree and the GL backbuffer — neither will update
-                // without an explicit request.
-                self.backbuffer.invalidate();
-                agg_gui::animation::request_draw();
-                EventResult::Consumed
             }
             _ => EventResult::Ignored,
         }

@@ -18,6 +18,9 @@ pub(super) struct Memory {
     /// pointer into canvas space depend on it firing for pan *and* zoom.
     pub pan: [f64; 2],
     pub pan_calls: usize,
+    /// The host-side primary-selection mirror: written by
+    /// `on_primary_selection_changed` and read back by
+    /// `primary_selection`, exactly as a real host wires the two.
     pub last_selection: Option<NodeId>,
     /// Records the most recent `set_property` write so tests can assert
     /// what a value editor committed / reverted.
@@ -28,6 +31,11 @@ pub(super) struct Memory {
     /// Value `on_node_activated` returns. `false` (the default) keeps the
     /// widget's built-in collapse toggle; `true` suppresses it.
     pub activation_handled: bool,
+    /// One entry per `remove_nodes` call, holding that call's ids — lets
+    /// the delete tests assert a multi-node delete arrives as a single
+    /// group (the seam hosts hang one undo step off) rather than as N
+    /// separate removals.
+    pub remove_groups: Vec<Vec<NodeId>>,
 }
 
 impl NodeGraphModel for Memory {
@@ -50,6 +58,12 @@ impl NodeGraphModel for Memory {
     }
     fn remove_node(&mut self, id: NodeId) {
         self.nodes.retain(|n| n.id != id);
+    }
+    fn remove_nodes(&mut self, ids: &[NodeId]) {
+        self.remove_groups.push(ids.to_vec());
+        for &id in ids {
+            self.remove_node(id);
+        }
     }
     fn try_add_noodle(
         &mut self,
@@ -94,6 +108,9 @@ impl NodeGraphModel for Memory {
     }
     fn on_primary_selection_changed(&mut self, id: Option<NodeId>) {
         self.last_selection = id;
+    }
+    fn primary_selection(&self) -> Option<NodeId> {
+        self.last_selection
     }
     fn on_node_activated(&mut self, node: NodeId) -> bool {
         self.activated.push(node);

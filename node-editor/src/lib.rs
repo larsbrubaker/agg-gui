@@ -47,4 +47,4 @@ pub use model::{
     EditorHint, NodeGraphModel, NodeId, NodeTypeView, NodeView, NoodleResult, NoodleView,
     PropertyValue, PropertyView, SocketTypeId, SocketView,
 };
-pub use widget::{NodeEditor, SharedModel};
+pub use widget::{NodeEditor, NodeEditorCommand, NodeEditorHandle, SharedModel};

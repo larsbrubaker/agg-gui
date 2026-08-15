@@ -265,6 +265,16 @@ pub trait NodeGraphModel {
     /// Remove a node and any edges incident to it.
     fn remove_node(&mut self, id: NodeId);
 
+    /// Remove several nodes as one logical operation (a multi-node
+    /// delete). The default forwards to [`Self::remove_node`] per id;
+    /// hosts with an undo stack should override this to record the
+    /// whole group as a single undo step.
+    fn remove_nodes(&mut self, ids: &[NodeId]) {
+        for &id in ids {
+            self.remove_node(id);
+        }
+    }
+
     /// Try to add an edge. The widget calls this on connection-drag
     /// release; it's responsible for socket-direction inference (the
     /// caller passes producer-first / consumer-second).

@@ -12,6 +12,7 @@
 //! and child rebuild logic live in [`paint_cache`], so this file stays
 //! under the 800-line guardrail.
 
+mod commands;
 mod events;
 mod fingerprint;
 mod host_hooks;
@@ -24,12 +25,15 @@ mod popup;
 mod snap_guides;
 mod value_editor_widget;
 
+pub use commands::{NodeEditorCommand, NodeEditorHandle};
 use popup::{build_add_node_popup_items, translate_event_into};
 
 #[cfg(test)]
 mod nodes_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_commands;
 #[cfg(test)]
 mod tests_common;
 #[cfg(test)]
@@ -234,6 +238,10 @@ pub struct NodeEditor {
     /// stale (the pane rarely moves between a paint and the click that opens
     /// an editor).
     pub(crate) last_abs_origin: Cell<(f64, f64)>,
+    /// Optional host command channel (see [`commands`]). Chrome built
+    /// outside the widget tree — an Edit menu, a toolbar — pushes
+    /// [`NodeEditorCommand`]s here; `layout()` drains them.
+    pub(crate) command_handle: Option<NodeEditorHandle>,
 }
 
 impl NodeEditor {
@@ -268,6 +276,7 @@ impl NodeEditor {
             overlay_sink: None,
             file_drop_handler: None,
             last_abs_origin: Cell::new((0.0, 0.0)),
+            command_handle: None,
         }
     }
 
@@ -577,6 +586,11 @@ impl Widget for NodeEditor {
 
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
+
+        // Apply host-queued commands (Edit → Delete Selected / Select
+        // All) before anything reads the model or the selection, so the
+        // effect lands in this frame's fingerprint and children.
+        self.drain_commands();
 
         // Drain the chevron-click channel — header chevrons (real
         // child widgets) write a NodeId here when consumed; the editor
