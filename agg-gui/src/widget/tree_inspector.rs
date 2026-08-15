@@ -182,6 +182,59 @@ pub fn find_widget_by_id_mut<'a>(
     None
 }
 
+/// Absolute (screen-space, Y-up) rectangle of the first widget in the
+/// subtree whose [`Widget::id`] matches `id`.
+///
+/// [`find_widget_by_id`] returns the widget itself, and
+/// [`Widget::bounds`] is **parent-local** — many widgets even reset
+/// their own origin to (0, 0) in `layout`, so a caller that wants "where
+/// on the window is this widget" cannot read `bounds()` directly. This
+/// walks the same accumulated transform chain
+/// [`collect_inspector_nodes`] does (translation by each ancestor's
+/// bounds origin, composed with any [`Widget::inspector_child_transform`]),
+/// so the answer matches the inspector overlay's *transform math*.
+///
+/// It differs from the inspector in which subtrees it walks: the
+/// inspector's `show_in_inspector` / `contributes_children_to_inspector`
+/// opt-outs are presentation concerns and are ignored here, but a subtree
+/// whose root reports `!is_visible()` is skipped entirely — a hidden
+/// widget occupies no pixels, so "where on the window is it" has no
+/// answer.
+///
+/// Useful to any host that has to line window-space pixels up with a
+/// widget: screenshot / thumbnail crops, platform overlays (IME, native
+/// video surfaces), and tests asserting on real placement. Returns
+/// `None` when no *visible* widget carries `id`.
+pub fn find_widget_screen_rect(root: &dyn Widget, id: &str) -> Option<Rect> {
+    // The root's own bounds origin is already screen-absolute, so the
+    // walk starts from the identity transform.
+    let root_to_screen = crate::TransAffine::new();
+    find_widget_screen_rect_inner(root, id, &root_to_screen)
+}
+
+fn find_widget_screen_rect_inner(
+    widget: &dyn Widget,
+    id: &str,
+    parent_to_screen: &crate::TransAffine,
+) -> Option<Rect> {
+    if !widget.is_visible() {
+        return None;
+    }
+    let b = widget.bounds();
+    if widget.id() == Some(id) {
+        return Some(transform_rect_aabb(parent_to_screen, b));
+    }
+    let mut child_to_screen = *parent_to_screen;
+    child_to_screen.translate(b.x, b.y);
+    child_to_screen.premultiply(&widget.inspector_child_transform());
+    for child in widget.children() {
+        if let Some(found) = find_widget_screen_rect_inner(child.as_ref(), id, &child_to_screen) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Depth-first search for a widget by its [`Widget::type_name`].  Returns
 /// the first match in paint order.  Used by tests that want to assert on
 /// a specific widget kind inside an opaque content subtree (e.g.
