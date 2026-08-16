@@ -591,7 +591,10 @@ mod host_waker_tests {
             // Snapshot from inside the waker: the host is woken only after the
             // bump is published, otherwise it would park again having seen
             // nothing.
-            sink.store(ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire), Ordering::Release);
+            sink.store(
+                ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire),
+                Ordering::Release,
+            );
         });
 
         signal_async_state_change();

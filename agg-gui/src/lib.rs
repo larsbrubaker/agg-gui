@@ -85,6 +85,9 @@ pub mod undo;
 pub mod ux_scale;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_clipboard;
+/// Wheel-delta normalization for shells: OS / DOM scroll deltas → the
+/// *notch* count `Event::MouseWheel` carries.
+pub mod wheel;
 pub mod widget;
 pub mod widgets;
 

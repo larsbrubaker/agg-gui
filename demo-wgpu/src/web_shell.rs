@@ -36,6 +36,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use agg_gui::wheel::{WheelDeltaMode, WheelNormalizer};
 use agg_gui::{App, MouseButton, Size};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -313,6 +314,11 @@ fn install_pointer_listeners() {
     }
     {
         let canvas_ref = canvas.clone();
+        // Sub-notch travel from a precision device (trackpad, smooth
+        // wheel) is banked here between events — see `agg_gui::wheel`.
+        // One accumulator per canvas, owned by the listener that feeds
+        // it (the closure is `FnMut`, so it can keep the state itself).
+        let mut wheel = WheelNormalizer::new();
         add_canvas_listener(&canvas, "wheel", move |e: web_sys::WheelEvent| {
             e.prevent_default();
             let rect = canvas_ref.get_bounding_client_rect();
@@ -320,9 +326,20 @@ fn install_pointer_listeners() {
             let x = (e.client_x() as f64 - rect.left()) * dpr;
             let y = (e.client_y() as f64 - rect.top()) * dpr;
             // Browser deltaY is positive-scroll-DOWN; App expects positive =
-            // wheel rotated forward (winit convention). deltaMode 0 = pixels
-            // (~40 px per line); other modes are already line-ish.
-            let scale = if e.delta_mode() == 0 { 40.0 } else { 1.0 };
+            // wheel rotated forward (winit convention). The *units* — CSS
+            // pixels, lines or pages, per `deltaMode` — are `agg_gui::wheel`'s
+            // business, and it hands back whole notches, which is what
+            // every consumer of `Event::MouseWheel` expects.
+            let (dx, dy) = wheel.normalize(
+                -e.delta_x(),
+                -e.delta_y(),
+                WheelDeltaMode::from_dom(e.delta_mode()),
+            );
+            if dx == 0.0 && dy == 0.0 {
+                // Not yet a whole notch: nothing to deliver, and no
+                // redraw to ask for.
+                return;
+            }
             let mods = agg_gui::Modifiers {
                 shift: e.shift_key(),
                 ctrl: e.ctrl_key(),
@@ -330,7 +347,7 @@ fn install_pointer_listeners() {
                 meta: e.meta_key(),
             };
             with_app(|app| {
-                app.on_mouse_wheel_xy_mods(x, y, -e.delta_x() / scale, -e.delta_y() / scale, mods);
+                app.on_mouse_wheel_xy_mods(x, y, dx, dy, mods);
             });
             mark_dirty();
         });
