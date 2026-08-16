@@ -83,7 +83,8 @@ pub use popup::{Align, Align2, Popup, PopupClickOutcome, PopupCloseBehavior, Rec
 pub use primitives::{Padding, SizedBox, Stack};
 pub use progress_bar::ProgressBar;
 pub use property_row::{
-    paint_editor_only, paint_row, EditorKind, NodeFieldAttrs, NumberAttrs, RowValue, VisibleWhen,
+    enum_variant_at, paint_editor_only, paint_row, EditorKind, NodeFieldAttrs, NumberAttrs,
+    RowValue, VisibleWhen,
 };
 pub use qr_view::QrView;
 pub use radio_group::RadioGroup;

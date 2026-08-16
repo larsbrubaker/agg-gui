@@ -144,6 +144,13 @@ impl NodeEditor {
                 }
                 // Property row?
                 if let Some((node_id, prop)) = self.hit_property(&layouts, canvas_pos) {
+                    // Enum row: the segmented strip picks a variant (see
+                    // `enum_row.rs`). Before the text branch below — an
+                    // enum value is a string, and free-typing it would
+                    // escape the variant set.
+                    if let Some(r) = self.handle_enum_row_click(&prop, node_id, canvas_pos[0]) {
+                        return r;
+                    }
                     if let PropertyValue::Number(start) = prop.current {
                         self.selected.clear();
                         self.selected.insert(node_id);

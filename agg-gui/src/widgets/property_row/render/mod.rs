@@ -37,6 +37,7 @@ use super::value::RowValue;
 
 mod color;
 mod default_row;
+mod enum_buttons;
 mod matrix;
 mod slider;
 mod string_read_only;
@@ -107,12 +108,50 @@ fn dispatch_editor(
         EditorKind::StringReadOnly => {
             string_read_only::paint_editor(ctx, editor_area, value, scale)
         }
+        EditorKind::EnumButtons { variants }
+        | EditorKind::EnumTabs { variants }
+        | EditorKind::EnumDropdown { variants } => {
+            enum_buttons::paint_editor(ctx, editor_area, value, variants, scale)
+        }
         // Other variants currently fall through to the default
         // painter — they'll get dedicated renderers in follow-up
-        // work (single-/multi-line text editors, enum dropdown /
-        // buttons / tabs, image picker).
+        // work (single-/multi-line text editors, image picker).
         _ => default_row::paint_editor(ctx, editor_area, value, scale),
     }
+}
+
+/// Which enum variant a point inside a row belongs to, or `None` when
+/// the row is not an enum row or the point misses the strip.
+///
+/// `area` is the same rectangle the host passed to [`paint_row`] /
+/// [`paint_editor_only`] and `x` is in that rectangle's space.
+/// `has_label` distinguishes the two: a labelled row ([`paint_row`] with
+/// a non-empty label) gives the label the left ~45%, so the strip starts
+/// further right.
+///
+/// Hosts own click routing (hit-testing lives wherever their canvas
+/// coordinates do), but the *geometry* must be the renderer's, or the
+/// segment the user clicked and the segment that lights up drift apart
+/// the first time either side is tweaked.
+pub fn enum_variant_at(
+    area: Rect,
+    has_label: bool,
+    editor: &EditorKind,
+    x: f64,
+    scale: f64,
+) -> Option<usize> {
+    let variants = match editor {
+        EditorKind::EnumButtons { variants }
+        | EditorKind::EnumTabs { variants }
+        | EditorKind::EnumDropdown { variants } => variants,
+        _ => return None,
+    };
+    let editor_area = if has_label {
+        split_label_editor(area, scale).1
+    } else {
+        area
+    };
+    enum_buttons::variant_at(editor_area, variants.len(), x, scale)
 }
 
 // ---------------------------------------------------------------------------

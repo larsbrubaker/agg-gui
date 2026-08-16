@@ -97,6 +97,18 @@ impl EditorKind {
         }
     }
 
+    /// The ordered variant list when this editor is one of the enum
+    /// presentations (dropdown / buttons / tabs), else `None`. Hosts use
+    /// it to map a selected index back to the value they store.
+    pub fn enum_variants(&self) -> Option<&[Arc<str>]> {
+        match self {
+            EditorKind::EnumDropdown { variants }
+            | EditorKind::EnumButtons { variants }
+            | EditorKind::EnumTabs { variants } => Some(variants.as_slice()),
+            _ => None,
+        }
+    }
+
     /// Numeric editor attributes when this editor is numeric.
     pub fn number_attrs(&self) -> Option<&NumberAttrs> {
         match self {

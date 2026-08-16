@@ -99,6 +99,14 @@ pub struct PropLayout {
     /// `top_left.y - size.y` is the bottom edge.
     pub top_left: [f64; 2],
     pub size: [f64; 2],
+    /// `true` when the rect above is the **whole** row and the row
+    /// renderer paints the label inside it (unbound property rows);
+    /// `false` when it is only the editor pill on an input socket's row,
+    /// whose label a sibling widget paints. Hit-testing inside the
+    /// editor (which segment of an enum strip did the user click?) has
+    /// to know which of the two it is — see
+    /// [`agg_gui::widgets::enum_variant_at`].
+    pub full_row: bool,
 }
 
 impl PropLayout {
@@ -453,6 +461,7 @@ where
                 editor_kind: p.editor_kind.clone(),
                 top_left: [top_left[0] + 1.0, row_top_y],
                 size: [node_width - 2.0, row_h],
+                full_row: true,
             }));
         }
         y_offset += row_h;
@@ -510,6 +519,7 @@ fn input_editor_layout_y(
         editor_kind: p.editor_kind.clone(),
         top_left: [editor_x, row_top_y],
         size: [EDITOR_WIDTH, ROW_HEIGHT],
+        full_row: false,
     }
 }
 

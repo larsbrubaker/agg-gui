@@ -13,6 +13,7 @@
 //! under the 800-line guardrail.
 
 mod commands;
+mod enum_row;
 mod events;
 mod fingerprint;
 mod host_hooks;
@@ -41,6 +42,8 @@ mod tests;
 mod tests_commands;
 #[cfg(test)]
 mod tests_common;
+#[cfg(test)]
+mod tests_enum;
 #[cfg(test)]
 mod tests_error_badge;
 #[cfg(test)]

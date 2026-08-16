@@ -30,11 +30,22 @@
 //! Phase 3 (then): full `PropertyPanel` widget that takes a list of
 //! field specs + a value getter/setter and renders the entire panel,
 //! including section headers, advanced gating, and tooltips.
+//!
+//! ## Enum rows
+//!
+//! The three enum presentations (`EnumDropdown` / `EnumButtons` /
+//! `EnumTabs`) all paint today as one segmented strip — see
+//! `render/enum_buttons.rs`. Painting is only half of an enum row: the
+//! host owns click routing (hit-testing lives wherever its coordinates
+//! do), so it maps a pointer onto a segment with [`enum_variant_at`],
+//! which recomputes exactly the geometry the painter drew. A host that
+//! re-derived the split itself would drift the moment either side
+//! changed.
 
 mod editor;
 mod render;
 mod value;
 
 pub use editor::{EditorKind, NodeFieldAttrs, NumberAttrs, VisibleWhen};
-pub use render::{paint_editor_only, paint_row};
+pub use render::{enum_variant_at, paint_editor_only, paint_row};
 pub use value::RowValue;
