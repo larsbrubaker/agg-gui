@@ -166,6 +166,16 @@ pub struct NodeView {
     pub inputs: Vec<SocketView>,
     pub outputs: Vec<SocketView>,
     pub properties: Vec<PropertyView>,
+    /// Why this node has no valid output right now — `None` when the
+    /// node is healthy.
+    ///
+    /// Hosts whose evaluation can *refuse* a node (a CAD boolean handed
+    /// a non-solid operand, a shader node with a type mismatch) put the
+    /// node's own message here and the canvas paints an error badge on
+    /// the title bar. The canvas has no tooltip path to nodes, so the
+    /// text itself is the host's to surface (a status bar, an inspector
+    /// pane); the badge answers "*which* node".
+    pub error: Option<String>,
 }
 
 /// Snapshot of one edge.

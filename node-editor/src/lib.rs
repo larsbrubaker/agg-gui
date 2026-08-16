@@ -36,6 +36,8 @@
 //! for the widget implementation.
 
 pub mod draw;
+pub mod draw_error;
+pub mod draw_immediate;
 #[cfg(test)]
 mod draw_tests;
 pub mod model;
@@ -43,6 +45,7 @@ mod palette;
 pub mod widget;
 
 pub use draw::CanvasPalette;
+pub use draw_immediate::draw_node;
 pub use model::{
     EditorHint, NodeGraphModel, NodeId, NodeTypeView, NodeView, NoodleResult, NoodleView,
     PropertyValue, PropertyView, SocketTypeId, SocketView,

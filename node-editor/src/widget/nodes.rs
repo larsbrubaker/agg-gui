@@ -34,8 +34,7 @@ use agg_gui::{
 };
 
 use crate::draw::{
-    NodeLayoutInfo, NodeRow, SocketLayout, SocketSide, NODE_RADIUS, ROW_HEIGHT, SOCKET_RADIUS,
-    TITLE_HEIGHT,
+    NodeLayoutInfo, NodeRow, SocketSide, NODE_RADIUS, ROW_HEIGHT, SOCKET_RADIUS, TITLE_HEIGHT,
 };
 use crate::model::NodeId;
 
@@ -44,6 +43,7 @@ pub(super) const LABEL_FONT_SIZE: f64 = 11.0;
 const TITLE_FONT_SIZE: f64 = 13.0;
 
 pub use super::node_paint_context::NodePaintContext;
+pub use super::node_parts::{RowLabelWidget, SocketDotWidget};
 pub use super::value_editor_widget::ValueEditorWidget;
 
 // ---------------------------------------------------------------------------
@@ -64,6 +64,11 @@ pub struct NodeWidget {
     /// both the paint pass (skip body fill, round all four corners on the
     /// header) and the row-rebuild path (header is the only child).
     collapsed: bool,
+    /// Host-reported evaluation failure ([`crate::NodeView::error`]).
+    /// `Some` paints the error outline here and the `!` badge on the
+    /// header child. Participates in the canvas paint fingerprint, so a
+    /// failure arriving from an async evaluation rebuilds this tree.
+    error: Option<String>,
     ctx: NodePaintContext,
 }
 
@@ -127,6 +132,7 @@ impl NodeWidget {
             layout.category.clone(),
             layout.collapsed,
             layout.node_id,
+            layout.error.is_some(),
             pending_collapse,
             ctx.clone(),
         )));
@@ -156,6 +162,7 @@ impl NodeWidget {
             category: layout.category.clone(),
             selected,
             collapsed: layout.collapsed,
+            error: layout.error.clone(),
             ctx,
         }
     }
@@ -214,6 +221,7 @@ impl Widget for NodeWidget {
             ("display_name", self.display_name.clone()),
             ("category", self.category.clone()),
             ("selected", format!("{}", self.selected)),
+            ("error", self.error.clone().unwrap_or_default()),
         ]
     }
 
@@ -274,6 +282,22 @@ impl Widget for NodeWidget {
             ctx.rounded_rect(1.0, 1.0, (w - 2.0).max(0.0), (h - 2.0).max(0.0), r);
             ctx.stroke();
         }
+        // A refused node wears an error-coloured outline. Painted after
+        // the selection ring so "broken" wins the outer edge when the
+        // user has the broken node selected; the `!` badge lands on the
+        // header child, which paints over this strip.
+        if self.error.is_some() {
+            crate::draw_error::draw_error_outline(
+                ctx,
+                1.0,
+                1.0,
+                (w - 2.0).max(0.0),
+                (h - 2.0).max(0.0),
+                NODE_RADIUS * s,
+                s,
+                self.ctx.palette.node_error,
+            );
+        }
     }
 
     fn on_event(&mut self, _: &Event) -> EventResult {
@@ -299,6 +323,9 @@ pub struct NodeHeaderWidget {
     /// Matches `NodeWidget::collapsed`. The header chrome rounds all four
     /// corners + skips the bottom separator when collapsed.
     collapsed: bool,
+    /// True when the node's host reported an evaluation error — paints
+    /// the `!` badge at the bar's right end (the chevron owns the left).
+    error: bool,
     /// Shared collapse cell handed to the chevron child so its glyph
     /// orientation tracks the live state without per-frame setters.
     chevron_collapsed: Rc<Cell<bool>>,
@@ -316,6 +343,7 @@ impl NodeHeaderWidget {
         category: String,
         collapsed: bool,
         node_id: NodeId,
+        error: bool,
         pending_collapse: Rc<Cell<Option<NodeId>>>,
         ctx: NodePaintContext,
     ) -> Self {
@@ -354,6 +382,7 @@ impl NodeHeaderWidget {
             title,
             category,
             collapsed,
+            error,
             chevron_collapsed,
             chevron_color,
             ctx,
@@ -412,6 +441,14 @@ impl Widget for NodeHeaderWidget {
             &self.title,
             TITLE_FONT_SIZE * s,
         );
+        if self.error {
+            crate::draw_error::draw_error_badge(
+                ctx,
+                crate::draw_error::badge_center_in_title_bar(w, h, s),
+                s,
+                self.ctx.palette.node_error,
+            );
+        }
         // Mirror live state into the cells the chevron child reads.
         self.chevron_collapsed.set(self.collapsed);
         self.chevron_color.set(self.ctx.palette.label_text);
@@ -586,213 +623,6 @@ impl Widget for NodeRowWidget {
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
         // Row backdrop is invisible — visuals come from children.
-    }
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SocketDotWidget — the coloured circle on the left or right edge
-// ---------------------------------------------------------------------------
-
-pub struct SocketDotWidget {
-    bounds: Rect,
-    base: WidgetBase,
-    children: Vec<Box<dyn Widget>>,
-    socket: SocketLayout,
-    side: SocketSide,
-    ctx: NodePaintContext,
-}
-
-impl SocketDotWidget {
-    fn new(
-        socket: SocketLayout,
-        side: SocketSide,
-        node_w: f64,
-        row_h: f64,
-        ctx: NodePaintContext,
-    ) -> Self {
-        // `node_w`, `row_h` are already in screen-space; SOCKET_RADIUS
-        // needs the same scale.
-        let cx = match side {
-            SocketSide::Input => 0.0,
-            SocketSide::Output => node_w,
-        };
-        let cy = row_h * 0.5;
-        let r = SOCKET_RADIUS * ctx.scale;
-        let bounds = Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r);
-        Self {
-            bounds,
-            base: WidgetBase::new(),
-            children: Vec::new(),
-            socket,
-            side,
-            ctx,
-        }
-    }
-}
-
-impl Widget for SocketDotWidget {
-    fn type_name(&self) -> &'static str {
-        "SocketDotWidget"
-    }
-    fn bounds(&self) -> Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, b: Rect) {
-        self.bounds = b;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-    fn widget_base(&self) -> Option<&WidgetBase> {
-        Some(&self.base)
-    }
-    fn enforce_integer_bounds(&self) -> bool {
-        false
-    }
-    fn properties(&self) -> Vec<(&'static str, String)> {
-        vec![
-            ("socket", self.socket.name.clone()),
-            (
-                "side",
-                match self.side {
-                    SocketSide::Input => "input".into(),
-                    SocketSide::Output => "output".into(),
-                },
-            ),
-            ("type", format!("{}", self.socket.socket_type.0)),
-        ]
-    }
-    fn layout(&mut self, _: Size) -> Size {
-        Size::new(self.bounds.width, self.bounds.height)
-    }
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        // The widget is a 2R x 2R square; draw the dot at its centre in
-        // local coords.  `bounds.width` is exactly 2*SOCKET_RADIUS so
-        // we can recover the radius without referencing the constant.
-        let r = self.bounds.width * 0.5;
-        let cx = r;
-        let cy = self.bounds.height * 0.5;
-        let fill = (self.ctx.socket_colors)(self.socket.socket_type);
-        ctx.set_fill_color(fill);
-        ctx.begin_path();
-        ctx.circle(cx, cy, r);
-        ctx.fill();
-        ctx.set_stroke_color(self.ctx.palette.node_border);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.circle(cx, cy, r);
-        ctx.stroke();
-    }
-    fn on_event(&mut self, _: &Event) -> EventResult {
-        EventResult::Ignored
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RowLabelWidget — the row's text label
-// ---------------------------------------------------------------------------
-
-/// Where the label hugs the row — left edge (input rows) or right edge
-/// (output rows).
-#[derive(Clone, Copy, Debug)]
-enum LabelSide {
-    Left,
-    Right,
-}
-
-pub struct RowLabelWidget {
-    bounds: Rect,
-    base: WidgetBase,
-    children: Vec<Box<dyn Widget>>,
-    text: String,
-    side: LabelSide,
-    ctx: NodePaintContext,
-}
-
-impl RowLabelWidget {
-    fn new_left(text: String, node_w: f64, row_h: f64, ctx: NodePaintContext) -> Self {
-        // Reserve from the dot's right edge to the right edge of the
-        // row.  Painting reads `text_x` from `side`.  All horizontal
-        // metrics scale with the active canvas zoom.
-        let s = ctx.scale;
-        let left = (SOCKET_RADIUS * 2.0 + ROW_PADDING_X) * s;
-        let bounds = Rect::new(left, 0.0, (node_w - left).max(0.0), row_h);
-        Self {
-            bounds,
-            base: WidgetBase::new(),
-            children: Vec::new(),
-            text,
-            side: LabelSide::Left,
-            ctx,
-        }
-    }
-
-    fn new_right(text: String, node_w: f64, row_h: f64, ctx: NodePaintContext) -> Self {
-        let s = ctx.scale;
-        let right_inset = (SOCKET_RADIUS * 2.0 + ROW_PADDING_X) * s;
-        let width = (node_w - right_inset).max(0.0);
-        let bounds = Rect::new(0.0, 0.0, width, row_h);
-        Self {
-            bounds,
-            base: WidgetBase::new(),
-            children: Vec::new(),
-            text,
-            side: LabelSide::Right,
-            ctx,
-        }
-    }
-}
-
-impl Widget for RowLabelWidget {
-    fn type_name(&self) -> &'static str {
-        "RowLabelWidget"
-    }
-    fn bounds(&self) -> Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, b: Rect) {
-        self.bounds = b;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-    fn widget_base(&self) -> Option<&WidgetBase> {
-        Some(&self.base)
-    }
-    fn enforce_integer_bounds(&self) -> bool {
-        false
-    }
-    fn properties(&self) -> Vec<(&'static str, String)> {
-        vec![("text", self.text.clone())]
-    }
-    fn layout(&mut self, _: Size) -> Size {
-        Size::new(self.bounds.width, self.bounds.height)
-    }
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        if self.text.is_empty() {
-            return;
-        }
-        let s = self.ctx.scale;
-        ctx.set_fill_color(self.ctx.palette.label_text);
-        ctx.set_font_size(LABEL_FONT_SIZE * s);
-        let baseline_y = self.bounds.height * 0.5 - 4.0 * s;
-        let x = match self.side {
-            LabelSide::Left => 0.0,
-            LabelSide::Right => {
-                let est = (self.text.len() as f64) * 6.5 * s;
-                (self.bounds.width - est).max(0.0)
-            }
-        };
-        ctx.fill_text(&self.text, x, baseline_y);
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored

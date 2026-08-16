@@ -18,6 +18,7 @@ mod fingerprint;
 mod host_hooks;
 mod hover;
 mod node_paint_context;
+pub mod node_parts;
 pub mod nodes;
 mod overlay_editors;
 mod paint;
@@ -40,6 +41,8 @@ mod tests;
 mod tests_commands;
 #[cfg(test)]
 mod tests_common;
+#[cfg(test)]
+mod tests_error_badge;
 #[cfg(test)]
 mod tests_inline_editor;
 #[cfg(test)]
@@ -489,6 +492,11 @@ impl NodeEditor {
             let sel = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
             sel.hash(&mut h);
             l.collapsed.hash(&mut h);
+            // An error arriving from an *asynchronous* host evaluation
+            // changes nothing else about the layout, so without this the
+            // badge would only appear (or clear) on the next unrelated
+            // interaction that happened to dirty the fingerprint.
+            l.error.hash(&mut h);
         }
         self.canvas_offset[0].to_bits().hash(&mut h);
         self.canvas_offset[1].to_bits().hash(&mut h);

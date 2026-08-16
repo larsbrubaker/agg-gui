@@ -24,6 +24,11 @@ pub struct CanvasPalette {
     pub node_border_selected: Color,
     pub node_title_fallback: Color,
     pub label_text: Color,
+    /// Border + badge colour for a node whose host reported an
+    /// evaluation error (see [`crate::draw_error`]). Deliberately not
+    /// theme-accent-derived: "broken" should not change meaning when the
+    /// user picks a red accent.
+    pub node_error: Color,
 }
 
 impl CanvasPalette {
@@ -66,6 +71,13 @@ impl CanvasPalette {
             node_border_selected: v.accent,
             node_title_fallback: v.accent,
             label_text: v.text_color,
+            // Lifted a little in dark mode so it doesn't muddy against
+            // the dark node body.
+            node_error: if dark {
+                Color::rgb(0.95, 0.34, 0.30)
+            } else {
+                Color::rgb(0.82, 0.15, 0.13)
+            },
         }
     }
 

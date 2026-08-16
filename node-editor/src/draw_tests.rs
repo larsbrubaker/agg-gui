@@ -35,6 +35,7 @@ fn make_node() -> NodeView {
             editor: None,
             editor_kind: None,
         }],
+        error: None,
     }
 }
 
@@ -72,6 +73,7 @@ fn make_extrude_like() -> NodeView {
             editor: None,
             editor_kind: None,
         }],
+        error: None,
     }
 }
 

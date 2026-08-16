@@ -37,6 +37,7 @@ fn resolve_noodle_endpoints_filters_by_socket_side_when_names_collide() {
             display_label: None,
         }],
         properties: vec![],
+        error: None,
     };
     // The target node has both an INPUT and an OUTPUT called
     // "Geometry" — the same shape an AtomArtist `Output` node takes
@@ -60,6 +61,7 @@ fn resolve_noodle_endpoints_filters_by_socket_side_when_names_collide() {
             display_label: None,
         }],
         properties: vec![],
+        error: None,
     };
 
     let layouts = vec![
@@ -126,6 +128,7 @@ fn resolve_noodle_endpoints_returns_none_for_missing_node() {
             display_label: None,
         }],
         properties: vec![],
+        error: None,
     };
     let layouts = vec![layout_node_with_connections(&producer, |_| false)];
     let dangling = NoodleView {
@@ -211,6 +214,7 @@ fn collapsed_node_layout_is_title_height_only() {
             socket_type: crate::model::SocketTypeId(0),
         }],
         properties: vec![],
+        error: None,
     };
     let info = layout_node_with_state(&node, |_| false, true);
     assert!(info.collapsed);
