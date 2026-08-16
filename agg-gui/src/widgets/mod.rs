@@ -102,7 +102,7 @@ pub use scroll_view::{
 };
 pub use slider::{HandleShape, Slider, SliderClamping, SliderOrientation};
 pub use spacers::{Separator, Spacer};
-pub use splitter::Splitter;
+pub use splitter::{Splitter, SplitterRatio};
 pub use tab_view::TabView;
 pub use table::{
     clip_text_to_width as table_clip_text_to_width, CellInfo, CellPainter, ColumnSize, HeaderClick,

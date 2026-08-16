@@ -3,12 +3,87 @@
 //! Supports horizontal split (left | right) and vertical split (top / bottom).
 //! Use [`Splitter::new`] for the historical horizontal layout, or
 //! [`Splitter::vertical`] for the Y-axis variant.
+//!
+//! [`SplitterRatio`] is the optional two-way channel a host uses to
+//! *persist* a divider position: the widget publishes every drag into it
+//! and adopts any value written from outside on its next layout. Without
+//! it there is no way to either read the ratio back out of a boxed
+//! widget tree or restore one — the field is only reachable while the
+//! host still owns the concrete `Splitter`.
+
+use std::sync::{Arc, Mutex};
 
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
+
+/// Shared, clonable divider position — the seam between a [`Splitter`]
+/// buried in a widget tree and a host that wants to save or restore it.
+///
+/// Two-way by design: the splitter writes the cell on every drag, and
+/// reads it at the start of each `layout()` so a host write (restoring a
+/// document's saved layout) lands on the next frame. They never fight —
+/// the value the splitter adopts is the value it would publish.
+///
+/// Poisoning is swallowed: the payload is one `f64` that no panic can
+/// leave logically inconsistent, so both accessors take the inner value
+/// rather than propagating a panic into the UI thread.
+#[derive(Clone, Debug)]
+pub struct SplitterRatio(Arc<Mutex<f64>>);
+
+impl SplitterRatio {
+    /// New channel seeded with `ratio` (clamped like
+    /// [`Splitter::with_ratio`]; a non-finite seed falls back to a even
+    /// split, see [`Self::set`]).
+    pub fn new(ratio: f64) -> Self {
+        Self(Arc::new(Mutex::new(clamp_ratio(ratio, 0.5))))
+    }
+
+    /// Current divider position as a fraction of the total length going
+    /// to `children[0]` (left / top pane).
+    pub fn get(&self) -> f64 {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Ask the splitter to move. Applied on its next layout pass.
+    ///
+    /// A non-finite ratio is **ignored** — `f64::clamp` passes `NaN`
+    /// through, and a `NaN` divider makes both panes zero-sized with no
+    /// way for the user to drag it back (the drag maths derives the new
+    /// ratio from the old one). Restoring a corrupt document therefore
+    /// leaves the splitter where it is rather than destroying the
+    /// layout. Returns `true` when the value was accepted.
+    pub fn set(&self, ratio: f64) -> bool {
+        if !ratio.is_finite() {
+            return false;
+        }
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = ratio.clamp(RATIO_MIN, RATIO_MAX);
+        crate::animation::request_draw();
+        true
+    }
+}
+
+/// Range the divider position is clamped to, at every entry point.
+///
+/// This is the *drag* range — how far the user may push the divider.
+/// A host persisting the position may narrow it further (AtomArtist
+/// clamps a saved divider to NodeDesigner's 20…80 % window before
+/// writing it); the widget deliberately does not, because a pane
+/// dragged to 5 % is a legitimate thing to do while working.
+pub const RATIO_MIN: f64 = 0.05;
+pub const RATIO_MAX: f64 = 0.95;
+
+/// Clamp `ratio` into the drag range, substituting `fallback` for a
+/// non-finite input (which `f64::clamp` would pass through untouched).
+fn clamp_ratio(ratio: f64, fallback: f64) -> f64 {
+    if ratio.is_finite() {
+        ratio.clamp(RATIO_MIN, RATIO_MAX)
+    } else {
+        fallback
+    }
+}
 
 /// A draggable divider that splits its two children along one axis.
 ///
@@ -32,6 +107,8 @@ pub struct Splitter {
 
     hovered: bool,
     dragging: bool,
+    /// Optional host channel (see [`SplitterRatio`]).
+    ratio_handle: Option<SplitterRatio>,
 }
 
 impl Splitter {
@@ -46,6 +123,7 @@ impl Splitter {
             vertical: false,
             hovered: false,
             dragging: false,
+            ratio_handle: None,
         }
     }
 
@@ -62,12 +140,46 @@ impl Splitter {
             vertical: true,
             hovered: false,
             dragging: false,
+            ratio_handle: None,
         }
     }
 
     pub fn with_ratio(mut self, ratio: f64) -> Self {
-        self.ratio = ratio.clamp(0.05, 0.95);
+        self.set_ratio(ratio);
         self
+    }
+
+    /// Install a shared [`SplitterRatio`] and adopt its current value.
+    ///
+    /// Call it *after* [`with_ratio`](Self::with_ratio): the handle is
+    /// the authority once installed, which is what lets a host seed the
+    /// default in one place (the handle's constructor) and have a
+    /// restored document overwrite it later.
+    pub fn with_ratio_handle(mut self, handle: SplitterRatio) -> Self {
+        self.ratio = handle.get();
+        self.ratio_handle = Some(handle);
+        self
+    }
+
+    /// Clamp, store, and publish a new divider position. A non-finite
+    /// ratio (an `x / 0` in a caller's own layout maths) leaves the
+    /// divider where it is.
+    fn set_ratio(&mut self, ratio: f64) {
+        self.ratio = clamp_ratio(ratio, self.ratio);
+        if let Some(handle) = &self.ratio_handle {
+            handle.set(self.ratio);
+        }
+    }
+
+    /// Adopt a host-written ratio, if the handle disagrees with ours.
+    /// Called at the top of `layout()`.
+    fn adopt_handle_ratio(&mut self) {
+        if let Some(handle) = &self.ratio_handle {
+            let wanted = handle.get();
+            if wanted != self.ratio {
+                self.ratio = wanted;
+            }
+        }
     }
 
     pub fn with_divider_width(mut self, w: f64) -> Self {
@@ -168,6 +280,7 @@ impl Widget for Splitter {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        self.adopt_handle_ratio();
         let div = self.divider_width;
 
         if self.children.len() < 2 {
@@ -284,7 +397,7 @@ impl Widget for Splitter {
                             // Convert pos.y (Y-up) into top fraction.
                             let div_mid = pos.y;
                             let top_h = (total - div_mid).max(0.0);
-                            self.ratio = (top_h / total).clamp(0.05, 0.95);
+                            self.set_ratio(top_h / total);
                         }
                         crate::animation::request_draw();
                         EventResult::Consumed
@@ -335,7 +448,7 @@ impl Widget for Splitter {
                     if self.dragging {
                         let total = self.bounds.width;
                         if total > self.divider_width {
-                            self.ratio = (pos.x / total).clamp(0.05, 0.95);
+                            self.set_ratio(pos.x / total);
                         }
                         crate::animation::request_draw();
                         EventResult::Consumed

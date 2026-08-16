@@ -24,9 +24,13 @@ mod paint;
 mod popup;
 mod snap_guides;
 mod value_editor_widget;
+pub mod view_nav;
 
 pub use commands::{NodeEditorCommand, NodeEditorHandle};
+pub use view_nav::InteractionMode;
+
 use popup::{build_add_node_popup_items, translate_event_into};
+use view_nav::ViewAnimation;
 
 #[cfg(test)]
 mod nodes_tests;
@@ -44,6 +48,8 @@ mod tests_noodle;
 mod tests_overlay;
 #[cfg(test)]
 mod tests_value;
+#[cfg(test)]
+mod tests_view_nav;
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -93,6 +99,16 @@ enum CanvasState {
         /// Per-node start position, captured at mousedown.
         start_positions: Vec<[f64; 2]>,
         start_canvas: [f64; 2],
+    },
+    /// Left-drag zoom (only reachable in [`InteractionMode::Zoom`]).
+    /// Anchored on the press point: the canvas position under the
+    /// pointer at mousedown stays under it for the whole drag.
+    ZoomingCanvas {
+        start_scale: f64,
+        start_local: agg_gui::Point,
+        /// Canvas-space position under the press, captured once so
+        /// rounding in the running scale can't drift the anchor.
+        anchor_canvas: [f64; 2],
     },
     DrawingConnection {
         from_node: NodeId,
@@ -175,6 +191,11 @@ pub struct NodeEditor {
     last_click: Option<(agg_gui::Point, web_time::Instant)>,
     palette: CanvasPalette,
     interaction: CanvasState,
+    /// What a left-drag does (see [`InteractionMode`]). Hosts flip it
+    /// from a toolbar via [`NodeEditorCommand::SetInteractionMode`].
+    mode: InteractionMode,
+    /// In-flight fit-to-content tween, ticked by `layout()`.
+    view_anim: Option<ViewAnimation>,
     /// Spacebar pan modifier — when held, mouse-left drag pans the canvas
     /// instead of selecting / dragging nodes.
     space_held: bool,
@@ -265,6 +286,8 @@ impl NodeEditor {
             last_click: None,
             palette: CanvasPalette::dark(),
             interaction: CanvasState::Idle,
+            mode: InteractionMode::default(),
+            view_anim: None,
             space_held: false,
             id: "node-editor",
             popup: PopupMenu::new(popup_items),
@@ -591,6 +614,11 @@ impl Widget for NodeEditor {
         // All) before anything reads the model or the selection, so the
         // effect lands in this frame's fingerprint and children.
         self.drain_commands();
+
+        // Advance the fit-to-content tween (if any) before the snapshot
+        // below, so this frame's fingerprint — which includes pan/zoom —
+        // carries the eased view and the children rebuild with it.
+        self.tick_view_animation();
 
         // Drain the chevron-click channel — header chevrons (real
         // child widgets) write a NodeId here when consumed; the editor

@@ -27,7 +27,13 @@ const DBL_CLICK_MS: u128 = 500;
 /// standalone widget.
 const PROP_DRAG_THRESHOLD: f64 = 3.0;
 
-use super::{CanvasState, NodeEditor, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
+use super::{CanvasState, InteractionMode, NodeEditor, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
+
+/// Zoom sensitivity of a left-drag in [`InteractionMode::Zoom`]:
+/// `scale *= exp(dy * ZOOM_DRAG_RATE)`. NodeDesigner uses
+/// `exp(-dy * 0.005)` on a **top-down** dy; our `dy` is Y-up, so the
+/// sign flips and dragging *up* zooms in on both sides.
+const ZOOM_DRAG_RATE: f64 = 0.005;
 
 impl NodeEditor {
     pub(super) fn on_mouse_down(
@@ -41,7 +47,36 @@ impl NodeEditor {
 
         match button {
             MouseButton::Left => {
+                // Pan / Zoom modes take the left button away from the
+                // nodes entirely (NodeDesigner suppresses node
+                // interaction while either is active), so this test
+                // comes before every hit-test below.
+                match self.mode {
+                    InteractionMode::Pan => {
+                        // The user is taking the view: abandon any fit
+                        // tween before capturing the start offset, or
+                        // the drag would be measured from a view the
+                        // animation is still moving.
+                        self.cancel_view_animation();
+                        self.interaction = CanvasState::PanningCanvas {
+                            start_offset: self.canvas_offset,
+                            start_local: pos,
+                        };
+                        return EventResult::Consumed;
+                    }
+                    InteractionMode::Zoom => {
+                        self.cancel_view_animation();
+                        self.interaction = CanvasState::ZoomingCanvas {
+                            start_scale: self.canvas_scale,
+                            start_local: pos,
+                            anchor_canvas: canvas_pos,
+                        };
+                        return EventResult::Consumed;
+                    }
+                    InteractionMode::Select => {}
+                }
                 if self.space_held {
+                    self.cancel_view_animation();
                     self.interaction = CanvasState::PanningCanvas {
                         start_offset: self.canvas_offset,
                         start_local: pos,
@@ -276,6 +311,7 @@ impl NodeEditor {
                 EventResult::Consumed
             }
             MouseButton::Middle => {
+                self.cancel_view_animation();
                 self.interaction = CanvasState::PanningCanvas {
                     start_offset: self.canvas_offset,
                     start_local: pos,
@@ -328,6 +364,17 @@ impl NodeEditor {
         // before the closure body runs otherwise.  Cheap to take
         // unconditionally (matches the snap-disabled path below).
         let layouts_snapshot = self.snapshot_layouts();
+        // A pan / zoom drag in flight owns the view for as long as it
+        // lasts. The presses above already cancelled the tween; this
+        // catches a fit started *during* a drag (a host toolbar can push
+        // `FitToContent` at any moment) rather than letting the two
+        // write the same fields on alternating frames.
+        if matches!(
+            self.interaction,
+            CanvasState::PanningCanvas { .. } | CanvasState::ZoomingCanvas { .. }
+        ) {
+            self.cancel_view_animation();
+        }
         let result = match &mut self.interaction {
             CanvasState::PanningCanvas {
                 start_offset,
@@ -344,6 +391,30 @@ impl NodeEditor {
                     .lock()
                     .unwrap()
                     .on_canvas_pan_changed(self.canvas_offset);
+                EventResult::Consumed
+            }
+            CanvasState::ZoomingCanvas {
+                start_scale,
+                start_local,
+                anchor_canvas,
+            } => {
+                // Y-up: `dy > 0` means the pointer moved UP the screen,
+                // which zooms in — the same gesture NodeDesigner gets
+                // from `exp(-dy * 0.005)` on a top-down dy.
+                let dy = pos.y - start_local.y;
+                let anchor = *anchor_canvas;
+                let press = *start_local;
+                let scale = (*start_scale * (dy * ZOOM_DRAG_RATE).exp()).clamp(ZOOM_MIN, ZOOM_MAX);
+                self.canvas_scale = scale;
+                // Keep the canvas point that was under the press under
+                // the press for the whole drag.
+                self.canvas_offset = [press.x - anchor[0] * scale, press.y - anchor[1] * scale];
+                {
+                    let mut model = self.model.lock().unwrap();
+                    model.on_canvas_pan_changed(self.canvas_offset);
+                    model.on_canvas_zoom_changed(scale);
+                }
+                self.backbuffer.invalidate();
                 EventResult::Consumed
             }
             CanvasState::DraggingNode {
@@ -523,7 +594,9 @@ impl NodeEditor {
                 agg_gui::animation::request_draw();
                 EventResult::Consumed
             }
-            (_, CanvasState::PanningCanvas { .. }) => EventResult::Consumed,
+            (_, CanvasState::PanningCanvas { .. }) | (_, CanvasState::ZoomingCanvas { .. }) => {
+                EventResult::Consumed
+            }
             (
                 _,
                 CanvasState::DraggingProperty {
@@ -571,6 +644,9 @@ impl NodeEditor {
         if delta_y == 0.0 {
             return EventResult::Ignored;
         }
+        // The wheel is always live, whatever the mode — so it is also
+        // always a user view move, and always beats the tween.
+        self.cancel_view_animation();
         let canvas_before = self.local_to_canvas(pos);
         let factor = if delta_y > 0.0 {
             ZOOM_STEP

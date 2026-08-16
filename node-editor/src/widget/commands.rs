@@ -45,7 +45,11 @@ use super::NodeEditor;
 
 /// One queued editor operation. Additive by design — new variants can be
 /// appended without breaking hosts, which only ever construct them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `Eq` is deliberately absent: [`Self::SetView`] carries `f64`s, and a
+/// command queue has no use for equality beyond the `assert_eq!` in a
+/// test, which `PartialEq` already serves.
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum NodeEditorCommand {
     /// Remove every currently-selected node from the model, exactly as
@@ -53,6 +57,21 @@ pub enum NodeEditorCommand {
     DeleteSelection,
     /// Select every node the model currently exposes.
     SelectAll,
+    /// Frame every node in the view, animated over
+    /// [`FIT_ANIM_MS`](super::view_nav::FIT_ANIM_MS). No-op on an empty
+    /// graph. See [`NodeEditor::fit_to_content`].
+    FitToContent,
+    /// Adopt an exact pan / zoom — the restore half of a host that
+    /// persists the canvas view with its document. Applied instantly
+    /// (no animation) and clamped to the editor's zoom limits.
+    ///
+    /// Queued rather than called directly because the host restoring a
+    /// view (a file-open continuation) has no handle on the widget, and
+    /// because `layout()` is the first moment the pane's size is known.
+    SetView { scale: f64, offset: [f64; 2] },
+    /// Switch what a left-drag on the canvas does. See
+    /// [`InteractionMode`](super::InteractionMode).
+    SetInteractionMode(super::InteractionMode),
 }
 
 /// Clonable command channel between a host's chrome and a
@@ -207,6 +226,18 @@ impl NodeEditor {
                 }
                 NodeEditorCommand::SelectAll => {
                     self.select_all();
+                }
+                NodeEditorCommand::FitToContent => {
+                    self.fit_to_content();
+                }
+                NodeEditorCommand::SetView { scale, offset } => {
+                    // A non-finite view is refused (see `set_view`);
+                    // there is nothing useful a queue drain can do about
+                    // it beyond not applying it.
+                    let _ = self.set_view(scale, offset);
+                }
+                NodeEditorCommand::SetInteractionMode(mode) => {
+                    self.set_interaction_mode(mode);
                 }
             }
         }

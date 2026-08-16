@@ -445,6 +445,62 @@ fn test_splitter_drag_updates_ratio() {
     );
 }
 
+/// A `SplitterRatio` handle is two-way: the splitter publishes drags
+/// into it, and adopts a value the host writes on its next layout. That
+/// pair is what lets an application persist a divider position with its
+/// document.
+#[test]
+fn test_splitter_ratio_handle_round_trips() {
+    use crate::widgets::SplitterRatio;
+
+    let handle = SplitterRatio::new(0.6);
+    let mut splitter = Splitter::new(Box::new(SizedBox::new()), Box::new(SizedBox::new()))
+        .with_ratio_handle(handle.clone());
+    splitter.layout(Size::new(400.0, 200.0));
+    splitter.set_bounds(crate::Rect::new(0.0, 0.0, 400.0, 200.0));
+    assert!(
+        (splitter.ratio - 0.6).abs() < 1e-9,
+        "handle seeds the ratio"
+    );
+
+    // A drag publishes into the handle.
+    let div_x = (400.0_f64 - 6.0) * 0.6;
+    splitter.on_event(&crate::Event::MouseDown {
+        pos: crate::Point::new(div_x + 1.0, 100.0),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    splitter.on_event(&crate::Event::MouseMove {
+        pos: crate::Point::new(100.0, 100.0),
+    });
+    assert!(
+        (handle.get() - 0.25).abs() < 0.01,
+        "drag must reach the handle; got {}",
+        handle.get()
+    );
+
+    // …and a host write is adopted on the next layout.
+    handle.set(0.8);
+    splitter.layout(Size::new(400.0, 200.0));
+    assert!(
+        (splitter.ratio - 0.8).abs() < 1e-9,
+        "got {}",
+        splitter.ratio
+    );
+
+    // Out-of-range values are clamped at the handle, not silently kept.
+    assert!(handle.set(5.0));
+    assert!((handle.get() - 0.95).abs() < 1e-9);
+
+    // …and a non-finite one is refused outright: clamping would pass
+    // NaN straight through and leave both panes zero-sized.
+    assert!(!handle.set(f64::NAN));
+    assert!(!handle.set(f64::INFINITY));
+    assert!((handle.get() - 0.95).abs() < 1e-9, "position survived");
+    splitter.layout(Size::new(400.0, 200.0));
+    assert!(splitter.ratio.is_finite());
+}
+
 /// TabView swaps its active child when the tab bar is clicked.
 #[test]
 fn test_tab_view_always_has_one_child() {
