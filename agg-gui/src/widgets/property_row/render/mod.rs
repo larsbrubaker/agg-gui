@@ -38,6 +38,7 @@ use super::value::RowValue;
 mod color;
 mod default_row;
 mod enum_buttons;
+mod enum_icons;
 mod matrix;
 mod slider;
 mod string_read_only;
@@ -113,6 +114,9 @@ fn dispatch_editor(
         | EditorKind::EnumDropdown { variants } => {
             enum_buttons::paint_editor(ctx, editor_area, value, variants, scale)
         }
+        EditorKind::EnumIcons { variants, icons } => {
+            enum_icons::paint_editor(ctx, editor_area, value, variants, icons, scale)
+        }
         // Other variants currently fall through to the default
         // painter — they'll get dedicated renderers in follow-up
         // work (single-/multi-line text editors, image picker).
@@ -140,12 +144,12 @@ pub fn enum_variant_at(
     x: f64,
     scale: f64,
 ) -> Option<usize> {
-    let variants = match editor {
-        EditorKind::EnumButtons { variants }
-        | EditorKind::EnumTabs { variants }
-        | EditorKind::EnumDropdown { variants } => variants,
-        _ => return None,
-    };
+    // Every enum presentation — labelled strip, tabs, dropdown, icon
+    // strip — is the same segmented geometry, so they share one
+    // hit-test. Going through `enum_variants` rather than a match here
+    // means a new presentation is hit-testable the moment it is
+    // declared.
+    let variants = editor.enum_variants()?;
     let editor_area = if has_label {
         split_label_editor(area, scale).1
     } else {

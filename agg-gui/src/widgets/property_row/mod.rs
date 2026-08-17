@@ -33,9 +33,12 @@
 //!
 //! ## Enum rows
 //!
-//! The three enum presentations (`EnumDropdown` / `EnumButtons` /
+//! The three text enum presentations (`EnumDropdown` / `EnumButtons` /
 //! `EnumTabs`) all paint today as one segmented strip — see
-//! `render/enum_buttons.rs`. Painting is only half of an enum row: the
+//! `render/enum_buttons.rs`. `EnumIcons` is the same strip with
+//! host-registered artwork per segment (`render/enum_icons.rs` +
+//! [`crate::vector_icon`]), so every enum row shares one geometry and
+//! one hit-test. Painting is only half of an enum row: the
 //! host owns click routing (hit-testing lives wherever its coordinates
 //! do), so it maps a pointer onto a segment with [`enum_variant_at`],
 //! which recomputes exactly the geometry the painter drew. A host that

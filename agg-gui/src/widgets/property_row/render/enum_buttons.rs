@@ -4,10 +4,15 @@
 //! Serves `EditorKind::EnumButtons`, `EnumTabs` and `EnumDropdown`: all
 //! three are "pick one of a short, fixed list", and a strip reads the
 //! same in a 22-px property row whichever presentation the schema asked
-//! for. A real popup list for `EnumDropdown` and an icon strip for
-//! MatterCAD's `IconRow` mode are follow-up work; adding either follows
-//! the three-step recipe in [`super`]'s module docs (variant, file,
-//! dispatch arm).
+//! for. A real popup list for `EnumDropdown` is follow-up work; adding
+//! it follows the three-step recipe in [`super`]'s module docs (variant,
+//! file, dispatch arm).
+//!
+//! `EditorKind::EnumIcons` is the same strip with artwork instead of
+//! labels — it lives in [`super::enum_icons`] and reuses this module's
+//! geometry and chrome ([`paint_strip_chrome`], [`segment_ink`],
+//! [`paint_segment_label`] for its fallback) so the two presentations
+//! cannot drift apart.
 //!
 //! Hosts route clicks through [`variant_at`] (re-exported as
 //! `enum_variant_at`), which recomputes exactly the geometry
@@ -52,17 +57,25 @@ pub(crate) fn variant_at(editor_area: Rect, count: usize, x: f64, scale: f64) ->
         .position(|r| x >= r.x && x <= r.x + r.width)
 }
 
-pub(crate) fn paint_editor(
+/// Paint the strip's background and per-segment chrome (the accent fill
+/// under the current value, hairline separators between the rest) and
+/// hand back each segment's rect paired with "is this the selected one".
+///
+/// Shared with the icon strip (`super::enum_icons`) so both
+/// presentations are the same control with different segment contents —
+/// if they painted their own chrome, selection would eventually look
+/// different depending on which editor kind the schema asked for.
+pub(crate) fn paint_strip_chrome(
     ctx: &mut dyn DrawCtx,
     editor_area: Rect,
     value: RowValue,
     variants: &[std::sync::Arc<str>],
     scale: f64,
-) {
+) -> Vec<(Rect, bool)> {
     let pill = editor_pill_rect(editor_area, scale);
     paint_pill_bg(ctx, pill, scale);
     if variants.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let current = value.as_short_text().unwrap_or("");
@@ -92,23 +105,61 @@ pub(crate) fn paint_editor(
             ctx.line_to(r.x, r.y + r.height - 2.0 * scale);
             ctx.stroke();
         }
+    }
 
-        let label = fit_label(&variants[i], r.width - SEGMENT_PAD * 2.0 * scale, scale);
-        if label.is_empty() {
-            continue;
-        }
-        ctx.set_fill_color(if Some(i) == selected {
-            // The accent fill is dark in both themes; keep the selected
-            // label readable rather than inheriting the dim body text.
-            Color::rgba(0.98, 0.98, 0.98, 1.0)
-        } else {
-            visuals.text_color
-        });
-        ctx.set_font_size(11.0 * scale);
-        let est_w = label.chars().count() as f64 * GLYPH_WIDTH * scale;
-        let text_x = (r.x + (r.width - est_w) * 0.5).max(r.x + 2.0 * scale);
-        let text_y = r.y + r.height * 0.5 - 4.0 * scale;
-        ctx.fill_text(&label, text_x, text_y);
+    rects
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| (r, Some(i) == selected))
+        .collect()
+}
+
+/// The colour a segment's contents should use — light on the accent
+/// fill, body text elsewhere. Shared with the icon strip so an icon's
+/// ink and a label's ink agree.
+pub(crate) fn segment_ink(ctx: &dyn DrawCtx, selected: bool) -> Color {
+    if selected {
+        // The accent fill is dark in both themes; keep the selected
+        // content readable rather than inheriting the dim body text.
+        Color::rgba(0.98, 0.98, 0.98, 1.0)
+    } else {
+        ctx.visuals().text_color
+    }
+}
+
+/// Draw a variant's (possibly truncated) label centred in `r`.
+pub(crate) fn paint_segment_label(
+    ctx: &mut dyn DrawCtx,
+    r: Rect,
+    variant: &str,
+    selected: bool,
+    scale: f64,
+) {
+    let label = fit_label(variant, r.width - SEGMENT_PAD * 2.0 * scale, scale);
+    if label.is_empty() {
+        return;
+    }
+    let ink = segment_ink(ctx, selected);
+    ctx.set_fill_color(ink);
+    ctx.set_font_size(11.0 * scale);
+    let est_w = label.chars().count() as f64 * GLYPH_WIDTH * scale;
+    let text_x = (r.x + (r.width - est_w) * 0.5).max(r.x + 2.0 * scale);
+    let text_y = r.y + r.height * 0.5 - 4.0 * scale;
+    ctx.fill_text(&label, text_x, text_y);
+}
+
+pub(crate) fn paint_editor(
+    ctx: &mut dyn DrawCtx,
+    editor_area: Rect,
+    value: RowValue,
+    variants: &[std::sync::Arc<str>],
+    scale: f64,
+) {
+    for (i, (r, selected)) in paint_strip_chrome(ctx, editor_area, value, variants, scale)
+        .into_iter()
+        .enumerate()
+    {
+        paint_segment_label(ctx, r, &variants[i], selected, scale);
     }
 }
 

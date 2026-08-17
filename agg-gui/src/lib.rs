@@ -83,6 +83,7 @@ pub mod touch_points;
 pub mod touch_state;
 pub mod undo;
 pub mod ux_scale;
+pub mod vector_icon;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_clipboard;
 /// Wheel-delta normalization for shells: OS / DOM scroll deltas → the

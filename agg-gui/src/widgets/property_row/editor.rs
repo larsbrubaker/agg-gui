@@ -18,7 +18,7 @@
 //! | `[MultiLineEdit]`               | `EditorKind::StringMultiLine`       |
 //! | `[EnumDisplay(Mode = Tabs)]`    | `EditorKind::EnumTabs { variants }` |
 //! | `[EnumDisplay(Mode = Buttons)]` | `EditorKind::EnumButtons { … }`     |
-//! | `[EnumDisplay(Mode = IconRow)]` | `EditorKind::EnumDropdown { … }`    |
+//! | `[EnumDisplay(Mode = IconRow)]` | `EditorKind::EnumIcons { … }`       |
 //! | `[HideFromEditor]`              | `NodeFieldAttrs::hidden`            |
 
 use std::sync::Arc;
@@ -62,6 +62,22 @@ pub enum EditorKind {
     EnumDropdown { variants: Vec<Arc<str>> },
     /// Enum rendered as a row of mutually-exclusive buttons.
     EnumButtons { variants: Vec<Arc<str>> },
+    /// Enum rendered as a strip of icons — MatterCAD's
+    /// `[EnumDisplay(Mode = IconRow)]`.
+    ///
+    /// `icons[i]` is the *id* of the artwork for `variants[i]`, looked
+    /// up at paint time in [`crate::vector_icon`]'s host-registered
+    /// registry; an id with nothing registered under it falls back to
+    /// the variant's label, so the strip is never blank. Ids rather
+    /// than drawings keep `EditorKind` cheap to clone and comparable —
+    /// it travels through property snapshots many times per frame.
+    ///
+    /// The two vectors are parallel and `icons` may be shorter than
+    /// `variants` (the tail then renders as labels).
+    EnumIcons {
+        variants: Vec<Arc<str>>,
+        icons: Vec<Arc<str>>,
+    },
     /// Enum rendered as a full-width tab strip — MatterCAD's
     /// `EnumDisplay.Tabs`. Best for 2–5 variants the user switches
     /// between at the top of a panel.
@@ -104,7 +120,28 @@ impl EditorKind {
         match self {
             EditorKind::EnumDropdown { variants }
             | EditorKind::EnumButtons { variants }
-            | EditorKind::EnumTabs { variants } => Some(variants.as_slice()),
+            | EditorKind::EnumTabs { variants }
+            | EditorKind::EnumIcons { variants, .. } => Some(variants.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// An [`EnumIcons`](EditorKind::EnumIcons) editor from parallel
+    /// `(variant, icon id)` pairs — the shape hosts usually have on
+    /// hand, without building two vectors by hand.
+    pub fn enum_icons<'a>(pairs: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        let (variants, icons) = pairs
+            .into_iter()
+            .map(|(v, i)| (Arc::from(v), Arc::from(i)))
+            .unzip();
+        EditorKind::EnumIcons { variants, icons }
+    }
+
+    /// The icon ids of an [`EnumIcons`](EditorKind::EnumIcons) editor,
+    /// else `None`. Parallel to [`enum_variants`](Self::enum_variants).
+    pub fn enum_icon_ids(&self) -> Option<&[Arc<str>]> {
+        match self {
+            EditorKind::EnumIcons { icons, .. } => Some(icons.as_slice()),
             _ => None,
         }
     }
@@ -350,6 +387,32 @@ mod tests {
         assert_eq!(EditorKind::Toggle.numeric_range(), (None, None));
         assert_eq!(EditorKind::ColorPicker.numeric_range(), (None, None));
         assert_eq!(EditorKind::StringSingleLine.numeric_range(), (None, None));
+    }
+
+    /// The icon strip is an enum presentation like any other: its
+    /// variants must come back through the same accessor every host
+    /// uses, or an icon row would silently stop being clickable.
+    #[test]
+    fn enum_icons_exposes_variants_and_icon_ids() {
+        let k = EditorKind::enum_icons([
+            ("Combine", "boolean.combine"),
+            ("Subtract", "boolean.subtract"),
+        ]);
+        let variants = k.enum_variants().expect("icon rows are enum rows");
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[1].as_ref(), "Subtract");
+        let icons = k.enum_icon_ids().expect("icon rows carry icon ids");
+        assert_eq!(icons[0].as_ref(), "boolean.combine");
+    }
+
+    #[test]
+    fn non_icon_editors_have_no_icon_ids() {
+        assert!(EditorKind::EnumButtons {
+            variants: vec!["A".into()]
+        }
+        .enum_icon_ids()
+        .is_none());
+        assert!(EditorKind::Toggle.enum_icon_ids().is_none());
     }
 
     #[test]
