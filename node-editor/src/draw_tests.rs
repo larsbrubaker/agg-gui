@@ -90,7 +90,7 @@ fn output_row_appears_before_input_rows() {
 fn input_row_carries_inline_editor_when_property_is_bound() {
     let info = layout_node(&make_extrude_like());
     let height_input = info.rows.iter().find_map(|r| match r {
-        NodeRow::Input { socket, editor } if socket.name == "Height" => Some(editor),
+        NodeRow::Input { socket, editor, .. } if socket.name == "Height" => Some(editor),
         _ => None,
     });
     assert!(
@@ -104,7 +104,7 @@ fn input_row_drops_editor_when_socket_is_connected() {
     let node = make_extrude_like();
     let info = layout_node_with_connections(&node, |name| name == "Height");
     let height_input = info.rows.iter().find_map(|r| match r {
-        NodeRow::Input { socket, editor } if socket.name == "Height" => Some(editor),
+        NodeRow::Input { socket, editor, .. } if socket.name == "Height" => Some(editor),
         _ => None,
     });
     assert!(

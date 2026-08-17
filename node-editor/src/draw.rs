@@ -138,6 +138,11 @@ pub enum NodeRow {
     Input {
         socket: SocketLayout,
         editor: Option<PropLayout>,
+        /// The row's own height (see [`NodeRow::height`]). Stored
+        /// rather than assumed: a bound property can be taller than one
+        /// [`ROW_HEIGHT`], and the row keeps that even when the editor
+        /// is dropped because the socket is connected.
+        height: f64,
     },
     /// Standalone property row — no socket attachment, just an inline
     /// editor that spans most of the row.
@@ -145,17 +150,35 @@ pub enum NodeRow {
 }
 
 impl NodeRow {
-    /// Canvas-space row rectangle (top edge y, height `ROW_HEIGHT`).
+    /// Canvas-space row rectangle (top edge, size).
     pub fn row_rect(&self) -> ([f64; 2], [f64; 2]) {
         match self {
             NodeRow::Output(s) | NodeRow::Input { socket: s, .. } => {
                 // We don't track the row's own rect explicitly on the socket
                 // (its `center` is in the middle of the row), so reconstruct
-                // it from the socket center.
+                // it from the socket center. The dot stays centred on the
+                // first ROW_HEIGHT of the row even when the row is taller.
                 let top = s.center[1] + ROW_HEIGHT * 0.5;
-                ([0.0, top], [NODE_WIDTH, ROW_HEIGHT])
+                ([0.0, top], [NODE_WIDTH, self.height()])
             }
             NodeRow::Property(p) => (p.top_left, p.size),
+        }
+    }
+
+    /// The row's own height in canvas units — **the** stacking pitch.
+    ///
+    /// Both the layout pass ([`layout_node_with_state`]) and the widget
+    /// builder (`NodeRowWidget::from_row`) advance by exactly this, so
+    /// what the user sees and what the canvas hit-tests cannot drift.
+    /// They did: rows were painted at a fixed `ROW_HEIGHT` pitch while
+    /// the layout advanced by [`row_height_for_property`], and a
+    /// read-only string row (two rows tall) pushed everything below it
+    /// out of reach of its own clicks.
+    pub fn height(&self) -> f64 {
+        match self {
+            NodeRow::Output(_) => ROW_HEIGHT,
+            NodeRow::Input { height, .. } => *height,
+            NodeRow::Property(p) => p.size[1],
         }
     }
 
@@ -336,6 +359,7 @@ where
                     center: [top_left[0], center_y],
                 },
                 editor: None,
+                height: ROW_HEIGHT,
             });
         }
         return NodeLayoutInfo {
@@ -395,7 +419,7 @@ where
             socket_type: s.socket_type,
             center: [top_left[0] + node_width, center_y],
         }));
-        y_offset += ROW_HEIGHT;
+        y_offset += rows[rows.len() - 1].height();
     }
 
     // Bare input sockets (no matching property) — render socket + label,
@@ -411,8 +435,9 @@ where
                 center: [top_left[0], center_y],
             },
             editor: None,
+            height: ROW_HEIGHT,
         });
-        y_offset += ROW_HEIGHT;
+        y_offset += rows[rows.len() - 1].height();
     }
 
     // Properties in declaration order. Each one becomes either:
@@ -448,7 +473,11 @@ where
             } else {
                 Some(input_editor_layout_y(top_left, y_offset, p, node_width))
             };
-            rows.push(NodeRow::Input { socket, editor });
+            rows.push(NodeRow::Input {
+                socket,
+                editor,
+                height: row_h,
+            });
         } else {
             let row_top_y = top_left[1] - TITLE_HEIGHT - y_offset;
             rows.push(NodeRow::Property(PropLayout {
@@ -464,7 +493,10 @@ where
                 full_row: true,
             }));
         }
-        y_offset += row_h;
+        // Advance by the row's own height, read back off the row that
+        // was just pushed — the same accessor the widget builder uses,
+        // so the two cannot describe different stacks.
+        y_offset += rows[rows.len() - 1].height();
     }
 
     let height = TITLE_HEIGHT + y_offset + NODE_BOTTOM_PAD;

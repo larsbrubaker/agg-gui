@@ -239,3 +239,159 @@ fn offset_translates_node_bounds() {
         nw.bounds().y
     );
 }
+
+/// A node whose rows are not all the same height must build its widget
+/// tree from the **layout's** row rects rather than from `row_index *
+/// ROW_HEIGHT`.
+///
+/// The two have to agree: the widget tree is what paints (and what the
+/// inspector reports), while `NodeLayoutInfo`'s rects are what the
+/// canvas hit-tests. A read-only string row is two rows tall
+/// (`row_height_for_property`), so with a fixed row pitch every row
+/// below one painted a row-height away from where its clicks resolve —
+/// a toggle under a hint row committed the hint's row instead of its
+/// own.
+/// A read-only string property, which the layout gives two rows worth of
+/// height.
+fn read_only_row(name: &str, bound_input: Option<&str>) -> PropertyView {
+    PropertyView {
+        name: name.into(),
+        display_label: Some(String::new()),
+        current: PropertyValue::Other {
+            display: "a hint message the renderer wraps across two lines".into(),
+        },
+        min: None,
+        max: None,
+        bound_input: bound_input.map(|s| s.to_string()),
+        editor: None,
+        editor_kind: Some(agg_gui::widgets::EditorKind::StringReadOnly),
+    }
+}
+
+fn toggle_row(name: &str) -> PropertyView {
+    PropertyView {
+        name: name.into(),
+        display_label: Some("Toggle".into()),
+        current: PropertyValue::Bool(false),
+        min: None,
+        max: None,
+        bound_input: None,
+        editor: None,
+        editor_kind: Some(agg_gui::widgets::EditorKind::Toggle),
+    }
+}
+
+/// Assert that the widget tree stacks its rows exactly where the layout
+/// says they are — every row, at `scale`.
+///
+/// `NodeRow::height()` is the single pitch both sides use, so this is
+/// the invariant that keeps what the user sees and what the canvas
+/// hit-tests from drifting apart.
+fn assert_row_stack_matches_layout(node: &NodeView, scale: f64, connected: &[&str]) {
+    let layout = crate::draw::layout_node_with_state(
+        node,
+        |name| connected.contains(&name),
+        /* collapsed */ false,
+    );
+    let ctx = NodePaintContext::from_model_scaled(CanvasPalette::dark(), &DummyModel, scale);
+    let nw = NodeWidget::from_layout_transformed(
+        &layout,
+        false,
+        ctx,
+        scale,
+        [0.0, 0.0],
+        std::rc::Rc::new(std::cell::Cell::new(None)),
+    );
+    let widget_rows: Vec<&Box<dyn Widget>> = nw
+        .children()
+        .iter()
+        .filter(|c| c.type_name() == "NodeRowWidget")
+        .collect();
+    assert_eq!(widget_rows.len(), layout.rows.len(), "row count");
+
+    let screen_h = layout.size[1] * scale;
+    let mut offset = 0.0_f64;
+    for (i, row) in layout.rows.iter().enumerate() {
+        let w = &widget_rows[i];
+        let want_top = screen_h - crate::draw::TITLE_HEIGHT * scale - offset * scale;
+        let got_top = w.bounds().y + w.bounds().height;
+        assert!(
+            (got_top - want_top).abs() < 1e-6,
+            "row {i} paints with its top at {got_top}, laid out at {want_top}"
+        );
+        assert!(
+            (w.bounds().height - row.height() * scale).abs() < 1e-6,
+            "row {i} paints {} tall, laid out {} tall",
+            w.bounds().height,
+            row.height() * scale
+        );
+        // The editor, when there is one, fills its row rather than a
+        // fixed row's worth — including at scale.
+        if let Some(editor) = w
+            .children()
+            .iter()
+            .find(|c| c.type_name() == "ValueEditorWidget")
+        {
+            let inset = 2.0 * scale;
+            assert!(
+                (editor.bounds().height - (row.height() * scale - inset)).abs() < 1e-6,
+                "row {i}'s editor is {} tall inside a {} row",
+                editor.bounds().height,
+                w.bounds().height
+            );
+        }
+        offset += row.height();
+    }
+}
+
+/// The rows below a tall one must line up with the hit layout.
+///
+/// The widget tree is what paints (and what the inspector reports),
+/// while `NodeLayoutInfo`'s rects are what the canvas hit-tests. A
+/// read-only string row is two rows tall (`row_height_for_property`), so
+/// with a fixed row pitch every row below one painted a row-height away
+/// from where its clicks resolve — a toggle under a hint row committed
+/// the hint's row instead of its own.
+#[test]
+fn rows_below_a_tall_row_line_up_with_the_hit_layout() {
+    let mut node = make_node();
+    node.properties = vec![read_only_row("hint", None), toggle_row("toggle")];
+    assert_row_stack_matches_layout(&node, 1.0, &[]);
+}
+
+/// The same for a tall row bound to an **input socket**, connected or
+/// not. The layout reserves the taller slot either way (the editor is
+/// dropped when the socket is wired, the row is not), so the row has to
+/// carry its own height rather than the socket branch assuming one.
+#[test]
+fn a_bound_read_only_row_stacks_by_its_own_height() {
+    let mut node = make_node();
+    node.properties = vec![read_only_row("hint", Some("Paths")), toggle_row("toggle")];
+    for connected in [&[][..], &["Paths"][..]] {
+        assert_row_stack_matches_layout(&node, 1.0, connected);
+        // The slot itself is the taller one either way — the row keeps
+        // the height its property asked for even when the editor is
+        // dropped because the socket is wired.
+        let layout =
+            crate::draw::layout_node_with_state(&node, |name| connected.contains(&name), false);
+        let hint = layout
+            .rows
+            .iter()
+            .find(|r| r.socket().map(|s| s.name == "Paths").unwrap_or(false))
+            .expect("the bound row exists");
+        assert!(
+            hint.height() > crate::draw::ROW_HEIGHT,
+            "a read-only bound row must reserve more than one row (connected: {connected:?})"
+        );
+    }
+}
+
+/// …and the whole stack scales. A row metric left in logical units
+/// while its neighbours are pre-scaled only shows up when the canvas is
+/// zoomed.
+#[test]
+fn the_row_stack_holds_at_double_scale() {
+    let mut node = make_node();
+    node.properties = vec![read_only_row("hint", Some("Paths")), toggle_row("toggle")];
+    assert_row_stack_matches_layout(&node, 2.0, &[]);
+}

@@ -33,9 +33,7 @@ use agg_gui::{
     Color, DrawCtx, Event, EventResult, HAnchor, Insets, Rect, Size, VAnchor, Widget, WidgetBase,
 };
 
-use crate::draw::{
-    NodeLayoutInfo, NodeRow, SocketSide, NODE_RADIUS, ROW_HEIGHT, SOCKET_RADIUS, TITLE_HEIGHT,
-};
+use crate::draw::{NodeLayoutInfo, NodeRow, SocketSide, NODE_RADIUS, SOCKET_RADIUS, TITLE_HEIGHT};
 use crate::model::NodeId;
 
 pub(super) const ROW_PADDING_X: f64 = 6.0;
@@ -140,14 +138,18 @@ impl NodeWidget {
         // Collapsed nodes drop row children entirely — the body is gone,
         // sockets are anchored on the title bar only for noodle resolution.
         if !layout.collapsed {
-            for (row_index, row) in layout.rows.iter().enumerate() {
+            // Cumulative row offset, mirroring the layout pass — rows
+            // may claim more than one `ROW_HEIGHT`.
+            let mut row_offset = 0.0_f64;
+            for row in layout.rows.iter() {
                 children.push(Box::new(NodeRowWidget::from_row(
                     row,
-                    row_index,
+                    row_offset,
                     screen_w,
                     screen_h,
                     ctx.clone(),
                 )));
+                row_offset += row.height();
             }
         }
 
@@ -482,9 +484,16 @@ enum RowKind {
 }
 
 impl NodeRowWidget {
+    /// `row_offset` is the row's own top edge as a distance below the
+    /// body's top, in **logical** units — the same cumulative offset
+    /// [`crate::draw::layout_node_with_state`] used to place the row's
+    /// hit rect. Rows are not all one height (a read-only string wraps
+    /// across two), so a fixed `row_index * ROW_HEIGHT` pitch would put
+    /// what the user sees somewhere other than what the canvas
+    /// hit-tests.
     fn from_row(
         row: &NodeRow,
-        row_index: usize,
+        row_offset: f64,
         node_w: f64,
         node_h: f64,
         ctx: NodePaintContext,
@@ -494,11 +503,9 @@ impl NodeRowWidget {
         // treatment so a scaled node's interior is visually consistent.
         let s = ctx.scale;
         let title_h = TITLE_HEIGHT * s;
-        let row_h = ROW_HEIGHT * s;
-        // Row at `row_index` (0 = top, directly under the title) sits at
-        // y ∈ [node_h - title_h - (row_index+1)*row_h,
-        //      node_h - title_h - row_index *row_h].
-        let row_top = node_h - title_h - (row_index as f64) * row_h;
+        let logical_h = row.height();
+        let row_h = logical_h * s;
+        let row_top = node_h - title_h - row_offset * s;
         let row_bot = row_top - row_h;
         let bounds = Rect::new(0.0, row_bot, node_w, row_h);
 
@@ -520,7 +527,7 @@ impl NodeRowWidget {
                 )));
                 (format!("output:{}", socket.name), RowKind::Output, children)
             }
-            NodeRow::Input { socket, editor } => {
+            NodeRow::Input { socket, editor, .. } => {
                 let mut children: Vec<Box<dyn Widget>> = Vec::new();
                 children.push(Box::new(SocketDotWidget::new(
                     socket.clone(),
@@ -556,7 +563,11 @@ impl NodeRowWidget {
                 children.push(Box::new(ValueEditorWidget::new(
                     prop.clone(),
                     node_w,
-                    ROW_HEIGHT,
+                    // Screen units, like every other metric here (and
+                    // like the bound-input branch above): `node_w` is
+                    // pre-scaled, so a logical height would leave a
+                    // zoomed row's editor covering a fraction of it.
+                    row_h,
                     ctx.clone(),
                     /* show_label */ true,
                 )));

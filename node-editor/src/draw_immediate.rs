@@ -135,7 +135,7 @@ fn draw_row<M: NodeGraphModel + ?Sized>(
                 label_y,
             );
         }
-        NodeRow::Input { socket, editor } => {
+        NodeRow::Input { socket, editor, .. } => {
             draw_socket(ctx, socket, palette, model);
             let label_y = socket.center[1] - 4.0;
             ctx.set_fill_color(palette.label_text);
