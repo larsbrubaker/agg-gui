@@ -500,6 +500,7 @@ impl NodeEditor {
             // badge would only appear (or clear) on the next unrelated
             // interaction that happened to dirty the fingerprint.
             l.error.hash(&mut h);
+            l.warning.hash(&mut h);
         }
         self.canvas_offset[0].to_bits().hash(&mut h);
         self.canvas_offset[1].to_bits().hash(&mut h);

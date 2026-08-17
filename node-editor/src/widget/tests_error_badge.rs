@@ -119,11 +119,17 @@ impl DrawCtx for BadgeRecorder {
 /// Lay out a real editor over one node and paint the node subtree the
 /// canvas built for it.
 fn paint_one_node(error: Option<&str>) -> BadgeRecorder {
+    paint_node(error, None)
+}
+
+/// Same, with both severities under the caller's control.
+fn paint_node(error: Option<&str>, warning: Option<&str>) -> BadgeRecorder {
     let (model, memory) = fixture_with_typed_handle();
     let mut editor = NodeEditor::new(model);
     editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
     let mut node = mk_node(1, "Boolean", [20.0, 200.0]);
     node.error = error.map(|s| s.to_string());
+    node.warning = warning.map(|s| s.to_string());
     seed_nodes(&mut editor, &memory, vec![node]);
 
     let mut recorder = BadgeRecorder::default();
@@ -206,5 +212,90 @@ fn an_error_changes_the_paint_fingerprint() {
         editor.compute_fingerprint(std::slice::from_ref(&healthy), None),
         editor.compute_fingerprint(std::slice::from_ref(&broken), None),
         "an error must invalidate the cached child tree"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Warning severity — the same chrome in the palette's amber
+// ---------------------------------------------------------------------------
+
+const DEGRADED: &str = "2 of 5 parts are not watertight solids";
+
+/// A node that produced degraded-but-usable output wears the badge in
+/// the warning colour, not the error colour.
+#[test]
+fn a_degraded_node_paints_an_amber_badge_and_outline() {
+    let palette = CanvasPalette::from_visuals(&agg_gui::theme::current_visuals());
+    let recorder = paint_node(None, Some(DEGRADED));
+
+    assert!(
+        recorder.filled_circle(crate::draw_error::ERROR_BADGE_RADIUS, palette.node_warning),
+        "the `!` badge is filled in the warning colour"
+    );
+    assert!(
+        recorder.stroked(palette.node_warning, crate::draw_error::ERROR_OUTLINE_WIDTH),
+        "the body is re-outlined in the warning colour"
+    );
+    assert!(
+        !recorder.filled_circle(crate::draw_error::ERROR_BADGE_RADIUS, palette.node_error),
+        "and never in the error colour"
+    );
+}
+
+/// Only one badge fits on a title bar, so the error wins when a node
+/// carries both.
+#[test]
+fn an_error_beats_a_warning_on_the_same_node() {
+    let palette = CanvasPalette::from_visuals(&agg_gui::theme::current_visuals());
+    let recorder = paint_node(Some(MESSAGE), Some(DEGRADED));
+
+    assert!(recorder.filled_circle(crate::draw_error::ERROR_BADGE_RADIUS, palette.node_error));
+    assert!(recorder.stroked(palette.node_error, crate::draw_error::ERROR_OUTLINE_WIDTH));
+    assert!(
+        !recorder.filled_circle(crate::draw_error::ERROR_BADGE_RADIUS, palette.node_warning),
+        "the warning colour never appears while an error is present"
+    );
+}
+
+/// The widget carries the warning text too, so hosts (and the F12
+/// inspector) can read which message produced the badge.
+#[test]
+fn the_canvas_node_widget_carries_the_hosts_warning() {
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 300.0));
+    let mut node = mk_node(1, "Boolean", [20.0, 200.0]);
+    node.warning = Some(DEGRADED.to_string());
+    seed_nodes(&mut editor, &memory, vec![node]);
+
+    let widget = editor
+        .children()
+        .iter()
+        .find(|c| c.type_name() == "NodeWidget")
+        .expect("a NodeWidget for the seeded node");
+    assert!(widget
+        .properties()
+        .iter()
+        .any(|(k, v)| *k == "warning" && v == DEGRADED));
+}
+
+/// Same async story as the error badge: nothing else about the layout
+/// changes when a warning arrives, so the fingerprint has to notice.
+#[test]
+fn a_warning_changes_the_paint_fingerprint() {
+    let (model, _memory) = fixture_with_typed_handle();
+    let editor = NodeEditor::new(model);
+
+    let healthy = crate::draw::layout_node(&mk_node(1, "Boolean", [20.0, 200.0]));
+    let degraded = {
+        let mut n = mk_node(1, "Boolean", [20.0, 200.0]);
+        n.warning = Some(DEGRADED.to_string());
+        crate::draw::layout_node(&n)
+    };
+
+    assert_ne!(
+        editor.compute_fingerprint(std::slice::from_ref(&healthy), None),
+        editor.compute_fingerprint(std::slice::from_ref(&degraded), None),
+        "a warning must invalidate the cached child tree"
     );
 }

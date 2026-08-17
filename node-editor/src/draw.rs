@@ -216,9 +216,19 @@ pub struct NodeLayoutInfo {
     /// badge a node whose evaluation refused. Layout is unaffected: the
     /// badge lives inside the existing title bar.
     pub error: Option<String>,
+    /// Carried through from [`NodeView::warning`] — the degraded-output
+    /// counterpart of [`error`](Self::error), painted in the palette's
+    /// warning colour. Layout is likewise unaffected.
+    pub warning: Option<String>,
 }
 
 impl NodeLayoutInfo {
+    /// The badge this node wears, if any — error beats warning, by the
+    /// same rule as [`NodeView::badge`].
+    pub fn badge(&self) -> Option<(crate::model::BadgeSeverity, &str)> {
+        crate::model::badge_of(self.error.as_deref(), self.warning.as_deref())
+    }
+
     /// Hit-test the node body. Returns true if the canvas-space point
     /// lies inside the rounded body.
     pub fn body_contains(&self, canvas_pos: [f64; 2]) -> bool {
@@ -371,6 +381,7 @@ where
             category: node.category.clone(),
             collapsed: true,
             error: node.error.clone(),
+            warning: node.warning.clone(),
         };
     }
 
@@ -510,6 +521,7 @@ where
         category: node.category.clone(),
         collapsed: false,
         error: node.error.clone(),
+        warning: node.warning.clone(),
     }
 }
 

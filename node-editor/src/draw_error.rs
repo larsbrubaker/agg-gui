@@ -1,6 +1,12 @@
-//! Error chrome for a node whose host reported a failed evaluation —
-//! the shared primitives, in whatever local space the caller is drawing
-//! in.
+//! Badge chrome for a node whose host reported a failed *or degraded*
+//! evaluation — the shared primitives, in whatever local space the
+//! caller is drawing in.
+//!
+//! The shape is identical for both severities; only the colour differs
+//! ([`CanvasPalette::badge_color`]). A node carrying both an error and a
+//! warning wears the error badge — one badge fits on a title bar, and
+//! the louder state is the one the user must act on
+//! ([`crate::model::badge_of`]).
 //!
 //! Two callers, one implementation:
 //!
@@ -105,9 +111,10 @@ pub fn draw_error_badge(ctx: &mut dyn DrawCtx, center: [f64; 2], scale: f64, col
 /// layout. A no-op for a healthy node, so callers can call it
 /// unconditionally.
 pub fn draw_node_error(ctx: &mut dyn DrawCtx, layout: &NodeLayoutInfo, palette: &CanvasPalette) {
-    if layout.error.is_none() {
+    let Some((severity, _)) = layout.badge() else {
         return;
-    }
+    };
+    let color = palette.badge_color(severity);
     draw_error_outline(
         ctx,
         layout.top_left[0],
@@ -116,7 +123,7 @@ pub fn draw_node_error(ctx: &mut dyn DrawCtx, layout: &NodeLayoutInfo, palette: 
         layout.size[1],
         NODE_RADIUS,
         1.0,
-        palette.node_error,
+        color,
     );
-    draw_error_badge(ctx, error_badge_center(layout), 1.0, palette.node_error);
+    draw_error_badge(ctx, error_badge_center(layout), 1.0, color);
 }

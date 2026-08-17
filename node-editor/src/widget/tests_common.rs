@@ -144,6 +144,7 @@ pub(super) fn mk_node(id: u64, name: &str, pos: [f64; 2]) -> NodeView {
         outputs: vec![],
         properties: vec![],
         error: None,
+        warning: None,
     }
 }
 

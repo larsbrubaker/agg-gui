@@ -67,6 +67,10 @@ pub struct NodeWidget {
     /// header child. Participates in the canvas paint fingerprint, so a
     /// failure arriving from an async evaluation rebuilds this tree.
     error: Option<String>,
+    /// Host-reported degraded output ([`crate::NodeView::warning`]) —
+    /// the same chrome in the warning colour, and only when there is no
+    /// error to out-shout it.
+    warning: Option<String>,
     ctx: NodePaintContext,
 }
 
@@ -130,7 +134,7 @@ impl NodeWidget {
             layout.category.clone(),
             layout.collapsed,
             layout.node_id,
-            layout.error.is_some(),
+            layout.badge().map(|(severity, _)| severity),
             pending_collapse,
             ctx.clone(),
         )));
@@ -165,6 +169,7 @@ impl NodeWidget {
             selected,
             collapsed: layout.collapsed,
             error: layout.error.clone(),
+            warning: layout.warning.clone(),
             ctx,
         }
     }
@@ -224,6 +229,7 @@ impl Widget for NodeWidget {
             ("category", self.category.clone()),
             ("selected", format!("{}", self.selected)),
             ("error", self.error.clone().unwrap_or_default()),
+            ("warning", self.warning.clone().unwrap_or_default()),
         ]
     }
 
@@ -284,11 +290,13 @@ impl Widget for NodeWidget {
             ctx.rounded_rect(1.0, 1.0, (w - 2.0).max(0.0), (h - 2.0).max(0.0), r);
             ctx.stroke();
         }
-        // A refused node wears an error-coloured outline. Painted after
-        // the selection ring so "broken" wins the outer edge when the
-        // user has the broken node selected; the `!` badge lands on the
-        // header child, which paints over this strip.
-        if self.error.is_some() {
+        // A refused (or degraded) node wears a severity-coloured
+        // outline. Painted after the selection ring so "broken" wins the
+        // outer edge when the user has the node selected; the `!` badge
+        // lands on the header child, which paints over this strip.
+        if let Some((severity, _)) =
+            crate::model::badge_of(self.error.as_deref(), self.warning.as_deref())
+        {
             crate::draw_error::draw_error_outline(
                 ctx,
                 1.0,
@@ -297,7 +305,7 @@ impl Widget for NodeWidget {
                 (h - 2.0).max(0.0),
                 NODE_RADIUS * s,
                 s,
-                self.ctx.palette.node_error,
+                self.ctx.palette.badge_color(severity),
             );
         }
     }
@@ -325,9 +333,10 @@ pub struct NodeHeaderWidget {
     /// Matches `NodeWidget::collapsed`. The header chrome rounds all four
     /// corners + skips the bottom separator when collapsed.
     collapsed: bool,
-    /// True when the node's host reported an evaluation error — paints
-    /// the `!` badge at the bar's right end (the chevron owns the left).
-    error: bool,
+    /// `Some` when the node's host reported an evaluation error or a
+    /// degraded result — paints the `!` badge in that severity's colour
+    /// at the bar's right end (the chevron owns the left).
+    badge: Option<crate::model::BadgeSeverity>,
     /// Shared collapse cell handed to the chevron child so its glyph
     /// orientation tracks the live state without per-frame setters.
     chevron_collapsed: Rc<Cell<bool>>,
@@ -345,7 +354,7 @@ impl NodeHeaderWidget {
         category: String,
         collapsed: bool,
         node_id: NodeId,
-        error: bool,
+        badge: Option<crate::model::BadgeSeverity>,
         pending_collapse: Rc<Cell<Option<NodeId>>>,
         ctx: NodePaintContext,
     ) -> Self {
@@ -384,7 +393,7 @@ impl NodeHeaderWidget {
             title,
             category,
             collapsed,
-            error,
+            badge,
             chevron_collapsed,
             chevron_color,
             ctx,
@@ -443,12 +452,12 @@ impl Widget for NodeHeaderWidget {
             &self.title,
             TITLE_FONT_SIZE * s,
         );
-        if self.error {
+        if let Some(severity) = self.badge {
             crate::draw_error::draw_error_badge(
                 ctx,
                 crate::draw_error::badge_center_in_title_bar(w, h, s),
                 s,
-                self.ctx.palette.node_error,
+                self.ctx.palette.badge_color(severity),
             );
         }
         // Mirror live state into the cells the chevron child reads.

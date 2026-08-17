@@ -67,6 +67,7 @@ fn make_node() -> NodeView {
             editor_kind: None,
         }],
         error: None,
+        warning: None,
     }
 }
 

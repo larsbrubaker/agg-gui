@@ -29,6 +29,21 @@ pub struct CanvasPalette {
     /// theme-accent-derived: "broken" should not change meaning when the
     /// user picks a red accent.
     pub node_error: Color,
+    /// Border + badge colour for a node whose output is *degraded* but
+    /// present (see [`crate::model::BadgeSeverity::Warning`]). Amber, and
+    /// deliberately not theme-accent-derived for the same reason as
+    /// [`node_error`](Self::node_error).
+    pub node_warning: Color,
+}
+
+impl CanvasPalette {
+    /// The badge / outline colour for a given severity.
+    pub fn badge_color(&self, severity: crate::model::BadgeSeverity) -> Color {
+        match severity {
+            crate::model::BadgeSeverity::Error => self.node_error,
+            crate::model::BadgeSeverity::Warning => self.node_warning,
+        }
+    }
 }
 
 impl CanvasPalette {
@@ -77,6 +92,13 @@ impl CanvasPalette {
                 Color::rgb(0.95, 0.34, 0.30)
             } else {
                 Color::rgb(0.82, 0.15, 0.13)
+            },
+            // Amber, darkened in light mode so the white `!` inside the
+            // badge keeps its contrast against a pale background.
+            node_warning: if dark {
+                Color::rgb(0.98, 0.72, 0.20)
+            } else {
+                Color::rgb(0.79, 0.52, 0.03)
             },
         }
     }

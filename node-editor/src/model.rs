@@ -176,6 +176,55 @@ pub struct NodeView {
     /// text itself is the host's to surface (a status bar, an inspector
     /// pane); the badge answers "*which* node".
     pub error: Option<String>,
+    /// Why this node's output is *degraded* — `None` when the node has
+    /// nothing to warn about.
+    ///
+    /// A warning differs from [`error`](Self::error) in that the node
+    /// still produced usable output (a CAD boolean that skipped one
+    /// refused operand and unioned the rest). It paints the same badge
+    /// shape in the palette's warning colour, so a permanently degraded
+    /// node stays distinguishable from a clean one long after a
+    /// transient status-bar message has scrolled away.
+    ///
+    /// When both are set the error wins the badge — the louder state is
+    /// the one the user has to act on, and only one badge fits on the
+    /// title bar. See [`NodeView::badge`].
+    pub warning: Option<String>,
+}
+
+/// How serious a node's badge is.
+///
+/// [`badge_of`] is *the* place the winner between an error and a warning
+/// is decided — don't re-derive that with `max` here, or the canvas and
+/// its host can disagree about which badge a node wears. The `Ord`
+/// derive exists so severities can be sorted or keyed, not to define the
+/// tie-break.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BadgeSeverity {
+    /// The node produced usable but degraded output.
+    Warning,
+    /// The node produced nothing.
+    Error,
+}
+
+impl NodeView {
+    /// The one badge this node wears, if any — error beats warning.
+    pub fn badge(&self) -> Option<(BadgeSeverity, &str)> {
+        badge_of(self.error.as_deref(), self.warning.as_deref())
+    }
+}
+
+/// Shared error-beats-warning rule, so [`NodeView`] and the layout /
+/// widget types that carry the same pair can never disagree.
+pub fn badge_of<'a>(
+    error: Option<&'a str>,
+    warning: Option<&'a str>,
+) -> Option<(BadgeSeverity, &'a str)> {
+    match (error, warning) {
+        (Some(e), _) => Some((BadgeSeverity::Error, e)),
+        (None, Some(w)) => Some((BadgeSeverity::Warning, w)),
+        (None, None) => None,
+    }
 }
 
 /// Snapshot of one edge.

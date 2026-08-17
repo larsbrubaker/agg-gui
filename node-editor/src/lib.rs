@@ -47,9 +47,7 @@ pub mod widget;
 pub use draw::CanvasPalette;
 pub use draw_immediate::draw_node;
 pub use model::{
-    EditorHint, NodeGraphModel, NodeId, NodeTypeView, NodeView, NoodleResult, NoodleView,
-    PropertyValue, PropertyView, SocketTypeId, SocketView,
+    BadgeSeverity, EditorHint, NodeGraphModel, NodeId, NodeTypeView, NodeView, NoodleResult,
+    NoodleView, PropertyValue, PropertyView, SocketTypeId, SocketView,
 };
-pub use widget::{
-    InteractionMode, NodeEditor, NodeEditorCommand, NodeEditorHandle, SharedModel,
-};
+pub use widget::{InteractionMode, NodeEditor, NodeEditorCommand, NodeEditorHandle, SharedModel};
