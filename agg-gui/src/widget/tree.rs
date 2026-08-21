@@ -98,6 +98,65 @@ pub fn active_modal_path(widget: &dyn Widget) -> Option<Vec<usize>> {
     }
 }
 
+/// Path to the first visible widget, in depth-first paint order, that
+/// answers `true` to `pred`. Subtrees that own an active modal are skipped
+/// when `skip_modals` is set — the `App` uses that for the root-level
+/// default/cancel action so a showing sheet's buttons (already offered the
+/// key by the sheet itself) are never fired twice.
+fn find_action_path(
+    widget: &dyn Widget,
+    pred: &dyn Fn(&dyn Widget) -> bool,
+    skip_modals: bool,
+) -> Option<Vec<usize>> {
+    if !widget.is_visible() || (skip_modals && widget.has_active_modal()) {
+        return None;
+    }
+    if pred(widget) {
+        return Some(vec![]);
+    }
+    for (i, child) in widget.children().iter().enumerate() {
+        if let Some(mut sub) = find_action_path(child.as_ref(), pred, skip_modals) {
+            sub.insert(0, i);
+            return Some(sub);
+        }
+    }
+    None
+}
+
+/// Path to the first visible widget whose `WidgetBase` has
+/// [`default_action`](crate::layout_props::WidgetBase::default_action)
+/// set, or `None`. See `find_action_path` for `skip_modals`.
+pub fn default_action_path(widget: &dyn Widget, skip_modals: bool) -> Option<Vec<usize>> {
+    find_action_path(
+        widget,
+        &|w| w.widget_base().is_some_and(|b| b.default_action),
+        skip_modals,
+    )
+}
+
+/// Path to the first visible widget whose `WidgetBase` has
+/// [`cancel_action`](crate::layout_props::WidgetBase::cancel_action) set,
+/// or `None`.
+pub fn cancel_action_path(widget: &dyn Widget, skip_modals: bool) -> Option<Vec<usize>> {
+    find_action_path(
+        widget,
+        &|w| w.widget_base().is_some_and(|b| b.cancel_action),
+        skip_modals,
+    )
+}
+
+/// Activate the widget at `path` as a keyboard default/cancel action by
+/// dispatching an `Enter` key-down to it (a `Button` fires its click and
+/// consumes it). Returns the dispatch result — `Ignored` when the target
+/// is disabled or otherwise declined — so the caller can fall back.
+pub fn activate_action_at(root: &mut dyn Widget, path: &[usize]) -> EventResult {
+    let event = Event::KeyDown {
+        key: Key::Enter,
+        modifiers: Modifiers::default(),
+    };
+    dispatch_event_dyn(root, path, &event, Point::ORIGIN)
+}
+
 /// Return the topmost widget whose app-level overlay contains `local_pos`.
 ///
 /// This intentionally ignores ancestor `hit_test` bounds while descending:

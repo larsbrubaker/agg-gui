@@ -211,6 +211,26 @@ impl Button {
         self
     }
 
+    /// Make this the default action of the nearest scope: the enclosing
+    /// [`ModalSheet`](crate::widgets::ModalSheet) (or the `App` root when
+    /// no modal is showing) fires this button's `on_click` when Return /
+    /// Enter arrives unconsumed — i.e. focus is not on a text input.
+    /// SwiftUI: `.keyboardShortcut(.defaultAction)`. Disabled buttons
+    /// decline the key. The first such button in paint order wins. Stored
+    /// on the [`WidgetBase`] (`default_action`) like tooltips are.
+    pub fn with_default_action(mut self) -> Self {
+        self.base.default_action = true;
+        self
+    }
+
+    /// Make this the cancel action of the nearest scope: Escape fires
+    /// this button's `on_click` instead of the sheet's plain close, so
+    /// the handler owns dismissal. SwiftUI: `.keyboardShortcut(.cancelAction)`.
+    pub fn with_cancel_action(mut self) -> Self {
+        self.base.cancel_action = true;
+        self
+    }
+
     /// Paint an icon glyph at the leading edge of the label.
     /// `icon_font` carries the glyph (e.g. a Font Awesome face);
     /// the label text continues to render in the button's main

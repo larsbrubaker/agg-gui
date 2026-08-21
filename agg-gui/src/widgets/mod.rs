@@ -35,9 +35,11 @@ pub mod rich_text;
 pub mod scene;
 pub mod scroll_view;
 pub(crate) mod scrollbar;
+pub mod segmented;
 pub mod slider;
 pub mod slider_math;
 pub mod spacers;
+pub mod spinner;
 pub mod splitter;
 pub mod tab_view;
 pub mod table;
@@ -101,8 +103,10 @@ pub use scroll_view::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
     ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
 };
+pub use segmented::SegmentedControl;
 pub use slider::{HandleShape, Slider, SliderClamping, SliderOrientation};
 pub use spacers::{Separator, Spacer};
+pub use spinner::{Spinner, SpinnerSize};
 pub use splitter::{Splitter, SplitterRatio};
 pub use tab_view::TabView;
 pub use table::{

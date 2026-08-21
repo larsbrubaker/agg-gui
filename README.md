@@ -66,7 +66,9 @@ Only the `agg-gui` library crate is published — the demo crates
 | `Slider` | Linear value control with focus ring and keyboard nudge |
 | `DragValue` | Click-drag to increment/decrement numeric values |
 | `RadioGroup` | Single-selection group with shared state |
+| `SegmentedControl` | macOS-style joined segment strip bound to a shared index cell; Left/Right keyboard selection, per-segment enable gates, compact size |
 | `ProgressBar` | Filled track with optional label |
+| `Spinner` | Small / regular indeterminate circular activity indicator |
 | `ToggleSwitch` | Animated on/off toggle |
 | `TextField` | Full text editing: cursor, selection, clipboard, undo/redo |
 | `TextArea` | Multi-line text editing |
@@ -75,7 +77,7 @@ Only the `agg-gui` library crate is published — the demo crates
 | `ImageView` | Image display widget |
 | `ScrollView` | Vertical scroll with drag-thumb and mouse-wheel support |
 | `Window` | Floating panel: draggable title bar, close button, resize handles, collapse |
-| `ModalSheet` | Centered fixed-size panel over a scrim; Escape or scrim-tap to dismiss |
+| `ModalSheet` | Centered fixed-size panel over a scrim; Escape to dismiss, Return fires the sheet's default action (`Button::with_default_action`) |
 | `FlexColumn` | Vertical flex layout with gap, padding, fixed + growing children |
 | `FlexRow` | Horizontal flex layout |
 | `Stack` | Z-ordered overlay layout (for floating windows) |

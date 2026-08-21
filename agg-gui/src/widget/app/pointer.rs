@@ -1,6 +1,7 @@
 //! Pointer-input methods on [`App`] — mouse move/down/up plus the
 //! modal-subtree hit extension they share. Split out of `app.rs`
-//! (800-line guardrail); wheel and keyboard routing stay in `app.rs`.
+//! (800-line guardrail); keyboard routing is in `keyboard.rs`, wheel
+//! routing stays in `app.rs`.
 
 use super::tree_paths::widget_at_path;
 use crate::event::{Event, Modifiers, MouseButton};

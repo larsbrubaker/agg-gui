@@ -10,6 +10,20 @@
 //! the sheet subtree (the scrim swallows what the panel doesn't use) and
 //! `Escape` closes it.
 //!
+//! # Default / cancel actions
+//!
+//! Return / Enter that reaches the sheet unconsumed (focus is not on a
+//! text input — those consume Enter) activates the sheet's **default
+//! action**: the first visible content widget whose `WidgetBase` has
+//! `default_action` set (a `Button::with_default_action()`), or the
+//! closure from [`with_default_action`](ModalSheet::with_default_action).
+//! Escape likewise runs the **cancel action** — a
+//! `Button::with_cancel_action()` in the content or a
+//! [`with_cancel_action`](ModalSheet::with_cancel_action) closure — and
+//! only falls back to the plain close when neither is present. Because
+//! keys are routed to the topmost active modal only, a stacked sheet's
+//! default button never fires the one beneath it.
+//!
 //! ```ignore
 //! let visible = Rc::new(Cell::new(false));
 //! let sheet = ModalSheet::new(Rc::clone(&visible), Box::new(content))
@@ -26,7 +40,7 @@ use crate::event::{Event, EventResult, Key};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::WidgetBase;
 use crate::theme::current_visuals;
-use crate::widget::Widget;
+use crate::widget::{activate_action_at, cancel_action_path, default_action_path, Widget};
 use crate::widgets::window::chrome::{paint_chrome_shadow, ChromeStyle};
 
 /// Minimum gap kept between the panel and the host bounds when the
@@ -54,6 +68,13 @@ pub struct ModalSheet {
     /// closes (a Done button clearing the cell) don't route through
     /// this — wire those callbacks at the button.
     on_close: Option<Box<dyn Fn()>>,
+    /// Closure-form default action (Enter); see the module docs. A
+    /// `Button::with_default_action()` in the content takes precedence.
+    default_action: Option<Box<dyn Fn()>>,
+    /// Closure-form cancel action (Escape). When set, Escape runs it
+    /// INSTEAD of closing the sheet — the action owns dismissal, exactly
+    /// like the Cancel button it mirrors.
+    cancel_action: Option<Box<dyn Fn()>>,
 }
 
 impl ModalSheet {
@@ -68,6 +89,8 @@ impl ModalSheet {
             escape_closes: true,
             key_passthrough: false,
             on_close: None,
+            default_action: None,
+            cancel_action: None,
         }
     }
 
@@ -96,6 +119,25 @@ impl ModalSheet {
         self
     }
 
+    /// Run `action` when Return / Enter reaches the sheet unconsumed and
+    /// no content widget is marked `with_default_action()`. Mirrors
+    /// SwiftUI's `.keyboardShortcut(.defaultAction)` on the sheet's
+    /// primary button; the closure owns whatever dismissal it wants.
+    pub fn with_default_action(mut self, action: impl Fn() + 'static) -> Self {
+        self.default_action = Some(Box::new(action));
+        self
+    }
+
+    /// Run `action` on Escape instead of the built-in close. The closure
+    /// owns dismissal (typically it clears the visibility cell, exactly
+    /// as the Cancel button's `on_click` does). A content widget marked
+    /// `with_cancel_action()` is tried first; `with_on_close` is NOT
+    /// invoked on this path because the sheet did not close itself.
+    pub fn with_cancel_action(mut self, action: impl Fn() + 'static) -> Self {
+        self.cancel_action = Some(Box::new(action));
+        self
+    }
+
     pub fn visibility_cell(&self) -> Rc<Cell<bool>> {
         Rc::clone(&self.visible)
     }
@@ -106,6 +148,55 @@ impl ModalSheet {
             on_close();
         }
         crate::animation::request_draw();
+    }
+
+    /// Activate the content widget at `path` (found by one of the
+    /// `*_action_path` searches). Dispatches into the content child only,
+    /// never back to the sheet, so a declining target can't re-enter
+    /// this handler.
+    fn activate_content(&mut self, path: &[usize]) -> bool {
+        let Some((&first, rest)) = path.split_first() else {
+            return false;
+        };
+        let Some(child) = self.children.get_mut(first) else {
+            return false;
+        };
+        activate_action_at(child.as_mut(), rest).is_consumed()
+    }
+
+    /// Enter reached the sheet: fire the default action if there is one.
+    fn handle_enter(&mut self) -> bool {
+        if let Some(path) = default_action_path(self, false) {
+            if self.activate_content(&path) {
+                return true;
+            }
+        }
+        if let Some(action) = &self.default_action {
+            action();
+            crate::animation::request_draw();
+            return true;
+        }
+        false
+    }
+
+    /// Escape reached the sheet: cancel-action widget, then closure, then
+    /// the plain close.
+    fn handle_escape(&mut self) -> bool {
+        if let Some(path) = cancel_action_path(self, false) {
+            if self.activate_content(&path) {
+                return true;
+            }
+        }
+        if let Some(action) = &self.cancel_action {
+            action();
+            crate::animation::request_draw();
+            return true;
+        }
+        if self.escape_closes {
+            self.close();
+            return true;
+        }
+        false
     }
 }
 
@@ -224,10 +315,10 @@ impl Widget for ModalSheet {
             }
             Event::KeyDown {
                 key: Key::Escape, ..
-            } if self.escape_closes => {
-                self.close();
-                EventResult::Consumed
-            }
+            } if self.handle_escape() => EventResult::Consumed,
+            Event::KeyDown {
+                key: Key::Enter, ..
+            } if self.handle_enter() => EventResult::Consumed,
             // Swallow every other key the panel content didn't take:
             // keystrokes must not fall through to shortcut handlers
             // behind the sheet (a piano app's key-to-note routing, say).

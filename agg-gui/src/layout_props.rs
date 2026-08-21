@@ -369,6 +369,26 @@ pub struct WidgetBase {
     ///
     /// A `String` here is why `WidgetBase` is `Clone` but not `Copy`.
     pub tooltip: Option<String>,
+    /// Marks this widget as its scope's keyboard **default action** — the
+    /// control Return / Enter activates when the key reaches the scope
+    /// unconsumed (focus is not on a text input, which consumes Enter
+    /// itself). SwiftUI `.keyboardShortcut(.defaultAction)` / AppKit's
+    /// default button.
+    ///
+    /// [`ModalSheet`](crate::widgets::ModalSheet) searches its content for
+    /// the first visible widget with this flag when Enter bubbles to it and
+    /// activates it by dispatching that Enter (a `Button` fires its click);
+    /// the [`App`](crate::widget::App) does the same for the whole tree when
+    /// no modal is showing, so only the topmost scope's default fires.
+    /// Set via `Button::with_default_action`; any widget embedding a
+    /// `WidgetBase` can opt in the same way.
+    pub default_action: bool,
+    /// Escape counterpart of [`default_action`](Self::default_action) —
+    /// SwiftUI `.keyboardShortcut(.cancelAction)`. A `ModalSheet` whose
+    /// content holds a cancel-action widget activates it on Escape instead
+    /// of closing itself, so the Cancel handler owns dismissal. Set via
+    /// `Button::with_cancel_action`.
+    pub cancel_action: bool,
 }
 
 impl WidgetBase {
@@ -384,6 +404,8 @@ impl WidgetBase {
             max_size: Size::MAX,
             enforce_integer_bounds: crate::pixel_bounds::default_enforce_integer_bounds(),
             tooltip: None,
+            default_action: false,
+            cancel_action: false,
         }
     }
 

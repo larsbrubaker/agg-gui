@@ -40,6 +40,7 @@ mod caret_deadline;
 mod color_clickaway;
 mod color_dialog_overlay;
 mod color_wheel_picker;
+mod default_action;
 /// A point drawn at Y=10 in a 100×100 buffer must be near the BOTTOM of the
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.
@@ -57,6 +58,7 @@ mod lcd_backbuffer_collapse;
 mod menu_hidpi_scale;
 mod multi_touch_routing;
 mod on_screen_keyboard;
+pub(crate) mod paint_recorder;
 #[cfg(feature = "reflect")]
 mod reflect_roundtrip;
 mod reserve_inset;

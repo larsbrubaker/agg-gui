@@ -2,8 +2,9 @@
 //!
 //! Displays one representative instance of every interactive widget in the
 //! agg-gui library: buttons (primary / secondary / danger), checkboxes, a
-//! radio group, a combo box, slider, progress bar, toggle switches, drag
-//! values, a hyperlink, and a text input field.
+//! radio group, a segmented control, a combo box, slider, progress bar,
+//! spinner, toggle switches, drag values, a hyperlink, and a text input
+//! field.
 //!
 //! Section headers use `Label` without an explicit color so they follow the
 //! active theme (`ctx.visuals().text_color`) and remain readable in both dark
@@ -17,8 +18,8 @@ use agg_gui::widget::{paint_subtree, CompositingLayer};
 use agg_gui::{
     Button, Checkbox, CollapsingHeader, Color, ColorPicker, ColorWheelPicker, ComboBox,
     Conditional, DragValue, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Hyperlink,
-    ImageView, Label, ProgressBar, RadioGroup, Rect, ScrollView, Separator, Size, SizedBox, Slider,
-    TextField, ToggleSwitch, Tooltip, Widget,
+    ImageView, Label, ProgressBar, RadioGroup, Rect, ScrollView, SegmentedControl, Separator, Size,
+    SizedBox, Slider, Spinner, TextField, ToggleSwitch, Tooltip, Widget,
 };
 
 const AGG_GUI_DOCS_URL: &str = "https://docs.rs/agg-gui/";
@@ -230,6 +231,7 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
     let scalar = Rc::new(Cell::new(42.0_f64));
     let color = Rc::new(Cell::new(Color::rgba(0.35, 0.55, 0.90, 0.50)));
     let custom_toggle = Rc::new(Cell::new(false));
+    let segment_size = Rc::new(Cell::new(1_usize));
     let visible = Rc::new(Cell::new(true));
     let interactive = Rc::new(Cell::new(true));
     let opacity = Rc::new(Cell::new(1.0_f64));
@@ -375,6 +377,34 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
         0.0,
     );
 
+    // SegmentedControl shares the radio's selection cell, so picking a
+    // segment moves the radio (and vice versa); the compact strip has
+    // its own cell and a disabled middle segment to show the gate.
+    col.push(
+        grid_row(
+            doc_link("SegmentedControl", "SegmentedControl", &font),
+            Box::new(
+                FlexRow::new()
+                    .with_gap(12.0)
+                    .add(Box::new(SegmentedControl::new(
+                        vec!["First", "Second", "Third"],
+                        Rc::clone(&radio_sel),
+                        Arc::clone(&font),
+                    )))
+                    .add(Box::new(
+                        SegmentedControl::new(
+                            vec!["S", "M", "L"],
+                            Rc::clone(&segment_size),
+                            Arc::clone(&font),
+                        )
+                        .with_compact()
+                        .with_segment_enabled_fn(|i| i != 1),
+                    )),
+            ),
+        ),
+        0.0,
+    );
+
     col.push(
         grid_row(
             doc_link("SelectableLabel", "SelectableLabel", &font),
@@ -470,6 +500,19 @@ pub fn widget_gallery(font: Arc<Font>) -> Box<dyn Widget> {
                 "The progress bar can be animated!",
                 Arc::clone(&font),
             )),
+        ),
+        0.0,
+    );
+
+    col.push(
+        grid_row(
+            doc_link("Spinner", "Spinner", &font),
+            Box::new(
+                FlexRow::new()
+                    .with_gap(12.0)
+                    .add(Box::new(Spinner::small()))
+                    .add(Box::new(Spinner::new())),
+            ),
         ),
         0.0,
     );

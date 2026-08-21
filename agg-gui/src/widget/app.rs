@@ -1,6 +1,7 @@
 use super::*;
 
 mod gesture;
+mod keyboard;
 mod pointer;
 mod touch;
 mod tree_paths;
@@ -327,65 +328,6 @@ impl App {
     // in wasm, or `WindowEvent::CursorMoved.position` on native).  These methods
     // divide by the current device scale factor and flip Y so widget code sees
     // logical Y-up coordinates matching the layout pass.
-
-    /// Key pressed. Delivered to the focused widget first, then to the visible
-    /// widget tree as an unconsumed key if focus ignores it.
-    pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
-        // Ctrl/Meta+Tab is a *direct* focus-traversal escape hatch: it advances
-        // focus without ever offering the event to the focused widget, so a
-        // widget that consumes plain Tab (e.g. the rich-text editor indenting)
-        // can never trap keyboard focus. Plain Tab / Shift+Tab are instead
-        // dispatched to the focused widget first (below) and only fall through
-        // to traversal when it Ignores them — that "consume Tab to opt out" is
-        // the established way for an editor to keep Tab for itself.
-        if key == Key::Tab && (mods.ctrl || mods.meta) {
-            self.advance_focus(!mods.shift);
-            return;
-        }
-        let event = Event::KeyDown {
-            key: key.clone(),
-            modifiers: mods,
-        };
-        let result = if let Some(path) = active_modal_path(self.root.as_ref()) {
-            // A focused widget INSIDE the modal (a dialog's text field)
-            // gets keys first; the modal subtree handles the rest (Esc).
-            let target = match self.focus.clone() {
-                Some(focus) if focus.starts_with(&path) => focus,
-                _ => path,
-            };
-            dispatch_event(&mut self.root, &target, &event, Point::ORIGIN)
-        } else if let Some(path) = self.focus.clone() {
-            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN)
-        } else {
-            EventResult::Ignored
-        };
-        if !result.is_consumed() {
-            // A plain Tab / Shift+Tab the focused widget didn't consume falls
-            // back to focus traversal — the default — instead of the
-            // unconsumed-key / global-handler path other keys take.
-            if key == Key::Tab {
-                self.advance_focus(!mods.shift);
-                return;
-            }
-            let result = dispatch_unconsumed_key(self.root.as_mut(), &key, mods);
-            if !result.is_consumed() {
-                if let Some(ref mut handler) = self.global_key_handler {
-                    handler(key, mods);
-                }
-            }
-        }
-    }
-
-    /// Key released. Delivered to the focused widget.
-    pub fn on_key_up(&mut self, key: Key, mods: Modifiers) {
-        let event = Event::KeyUp {
-            key,
-            modifiers: mods,
-        };
-        if let Some(path) = self.focus.clone() {
-            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
-        }
-    }
 
     /// Mouse wheel scrolled. `screen_y` is Y-down. Convention matches
     /// `winit` / `WheelEvent`: positive `delta_y` = wheel rotated

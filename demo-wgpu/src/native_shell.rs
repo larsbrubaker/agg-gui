@@ -11,7 +11,7 @@
 //! fn main() {
 //!     let (app, handles) = build_my_app(font, MyNativePlatform::new());
 //!     demo_wgpu::native_shell::run(
-//!         demo_wgpu::NativeShellConfig { title: "My App", logical_size: (1024.0, 768.0) },
+//!         demo_wgpu::NativeShellConfig::new("My App", (1024.0, 768.0)).with_min_size(800.0, 600.0),
 //!         app,
 //!         move || handles.timestamp_ms.set(now_ms()), // per-frame hook, or `|| {}`
 //!     );
@@ -33,11 +33,35 @@ use winit::window::{Window, WindowAttributes};
 use crate::{begin_frame, WgpuGfxCtx};
 
 /// Window parameters for [`run`].
+///
+/// Build with [`NativeShellConfig::new`] and chain the `with_*` setters;
+/// the struct literal form still works with `..NativeShellConfig::new(..)`
+/// for the optional fields.
 pub struct NativeShellConfig {
     /// OS window title.
     pub title: &'static str,
     /// Initial inner size in logical (DPI-independent) pixels.
     pub logical_size: (f64, f64),
+    /// Minimum inner size in logical pixels, enforced by the window
+    /// system (`winit` `with_min_inner_size`). `None` = unconstrained.
+    pub min_size: Option<(f64, f64)>,
+}
+
+impl NativeShellConfig {
+    pub fn new(title: &'static str, logical_size: (f64, f64)) -> Self {
+        Self {
+            title,
+            logical_size,
+            min_size: None,
+        }
+    }
+
+    /// Refuse to let the user shrink the window below `(w, h)` logical
+    /// pixels (SwiftUI `.frame(minWidth:minHeight:)` on the window root).
+    pub fn with_min_size(mut self, w: f64, h: f64) -> Self {
+        self.min_size = Some((w, h));
+        self
+    }
 }
 
 /// wgpu device + surface bundle for one OS window.
@@ -123,7 +147,7 @@ impl Gpu {
 pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() + 'static) {
     let event_loop = EventLoop::new().expect("create event loop");
 
-    let window_attributes = WindowAttributes::default()
+    let mut window_attributes = WindowAttributes::default()
         .with_title(config.title)
         .with_inner_size(LogicalSize::new(
             config.logical_size.0,
@@ -131,6 +155,9 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
         ))
         // Shown after the first surface configure to avoid a white flash.
         .with_visible(false);
+    if let Some((min_w, min_h)) = config.min_size {
+        window_attributes = window_attributes.with_min_inner_size(LogicalSize::new(min_w, min_h));
+    }
     let window = Arc::new(
         event_loop
             .create_window(window_attributes)

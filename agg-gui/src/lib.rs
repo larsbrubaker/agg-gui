@@ -168,13 +168,12 @@ pub use widgets::{
     PerformanceView, Popup, PopupClickOutcome, PopupCloseBehavior, PopupMenu, ProgressBar, QrView,
     RadioGroup, Rebuilder, RectAlign, Resize, RichCommand, RichDoc, RichEditHandle, RichTextEdit,
     RichTextToolbar, RichTextView, RunMode, RunModeDesc, RunModeRow, Scene, SceneTransform,
-    ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView, Separator,
-    SharedFrameHistory, SharedResolver, ShortcutKey, SizedBox, Slider, SliderClamping,
-    SliderOrientation, Spacer, Splitter, SplitterRatio, Stack, TabView, Table, TableBuilder,
-    TableColumn,
-    TableRows, TextArea, TextAreaScrollInfo, TextEditState, TextField, TextHAlign, TextVAlign,
-    ToggleSwitch, Tooltip, TooltipTimings, TopMenu, TreeView, Window, DEFAULT_COLUMN_GAP,
-    DEFAULT_ROW_GAP,
+    ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
+    SegmentedControl, Separator, SharedFrameHistory, SharedResolver, ShortcutKey, SizedBox, Slider,
+    SliderClamping, SliderOrientation, Spacer, Spinner, SpinnerSize, Splitter, SplitterRatio,
+    Stack, TabView, Table, TableBuilder, TableColumn, TableRows, TextArea, TextAreaScrollInfo,
+    TextEditState, TextField, TextHAlign, TextVAlign, ToggleSwitch, Tooltip, TooltipTimings,
+    TopMenu, TreeView, Window, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.
