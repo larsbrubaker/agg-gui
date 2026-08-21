@@ -4,16 +4,16 @@ use crate::geometry::{Point, Rect};
 
 use super::scroll_view::{ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility};
 
-pub(crate) const DEFAULT_GRAB_MARGIN: f64 = 6.0;
+pub const DEFAULT_GRAB_MARGIN: f64 = 6.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ScrollbarOrientation {
+pub enum ScrollbarOrientation {
     Vertical,
     Horizontal,
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ScrollbarGeometry {
+pub struct ScrollbarGeometry {
     pub orientation: ScrollbarOrientation,
     pub track_start: f64,
     pub track_end: f64,
@@ -23,7 +23,7 @@ pub(crate) struct ScrollbarGeometry {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct PreparedScrollbar {
+pub struct PreparedScrollbar {
     pub track: Rect,
     pub thumb: Rect,
     pub radius: f64,
@@ -34,7 +34,7 @@ pub(crate) struct PreparedScrollbar {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ScrollbarAxis {
+pub struct ScrollbarAxis {
     pub enabled: bool,
     pub offset: f64,
     pub content: f64,
@@ -344,7 +344,7 @@ impl PreparedScrollbar {
     }
 }
 
-pub(crate) fn paint_prepared_scrollbar(ctx: &mut dyn DrawCtx, bar: PreparedScrollbar) {
+pub fn paint_prepared_scrollbar(ctx: &mut dyn DrawCtx, bar: PreparedScrollbar) {
     let v = ctx.visuals();
     let track_color = v.scroll_track;
     ctx.set_fill_color(scale_alpha(track_color, bar.alpha));

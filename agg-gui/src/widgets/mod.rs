@@ -34,7 +34,9 @@ pub mod resize;
 pub mod rich_text;
 pub mod scene;
 pub mod scroll_view;
-pub(crate) mod scrollbar;
+/// Shared scrollbar geometry, hit-testing, and painting: the same thumb
+/// every `ScrollView` shows, reusable by widgets that own their offset.
+pub mod scrollbar;
 pub mod segmented;
 pub mod slider;
 pub mod slider_math;
