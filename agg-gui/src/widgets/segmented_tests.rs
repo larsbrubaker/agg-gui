@@ -101,6 +101,29 @@ fn stretch_anchor_fills_available_width() {
 }
 
 #[test]
+fn equal_width_mode_distributes_whole_pixels() {
+    // 401 px over three segments: floor(401 / 3) = 133 each, the two
+    // leftover pixels go to the leading segments — never 133.666… each.
+    let (mut ctl, _) = control(&["One", "Two", "Three"], 0);
+    ctl = ctl.with_h_anchor(HAnchor::STRETCH);
+    let size = ctl.layout(Size::new(401.0, 0.0));
+    let widths: Vec<f64> = ctl.segments.iter().map(|s| s.width).collect();
+    assert_eq!(widths, vec![134.0, 134.0, 133.0]);
+    assert_eq!(size.width, 401.0);
+    for s in &ctl.segments {
+        assert_eq!(s.x, s.x.floor(), "segment edges on whole pixels: {:?}", ctl.segments);
+    }
+
+    // A fractional target floors to whole pixels before the split.
+    let (mut ctl, _) = control(&["One", "Two", "Three"], 0);
+    ctl = ctl.with_h_anchor(HAnchor::STRETCH);
+    let size = ctl.layout(Size::new(400.6, 0.0));
+    let widths: Vec<f64> = ctl.segments.iter().map(|s| s.width).collect();
+    assert_eq!(widths, vec![134.0, 133.0, 133.0]);
+    assert_eq!(size.width, 400.0);
+}
+
+#[test]
 fn narrow_available_width_clamps_the_strip() {
     let (mut ctl, _) = control(&["Alpha", "Beta", "Gamma"], 0);
     let size = ctl.layout(Size::new(60.0, 0.0));

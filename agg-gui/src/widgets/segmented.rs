@@ -349,13 +349,30 @@ impl SegmentedControl {
                     *w *= k;
                 }
             } else {
-                let each = target / n as f64;
-                for w in widths.iter_mut() {
-                    *w = each;
-                }
+                // Whole-pixel segments: floor the share and hand the
+                // leftover pixels to the leading segments one each, so the
+                // hairline dividers land on pixel boundaries instead of
+                // every segment carrying the same fractional width.
+                Self::distribute_whole_pixels(&mut widths, target);
             }
         }
         widths
+    }
+
+    /// Split `target` into `widths.len()` whole-pixel parts: each gets
+    /// `floor(target / n)` and the first `target mod n` parts one pixel
+    /// more, so the parts sum to `floor(target)` and differ by at most one.
+    fn distribute_whole_pixels(widths: &mut [f64], target: f64) {
+        let n = widths.len();
+        if n == 0 {
+            return;
+        }
+        let whole = target.max(0.0).floor();
+        let base = (whole / n as f64).floor();
+        let extra = (whole - base * n as f64) as usize;
+        for (i, w) in widths.iter_mut().enumerate() {
+            *w = if i < extra { base + 1.0 } else { base };
+        }
     }
 
     /// Append a rectangle with independent left / right corner radii to
