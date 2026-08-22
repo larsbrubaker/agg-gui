@@ -1,10 +1,20 @@
 //! Deterministic frame capture for [`crate::native_shell::run`].
 //!
-//! Split out of `native_shell.rs` (800-line guardrail). Owns the two
+//! Split out of `native_shell.rs` (800-line guardrail). Owns the three
 //! pieces the shell needs for `NativeShellConfig::with_screenshot`: the
-//! "is this the frame to capture?" predicate and the PNG write.
+//! "is this the frame to capture?" predicate, the give-up budget for a
+//! capture whose surface never becomes presentable, and the PNG write.
+//!
+//! The budget is wall-clock rather than a redraw count on purpose: a
+//! pending capture puts the shell on `ControlFlow::Poll` and requests a
+//! redraw every idle iteration, so a *healthy* capture burns dozens of
+//! `RedrawRequested` events in the milliseconds before the window server
+//! first hands out a surface. Any attempt-count budget small enough to
+//! catch a hang also kills every real capture — see
+//! [`capture_exhausted`].
 
 use std::path::Path;
+use std::time::Duration;
 
 /// Should the frame that just finished painting be captured?
 ///
@@ -14,6 +24,32 @@ use std::path::Path;
 /// Only ever true once, so the capture cannot fire twice.
 pub(crate) fn should_capture(painted: u32, settle_frames: u32) -> bool {
     painted == settle_frames.max(1)
+}
+
+/// How long a pending capture may go without a painted frame before the
+/// shell gives up. Generous: the first surface configuration can take a
+/// while on a cold start, and a window that is merely being dragged or
+/// resized still paints inside this.
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Has a still-pending capture waited too long for a presentable surface?
+///
+/// `since_last_paint` is the time since the capture was armed, or since
+/// the last frame that actually painted — whichever is later.
+///
+/// The budget has to be wall-clock, *not* a count of redraw attempts:
+/// while a capture is pending the shell runs `ControlFlow::Poll` and
+/// requests a redraw unconditionally, so dozens of `RedrawRequested`
+/// events go by in a couple of milliseconds — long before the window
+/// server has configured the surface for the first time. An
+/// attempt-based budget therefore fires on every healthy capture.
+///
+/// Without any budget, a surface that never becomes presentable
+/// (minimized, occluded, `Lost`) busy-spins forever: only a painted
+/// frame advances the settle count, and `paint_frame` returns false
+/// whenever `get_current_texture` fails.
+pub(crate) fn capture_exhausted(since_last_paint: Duration) -> bool {
+    since_last_paint >= CAPTURE_TIMEOUT
 }
 
 /// Encode `rgba` as a PNG and write it to `path`, creating the parent
@@ -55,6 +91,28 @@ mod tests {
     fn settle_frames_zero_captures_the_first_frame() {
         assert!(should_capture(1, 0));
         assert!(!should_capture(2, 0));
+    }
+
+    #[test]
+    fn a_pending_capture_gives_up_after_the_wall_clock_timeout() {
+        assert!(!capture_exhausted(Duration::ZERO));
+        assert!(!capture_exhausted(CAPTURE_TIMEOUT - Duration::from_millis(1)));
+        assert!(capture_exhausted(CAPTURE_TIMEOUT));
+        assert!(capture_exhausted(CAPTURE_TIMEOUT + Duration::from_secs(60)));
+    }
+
+    /// The regression that made every real capture fail: `ControlFlow::Poll`
+    /// burns dozens of redraw attempts in a few milliseconds while the
+    /// window server is still configuring the surface, so no plausible
+    /// attempt count is safe — only elapsed time is.
+    #[test]
+    fn a_burst_of_attempts_in_a_few_milliseconds_is_not_exhaustion() {
+        for ms in [0_u64, 1, 5, 50, 500] {
+            assert!(
+                !capture_exhausted(Duration::from_millis(ms)),
+                "{ms} ms of polling must not end a pending capture"
+            );
+        }
     }
 
     #[test]

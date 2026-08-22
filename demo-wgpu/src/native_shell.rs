@@ -31,7 +31,7 @@ use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes};
 
-use crate::native_shell_screenshot::{should_capture, write_png};
+use crate::native_shell_screenshot::{capture_exhausted, should_capture, write_png};
 use crate::{begin_frame, WgpuGfxCtx};
 
 /// Window parameters for [`run`].
@@ -219,6 +219,10 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
     let mut current_mods = Modifiers::default();
     let mut layout_key: Option<(u32, u32, u64, u64)> = None;
     let mut frames_painted: u32 = 0;
+    // When a pending `--screenshot` capture last saw a painted frame
+    // (armed here) — the wall-clock budget that stops a surface which
+    // never becomes presentable from spinning forever.
+    let mut screenshot_last_paint = std::time::Instant::now();
     let mut screenshot_done = false;
 
     window.set_visible(true);
@@ -333,12 +337,27 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
                 if let Some((_, settle_frames)) = screenshot.as_ref() {
                     if painted {
                         frames_painted += 1;
+                        screenshot_last_paint = std::time::Instant::now();
                         if should_capture(frames_painted, *settle_frames) {
                             screenshot_done = true;
                         }
                     }
                     if screenshot_done {
                         elwt.exit();
+                    } else {
+                        // `paint_frame` returns false whenever the surface
+                        // will not hand out a texture (minimized, occluded,
+                        // `Lost`), and the capture cannot fire without a
+                        // painted frame — so time the wait out rather than
+                        // poll at full speed forever.
+                        let waiting = screenshot_last_paint.elapsed();
+                        if capture_exhausted(waiting) {
+                            eprintln!(
+                                "screenshot: gave up after {:.0}s without a presentable surface",
+                                waiting.as_secs_f64()
+                            );
+                            std::process::exit(1);
+                        }
                     }
                 }
             }

@@ -130,6 +130,35 @@ impl Font {
         self
     }
 
+    /// A second handle on the *same* face that shapes its digits with
+    /// `tnum` applied — the cheap counterpart to re-parsing the bytes
+    /// just to flip [`with_tabular_digits`](Self::with_tabular_digits).
+    ///
+    /// The font data `Arc` is shared rather than copied, so a UI that
+    /// wants both the proportional and the tabular variant of a face
+    /// pays for one copy of the bytes instead of two. Sharing the
+    /// pointer is safe for the shape cache: its key is
+    /// `(data pointer, text, size, tabular_digits)`, so the two
+    /// variants still land on distinct entries and neither can serve
+    /// the other's glyphs.
+    ///
+    /// ```ignore
+    /// let inter = Arc::new(Font::from_slice(INTER)?);
+    /// let digits = Arc::new(inter.variant_with_tabular_digits());
+    /// ```
+    pub fn variant_with_tabular_digits(&self) -> Font {
+        Font {
+            data: Arc::clone(&self.data),
+            index: self.index,
+            units_per_em: self.units_per_em,
+            ascender: self.ascender,
+            descender: self.descender,
+            line_gap: self.line_gap,
+            fallback: self.fallback.clone(),
+            tabular_digits: true,
+        }
+    }
+
     /// Whether this font shapes its digits with `tnum` applied.
     pub fn tabular_digits(&self) -> bool {
         self.tabular_digits

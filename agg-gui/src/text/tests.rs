@@ -443,3 +443,38 @@ fn test_tabular_digits_shape_on_one_advance() {
         shaped.iter().map(|g| g.x_advance).collect::<Vec<_>>()
     );
 }
+
+/// `variant_with_tabular_digits` must hand back the same face without a
+/// second copy of the bytes: the data `Arc` is shared, the metrics are
+/// identical, and the two variants still shape independently (the shape
+/// cache keys on the flag as well as the data pointer).
+#[test]
+fn test_tabular_variant_shares_the_font_data() {
+    use std::sync::Arc;
+
+    let proportional = Font::from_slice(NOTO_BYTES).expect("noto");
+    let tabular = proportional.variant_with_tabular_digits();
+
+    assert!(
+        Arc::ptr_eq(&proportional.data, &tabular.data),
+        "the variant must share the font bytes, not copy them"
+    );
+    assert!(!proportional.tabular_digits());
+    assert!(tabular.tabular_digits());
+    assert_eq!(proportional.units_per_em(), tabular.units_per_em());
+    assert_eq!(
+        proportional.line_height_px(16.0),
+        tabular.line_height_px(16.0)
+    );
+
+    // Same pointer, different feature plan: each variant gets its own
+    // cache entry rather than serving the other's glyphs.
+    let plain = shape_glyphs(&proportional, "0123456789", 16.0);
+    let tnum = shape_glyphs(&tabular, "0123456789", 16.0);
+    assert_eq!(plain.len(), tnum.len());
+    let first = tnum[0].x_advance;
+    assert!(
+        tnum.iter().all(|g| (g.x_advance - first).abs() < 1e-6),
+        "the shared-data variant must still shape with tnum"
+    );
+}
