@@ -1,4 +1,4 @@
-//! Unit tests for [`segment_highlight`](super::widget_impl::segment_highlight),
+//! Unit tests for [`segment_highlight`](super::highlight::segment_highlight),
 //! the helper the [`TextArea`](super::TextArea) paint path uses to turn caller
 //! supplied highlight spans into draw-ready colour runs.
 //!
@@ -7,7 +7,7 @@
 //! non-overlapping colour segments so every glyph is filled exactly once (no
 //! double-paint on AA fringes). These exercise the production function directly.
 
-use super::widget_impl::segment_highlight;
+use super::highlight::segment_highlight;
 use crate::color::Color;
 
 const BASE: Color = Color::rgb(1.0, 1.0, 1.0);

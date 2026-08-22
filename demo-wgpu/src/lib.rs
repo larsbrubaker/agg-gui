@@ -43,6 +43,9 @@ pub use frame::{begin_frame, render_app_frame};
 pub mod native_shell;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_shell::NativeShellConfig;
+/// Frame capture helpers for `NativeShellConfig::with_screenshot`.
+#[cfg(not(target_arch = "wasm32"))]
+mod native_shell_screenshot;
 
 /// Turn-key canvas + rAF + DOM-input shell for wasm platform shims.
 #[cfg(target_arch = "wasm32")]

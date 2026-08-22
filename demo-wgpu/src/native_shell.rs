@@ -22,6 +22,7 @@
 
 #![allow(deprecated)] // winit 0.30 EventLoop::run idiom
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use agg_gui::{winit_adapter, App, Modifiers, Size};
@@ -30,6 +31,7 @@ use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes};
 
+use crate::native_shell_screenshot::{should_capture, write_png};
 use crate::{begin_frame, WgpuGfxCtx};
 
 /// Window parameters for [`run`].
@@ -45,6 +47,9 @@ pub struct NativeShellConfig {
     /// Minimum inner size in logical pixels, enforced by the window
     /// system (`winit` `with_min_inner_size`). `None` = unconstrained.
     pub min_size: Option<(f64, f64)>,
+    /// Deterministic capture target: `(png path, settle frames)`.
+    /// See [`NativeShellConfig::with_screenshot`].
+    pub screenshot: Option<(PathBuf, u32)>,
 }
 
 impl NativeShellConfig {
@@ -53,6 +58,7 @@ impl NativeShellConfig {
             title,
             logical_size,
             min_size: None,
+            screenshot: None,
         }
     }
 
@@ -60,6 +66,23 @@ impl NativeShellConfig {
     /// pixels (SwiftUI `.frame(minWidth:minHeight:)` on the window root).
     pub fn with_min_size(mut self, w: f64, h: f64) -> Self {
         self.min_size = Some((w, h));
+        self
+    }
+
+    /// Headless-style capture: after `settle_frames` painted frames, read
+    /// the frame back, write it as a PNG to `path`, and exit the event
+    /// loop. Redraws are requested continuously until the capture fires,
+    /// so the frame count advances without any user input.
+    ///
+    /// `settle_frames` is clamped to at least 1; ~6 gives fonts, layout
+    /// and start-up animations time to settle. The image is in PHYSICAL
+    /// pixels — on a Retina display that is 2x the logical window size.
+    ///
+    /// A failed capture (empty read-back, encode or io error) prints to
+    /// stderr and exits the process with status 1: a deterministic capture
+    /// that silently produced nothing would be worse than a loud failure.
+    pub fn with_screenshot(mut self, path: impl Into<PathBuf>, settle_frames: u32) -> Self {
+        self.screenshot = Some((path.into(), settle_frames));
         self
     }
 }
@@ -74,7 +97,11 @@ struct Gpu {
 }
 
 impl Gpu {
-    fn new(window: Arc<Window>) -> Self {
+    /// `copy_src` adds `COPY_SRC` to the surface usage so
+    /// `WgpuGfxCtx::read_screenshot` can blit the rendered surface to a
+    /// staging buffer — only requested when a capture is configured, since
+    /// not every surface supports it.
+    fn new(window: Arc<Window>, copy_src: bool) -> Self {
         let size = window.inner_size();
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
         instance_desc.backends = wgpu::Backends::PRIMARY;
@@ -107,8 +134,18 @@ impl Gpu {
             .find(|f| !f.is_srgb())
             .unwrap_or(caps.formats[0]);
 
+        let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
+        if copy_src {
+            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+                usage |= wgpu::TextureUsages::COPY_SRC;
+            } else {
+                eprintln!("screenshot: surface does not support COPY_SRC read-back");
+                std::process::exit(1);
+            }
+        }
+
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage,
             format: surface_format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -165,7 +202,8 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
     );
     agg_gui::set_device_scale(window.scale_factor());
 
-    let mut gpu = Gpu::new(window.clone());
+    let screenshot = config.screenshot.clone();
+    let mut gpu = Gpu::new(window.clone(), screenshot.is_some());
     let mut wgpu_ctx = WgpuGfxCtx::new(
         Arc::clone(&gpu.device),
         Arc::clone(&gpu.queue),
@@ -180,6 +218,8 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
     let mut cursor_y = 0.0_f64;
     let mut current_mods = Modifiers::default();
     let mut layout_key: Option<(u32, u32, u64, u64)> = None;
+    let mut frames_painted: u32 = 0;
+    let mut screenshot_done = false;
 
     window.set_visible(true);
 
@@ -279,7 +319,7 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
                 event: WindowEvent::RedrawRequested,
                 ..
             } => {
-                paint_frame(
+                let painted = paint_frame(
                     &gpu,
                     &mut wgpu_ctx,
                     &mut app,
@@ -287,7 +327,20 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
                     win_h,
                     &mut on_frame,
                     &mut layout_key,
+                    screenshot.as_ref().filter(|_| !screenshot_done),
+                    frames_painted,
                 );
+                if let Some((_, settle_frames)) = screenshot.as_ref() {
+                    if painted {
+                        frames_painted += 1;
+                        if should_capture(frames_painted, *settle_frames) {
+                            screenshot_done = true;
+                        }
+                    }
+                    if screenshot_done {
+                        elwt.exit();
+                    }
+                }
             }
 
             // A scheduled `WaitUntil` deadline fired. Belt-and-braces only:
@@ -312,7 +365,13 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
                 // `wants_draw()` covers due scheduled deadlines; otherwise
                 // re-arm `WaitUntil` from the non-destructive peek every idle
                 // iteration (idempotent — cannot lose the scheduled wake).
-                if app.wants_draw() {
+                if screenshot.is_some() && !screenshot_done {
+                    // A pending deterministic capture needs the frame count
+                    // to advance on its own; `ControlFlow::Wait` would stall
+                    // forever with no user input.
+                    window.request_redraw();
+                    elwt.set_control_flow(ControlFlow::Poll);
+                } else if app.wants_draw() {
                     window.request_redraw();
                     elwt.set_control_flow(ControlFlow::Poll);
                 } else if let Some(t) = app.next_draw_deadline() {
@@ -327,6 +386,11 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
         .expect("event loop");
 }
 
+/// Paint one frame. `capture` is `Some((path, settle_frames))` while a
+/// screenshot is still pending; the frame is written out when
+/// `frames_painted + 1` reaches the settle count. Returns whether a frame
+/// was actually painted (the surface can be unavailable).
+#[allow(clippy::too_many_arguments)]
 fn paint_frame(
     gpu: &Gpu,
     ctx: &mut WgpuGfxCtx,
@@ -335,13 +399,15 @@ fn paint_frame(
     win_h: u32,
     on_frame: &mut impl FnMut(),
     layout_key: &mut Option<(u32, u32, u64, u64)>,
-) {
+    capture: Option<&(PathBuf, u32)>,
+    frames_painted: u32,
+) -> bool {
     if win_w == 0 || win_h == 0 {
-        return;
+        return false;
     }
     let frame = match gpu.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-        _ => return,
+        _ => return false,
     };
     let view = frame
         .texture
@@ -368,5 +434,20 @@ fn paint_frame(
 
     app.paint(ctx);
     ctx.end_frame();
+
+    // Read-back must sit between `end_frame` (render submitted) and
+    // `present` (surface texture handed back to the compositor).
+    if let Some((path, settle_frames)) = capture {
+        if should_capture(frames_painted + 1, *settle_frames) {
+            let (rgba, w, h) = ctx.read_screenshot();
+            if let Err(e) = write_png(path, &rgba, w, h) {
+                frame.present();
+                eprintln!("screenshot: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     frame.present();
+    true
 }

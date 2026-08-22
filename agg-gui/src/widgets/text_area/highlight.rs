@@ -10,8 +10,7 @@
 //! ([`segment_highlight`]) and paints that partition ([`TextArea::paint_highlighted_line`]),
 //! so the AA text path in `widget_impl`'s `paint` fills every glyph exactly once.
 //! The segmentation is pure and side-effect free so it can be unit-tested in
-//! isolation (`segment_highlight_tests`); `widget_impl` re-exports it so the
-//! historic `widget_impl::segment_highlight` path keeps resolving.
+//! isolation (`segment_highlight_tests`).
 
 use super::*;
 use crate::color::Color;

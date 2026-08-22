@@ -1,10 +1,5 @@
 use super::*;
 
-/// Highlight segmentation moved to `super::highlight`; re-exported here so the
-/// long-standing `widget_impl::segment_highlight` path (used by the unit tests
-/// and by `paint`'s doc links) keeps resolving.
-pub(crate) use super::highlight::segment_highlight;
-
 /// Clamp the caret's vertical span `[p_y, p_y + line_h]` (Y-up) to the padded
 /// inner band `[inner_lo, inner_hi]`, returning the visible sub-segment. Yields
 /// `None` when the caret's line has scrolled entirely outside the inner rect,
