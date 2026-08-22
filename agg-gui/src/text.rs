@@ -75,6 +75,9 @@ pub struct Font {
     line_gap: i16,
     /// Optional fallback used when the primary font lacks a glyph.
     pub(crate) fallback: Option<Arc<Font>>,
+    /// Apply the OpenType `tnum` (tabular figures) feature when shaping
+    /// with this font — see [`Font::with_tabular_digits`].
+    tabular_digits: bool,
 }
 
 impl Font {
@@ -91,6 +94,7 @@ impl Font {
             data: Arc::new(data),
             index: 0,
             fallback: None,
+            tabular_digits: false,
         })
     }
 
@@ -108,6 +112,27 @@ impl Font {
     pub fn with_fallback(mut self, fallback: Arc<Font>) -> Self {
         self.fallback = Some(fallback);
         self
+    }
+
+    /// Shape text with the OpenType `tnum` (tabular figures) feature, so
+    /// every digit takes the same advance while the rest of the face stays
+    /// proportional — the typographic equivalent of Cocoa's
+    /// `monospacedDigitSystemFont` / SwiftUI's `.monospacedDigit()`.
+    ///
+    /// Fonts without a `tnum` feature are unaffected: the shaper simply
+    /// finds nothing to substitute.
+    ///
+    /// ```ignore
+    /// let digits = Arc::new(Font::from_slice(INTER)?.with_tabular_digits(true));
+    /// ```
+    pub fn with_tabular_digits(mut self, tabular: bool) -> Self {
+        self.tabular_digits = tabular;
+        self
+    }
+
+    /// Whether this font shapes its digits with `tnum` applied.
+    pub fn tabular_digits(&self) -> bool {
+        self.tabular_digits
     }
 
     pub fn units_per_em(&self) -> u16 {
@@ -508,11 +533,12 @@ pub struct ShapedGlyph {
 pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
     let font_key = Arc::as_ptr(&font.data) as usize;
     let size_key = size.to_bits();
+    let tabular = font.tabular_digits;
 
     SHAPE_CACHE.with(|cache| {
         {
             let c = cache.borrow();
-            if let Some(cached) = c.get(&(font_key, text.to_owned(), size_key)) {
+            if let Some(cached) = c.get(&(font_key, text.to_owned(), size_key, tabular)) {
                 return cached.clone();
             }
         }
@@ -522,7 +548,19 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
         let glyphs = font.with_rb_face(|face| {
             let mut buffer = rustybuzz::UnicodeBuffer::new();
             buffer.push_str(text);
-            let output = rustybuzz::shape(face, &[], buffer);
+            // Tabular figures are a real GSUB substitution (Inter and the
+            // other UI faces swap in `.tnum` digit glyphs), so the feature
+            // has to reach the shaper — it cannot be faked with advances.
+            let features: &[rustybuzz::Feature] = if tabular {
+                &[rustybuzz::Feature::new(
+                    ttf_parser::Tag::from_bytes(b"tnum"),
+                    1,
+                    ..,
+                )]
+            } else {
+                &[]
+            };
+            let output = rustybuzz::shape(face, features, buffer);
             output
                 .glyph_infos()
                 .iter()
@@ -576,7 +614,7 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
 
         cache
             .borrow_mut()
-            .insert((font_key, text.to_owned(), size_key), glyphs.clone());
+            .insert((font_key, text.to_owned(), size_key, tabular), glyphs.clone());
         glyphs
     })
 }
@@ -678,7 +716,9 @@ thread_local! {
     /// Caches the full rustybuzz shaping output (per-glyph IDs + advances).
     /// Used by shape_glyphs() so fill_text() avoids re-shaping every frame.
     /// Also serves as the measurement cache — measure_advance() reads it too.
-    static SHAPE_CACHE: RefCell<HashMap<(usize, String, u64), Vec<ShapedGlyph>>> =
+    /// The trailing flag is the font's tabular-digits setting, which picks
+    /// different digit glyphs from the same face.
+    static SHAPE_CACHE: RefCell<HashMap<(usize, String, u64, bool), Vec<ShapedGlyph>>> =
         RefCell::new(HashMap::new());
 }
 

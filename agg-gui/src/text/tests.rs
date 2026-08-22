@@ -418,3 +418,28 @@ fn test_flatten_output_is_in_screen_space() {
         }
     }
 }
+
+/// `Font::with_tabular_digits` must carry the `tnum` feature into the
+/// shaper: every digit of a `tnum`-capable face comes back on one shared
+/// advance, which is the contract callers lay tables and counters out
+/// against.  (None of the faces bundled here default to proportional
+/// figures, so the *substitution* itself is covered where a face that
+/// does is available — see KeyInSight's `ui::fonts` tests with Inter.)
+#[test]
+fn test_tabular_digits_shape_on_one_advance() {
+    let proportional = Font::from_slice(NOTO_BYTES).expect("noto");
+    let tabular = Font::from_slice(NOTO_BYTES)
+        .expect("noto")
+        .with_tabular_digits(true);
+    assert!(!proportional.tabular_digits(), "off by default");
+    assert!(tabular.tabular_digits(), "the builder sets the flag");
+
+    let shaped = shape_glyphs(&tabular, "0123456789", 16.0);
+    assert_eq!(shaped.len(), 10);
+    let first = shaped[0].x_advance;
+    assert!(
+        shaped.iter().all(|g| (g.x_advance - first).abs() < 1e-6),
+        "tabular digits must all share one advance, got {:?}",
+        shaped.iter().map(|g| g.x_advance).collect::<Vec<_>>()
+    );
+}
