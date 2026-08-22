@@ -280,3 +280,99 @@ fn sheet_without_default_still_swallows_enter() {
     assert_eq!(r, EventResult::Consumed);
     assert!(visible.get());
 }
+
+// ---------------------------------------------------------------------------
+// Key-passthrough sheets (`ModalSheet::with_key_passthrough`)
+// ---------------------------------------------------------------------------
+
+/// A passthrough sheet lets keys it doesn't use reach the app behind it, but
+/// it still OWNS Enter/Escape for its scope: the root default/cancel action
+/// behind the modal must never fire while the sheet is up.
+fn passthrough_sheet(visible: &Rc<Cell<bool>>, content: Box<dyn Widget>) -> ModalSheet {
+    ModalSheet::new(Rc::clone(visible), content).with_key_passthrough(true)
+}
+
+/// The regression: a passthrough sheet with NO default action of its own
+/// must still shadow the root default button (KeyInSight's calibration
+/// sheet vs. the side panel's "Next Exercise").
+#[test]
+fn passthrough_sheet_without_default_shadows_the_root_default() {
+    let visible = Rc::new(Cell::new(true));
+    let sheet = passthrough_sheet(&visible, Box::new(Label::new("measuring…", font())));
+    let mut h = harness(vec![sheet]);
+
+    press(&mut h.app, Key::Enter);
+    assert_eq!(
+        h.root_hits.get(),
+        0,
+        "root default must not fire behind a passthrough modal"
+    );
+    assert!(visible.get(), "the sheet stays open");
+}
+
+/// The same sheet WITH its own default action: that one fires, the root
+/// one still does not.
+#[test]
+fn passthrough_sheet_with_default_fires_only_its_own() {
+    let visible = Rc::new(Cell::new(true));
+    let ok = Rc::new(Cell::new(0));
+    let mut col = FlexColumn::new();
+    col.push(
+        Box::new(counting_button("Done", &ok).with_default_action()),
+        0.0,
+    );
+    let mut h = harness(vec![passthrough_sheet(&visible, Box::new(col))]);
+
+    press(&mut h.app, Key::Enter);
+    assert_eq!(ok.get(), 1, "the sheet's own default fires");
+    assert_eq!(h.root_hits.get(), 0, "root default stays shadowed");
+}
+
+/// Escape behaves the same way: a passthrough sheet that neither closes on
+/// Escape nor has a cancel action still shadows a root cancel button.
+#[test]
+fn passthrough_sheet_shadows_the_root_cancel_action() {
+    let visible = Rc::new(Cell::new(true));
+    let root_cancel = Rc::new(Cell::new(0));
+    let mut col = FlexColumn::new();
+    col.push(
+        Box::new(counting_button("Root cancel", &root_cancel).with_cancel_action()),
+        0.0,
+    );
+    let sheet = ModalSheet::new(
+        Rc::clone(&visible),
+        Box::new(Label::new("measuring…", font())),
+    )
+    .with_key_passthrough(true)
+    .with_escape_closes(false);
+    let mut stack = Stack::new().add(Box::new(col));
+    stack = stack.add(Box::new(sheet));
+    let mut app = App::new(Box::new(stack));
+    app.layout(Size::new(400.0, 400.0));
+
+    app.on_key_down(Key::Escape, Modifiers::default());
+    assert_eq!(
+        root_cancel.get(),
+        0,
+        "root cancel must not fire behind a passthrough modal"
+    );
+}
+
+/// Passthrough itself is intact: keys that are not the modal's action keys
+/// still reach the app behind the sheet (the calibration sheet's whole
+/// reason for existing — live instrument keys keep playing).
+#[test]
+fn passthrough_sheet_still_forwards_other_keys() {
+    let visible = Rc::new(Cell::new(true));
+    let sheet = passthrough_sheet(&visible, Box::new(Label::new("measuring…", font())));
+    let mut h = harness(vec![sheet]);
+    let seen = Rc::new(Cell::new(0));
+    let s = Rc::clone(&seen);
+    h.app.set_global_key_handler(move |_key, _mods| {
+        s.set(s.get() + 1);
+        true
+    });
+
+    press(&mut h.app, Key::Char('c'));
+    assert_eq!(seen.get(), 1, "plain keys still pass through");
+}

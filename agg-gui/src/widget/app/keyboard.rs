@@ -31,7 +31,8 @@ impl App {
             key: key.clone(),
             modifiers: mods,
         };
-        let result = if let Some(path) = active_modal_path(self.root.as_ref()) {
+        let modal = active_modal_path(self.root.as_ref());
+        let result = if let Some(path) = modal.clone() {
             // A focused widget INSIDE the modal (a dialog's text field)
             // gets keys first; the modal subtree handles the rest (Esc).
             let target = match self.focus.clone() {
@@ -55,10 +56,19 @@ impl App {
             let result = dispatch_unconsumed_key(self.root.as_mut(), &key, mods);
             if !result.is_consumed() {
                 // Root-level default / cancel action (`Button::with_default_action`
-                // / `with_cancel_action`). A showing modal has already had its
-                // turn (its subtree is skipped here) and swallows the key unless
-                // it passes keys through, so only the topmost scope fires.
-                let result = self.dispatch_root_action(&key);
+                // / `with_cancel_action`) — only when NO modal is showing. A
+                // modal owns Enter / Escape for its whole scope: it has already
+                // resolved its own default / cancel action (`ModalSheet`
+                // searches its content with `skip_modals = false`), and a
+                // modal without one must still shadow the actions behind it
+                // rather than let them fire under the sheet. That holds even
+                // for a `with_key_passthrough` sheet: passthrough forwards
+                // ordinary keys to the app behind, not the modal's own
+                // Enter / Escape semantics.
+                let result = match modal {
+                    Some(_) => EventResult::Ignored,
+                    None => self.dispatch_root_action(&key),
+                };
                 if !result.is_consumed() {
                     if let Some(ref mut handler) = self.global_key_handler {
                         handler(key, mods);
@@ -69,8 +79,9 @@ impl App {
     }
 
     /// Enter → the tree's first visible `default_action` widget;
-    /// Escape → the first `cancel_action` widget. Subtrees under an
-    /// active modal are skipped (see `on_key_down`).
+    /// Escape → the first `cancel_action` widget. Only called when no
+    /// modal is showing (see `on_key_down`); subtrees under an active
+    /// modal are skipped as a second line of defence.
     fn dispatch_root_action(&mut self, key: &Key) -> EventResult {
         let path = match key {
             Key::Enter => default_action_path(self.root.as_ref(), true),

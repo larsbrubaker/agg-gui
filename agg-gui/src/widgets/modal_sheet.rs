@@ -24,6 +24,15 @@
 //! keys are routed to the topmost active modal only, a stacked sheet's
 //! default button never fires the one beneath it.
 //!
+//! A showing sheet OWNS Enter / Escape for its whole scope: while any
+//! modal is active the [`App`](crate::App) skips the root-level
+//! default / cancel dispatch entirely, so a sheet without a default
+//! action still shadows the buttons behind it instead of firing them
+//! under the scrim. That applies to
+//! [`with_key_passthrough`](ModalSheet::with_key_passthrough) sheets too
+//! — passthrough forwards ordinary keys to the app behind, never the
+//! sheet's own Enter / Escape semantics.
+//!
 //! ```ignore
 //! let visible = Rc::new(Cell::new(false));
 //! let sheet = ModalSheet::new(Rc::clone(&visible), Box::new(content))
@@ -95,7 +104,9 @@ impl ModalSheet {
     }
 
     /// Let unhandled keys reach the app behind the sheet (see
-    /// `key_passthrough`).
+    /// `key_passthrough`). Enter / Escape stay the sheet's own: the
+    /// root-level default / cancel action is suppressed while any modal
+    /// is showing (see the module docs).
     pub fn with_key_passthrough(mut self, passthrough: bool) -> Self {
         self.key_passthrough = passthrough;
         self
