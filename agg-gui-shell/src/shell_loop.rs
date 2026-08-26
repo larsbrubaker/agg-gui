@@ -402,12 +402,14 @@ impl<H: ShellHost> ShellLoop<H> {
             return;
         }
         self.finished = true;
-        self.host.on_exit(&mut self.app);
         if let Some(store) = self.bounds_store.as_ref() {
-            // Unconditional: the last change may have happened with a button
-            // still held (closing from a drag), which the idle gate skipped.
+            // Unconditional, and BEFORE `on_exit`: the last change may have
+            // happened with a button still held (closing from a drag), which
+            // the idle gate skipped — and an app whose store only records the
+            // bounds writes them out from its own `on_exit` flush.
             store.save(self.current_bounds());
         }
+        self.host.on_exit(&mut self.app);
     }
 }
 
