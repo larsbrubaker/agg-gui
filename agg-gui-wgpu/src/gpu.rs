@@ -143,6 +143,27 @@ fn pick_alpha_mode(
     modes.first().copied().ok_or(GpuInitError::NoAlphaModes)
 }
 
+/// Pick the present mode to configure the swap chain with.
+///
+/// `wgpu` resolves the `Auto*` modes itself against whatever the surface
+/// supports, so they are always safe to request. An explicit mode that the
+/// surface does not list (`Mailbox` on a driver that lacks it, `Immediate`
+/// under a compositor that forces vsync) is a validation error, so it falls
+/// back to `Fifo` — the one mode the spec guarantees every surface supports.
+///
+/// Pure so the fallback is testable without a live surface.
+pub fn pick_present_mode(
+    supported: &[wgpu::PresentMode],
+    requested: wgpu::PresentMode,
+) -> wgpu::PresentMode {
+    use wgpu::PresentMode as P;
+    match requested {
+        P::AutoVsync | P::AutoNoVsync => requested,
+        explicit if supported.contains(&explicit) => explicit,
+        _ => P::Fifo,
+    }
+}
+
 /// Clamp a surface configuration size to `[1, max_dim]` on both axes.
 ///
 /// `max_dim` is the device's `max_texture_dimension_2d`. Applied on every
@@ -161,6 +182,7 @@ pub struct Gpu {
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
+    device_lost: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Gpu {
@@ -220,6 +242,20 @@ impl Gpu {
             }
         }
 
+        // Device loss (TDR, driver update, GPU reset, RDP session change) is
+        // reported out-of-band: nothing in the per-frame API returns an error,
+        // so a shell that does not watch this flag silently renders nothing
+        // forever. `Destroyed` is our own teardown, not a fault.
+        let device_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let flag = Arc::clone(&device_lost);
+            device.set_device_lost_callback(move |reason, _message| {
+                if reason != wgpu::DeviceLostReason::Destroyed {
+                    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            });
+        }
+
         let (cfg_w, cfg_h) =
             clamp_surface_size(size.0, size.1, device.limits().max_texture_dimension_2d);
         let surface_config = wgpu::SurfaceConfiguration {
@@ -227,7 +263,7 @@ impl Gpu {
             format: surface_format,
             width: cfg_w,
             height: cfg_h,
-            present_mode: config.present_mode,
+            present_mode: pick_present_mode(&caps.present_modes, config.present_mode),
             desired_maximum_frame_latency: 2,
             alpha_mode,
             view_formats: vec![],
@@ -240,7 +276,20 @@ impl Gpu {
             surface,
             surface_format,
             config: surface_config,
+            device_lost,
         })
+    }
+
+    /// Has this device been lost since it was created?
+    ///
+    /// Set from wgpu's device-lost callback (TDR / driver reset / GPU removal
+    /// / RDP session change); our own `Device::destroy` is not counted. A
+    /// lost device cannot be revived — every resource created from it is dead
+    /// too — so the only recovery is to build a fresh [`Gpu`] for the same
+    /// window, rebuild the renderer on the new device, and drop any GPU
+    /// resources the app cached. Shells should poll this once per frame.
+    pub fn device_lost(&self) -> bool {
+        self.device_lost.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn device(&self) -> &Arc<wgpu::Device> {
@@ -356,8 +405,8 @@ pub fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAc
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_surface_size, pick_alpha_mode, pick_surface_format, surface_acquire_action,
-        GpuInitError, SurfaceAcquire,
+        clamp_surface_size, pick_alpha_mode, pick_present_mode, pick_surface_format,
+        surface_acquire_action, GpuInitError, SurfaceAcquire,
     };
     use wgpu::CurrentSurfaceTexture as T;
 
@@ -430,6 +479,29 @@ mod tests {
             pick_alpha_mode(&[A::Opaque, A::PreMultiplied]).unwrap(),
             A::Opaque
         );
+    }
+
+    #[test]
+    fn unsupported_present_mode_falls_back_to_fifo() {
+        use wgpu::PresentMode as P;
+        // Only Fifo on offer (the guaranteed-everywhere mode): an explicit
+        // Mailbox/Immediate request would be a validation error.
+        assert_eq!(pick_present_mode(&[P::Fifo], P::Mailbox), P::Fifo);
+        assert_eq!(pick_present_mode(&[P::Fifo], P::Immediate), P::Fifo);
+        // Supported explicit modes pass through.
+        assert_eq!(
+            pick_present_mode(&[P::Fifo, P::Mailbox], P::Mailbox),
+            P::Mailbox
+        );
+        // wgpu resolves the Auto modes itself, so they are never rewritten —
+        // they do not appear in `caps.present_modes`.
+        assert_eq!(pick_present_mode(&[P::Fifo], P::AutoVsync), P::AutoVsync);
+        assert_eq!(
+            pick_present_mode(&[P::Fifo], P::AutoNoVsync),
+            P::AutoNoVsync
+        );
+        // A surface that reports nothing at all still yields a legal mode.
+        assert_eq!(pick_present_mode(&[], P::Immediate), P::Fifo);
     }
 
     #[test]

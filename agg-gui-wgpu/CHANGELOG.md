@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased] — 0.5.1-pending
+
+### Added
+
+- `Gpu::device_lost()` — wgpu reports device loss (TDR, driver reset, GPU
+  removal, RDP session change) out-of-band through a callback, so a shell that
+  only inspects `get_current_texture` keeps rendering nothing forever
+  afterwards. `Gpu` now installs that callback and latches a flag for the shell
+  to poll once per frame; our own `Device::destroy` is not counted as a loss.
+  Recovery is to build a fresh `Gpu` for the same window — `agg-gui-shell`
+  does this and tells the app to drop its cached GPU resources.
+- `pick_present_mode` — the surface-capability fallback used below, exposed
+  because it is pure and useful to a shell configuring its own surface.
+
+### Changed
+
+- `Gpu::new` falls back to `PresentMode::Fifo` when the requested explicit
+  present mode is not in the surface's capabilities, instead of configuring an
+  unsupported mode. The `Auto*` modes pass through untouched — wgpu resolves
+  those itself.
+
 ## [0.5.0] - 2026-08-26
 
 ### Added
