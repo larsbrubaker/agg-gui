@@ -8,6 +8,47 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-25
+
+### Added
+
+- **Touch and multi-touch.** Multi-touch gestures route as captured events with
+  a per-finger touch registry, and the web shell forwards browser touch events;
+  the Lion demo gains pan. Device-tilt input (`agg_gui::tilt`) rides the same
+  plumbing.
+- **Gamepad support** — `agg_gui::gamepad` pad-state plumbing, polled through
+  the Web Gamepad API in the browser shell.
+- **Keyboard focus and window control.** `App::focus_first` seeds initial
+  keyboard focus for canvas/game roots; app-requested fullscreen toggling is
+  handled by both shells; `Window` gains a chromeless mode.
+- **Widgets and editors.** `SegmentedControl` and `Spinner`; a segmented-strip
+  enum editor for `property_row`; registered vector icons plus an `EnumIcons`
+  strip; default/cancel actions; the node editor's inline value editing,
+  interaction modes, animated fit-to-content, and `SplitterRatio`.
+- `Font::with_tabular_digits` / `variant_with_tabular_digits` — shape with the
+  OpenType `tnum` feature, sharing the face bytes with the source font.
+- The shared scrollbar helpers (`ScrollbarAxis`, geometry, painter) are public
+  so widgets that own their scroll offset can reuse them.
+- `tree_inspector::find_widget_screen_rect` — absolute widget placement by id.
+- An optional animation host waker so reactive hosts wake for async completions.
+
+### Changed
+
+- Wheel input normalizes DOM wheel deltas to notches; the web shell adopts it.
+- `winit_adapter` round-trips unmapped named keys as `Key::Other` instead of
+  dropping them.
+- LCD backbuffer alpha collapses by Rec.709 weight.
+- `Gutter` numbers soft-wrapped lines by their first visual row.
+- `SegmentedControl` uses whole-pixel segment widths in equal-width mode.
+
+### Fixed
+
+- An active modal owns Enter/Escape — no root default/cancel dispatch behind it.
+- Any non-left press dismisses an open menu.
+- The post-layout keyboard lift is gated on `accepts_text_input`.
+- LCD subpixel text inside opaque compositing layers renders correctly on the
+  wgpu backend again.
+
 ## [0.4.0] - 2026-07-22
 
 ### Changed

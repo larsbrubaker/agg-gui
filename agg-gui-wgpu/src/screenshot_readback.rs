@@ -12,14 +12,14 @@ use crate::WgpuGfxCtx;
 impl WgpuGfxCtx {
     /// Stash a handle to the current frame's surface texture so a later
     /// [`Self::read_screenshot`] call can copy from it.  Called from the
-    /// platform shell with `frame.texture.clone()` BEFORE [`begin_frame`].
+    /// platform shell with `frame.texture.clone()` BEFORE [`begin_frame`](WgpuGfxCtx::begin_frame).
     /// `wgpu::Texture` is internally ref-counted, so the clone is cheap.
     pub fn set_surface_texture(&mut self, tex: wgpu::Texture) {
         self.surface_texture = Some(tex);
     }
 
     /// Stash captured screenshot pixels for the read-back closure to pick
-    /// up.  See [`Self::pending_screenshot`] / [`Self::take_pending_screenshot`].
+    /// up.  See [`Self::take_pending_screenshot`].
     pub fn set_pending_screenshot(&mut self, captured: (Vec<u8>, u32, u32)) {
         self.pending_screenshot = Some(captured);
     }

@@ -43,9 +43,11 @@ cargo add agg-gui
 
 ```toml
 [dependencies]
-agg-gui = "0.4"
+agg-gui = "0.5"
 # Optional: winit event-type adapters (for desktop hosts)
-# agg-gui = { version = "0.4", features = ["winit-adapter", "clipboard"] }
+# agg-gui = { version = "0.5", features = ["winit-adapter", "clipboard"] }
+# Optional: the hardware-accelerated wgpu renderer
+# agg-gui-wgpu = "0.5"
 ```
 
 The published crates are `agg-gui` and `agg-gui-wgpu` (the hardware-accelerated

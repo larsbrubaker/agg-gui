@@ -3,8 +3,8 @@
 //!
 //! # Why
 //!
-//! agg-gui paints 2-D widgets via deferred [`DrawCommand`](crate::DrawCommand)s
-//! that flush into a single `wgpu::CommandEncoder` in [`end_frame`]. A
+//! agg-gui paints 2-D widgets via deferred `DrawCommand`s that flush into a
+//! single `wgpu::CommandEncoder` in [`WgpuGfxCtx::end_frame`](crate::WgpuGfxCtx::end_frame). A
 //! 3-D viewport widget (e.g. AtomArtist's `Viewport3dWidget`) needs to run
 //! its own render pass(es) interleaved with that 2-D stream so its output
 //! ends up on the same surface or layer texture, with depth-correct
@@ -22,12 +22,13 @@
 //! 2. Hold it in `Rc<RefCell<dyn WgpuCustomRender>>` so the widget can
 //!    keep a clone (lazy-init / persistent buffers across frames).
 //! 3. From your widget's `paint(ctx)`, downcast `ctx` to
-//!    [`WgpuGfxCtx`](crate::WgpuGfxCtx) via [`DrawCtx::as_any_mut`] and
-//!    call [`WgpuGfxCtx::push_custom_render`].
+//!    [`WgpuGfxCtx`](crate::WgpuGfxCtx) via
+//!    [`DrawCtx::as_any_mut`](agg_gui::draw_ctx::DrawCtx::as_any_mut) and call
+//!    [`WgpuGfxCtx::push_custom_render`](crate::WgpuGfxCtx::push_custom_render).
 //!
 //! # Pass semantics
 //!
-//! When the executor reaches a [`DrawCommand::Custom`] entry, it:
+//! When the executor reaches a `DrawCommand::Custom` entry, it:
 //!   1. Ends the active 2-D render pass.
 //!   2. Calls [`WgpuCustomRender::render`] with a [`WgpuCustomRenderCtx`]
 //!      pointing at the same encoder + active target view.
@@ -61,6 +62,11 @@ use crate::pipelines::WgpuPipelines;
 ///     [`crate::ssaa::SsaaFramebuffer::blit_to`] with this to composite
 ///     their offscreen output onto `target_view` through the same
 ///     textured-quad pipeline the 2-D path uses.
+///
+/// Only the renderer constructs this (from `end_frame`); implementors receive
+/// one and read it. It is `#[non_exhaustive]` so further per-pass state can be
+/// added without a breaking release.
+#[non_exhaustive]
 pub struct WgpuCustomRenderCtx<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
@@ -84,7 +90,7 @@ pub struct WgpuCustomRenderCtx<'a> {
 /// commands into the frame.
 ///
 /// `render` is called from `end_frame()` once per matching
-/// [`DrawCommand::Custom`](crate::DrawCommand::Custom) queued during
+/// `DrawCommand::Custom` queued during
 /// `paint()`. Implementations are typically held in
 /// `Rc<RefCell<dyn WgpuCustomRender>>` so the widget can lazy-init GPU
 /// state on first use and persist it across frames.

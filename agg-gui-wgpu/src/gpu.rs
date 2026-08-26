@@ -20,6 +20,7 @@ use std::sync::Arc;
 /// rendered surface into a staging buffer. Not every surface supports it, so
 /// the caller states whether a screenshot is optional or the point of the run.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[non_exhaustive]
 pub enum CopySrc {
     /// Never request it — the app has no read-back path.
     #[default]
@@ -33,7 +34,17 @@ pub enum CopySrc {
 }
 
 /// Everything [`Gpu::new`] needs beyond the window handle.
+///
+/// Build one with [`GpuConfig::new`] (or [`Default`]) and the `with_*`
+/// setters rather than a struct literal — the struct is `#[non_exhaustive]`
+/// so new knobs can be added without a breaking release:
+///
+/// ```no_run
+/// use agg_gui_wgpu::{CopySrc, GpuConfig};
+/// let cfg = GpuConfig::new("my-app").with_copy_src(CopySrc::IfSupported);
+/// ```
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct GpuConfig {
     /// `wgpu::DeviceDescriptor` label — shows up in backend validation
     /// messages and GPU captures, so each shell names its own.
@@ -55,6 +66,7 @@ impl Default for GpuConfig {
 }
 
 impl GpuConfig {
+    /// Default configuration under a shell-specific device label.
     pub fn new(label: &'static str) -> Self {
         Self {
             label,
@@ -66,16 +78,28 @@ impl GpuConfig {
         self.copy_src = copy_src;
         self
     }
+
+    /// Override the swap-chain present mode (default `AutoVsync`).
+    pub fn with_present_mode(mut self, present_mode: wgpu::PresentMode) -> Self {
+        self.present_mode = present_mode;
+        self
+    }
 }
 
 /// Why [`Gpu::new`] could not produce a usable surface.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum GpuInitError {
     CreateSurface(wgpu::CreateSurfaceError),
     RequestAdapter,
     RequestDevice,
     /// [`CopySrc::Required`] was asked for and the surface does not offer it.
     CopySrcUnsupported,
+    /// The surface reported no supported texture formats — a torn-down or
+    /// otherwise unusable surface.
+    NoSurfaceFormats,
+    /// The surface reported no supported composite alpha modes.
+    NoAlphaModes,
 }
 
 impl std::fmt::Display for GpuInitError {
@@ -87,11 +111,37 @@ impl std::fmt::Display for GpuInitError {
             Self::CopySrcUnsupported => {
                 write!(f, "surface does not support COPY_SRC read-back")
             }
+            Self::NoSurfaceFormats => write!(f, "surface reports no supported texture formats"),
+            Self::NoAlphaModes => write!(f, "surface reports no supported alpha modes"),
         }
     }
 }
 
 impl std::error::Error for GpuInitError {}
+
+/// Pick the surface format to configure the swap chain with.
+///
+/// A non-sRGB format is preferred so the renderer's linear-space colour maths
+/// isn't gamma-corrected a second time by the surface; when the surface only
+/// offers sRGB formats we take its own first preference. Pure so the choice is
+/// testable without a live surface.
+fn pick_surface_format(
+    formats: &[wgpu::TextureFormat],
+) -> Result<wgpu::TextureFormat, GpuInitError> {
+    formats
+        .iter()
+        .copied()
+        .find(|f| !f.is_srgb())
+        .or_else(|| formats.first().copied())
+        .ok_or(GpuInitError::NoSurfaceFormats)
+}
+
+/// Pick the composite alpha mode — the surface's first preference.
+fn pick_alpha_mode(
+    modes: &[wgpu::CompositeAlphaMode],
+) -> Result<wgpu::CompositeAlphaMode, GpuInitError> {
+    modes.first().copied().ok_or(GpuInitError::NoAlphaModes)
+}
 
 /// Clamp a surface configuration size to `[1, max_dim]` on both axes.
 ///
@@ -150,12 +200,8 @@ impl Gpu {
         .map_err(|_| GpuInitError::RequestDevice)?;
 
         let caps = surface.get_capabilities(&adapter);
-        let surface_format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
-            .unwrap_or(caps.formats[0]);
+        let surface_format = pick_surface_format(&caps.formats)?;
+        let alpha_mode = pick_alpha_mode(&caps.alpha_modes)?;
 
         let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
         let has_copy_src = caps.usages.contains(wgpu::TextureUsages::COPY_SRC);
@@ -183,7 +229,7 @@ impl Gpu {
             height: cfg_h,
             present_mode: config.present_mode,
             desired_maximum_frame_latency: 2,
-            alpha_mode: caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
         };
         surface.configure(&device, &surface_config);
@@ -272,6 +318,7 @@ impl Gpu {
 
 /// How to handle the result of `Surface::get_current_texture`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
 pub enum SurfaceAcquire {
     /// Texture is usable — render into it.
     Present,
@@ -308,7 +355,10 @@ pub fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAc
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_surface_size, surface_acquire_action, SurfaceAcquire};
+    use super::{
+        clamp_surface_size, pick_alpha_mode, pick_surface_format, surface_acquire_action,
+        GpuInitError, SurfaceAcquire,
+    };
     use wgpu::CurrentSurfaceTexture as T;
 
     #[test]
@@ -340,6 +390,46 @@ mod tests {
     fn occluded_and_validation_skip_without_self_requested_redraw() {
         assert_eq!(surface_acquire_action(&T::Occluded), SurfaceAcquire::Skip);
         assert_eq!(surface_acquire_action(&T::Validation), SurfaceAcquire::Skip);
+    }
+
+    #[test]
+    fn empty_capability_lists_are_an_error_not_a_panic() {
+        // A surface that reports no formats / no alpha modes is a broken or
+        // torn-down surface (headless RDP session, adapter lost mid-init).
+        // Indexing `[0]` there took the whole app down; callers get an error.
+        assert!(matches!(
+            pick_surface_format(&[]),
+            Err(GpuInitError::NoSurfaceFormats)
+        ));
+        assert!(matches!(
+            pick_alpha_mode(&[]),
+            Err(GpuInitError::NoAlphaModes)
+        ));
+    }
+
+    #[test]
+    fn non_srgb_format_is_preferred_and_first_is_the_fallback() {
+        use wgpu::TextureFormat as F;
+        // The renderer writes linear-space colour, so an sRGB surface would
+        // gamma-correct it twice — prefer any non-sRGB format on offer.
+        assert_eq!(
+            pick_surface_format(&[F::Bgra8UnormSrgb, F::Bgra8Unorm]).unwrap(),
+            F::Bgra8Unorm
+        );
+        // All-sRGB surface: fall back to the surface's own preference (first).
+        assert_eq!(
+            pick_surface_format(&[F::Bgra8UnormSrgb, F::Rgba8UnormSrgb]).unwrap(),
+            F::Bgra8UnormSrgb
+        );
+    }
+
+    #[test]
+    fn alpha_mode_takes_the_surface_preference() {
+        use wgpu::CompositeAlphaMode as A;
+        assert_eq!(
+            pick_alpha_mode(&[A::Opaque, A::PreMultiplied]).unwrap(),
+            A::Opaque
+        );
     }
 
     #[test]

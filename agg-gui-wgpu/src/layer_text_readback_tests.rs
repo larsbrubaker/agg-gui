@@ -27,7 +27,10 @@ use agg_gui::text::Font;
 
 use crate::WgpuGfxCtx;
 
-const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
+/// In-crate test font so the published tarball's tests still compile — the
+/// tests used to reach out to `demo/assets/`, which is not part of this
+/// package.  SIL OFL 1.1, see `assets/fonts/Noto-LICENSE-OFL.txt`.
+const TEST_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 
 /// A live headless device + queue, or `None` when no adapter is present.
 pub(crate) fn try_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {

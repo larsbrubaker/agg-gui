@@ -1,4 +1,5 @@
-//! `WgpuGfxCtx` — a hardware-accelerated [`DrawCtx`] implementation via `wgpu`.
+//! `WgpuGfxCtx` — a hardware-accelerated [`DrawCtx`](agg_gui::draw_ctx::DrawCtx)
+//! implementation via `wgpu`.
 //!
 //! # Platform coverage
 //!
@@ -11,7 +12,8 @@
 //!
 //! # Scope
 //!
-//! This crate is the **renderer and nothing else**: the [`DrawCtx`]
+//! This crate is the **renderer and nothing else**: the
+//! [`DrawCtx`](agg_gui::draw_ctx::DrawCtx)
 //! implementation, its pipelines and shaders, offscreen framebuffers,
 //! screenshot capture, the [`custom_render`] hook for widgets that want their
 //! own GPU passes, and the [`Gpu`] surface bundle that platform shells build
@@ -34,7 +36,7 @@
 //! # Deferred draw command model
 //!
 //! Unlike the GL backend which submits draw calls immediately, `WgpuGfxCtx`
-//! accumulates [`DrawCommand`] enums during `fill()` / `stroke()` / etc., then
+//! accumulates `DrawCommand` enums during `fill()` / `stroke()` / etc., then
 //! flushes them all in [`WgpuGfxCtx::end_frame`] using a single
 //! `wgpu::CommandEncoder`.  This avoids the render-pass borrow lifetime
 //! conflict: a `RenderPass` exclusively borrows its encoder, preventing both
@@ -76,7 +78,11 @@ mod screenshot_readback;
 /// `queue.submit(...)`.  `WgpuGfxCtx` flushes any pending 2-D commands
 /// before invoking the painter, so submissions interleave in the natural
 /// paint order without an explicit barrier.
+///
+/// Constructed by the renderer and handed to painters — `#[non_exhaustive]`
+/// so more GPU state can be threaded through without a breaking release.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct WgpuPaintContext {
     /// Device used to build pipelines, buffers, and textures.
     pub device: Arc<wgpu::Device>,
@@ -261,16 +267,9 @@ pub(crate) struct RetainedWgpuLayer {
 // WgpuGfxCtx
 // ---------------------------------------------------------------------------
 
-/// A [`DrawCtx`] that renders via `wgpu` (Vulkan / DX12 / Metal / WebGL2).
-///
-/// Create with [`WgpuGfxCtx::new`], passing a `wgpu::Device` and `wgpu::Queue`
-/// that were obtained by the platform shell.  Each frame: call
-/// [`render_app_frame`] (which calls [`reset`][WgpuGfxCtx::reset] and
-/// `app.paint(ctx)`), then call [`end_frame`][WgpuGfxCtx::end_frame] with the
-/// current surface texture view to flush all deferred draw commands.
 /// An in-flight, non-blocking readback of the capture texture for the **web**
 /// screen-share sender.  A blocking `map_async` + `poll(Wait)` (as
-/// [`DrawCtx::read_captured_screenshot`] does for native Save/Copy) deadlocks the
+/// `DrawCtx::read_captured_screenshot` does for native Save/Copy) deadlocks the
 /// single-threaded browser: the map can only complete once control returns to the
 /// JS event loop, but the blocking wait never yields.  So the sender starts a
 /// readback one frame and harvests it a later frame via
@@ -283,6 +282,14 @@ pub(crate) struct PendingReadback {
     done: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
+/// A [`DrawCtx`](agg_gui::draw_ctx::DrawCtx) that renders via `wgpu`
+/// (Vulkan / DX12 / Metal / WebGL2).
+///
+/// Create with [`WgpuGfxCtx::new`], passing a `wgpu::Device` and `wgpu::Queue`
+/// that were obtained by the platform shell.  Each frame: call
+/// `render_app_frame` (which calls [`reset`][WgpuGfxCtx::reset] and
+/// `app.paint(ctx)`), then call [`end_frame`][WgpuGfxCtx::end_frame] with the
+/// current surface texture view to flush all deferred draw commands.
 pub struct WgpuGfxCtx {
     // ── wgpu core ────────────────────────────────────────────────────────────
     pub(crate) device: Arc<wgpu::Device>,
@@ -363,7 +370,7 @@ pub struct WgpuGfxCtx {
     /// [`DrawCtx::capture_screenshot`], sampled directly by
     /// [`DrawCtx::draw_captured_screenshot`].  Lives on the GPU so the
     /// screenshot preview pane can render it every frame with no CPU
-    /// readback (the previous Vec<u8> + re-upload + mipmap gen path was
+    /// readback (the previous `Vec<u8>` + re-upload + mipmap gen path was
     /// blowing the frame budget under continuous capture).
     ///
     /// Pixels are pulled back to system memory only when the user clicks
@@ -566,7 +573,7 @@ impl WgpuGfxCtx {
     /// plumbing it through every method; [`Self::end_frame`] consumes it.
     ///
     /// The clear itself happens inside `end_frame`, when the leading
-    /// [`DrawCommand::Clear`] is flushed into the first render pass; this
+    /// `DrawCommand::Clear` is flushed into the first render pass; this
     /// method only pushes the current theme's background colour onto the
     /// command list so the frame starts from a clean framebuffer.
     pub fn begin_frame(&mut self, view: wgpu::TextureView) {

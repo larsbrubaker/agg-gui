@@ -34,7 +34,7 @@ Optional features:
 
 ```toml
 [dependencies]
-agg-gui = { version = "0.4", features = ["winit-adapter", "clipboard"] }
+agg-gui = { version = "0.5", features = ["winit-adapter", "clipboard"] }
 ```
 
 ## Widgets And Layout

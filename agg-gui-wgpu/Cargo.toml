@@ -2,7 +2,8 @@
 name = "agg-gui-wgpu"
 version = "0.5.0"
 edition = "2021"
-rust-version = "1.70"
+# wgpu 29 requires 1.87, and this crate uses `u32::div_ceil` (stable 1.73).
+rust-version = "1.87"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 license = "MIT"
 description = "Hardware-accelerated wgpu renderer for agg-gui — DrawCtx via Vulkan/DX12/Metal/WebGL2, with SSAA, screenshot capture, and a custom render-pass hook"
@@ -13,9 +14,19 @@ readme = "README.md"
 keywords = ["gui", "wgpu", "renderer", "graphics", "gpu"]
 categories = ["gui", "graphics", "rendering"]
 
+[features]
+# Forwards to agg-gui's `reflect` feature. The renderer itself has no
+# reflection code; the forward exists so a consumer that turns agg-gui's
+# default features off can re-enable them through one knob and still get a
+# single, consistently-featured agg-gui in the dependency graph.
+reflect = ["agg-gui/reflect"]
+
 [dependencies]
 # `version` is required for a `path` dependency to be publishable.
-agg-gui  = { path = "../agg-gui", version = "0.5" }
+# `default-features = false`: the renderer needs none of agg-gui's optional
+# features (reflect, clipboard, winit-adapter), so depending on them would
+# force `bevy_reflect` on every consumer of this crate.
+agg-gui  = { path = "../agg-gui", version = "0.5", default-features = false }
 agg-rust = "1.1.0"
 bytemuck = { version = "1", features = ["derive"] }
 web-time = "1"

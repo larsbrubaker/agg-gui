@@ -8,8 +8,11 @@ publish = false
 [features]
 default = ["reflect"]
 # Forwards to agg-gui's `reflect` feature so the live inspector edit-queue
-# plumbing in `render_app_frame` is wired up.
-reflect = ["agg-gui/reflect"]
+# plumbing in `render_app_frame` is wired up. agg-gui-wgpu takes agg-gui with
+# default features off, so name its forward too — that keeps the feature
+# request explicit rather than relying on this crate's own agg-gui dep to
+# unify it in.
+reflect = ["agg-gui/reflect", "agg-gui-wgpu/reflect"]
 
 [dependencies]
 agg-gui  = { path = "../agg-gui" }

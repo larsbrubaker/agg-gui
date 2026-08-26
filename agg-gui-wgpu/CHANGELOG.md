@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
-## [Unreleased]
+## [0.5.0] - 2026-08-26
 
 ### Added
 
@@ -40,7 +40,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   every `configure`, not just in the demo shell that had the clamp.
 - `Gpu::new` returns a `Result` instead of panicking, and states its
   `COPY_SRC` requirement explicitly (`CopySrc::Never` / `IfSupported` /
-  `Required`) rather than assuming the surface supports read-back.
+  `Required`) rather than assuming the surface supports read-back. A surface
+  that reports no formats or no alpha modes yields `GpuInitError::NoSurfaceFormats`
+  / `NoAlphaModes` instead of an index panic.
+- `GpuConfig`, `CopySrc`, `GpuInitError`, `SurfaceAcquire`, `WgpuPaintContext`
+  and `WgpuCustomRenderCtx` are `#[non_exhaustive]` so they can grow without a
+  breaking release. Build a `GpuConfig` with `GpuConfig::new(label)` plus
+  `with_copy_src` / `with_present_mode` rather than a struct literal.
+- The `agg-gui` dependency is taken with `default-features = false`; enable this
+  crate's `reflect` feature to forward `agg-gui/reflect`.
 
 ### Removed
 
