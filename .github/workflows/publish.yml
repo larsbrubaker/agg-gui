@@ -1,0 +1,28 @@
+# Publishes a workspace crate to crates.io from GitHub's network.
+#
+# Exists because the development machine's network path drops HTTPS uploads
+# larger than ~1.1MB (transparent middlebox; crates.io itself is fine), so
+# `cargo publish` from that box fails on any non-trivial crate.
+#
+# Requires the repository secret CARGO_REGISTRY_TOKEN (a crates.io token
+# with publish-new and publish-update scopes).
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: "Workspace crate to publish (package name)"
+        required: true
+        default: "agg-gui"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p "${{ github.event.inputs.crate }}"
