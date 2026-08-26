@@ -110,6 +110,7 @@ What stays yours, threaded through `ShellHost` hooks (`on_frame`, `paint` overri
 - `Container` always fills the width it is offered (no fit-width mode) — hug-content layouts need a measure-and-pin workaround today.
 - A `FlexColumn` inside a non-fit-height `Container` positions children against the measured height, not the painted one.
 - Variable fonts (`fvar`/`gvar`) shape/tessellate pathologically slowly (>60 s for a test frame vs 8 s with a static font). Prefer static instances until fixed.
+- `ScrollView` measures content at `f64::MAX / 2`, where `Container`'s fit-height accumulator loses all precision and reports ~zero height (content silently truncated instead of scrolled). Workaround: re-offer a finite huge height (e.g. `1.0e10`) via a wrapper widget; the real fix is a magnitude guard in `container.rs` like the one `flex.rs` already has.
 - Deliberately deferred from `agg-gui-shell` 0.5.0 (MatterCAD-proven, planned): the **scratch render target** (paint destination during unpresentable frames) and the **`AGG_SMOKE_FRAMES` / `AGG_SMOKE_SCREENSHOT` smoke-run contract** as a `ShellConfig` option.
 
 ## MatterCAD / agg-sharp parity notes
