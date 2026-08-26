@@ -82,6 +82,53 @@ pub fn sanitize_restored_window_size(
     (w.clamp(MIN_W, max_w), h.clamp(MIN_H, max_h))
 }
 
+/// The last window size seen while the window was neither maximized nor
+/// fullscreen — the size [`SavedBounds`] carries, so a maximized session still
+/// restores to a windowed window of the right size.
+///
+/// A separate type because both halves of it are easy to get subtly wrong and
+/// neither is observable without a real window; keeping them pure makes them
+/// testable.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WindowedSizeTracker {
+    size: (u32, u32),
+}
+
+impl WindowedSizeTracker {
+    /// Seed from the sanitised restored size when there is one, else from the
+    /// configured surface size.
+    ///
+    /// The restored size has to win even though the surface is already live: a
+    /// window created maximized from restored bounds reports the *work-area*
+    /// rect as its surface size, and [`note_resize`](Self::note_resize) never
+    /// corrects it (every resize while maximized is ignored by design), so
+    /// seeding from the surface would persist the maximized rect as the
+    /// windowed size — and the next launch would un-maximize into a
+    /// screen-sized window. Mirrors the pre-port behaviour, which seeded from
+    /// the sanitised saved size (`start_w`/`start_h` in demo-native's old
+    /// `main.rs`).
+    pub(crate) fn new(restored: Option<(u32, u32)>, configured: (u32, u32)) -> Self {
+        Self {
+            size: restored.unwrap_or(configured),
+        }
+    }
+
+    /// Record a resize. Ignored while the window is maximized or fullscreen:
+    /// those report the work-area / monitor rect, which is exactly what must
+    /// not be persisted as the windowed size. Borderless fullscreen is the
+    /// reason `fullscreen` is checked separately — on Windows it delivers
+    /// `Resized` with `is_maximized() == false`.
+    pub(crate) fn note_resize(&mut self, size: (u32, u32), maximized: bool, fullscreen: bool) {
+        if !maximized && !fullscreen {
+            self.size = size;
+        }
+    }
+
+    pub(crate) fn size(&self) -> (u32, u32) {
+        self.size
+    }
+}
+
 /// Diff-and-gate policy for writing bounds back, mirroring
 /// `agg_gui::persistence::AutoSave` for a value type rather than a blob:
 /// write only when the bounds actually changed AND no mouse button is held,
@@ -199,6 +246,46 @@ mod tests {
                 maximized: true
             }
         ));
+    }
+
+    #[test]
+    fn restoring_maximized_keeps_the_saved_windowed_size() {
+        // The bug: a window created maximized from restored bounds comes up
+        // with the WORK-AREA rect as its surface size. Seeding the tracker
+        // from that surface size persisted the maximized rect as the windowed
+        // size, so the next launch un-maximized into a screen-sized window.
+        let mut tracker = WindowedSizeTracker::new(Some((1280, 720)), (3408, 1895));
+        assert_eq!(tracker.size(), (1280, 720));
+        // Every resize that arrives while maximized is ignored, so nothing
+        // ever corrects a bad seed.
+        tracker.note_resize((3408, 1895), true, false);
+        assert_eq!(tracker.size(), (1280, 720));
+    }
+
+    #[test]
+    fn without_saved_bounds_the_tracker_starts_at_the_surface_size() {
+        let tracker = WindowedSizeTracker::new(None, (1600, 900));
+        assert_eq!(tracker.size(), (1600, 900));
+    }
+
+    #[test]
+    fn windowed_resizes_are_tracked() {
+        let mut tracker = WindowedSizeTracker::new(Some((1280, 720)), (1280, 720));
+        tracker.note_resize((1000, 800), false, false);
+        assert_eq!(tracker.size(), (1000, 800));
+    }
+
+    #[test]
+    fn fullscreen_resizes_do_not_clobber_the_windowed_size() {
+        // Borderless fullscreen on Windows delivers `Resized` with the monitor
+        // rect and `is_maximized() == false`, so the maximized guard alone let
+        // the monitor size through.
+        let mut tracker = WindowedSizeTracker::new(Some((1280, 720)), (1280, 720));
+        tracker.note_resize((3840, 2160), false, true);
+        assert_eq!(tracker.size(), (1280, 720));
+        // Leaving fullscreen reports the real windowed size again.
+        tracker.note_resize((1280, 720), false, false);
+        assert_eq!(tracker.size(), (1280, 720));
     }
 
     #[test]

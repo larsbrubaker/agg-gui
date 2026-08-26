@@ -16,7 +16,9 @@ use agg_gui_wgpu::{CopySrc, Gpu, GpuConfig};
 use winit::event_loop::EventLoop;
 use winit::window::{Icon, Window, WindowAttributes};
 
-use crate::bounds::{sanitize_restored_window_size, BoundsAutoSave, SavedBounds};
+use crate::bounds::{
+    sanitize_restored_window_size, BoundsAutoSave, SavedBounds, WindowedSizeTracker,
+};
 use crate::config::{ShellConfig, WindowIcon, WindowSize};
 use crate::host::{ExitAction, ShellHost};
 use crate::paint::{PaintRequest, Painter};
@@ -60,7 +62,7 @@ where
     let event_loop = EventLoop::new().map_err(ShellError::EventLoop)?;
 
     let restored_bounds = config.bounds_store.as_ref().and_then(|s| s.load());
-    let window = create_window(&event_loop, &config, restored_bounds)?;
+    let (window, restored_size) = create_window(&event_loop, &config, restored_bounds)?;
     agg_gui::set_device_scale(window.scale_factor());
     if config.os_tooltip_timings {
         if let Some(timings) = crate::tooltip::os_tooltip_timings() {
@@ -100,7 +102,11 @@ where
 
     let painter = Painter::new(&gpu);
     let maximized = window.is_maximized();
-    let initial_size = (gpu.config().width, gpu.config().height);
+    // Seeded from the restored size, NOT from the live surface: a window
+    // created maximized reports the work-area rect, which must never become
+    // the persisted windowed size. See `WindowedSizeTracker::new`.
+    let windowed_size =
+        WindowedSizeTracker::new(restored_size, (gpu.config().width, gpu.config().height));
     let mut bounds_auto = BoundsAutoSave::default();
     bounds_auto.seed(restored_bounds);
 
@@ -125,7 +131,7 @@ where
         pending_resize: None,
         bounds_store: config.bounds_store,
         bounds_auto,
-        last_windowed: initial_size,
+        windowed_size,
         maximized,
         exit: Rc::clone(&exit),
         error: Rc::clone(&error),
@@ -175,11 +181,15 @@ fn relaunch() -> Result<(), ShellError> {
         .map_err(ShellError::Relaunch)
 }
 
+/// Create the window, returning it alongside the sanitised restored size that
+/// was applied (`None` when nothing was restored). The caller needs that size
+/// to seed [`WindowedSizeTracker`]: it is the last *windowed* size, which the
+/// live surface does not report when the window came up maximized.
 fn create_window(
     event_loop: &EventLoop<()>,
     config: &ShellConfig,
     restored: Option<SavedBounds>,
-) -> Result<Arc<Window>, ShellError> {
+) -> Result<(Arc<Window>, Option<(u32, u32)>), ShellError> {
     // A restored size is physical px and may be corrupt (an old DPI-ratchet
     // bug, a zeroed file), so it is sanitised before winit ever sees it. This
     // first pass has no monitor information: winit 0.30 exposes monitors on
@@ -188,11 +198,9 @@ fn create_window(
     // floors tiny values and caps an over-large size below the GPU max; the
     // refinement against the actual monitor happens right after creation.
     let saved = restored.map(|b| (b.width, b.height));
-    let size = match saved {
-        Some(_) => {
-            let (w, h) = sanitize_restored_window_size(saved, None);
-            WindowSize::Physical(w, h)
-        }
+    let mut restored_size = saved.map(|_| sanitize_restored_window_size(saved, None));
+    let size = match restored_size {
+        Some((w, h)) => WindowSize::Physical(w, h),
         None => config.size,
     };
 
@@ -230,13 +238,14 @@ fn create_window(
         {
             let m = monitor.size();
             let refined = sanitize_restored_window_size(saved, Some((m.width, m.height)));
+            restored_size = Some(refined);
             if WindowSize::Physical(refined.0, refined.1) != size {
                 let _ =
                     window.request_inner_size(winit::dpi::PhysicalSize::new(refined.0, refined.1));
             }
         }
     }
-    Ok(window)
+    Ok((window, restored_size))
 }
 
 /// Build a winit icon, logging and dropping one the platform rejects — a bad

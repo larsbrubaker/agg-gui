@@ -17,7 +17,7 @@ use winit::event::{ElementState, Event, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Fullscreen, Window};
 
-use crate::bounds::{BoundsAutoSave, SavedBounds, WindowBoundsStore};
+use crate::bounds::{BoundsAutoSave, SavedBounds, WindowBoundsStore, WindowedSizeTracker};
 use crate::config::{RedrawPolicy, ScreenshotConfig};
 use crate::host::{ExitAction, ShellControl, ShellHost, WindowGeometry};
 use crate::input::{dispatch_touch, shift_held, wheel_delta};
@@ -53,10 +53,10 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     pub(crate) pending_resize: Option<(u32, u32)>,
     pub(crate) bounds_store: Option<Box<dyn WindowBoundsStore>>,
     pub(crate) bounds_auto: BoundsAutoSave,
-    /// Last size seen while the window was NOT maximized — what gets
-    /// persisted, so a restore doesn't reopen a windowed window at the
-    /// maximized rect.
-    pub(crate) last_windowed: (u32, u32),
+    /// Last size seen while the window was neither maximized nor fullscreen —
+    /// what gets persisted, so a restore doesn't reopen a windowed window at
+    /// the maximized rect.
+    pub(crate) windowed_size: WindowedSizeTracker,
     pub(crate) maximized: bool,
     pub(crate) exit: Rc<Cell<Option<ExitAction>>>,
     pub(crate) error: Rc<RefCell<Option<ShellError>>>,
@@ -112,13 +112,15 @@ impl<H: ShellHost> ShellLoop<H> {
                 // validation error.
                 self.pending_resize = Some((size.width, size.height));
                 self.maximized = self.window.is_maximized();
-                if !self.maximized {
-                    // winit's `Resized` reports PHYSICAL px. That is the
-                    // canonical stored unit — it must round-trip through
-                    // `PhysicalSize` on restore, never `LogicalSize`, or the
-                    // size ratchets up by the DPI scale factor every launch.
-                    self.last_windowed = (size.width, size.height);
-                }
+                // winit's `Resized` reports PHYSICAL px. That is the canonical
+                // stored unit — it must round-trip through `PhysicalSize` on
+                // restore, never `LogicalSize`, or the size ratchets up by the
+                // DPI scale factor every launch.
+                self.windowed_size.note_resize(
+                    (size.width, size.height),
+                    self.maximized,
+                    self.window.fullscreen().is_some(),
+                );
                 self.notify_geometry();
                 self.window.request_redraw();
             }
@@ -373,9 +375,10 @@ impl<H: ShellHost> ShellLoop<H> {
     }
 
     fn current_bounds(&self) -> SavedBounds {
+        let (width, height) = self.windowed_size.size();
         SavedBounds {
-            width: self.last_windowed.0,
-            height: self.last_windowed.1,
+            width,
+            height,
             maximized: self.maximized,
         }
     }
