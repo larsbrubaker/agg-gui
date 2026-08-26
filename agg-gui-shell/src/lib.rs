@@ -78,6 +78,23 @@ pub use shell_loop::ShellInit;
 // renderer crate, and so the versions can never disagree.
 pub use agg_gui_wgpu::{CopySrc, Gpu, WgpuGfxCtx};
 
+/// The `wgpu` this shell was built against.
+///
+/// Its major version is part of this crate's public API (present modes, the
+/// render context, the device behind [`Gpu`]), so an app that names `wgpu`
+/// types itself should reach them through here rather than adding its own
+/// `wgpu` dependency, where a mismatched major would silently produce two
+/// incompatible sets of types.
+pub use wgpu;
+
+/// The `winit` this shell was built against.
+///
+/// Its major version is part of this crate's public API (the window handed to
+/// the builder closure, fullscreen and monitor types), so an app that names
+/// `winit` types itself should reach them through here rather than adding its
+/// own `winit` dependency.
+pub use winit;
+
 /// Why the shell could not start, or could not finish.
 #[derive(Debug)]
 #[non_exhaustive]

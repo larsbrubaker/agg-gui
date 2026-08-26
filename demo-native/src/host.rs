@@ -132,7 +132,7 @@ impl ShellHost for DemoHost {
         );
     }
 
-    fn after_paint(&mut self, ctx: &mut WgpuGfxCtx) {
+    fn after_paint(&mut self, ctx: &mut WgpuGfxCtx, _frame: &Frame) {
         // GPU-direct screenshot flow: a single render per frame. When a
         // capture is requested we issue ONE extra `copy_texture_to_texture`
         // after `end_frame()` and before `present()` — pure GPU work, no

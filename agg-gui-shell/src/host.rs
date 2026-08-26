@@ -142,8 +142,11 @@ pub trait ShellHost {
     /// Runs after `WgpuGfxCtx::end_frame` and before `present`.
     ///
     /// The only place a GPU copy off the surface texture can happen: wgpu's
-    /// swap chain takes ownership of that texture at `present`.
-    fn after_paint(&mut self, _ctx: &mut WgpuGfxCtx) {}
+    /// swap chain takes ownership of that texture at `present`. `frame` is the
+    /// same descriptor [`ShellHost::paint`] just saw — a read-back needs the
+    /// surface size, and a capture that only fires on some frames needs the
+    /// frame index.
+    fn after_paint(&mut self, _ctx: &mut WgpuGfxCtx, _frame: &Frame) {}
 
     /// The OS window was resized, maximized, restored, or changed scale.
     fn on_geometry_changed(&mut self, _geometry: WindowGeometry) {}

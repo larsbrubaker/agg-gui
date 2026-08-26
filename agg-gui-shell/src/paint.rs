@@ -144,7 +144,7 @@ impl Painter {
         // After the render is submitted, before the surface texture goes back
         // to the compositor: the only window in which the frame can be copied
         // or read back.
-        host.after_paint(&mut self.ctx);
+        host.after_paint(&mut self.ctx, &frame);
 
         if let Some(cfg) = capture {
             if should_capture(self.frames_painted, cfg.settle_frames) {

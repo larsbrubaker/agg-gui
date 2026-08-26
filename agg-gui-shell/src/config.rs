@@ -51,7 +51,11 @@ pub enum RedrawPolicy {
 }
 
 /// An RGBA8 window icon, as the OS taskbar / title bar wants it.
+///
+/// Built through [`ShellConfig::with_icon_rgba`]; `#[non_exhaustive]` so it can
+/// grow (a separate small icon, a mask) without a breaking release.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct WindowIcon {
     pub rgba: Vec<u8>,
     pub width: u32,
@@ -60,7 +64,11 @@ pub struct WindowIcon {
 
 /// Deterministic frame capture: after `settle_frames` painted frames, read the
 /// frame back, write it to `path` as a PNG, and leave the event loop.
+///
+/// Built through [`ShellConfig::with_screenshot`]; `#[non_exhaustive]` so it
+/// can grow (a capture region, a scale) without a breaking release.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct ScreenshotConfig {
     pub path: PathBuf,
     /// Frames to paint before capturing, clamped to at least 1. ~6 gives
@@ -170,6 +178,12 @@ impl ShellConfig {
         self
     }
 
+    /// Refuse to let the user shrink the window below `(w, h)` device pixels.
+    pub fn with_min_physical_size(mut self, w: u32, h: u32) -> Self {
+        self.min_size = Some(WindowSize::Physical(w, h));
+        self
+    }
+
     /// Window icon from raw RGBA8 bytes (`width * height * 4`). An icon that
     /// winit rejects is logged and dropped — an app should still open.
     pub fn with_icon_rgba(mut self, rgba: impl Into<Vec<u8>>, width: u32, height: u32) -> Self {
@@ -213,8 +227,8 @@ impl ShellConfig {
 
     /// Headless-style capture: after `settle_frames` painted frames, read the
     /// frame back, write it as a PNG to `path`, and leave the event loop.
-    /// Redraws are requested continuously until the capture fires, so the
-    /// frame count advances without any user input.
+    /// The shell polls and paints every idle iteration until the capture
+    /// fires, so the frame count advances without any user input.
     ///
     /// The image is in PHYSICAL pixels — on a 2x display that is twice the
     /// logical window size. A failed capture ends [`crate::run`] with
@@ -262,5 +276,11 @@ mod tests {
         assert_eq!(cfg.min_size, Some(WindowSize::Logical(640.0, 480.0)));
         assert_eq!(cfg.redraw_policy, RedrawPolicy::Continuous);
         assert_eq!(cfg.screenshot.map(|s| s.settle_frames), Some(6));
+    }
+
+    #[test]
+    fn min_size_can_be_given_in_either_unit() {
+        let cfg = ShellConfig::new("Title").with_min_physical_size(320, 240);
+        assert_eq!(cfg.min_size, Some(WindowSize::Physical(320, 240)));
     }
 }

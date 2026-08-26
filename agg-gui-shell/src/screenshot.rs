@@ -5,12 +5,12 @@
 //! presentable, and the PNG write. Failures come back as an error for
 //! [`crate::run`] to return — a library must not take the process down.
 //!
-//! The budget is wall-clock rather than a redraw count on purpose: a pending
-//! capture puts the shell on `ControlFlow::Poll` and requests a redraw every
-//! idle iteration, so a *healthy* capture burns dozens of `RedrawRequested`
-//! events in the milliseconds before the window server first hands out a
-//! surface. Any attempt-count budget small enough to catch a hang also kills
-//! every real capture — see [`capture_exhausted`].
+//! The budget is wall-clock rather than a paint-attempt count on purpose: a
+//! pending capture puts the shell on `ControlFlow::Poll` and paints straight
+//! from `AboutToWait` every idle iteration, so a *healthy* capture burns dozens
+//! of paint attempts in the milliseconds before the window server first hands
+//! out a surface. Any attempt-count budget small enough to catch a hang also
+//! kills every real capture — see [`capture_exhausted`].
 
 use std::path::Path;
 use std::time::Duration;
@@ -36,11 +36,11 @@ const CAPTURE_TIMEOUT: Duration = Duration::from_secs(15);
 /// `since_last_paint` is the time since the capture was armed, or since the
 /// last frame that actually painted — whichever is later.
 ///
-/// The budget has to be wall-clock, *not* a count of redraw attempts: while a
-/// capture is pending the shell runs `ControlFlow::Poll` and requests a redraw
-/// unconditionally, so dozens of `RedrawRequested` events go by in a couple of
-/// milliseconds — long before the window server has configured the surface for
-/// the first time. An attempt-based budget therefore fires on every healthy
+/// The budget has to be wall-clock, *not* a count of paint attempts: while a
+/// capture is pending the shell runs `ControlFlow::Poll` and paints
+/// unconditionally from `AboutToWait`, so dozens of attempts go by in a couple
+/// of milliseconds — long before the window server has configured the surface
+/// for the first time. An attempt-based budget therefore fires on every healthy
 /// capture.
 ///
 /// Without any budget, a surface that never becomes presentable (minimized,
