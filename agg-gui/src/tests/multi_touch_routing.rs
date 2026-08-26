@@ -129,11 +129,6 @@ fn app_with_two_panes() -> (App, Rc<Cell<usize>>, Rc<Cell<usize>>) {
 fn paint(app: &mut App) {
     let mut fb = Framebuffer::new(VIEWPORT.width as u32, VIEWPORT.height as u32);
     let mut ctx = GfxCtx::new(&mut fb);
-    // Force the async-epoch bump so `App::paint` runs its `mark_subtree_dirty`
-    // walk every frame. That makes these tests exercise the leaf widgets under
-    // full-tree traversal deterministically, instead of only when a parallel
-    // test happens to bump the process-global epoch.
-    crate::animation::signal_async_state_change();
     app.paint(&mut ctx);
 }
 
@@ -221,4 +216,18 @@ fn gesture_over_dead_space_delivers_to_neither() {
         "no capture means no delivery for this gesture"
     );
     assert_eq!(right.get(), 0);
+}
+
+/// Regression for the panicking `children_mut()` stubs: a whole-tree walk must
+/// be able to traverse these leaves.
+#[test]
+fn mark_subtree_dirty_traverses_gesture_counter_leaves() {
+    let mut root = TwoPane {
+        bounds: Rect::default(),
+        children: vec![
+            Box::new(GestureCounter::new(Rc::new(Cell::new(0)))),
+            Box::new(GestureCounter::new(Rc::new(Cell::new(0)))),
+        ],
+    };
+    crate::widget::mark_subtree_dirty(&mut root);
 }

@@ -164,6 +164,10 @@ fn test_scroll_fade_does_not_overpaint_front_window() {
     stack.set_bounds(Rect::new(0.0, 0.0, 320.0, 260.0));
     stack.layout(Size::new(320.0, 260.0));
 
+    // Regression for the panicking `children_mut()` stubs: a whole-tree walk
+    // must be able to traverse these leaves.
+    crate::widget::mark_subtree_dirty(&mut stack);
+
     let mut fb = Framebuffer::new(320, 260);
     {
         let mut ctx = GfxCtx::new(&mut fb);
@@ -281,10 +285,14 @@ fn test_scroll_view_measure_min_height_forwards_to_content() {
         }
     }
 
-    let scroll = ScrollView::new(Box::new(FixedHeight::new(347.0)));
+    let mut scroll = ScrollView::new(Box::new(FixedHeight::new(347.0)));
     assert_eq!(
         scroll.measure_min_height(280.0),
         347.0,
         "ScrollView must report its content's required height for tight-fit"
     );
+
+    // Regression for the panicking `children_mut()` stubs: a whole-tree walk
+    // must be able to traverse this leaf.
+    crate::widget::mark_subtree_dirty(&mut scroll);
 }

@@ -146,3 +146,11 @@ fn test_scroll_view_wheel_direction_matches_system_convention() {
     sv.on_event(&wheel(-1.0));
     assert!(v.get() > mid, "-y must scroll down; {mid} → {}", v.get());
 }
+
+/// Regression for the panicking `children_mut()` stubs: a whole-tree walk must
+/// be able to traverse these leaves.
+#[test]
+fn mark_subtree_dirty_traverses_move_consumer_leaf() {
+    let mut root = ScrollView::new(Box::new(MoveConsumer::new()));
+    crate::widget::mark_subtree_dirty(&mut root);
+}
