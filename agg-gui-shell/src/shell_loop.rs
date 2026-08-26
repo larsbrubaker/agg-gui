@@ -250,9 +250,12 @@ impl<H: ShellHost> ShellLoop<H> {
         // `WaitUntil` from the non-destructive peek — this runs every idle
         // iteration and is idempotent, so an intervening non-repainting event
         // cannot lose the scheduled wake.
+        //
+        // No `request_redraw` here: `Poll` brings us straight back to
+        // `AboutToWait`, which paints. Asking for a redraw as well would paint
+        // the same state twice per iteration while anything is animating.
         let poll = capture_pending || self.policy == RedrawPolicy::Continuous;
         if poll || self.app.wants_draw() {
-            self.window.request_redraw();
             elwt.set_control_flow(ControlFlow::Poll);
         } else if let Some(t) = self.app.next_draw_deadline() {
             elwt.set_control_flow(ControlFlow::WaitUntil(t));
