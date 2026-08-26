@@ -1,0 +1,43 @@
+[package]
+name = "agg-gui-shell"
+version = "0.5.0"
+edition = "2021"
+# Matches agg-gui-wgpu: wgpu 29 requires 1.87.
+rust-version = "1.87"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+license = "MIT"
+description = "Turn-key native shell for agg-gui — winit event loop, wgpu present, input forwarding, window-bounds persistence, and device-loss recovery"
+repository = "https://github.com/larsbrubaker/agg-gui"
+homepage = "https://larsbrubaker.github.io/agg-gui/"
+documentation = "https://docs.rs/agg-gui-shell"
+readme = "README.md"
+keywords = ["gui", "winit", "wgpu", "shell", "window"]
+categories = ["gui", "graphics", "rendering"]
+
+[features]
+# Forwards to agg-gui's `reflect` feature (and agg-gui-wgpu's forward of the
+# same) so a consumer that turns default features off can re-enable reflection
+# through one knob and still get a single, consistently-featured agg-gui in the
+# dependency graph.
+reflect = ["agg-gui/reflect", "agg-gui-wgpu/reflect"]
+
+[dependencies]
+# `version` is required for a `path` dependency to be publishable.
+# `winit-adapter` is the point of this crate: the winit -> agg-gui input
+# mapping. The rest of agg-gui's default features (reflect, clipboard) are the
+# consumer's choice, so they are off here.
+agg-gui = { path = "../agg-gui", version = "0.5", default-features = false, features = [
+    "winit-adapter",
+] }
+agg-gui-wgpu = { path = "../agg-gui-wgpu", version = "0.5", default-features = false }
+winit = "0.30"
+wgpu = { version = "29", default-features = false, features = ["wgsl"] }
+# Facade only — a library must not print. Binaries choose a logger (or none,
+# in which case every call compiles down to a branch on a static).
+log = "0.4"
+
+# Reuse the same windows-sys major winit 0.30 already pulls in (0.52) so no
+# second copy is linked. Only the WindowsAndMessaging surface is needed, for
+# SystemParametersInfoW(SPI_GETMOUSEHOVERTIME) to seed OS tooltip hover timing.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging"] }

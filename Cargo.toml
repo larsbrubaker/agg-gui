@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "agg-gui",
+    "agg-gui-shell",
     "agg-gui-wgpu",
     "demo-native",
     "demo-wasm",
@@ -10,6 +11,7 @@ members = [
 ]
 default-members = [
     "agg-gui",
+    "agg-gui-shell",
     "agg-gui-wgpu",
     "demo-native",
     "demo-wgpu",
