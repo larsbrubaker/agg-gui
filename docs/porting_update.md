@@ -9,8 +9,8 @@ The GPU renderer and the native event loop are now **published crates** instead 
 | Crate | Version | Status | What it is |
 |---|---|---|---|
 | `agg-gui` | 0.5.0 | on crates.io | The widget/layout/text library. Unchanged role. |
-| `agg-gui-wgpu` | 0.5.1 | on crates.io | The wgpu renderer, extracted from `demo-wgpu`: `WgpuGfxCtx`, the shared `Gpu` + surface-acquire policy, device-lost detection, present-mode fallback, SSAA, screenshots, the custom-render hook. |
-| `agg-gui-shell` | 0.5.0 | on crates.io | The native winit event loop — the union of `native_shell` and `demo-native`'s hand-rolled loop, plus device-loss recovery and window-bounds persistence. Replaces every app's copied shell. |
+| `agg-gui-wgpu` | 0.5.2 | on crates.io | The wgpu renderer, extracted from `demo-wgpu`: `WgpuGfxCtx`, the shared `Gpu` + surface-acquire policy, device-lost detection, present-mode fallback, SSAA, screenshots, the custom-render hook. |
+| `agg-gui-shell` | 0.5.1 | on crates.io | The native winit event loop — the union of `native_shell` and `demo-native`'s hand-rolled loop, plus device-loss recovery and window-bounds persistence. Replaces every app's copied shell. |
 | `demo-wgpu` | — | repo-only shim | Re-exports `agg-gui-wgpu`; `native_shell` is `#[deprecated]`, wrapping `agg-gui-shell`. Path deps keep compiling, but migrate off it. |
 
 Why: every app hand-carried ~250+ lines of platform glue copied from the demos, and the copies diverged — each had bugs the others had fixed (frozen window after GPU reset in one lineage, key-up events never dispatched in the other, a maximized-restore bug in both). One implementation ends that drift.
@@ -44,7 +44,7 @@ agg-gui = { path = "../agg-gui/agg-gui" }        # optional, for local dev
 demo-wgpu = { path = "../agg-gui/demo-wgpu", default-features = false }
 
 # after
-agg-gui-wgpu = "0.5.1"
+agg-gui-wgpu = "0.5.2"
 ```
 
 API mapping (mechanical):
