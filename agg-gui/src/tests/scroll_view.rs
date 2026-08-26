@@ -86,6 +86,9 @@ fn test_scroll_fade_does_not_overpaint_front_window() {
     struct SolidBox {
         bounds: Rect,
         color: Color,
+        /// Always empty — this is a leaf. Kept as a real field so whole-tree
+        /// walks (e.g. `App::paint`'s dirty-marking pass) can traverse it.
+        children: Vec<Box<dyn Widget>>,
     }
 
     impl SolidBox {
@@ -93,6 +96,7 @@ fn test_scroll_fade_does_not_overpaint_front_window() {
             Self {
                 bounds: Rect::default(),
                 color,
+                children: Vec::new(),
             }
         }
     }
@@ -111,11 +115,11 @@ fn test_scroll_fade_does_not_overpaint_front_window() {
         }
 
         fn children(&self) -> &[Box<dyn Widget>] {
-            &[]
+            &self.children
         }
 
         fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-            panic!("SolidBox has no children")
+            &mut self.children
         }
 
         fn layout(&mut self, available: Size) -> Size {
@@ -237,7 +241,20 @@ fn test_scroll_view_measure_min_height_forwards_to_content() {
 
     /// Leaf whose `measure_min_height` is a fixed, known value regardless
     /// of width — isolates the forwarding from any real widget's metrics.
-    struct FixedHeight(f64);
+    struct FixedHeight {
+        min_height: f64,
+        /// Always empty — this is a leaf. Kept as a real field so whole-tree
+        /// walks (e.g. `App::paint`'s dirty-marking pass) can traverse it.
+        children: Vec<Box<dyn Widget>>,
+    }
+    impl FixedHeight {
+        fn new(min_height: f64) -> Self {
+            Self {
+                min_height,
+                children: Vec::new(),
+            }
+        }
+    }
     impl Widget for FixedHeight {
         fn type_name(&self) -> &'static str {
             "FixedHeight"
@@ -247,10 +264,10 @@ fn test_scroll_view_measure_min_height_forwards_to_content() {
         }
         fn set_bounds(&mut self, _b: Rect) {}
         fn children(&self) -> &[Box<dyn Widget>] {
-            &[]
+            &self.children
         }
         fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-            panic!("FixedHeight has no children")
+            &mut self.children
         }
         fn layout(&mut self, available: Size) -> Size {
             available
@@ -260,11 +277,11 @@ fn test_scroll_view_measure_min_height_forwards_to_content() {
             EventResult::Ignored
         }
         fn measure_min_height(&self, _available_w: f64) -> f64 {
-            self.0
+            self.min_height
         }
     }
 
-    let scroll = ScrollView::new(Box::new(FixedHeight(347.0)));
+    let scroll = ScrollView::new(Box::new(FixedHeight::new(347.0)));
     assert_eq!(
         scroll.measure_min_height(280.0),
         347.0,

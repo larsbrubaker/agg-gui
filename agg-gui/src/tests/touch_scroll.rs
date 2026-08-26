@@ -13,12 +13,16 @@ use crate::{
 
 struct MoveConsumer {
     bounds: Rect,
+    /// Always empty — this is a leaf. Kept as a real field so whole-tree walks
+    /// (e.g. `App::paint`'s dirty-marking pass) can traverse through it.
+    children: Vec<Box<dyn Widget>>,
 }
 
 impl MoveConsumer {
     fn new() -> Self {
         Self {
             bounds: Rect::default(),
+            children: Vec::new(),
         }
     }
 }
@@ -33,11 +37,11 @@ impl Widget for MoveConsumer {
     }
 
     fn children(&self) -> &[Box<dyn Widget>] {
-        &[]
+        &self.children
     }
 
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        panic!("MoveConsumer has no children")
+        &mut self.children
     }
 
     fn layout(&mut self, _available: Size) -> Size {

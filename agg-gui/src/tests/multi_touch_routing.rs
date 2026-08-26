@@ -22,6 +22,9 @@ use crate::{
 struct GestureCounter {
     bounds: Rect,
     count: Rc<Cell<usize>>,
+    /// Always empty — this is a leaf. Kept as a real field so whole-tree walks
+    /// (e.g. `App::paint`'s dirty-marking pass) can traverse through it.
+    children: Vec<Box<dyn Widget>>,
 }
 
 impl GestureCounter {
@@ -29,6 +32,7 @@ impl GestureCounter {
         Self {
             bounds: Rect::default(),
             count,
+            children: Vec::new(),
         }
     }
 }
@@ -41,10 +45,10 @@ impl Widget for GestureCounter {
         self.bounds = b;
     }
     fn children(&self) -> &[Box<dyn Widget>] {
-        &[]
+        &self.children
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        panic!("GestureCounter has no children")
+        &mut self.children
     }
     fn layout(&mut self, available: Size) -> Size {
         available
@@ -125,6 +129,11 @@ fn app_with_two_panes() -> (App, Rc<Cell<usize>>, Rc<Cell<usize>>) {
 fn paint(app: &mut App) {
     let mut fb = Framebuffer::new(VIEWPORT.width as u32, VIEWPORT.height as u32);
     let mut ctx = GfxCtx::new(&mut fb);
+    // Force the async-epoch bump so `App::paint` runs its `mark_subtree_dirty`
+    // walk every frame. That makes these tests exercise the leaf widgets under
+    // full-tree traversal deterministically, instead of only when a parallel
+    // test happens to bump the process-global epoch.
+    crate::animation::signal_async_state_change();
     app.paint(&mut ctx);
 }
 
