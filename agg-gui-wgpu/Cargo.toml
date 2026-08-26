@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui-wgpu"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 # wgpu 29 requires 1.87, and this crate uses `u32::div_ceil` (stable 1.73).
 rust-version = "1.87"
