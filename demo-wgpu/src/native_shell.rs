@@ -325,6 +325,7 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
             } => {
                 let painted = paint_frame(
                     &gpu,
+                    &window,
                     &mut wgpu_ctx,
                     &mut app,
                     win_w,
@@ -405,6 +406,79 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
         .expect("event loop");
 }
 
+/// How to handle the result of `Surface::get_current_texture`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SurfaceAcquire {
+    /// Texture is usable — render into it.
+    Present,
+    /// The swapchain is stale or gone (`Outdated`/`Lost`): reconfigure the
+    /// surface and try once more THIS frame.
+    Reconfigure,
+    /// Transient (`Timeout`): skip the frame, but ask for another one.
+    SkipAndRetry,
+    /// Skip the frame with no follow-up (`Occluded`/`Validation`): the
+    /// window is not visible / the app must fix the validation error, and
+    /// a self-requested redraw would just burn the CPU.
+    Skip,
+}
+
+/// Decide how to handle a surface-acquire status. Split out as a pure
+/// function so the recovery policy is unit-testable without a live GPU
+/// surface (the no-payload variants are constructible in tests). Mirrors
+/// `demo-native`'s `gpu::surface_acquire_action`.
+///
+/// `Outdated`/`Lost` fire after a GPU driver reset (TDR), a display-mode
+/// change, or an RDP reconnect, as well as right after a resize. Treating
+/// them as a plain skip wedges this shell permanently: it is reactive
+/// (`ControlFlow::Wait` whenever `wants_draw()` is false), so with nothing
+/// reconfiguring the surface and nothing requesting another redraw, the
+/// window stays frozen or blank until the user resizes it by hand. wgpu
+/// documents both as "reconfigure the surface and try again".
+fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAcquire {
+    use wgpu::CurrentSurfaceTexture as T;
+    match status {
+        T::Success(_) | T::Suboptimal(_) => SurfaceAcquire::Present,
+        T::Outdated | T::Lost => SurfaceAcquire::Reconfigure,
+        T::Timeout => SurfaceAcquire::SkipAndRetry,
+        T::Occluded | T::Validation => SurfaceAcquire::Skip,
+    }
+}
+
+/// Acquire the next surface texture, recovering from a stale swapchain by
+/// reconfiguring and retrying once. Returns `None` when the frame must be
+/// skipped; a redraw is requested for the cases that can recover on their
+/// own so the reactive event loop wakes up again instead of idling forever.
+fn acquire_frame(gpu: &Gpu, window: &Window) -> Option<wgpu::SurfaceTexture> {
+    use wgpu::CurrentSurfaceTexture as T;
+    let first = gpu.surface.get_current_texture();
+    match surface_acquire_action(&first) {
+        SurfaceAcquire::Present => match first {
+            T::Success(f) | T::Suboptimal(f) => Some(f),
+            _ => None,
+        },
+        SurfaceAcquire::Skip => None,
+        SurfaceAcquire::SkipAndRetry => {
+            window.request_redraw();
+            None
+        }
+        SurfaceAcquire::Reconfigure => {
+            // `configure` takes `&self`; the config already carries the
+            // current (nonzero, `Gpu::resize`-clamped) window size, so we
+            // just re-bind it.
+            gpu.surface.configure(&gpu.device, &gpu.config);
+            match gpu.surface.get_current_texture() {
+                T::Success(f) | T::Suboptimal(f) => Some(f),
+                _ => {
+                    // Still nothing after the reconfigure: come back next
+                    // frame rather than sitting in `ControlFlow::Wait`.
+                    window.request_redraw();
+                    None
+                }
+            }
+        }
+    }
+}
+
 /// Paint one frame. `capture` is `Some((path, settle_frames))` while a
 /// screenshot is still pending; the frame is written out when
 /// `frames_painted + 1` reaches the settle count. Returns whether a frame
@@ -412,6 +486,7 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
 #[allow(clippy::too_many_arguments)]
 fn paint_frame(
     gpu: &Gpu,
+    window: &Window,
     ctx: &mut WgpuGfxCtx,
     app: &mut App,
     win_w: u32,
@@ -421,12 +496,13 @@ fn paint_frame(
     capture: Option<&(PathBuf, u32)>,
     frames_painted: u32,
 ) -> bool {
+    // A zero-sized (minimized) window has no presentable surface, and
+    // `Gpu::resize` refuses to configure one — same guard as there.
     if win_w == 0 || win_h == 0 {
         return false;
     }
-    let frame = match gpu.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-        _ => return false,
+    let Some(frame) = acquire_frame(gpu, window) else {
+        return false;
     };
     let view = frame
         .texture
@@ -469,4 +545,38 @@ fn paint_frame(
 
     frame.present();
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{surface_acquire_action, SurfaceAcquire};
+    use wgpu::CurrentSurfaceTexture as T;
+
+    #[test]
+    fn lost_or_outdated_surface_reconfigures_instead_of_skipping() {
+        // Driver reset (TDR), display-mode change or RDP reconnect: a bare
+        // skip left this reactive shell frozen until a manual resize.
+        assert_eq!(
+            surface_acquire_action(&T::Outdated),
+            SurfaceAcquire::Reconfigure
+        );
+        assert_eq!(
+            surface_acquire_action(&T::Lost),
+            SurfaceAcquire::Reconfigure
+        );
+    }
+
+    #[test]
+    fn timeout_skips_the_frame_but_asks_for_another() {
+        assert_eq!(
+            surface_acquire_action(&T::Timeout),
+            SurfaceAcquire::SkipAndRetry
+        );
+    }
+
+    #[test]
+    fn occluded_and_validation_skip_without_self_requested_redraw() {
+        assert_eq!(surface_acquire_action(&T::Occluded), SurfaceAcquire::Skip);
+        assert_eq!(surface_acquire_action(&T::Validation), SurfaceAcquire::Skip);
+    }
 }
