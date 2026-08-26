@@ -443,7 +443,7 @@ impl BarGridWgpuRenderer {
     /// `pipelines` is the shared 2-D pipeline collection — used for the
     /// blit pass that copies the (resolved) bar-grid output into
     /// `target_view`.
-    pub(crate) fn draw(
+    pub fn draw(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,

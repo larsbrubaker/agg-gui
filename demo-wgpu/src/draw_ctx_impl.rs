@@ -466,11 +466,11 @@ impl DrawCtx for WgpuGfxCtx {
         //      surface instead of the active layer — and on tile-based GPUs
         //      this manifested as a hang under continuous repaint.
         //
-        // The clean fix is a `DrawBarGrid` deferred command driven by an
-        // `as_any_mut` downcast on `DrawCtx`, with the layer target/depth
-        // attachment plumbed through the deferred-flush state machine.
-        // Tracking that as a follow-up; until then the cube widget's
-        // `paint()` only renders its theme-coloured placeholder fill.
+        // The clean fix is the deferred `DrawCommand::Custom` command, queued
+        // via an `as_any_mut` downcast on `DrawCtx` plus
+        // `WgpuGfxCtx::push_custom_render`, with the layer target plumbed
+        // through the deferred-flush state machine — see `custom_render`.
+        // GPU widgets should use that hook; `gl_paint` stays a no-op here.
     }
 
     // ── Screenshot capture (GPU-direct path) ──────────────────────────────────

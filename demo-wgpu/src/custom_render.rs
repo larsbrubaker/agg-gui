@@ -10,10 +10,11 @@
 //! ends up on the same surface or layer texture, with depth-correct
 //! ordering relative to surrounding 2-D content.
 //!
-//! Before this hook, the only built-in 3-D widget (`WgpuCubeWidget`)
-//! pushed a hard-coded [`DrawCommand::DrawBarGrid`] variant directly into
-//! the command list — which works but is not extensible. This module
-//! generalises that pattern so any widget can plug in.
+//! The demo's own `WgpuCubeWidget` used to push a hard-coded
+//! `DrawCommand::DrawBarGrid` variant directly into the command list — which
+//! worked but was not extensible, and it kept demo content inside the
+//! renderer. This module generalises that pattern so any widget can plug in;
+//! the cube now rides this path like everyone else.
 //!
 //! # How to use
 //!

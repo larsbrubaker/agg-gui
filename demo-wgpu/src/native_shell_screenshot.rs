@@ -54,12 +54,7 @@ pub(crate) fn capture_exhausted(since_last_paint: Duration) -> bool {
 
 /// Encode `rgba` as a PNG and write it to `path`, creating the parent
 /// directory. Returns a human-readable message on failure.
-pub(crate) fn write_png(
-    path: &Path,
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<(), String> {
+pub(crate) fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<(), String> {
     if rgba.is_empty() || width == 0 || height == 0 {
         return Err("frame read-back returned no pixels".to_string());
     }
@@ -96,7 +91,9 @@ mod tests {
     #[test]
     fn a_pending_capture_gives_up_after_the_wall_clock_timeout() {
         assert!(!capture_exhausted(Duration::ZERO));
-        assert!(!capture_exhausted(CAPTURE_TIMEOUT - Duration::from_millis(1)));
+        assert!(!capture_exhausted(
+            CAPTURE_TIMEOUT - Duration::from_millis(1)
+        ));
         assert!(capture_exhausted(CAPTURE_TIMEOUT));
         assert!(capture_exhausted(CAPTURE_TIMEOUT + Duration::from_secs(60)));
     }

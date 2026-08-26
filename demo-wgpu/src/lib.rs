@@ -54,7 +54,7 @@ pub mod web_shell;
 pub mod bar_grid;
 mod bar_grid_math;
 pub mod bar_grid_render;
-pub use bar_grid::{BarGridWgpuRenderer, WgpuCubeWidget, CUBE_SCREEN_RECT};
+pub use bar_grid::{BarGridCustomRenderer, BarGridWgpuRenderer, WgpuCubeWidget, CUBE_SCREEN_RECT};
 
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
@@ -593,6 +593,13 @@ impl WgpuGfxCtx {
         &self.queue
     }
 
+    /// Format of the render target this context was configured for.  Custom
+    /// renderers need it to build pipelines whose `ColorTargetState` matches
+    /// the surface they will be composited onto.
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.surface_format
+    }
+
     /// Queue a custom wgpu render pass to run at the current point in the
     /// frame's draw order. The user-supplied [`WgpuCustomRender`] is invoked
     /// from `end_frame` after the active 2-D pass closes; subsequent 2-D
@@ -744,19 +751,11 @@ pub(crate) enum DrawCommand {
         /// Scissor active on the target when the composite is requested.
         parent_clip: Option<[i32; 4]>,
     },
-    /// Render the 3-D bar-grid scene into the current render target.  The
-    /// renderer is shared with [`bar_grid::WgpuCubeWidget`] via `Rc<RefCell<>>`
-    /// so it persists across frames; `execute_prepared` ends the active 2-D
-    /// pass, drives the renderer onto the active layer or surface, then
-    /// reopens the 2-D pass with `LoadOp::Load`.
-    DrawBarGrid {
-        renderer: std::rc::Rc<std::cell::RefCell<Option<bar_grid::BarGridWgpuRenderer>>>,
-        screen_rect: agg_gui::Rect,
-        parent_clip: Option<[i32; 4]>,
-    },
     /// Generic custom-render hook — dispatches to user code implementing
-    /// [`WgpuCustomRender`].  Same pass-break / reopen semantics as
-    /// `DrawBarGrid`. Pushed via [`WgpuGfxCtx::push_custom_render`].
+    /// [`WgpuCustomRender`].  The executor ends the active 2-D pass, lets the
+    /// renderer record its own pass(es) onto the active layer or surface, then
+    /// reopens the 2-D pass with `LoadOp::Load`.  Pushed via
+    /// [`WgpuGfxCtx::push_custom_render`].
     Custom {
         renderer: custom_render::SharedCustomRenderer,
         screen_rect: agg_gui::Rect,

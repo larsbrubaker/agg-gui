@@ -25,13 +25,61 @@ use agg_gui::widget::Widget;
 use agg_gui::{Size, TransAffine};
 
 pub use crate::bar_grid_render::BarGridWgpuRenderer;
-use crate::{DrawCommand, WgpuGfxCtx};
+use crate::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx, WgpuGfxCtx};
 
 thread_local! {
     /// Set each frame by [`WgpuCubeWidget::paint`].  Mirrors the GL backend
     /// constant of the same name so platform shells with debug-overlay code
     /// compiled against either backend keep working.
     pub static CUBE_SCREEN_RECT: Cell<Rect> = Cell::new(Rect::default());
+}
+
+// ---------------------------------------------------------------------------
+// BarGridCustomRenderer — the demo's bridge onto the generic custom-render hook
+// ---------------------------------------------------------------------------
+
+/// Adapts [`BarGridWgpuRenderer`] to the renderer crate's generic
+/// [`WgpuCustomRender`] hook.
+///
+/// The bar grid used to have its own `DrawCommand::DrawBarGrid` variant baked
+/// into the renderer; it now rides the same public `Custom` path any downstream
+/// 3-D widget uses, which is what let the renderer move out to `agg-gui-wgpu`
+/// with no demo content in it.
+///
+/// `inner` is `None` until the first paint, where the widget has a
+/// `wgpu::Device` in hand to build the pipeline (and clears it to force a
+/// rebuild when the SSAA scale changes).
+#[derive(Default)]
+pub struct BarGridCustomRenderer {
+    inner: Option<BarGridWgpuRenderer>,
+}
+
+impl BarGridCustomRenderer {
+    /// The renderer built for the current SSAA scale, if one exists yet.
+    pub fn renderer(&self) -> Option<&BarGridWgpuRenderer> {
+        self.inner.as_ref()
+    }
+
+    /// Install a freshly built renderer, dropping any previous one.
+    pub fn set_renderer(&mut self, renderer: BarGridWgpuRenderer) {
+        self.inner = Some(renderer);
+    }
+}
+
+impl WgpuCustomRender for BarGridCustomRenderer {
+    fn render(&mut self, ctx: WgpuCustomRenderCtx<'_>) {
+        if let Some(r) = self.inner.as_mut() {
+            r.draw(
+                ctx.device,
+                ctx.encoder,
+                ctx.target_view,
+                ctx.target_size,
+                ctx.pipelines,
+                ctx.screen_rect,
+                ctx.parent_clip,
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -42,10 +90,10 @@ pub struct WgpuCubeWidget {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     /// Lazy-init renderer shared with the deferred draw command.  Wrapped in
-    /// `Rc<RefCell<Option<>>>` so the widget can keep ownership while the
-    /// `DrawCommand::DrawBarGrid` queued for this frame holds a clone of the
-    /// `Rc` and reads the renderer back at execute time.
-    renderer: Rc<RefCell<Option<BarGridWgpuRenderer>>>,
+    /// `Rc<RefCell<>>` so the widget can keep ownership while the
+    /// `DrawCommand::Custom` queued for this frame holds a clone of the `Rc`
+    /// (coerced to `SharedCustomRenderer`) and drives it at execute time.
+    renderer: Rc<RefCell<BarGridCustomRenderer>>,
     /// Shared SSAA samples cell.  Values map to a linear framebuffer scale
     /// via [`crate::ssaa::ssaa_linear_scale`]: `1`/`0` → 1× (Off), `4` → 2×
     /// (4× SSAA), `9` → 3× (9× SSAA), `16` → 4× (16× SSAA).  The widget
@@ -80,7 +128,7 @@ impl WgpuCubeWidget {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),
-            renderer: Rc::new(RefCell::new(None)),
+            renderer: Rc::new(RefCell::new(BarGridCustomRenderer::default())),
             sample_count,
             start: web_time::Instant::now(),
         }
@@ -161,25 +209,23 @@ impl Widget for WgpuCubeWidget {
                 let desired_scale = crate::ssaa::ssaa_linear_scale(raw);
                 {
                     let mut slot = self.renderer.borrow_mut();
-                    let needs_rebuild = match slot.as_ref() {
+                    let needs_rebuild = match slot.renderer() {
                         Some(r) => r.ssaa_scale() != desired_scale,
                         None => true,
                     };
                     if needs_rebuild {
-                        *slot = Some(BarGridWgpuRenderer::new(
-                            &wgpu_ctx.device,
-                            wgpu_ctx.surface_format,
+                        slot.set_renderer(BarGridWgpuRenderer::new(
+                            wgpu_ctx.device(),
+                            wgpu_ctx.surface_format(),
                             raw,
                             self.start,
                         ));
                     }
                 }
-                let parent_clip = wgpu_ctx.current_clip();
-                wgpu_ctx.commands.push(DrawCommand::DrawBarGrid {
-                    renderer: Rc::clone(&self.renderer),
-                    screen_rect,
-                    parent_clip,
-                });
+                // Explicit annotation drives the `Rc<RefCell<Concrete>>` →
+                // `Rc<RefCell<dyn WgpuCustomRender>>` unsizing coercion.
+                let shared: SharedCustomRenderer = self.renderer.clone();
+                wgpu_ctx.push_custom_render(shared, screen_rect);
             }
         }
     }

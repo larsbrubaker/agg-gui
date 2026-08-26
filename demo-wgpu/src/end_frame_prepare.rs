@@ -522,27 +522,15 @@ pub(crate) fn prepare_all(
                 });
             }
 
-            DrawCommand::DrawBarGrid {
-                renderer,
-                screen_rect,
-                parent_clip,
-            } => {
-                // Renderer owns its own pipeline + buffers; nothing to allocate
-                // here.  Per-frame uniforms are built at execute time, when the
-                // active render target's size is known.
-                out.push(Prepared::DrawBarGrid {
-                    renderer: std::rc::Rc::clone(renderer),
-                    screen_rect: *screen_rect,
-                    parent_clip: *parent_clip,
-                });
-            }
-
             DrawCommand::Custom {
                 renderer,
                 screen_rect,
                 parent_clip,
             } => {
-                // Identical structure to DrawBarGrid: pass-break + reopen.
+                // The renderer owns its own pipeline + buffers; nothing to
+                // allocate here.  Per-frame uniforms are built at execute time,
+                // when the active render target's size is known.  Pass-break +
+                // reopen happens in the executor.
                 out.push(Prepared::Custom {
                     renderer: std::rc::Rc::clone(renderer),
                     screen_rect: *screen_rect,
