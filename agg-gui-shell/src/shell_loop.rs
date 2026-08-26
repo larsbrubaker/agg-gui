@@ -323,6 +323,12 @@ impl<H: ShellHost> ShellLoop<H> {
     /// A lost device cannot be revived and every resource made from it is dead
     /// with it, so the whole bundle is rebuilt and the host is told to drop
     /// its own cached GPU resources.
+    ///
+    /// The C# port does the same thing in
+    /// `PlatformWin32/win32/WebGpuControl.cs::TryRecoverDevice` (agg-sharp), down
+    /// to the closing repaint request; it additionally guards against re-entering
+    /// recovery from a failure raised by recovery itself, which the `&mut self`
+    /// borrow here rules out for free.
     fn recover_lost_device(&mut self) -> Result<(), ShellError> {
         if !self.gpu.as_ref().is_some_and(|g| g.device_lost()) {
             return Ok(());

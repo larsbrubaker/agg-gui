@@ -288,6 +288,11 @@ impl Gpu {
     /// too — so the only recovery is to build a fresh [`Gpu`] for the same
     /// window, rebuild the renderer on the new device, and drop any GPU
     /// resources the app cached. Shells should poll this once per frame.
+    ///
+    /// The C# port polls the same flag at the top of a frame and rebuilds from
+    /// it in `PlatformWin32/win32/WebGpuControl.cs::TryRecoverDevice`
+    /// (agg-sharp), which is the closest thing to a reference implementation of
+    /// the recovery this flag is meant to drive.
     pub fn device_lost(&self) -> bool {
         self.device_lost.load(std::sync::atomic::Ordering::Relaxed)
     }
