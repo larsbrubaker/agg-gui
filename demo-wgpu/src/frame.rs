@@ -3,14 +3,19 @@
 //! Mirrors `demo-gl/src/frame.rs`.  Both platform shells call:
 //!
 //! ```text
-//! begin_frame(&device, &queue, surface_view, width, height)
+//! begin_frame(&mut ctx, surface_view)
 //! render_app_frame(&mut ctx, &mut app, width, height, ...)
-//! ctx.end_frame(surface_view)
+//! ctx.end_frame()
 //! surface_texture.present()
 //! ```
 //!
 //! `begin_frame` issues the clear; `render_app_frame` does layout + paint;
 //! `end_frame` flushes the deferred draw-command list to the GPU.
+//!
+//! `begin_frame` / `end_frame` belong to the renderer (`agg-gui-wgpu`); what
+//! stays here is `render_app_frame`, which is inspector plumbing — draining the
+//! live-edit queues and refreshing the widget-tree snapshot around layout and
+//! paint — and therefore demo/shell code, not renderer code.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -24,35 +29,17 @@ thread_local! {
     static LAYOUT_FRAME_KEY: Cell<Option<(u32, u32, u64)>> = const { Cell::new(None) };
 }
 
-/// Record a clear pass for the new frame and stash the surface view.
-///
-/// `view` is the `wgpu::TextureView` for this frame's surface texture, taken
-/// over so that any mid-frame `DrawCtx::gl_paint` calls (which need to target
-/// the same attachment as the 2-D deferred pipeline) can find it without the
-/// caller plumbing it through every method.  The view is consumed by
-/// [`WgpuGfxCtx::end_frame`].
-///
-/// The actual clear happens inside `end_frame` when the leading
-/// `DrawCommand::Clear` is flushed into the first render pass — calling this
-/// function simply pushes the correct clear colour so the deferred command
-/// list starts with a clean framebuffer.
+/// Free-function form of [`WgpuGfxCtx::begin_frame`], kept because every
+/// existing shell calls `begin_frame(&mut ctx, view)`.  New code should call
+/// the method on the context directly.
 pub fn begin_frame(ctx: &mut WgpuGfxCtx, view: wgpu::TextureView) {
-    ctx.surface_view = Some(view);
-    let bg = agg_gui::current_visuals().bg_color;
-    ctx.commands.push(crate::DrawCommand::Clear(bg));
-    // Sync the per-ctx LCD flag from the global typography setting so
-    // any subsequent `fill_text` routes through the cached subpixel mask
-    // path when LCD is enabled (default at scale ≤ 1.25).  Without this
-    // shells that drive the loop via `begin_frame` instead of
-    // `paint_app_with_inspector` silently fall through to the aliased
-    // tessellated-outline path even when the global says LCD is on.
-    ctx.set_lcd_mode(agg_gui::font_settings::lcd_enabled());
+    ctx.begin_frame(view);
 }
 
 /// Reset `ctx`, sync the inspector snapshot, lay out and paint `app`.
 ///
 /// Identical logic to `demo-gl/src/frame.rs::render_app_frame`; only the
-/// context type differs.  The caller must call `ctx.end_frame(view)` after
+/// context type differs.  The caller must call `ctx.end_frame()` after
 /// this function returns, then `surface_texture.present()`.
 #[allow(clippy::too_many_arguments)]
 pub fn render_app_frame(

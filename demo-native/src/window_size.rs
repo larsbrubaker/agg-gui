@@ -2,16 +2,17 @@
 //!
 //! Split out of `main.rs` so the DPI-unit round-trip logic is unit-testable
 //! without a live winit/wgpu window (and to keep `main.rs` under the 800-line
-//! limit).  Two concerns live here:
+//! limit).
 //!
-//! - [`sanitize_restored_window_size`] guards the *restore* path: a saved
-//!   window size read from disk is physical pixels, but a corrupted or
-//!   out-of-range value (e.g. from an earlier DPI-ratchet bug, or a zeroed
-//!   state file) must not be handed to winit verbatim — it could produce an
-//!   invisible window or a surface larger than the GPU's max texture size.
-//! - [`clamp_surface_size`] is the last line of defence in `Gpu`: it clamps
-//!   the surface configuration to `[1, max_texture_dimension_2d]` so no code
-//!   path can panic `Surface::configure` with an over-large extent.
+//! [`sanitize_restored_window_size`] guards the *restore* path: a saved
+//! window size read from disk is physical pixels, but a corrupted or
+//! out-of-range value (e.g. from an earlier DPI-ratchet bug, or a zeroed
+//! state file) must not be handed to winit verbatim — it could produce an
+//! invisible window or a surface larger than the GPU's max texture size.
+//!
+//! The companion surface-size clamp that used to live here now belongs to the
+//! shared `agg_gui_wgpu::Gpu`, which applies it on every `Surface::configure`
+//! (see `agg_gui_wgpu::clamp_surface_size`).
 //!
 //! The stored size is canonically **physical px** (see the save site in
 //! `main.rs`); restoring therefore uses `PhysicalSize`, not `LogicalSize`, so
@@ -55,16 +56,6 @@ pub fn sanitize_restored_window_size(
         None => (FALLBACK_MAX_DIM, FALLBACK_MAX_DIM),
     };
     (w.clamp(MIN_W, max_w), h.clamp(MIN_H, max_h))
-}
-
-/// Clamp a surface configuration size to `[1, max_dim]` on both axes.
-///
-/// `max_dim` is the device's `max_texture_dimension_2d`.  Applied on every
-/// `Surface::configure` so a stray oversized request degrades to the GPU limit
-/// instead of a validation panic.
-pub fn clamp_surface_size(w: u32, h: u32, max_dim: u32) -> (u32, u32) {
-    let max_dim = max_dim.max(1);
-    (w.clamp(1, max_dim), h.clamp(1, max_dim))
 }
 
 #[cfg(test)]
@@ -130,14 +121,5 @@ mod tests {
             sanitize_restored_window_size(Some((100, 100)), Some((50, 40))),
             (200, 150)
         );
-    }
-
-    #[test]
-    fn surface_size_clamped_to_max_dim() {
-        assert_eq!(clamp_surface_size(10224, 5925, 8192), (8192, 5925));
-        assert_eq!(clamp_surface_size(0, 0, 8192), (1, 1));
-        assert_eq!(clamp_surface_size(1280, 720, 8192), (1280, 720));
-        // Degenerate zero limit still yields a valid 1x1.
-        assert_eq!(clamp_surface_size(100, 100, 0), (1, 1));
     }
 }

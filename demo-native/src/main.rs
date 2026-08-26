@@ -30,17 +30,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::{winit_adapter, App, DrawCtx, Modifiers, Size};
-use demo_wgpu::{begin_frame, render_app_frame, WgpuCubeWidget, WgpuGfxCtx};
+use demo_wgpu::{
+    begin_frame, render_app_frame, CopySrc, Gpu, GpuConfig, WgpuCubeWidget, WgpuGfxCtx,
+};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Icon, WindowAttributes};
+use winit::window::{Icon, Window, WindowAttributes};
 
-mod gpu;
 mod screen_share;
 mod window_size;
-
-use gpu::{acquire_frame, Gpu};
 
 const STATE_FILE_NAME: &str = ".agg-gui-demo-state";
 const DEBUG_LOG_FILE_NAME: &str = ".agg-gui-draw-debug.log";
@@ -277,13 +276,26 @@ fn main() {
         }
     }
 
-    let mut gpu = Gpu::new(Arc::clone(&window));
-    let init_w = gpu.config.width as f32;
-    let init_h = gpu.config.height as f32;
+    // `COPY_SRC` is what the Take-Screenshot button's read-back needs;
+    // `IfSupported` because a surface that can't offer it should cost us the
+    // screenshot feature, not the whole app.
+    // Configure at the window's REAL inner size rather than the size just
+    // requested above: `request_inner_size` may be applied asynchronously, and
+    // the `Resized` event that follows drives `gpu.resize`.  This is what
+    // `Gpu::new` read for itself before the surface bundle moved out.
+    let init_size = window.inner_size();
+    let mut gpu = Gpu::new(
+        Arc::clone(&window),
+        (init_size.width, init_size.height),
+        GpuConfig::new("demo-native-wgpu").with_copy_src(CopySrc::IfSupported),
+    )
+    .expect("create wgpu device + surface");
+    let init_w = gpu.config().width as f32;
+    let init_h = gpu.config().height as f32;
     let mut wgpu_ctx = WgpuGfxCtx::new(
-        Arc::clone(&gpu.device),
-        Arc::clone(&gpu.queue),
-        gpu.surface_format,
+        Arc::clone(gpu.device()),
+        Arc::clone(gpu.queue()),
+        gpu.surface_format(),
         init_w,
         init_h,
     );
@@ -352,8 +364,8 @@ fn main() {
     let mut runaway = demo_ui::RunawayDetector::new(demo_ui::DEFAULT_RUNAWAY_THRESHOLD);
     let mut input_since_frame = false;
 
-    let mut win_w = gpu.config.width;
-    let mut win_h = gpu.config.height;
+    let mut win_w = gpu.config().width;
+    let mut win_h = gpu.config().height;
     screen_size.set((win_w, win_h));
 
     // Last size seen while the window was NOT maximized — what we persist
@@ -377,6 +389,7 @@ fn main() {
     app.layout(Size::new(win_w as f64, win_h as f64));
     paint_frame(
         &gpu,
+        &window,
         &mut wgpu_ctx,
         &mut app,
         win_w,
@@ -550,6 +563,7 @@ fn main() {
             } => {
                 paint_frame(
                     &gpu,
+                    &window,
                     &mut wgpu_ctx,
                     &mut app,
                     win_w,
@@ -599,6 +613,7 @@ fn main() {
                     let t0 = web_time::Instant::now();
                     paint_frame(
                         &gpu,
+                        &window,
                         &mut wgpu_ctx,
                         &mut app,
                         win_w,
@@ -691,6 +706,7 @@ fn main() {
 #[allow(clippy::too_many_arguments)]
 fn paint_frame(
     gpu: &Gpu,
+    window: &Window,
     ctx: &mut WgpuGfxCtx,
     app: &mut App,
     w: u32,
@@ -717,7 +733,7 @@ fn paint_frame(
     // `frame.present()`, so the GPU copy MUST happen before present.
     let want_capture = screenshot_request.get();
 
-    let Some(frame) = acquire_frame(gpu) else {
+    let Some(frame) = gpu.acquire_frame(|| window.request_redraw()) else {
         return;
     };
     let view = frame

@@ -48,8 +48,9 @@ agg-gui = "0.4"
 # agg-gui = { version = "0.4", features = ["winit-adapter", "clipboard"] }
 ```
 
-Only the `agg-gui` library crate is published — the demo crates
-(`demo-native`, `demo-wasm`, `demo-wgpu`, `demo-ui`) stay in-repo.
+The published crates are `agg-gui` and `agg-gui-wgpu` (the hardware-accelerated
+wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
+`demo-ui`) stay in-repo.
 
 ## Library
 
@@ -185,8 +186,9 @@ and feature set using agg-gui's own widgets:
 | Crate | Description |
 |-------|-------------|
 | `agg-gui` | Core library — widgets, layout, drawing, theme, text, undo |
+| `agg-gui-wgpu` | Hardware-accelerated wgpu `DrawCtx` backend — pipelines, SSAA, screenshot capture, custom render-pass hook |
 | `demo-ui` | Shared demo widget tree (identical for native and WASM) |
-| `demo-wgpu` | Shared wgpu `DrawCtx` backend + turn-key `native_shell` / `web_shell` platform shells |
+| `demo-wgpu` | Turn-key `native_shell` / `web_shell` platform shells + wgpu demo widgets, on top of `agg-gui-wgpu` |
 | `demo-native` | Desktop demo shell (winit 0.30 + wgpu) |
 | `demo-wasm` | WASM cdylib deployed to GitHub Pages |
 | `node-editor` | Node-graph editor demo built on agg-gui |

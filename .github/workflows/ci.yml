@@ -32,6 +32,17 @@ jobs:
       - name: Run tests
         run: cargo test -p agg-gui
 
+      # The wgpu renderer and the shells on top of it. The headless GPU
+      # read-back tests in these crates skip themselves when no adapter is
+      # available, which is the case on a stock runner, so this covers the
+      # CPU-side logic (clip math, cache decisions, capture geometry, the
+      # surface-acquire policy) without needing a GPU.
+      - name: Build wgpu renderer
+        run: cargo build -p agg-gui-wgpu
+
+      - name: Run wgpu renderer + shell tests
+        run: cargo test -p agg-gui-wgpu -p demo-wgpu
+
   build-wasm:
     runs-on: ubuntu-latest
     steps:

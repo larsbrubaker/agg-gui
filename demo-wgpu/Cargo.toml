@@ -2,7 +2,8 @@
 name = "demo-wgpu"
 version = "0.1.0"
 edition = "2021"
-description = "Shared WgpuGfxCtx â€” DrawCtx implementation via wgpu (native Vulkan/DX12/Metal + WebGL2/WebGPU)"
+description = "Platform shells (winit / browser canvas) and wgpu demo widgets on top of the agg-gui-wgpu renderer"
+publish = false
 
 [features]
 default = ["reflect"]
@@ -12,6 +13,7 @@ reflect = ["agg-gui/reflect"]
 
 [dependencies]
 agg-gui  = { path = "../agg-gui" }
+agg-gui-wgpu = { path = "../agg-gui-wgpu" }
 agg-rust = "1.1.0"
 bytemuck = { version = "1", features = ["derive"] }
 web-time = "1"

@@ -32,7 +32,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes};
 
 use crate::native_shell_screenshot::{capture_exhausted, should_capture, write_png};
-use crate::{begin_frame, WgpuGfxCtx};
+use crate::{begin_frame, CopySrc, Gpu, GpuConfig, WgpuGfxCtx};
 
 /// Window parameters for [`run`].
 ///
@@ -87,91 +87,31 @@ impl NativeShellConfig {
     }
 }
 
-/// wgpu device + surface bundle for one OS window.
-struct Gpu {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    surface: wgpu::Surface<'static>,
-    surface_format: wgpu::TextureFormat,
-    config: wgpu::SurfaceConfiguration,
-}
-
-impl Gpu {
-    /// `copy_src` adds `COPY_SRC` to the surface usage so
-    /// `WgpuGfxCtx::read_screenshot` can blit the rendered surface to a
-    /// staging buffer — only requested when a capture is configured, since
-    /// not every surface supports it.
-    fn new(window: Arc<Window>, copy_src: bool) -> Self {
-        let size = window.inner_size();
-        let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        instance_desc.backends = wgpu::Backends::PRIMARY;
-        let instance = wgpu::Instance::new(instance_desc);
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("create wgpu surface");
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .expect("request wgpu adapter");
-
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("agg-gui-native-shell"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("request wgpu device");
-
-        let caps = surface.get_capabilities(&adapter);
-        let surface_format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
-            .unwrap_or(caps.formats[0]);
-
-        let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
-        if copy_src {
-            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
-                usage |= wgpu::TextureUsages::COPY_SRC;
-            } else {
-                eprintln!("screenshot: surface does not support COPY_SRC read-back");
-                std::process::exit(1);
-            }
+/// Build the shell's [`Gpu`], turning the two fatal setup failures into the
+/// loud process exit a turn-key shell wants (there is no app yet to show an
+/// error in).
+///
+/// `copy_src` is [`CopySrc::Required`] when a deterministic screenshot is
+/// configured — a capture run that silently produced nothing would be worse
+/// than a hard failure — and [`CopySrc::Never`] otherwise, since not every
+/// surface supports the usage.
+fn create_gpu(window: Arc<Window>, want_screenshot: bool) -> Gpu {
+    let size = window.inner_size();
+    let copy_src = if want_screenshot {
+        CopySrc::Required
+    } else {
+        CopySrc::Never
+    };
+    match Gpu::new(
+        window,
+        (size.width, size.height),
+        GpuConfig::new("agg-gui-native-shell").with_copy_src(copy_src),
+    ) {
+        Ok(gpu) => gpu,
+        Err(e) => {
+            eprintln!("native shell: {e}");
+            std::process::exit(1);
         }
-
-        let config = wgpu::SurfaceConfiguration {
-            usage,
-            format: surface_format,
-            width: size.width.max(1),
-            height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
-            desired_maximum_frame_latency: 2,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-        };
-        surface.configure(&device, &config);
-
-        Self {
-            device: Arc::new(device),
-            queue: Arc::new(queue),
-            surface,
-            surface_format,
-            config,
-        }
-    }
-
-    fn resize(&mut self, w: u32, h: u32) {
-        if w == 0 || h == 0 {
-            return;
-        }
-        self.config.width = w;
-        self.config.height = h;
-        self.surface.configure(&self.device, &self.config);
     }
 }
 
@@ -203,13 +143,13 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
     agg_gui::set_device_scale(window.scale_factor());
 
     let screenshot = config.screenshot.clone();
-    let mut gpu = Gpu::new(window.clone(), screenshot.is_some());
+    let mut gpu = create_gpu(window.clone(), screenshot.is_some());
     let mut wgpu_ctx = WgpuGfxCtx::new(
-        Arc::clone(&gpu.device),
-        Arc::clone(&gpu.queue),
-        gpu.surface_format,
-        gpu.config.width as f32,
-        gpu.config.height as f32,
+        Arc::clone(gpu.device()),
+        Arc::clone(gpu.queue()),
+        gpu.surface_format(),
+        gpu.config().width as f32,
+        gpu.config().height as f32,
     );
 
     let mut win_w = window.inner_size().width.max(1);
@@ -406,79 +346,6 @@ pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() +
         .expect("event loop");
 }
 
-/// How to handle the result of `Surface::get_current_texture`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum SurfaceAcquire {
-    /// Texture is usable — render into it.
-    Present,
-    /// The swapchain is stale or gone (`Outdated`/`Lost`): reconfigure the
-    /// surface and try once more THIS frame.
-    Reconfigure,
-    /// Transient (`Timeout`): skip the frame, but ask for another one.
-    SkipAndRetry,
-    /// Skip the frame with no follow-up (`Occluded`/`Validation`): the
-    /// window is not visible / the app must fix the validation error, and
-    /// a self-requested redraw would just burn the CPU.
-    Skip,
-}
-
-/// Decide how to handle a surface-acquire status. Split out as a pure
-/// function so the recovery policy is unit-testable without a live GPU
-/// surface (the no-payload variants are constructible in tests). Mirrors
-/// `demo-native`'s `gpu::surface_acquire_action`.
-///
-/// `Outdated`/`Lost` fire after a GPU driver reset (TDR), a display-mode
-/// change, or an RDP reconnect, as well as right after a resize. Treating
-/// them as a plain skip wedges this shell permanently: it is reactive
-/// (`ControlFlow::Wait` whenever `wants_draw()` is false), so with nothing
-/// reconfiguring the surface and nothing requesting another redraw, the
-/// window stays frozen or blank until the user resizes it by hand. wgpu
-/// documents both as "reconfigure the surface and try again".
-fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAcquire {
-    use wgpu::CurrentSurfaceTexture as T;
-    match status {
-        T::Success(_) | T::Suboptimal(_) => SurfaceAcquire::Present,
-        T::Outdated | T::Lost => SurfaceAcquire::Reconfigure,
-        T::Timeout => SurfaceAcquire::SkipAndRetry,
-        T::Occluded | T::Validation => SurfaceAcquire::Skip,
-    }
-}
-
-/// Acquire the next surface texture, recovering from a stale swapchain by
-/// reconfiguring and retrying once. Returns `None` when the frame must be
-/// skipped; a redraw is requested for the cases that can recover on their
-/// own so the reactive event loop wakes up again instead of idling forever.
-fn acquire_frame(gpu: &Gpu, window: &Window) -> Option<wgpu::SurfaceTexture> {
-    use wgpu::CurrentSurfaceTexture as T;
-    let first = gpu.surface.get_current_texture();
-    match surface_acquire_action(&first) {
-        SurfaceAcquire::Present => match first {
-            T::Success(f) | T::Suboptimal(f) => Some(f),
-            _ => None,
-        },
-        SurfaceAcquire::Skip => None,
-        SurfaceAcquire::SkipAndRetry => {
-            window.request_redraw();
-            None
-        }
-        SurfaceAcquire::Reconfigure => {
-            // `configure` takes `&self`; the config already carries the
-            // current (nonzero, `Gpu::resize`-clamped) window size, so we
-            // just re-bind it.
-            gpu.surface.configure(&gpu.device, &gpu.config);
-            match gpu.surface.get_current_texture() {
-                T::Success(f) | T::Suboptimal(f) => Some(f),
-                _ => {
-                    // Still nothing after the reconfigure: come back next
-                    // frame rather than sitting in `ControlFlow::Wait`.
-                    window.request_redraw();
-                    None
-                }
-            }
-        }
-    }
-}
-
 /// Paint one frame. `capture` is `Some((path, settle_frames))` while a
 /// screenshot is still pending; the frame is written out when
 /// `frames_painted + 1` reaches the settle count. Returns whether a frame
@@ -501,7 +368,7 @@ fn paint_frame(
     if win_w == 0 || win_h == 0 {
         return false;
     }
-    let Some(frame) = acquire_frame(gpu, window) else {
+    let Some(frame) = gpu.acquire_frame(|| window.request_redraw()) else {
         return false;
     };
     let view = frame
@@ -545,38 +412,4 @@ fn paint_frame(
 
     frame.present();
     true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{surface_acquire_action, SurfaceAcquire};
-    use wgpu::CurrentSurfaceTexture as T;
-
-    #[test]
-    fn lost_or_outdated_surface_reconfigures_instead_of_skipping() {
-        // Driver reset (TDR), display-mode change or RDP reconnect: a bare
-        // skip left this reactive shell frozen until a manual resize.
-        assert_eq!(
-            surface_acquire_action(&T::Outdated),
-            SurfaceAcquire::Reconfigure
-        );
-        assert_eq!(
-            surface_acquire_action(&T::Lost),
-            SurfaceAcquire::Reconfigure
-        );
-    }
-
-    #[test]
-    fn timeout_skips_the_frame_but_asks_for_another() {
-        assert_eq!(
-            surface_acquire_action(&T::Timeout),
-            SurfaceAcquire::SkipAndRetry
-        );
-    }
-
-    #[test]
-    fn occluded_and_validation_skip_without_self_requested_redraw() {
-        assert_eq!(surface_acquire_action(&T::Occluded), SurfaceAcquire::Skip);
-        assert_eq!(surface_acquire_action(&T::Validation), SurfaceAcquire::Skip);
-    }
 }

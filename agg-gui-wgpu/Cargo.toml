@@ -1,0 +1,36 @@
+[package]
+name = "agg-gui-wgpu"
+version = "0.5.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+license = "MIT"
+description = "Hardware-accelerated wgpu renderer for agg-gui — DrawCtx via Vulkan/DX12/Metal/WebGL2, with SSAA, screenshot capture, and a custom render-pass hook"
+repository = "https://github.com/larsbrubaker/agg-gui"
+homepage = "https://larsbrubaker.github.io/agg-gui/"
+documentation = "https://docs.rs/agg-gui-wgpu"
+readme = "README.md"
+keywords = ["gui", "wgpu", "renderer", "graphics", "gpu"]
+categories = ["gui", "graphics", "rendering"]
+
+[dependencies]
+# `version` is required for a `path` dependency to be publishable.
+agg-gui  = { path = "../agg-gui", version = "0.5" }
+agg-rust = "1.1.0"
+bytemuck = { version = "1", features = ["derive"] }
+web-time = "1"
+# wgsl is enabled by default in wgpu; native backends are enabled per target below.
+wgpu = { version = "29", default-features = false, features = ["wgsl"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.wgpu]
+version = "29"
+features = ["vulkan", "dx12", "metal"]
+
+# `gpu::Gpu` blocks on adapter/device requests during surface setup; the
+# browser configures its canvas surface instead, so this is native-only.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
+version = "29"
+features = ["webgl"]

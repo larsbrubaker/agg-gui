@@ -3,6 +3,7 @@ name = "demo-ui"
 version = "0.1.0"
 edition = "2021"
 description = "Shared demo UI builders â€” identical widget trees for native and WASM"
+publish = false
 
 [features]
 default = ["reflect"]

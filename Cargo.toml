@@ -1,6 +1,21 @@
 [workspace]
-members = ["agg-gui", "demo-native", "demo-wasm", "demo-ui", "demo-wgpu", "node-editor"]
-default-members = ["agg-gui", "demo-native", "demo-wgpu", "demo-ui", "node-editor"]
+members = [
+    "agg-gui",
+    "agg-gui-wgpu",
+    "demo-native",
+    "demo-wasm",
+    "demo-ui",
+    "demo-wgpu",
+    "node-editor",
+]
+default-members = [
+    "agg-gui",
+    "agg-gui-wgpu",
+    "demo-native",
+    "demo-wgpu",
+    "demo-ui",
+    "node-editor",
+]
 resolver = "2"
 
 # ---------------------------------------------------------------------------
