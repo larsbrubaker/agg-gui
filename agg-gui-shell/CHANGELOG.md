@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Added
+
+- `ShellHost::on_close_requested` — called when the user asks the OS window to
+  close (title-bar ×, Alt+F4). Return `false` to keep the app running; the
+  seam an unsaved-changes gate needs (prompt Save / Discard / Cancel, or defer
+  and finish the close from `on_idle` via `ShellControl::request_exit` once an
+  asynchronous save lands). Defaults to `true`, so existing hosts are
+  unchanged. Needed by AtomArtist's close gate; every document-editing app
+  wants the same seam.
+- `WindowEvent::DroppedFile` is now forwarded to `App::on_file_dropped`, one
+  call per dropped file, at the live OS cursor position on Windows — winit's
+  OLE drop path emits no `CursorMoved` during the drag and discards the drop
+  point, so the tracked cursor is stale there (ported from AtomArtist's shell,
+  which carried the `GetCursorPos` workaround). Other platforms use the
+  tracked cursor.
+- `ShellConfig::with_optional_features` — pass-through to
+  `agg_gui_wgpu::GpuConfig::with_optional_features`: device features requested
+  only when the adapter offers them.
+
 ## [0.5.0] - 2026-08-25
 
 ### Added

@@ -68,6 +68,36 @@ pub(crate) fn shift_held(mods: Modifiers) -> bool {
     mods.shift
 }
 
+/// Physical-pixel cursor position relative to the window's client area,
+/// queried live from the OS.
+///
+/// Used by the `DroppedFile` arm because winit's tracked cursor is stale
+/// during an OLE drag on Windows: the OS owns the pointer, no `CursorMoved`
+/// is emitted, and winit's `IDropTarget::Drop` discards the drop point.
+/// Returns `None` off-Windows or when the window position is unavailable —
+/// the caller falls back to the last tracked cursor position.
+#[cfg(windows)]
+pub(crate) fn live_cursor_in_window(window: &winit::window::Window) -> Option<(f64, f64)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut pt = POINT { x: 0, y: 0 };
+    // SAFETY: GetCursorPos writes into the POINT we own; no other
+    // preconditions.
+    if unsafe { GetCursorPos(&mut pt) } == 0 {
+        return None;
+    }
+    let client_origin = window.inner_position().ok()?;
+    Some((
+        (pt.x - client_origin.x) as f64,
+        (pt.y - client_origin.y) as f64,
+    ))
+}
+
+#[cfg(not(windows))]
+pub(crate) fn live_cursor_in_window(_window: &winit::window::Window) -> Option<(f64, f64)> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

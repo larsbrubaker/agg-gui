@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Added
+
+- `GpuConfig::with_optional_features` — device features requested when, and
+  only when, the adapter offers them (the set is masked against
+  `adapter.features()` before `request_device`, so an absent feature degrades
+  instead of failing device creation). Needed by AtomArtist's depth-peel
+  renderer, which uses `FLOAT32_BLENDABLE` when present and falls back to
+  half-float depth when not; general enough for any renderer with an
+  adapter-dependent fast path.
+
 ## [0.5.1] - 2026-08-26
 
 ### Added

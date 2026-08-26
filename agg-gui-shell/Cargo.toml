@@ -37,7 +37,12 @@ wgpu = { version = "29", default-features = false, features = ["wgsl"] }
 log = "0.4"
 
 # Reuse the same windows-sys major winit 0.30 already pulls in (0.52) so no
-# second copy is linked. Only the WindowsAndMessaging surface is needed, for
-# SystemParametersInfoW(SPI_GETMOUSEHOVERTIME) to seed OS tooltip hover timing.
+# second copy is linked. `Win32_UI_WindowsAndMessaging` carries
+# SystemParametersInfoW(SPI_GETMOUSEHOVERTIME) for OS tooltip hover timing and
+# GetCursorPos for the file-drop position workaround (winit's OLE drop path
+# discards the drop point); `Win32_Foundation` is POINT for the latter.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }

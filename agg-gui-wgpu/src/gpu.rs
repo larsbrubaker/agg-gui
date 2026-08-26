@@ -53,6 +53,12 @@ pub struct GpuConfig {
     pub copy_src: CopySrc,
     /// Present mode for the swap chain. `AutoVsync` for normal windows.
     pub present_mode: wgpu::PresentMode,
+    /// Device features requested **when the adapter offers them** — the set is
+    /// masked against `adapter.features()` before `request_device`, so an
+    /// adapter that lacks one still yields a device (the app degrades instead
+    /// of failing to start). For an app renderer that can use, e.g.,
+    /// `FLOAT32_BLENDABLE` when present and fall back when not.
+    pub optional_features: wgpu::Features,
 }
 
 impl Default for GpuConfig {
@@ -61,6 +67,7 @@ impl Default for GpuConfig {
             label: "agg-gui-wgpu",
             copy_src: CopySrc::Never,
             present_mode: wgpu::PresentMode::AutoVsync,
+            optional_features: wgpu::Features::empty(),
         }
     }
 }
@@ -82,6 +89,13 @@ impl GpuConfig {
     /// Override the swap-chain present mode (default `AutoVsync`).
     pub fn with_present_mode(mut self, present_mode: wgpu::PresentMode) -> Self {
         self.present_mode = present_mode;
+        self
+    }
+
+    /// Request these device features when — and only when — the adapter
+    /// offers them. See [`GpuConfig::optional_features`].
+    pub fn with_optional_features(mut self, features: wgpu::Features) -> Self {
+        self.optional_features = features;
         self
     }
 }
@@ -213,7 +227,10 @@ impl Gpu {
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some(config.label),
-            required_features: wgpu::Features::empty(),
+            // Optional features are masked against what the adapter actually
+            // offers, so asking for an absent one degrades instead of failing
+            // `request_device`.
+            required_features: config.optional_features & adapter.features(),
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::Performance,
             experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -507,6 +524,20 @@ mod tests {
         );
         // A surface that reports nothing at all still yields a legal mode.
         assert_eq!(pick_present_mode(&[], P::Immediate), P::Fifo);
+    }
+
+    #[test]
+    fn optional_features_default_empty_and_build() {
+        let cfg = super::GpuConfig::new("t");
+        assert_eq!(cfg.optional_features, wgpu::Features::empty());
+        let cfg = cfg.with_optional_features(wgpu::Features::FLOAT32_BLENDABLE);
+        assert_eq!(cfg.optional_features, wgpu::Features::FLOAT32_BLENDABLE);
+        // The request mask: an adapter without the feature yields an empty
+        // request rather than a failed `request_device`.
+        assert_eq!(
+            cfg.optional_features & wgpu::Features::empty(),
+            wgpu::Features::empty()
+        );
     }
 
     #[test]

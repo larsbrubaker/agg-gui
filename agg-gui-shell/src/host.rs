@@ -151,6 +151,21 @@ pub trait ShellHost {
     /// The OS window was resized, maximized, restored, or changed scale.
     fn on_geometry_changed(&mut self, _geometry: WindowGeometry) {}
 
+    /// The user asked the OS window to close (title-bar ×, Alt+F4, taskbar
+    /// close). Return `true` to let the shell exit the loop; return `false`
+    /// to keep running.
+    ///
+    /// This is where an unsaved-changes gate lives: prompt here (a blocking
+    /// native dialog is fine — no frame is in flight), and either allow the
+    /// close, or return `false` and finish an asynchronous save from
+    /// [`ShellHost::on_idle`], calling [`ShellControl::request_exit`] once it
+    /// lands. Not called for [`ShellControl::request_exit`] /
+    /// `request_relaunch` (the app already decided) or when a configured
+    /// screenshot capture completes.
+    fn on_close_requested(&mut self, _app: &mut App) -> bool {
+        true
+    }
+
     /// Runs once per idle iteration of the event loop, after any frame this
     /// iteration painted. The hook for app-owned auto-save, deferred work that
     /// must not run inside event dispatch, and exit/relaunch requests.

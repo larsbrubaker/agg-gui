@@ -120,6 +120,10 @@ pub struct ShellConfig {
     /// `wgpu::DeviceDescriptor` label — shows up in backend validation
     /// messages and GPU captures.
     pub device_label: &'static str,
+    /// Device features requested when the adapter offers them, passed through
+    /// to `agg_gui_wgpu::GpuConfig` (which masks them against
+    /// `adapter.features()` so an adapter lacking one still yields a device).
+    pub optional_features: wgpu::Features,
     /// Deterministic capture, see [`ScreenshotConfig`].
     pub screenshot: Option<ScreenshotConfig>,
     /// Seed `agg_gui`'s tooltip timings from the OS (Windows:
@@ -144,6 +148,7 @@ impl Default for ShellConfig {
             copy_src: CopySrc::Never,
             present_mode: wgpu::PresentMode::AutoVsync,
             device_label: "agg-gui-shell",
+            optional_features: wgpu::Features::empty(),
             screenshot: None,
             os_tooltip_timings: true,
             bounds_store: None,
@@ -222,6 +227,13 @@ impl ShellConfig {
 
     pub fn with_device_label(mut self, label: &'static str) -> Self {
         self.device_label = label;
+        self
+    }
+
+    /// Request these device features when — and only when — the adapter
+    /// offers them. See [`ShellConfig::optional_features`].
+    pub fn with_optional_features(mut self, features: wgpu::Features) -> Self {
+        self.optional_features = features;
         self
     }
 
