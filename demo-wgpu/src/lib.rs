@@ -38,14 +38,13 @@ pub use agg_gui_wgpu::*;
 pub mod frame;
 pub use frame::{begin_frame, render_app_frame};
 
-/// Turn-key winit + wgpu shell for native platform shims.
+/// Deprecated winit + wgpu shell — a thin wrapper over the `agg-gui-shell`
+/// crate, kept so external path-dependency consumers keep compiling.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_shell;
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(deprecated)]
 pub use native_shell::NativeShellConfig;
-/// Frame capture helpers for `NativeShellConfig::with_screenshot`.
-#[cfg(not(target_arch = "wasm32"))]
-mod native_shell_screenshot;
 
 /// Turn-key canvas + rAF + DOM-input shell for wasm platform shims.
 #[cfg(target_arch = "wasm32")]

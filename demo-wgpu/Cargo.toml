@@ -30,7 +30,7 @@ features = ["vulkan", "dx12", "metal"]
 # native_shell â€” turn-key winit event loop + wgpu present for native shims.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 agg-gui = { path = "../agg-gui", features = ["winit-adapter"] }
-winit = "0.30"
+agg-gui-shell = { path = "../agg-gui-shell" }
 pollster = "0.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]

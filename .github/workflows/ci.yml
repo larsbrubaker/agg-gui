@@ -40,8 +40,11 @@ jobs:
       - name: Build wgpu renderer
         run: cargo build -p agg-gui-wgpu
 
+      - name: Build native shell
+        run: cargo build -p agg-gui-shell
+
       - name: Run wgpu renderer + shell tests
-        run: cargo test -p agg-gui-wgpu -p demo-wgpu
+        run: cargo test -p agg-gui-wgpu -p agg-gui-shell -p demo-wgpu
 
   build-wasm:
     runs-on: ubuntu-latest

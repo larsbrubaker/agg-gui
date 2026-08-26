@@ -1,57 +1,51 @@
-//! Turn-key native (winit + wgpu) shell for an agg-gui [`App`].
+//! Deprecated compatibility wrapper over [`agg_gui_shell`].
 //!
-//! Every native platform crate used to hand-roll the same ~250 lines:
-//! wgpu instance/surface/device setup, the winit event loop with input
-//! forwarding, DPI tracking, redraw scheduling, and the per-frame
-//! layout/paint. That machinery is platform glue, not app code — it now
-//! lives here so a native shim reduces to its genuinely app-specific
-//! parts (platform-trait impl, window title, per-frame state tick):
+//! This module used to *be* the native shell. It now forwards to the
+//! `agg-gui-shell` crate, which is the published, maintained version of the
+//! same thing plus everything `demo-native`'s hand-rolled loop had that this
+//! one didn't (touch, cursor-leave, window-bounds persistence, the host waker,
+//! device-loss recovery, …).
+//!
+//! The old entry point is kept only so external path-dependency consumers keep
+//! compiling; new code should call [`agg_gui_shell::run`] directly, which gives
+//! it a builder closure, a real error type, and the [`agg_gui_shell::ShellHost`]
+//! hooks:
 //!
 //! ```ignore
-//! fn main() {
-//!     let (app, handles) = build_my_app(font, MyNativePlatform::new());
-//!     demo_wgpu::native_shell::run(
-//!         demo_wgpu::NativeShellConfig::new("My App", (1024.0, 768.0)).with_min_size(800.0, 600.0),
-//!         app,
-//!         move || handles.timestamp_ms.set(now_ms()), // per-frame hook, or `|| {}`
-//!     );
-//! }
+//! agg_gui_shell::run(
+//!     agg_gui_shell::ShellConfig::new("My App").with_logical_size(1024.0, 768.0),
+//!     |_init| Ok((build_my_app(), agg_gui_shell::NoHost)),
+//! )
 //! ```
 //!
 //! The web equivalent is [`crate::web_shell`].
 
-#![allow(deprecated)] // winit 0.30 EventLoop::run idiom
-
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use agg_gui::{winit_adapter, App, Modifiers, Size};
-use winit::dpi::LogicalSize;
-use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Window, WindowAttributes};
-
-use crate::native_shell_screenshot::{capture_exhausted, should_capture, write_png};
-use crate::{begin_frame, CopySrc, Gpu, GpuConfig, WgpuGfxCtx};
+use agg_gui::App;
+use agg_gui_shell::{Frame, ShellConfig, ShellHost};
 
 /// Window parameters for [`run`].
 ///
-/// Build with [`NativeShellConfig::new`] and chain the `with_*` setters;
-/// the struct literal form still works with `..NativeShellConfig::new(..)`
-/// for the optional fields.
+/// Deprecated alongside [`run`]; [`agg_gui_shell::ShellConfig`] is the
+/// replacement and takes an owned `String` title, physical sizes, an icon,
+/// a redraw policy and a bounds store as well.
+#[deprecated(
+    since = "0.5.0",
+    note = "use agg_gui_shell::ShellConfig with agg_gui_shell::run"
+)]
 pub struct NativeShellConfig {
     /// OS window title.
     pub title: &'static str,
     /// Initial inner size in logical (DPI-independent) pixels.
     pub logical_size: (f64, f64),
-    /// Minimum inner size in logical pixels, enforced by the window
-    /// system (`winit` `with_min_inner_size`). `None` = unconstrained.
+    /// Minimum inner size in logical pixels. `None` = unconstrained.
     pub min_size: Option<(f64, f64)>,
     /// Deterministic capture target: `(png path, settle frames)`.
-    /// See [`NativeShellConfig::with_screenshot`].
     pub screenshot: Option<(PathBuf, u32)>,
 }
 
+#[allow(deprecated)]
 impl NativeShellConfig {
     pub fn new(title: &'static str, logical_size: (f64, f64)) -> Self {
         Self {
@@ -62,354 +56,59 @@ impl NativeShellConfig {
         }
     }
 
-    /// Refuse to let the user shrink the window below `(w, h)` logical
-    /// pixels (SwiftUI `.frame(minWidth:minHeight:)` on the window root).
+    /// Refuse to let the user shrink the window below `(w, h)` logical pixels.
     pub fn with_min_size(mut self, w: f64, h: f64) -> Self {
         self.min_size = Some((w, h));
         self
     }
 
-    /// Headless-style capture: after `settle_frames` painted frames, read
-    /// the frame back, write it as a PNG to `path`, and exit the event
-    /// loop. Redraws are requested continuously until the capture fires,
-    /// so the frame count advances without any user input.
-    ///
-    /// `settle_frames` is clamped to at least 1; ~6 gives fonts, layout
-    /// and start-up animations time to settle. The image is in PHYSICAL
-    /// pixels — on a Retina display that is 2x the logical window size.
-    ///
-    /// A failed capture (empty read-back, encode or io error) prints to
-    /// stderr and exits the process with status 1: a deterministic capture
-    /// that silently produced nothing would be worse than a loud failure.
+    /// Headless-style capture: after `settle_frames` painted frames, write the
+    /// frame to `path` as a PNG and exit.
     pub fn with_screenshot(mut self, path: impl Into<PathBuf>, settle_frames: u32) -> Self {
         self.screenshot = Some((path.into(), settle_frames));
         self
     }
 }
 
-/// Build the shell's [`Gpu`], turning the two fatal setup failures into the
-/// loud process exit a turn-key shell wants (there is no app yet to show an
-/// error in).
-///
-/// `copy_src` is [`CopySrc::Required`] when a deterministic screenshot is
-/// configured — a capture run that silently produced nothing would be worse
-/// than a hard failure — and [`CopySrc::Never`] otherwise, since not every
-/// surface supports the usage.
-fn create_gpu(window: Arc<Window>, want_screenshot: bool) -> Gpu {
-    let size = window.inner_size();
-    let copy_src = if want_screenshot {
-        CopySrc::Required
-    } else {
-        CopySrc::Never
-    };
-    match Gpu::new(
-        window,
-        (size.width, size.height),
-        GpuConfig::new("agg-gui-native-shell").with_copy_src(copy_src),
-    ) {
-        Ok(gpu) => gpu,
-        Err(e) => {
-            eprintln!("native shell: {e}");
-            std::process::exit(1);
-        }
+/// A per-frame closure in [`ShellHost`] clothing — all this wrapper's callers
+/// ever supplied.
+struct OnFrameHost<F: FnMut()>(F);
+
+impl<F: FnMut()> ShellHost for OnFrameHost<F> {
+    fn on_frame(&mut self, _app: &mut App, _frame: &Frame) {
+        (self.0)();
     }
 }
 
-/// Open an OS window, wire all input into `app`, and run the event loop
-/// until the window closes.
+/// Open an OS window, wire all input into `app`, and run the event loop until
+/// the window closes.
 ///
-/// `on_frame` runs once per painted frame, before layout — the hook for
-/// per-frame app state such as advancing a wall-clock cell. Pass `|| {}`
-/// when the app has no per-frame state.
-pub fn run(config: NativeShellConfig, mut app: App, mut on_frame: impl FnMut() + 'static) {
-    let event_loop = EventLoop::new().expect("create event loop");
-
-    let mut window_attributes = WindowAttributes::default()
-        .with_title(config.title)
-        .with_inner_size(LogicalSize::new(
-            config.logical_size.0,
-            config.logical_size.1,
-        ))
-        // Shown after the first surface configure to avoid a white flash.
-        .with_visible(false);
-    if let Some((min_w, min_h)) = config.min_size {
-        window_attributes = window_attributes.with_min_inner_size(LogicalSize::new(min_w, min_h));
+/// Kept for source compatibility only: it swallows the app-visible error type
+/// and exits the process on failure, which is exactly what a library should not
+/// do. Call [`agg_gui_shell::run`] instead.
+#[deprecated(
+    since = "0.5.0",
+    note = "use agg_gui_shell::run, which returns a ShellError instead of exiting the process"
+)]
+#[allow(deprecated)]
+pub fn run(config: NativeShellConfig, app: App, on_frame: impl FnMut() + 'static) {
+    let mut shell_config = ShellConfig::new(config.title)
+        .with_logical_size(config.logical_size.0, config.logical_size.1)
+        .with_device_label("agg-gui-native-shell");
+    if let Some((w, h)) = config.min_size {
+        shell_config = shell_config.with_min_logical_size(w, h);
     }
-    let window = Arc::new(
-        event_loop
-            .create_window(window_attributes)
-            .expect("create window"),
-    );
-    agg_gui::set_device_scale(window.scale_factor());
-
-    let screenshot = config.screenshot.clone();
-    let mut gpu = create_gpu(window.clone(), screenshot.is_some());
-    let mut wgpu_ctx = WgpuGfxCtx::new(
-        Arc::clone(gpu.device()),
-        Arc::clone(gpu.queue()),
-        gpu.surface_format(),
-        gpu.config().width as f32,
-        gpu.config().height as f32,
-    );
-
-    let mut win_w = window.inner_size().width.max(1);
-    let mut win_h = window.inner_size().height.max(1);
-    let mut cursor_x = 0.0_f64;
-    let mut cursor_y = 0.0_f64;
-    let mut current_mods = Modifiers::default();
-    let mut layout_key: Option<(u32, u32, u64, u64)> = None;
-    let mut frames_painted: u32 = 0;
-    // When a pending `--screenshot` capture last saw a painted frame
-    // (armed here) — the wall-clock budget that stops a surface which
-    // never becomes presentable from spinning forever.
-    let mut screenshot_last_paint = std::time::Instant::now();
-    let mut screenshot_done = false;
-
-    window.set_visible(true);
-
-    event_loop
-        .run(move |event, elwt| match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                elwt.exit();
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::Resized(size),
-                ..
-            } if size.width > 0 && size.height > 0 => {
-                win_w = size.width;
-                win_h = size.height;
-                gpu.resize(win_w, win_h);
-                window.request_redraw();
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::ScaleFactorChanged { scale_factor, .. },
-                ..
-            } => {
-                agg_gui::set_device_scale(scale_factor);
-                window.request_redraw();
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } => {
-                cursor_x = position.x;
-                cursor_y = position.y;
-                app.on_mouse_move(cursor_x, cursor_y);
-                winit_adapter::apply_cursor(&window, agg_gui::current_cursor_icon());
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::ModifiersChanged(mods_state),
-                ..
-            } => {
-                current_mods = winit_adapter::modifiers(mods_state.state());
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::MouseInput { state, button, .. },
-                ..
-            } => {
-                let btn = winit_adapter::mouse_button(button);
-                match state {
-                    ElementState::Pressed => {
-                        app.on_mouse_down(cursor_x, cursor_y, btn, current_mods);
-                    }
-                    ElementState::Released => {
-                        app.on_mouse_up(cursor_x, cursor_y, btn, current_mods);
-                    }
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::MouseWheel { delta, .. },
-                ..
-            } => {
-                let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(dx, dy) => (dx as f64, dy as f64),
-                    // Trackpads report pixel deltas; ~40 px per wheel line
-                    // matches the browser-shell conversion in `web_shell`.
-                    MouseScrollDelta::PixelDelta(p) => (p.x / 40.0, p.y / 40.0),
-                };
-                app.on_mouse_wheel_xy_mods(cursor_x, cursor_y, dx, dy, current_mods);
-            }
-
-            Event::WindowEvent {
-                event:
-                    WindowEvent::KeyboardInput {
-                        event: key_event, ..
-                    },
-                ..
-            } => {
-                let Some(key) = winit_adapter::key_event(&key_event, current_mods) else {
-                    return;
-                };
-                match key_event.state {
-                    ElementState::Pressed => {
-                        app.on_key_down(key, current_mods);
-                    }
-                    ElementState::Released => {
-                        app.on_key_up(key, current_mods);
-                    }
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::RedrawRequested,
-                ..
-            } => {
-                let painted = paint_frame(
-                    &gpu,
-                    &window,
-                    &mut wgpu_ctx,
-                    &mut app,
-                    win_w,
-                    win_h,
-                    &mut on_frame,
-                    &mut layout_key,
-                    screenshot.as_ref().filter(|_| !screenshot_done),
-                    frames_painted,
-                );
-                if let Some((_, settle_frames)) = screenshot.as_ref() {
-                    if painted {
-                        frames_painted += 1;
-                        screenshot_last_paint = std::time::Instant::now();
-                        if should_capture(frames_painted, *settle_frames) {
-                            screenshot_done = true;
-                        }
-                    }
-                    if screenshot_done {
-                        elwt.exit();
-                    } else {
-                        // `paint_frame` returns false whenever the surface
-                        // will not hand out a texture (minimized, occluded,
-                        // `Lost`), and the capture cannot fire without a
-                        // painted frame — so time the wait out rather than
-                        // poll at full speed forever.
-                        let waiting = screenshot_last_paint.elapsed();
-                        if capture_exhausted(waiting) {
-                            eprintln!(
-                                "screenshot: gave up after {:.0}s without a presentable surface",
-                                waiting.as_secs_f64()
-                            );
-                            std::process::exit(1);
-                        }
-                    }
-                }
-            }
-
-            // A scheduled `WaitUntil` deadline fired. Belt-and-braces only:
-            // the scheduled channel is read non-destructively
-            // (`peek_next_draw_deadline`) and a due deadline surfaces through
-            // `wants_draw()` on the next `AboutToWait`, so correctness no
-            // longer depends on catching this event — it only trims latency.
-            Event::NewEvents(winit::event::StartCause::ResumeTimeReached { .. }) => {
-                window.request_redraw();
-            }
-
-            Event::AboutToWait => {
-                // App-requested fullscreen toggles (agg_gui::fullscreen).
-                if agg_gui::fullscreen::take_request() {
-                    let now_fullscreen = window.fullscreen().is_none();
-                    window.set_fullscreen(
-                        now_fullscreen.then_some(winit::window::Fullscreen::Borderless(None)),
-                    );
-                    agg_gui::fullscreen::set_active(now_fullscreen);
-                    window.request_redraw();
-                }
-                // `wants_draw()` covers due scheduled deadlines; otherwise
-                // re-arm `WaitUntil` from the non-destructive peek every idle
-                // iteration (idempotent — cannot lose the scheduled wake).
-                if screenshot.is_some() && !screenshot_done {
-                    // A pending deterministic capture needs the frame count
-                    // to advance on its own; `ControlFlow::Wait` would stall
-                    // forever with no user input.
-                    window.request_redraw();
-                    elwt.set_control_flow(ControlFlow::Poll);
-                } else if app.wants_draw() {
-                    window.request_redraw();
-                    elwt.set_control_flow(ControlFlow::Poll);
-                } else if let Some(t) = app.next_draw_deadline() {
-                    elwt.set_control_flow(ControlFlow::WaitUntil(t));
-                } else {
-                    elwt.set_control_flow(ControlFlow::Wait);
-                }
-            }
-
-            _ => {}
-        })
-        .expect("event loop");
-}
-
-/// Paint one frame. `capture` is `Some((path, settle_frames))` while a
-/// screenshot is still pending; the frame is written out when
-/// `frames_painted + 1` reaches the settle count. Returns whether a frame
-/// was actually painted (the surface can be unavailable).
-#[allow(clippy::too_many_arguments)]
-fn paint_frame(
-    gpu: &Gpu,
-    window: &Window,
-    ctx: &mut WgpuGfxCtx,
-    app: &mut App,
-    win_w: u32,
-    win_h: u32,
-    on_frame: &mut impl FnMut(),
-    layout_key: &mut Option<(u32, u32, u64, u64)>,
-    capture: Option<&(PathBuf, u32)>,
-    frames_painted: u32,
-) -> bool {
-    // A zero-sized (minimized) window has no presentable surface, and
-    // `Gpu::resize` refuses to configure one — same guard as there.
-    if win_w == 0 || win_h == 0 {
-        return false;
-    }
-    let Some(frame) = gpu.acquire_frame(|| window.request_redraw()) else {
-        return false;
-    };
-    let view = frame
-        .texture
-        .create_view(&wgpu::TextureViewDescriptor::default());
-
-    on_frame();
-
-    ctx.set_surface_texture(frame.texture.clone());
-    ctx.reset(win_w as f32, win_h as f32);
-    begin_frame(ctx, view);
-
-    // Skip layout when nothing that feeds it changed: same surface size,
-    // same DPI, same invalidation epoch.
-    let next_layout_key = (
-        win_w,
-        win_h,
-        agg_gui::device_scale().to_bits(),
-        agg_gui::animation::invalidation_epoch(),
-    );
-    if *layout_key != Some(next_layout_key) {
-        app.layout(Size::new(win_w as f64, win_h as f64));
-        *layout_key = Some(next_layout_key);
+    if let Some((path, settle_frames)) = config.screenshot {
+        shell_config = shell_config.with_screenshot(path, settle_frames);
     }
 
-    app.paint(ctx);
-    ctx.end_frame();
-
-    // Read-back must sit between `end_frame` (render submitted) and
-    // `present` (surface texture handed back to the compositor).
-    if let Some((path, settle_frames)) = capture {
-        if should_capture(frames_painted + 1, *settle_frames) {
-            let (rgba, w, h) = ctx.read_screenshot();
-            if let Err(e) = write_png(path, &rgba, w, h) {
-                frame.present();
-                eprintln!("screenshot: {e}");
-                std::process::exit(1);
-            }
-        }
+    // The old signature has no way to report a failure, and its callers are
+    // `fn main()`s that treated one as fatal — so preserve that behaviour here
+    // rather than silently painting nothing.
+    if let Err(err) =
+        agg_gui_shell::run(shell_config, move |_init| Ok((app, OnFrameHost(on_frame))))
+    {
+        eprintln!("native shell: {err}");
+        std::process::exit(1);
     }
-
-    frame.present();
-    true
 }
