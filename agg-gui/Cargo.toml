@@ -16,6 +16,10 @@ exclude = [
     "reference-egui-main/",
     "src/gl_renderer/lion.txt",
     "target/",
+    # README-only asset; crates.io rewrites relative README images to the
+    # repository URL, and dropping it keeps the upload under a flaky ~1.2MB
+    # network limit on the publish path.
+    "readme_hero.png",
 ]
 
 [dependencies]
