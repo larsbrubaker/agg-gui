@@ -4,28 +4,32 @@
 //! carries a *notch* count, not pixels: every consumer scales it itself
 //! ([`ScrollView`](crate::widgets::scroll_view) multiplies by
 //! [`PIXELS_PER_NOTCH`], text areas and tree views do the same, and zoom
-//! consumers read only the sign). Shells are therefore responsible for
-//! converting whatever their platform reports into notches, and this
-//! module is that conversion in one testable place — the native shells
-//! (`LineDelta` through, `PixelDelta / 40`) and the web shell
-//! (`WheelEvent.deltaMode`) had drifted apart, and a shim that forwarded
-//! raw pixels multiplied every scroll in the app by ~40-100×.
+//! consumers raise their per-notch factor to the power of the delta).
+//! Shells are therefore responsible for converting whatever their
+//! platform reports into notches, and this module is that conversion in
+//! one testable place — the native shells (`LineDelta` through,
+//! `PixelDelta / 40`) and the web shell (`WheelEvent.deltaMode`) had
+//! drifted apart, and a shim that forwarded raw pixels multiplied every
+//! scroll in the app by ~40-100×.
 //!
-//! # Precision deltas are accumulated, not forwarded fractionally
+//! # Precision deltas are forwarded fractionally
 //!
 //! A macOS trackpad (and a smooth-scrolling mouse) reports pixel deltas of
-//! 1-10 px per event, i.e. a *fraction* of a notch. Forwarding fractions
-//! is fine for consumers that scale by the magnitude but wrong for the
-//! ones that only read the sign — a zoom would take a full step per
-//! 2-pixel event. [`WheelNormalizer`] therefore accumulates sub-notch
-//! travel and emits only whole notches, keeping the remainder for the
-//! next event: nothing is dropped (40 px of finger travel always produces
-//! exactly one notch, which a `ScrollView` turns back into 40 px, so
-//! precision scrolling stays 1:1), and no consumer ever sees a fraction.
+//! 1-10 px per event, i.e. a *fraction* of a notch. Those fractions are
+//! passed straight through: 4 px of finger travel is 0.1 notch, which a
+//! `ScrollView` turns back into 4 px, so precision scrolling stays 1:1
+//! **and** continuous — no banking into 40 px jumps. A classic wheel still
+//! arrives as whole notches (one `LineDelta` line, or ~100 px per click
+//! in browsers that report wheels in pixels), so consumers that want a
+//! crisp per-click step get one; consumers must therefore scale by the
+//! delta's magnitude rather than reading only its sign, or a trackpad
+//! would take a full step per 2-pixel event. Every consumer in agg-gui
+//! does (scroll containers multiply, zooms use `step.powf(delta)`).
 //!
-//! The accumulator is per-axis and resets when the direction flips, so a
-//! reversal takes effect immediately instead of first burning the
-//! leftover of the previous direction.
+//! An earlier revision banked sub-notch travel and emitted only whole
+//! notches. That made trackpads stutter in 40 px steps on the web while
+//! the native shell — which never banked — was smooth; the two shells now
+//! agree, via [`to_notches`] on both.
 
 /// Pixels one wheel notch is worth. The scale
 /// [`ScrollView`](crate::widgets::scroll_view) scrolls by, and the
@@ -81,61 +85,26 @@ pub fn to_notches(delta: f64, mode: WheelDeltaMode) -> f64 {
     }
 }
 
-/// Per-axis sub-notch accumulator (see the module docs).
+/// Stateless per-event converter a shell keeps beside its wheel listener.
 ///
-/// One instance per input source; a shell keeps it beside its event
-/// listener. Sign convention is the caller's — the normalizer only
-/// changes units, so a shell that flips the browser's
-/// "positive = scroll down" into agg-gui's "positive = wheel forward"
-/// keeps doing that at its own call site.
+/// Sign convention is the caller's — the normalizer only changes units,
+/// so a shell that flips the browser's "positive = scroll down" into
+/// agg-gui's "positive = wheel forward" keeps doing that at its own call
+/// site. Kept as a type (rather than two calls to [`to_notches`]) so the
+/// shells have one obvious place to convert both axes.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct WheelNormalizer {
-    acc_x: f64,
-    acc_y: f64,
-}
+pub struct WheelNormalizer;
 
 impl WheelNormalizer {
     pub fn new() -> WheelNormalizer {
-        WheelNormalizer::default()
+        WheelNormalizer
     }
 
-    /// Convert one event's deltas to whole notches, carrying whatever
-    /// did not add up to one into the next call.
+    /// Convert one event's deltas to notches — fractional for precision
+    /// devices, whole for a classic wheel. Non-finite input becomes `0.0`.
     pub fn normalize(&mut self, delta_x: f64, delta_y: f64, mode: WheelDeltaMode) -> (f64, f64) {
-        let x = accumulate(&mut self.acc_x, to_notches(delta_x, mode));
-        let y = accumulate(&mut self.acc_y, to_notches(delta_y, mode));
-        (x, y)
+        (to_notches(delta_x, mode), to_notches(delta_y, mode))
     }
-
-    /// Forget any partial travel — for a shell that lost the pointer
-    /// (canvas blur, gesture cancel) and must not apply half a notch
-    /// from before to whatever comes next.
-    pub fn reset(&mut self) {
-        self.acc_x = 0.0;
-        self.acc_y = 0.0;
-    }
-}
-
-/// Slack allowed when deciding whether the banked travel has reached a
-/// whole notch. Ten 4-px events *are* 40 px, but ten binary `0.1`s fall a
-/// few ulps short of `1.0`; without this the tenth event of a steady
-/// trackpad scroll would silently bank instead of firing, and the notch
-/// would arrive one event late forever after.
-const NOTCH_EPSILON: f64 = 1e-9;
-
-/// Add `notches` to `acc` and take out the whole part, resetting first
-/// when the direction reverses.
-fn accumulate(acc: &mut f64, notches: f64) -> f64 {
-    if notches == 0.0 {
-        return 0.0;
-    }
-    if *acc != 0.0 && acc.signum() != notches.signum() {
-        *acc = 0.0;
-    }
-    *acc += notches;
-    let whole = (acc.abs() + NOTCH_EPSILON).trunc().copysign(*acc);
-    *acc -= whole;
-    whole
 }
 
 #[cfg(test)]
@@ -148,7 +117,7 @@ mod tests {
     fn one_notch_in_each_mode() {
         let mut n = WheelNormalizer::new();
         // Chrome/Edge/Safari: 100 CSS px per notch.
-        assert_eq!(n.normalize(0.0, 100.0, WheelDeltaMode::Pixel).1, 2.0);
+        assert_eq!(n.normalize(0.0, 100.0, WheelDeltaMode::Pixel).1, 2.5);
         // Firefox: 3 lines per notch.
         assert_eq!(n.normalize(0.0, 3.0, WheelDeltaMode::Line).1, 3.0);
         // A page device.
@@ -158,55 +127,38 @@ mod tests {
         );
     }
 
-    /// The precision case: 4 px events emit nothing until they add up,
-    /// and then exactly one notch — with the leftover carried, so no
-    /// travel is lost and 40 px of finger always means one notch.
+    /// The precision case: a 4 px trackpad event is a tenth of a notch
+    /// and is delivered as exactly that, every event, so a `ScrollView`
+    /// moves 4 px per event instead of 40 px every tenth event.
     #[test]
-    fn sub_notch_deltas_accumulate_instead_of_jumping_or_vanishing() {
+    fn sub_notch_deltas_pass_through_fractionally() {
         let mut n = WheelNormalizer::new();
-        for _ in 0..9 {
-            assert_eq!(
-                n.normalize(0.0, 4.0, WheelDeltaMode::Pixel).1,
-                0.0,
-                "a fraction of a notch must not reach a sign-reading consumer"
-            );
+        for _ in 0..10 {
+            assert_eq!(n.normalize(0.0, 4.0, WheelDeltaMode::Pixel).1, 0.1);
         }
-        assert_eq!(n.normalize(0.0, 4.0, WheelDeltaMode::Pixel).1, 1.0);
-
         // 400 px of travel is ten notches, however it is chopped up.
         let mut fine = WheelNormalizer::new();
         let total: f64 = (0..400)
             .map(|_| fine.normalize(0.0, 1.0, WheelDeltaMode::Pixel).1)
             .sum();
-        assert_eq!(total, 10.0);
+        assert!((total - 10.0).abs() < 1e-9, "{total}");
         let mut coarse = WheelNormalizer::new();
         assert_eq!(coarse.normalize(0.0, 400.0, WheelDeltaMode::Pixel).1, 10.0);
     }
 
-    /// Reversing direction answers at once rather than first spending the
-    /// notch fragment banked in the other direction.
+    /// No state: reversing direction answers at once, and the two axes
+    /// never influence each other.
     #[test]
-    fn a_direction_change_drops_the_partial_notch() {
+    fn direction_changes_and_axes_are_independent() {
         let mut n = WheelNormalizer::new();
-        assert_eq!(n.normalize(0.0, 30.0, WheelDeltaMode::Pixel).1, 0.0);
-        assert_eq!(n.normalize(0.0, -30.0, WheelDeltaMode::Pixel).1, 0.0);
-        // …and 40 more px the *new* way is a whole notch, not 10 px worth
-        // of catching up.
-        assert_eq!(n.normalize(0.0, -10.0, WheelDeltaMode::Pixel).1, -1.0);
-    }
-
-    /// The two axes bank separately — a diagonal trackpad swipe must not
-    /// let horizontal travel pay for a vertical notch.
-    #[test]
-    fn the_axes_accumulate_independently() {
-        let mut n = WheelNormalizer::new();
-        assert_eq!(n.normalize(30.0, 20.0, WheelDeltaMode::Pixel), (0.0, 0.0));
-        assert_eq!(n.normalize(10.0, 0.0, WheelDeltaMode::Pixel), (1.0, 0.0));
-        assert_eq!(n.normalize(0.0, 20.0, WheelDeltaMode::Pixel), (0.0, 1.0));
+        assert_eq!(n.normalize(0.0, 30.0, WheelDeltaMode::Pixel).1, 0.75);
+        assert_eq!(n.normalize(0.0, -30.0, WheelDeltaMode::Pixel).1, -0.75);
+        assert_eq!(n.normalize(30.0, 20.0, WheelDeltaMode::Pixel), (0.75, 0.5));
+        assert_eq!(n.normalize(10.0, 0.0, WheelDeltaMode::Pixel), (0.25, 0.0));
     }
 
     /// Nonsense in, nothing out: a `NaN` delta (seen from at least one
-    /// browser extension) must not poison the accumulator.
+    /// browser extension) becomes zero rather than propagating.
     #[test]
     fn non_finite_deltas_are_ignored() {
         let mut n = WheelNormalizer::new();
@@ -215,15 +167,6 @@ mod tests {
             (0.0, 0.0)
         );
         assert_eq!(n.normalize(0.0, 40.0, WheelDeltaMode::Pixel).1, 1.0);
-    }
-
-    /// `reset` throws the partial travel away.
-    #[test]
-    fn reset_forgets_partial_travel() {
-        let mut n = WheelNormalizer::new();
-        n.normalize(0.0, 30.0, WheelDeltaMode::Pixel);
-        n.reset();
-        assert_eq!(n.normalize(0.0, 30.0, WheelDeltaMode::Pixel).1, 0.0);
     }
 
     /// DOM deltaMode mapping, including the "anything else is pixels"

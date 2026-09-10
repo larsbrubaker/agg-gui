@@ -321,10 +321,9 @@ fn install_pointer_listeners() {
     }
     {
         let canvas_ref = canvas.clone();
-        // Sub-notch travel from a precision device (trackpad, smooth
-        // wheel) is banked here between events — see `agg_gui::wheel`.
-        // One accumulator per canvas, owned by the listener that feeds
-        // it (the closure is `FnMut`, so it can keep the state itself).
+        // DOM deltas → agg-gui notches, see `agg_gui::wheel`. Precision
+        // devices come through as fractional notches so scrolling and
+        // zooming track the fingers instead of stepping.
         let mut wheel = WheelNormalizer::new();
         add_canvas_listener(&canvas, "wheel", move |e: web_sys::WheelEvent| {
             e.prevent_default();
@@ -335,15 +334,16 @@ fn install_pointer_listeners() {
             // Browser deltaY is positive-scroll-DOWN; App expects positive =
             // wheel rotated forward (winit convention). The *units* — CSS
             // pixels, lines or pages, per `deltaMode` — are `agg_gui::wheel`'s
-            // business, and it hands back whole notches, which is what
-            // every consumer of `Event::MouseWheel` expects.
+            // business (whole notches for a wheel, fractions for a
+            // trackpad), which is what every consumer of
+            // `Event::MouseWheel` expects.
             let (dx, dy) = wheel.normalize(
                 -e.delta_x(),
                 -e.delta_y(),
                 WheelDeltaMode::from_dom(e.delta_mode()),
             );
             if dx == 0.0 && dy == 0.0 {
-                // Not yet a whole notch: nothing to deliver, and no
+                // Nothing to deliver (e.g. a non-finite delta), and no
                 // redraw to ask for.
                 return;
             }

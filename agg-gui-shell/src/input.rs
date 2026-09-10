@@ -5,13 +5,9 @@
 //! can't know about: wheel-delta conversion and the shift→horizontal remap,
 //! and raw touch forwarding. Both are pure enough to test without a window.
 
+use agg_gui::wheel::{to_notches, WheelDeltaMode};
 use agg_gui::{App, Modifiers};
 use winit::event::{MouseScrollDelta, Touch, TouchPhase};
-
-/// Pixel deltas (trackpads, precision wheels) per notional wheel line. Matches
-/// the browser-shell conversion in agg-gui's web shells, so a scroll feels the
-/// same on both.
-const PIXELS_PER_LINE: f64 = 40.0;
 
 /// Convert a winit wheel delta into agg-gui `(dx, dy)` wheel lines.
 ///
@@ -32,7 +28,13 @@ const PIXELS_PER_LINE: f64 = 40.0;
 pub(crate) fn wheel_delta(delta: MouseScrollDelta, shift: bool) -> (f64, f64) {
     let (mut dx, mut dy) = match delta {
         MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
-        MouseScrollDelta::PixelDelta(p) => (p.x / PIXELS_PER_LINE, p.y / PIXELS_PER_LINE),
+        // Trackpads / precision wheels: the same pixel → notch conversion
+        // the web shells use (`agg_gui::wheel`), forwarded fractionally so
+        // scrolling stays continuous.
+        MouseScrollDelta::PixelDelta(p) => (
+            to_notches(p.x, WheelDeltaMode::Pixel),
+            to_notches(p.y, WheelDeltaMode::Pixel),
+        ),
     };
     if shift && dx == 0.0 {
         dx = dy;

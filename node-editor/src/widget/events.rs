@@ -655,11 +655,10 @@ impl NodeEditor {
         // always a user view move, and always beats the tween.
         self.cancel_view_animation();
         let canvas_before = self.local_to_canvas(pos);
-        let factor = if delta_y > 0.0 {
-            ZOOM_STEP
-        } else {
-            1.0 / ZOOM_STEP
-        };
+        // One wheel notch (`delta_y == ±1`) is exactly one ZOOM_STEP; a
+        // trackpad's fractional notches zoom proportionally, so the view
+        // tracks the fingers instead of stepping 10 % per 2 px event.
+        let factor = ZOOM_STEP.powf(delta_y);
         let new_scale = (self.canvas_scale * factor).clamp(ZOOM_MIN, ZOOM_MAX);
         if (new_scale - self.canvas_scale).abs() < 1e-9 {
             // Zoom clamped — nothing visible changed, so don't
