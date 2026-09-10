@@ -147,6 +147,27 @@ fn test_scroll_view_wheel_direction_matches_system_convention() {
     assert!(v.get() > mid, "-y must scroll down; {mid} → {}", v.get());
 }
 
+/// Regression: a wheel delivered through `App` while the pointer is over a
+/// `ScrollView`'s *content* — a child that does not handle `MouseWheel` —
+/// must bubble up and scroll the view. Scrolling only when the pointer sat
+/// on the scrollbar is the failure mode this guards against.
+#[test]
+fn app_wheel_over_scroll_content_bubbles_to_scroll_view() {
+    let v = Rc::new(Cell::new(0.0));
+    let sv = ScrollView::new(Box::new(MoveConsumer::new())).with_offset_cell(Rc::clone(&v));
+    let mut app = App::new(Box::new(sv));
+    app.layout(Size::new(200.0, 200.0));
+    // Content is 300 tall in a 200 viewport, so there is 100 to scroll.
+    // Pointer at the middle of the content (well clear of the bar);
+    // negative delta_y = the user wants to see content BELOW.
+    app.on_mouse_wheel(60.0, 100.0, -1.0);
+    assert!(
+        v.get() > 0.0,
+        "wheel over scroll content must scroll the ScrollView; offset = {}",
+        v.get()
+    );
+}
+
 /// Regression for the panicking `children_mut()` stubs: a whole-tree walk must
 /// be able to traverse these leaves.
 #[test]
