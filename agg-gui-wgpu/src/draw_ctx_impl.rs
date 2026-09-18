@@ -152,6 +152,14 @@ impl DrawCtx for WgpuGfxCtx {
         self.state_stack.last_mut().unwrap().1 = None;
     }
 
+    fn clip_path(&mut self) {
+        self.clip_path_impl();
+    }
+
+    fn supports_clip_path(&self) -> bool {
+        true
+    }
+
     // ── Clear ─────────────────────────────────────────────────────────────────
 
     fn clear(&mut self, color: Color) {
@@ -382,6 +390,17 @@ impl DrawCtx for WgpuGfxCtx {
     }
 
     fn restore(&mut self) {
+        // A clip layer owns the state that was live when `clip_path()` ran, so
+        // a single-entry local stack means this restore ends the clip's scope:
+        // composite the clip layer(s) first, then do the normal restore.
+        while self.state_stack.len() == 1
+            && self
+                .layer_stack
+                .last()
+                .is_some_and(|l| l.clip_mask.is_some())
+        {
+            self.pop_layer_impl();
+        }
         if self.state_stack.len() > 1 {
             self.state_stack.pop();
             // Scissor is deferred; no GPU state to restore immediately.

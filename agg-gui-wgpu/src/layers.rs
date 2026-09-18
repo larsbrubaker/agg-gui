@@ -134,7 +134,11 @@ impl WgpuGfxCtx {
 impl WgpuGfxCtx {
     /// Allocate a fresh transient layer texture.  Used for `push_layer` (and
     /// transient retained-layer fallback).
-    fn alloc_layer_texture(&self, w: u32, h: u32) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
+    pub(crate) fn alloc_layer_texture(
+        &self,
+        w: u32,
+        h: u32,
+    ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("layer"),
             size: wgpu::Extent3d {
@@ -241,6 +245,8 @@ impl WgpuGfxCtx {
             retained_key,
             rounded_clip,
             parent_clip,
+            clip_mask: None,
+            clip_saved_path: None,
             // Starts false: nothing has been drawn into the fresh texture
             // yet, so it is entirely transparent. Callers opt in after
             // painting their opaque body.
@@ -261,12 +267,23 @@ impl WgpuGfxCtx {
     }
 
     pub(crate) fn pop_layer_impl(&mut self) {
-        let Some(layer) = self.layer_stack.pop() else {
+        let Some(mut layer) = self.layer_stack.pop() else {
             return;
         };
         // Restore parent draw state BEFORE emitting the composite, so the
         // composite scissor is the parent's.
         self.restore_draw_state(layer.saved.clone());
+
+        // Clip layer: composite through the clip path's mesh (see layer_mask.rs).
+        if let Some(mask) = layer.clip_mask.take() {
+            // `restore_draw_state` cleared the path; canvas `clip()` keeps it,
+            // so put back the path that was current at `clip_path()` time.
+            if let Some(path) = layer.clip_saved_path.take() {
+                self.path = path;
+            }
+            self.push_masked_pop_command(layer, mask);
+            return;
+        }
 
         // Persist rounded clip back into retained store, if applicable.
         if let Some(key) = layer.retained_key {

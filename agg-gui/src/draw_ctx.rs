@@ -14,6 +14,10 @@
 
 use std::sync::Arc;
 
+/// Free-function bodies for this trait's default methods (arc lowering,
+/// pixel snapping, the corner-quad and LCD-plane fallbacks).
+pub mod defaults;
+
 use crate::color::Color;
 use crate::geometry::Rect;
 use crate::text::{Font, TextMetrics};
@@ -33,31 +37,10 @@ pub use crate::paints::{
 // GL paint hook
 // ---------------------------------------------------------------------------
 
-/// Trait for widgets that want to render 3-D (or other GPU) content inline
-/// during the widget paint pass.
-///
-/// `DrawCtx::gl_paint` calls this with an opaque `gl` handle — implementations
-/// downcast it to `glow::Context` (or whatever GL type the platform provides).
-/// The software `GfxCtx` never calls `paint`; see [`DrawCtx::gl_paint`].
-pub trait GlPaint {
-    /// Execute GPU draw calls for the widget's 3-D content.
-    ///
-    /// `gl` — opaque platform GL context; downcast via `std::any::Any`.
-    /// `screen_rect` — Y-up screen-space rect for this widget (for viewport/scissor).
-    /// `full_w`, `full_h` — full viewport dimensions (for restoring after).
-    /// `parent_clip` — current framework scissor rect `[x, y, w, h]` in GL/Y-up
-    ///   pixels, or `None` if no clip is active.  Implementations **must intersect**
-    ///   any scissor they set with this rect so that parent widget clips (e.g. a
-    ///   collapsed window) correctly hide GPU-rendered content.
-    fn gl_paint(
-        &mut self,
-        gl: &dyn std::any::Any,
-        screen_rect: Rect,
-        full_w: i32,
-        full_h: i32,
-        parent_clip: Option<[i32; 4]>,
-    );
-}
+// The `GlPaint` trait itself lives in `draw_ctx/gl_paint.rs`; re-exported here
+// so `agg_gui::draw_ctx::GlPaint` keeps resolving.
+mod gl_paint;
+pub use gl_paint::GlPaint;
 
 /// Unified 2-D drawing context.
 ///
@@ -123,6 +106,26 @@ pub trait DrawCtx {
     fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64);
     fn reset_clip(&mut self);
 
+    /// Intersect the clip with the current path (canvas-2D `clip()`), using
+    /// the current fill rule.
+    ///
+    /// Everything drawn afterwards is masked by the path, with anti-aliased
+    /// edges, until the [`DrawCtx::restore`] that matches the
+    /// [`DrawCtx::save`] preceding this call.  Nests: a `clip_path` inside an
+    /// already-clipped region intersects with it.
+    ///
+    /// **The default is a no-op: drawing is NOT clipped at all.**  There is no
+    /// bounding-box fallback — a backend that has not implemented path
+    /// clipping simply ignores the call, so callers that need to know must ask
+    /// [`DrawCtx::supports_clip_path`] and choose their own fallback.
+    fn clip_path(&mut self) {}
+
+    /// True when [`DrawCtx::clip_path`] actually masks by the current path.
+    /// `false` means the call is a no-op on this backend.
+    fn supports_clip_path(&self) -> bool {
+        false
+    }
+
     // ── Clear ─────────────────────────────────────────────────────────────────
 
     /// Fill the entire render target with `color`, ignoring the current clip.
@@ -139,6 +142,51 @@ pub trait DrawCtx {
 
     /// Add a full circle contour to the current path.
     fn circle(&mut self, cx: f64, cy: f64, r: f64);
+
+    /// Append an elliptical arc to the current path, mirroring canvas-2D
+    /// `ellipse(cx, cy, rx, ry, rotation, start_angle, end_angle, ccw)`.
+    ///
+    /// The arc starts with a `move_to` at the start point (callers place it
+    /// after `begin_path`, as with [`DrawCtx::circle`]).  Angles are measured
+    /// from the +x axis of the ellipse's own — i.e. `rotation`-rotated —
+    /// frame.  With `ccw == false` the arc sweeps towards increasing angle,
+    /// with `ccw == true` towards decreasing angle.
+    ///
+    /// A **full turn** — the whole ellipse, with the contour closed — is drawn
+    /// only when the sweep covers a revolution *in the requested direction*:
+    /// `!ccw && end_angle - start_angle >= 2π`, or
+    /// `ccw && start_angle - end_angle >= 2π`.  Any other sweep is normalised
+    /// into `[0, 2π)` (`!ccw`) or `(-2π, 0]` (`ccw`), matching the canvas-2D
+    /// spec: `ellipse(.., 0.0, -2π, false)` is an empty arc, not a full
+    /// ellipse.
+    ///
+    /// Implemented on top of [`DrawCtx::cubic_to`] with at most one Bézier
+    /// segment per quarter turn (see [`defaults::ellipse_ops`]), so every
+    /// backend gets it for free; backends with a native primitive may
+    /// override it.
+    #[allow(clippy::too_many_arguments)]
+    fn ellipse(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+        rotation: f64,
+        start_angle: f64,
+        end_angle: f64,
+        ccw: bool,
+    ) {
+        use defaults::EllipseOp;
+        for op in defaults::ellipse_ops(cx, cy, rx, ry, rotation, start_angle, end_angle, ccw) {
+            match op {
+                EllipseOp::MoveTo(x, y) => self.move_to(x, y),
+                EllipseOp::CubicTo(c1x, c1y, c2x, c2y, x, y) => {
+                    self.cubic_to(c1x, c1y, c2x, c2y, x, y)
+                }
+                EllipseOp::ClosePath => self.close_path(),
+            }
+        }
+    }
 
     /// Add an axis-aligned rectangle contour to the current path.
     fn rect(&mut self, x: f64, y: f64, w: f64, h: f64);
@@ -267,10 +315,7 @@ pub trait DrawCtx {
     /// isn't well defined, and forcing a snap would visibly jitter rotated
     /// content).
     fn snap_to_pixel(&mut self) {
-        let t = self.transform();
-        let fx = t.tx - t.tx.floor();
-        let fy = t.ty - t.ty.floor();
-        if fx != 0.0 || fy != 0.0 {
+        if let Some((fx, fy)) = defaults::pixel_snap_offset(&self.transform()) {
             self.translate(-fx, -fy);
         }
     }
@@ -523,20 +568,8 @@ pub trait DrawCtx {
     ) {
         // Default: bounding-rect fallback. The wgpu backend overrides
         // with a real 4-corner textured-quad draw.
-        let (min_x, min_y, max_x, max_y) = corners
-            .iter()
-            .fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |a, c| {
-                (a.0.min(c.0), a.1.min(c.1), a.2.max(c.0), a.3.max(c.1))
-            });
-        self.draw_image_rgba_arc(
-            data,
-            img_w,
-            img_h,
-            min_x,
-            min_y,
-            (max_x - min_x).max(0.0),
-            (max_y - min_y).max(0.0),
-        );
+        let (x, y, w, h) = defaults::corners_bounding_rect(corners);
+        self.draw_image_rgba_arc(data, img_w, img_h, x, y, w, h);
     }
 
     // ── LCD backbuffer blit ───────────────────────────────────────────────────
@@ -591,28 +624,11 @@ pub trait DrawCtx {
         dst_h: f64,
     ) {
         let _ = content_version; // CPU collapse path is stateless; version unused.
-                                 // Collapse to straight-alpha RGBA8 on the fly through the SAME shared
-                                 // per-pixel rule `LcdBuffer::to_rgba8_top_down_collapsed` uses — only
-                                 // the row order differs (this pair is already top-down).  Keeping the
-                                 // math in one place is deliberate: this site kept an independent `max`
-                                 // collapse after the other was fixed, which is how the "LCD text is
-                                 // bolder" bug stayed alive on the nested-backbuffer path.
-        let w_u = w as usize;
-        let h_u = h as usize;
-        if color.len() < w_u * h_u * 3 || alpha.len() < w_u * h_u * 3 {
-            return;
+                                 // Collapse to straight-alpha RGBA8 on the fly (see
+                                 // `defaults::collapse_lcd_planes`); the row order already matches.
+        if let Some(rgba) = defaults::collapse_lcd_planes(color, alpha, w, h) {
+            self.draw_image_rgba(&rgba, w, h, dst_x, dst_y, dst_w, dst_h);
         }
-        let mut rgba = vec![0u8; w_u * h_u * 4];
-        for i in 0..(w_u * h_u) {
-            let ci = i * 3;
-            let di = i * 4;
-            let px = crate::lcd_coverage::collapse_lcd_pixel(
-                [color[ci], color[ci + 1], color[ci + 2]],
-                [alpha[ci], alpha[ci + 1], alpha[ci + 2]],
-            );
-            rgba[di..di + 4].copy_from_slice(&px);
-        }
-        self.draw_image_rgba(&rgba, w, h, dst_x, dst_y, dst_w, dst_h);
     }
 
     // ── Screenshot capture (GPU-direct path) ──────────────────────────────────

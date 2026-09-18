@@ -37,6 +37,7 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
 mod backbuffer_scale;
 mod caret_deadline;
+mod clip_path_software;
 mod color_clickaway;
 mod color_dialog_overlay;
 mod color_wheel_picker;
@@ -46,6 +47,7 @@ mod default_action;
 /// the framebuffer level.
 mod draw_report;
 mod drawing;
+mod ellipse_path;
 mod flex_gap;
 mod focus;
 mod inspector_hover;

@@ -150,6 +150,19 @@ pub(crate) enum Prepared {
         bg1: wgpu::BindGroup,
         parent_clip: Option<[i32; 4]>,
     },
+    /// End clip-layer rendering and composite onto the parent through the
+    /// tessellated clip path (see `crate::layer_mask`).
+    PopLayerMasked {
+        _texture: Arc<wgpu::Texture>,
+        _view: wgpu::TextureView,
+        vb: PreparedSlice,
+        ib: PreparedSlice,
+        /// 0 for an empty clip — nothing is drawn.
+        index_count: u32,
+        bg0: wgpu::BindGroup,
+        bg1: wgpu::BindGroup,
+        parent_clip: Option<[i32; 4]>,
+    },
     /// Composite a retained layer onto the current target — no layer-stack
     /// change.
     CompositeLayer {
@@ -269,12 +282,16 @@ fn execute_prepared<'a>(
     // After a PopLayer we must emit a composite quad at the start of the parent's
     // resumed pass — captured here between the closed layer pass and the reopened
     // parent pass.  The references point into `prepared`.
-    let mut pending_composite: Option<(
-        &'a PreparedSlice,
-        &'a wgpu::BindGroup,
-        &'a wgpu::BindGroup,
+    // `indexed` is `Some((index_buffer, index_count))` for a masked clip-layer
+    // composite (a mesh through the clip path) and `None` for the plain quad.
+    type PendingComposite<'p> = (
+        &'p PreparedSlice,
+        Option<(&'p PreparedSlice, u32)>,
+        &'p wgpu::BindGroup,
+        &'p wgpu::BindGroup,
         Option<[i32; 4]>,
-    )> = None;
+    );
+    let mut pending_composite: Option<PendingComposite<'a>> = None;
 
     let mut i = 0usize;
 
@@ -291,13 +308,27 @@ fn execute_prepared<'a>(
             // start of this resumed parent pass — clipped to the scissor that
             // was active in the parent when the layer was pushed, so the blit
             // can't spill outside the parent's clip (e.g. over a title bar).
-            if let Some((vb, bg0, bg1, parent_clip)) = pending_composite.take() {
+            if let Some((vb, indexed, bg0, bg1, parent_clip)) = pending_composite.take() {
                 if apply_clip(&mut pass, parent_clip, target_vp) {
-                    pass.set_pipeline(&pipelines.layer_pipeline);
-                    pass.set_bind_group(0, bg0, &[]);
-                    pass.set_bind_group(1, bg1, &[]);
-                    pass.set_vertex_buffer(0, vb.wgpu_slice());
-                    pass.draw(0..6, 0..1);
+                    match indexed {
+                        None => {
+                            pass.set_pipeline(&pipelines.layer_pipeline);
+                            pass.set_bind_group(0, bg0, &[]);
+                            pass.set_bind_group(1, bg1, &[]);
+                            pass.set_vertex_buffer(0, vb.wgpu_slice());
+                            pass.draw(0..6, 0..1);
+                        }
+                        Some((ib, index_count)) if index_count > 0 => {
+                            pass.set_pipeline(&pipelines.layer_mesh_pipeline);
+                            pass.set_bind_group(0, bg0, &[]);
+                            pass.set_bind_group(1, bg1, &[]);
+                            pass.set_vertex_buffer(0, vb.wgpu_slice());
+                            pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..index_count, 0, 0..1);
+                        }
+                        // Empty clip — nothing to draw.
+                        Some(_) => {}
+                    }
                 }
             }
 
@@ -308,6 +339,7 @@ fn execute_prepared<'a>(
                 match &prepared[i] {
                     Prepared::PushLayer { .. }
                     | Prepared::PopLayer { .. }
+                    | Prepared::PopLayerMasked { .. }
                     | Prepared::Custom { .. } => break,
                     other => {
                         execute_one(&mut pass, pipelines, other, target_vp);
@@ -337,7 +369,21 @@ fn execute_prepared<'a>(
                     ..
                 } => {
                     target_stack.pop();
-                    pending_composite = Some((vb, bg0, bg1, *parent_clip));
+                    pending_composite = Some((vb, None, bg0, bg1, *parent_clip));
+                    i += 1;
+                }
+                Prepared::PopLayerMasked {
+                    vb,
+                    ib,
+                    index_count,
+                    bg0,
+                    bg1,
+                    parent_clip,
+                    ..
+                } => {
+                    target_stack.pop();
+                    pending_composite =
+                        Some((vb, Some((ib, *index_count)), bg0, bg1, *parent_clip));
                     i += 1;
                 }
                 Prepared::Custom {
@@ -545,7 +591,10 @@ fn execute_one(
             pass.draw(0..6, 0..1);
         }
         // Pass-boundary commands are handled in the outer driver, not here.
-        Prepared::PushLayer { .. } | Prepared::PopLayer { .. } | Prepared::Custom { .. } => {}
+        Prepared::PushLayer { .. }
+        | Prepared::PopLayer { .. }
+        | Prepared::PopLayerMasked { .. }
+        | Prepared::Custom { .. } => {}
     }
 }
 

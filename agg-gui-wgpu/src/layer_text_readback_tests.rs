@@ -57,17 +57,17 @@ pub(crate) fn try_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
 
 /// Offscreen render target + CPU readback.  Width is chosen a multiple of 64 so
 /// `bytes_per_row = w*4` is already 256-aligned (no padding math needed).
-struct Target {
+pub(crate) struct Target {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     texture: wgpu::Texture,
-    view: wgpu::TextureView,
+    pub(crate) view: wgpu::TextureView,
     w: u32,
     h: u32,
 }
 
 impl Target {
-    fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, w: u32, h: u32) -> Self {
+    pub(crate) fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, w: u32, h: u32) -> Self {
         assert_eq!(
             (w * 4) % 256,
             0,
@@ -99,7 +99,7 @@ impl Target {
     }
 
     /// Copy the rendered target back to a top-row-first RGBA8 `Vec`.
-    fn read(&self) -> Vec<u8> {
+    pub(crate) fn read(&self) -> Vec<u8> {
         let bpr = self.w * 4;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback-buf"),
@@ -147,7 +147,7 @@ impl Target {
 }
 
 /// Fetch pixel `(x, y)` — the readback is top-row-first (y=0 is the visual top).
-fn px(data: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
+pub(crate) fn px(data: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * w + x) * 4) as usize;
     [data[i], data[i + 1], data[i + 2], data[i + 3]]
 }

@@ -15,6 +15,7 @@ use agg_rust::arc::Arc as AggArc;
 use agg_rust::basics::FillingRule;
 use agg_rust::basics::VertexSource;
 use agg_rust::basics::PATH_FLAGS_NONE;
+use agg_rust::bounding_rect::bounding_rect_single;
 use agg_rust::comp_op::{CompOp, PixfmtRgba32CompOp};
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
@@ -55,6 +56,16 @@ struct LayerEntry {
     origin_y: f64,
     /// Alpha multiplier applied when the layer is composited back.
     alpha: f64,
+    /// When `Some`, this is a **clip layer** created by `clip_path`: an 8-bit
+    /// coverage mask the size of `fb` that is multiplied into the layer's
+    /// alpha just before compositing, producing an anti-aliased path clip.
+    /// Clip layers are popped implicitly by the `restore()` matching the
+    /// `save()` that preceded the `clip_path()` call.
+    clip_mask: Option<Vec<u8>>,
+    /// For a clip layer, the current path as it was when `clip_path()` ran; it
+    /// is put back when the layer is popped so the caller can stroke or re-fill
+    /// the outline it clipped with.
+    clip_saved_path: Option<PathStorage>,
 }
 
 // Re-export so callers don't need to import agg_rust directly.
@@ -164,7 +175,24 @@ impl<'a> GfxCtx<'a> {
         self.state_stack.push(self.state.clone());
     }
 
+    /// Pop the graphics state pushed by the matching `save()`.
+    ///
+    /// Any clip layers opened by `clip_path()` since that `save()` are
+    /// composited (and their masks applied) first — a clip layer's lifetime
+    /// ends at the `restore()` matching the `save()` that preceded it, which
+    /// is exactly canvas-2D `clip()` semantics.
     pub fn restore(&mut self) {
+        // A clip layer took ownership of the state stack at push time, so an
+        // empty local stack means this restore would pop past the state that
+        // was live when `clip_path()` ran.
+        while self.state_stack.is_empty()
+            && self
+                .layer_stack
+                .last()
+                .is_some_and(|l| l.clip_mask.is_some())
+        {
+            self.pop_layer();
+        }
         if let Some(state) = self.state_stack.pop() {
             self.state = state;
         }

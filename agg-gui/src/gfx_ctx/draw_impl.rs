@@ -313,6 +313,12 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn reset_clip(&mut self) {
         self.reset_clip()
     }
+    fn clip_path(&mut self) {
+        self.clip_path()
+    }
+    fn supports_clip_path(&self) -> bool {
+        true
+    }
     fn clear(&mut self, c: crate::color::Color) {
         self.clear(c)
     }

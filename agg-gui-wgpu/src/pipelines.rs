@@ -194,6 +194,10 @@ pub struct WgpuPipelines {
 
     // ── Layer composite (SDF rounded-corner mask in fragment shader) ──────────
     pub layer_pipeline: wgpu::RenderPipeline,
+    /// Masked variant of `layer_pipeline`: composites a clip layer through the
+    /// tessellated clip path (`pos2 + uv2 + coverage`).  Built in
+    /// `crate::layer_mask`, which also owns its shader.
+    pub layer_mesh_pipeline: wgpu::RenderPipeline,
     pub layer_bgl0: wgpu::BindGroupLayout,
     pub layer_bgl1: wgpu::BindGroupLayout,
 
@@ -460,6 +464,14 @@ impl WgpuPipelines {
             wgpu::ColorWrites::ALL,
             sample_count,
         );
+        let layer_mesh_pipeline = crate::layer_mask::build_layer_mesh_pipeline(
+            device,
+            &layer_bgl0,
+            &layer_bgl1,
+            surface_format,
+            BLEND_PREMUL,
+            sample_count,
+        );
         let lcd_r = build_pipeline(
             device,
             "lcd_r",
@@ -581,6 +593,7 @@ impl WgpuPipelines {
             tex_downsample_3x_pipeline,
             tex_downsample_4x_pipeline,
             layer_pipeline,
+            layer_mesh_pipeline,
             layer_bgl0,
             layer_bgl1,
             lcd_r,

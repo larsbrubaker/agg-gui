@@ -478,6 +478,60 @@ pub(crate) fn prepare_all(
                 });
             }
 
+            DrawCommand::PopLayerMasked {
+                texture,
+                view,
+                layer_w,
+                layer_h,
+                alpha,
+                verts,
+                indices,
+                parent_clip,
+            } => {
+                size_stack.pop();
+                let parent_vp = *size_stack.last().unwrap_or(&viewport);
+                let u = LayerUniforms {
+                    resolution: [parent_vp.0, parent_vp.1],
+                    alpha: *alpha,
+                    mask_enabled: 0,
+                    layer_size: [*layer_w as f32, *layer_h as f32],
+                    mask_radius: 0.0,
+                    _pad0: 0.0,
+                    mask_rect: [0.0; 4],
+                };
+                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u));
+                let bg0 = mk_uniform_bg(device, &pipelines.layer_bgl0, &ub);
+                let bg1 = layer_texture_bg(
+                    device,
+                    &pipelines.layer_bgl1,
+                    view,
+                    &pipelines.linear_sampler,
+                );
+                // An empty clip has no triangles: the arena still needs a
+                // non-zero slice, so fall back to a degenerate entry and an
+                // index count of 0 (nothing is drawn).
+                let empty_v = [0.0f32; 5];
+                let empty_i = [0u32; 3];
+                let vsrc: &[f32] = if verts.is_empty() { &empty_v } else { verts };
+                let isrc: &[u32] = if indices.is_empty() {
+                    &empty_i
+                } else {
+                    indices
+                };
+                let vb = alloc_vertex(device, queue, arenas, bytemuck::cast_slice(vsrc));
+                let ib = alloc_index(device, queue, arenas, bytemuck::cast_slice(isrc));
+                out.push(Prepared::PopLayerMasked {
+                    _texture: Arc::clone(texture),
+                    _view: view.clone(),
+                    vb,
+                    ib,
+                    index_count: indices.len() as u32,
+                    bg0,
+                    bg1,
+                    parent_clip: *parent_clip,
+                });
+            }
+
             DrawCommand::CompositeLayer {
                 texture,
                 view,

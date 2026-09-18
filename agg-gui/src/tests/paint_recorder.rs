@@ -32,6 +32,19 @@ pub(crate) enum PathKind {
     RoundedRect,
 }
 
+/// One recorded path-building call, with its coordinates.
+///
+/// Used by tests that need to inspect the geometry a `DrawCtx` default
+/// implementation emits (e.g. `DrawCtx::ellipse` lowering to `cubic_to`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PathOp {
+    MoveTo(f64, f64),
+    LineTo(f64, f64),
+    /// `(cx1, cy1, cx2, cy2, x, y)`
+    CubicTo(f64, f64, f64, f64, f64, f64),
+    ClosePath,
+}
+
 /// One recorded `fill()` or `stroke()` call.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PaintOp {
@@ -47,6 +60,8 @@ pub(crate) struct PaintRecorder {
     last_kind: PathKind,
     pub fills: Vec<PaintOp>,
     pub strokes: Vec<PaintOp>,
+    /// Path-building calls in order, with coordinates.
+    pub path_ops: Vec<PathOp>,
 }
 
 impl PaintRecorder {
@@ -59,6 +74,7 @@ impl PaintRecorder {
             last_kind: PathKind::Empty,
             fills: Vec::new(),
             strokes: Vec::new(),
+            path_ops: Vec::new(),
         }
     }
 
@@ -97,15 +113,20 @@ impl DrawCtx for PaintRecorder {
     fn clear(&mut self, _color: Color) {}
     fn begin_path(&mut self) {
         self.last_kind = PathKind::Empty;
+        self.path_ops.clear();
     }
-    fn move_to(&mut self, _x: f64, _y: f64) {
+    fn move_to(&mut self, x: f64, y: f64) {
         self.last_kind = PathKind::Freeform;
+        self.path_ops.push(PathOp::MoveTo(x, y));
     }
-    fn line_to(&mut self, _x: f64, _y: f64) {
+    fn line_to(&mut self, x: f64, y: f64) {
         self.last_kind = PathKind::Freeform;
+        self.path_ops.push(PathOp::LineTo(x, y));
     }
-    fn cubic_to(&mut self, _cx1: f64, _cy1: f64, _cx2: f64, _cy2: f64, _x: f64, _y: f64) {
+    fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64) {
         self.last_kind = PathKind::Freeform;
+        self.path_ops
+            .push(PathOp::CubicTo(cx1, cy1, cx2, cy2, x, y));
     }
     fn quad_to(&mut self, _cx: f64, _cy: f64, _x: f64, _y: f64) {
         self.last_kind = PathKind::Freeform;
@@ -122,7 +143,9 @@ impl DrawCtx for PaintRecorder {
     fn rounded_rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _r: f64) {
         self.last_kind = PathKind::RoundedRect;
     }
-    fn close_path(&mut self) {}
+    fn close_path(&mut self) {
+        self.path_ops.push(PathOp::ClosePath);
+    }
     fn fill(&mut self) {
         self.fills.push(PaintOp {
             color: self.fill_color,

@@ -127,6 +127,23 @@ pub(crate) enum DrawCommand {
         /// content paints over sibling chrome (e.g. a window title bar).
         parent_clip: Option<[i32; 4]>,
     },
+    /// Composite the topmost **clip** layer into its parent through the
+    /// tessellated clip path (see `layer_mask.rs`) and resume the parent
+    /// render target.  Same pass-boundary semantics as `PopLayer`; the only
+    /// difference is that the composite geometry is a coverage-carrying mesh
+    /// instead of a quad.
+    PopLayerMasked {
+        texture: Arc<wgpu::Texture>,
+        view: wgpu::TextureView,
+        layer_w: u32,
+        layer_h: u32,
+        alpha: f32,
+        /// Interleaved `(x, y, u, v, coverage)` in the parent's coordinates.
+        verts: Vec<f32>,
+        indices: Vec<u32>,
+        /// Scissor active in the PARENT at `clip_path` time.
+        parent_clip: Option<[i32; 4]>,
+    },
     /// Composite a previously-retained layer onto the current render target
     /// without entering it as a draw target.  Used by `composite_retained_layer`.
     CompositeLayer {

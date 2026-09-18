@@ -109,6 +109,7 @@ mod end_frame;
 mod end_frame_prepare;
 mod gradient;
 mod image_blit;
+mod layer_mask;
 mod layers;
 pub mod pipelines;
 mod primitives;
@@ -120,6 +121,8 @@ pub use screenshot_scaled::RectInPixels;
 mod shaders;
 mod text_render;
 
+#[cfg(test)]
+mod clip_path_readback_tests;
 #[cfg(test)]
 mod layer_text_readback_tests;
 #[cfg(test)]
@@ -252,6 +255,15 @@ pub(crate) struct WgpuLayerEntry {
     /// region, destination alpha is already 1 where glyphs land and
     /// subpixel geometry is exactly as valid as against the backbuffer.
     pub(crate) opaque_backdrop: bool,
+    /// `Some` when this is a **clip layer** created by `DrawCtx::clip_path`:
+    /// the tessellated clip path (parent-space positions + per-vertex
+    /// coverage) that composites the layer back through the path instead of
+    /// through a plain quad.  See `layer_mask.rs`.
+    pub(crate) clip_mask: Option<crate::layer_mask::ClipMaskMesh>,
+    /// For a clip layer, the current path as it was when `clip_path()` ran.
+    /// Canvas `clip()` leaves the path alone, so it is restored on pop (after
+    /// `restore_draw_state`, which resets `path`).
+    pub(crate) clip_saved_path: Option<PathStorage>,
 }
 
 /// A retained layer that persists across frames (keyed by `u64` handle).
