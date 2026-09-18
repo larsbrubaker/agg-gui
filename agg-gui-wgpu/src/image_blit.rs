@@ -291,13 +291,20 @@ impl WgpuGfxCtx {
             }
         };
 
-        let use_nearest = !should_use_mipmaps(img_w, img_h);
+        // Always LINEAR, regardless of image size.  Unlike the axis-aligned
+        // `draw_image_rgba_arc` blits (pixel-aligned Label backbuffers that
+        // want point-sampled crispness), a corner quad is arbitrarily
+        // rotated / scaled / perspective-projected, so destination pixels
+        // almost never land on texel centres — nearest sampling there gives
+        // jagged, shimmering edges.  The linear sampler is valid for these
+        // textures even without a mip chain: `mipmap_filter: Linear` just
+        // clamps to the single available level.
         let alpha = self.global_alpha as f32;
         self.commands.push(DrawCommand::Textured {
             verts,
             texture,
             view,
-            nearest: use_nearest,
+            nearest: false,
             tint: [1.0, 1.0, 1.0, alpha],
             clip: self.current_clip(),
         });

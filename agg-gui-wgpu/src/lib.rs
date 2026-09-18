@@ -124,6 +124,8 @@ mod text_render;
 #[cfg(test)]
 mod clip_path_readback_tests;
 #[cfg(test)]
+mod image_blit_readback_tests;
+#[cfg(test)]
 mod layer_text_readback_tests;
 #[cfg(test)]
 mod lcd_arc_cache_tests;
