@@ -9,8 +9,24 @@
 //! settings).
 //!
 //! The old entry points are kept so external path-dependency consumers keep
-//! compiling. Behaviour is unchanged except that the app is now built once
-//! the GPU is up (like the native shell) instead of before it. New code
+//! compiling. Behaviour changes a caller can observe:
+//!
+//! - `build_app` runs once the GPU is up (like the native shell), not
+//!   synchronously inside `start`; until then [`with_app`] is a no-op.
+//! - The `on_frame` hook runs on every animation frame only once the app is
+//!   built (it used to run from the very first frame).
+//! - Start-up failures are logged with `console.error` and replace the canvas
+//!   with a readable error panel (previously a blank canvas); a missing canvas
+//!   is still only logged.
+//! - The first frame always paints, and reactive mode also wakes for
+//!   scheduled deadlines (`App::next_draw_deadline` — cursor blink, delayed
+//!   tooltips); mouse moves still only paint through `App::wants_draw()`.
+//! - Pointer-leave clears hover; the canvas backing store is fitted to the
+//!   device's texture limit (scale reduced uniformly, pointer mapping kept
+//!   consistent) instead of overflowing it; a lost GPU device is rebuilt
+//!   (with backoff), a lost WebGL2 context shows the error panel.
+//!
+//! New code
 //! should call [`agg_gui_web_shell::start`] directly, which gives it a real
 //! error type, a backend choice, and the [`agg_gui_web_shell::WebShellHost`]
 //! hooks:

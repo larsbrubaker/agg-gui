@@ -5,7 +5,9 @@
 //! Owns the GPU-side state ([`Painter`]) in its own thread-local; the app and
 //! host live in [`super`]'s cells. Order per tick mirrors the native shell's
 //! loop: size → sensors/fullscreen → `on_tick` → decide → (`on_frame` →
-//! `paint` → `end_frame` → `after_paint` → present) → `on_idle`.
+//! `paint` → `end_frame` → `after_paint` → present → `after_present`) →
+//! `on_idle`. Every decision is delegated to a platform-neutral module
+//! (`dom_math::fit_backing`, `policy`, `recovery`) that is unit tested.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -18,11 +20,13 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
 use super::gpu::{Acquire, WebGpu};
-use super::{mark_dirty, INPUT_SINCE_FRAME, POLICY};
-use super::{platform, sensors, APP, BUTTONS_HELD, CANVAS, CONFIG, DIRTY, FIRST_PAINT, HOST};
-use crate::dom_math::{backing_size, sanitize_dpr};
+use super::{lifecycle, mark_dirty, report_fatal, INPUT_SINCE_FRAME, POINTERS, POLICY, PRESENTED};
+use super::{platform, sensors, APP, CANVAS, CONFIG, DIRTY, FIRST_PAINT, HOST};
+use crate::dom_math::{fit_backing, sanitize_dpr};
+use crate::error::WebShellError;
 use crate::host::{CanvasGeometry, Frame, WebShellControl, WebShellHost};
-use crate::policy::{layout_key, wants_paint, LayoutKey};
+use crate::policy::{layout_key, policy_after_idle, wants_paint, GeometryTracker, LayoutKey};
+use crate::recovery::{RebuildBackoff, RebuildVerdict};
 
 /// GPU-side per-canvas state.
 struct Painter {
@@ -41,11 +45,20 @@ enum GpuState {
     Ready(Box<Painter>),
     /// A device-loss rebuild is in flight; the painter is inside the future.
     Rebuilding,
+    /// The GPU is gone for good (rebuild gave up, WebGL2 context lost); the
+    /// fatal path has run and nothing paints again.
+    Failed,
 }
 
 thread_local! {
     static GPU: RefCell<GpuState> = const { RefCell::new(GpuState::Pending) };
-    static GEOMETRY: RefCell<Option<CanvasGeometry>> = const { RefCell::new(None) };
+    static GEOMETRY: RefCell<GeometryTracker> = const { RefCell::new(GeometryTracker::new()) };
+    static BACKOFF: RefCell<RebuildBackoff> = const { RefCell::new(RebuildBackoff::new()) };
+    /// The device's `max_texture_dimension_2d`; unbounded until the GPU is up.
+    static MAX_DIM: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
+    /// Physical px per CSS px of the current backing store — the DPR, or less
+    /// when the texture limit forced a smaller surface. Input maps with it.
+    static SCALE: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
 }
 
 fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
@@ -59,6 +72,7 @@ fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
 }
 
 pub(super) fn install_gpu(gpu: WebGpu) {
+    MAX_DIM.with(|m| m.set(gpu.device.limits().max_texture_dimension_2d));
     let ctx = new_ctx(&gpu);
     GPU.with(|g| {
         *g.borrow_mut() = GpuState::Ready(Box::new(Painter {
@@ -80,21 +94,29 @@ pub(super) fn current_dpr() -> f64 {
     )
 }
 
-/// Match the canvas backing store to `clientSize × DPR`. Returns the size and
-/// whether it changed.
-pub(super) fn size_backing_store(canvas: &web_sys::HtmlCanvasElement) -> ((u32, u32), bool) {
-    let dpr = current_dpr();
-    let (w, h) = backing_size(
+/// Physical px per CSS px of the canvas backing store, for pointer mapping.
+pub(super) fn input_scale() -> f64 {
+    SCALE.with(|s| s.get())
+}
+
+/// Match the canvas backing store to `clientSize × DPR`, fitted to the
+/// device's texture limit ([`fit_backing`] — the single source of truth, so
+/// the surface `configure` never disagrees with it and resizes every tick).
+/// Returns the size, the scale it was built at, and whether it changed.
+pub(super) fn size_backing_store(canvas: &web_sys::HtmlCanvasElement) -> ((u32, u32), f64, bool) {
+    let ((w, h), scale) = fit_backing(
         canvas.client_width() as f64,
         canvas.client_height() as f64,
-        dpr,
+        current_dpr(),
+        MAX_DIM.with(|m| m.get()),
     );
+    SCALE.with(|s| s.set(scale));
     let changed = canvas.width() != w || canvas.height() != h;
     if changed {
         canvas.set_width(w);
         canvas.set_height(h);
     }
-    ((w, h), changed)
+    ((w, h), scale, changed)
 }
 
 /// Self-rescheduling `requestAnimationFrame` loop.
@@ -133,12 +155,11 @@ fn tick() {
     let Some(canvas) = CANVAS.with(|c| c.borrow().clone()) else {
         return;
     };
-    let dpr = current_dpr();
+    let ((w, h), dpr, resized) = size_backing_store(&canvas);
     if (agg_gui::device_scale() - dpr).abs() > 1e-9 {
         agg_gui::set_device_scale(dpr);
         mark_dirty();
     }
-    let ((w, h), resized) = size_backing_store(&canvas);
 
     sensors::service_tilt_requests();
     sensors::poll_gamepads();
@@ -178,13 +199,15 @@ fn tick() {
         }
     }
 
-    let pointer_idle = BUTTONS_HELD.with(|b| b.get()) == 0;
-    let mut policy = POLICY.with(|p| p.get());
+    let pointer_idle = POINTERS.with(|p| p.borrow().is_idle());
+    let before = POLICY.with(|p| p.get());
+    let mut policy = before;
     with_app_host(|app, host| {
         let mut control = WebShellControl::new(&mut policy, painted, pointer_idle);
         host.on_idle(app, &mut control);
     });
-    POLICY.with(|p| p.set(policy));
+    // A global `set_redraw_policy` made inside `on_idle` must survive.
+    POLICY.with(|p| p.set(policy_after_idle(before, policy, p.get())));
 }
 
 fn report_geometry(width: u32, height: u32, scale_factor: f64, fullscreen: bool) {
@@ -194,36 +217,47 @@ fn report_geometry(width: u32, height: u32, scale_factor: f64, fullscreen: bool)
         fullscreen,
         scale_factor,
     };
-    let changed = GEOMETRY.with(|g| {
-        let mut g = g.borrow_mut();
-        let changed = *g != Some(geometry);
-        *g = Some(geometry);
-        changed
+    HOST.with(|h| {
+        let Ok(mut host) = h.try_borrow_mut() else {
+            return;
+        };
+        let deliver = GEOMETRY.with(|g| g.borrow_mut().should_deliver(geometry, host.is_some()));
+        if let (true, Some(host)) = (deliver, host.as_mut()) {
+            mark_dirty();
+            host.on_geometry_changed(geometry);
+        }
     });
-    if changed {
-        mark_dirty();
-        HOST.with(|h| {
-            if let Ok(mut host) = h.try_borrow_mut() {
-                if let Some(host) = host.as_mut() {
-                    host.on_geometry_changed(geometry);
-                }
-            }
-        });
-    }
+}
+
+/// Stop painting for good and run the fatal path.
+fn fail(err: WebShellError) {
+    GPU.with(|g| *g.borrow_mut() = GpuState::Failed);
+    report_fatal(&err);
 }
 
 /// Start a rebuild if the device was lost. Returns `false` while no painting
 /// is possible this tick (a rebuild is in flight or was just started).
 fn service_device_loss() -> bool {
+    if lifecycle::take_webgl_context_lost() {
+        // wgpu's GL backend cannot re-create its resources on a restored
+        // context, so a lost WebGL2 context is reported, not rebuilt.
+        fail(WebShellError::DeviceLost(
+            "the WebGL2 context was lost; reload the page".to_string(),
+        ));
+        return false;
+    }
     let lost = GPU.with(|g| match &*g.borrow() {
         GpuState::Ready(p) => Some(p.gpu.device_lost()),
-        GpuState::Rebuilding => None,
+        GpuState::Rebuilding | GpuState::Failed => None,
         GpuState::Pending => Some(false),
     });
     match lost {
         None => false,
         Some(false) => true,
         Some(true) => {
+            if !BACKOFF.with(|b| b.borrow().may_attempt(web_time::Instant::now())) {
+                return false;
+            }
             let old = GPU.with(|g| std::mem::replace(&mut *g.borrow_mut(), GpuState::Rebuilding));
             let GpuState::Ready(painter) = old else {
                 return false;
@@ -231,6 +265,7 @@ fn service_device_loss() -> bool {
             wasm_bindgen_futures::spawn_local(async move {
                 match painter.gpu.rebuild().await {
                     Ok(gpu) => {
+                        BACKOFF.with(|b| b.borrow_mut().record_success());
                         let info = gpu.info();
                         install_gpu(gpu);
                         FIRST_PAINT.with(|g| g.reset());
@@ -238,12 +273,23 @@ fn service_device_loss() -> bool {
                         mark_dirty();
                     }
                     Err((gpu, err)) => {
-                        web_sys::console::error_1(&JsValue::from_str(&format!(
-                            "agg-gui-web-shell: GPU rebuild failed: {err}"
-                        )));
-                        // Keep the dead device installed; the lost flag is
-                        // still set, so the next tick retries the rebuild.
-                        install_gpu(gpu);
+                        let verdict = BACKOFF
+                            .with(|b| b.borrow_mut().record_failure(web_time::Instant::now()));
+                        match verdict {
+                            RebuildVerdict::RetryAfter(delay) => {
+                                web_sys::console::error_1(&JsValue::from_str(&format!(
+                                    "agg-gui-web-shell: GPU rebuild failed ({err}); \
+                                     retrying in {delay:?}"
+                                )));
+                                // Keep the dead device installed; the lost
+                                // flag is still set, so a tick after the
+                                // backoff retries the rebuild.
+                                install_gpu(gpu);
+                            }
+                            RebuildVerdict::GiveUp => {
+                                fail(WebShellError::DeviceLost(err.to_string()))
+                            }
+                        }
                     }
                 }
             });
@@ -343,6 +389,8 @@ fn paint(w: u32, h: u32) -> bool {
 
         surface_frame.present();
         p.last_duration = started.elapsed();
+        PRESENTED.with(|c| c.set(true));
+        with_app_host(|app, host| host.after_present(app, &frame));
         true
     })
 }

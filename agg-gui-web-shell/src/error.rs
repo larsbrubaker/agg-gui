@@ -30,8 +30,17 @@ pub enum WebShellError {
     RequestDevice(String),
     /// The surface reported no texture formats or alpha modes.
     UnusableSurface,
+    /// The adapter lacks features the app marked required with
+    /// [`crate::WebShellConfig::with_required_features`].
+    MissingFeatures(wgpu::Features),
     /// The app's builder closure failed. Build one with [`WebShellError::app`].
     App(Box<dyn std::error::Error>),
+    /// [`crate::start`] was called a second time on this page. The shell owns
+    /// page-global state (one app, one rAF loop); the first instance keeps
+    /// running.
+    AlreadyStarted,
+    /// The GPU device (or WebGL2 context) was lost and could not be rebuilt.
+    DeviceLost(String),
 }
 
 impl WebShellError {
@@ -60,7 +69,12 @@ impl std::fmt::Display for WebShellError {
             Self::RequestAdapter(e) => write!(f, "no suitable GPU adapter: {e}"),
             Self::RequestDevice(e) => write!(f, "GPU device request failed: {e}"),
             Self::UnusableSurface => write!(f, "canvas surface reports no formats/alpha modes"),
+            Self::MissingFeatures(missing) => {
+                write!(f, "this GPU lacks required features: {missing:?}")
+            }
             Self::App(e) => write!(f, "app start-up: {e}"),
+            Self::AlreadyStarted => write!(f, "agg-gui-web-shell was already started on this page"),
+            Self::DeviceLost(e) => write!(f, "the GPU was lost and could not be recovered: {e}"),
         }
     }
 }
@@ -89,7 +103,7 @@ pub struct GpuInfo {
 /// Pick the swap-chain format: non-sRGB preferred (the renderer writes
 /// linear-space values and must not be gamma-corrected twice), else the
 /// surface's first preference.
-pub fn pick_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
+pub(crate) fn pick_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
     formats
         .iter()
         .copied()
@@ -98,7 +112,7 @@ pub fn pick_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::Text
 }
 
 /// The device limits to request for `backend`, honouring an explicit override.
-pub fn device_limits(
+pub(crate) fn device_limits(
     backend: wgpu::Backend,
     adapter_limits: wgpu::Limits,
     override_limits: Option<&wgpu::Limits>,
@@ -112,6 +126,21 @@ pub fn device_limits(
         wgpu::Limits::default()
     };
     base.using_resolution(adapter_limits)
+}
+
+/// The device features to request: every `required` feature (an error naming
+/// the missing ones when the adapter lacks any) plus the `optional` ones the
+/// adapter offers.
+pub(crate) fn device_features(
+    adapter: wgpu::Features,
+    required: wgpu::Features,
+    optional: wgpu::Features,
+) -> Result<wgpu::Features, WebShellError> {
+    let missing = required.difference(adapter);
+    if !missing.is_empty() {
+        return Err(WebShellError::MissingFeatures(missing));
+    }
+    Ok(required | (optional & adapter))
 }
 
 #[cfg(test)]
@@ -156,5 +185,41 @@ mod tests {
             Some(&want),
         );
         assert_eq!(got.max_bind_groups, 3);
+    }
+
+    #[test]
+    fn required_features_must_be_offered() {
+        use wgpu::Features as F;
+        let adapter = F::DEPTH_CLIP_CONTROL;
+        assert_eq!(
+            device_features(adapter, F::DEPTH_CLIP_CONTROL, F::empty()).unwrap(),
+            F::DEPTH_CLIP_CONTROL
+        );
+        match device_features(adapter, F::TIMESTAMP_QUERY, F::empty()) {
+            Err(WebShellError::MissingFeatures(m)) => assert_eq!(m, F::TIMESTAMP_QUERY),
+            other => panic!("expected MissingFeatures, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn optional_features_are_masked() {
+        use wgpu::Features as F;
+        let got = device_features(
+            F::DEPTH_CLIP_CONTROL,
+            F::empty(),
+            F::DEPTH_CLIP_CONTROL | F::TIMESTAMP_QUERY,
+        )
+        .unwrap();
+        assert_eq!(got, F::DEPTH_CLIP_CONTROL);
+    }
+
+    #[test]
+    fn new_variants_display() {
+        assert!(WebShellError::AlreadyStarted
+            .to_string()
+            .contains("already started"));
+        assert!(WebShellError::DeviceLost("x".into())
+            .to_string()
+            .contains("lost"));
     }
 }

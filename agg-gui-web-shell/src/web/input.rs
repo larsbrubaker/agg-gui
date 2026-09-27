@@ -11,10 +11,12 @@ use agg_gui::wheel::{WheelDeltaMode, WheelNormalizer};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use super::{frame::current_dpr, lifecycle, note_input, sensors, with_app};
+use super::{frame::input_scale, lifecycle, note_input, note_input_without_repaint};
+use super::{sensors, with_app};
 use crate::dom_math::{
     client_to_physical, modifiers, mouse_button_from_dom, pressed_button_count, PointerKind,
 };
+use crate::pointer::move_forces_repaint;
 
 /// The single web touchscreen, as far as the multi-touch pipeline is
 /// concerned — pointer events don't expose per-digitizer identity.
@@ -57,7 +59,9 @@ fn pos(canvas: &web_sys::HtmlCanvasElement, client_x: i32, client_y: i32) -> (f6
         client_y as f64,
         rect.left(),
         rect.top(),
-        current_dpr(),
+        // The backing store's own scale, not the raw DPR: they differ when
+        // the texture limit forced a smaller surface.
+        input_scale(),
     )
 }
 
@@ -82,20 +86,25 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
         let c = canvas.clone();
         add_listener(target, "pointermove", move |e: web_sys::PointerEvent| {
             let (x, y) = pos(&c, e.client_x(), e.client_y());
-            if PointerKind::from_dom(&e.pointer_type()) == PointerKind::Touch {
+            let kind = PointerKind::from_dom(&e.pointer_type());
+            if kind == PointerKind::Touch {
                 with_app(|app| {
                     app.on_touch_move(TOUCH_DEVICE, touch_id(&e), x, y, Some(e.pressure()))
                 });
-                note_input();
-                return;
+            } else {
+                // Self-healing idle guard: re-derive held buttons from the event.
+                lifecycle::sync_buttons(pressed_button_count(e.buttons()));
+                with_app(|app| app.on_mouse_move(x, y));
+                // Reflect the hovered widget's preferred cursor on the canvas.
+                let icon = agg_gui::current_cursor_icon();
+                let _ = c.style().set_property("cursor", icon.to_css());
             }
-            // Self-healing idle guard: re-derive held buttons from the event.
-            lifecycle::sync_buttons(pressed_button_count(e.buttons()));
-            with_app(|app| app.on_mouse_move(x, y));
-            // Reflect the hovered widget's preferred cursor on the canvas.
-            let icon = agg_gui::current_cursor_icon();
-            let _ = c.style().set_property("cursor", icon.to_css());
-            note_input();
+            if move_forces_repaint(kind) {
+                note_input();
+            } else {
+                // Hover that matters invalidates a widget → `wants_draw()`.
+                note_input_without_repaint();
+            }
         });
     }
     {
@@ -108,6 +117,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             if PointerKind::from_dom(&e.pointer_type()) == PointerKind::Touch {
                 e.prevent_default();
+                lifecycle::touch_down(e.pointer_id());
                 with_app(|app| {
                     app.on_touch_start(TOUCH_DEVICE, touch_id(&e), x, y, Some(e.pressure()))
                 });
@@ -126,6 +136,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             if PointerKind::from_dom(&e.pointer_type()) == PointerKind::Touch {
                 let id = touch_id(&e);
+                lifecycle::touch_up(e.pointer_id());
                 with_app(|app| {
                     if cancel {
                         app.on_touch_cancel(TOUCH_DEVICE, id);

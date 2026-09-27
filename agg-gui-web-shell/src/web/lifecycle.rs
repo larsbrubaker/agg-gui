@@ -1,7 +1,9 @@
-//! Page lifecycle: the held-button count behind
-//! [`crate::WebShellControl::pointer_idle`], the window-level release listener
-//! that keeps it honest, the `visibilitychange` / `pagehide` flush that calls
-//! [`crate::WebShellHost::on_page_hide`], and the window `resize` listener.
+//! Page lifecycle: the held-pointer state behind
+//! [`crate::WebShellControl::pointer_idle`] (mouse buttons *and* touch
+//! contacts, see [`crate::pointer`]), the window-level release listener that
+//! keeps it honest, the `visibilitychange` / `pagehide` flush that calls
+//! [`crate::WebShellHost::on_page_hide`], the window `resize` listener, and
+//! the `webglcontextlost` listener.
 //!
 //! Extracted from AtomArtist's `demo-wasm/src/web_lifecycle.rs`. The count is
 //! maintained by three independent paths, each sufficient to reopen the guard
@@ -12,12 +14,26 @@
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use super::{mark_dirty, BUTTONS_HELD, HOST};
-use crate::dom_math::pressed_button_count;
+use std::cell::Cell;
+
+use super::{mark_dirty, HOST, POINTERS};
+use crate::dom_math::{pressed_button_count, PointerKind};
+
+thread_local! {
+    static WEBGL_CONTEXT_LOST: Cell<bool> = const { Cell::new(false) };
+}
 
 /// Adopt the authoritative held-button count from an event's `buttons`.
 pub(super) fn sync_buttons(count: u32) {
-    BUTTONS_HELD.with(|b| b.set(count));
+    POINTERS.with(|p| p.borrow_mut().sync_mouse_buttons(count));
+}
+
+pub(super) fn touch_down(pointer_id: i32) {
+    POINTERS.with(|p| p.borrow_mut().touch_down(pointer_id));
+}
+
+pub(super) fn touch_up(pointer_id: i32) {
+    POINTERS.with(|p| p.borrow_mut().touch_up(pointer_id));
 }
 
 fn listen(target: &web_sys::EventTarget, event: &str, f: impl FnMut(web_sys::Event) + 'static) {
@@ -40,6 +56,14 @@ pub(super) fn install_window_pointer_release() {
     };
     for event in ["pointerup", "mouseup", "pointercancel"] {
         listen(window.as_ref(), event, |e: web_sys::Event| {
+            if let Some(p) = e.dyn_ref::<web_sys::PointerEvent>() {
+                if PointerKind::from_dom(&p.pointer_type()) == PointerKind::Touch {
+                    // A finger lifted (possibly off the canvas); its
+                    // `buttons` says nothing about the mouse.
+                    touch_up(p.pointer_id());
+                    return;
+                }
+            }
             // A cancel without mouse data reads as "nothing held" — the safe
             // direction: worst case settings persist a frame early.
             let buttons = e
@@ -75,6 +99,8 @@ pub(super) fn install_page_hide() {
         let doc = document.clone();
         listen(document.as_ref(), "visibilitychange", move |_| {
             if doc.hidden() {
+                // No release will be delivered to a hidden page.
+                POINTERS.with(|p| p.borrow_mut().clear());
                 page_hide();
             } else {
                 // Back from hidden: repaint whatever changed meanwhile.
@@ -92,4 +118,18 @@ pub(super) fn install_resize() {
         return;
     };
     listen(window.as_ref(), "resize", |_| mark_dirty());
+}
+
+/// `webglcontextlost` on the canvas (fires only for a WebGL2 surface). The
+/// frame loop reports it as fatal — see [`take_webgl_context_lost`]. WebGPU
+/// device loss is handled separately, through wgpu's device-lost callback.
+pub(super) fn install_webgl_context_lost(canvas: &web_sys::HtmlCanvasElement) {
+    listen(canvas.as_ref(), "webglcontextlost", |_| {
+        WEBGL_CONTEXT_LOST.with(|c| c.set(true));
+    });
+}
+
+/// Whether the WebGL2 context was lost since the last call.
+pub(super) fn take_webgl_context_lost() -> bool {
+    WEBGL_CONTEXT_LOST.with(|c| c.replace(false))
 }

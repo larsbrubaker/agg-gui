@@ -6,12 +6,15 @@
 //! tested) on native too. The runtime that consumes it lives in
 //! [`crate::web`] and is wasm-only.
 
+use crate::fatal::{FatalHook, FatalMessageFn};
+
 /// Which browser graphics API the shell renders through.
 ///
 /// WebGL2 is always compiled in on wasm32 (agg-gui-wgpu enables wgpu's `webgl`
 /// backend there). WebGPU needs this crate's `webgpu` cargo feature (on by
 /// default); asking for [`Backend::WebGpu`] without it is a start-up error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Backend {
     /// Browser WebGPU only. The choice for an app whose own renderer needs
     /// WebGPU-only features (independent blend, storage textures, compute) —
@@ -24,6 +27,14 @@ pub enum Backend {
     /// otherwise. The probe runs before the canvas is bound to a context
     /// (a canvas can only ever get one context type), so the fallback is
     /// clean. Degrades to [`Backend::WebGl2`] when the `webgpu` feature is off.
+    ///
+    /// Limits and features apply to whichever API it lands on: an explicit
+    /// [`WebShellConfig::limits`] or [`WebShellConfig::required_features`]
+    /// sized for WebGPU will fail the device request on the WebGL2 fallback
+    /// (WebGL2 caps are far lower — e.g. no storage buffers). Leave `limits`
+    /// at `None` (per-backend defaults), keep WebGPU-only features in
+    /// `optional_features`, and branch on [`crate::GpuInfo::backend`]; or use
+    /// [`Backend::WebGpu`] when the app cannot run without them.
     PreferWebGpu,
 }
 
@@ -63,6 +74,7 @@ impl Backend {
 /// whether a tick *paints*. A reactive idle page costs one cheap predicate per
 /// vsync and no GPU work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum RedrawPolicy {
     /// Paint only when something asks for it: input, an `agg_gui::animation`
     /// request, a widget invalidation, or a due scheduled deadline.
@@ -109,6 +121,10 @@ pub struct WebShellConfig {
     /// against `adapter.features()`), like
     /// `agg_gui_wgpu::GpuConfig::with_optional_features`.
     pub optional_features: wgpu::Features,
+    /// Device features the app cannot run without. An adapter lacking any of
+    /// them fails start-up with [`crate::WebShellError::MissingFeatures`]
+    /// (and the fatal panel) instead of a device the app can't use.
+    pub required_features: wgpu::Features,
     /// Device limits to request. `None` (default) asks for
     /// `Limits::downlevel_webgl2_defaults()` on WebGL2 and `Limits::default()`
     /// on WebGPU, each with the texture-dimension caps raised to what the
@@ -131,6 +147,21 @@ pub struct WebShellConfig {
     pub fatal_panel: bool,
     /// Install `console_error_panic_hook`. On by default.
     pub panic_hook: bool,
+    /// Human-readable app name; prefixes the fatal message
+    /// (`"{name} could not start: …"`) unless [`Self::fatal_message`] is set.
+    pub app_name: Option<String>,
+    /// Composes the fatal panel / console text from the error, replacing the
+    /// default wording entirely.
+    pub fatal_message: Option<FatalMessageFn>,
+    /// CSS class for the fatal panel. `None` (default) uses the built-in
+    /// class and stylesheet (light, with a `prefers-color-scheme: dark`
+    /// variant); `Some` sets only this class and injects no styles, so the
+    /// page's own CSS owns the look.
+    pub fatal_panel_class: Option<String>,
+    /// Called for every fatal error, with or without the panel — the way
+    /// asynchronous start-up failures and an unrecoverable device loss reach
+    /// the app (they happen after [`crate::start`] has returned).
+    pub on_fatal: Option<FatalHook>,
 }
 
 impl WebShellConfig {
@@ -142,11 +173,16 @@ impl WebShellConfig {
             redraw_policy: RedrawPolicy::Reactive,
             device_label: "agg-gui-web-shell".to_string(),
             optional_features: wgpu::Features::empty(),
+            required_features: wgpu::Features::empty(),
             limits: None,
             offscreen_scene: false,
             detect_platform: true,
             fatal_panel: true,
             panic_hook: true,
+            app_name: None,
+            fatal_message: None,
+            fatal_panel_class: None,
+            on_fatal: None,
         }
     }
 
@@ -167,6 +203,12 @@ impl WebShellConfig {
 
     pub fn with_optional_features(mut self, features: wgpu::Features) -> Self {
         self.optional_features = features;
+        self
+    }
+
+    /// Features the device must have — see [`Self::required_features`].
+    pub fn with_required_features(mut self, features: wgpu::Features) -> Self {
+        self.required_features = features;
         self
     }
 
@@ -192,6 +234,30 @@ impl WebShellConfig {
 
     pub fn with_panic_hook(mut self, on: bool) -> Self {
         self.panic_hook = on;
+        self
+    }
+
+    /// Name the app in the default fatal message.
+    pub fn with_app_name(mut self, name: impl Into<String>) -> Self {
+        self.app_name = Some(name.into());
+        self
+    }
+
+    /// Compose the fatal message yourself.
+    pub fn with_fatal_message(mut self, compose: FatalMessageFn) -> Self {
+        self.fatal_message = Some(compose);
+        self
+    }
+
+    /// Style the fatal panel with the page's own CSS class.
+    pub fn with_fatal_panel_class(mut self, class: impl Into<String>) -> Self {
+        self.fatal_panel_class = Some(class.into());
+        self
+    }
+
+    /// Run `hook` for every fatal error (see [`Self::on_fatal`]).
+    pub fn with_on_fatal(mut self, hook: impl Fn(&crate::WebShellError) + 'static) -> Self {
+        self.on_fatal = Some(FatalHook(std::rc::Rc::new(hook)));
         self
     }
 }
@@ -246,5 +312,8 @@ mod tests {
         assert!(cfg.detect_platform && cfg.fatal_panel && cfg.panic_hook);
         assert!(!cfg.offscreen_scene);
         assert_eq!(cfg.backend, Backend::default());
+        assert!(cfg.required_features.is_empty());
+        assert!(cfg.app_name.is_none() && cfg.fatal_message.is_none());
+        assert!(cfg.fatal_panel_class.is_none() && cfg.on_fatal.is_none());
     }
 }

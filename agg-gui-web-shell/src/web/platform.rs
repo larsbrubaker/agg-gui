@@ -10,6 +10,7 @@ use wasm_bindgen::JsCast;
 use super::mark_dirty;
 use super::sensors::screen_angle_degrees;
 use crate::error::WebShellError;
+use crate::fatal::{PANEL_CLASS, PANEL_CSS};
 
 pub(super) fn find_canvas(id: &str) -> Result<web_sys::HtmlCanvasElement, WebShellError> {
     let document = web_sys::window()
@@ -115,23 +116,46 @@ fn lock_orientation(fullscreen: bool) {
 }
 
 /// Replace the canvas with a readable error panel — users without WebGPU
-/// should see *why* the page is blank, not a dead canvas.
-pub(super) fn show_fatal_panel(message: &str) {
+/// should see *why* the page is blank, not a dead canvas. With `class` the
+/// panel carries only that class (the page styles it); otherwise the built-in
+/// class and its stylesheet (light + `prefers-color-scheme: dark`) are used.
+/// The canvas stays in the DOM (hidden) so `with_canvas` keeps working.
+pub(super) fn show_fatal_panel(message: &str, class: Option<&str>) {
     let Some(canvas) = super::CANVAS.with(|c| c.borrow().clone()) else {
         return;
     };
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
-    if let Ok(panel) = document.create_element("div") {
-        let _ = panel.set_attribute(
-            "style",
-            "max-width:40em;margin:4em auto;padding:1.5em 2em;\
-             font:16px/1.5 system-ui,sans-serif;color:#333;\
-             background:#fff3f0;border:1px solid #e0b4a8;border-radius:8px;",
-        );
-        let _ = panel.set_attribute("role", "alert");
-        panel.set_text_content(Some(message));
-        let _ = canvas.replace_with_with_node_1(&panel);
+    let class = match class {
+        Some(class) => class,
+        None => {
+            install_panel_css(&document);
+            PANEL_CLASS
+        }
+    };
+    let Ok(panel) = document.create_element("div") else {
+        return;
+    };
+    let _ = panel.set_attribute("class", class);
+    let _ = panel.set_attribute("role", "alert");
+    panel.set_text_content(Some(message));
+    let _ = canvas.before_with_node_1(&panel);
+    let _ = canvas.style().set_property("display", "none");
+}
+
+/// Inject the built-in panel stylesheet once.
+fn install_panel_css(document: &web_sys::Document) {
+    const STYLE_ID: &str = "agg-gui-web-shell-fatal-css";
+    if document.get_element_by_id(STYLE_ID).is_some() {
+        return;
+    }
+    let Ok(style) = document.create_element("style") else {
+        return;
+    };
+    style.set_id(STYLE_ID);
+    style.set_text_content(Some(PANEL_CSS));
+    if let Some(head) = document.query_selector("head").ok().flatten() {
+        let _ = head.append_child(&style);
     }
 }

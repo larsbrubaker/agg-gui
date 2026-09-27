@@ -37,3 +37,37 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   diff-guarded, pointer-idle-gated settings persistence.
 - `agg_gui::fullscreen` (with mobile orientation lock), `agg_gui::tilt` and
   `agg_gui::gamepad` plumbing, and a fatal-error panel in place of the canvas.
+- Fatal-error path shared by every failure (sync start errors included):
+  `console.error`, `WebShellConfig::with_on_fatal` hook, and the panel, with
+  `with_app_name` / `with_fatal_message` wording and a `prefers-color-scheme`
+  dark style (or `with_fatal_panel_class` for page-owned CSS).
+- `WebShellConfig::with_required_features` (`WebShellError::MissingFeatures`
+  when the adapter lacks one).
+- `WebShellHost::after_present` hook and wasm `has_presented()`.
+- `WebShellError::AlreadyStarted` (a second `start` on the page) and
+  `WebShellError::DeviceLost`.
+- Re-exports of `agg_gui`, `agg_gui_wgpu` and (wasm) `web_sys`.
+
+### Changed (relative to the first draft of this release)
+
+- Internals are no longer public: `dom_math`, `FirstPaintGate`,
+  `wants_paint`, `layout_key` / `LayoutKey`, `device_limits`,
+  `pick_surface_format`. `Backend` and `RedrawPolicy` are `#[non_exhaustive]`.
+- Mouse/pen moves no longer force a repaint; they paint through
+  `App::wants_draw()` like the pre-extraction `demo-wgpu` shell.
+
+### Fixed
+
+- Canvas resized every frame when `client × DPR` exceeded the GPU's
+  `max_texture_dimension_2d`: the backing store is now fitted once (scale
+  reduced uniformly) and pointer mapping uses the fitted scale.
+- A failing device-loss rebuild retried every frame; it now backs off
+  exponentially and shows the fatal panel after 5 attempts. A lost WebGL2
+  context is reported instead of leaving a dead canvas.
+- `WebShellControl::pointer_idle` was true during touch drags; touch contacts
+  are now counted.
+- `on_geometry_changed` never delivered the boot geometry; it now fires once
+  right after the app is built.
+- A global `set_redraw_policy` called inside `on_idle` was overwritten.
+- `start` errors detected synchronously (canvas not found) were silent unless
+  the caller logged them; they now take the fatal path too.

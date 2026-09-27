@@ -98,6 +98,20 @@ impl<'a> WebShellControl<'a> {
 
 /// The app side of the web shell. Every method has a default, so [`NoHost`]
 /// is a complete implementation.
+///
+/// # Borrow rules inside callbacks
+///
+/// The shell holds the app and the host mutably borrowed while it calls a
+/// host method. From inside any callback:
+///
+/// - use the `&mut App` you were handed — the global `with_app` (wasm)
+///   returns `None` there (the app is already borrowed) and the closure does
+///   not run;
+/// - `with_canvas`, `mark_dirty`, `set_redraw_policy`, `redraw_policy` and
+///   `has_presented` are safe (separate cells, never held across a callback);
+/// - a `#[wasm_bindgen]` export the page calls *during* a callback cannot
+///   happen (the browser main thread is busy), so exports may use `with_app`
+///   freely.
 pub trait WebShellHost {
     /// Runs on **every** `requestAnimationFrame` tick, before the shell
     /// decides whether to paint. The hook for polling app state that has no
@@ -119,7 +133,15 @@ pub trait WebShellHost {
     /// is the copyable scene texture, so `capture_screenshot` works here.
     fn after_paint(&mut self, _ctx: &mut WgpuGfxCtx, _frame: &Frame) {}
 
-    /// The canvas backing size, DPR, or fullscreen state changed.
+    /// Runs right after the frame was presented to the canvas — the point at
+    /// which it is actually on screen. The hook for "first frame visible"
+    /// signals (a page-level ready flag for an end-to-end test) and present
+    /// timing. Not called for a tick that bailed before presenting.
+    /// [`crate::has_presented`] (wasm) answers the same question globally.
+    fn after_present(&mut self, _app: &mut App, _frame: &Frame) {}
+
+    /// The canvas backing size, DPR, or fullscreen state changed. Also called
+    /// once right after boot, with the geometry the app was built at.
     fn on_geometry_changed(&mut self, _geometry: CanvasGeometry) {}
 
     /// Runs once per tick after any painted frame — auto-save, deferred work,

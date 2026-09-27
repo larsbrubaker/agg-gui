@@ -20,7 +20,7 @@ use wasm_bindgen::JsValue;
 
 use crate::config::{Backend, WebShellConfig};
 use crate::dom_math::clamp_to_max_dim;
-use crate::error::{device_limits, pick_surface_format, GpuInfo, WebShellError};
+use crate::error::{device_features, device_limits, pick_surface_format, GpuInfo, WebShellError};
 
 /// wgpu 29's `create_surface` rejects a canvas target unless the instance
 /// has *some* display handle (canvases have none). A zero-sized `Web` display
@@ -43,6 +43,7 @@ pub(crate) struct WebGpu {
     pub(crate) config: wgpu::SurfaceConfiguration,
     adapter_info: wgpu::AdapterInfo,
     lost: Arc<AtomicBool>,
+    required_features: wgpu::Features,
     optional_features: wgpu::Features,
     limits_override: Option<wgpu::Limits>,
     label: String,
@@ -89,6 +90,7 @@ impl WebGpu {
             &instance,
             &surface,
             &cfg.device_label,
+            cfg.required_features,
             cfg.optional_features,
             cfg.limits.as_ref(),
         )
@@ -127,6 +129,7 @@ impl WebGpu {
             config,
             adapter_info: adapter.get_info(),
             lost,
+            required_features: cfg.required_features,
             optional_features: cfg.optional_features,
             limits_override: cfg.limits.clone(),
             label: cfg.device_label.clone(),
@@ -184,6 +187,7 @@ impl WebGpu {
             &self.instance,
             &self.surface,
             &self.label,
+            self.required_features,
             self.optional_features,
             self.limits_override.as_ref(),
         )
@@ -206,6 +210,7 @@ async fn request_device(
     instance: &wgpu::Instance,
     surface: &wgpu::Surface<'static>,
     label: &str,
+    required_features: wgpu::Features,
     optional_features: wgpu::Features,
     limits_override: Option<&wgpu::Limits>,
 ) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Adapter, Arc<AtomicBool>), WebShellError> {
@@ -218,12 +223,13 @@ async fn request_device(
         .await
         .map_err(|e| WebShellError::RequestAdapter(format!("{e:?}")))?;
     let backend = adapter.get_info().backend;
+    let features = device_features(adapter.features(), required_features, optional_features)?;
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some(label),
-            // Masked so an absent optional feature degrades instead of
-            // failing the request.
-            required_features: optional_features & adapter.features(),
+            // Required features were checked above; optional ones are masked
+            // so an absent one degrades instead of failing the request.
+            required_features: features,
             required_limits: device_limits(backend, adapter.limits(), limits_override),
             memory_hints: wgpu::MemoryHints::Performance,
             experimental_features: wgpu::ExperimentalFeatures::default(),

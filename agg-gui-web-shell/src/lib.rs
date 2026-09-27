@@ -9,16 +9,21 @@
 //!   clean WebGPU → WebGL2 fallback probed before the canvas is bound;
 //! - the `requestAnimationFrame` loop with [`RedrawPolicy::Reactive`] /
 //!   [`RedrawPolicy::Continuous`] run modes, layout caching, and the
-//!   **first-paint guarantee** (see [`FirstPaintGate`]);
-//! - canvas backing-store sizing (`clientSize × devicePixelRatio`) and DPR
-//!   tracking every tick (browser zoom changes DPR without a resize event);
+//!   **first-paint guarantee** (the first frame always paints, even when
+//!   nothing requested a draw by the time the async GPU init resolved);
+//! - canvas backing-store sizing (`clientSize × devicePixelRatio`, with the
+//!   scale reduced uniformly when that would exceed the device's texture
+//!   limit) and DPR tracking every tick (browser zoom changes DPR without a
+//!   resize event);
 //! - DOM pointer (mouse / pen / multi-touch), wheel, context-menu, and
 //!   pointer-leave listeners; physical keyboard **plus the copy/cut/paste
 //!   clipboard bridge** via `agg_gui::web_adapter`;
 //! - page lifecycle: a window-level `pointerup` resync so a release outside the
 //!   canvas can't wedge the pointer-idle guard, and `visibilitychange` /
 //!   `pagehide` flush hooks ([`WebShellHost::on_page_hide`]);
-//! - surface-acquire recovery and GPU **device-loss** rebuild;
+//! - surface-acquire recovery and WebGPU **device-loss** rebuild (backed
+//!   off, then the fatal panel); a lost WebGL2 context is reported as fatal
+//!   rather than rebuilt;
 //! - `agg_gui::fullscreen`, `agg_gui::tilt` and `agg_gui::gamepad` plumbing;
 //! - optional `localStorage` settings ([`LocalStorageSettings`] +
 //!   [`SettingsAutoSave`]).
@@ -29,7 +34,10 @@
 //!
 //! #[wasm_bindgen(start)]
 //! pub fn main() {
-//!     let _ = start(WebShellConfig::new("canvas"), |_init| Ok((build_my_app(), NoHost)));
+//!     // Errors are already on the console and in the fatal panel; the
+//!     // Result is for apps that want to react (or fail the wasm start).
+//!     start(WebShellConfig::new("canvas"), |_init| Ok((build_my_app(), NoHost)))
+//!         .expect("agg-gui-web-shell start");
 //! }
 //! ```
 //!
@@ -48,24 +56,41 @@
 //!
 //! `wgpu` types appear in this crate's API; its major version is part of this
 //! crate's public API. Reach wgpu through [`wgpu`] (re-exported) rather than a
-//! separate dependency.
+//! separate dependency; likewise [`agg_gui`], [`agg_gui_wgpu`] and (wasm)
+//! `web_sys` are re-exported so an app's versions always match the shell's.
+
+// The crate-internal decision modules (dom_math, pointer, recovery, fatal,
+// most of policy) are consumed only by the wasm runtime; natively they are
+// exercised by the unit tests alone.
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 mod config;
-pub mod dom_math;
+mod dom_math;
 mod error;
+mod fatal;
 mod host;
+mod pointer;
 mod policy;
+mod recovery;
 mod settings;
 
 pub use config::{Backend, RedrawPolicy, WebShellConfig};
-pub use error::{device_limits, pick_surface_format, GpuInfo, WebShellError};
+pub use error::{GpuInfo, WebShellError};
+pub use fatal::{FatalHook, FatalMessageFn};
 pub use host::{default_paint, CanvasGeometry, Frame, NoHost, WebShellControl, WebShellHost};
-pub use policy::{layout_key, wants_paint, FirstPaintGate, LayoutKey};
 pub use settings::{
     LocalStorageSettings, MemorySettings, SettingsAutoSave, SettingsError, SettingsStore,
 };
 
+/// The `agg-gui` this shell was built against.
+pub use agg_gui;
+/// The `agg-gui-wgpu` renderer this shell was built against.
+pub use agg_gui_wgpu;
 pub use agg_gui_wgpu::WgpuGfxCtx;
+/// The `web-sys` this shell was built against (its canvas type appears in
+/// [`WebShellInit`] and [`with_canvas`]).
+#[cfg(target_arch = "wasm32")]
+pub use web_sys;
 /// The `wgpu` this shell was built against — see "Public API surface".
 pub use wgpu;
 
@@ -73,5 +98,6 @@ pub use wgpu;
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::{
-    mark_dirty, redraw_policy, set_redraw_policy, start, with_app, with_canvas, WebShellInit,
+    has_presented, mark_dirty, redraw_policy, set_redraw_policy, start, with_app, with_canvas,
+    WebShellInit,
 };
