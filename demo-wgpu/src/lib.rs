@@ -8,9 +8,9 @@
 //! [`gpu::Gpu`] surface bundle — was extracted into the publishable
 //! [`agg_gui_wgpu`] crate. This crate is now:
 //!
-//! - **Platform shells**: [`native_shell`] (winit event loop + wgpu present)
-//!   and [`web_shell`] (canvas + rAF loop + DOM input), the turn-key harnesses
-//!   a platform shim reduces to.
+//! - **Deprecated shell wrappers**: `native_shell` and `web_shell`, thin
+//!   forwards to the publishable `agg-gui-shell` and `agg-gui-web-shell`
+//!   crates, kept so path-dependency consumers keep compiling.
 //! - **Inspector plumbing**: [`render_app_frame`], which drains the live
 //!   inspector edit queues around layout + paint.
 //! - **Demo widgets that need the GPU**: the 3-D bar-grid cube
@@ -46,7 +46,8 @@ pub mod native_shell;
 #[allow(deprecated)]
 pub use native_shell::NativeShellConfig;
 
-/// Turn-key canvas + rAF + DOM-input shell for wasm platform shims.
+/// Deprecated canvas shell — a thin wrapper over the `agg-gui-web-shell`
+/// crate, kept so external path-dependency consumers keep compiling.
 #[cfg(target_arch = "wasm32")]
 pub mod web_shell;
 

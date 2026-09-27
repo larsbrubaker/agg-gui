@@ -156,9 +156,9 @@ The core crate owns its event, cursor, clipboard, font, device-scale, screenshot
 and platform types. Optional adapters map winit input types into `agg-gui`. On
 WASM, `web_adapter::install_keyboard_listeners` gives any shell physical-keyboard
 typing plus the copy/cut/paste clipboard bridge; the in-repo
-`agg-gui-shell` (native) and `demo_wgpu::web_shell` (browser) are turn-key
+`agg-gui-shell` (native) and `agg-gui-web-shell` (browser) are turn-key
 platform shells (window / canvas, wgpu surface, frame loop, all input
-forwarding) so an app shim reduces to its app-specific glue. Append `?agg_input=mobile` to any `web_shell` URL to
+forwarding) so an app shim reduces to its app-specific glue. Append `?agg_input=mobile` to any `agg-gui-web-shell` URL to
 exercise the mobile layout from a desktop browser.
 
 ### Inspector
@@ -190,8 +190,9 @@ and feature set using agg-gui's own widgets:
 | `agg-gui` | Core library — widgets, layout, drawing, theme, text, undo |
 | `agg-gui-wgpu` | Hardware-accelerated wgpu `DrawCtx` backend — pipelines, SSAA, screenshot capture, custom render-pass hook |
 | `agg-gui-shell` | Turn-key native shell — winit window + event loop + wgpu present, input forwarding, window-bounds persistence, device-loss recovery |
+| `agg-gui-web-shell` | Turn-key browser shell — canvas + WebGPU/WebGL2 surface, rAF loop (reactive/continuous), DOM input, page lifecycle, localStorage settings |
 | `demo-ui` | Shared demo widget tree (identical for native and WASM) |
-| `demo-wgpu` | `web_shell` browser platform shell + wgpu demo widgets, on top of `agg-gui-wgpu` (its `native_shell` is a deprecated wrapper over `agg-gui-shell`) |
+| `demo-wgpu` | wgpu demo widgets on top of `agg-gui-wgpu` (its `native_shell` / `web_shell` are deprecated wrappers over `agg-gui-shell` / `agg-gui-web-shell`) |
 | `demo-native` | Desktop demo shim on `agg-gui-shell` |
 | `demo-wasm` | WASM cdylib deployed to GitHub Pages |
 | `node-editor` | Node-graph editor demo built on agg-gui |

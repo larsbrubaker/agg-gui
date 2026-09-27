@@ -54,8 +54,8 @@
 //! public API: a `winit` 0.31 or `wgpu` 30 will be a breaking release here,
 //! and an app must depend on the same majors this crate does.
 //!
-//! The browser equivalent of this crate does not live here — a wasm app drives
-//! its own `requestAnimationFrame` loop against `agg-gui-wgpu`.
+//! The browser equivalent of this crate is `agg-gui-web-shell`, whose
+//! `WebShellHost` mirrors [`ShellHost`] method for method.
 
 mod bounds;
 mod config;

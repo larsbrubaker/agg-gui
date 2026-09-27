@@ -1,16 +1,15 @@
-//! Device-sensor plumbing for [`crate::web_shell`]: tilt
-//! (`deviceorientation`) and gamepad polling.
+//! Device-sensor plumbing for the web shell: tilt (`deviceorientation`)
+//! and gamepad polling.
 //!
-//! Split out of the parent shell module so `web_shell.rs` stays inside
-//! the project's 800-line file limit. Everything here feeds the
-//! platform-agnostic `agg_gui::tilt` / `agg_gui::gamepad` state that
-//! apps read, and asks the parent for a repaint via
-//! [`super::mark_dirty`]. The parent calls into three entry points: the
-//! rAF tick runs [`service_tilt_requests`] + [`poll_gamepads`] (and
-//! reads [`screen_angle_degrees`] for its fullscreen orientation lock),
-//! and the canvas `pointerdown` listener runs
-//! [`service_tilt_permission_gesture`] so iOS sees its permission
-//! prompt inside a genuine user gesture.
+//! Moved here from `demo-wgpu/src/web_shell/sensors.rs` when the demo's
+//! shell became this crate. Everything here feeds the platform-agnostic
+//! `agg_gui::tilt` / `agg_gui::gamepad` state that apps read, and asks for
+//! a repaint via [`crate::web::mark_dirty`]. Entry points: the rAF tick
+//! ([`super::frame`]) runs [`service_tilt_requests`] + [`poll_gamepads`]
+//! (and [`super::platform`] reads [`screen_angle_degrees`] for its
+//! fullscreen orientation lock), and the canvas `pointerdown` listener in
+//! [`super::input`] runs [`service_tilt_permission_gesture`] so iOS sees
+//! its permission prompt inside a genuine user gesture.
 
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};

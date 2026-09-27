@@ -40,8 +40,8 @@
 //!   keyboard with keyboard-avoidance handled by [`App::layout`].
 //! - `winit_adapter` (feature `winit-adapter`) and, on WASM,
 //!   `web_adapter` (`install_keyboard_listeners` = typing + clipboard
-//!   for any browser shell) — platform glue. The repo's `demo-wgpu` crate
-//!   adds turn-key `native_shell` / `web_shell` runners on top.
+//!   for any browser shell) — platform glue. The `agg-gui-shell` (native)
+//!   and `agg-gui-web-shell` (browser) crates add turn-key runners on top.
 
 pub mod animation;
 pub mod app_state;

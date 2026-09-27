@@ -1,0 +1,78 @@
+[package]
+name = "agg-gui-web-shell"
+version = "0.5.0"
+edition = "2021"
+# Matches agg-gui-wgpu: wgpu 29 requires 1.87.
+rust-version = "1.87"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+license = "MIT"
+description = "Turn-key browser shell for agg-gui — canvas + WebGPU/WebGL2 surface, requestAnimationFrame loop, DOM input forwarding, page lifecycle, and localStorage settings"
+repository = "https://github.com/larsbrubaker/agg-gui"
+homepage = "https://larsbrubaker.github.io/agg-gui/"
+documentation = "https://docs.rs/agg-gui-web-shell"
+readme = "README.md"
+keywords = ["gui", "wasm", "wgpu", "webgpu", "shell"]
+categories = ["gui", "graphics", "rendering", "wasm"]
+
+[package.metadata.docs.rs]
+# The runtime half of the crate only exists on wasm32; document that target.
+default-target = "wasm32-unknown-unknown"
+
+[features]
+default = ["webgpu"]
+# Compile wgpu's browser WebGPU backend in. WebGL2 is always available on
+# wasm32 (agg-gui-wgpu enables wgpu's `webgl` there); `webgpu` is additive, and
+# which of the two a page actually uses is `WebShellConfig::backend`. Turn it
+# off for a WebGL2-only app to keep the wasm smaller.
+webgpu = ["wgpu/webgpu"]
+# Forwards to agg-gui's `reflect` feature (and agg-gui-wgpu's forward of the
+# same), mirroring agg-gui-shell.
+reflect = ["agg-gui/reflect", "agg-gui-wgpu/reflect"]
+
+[dependencies]
+# `version` is required for a `path` dependency to be publishable.
+agg-gui = { path = "../agg-gui", version = "0.5", default-features = false }
+agg-gui-wgpu = { path = "../agg-gui-wgpu", version = "0.5.2", default-features = false }
+wgpu = { version = "29", default-features = false, features = ["wgsl"] }
+web-time = "1"
+# Facade only — a library must not print.
+log = "0.4"
+
+# The browser runtime (canvas, rAF loop, DOM listeners, localStorage). Every
+# module that touches these is `cfg(target_arch = "wasm32")`, so a native
+# `cargo build --workspace` compiles only the platform-neutral half.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3.82", features = [
+    "console",
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CssStyleDeclaration",
+    "DomRect",
+    "Event",
+    "EventTarget",
+    "Location",
+    "PointerEvent",
+    "MouseEvent",
+    "WheelEvent",
+    "Navigator",
+    "MediaQueryList",
+    "Storage",
+    # Device-tilt input (agg_gui::tilt plumbing)
+    "DeviceOrientationEvent",
+    "Screen",
+    "ScreenOrientation",
+    # Gamepad polling (agg_gui::gamepad plumbing)
+    "Gamepad",
+    "GamepadButton",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
