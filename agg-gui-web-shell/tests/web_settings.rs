@@ -15,7 +15,9 @@ wasm_bindgen_test_configure!(run_in_browser);
 #[wasm_bindgen_test]
 fn round_trips_through_local_storage() {
     let store = LocalStorageSettings::new("agg-gui-web-shell.test.roundtrip");
-    store.save("hello").expect("localStorage writable in a test browser");
+    store
+        .save("hello")
+        .expect("localStorage writable in a test browser");
     assert_eq!(store.load().as_deref(), Some("hello"));
 }
 

@@ -111,7 +111,12 @@ fn equal_width_mode_distributes_whole_pixels() {
     assert_eq!(widths, vec![134.0, 134.0, 133.0]);
     assert_eq!(size.width, 401.0);
     for s in &ctl.segments {
-        assert_eq!(s.x, s.x.floor(), "segment edges on whole pixels: {:?}", ctl.segments);
+        assert_eq!(
+            s.x,
+            s.x.floor(),
+            "segment edges on whole pixels: {:?}",
+            ctl.segments
+        );
     }
 
     // A fractional target floors to whole pixels before the split.

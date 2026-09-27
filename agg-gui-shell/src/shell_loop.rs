@@ -200,8 +200,8 @@ impl<H: ShellHost> ShellLoop<H> {
                 // `self.cursor` still says wherever the mouse was before the
                 // drag began. Query the live cursor instead; fall back to the
                 // tracked position on other platforms.
-                let (x, y) = crate::input::live_cursor_in_window(&self.window)
-                    .unwrap_or(self.cursor);
+                let (x, y) =
+                    crate::input::live_cursor_in_window(&self.window).unwrap_or(self.cursor);
                 self.app.on_file_dropped(x, y, vec![path]);
             }
 

@@ -641,9 +641,10 @@ pub fn shape_glyphs(font: &Font, text: &str, size: f64) -> Vec<ShapedGlyph> {
                 .collect::<Vec<_>>()
         });
 
-        cache
-            .borrow_mut()
-            .insert((font_key, text.to_owned(), size_key, tabular), glyphs.clone());
+        cache.borrow_mut().insert(
+            (font_key, text.to_owned(), size_key, tabular),
+            glyphs.clone(),
+        );
         glyphs
     })
 }
