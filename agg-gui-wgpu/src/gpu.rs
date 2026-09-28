@@ -189,6 +189,27 @@ pub fn clamp_surface_size(w: u32, h: u32, max_dim: u32) -> (u32, u32) {
     (w.clamp(1, max_dim), h.clamp(1, max_dim))
 }
 
+/// The size [`Gpu::resize`] should configure the swap chain to, or `None` to
+/// leave it alone.
+///
+/// A zero-sized (minimized) window is ignored — there is no presentable
+/// surface then, and wgpu rejects a zero extent. A request for the size the
+/// swap chain already has is a no-op, unless an earlier configure failed and
+/// the surface still needs one.
+pub fn resize_target(
+    current: (u32, u32),
+    requested: (u32, u32),
+    configured: bool,
+    max_dim: u32,
+) -> Option<(u32, u32)> {
+    let (w, h) = requested;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let target = clamp_surface_size(w, h, max_dim);
+    (target != current || !configured).then_some(target)
+}
+
 /// wgpu device + surface bundle for one OS window.
 pub struct Gpu {
     device: Arc<wgpu::Device>,
@@ -197,6 +218,11 @@ pub struct Gpu {
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
     device_lost: Arc<std::sync::atomic::AtomicBool>,
+    /// False after a `Surface::configure` failed. wgpu drops the swap chain
+    /// on a failed configure, and acquiring from an unconfigured surface is
+    /// itself a fatal error, so no frame is acquired until a configure
+    /// succeeds again. Atomic only because `acquire_frame` takes `&self`.
+    surface_configured: std::sync::atomic::AtomicBool,
 }
 
 impl Gpu {
@@ -285,16 +311,19 @@ impl Gpu {
             alpha_mode,
             view_formats: vec![],
         };
-        surface.configure(&device, &surface_config);
-
-        Ok(Self {
+        let gpu = Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
             surface,
             surface_format,
             config: surface_config,
             device_lost,
-        })
+            surface_configured: std::sync::atomic::AtomicBool::new(false),
+        };
+        // A failure here is retried by the first `acquire_frame`, same as a
+        // failed resize.
+        gpu.configure_surface();
+        Ok(gpu)
     }
 
     /// Has this device been lost since it was created?
@@ -339,14 +368,48 @@ impl Gpu {
     /// Reconfigure the swap chain for a new physical size. A zero-sized
     /// (minimized) window is ignored — there is no presentable surface then,
     /// and wgpu rejects a zero extent.
+    ///
+    /// A `Resized` to the size the swap chain already has is skipped. Windows
+    /// sends one when a borderless-fullscreen window is shown, and the
+    /// `ResizeBuffers` it would cost is the call that fails on some DX12
+    /// drivers. If the configure fails anyway, the next [`Self::acquire_frame`]
+    /// retries it instead of the app panicking.
     pub fn resize(&mut self, w: u32, h: u32) {
-        if w == 0 || h == 0 {
+        let configured = self
+            .surface_configured
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let Some((w, h)) = resize_target(
+            (self.config.width, self.config.height),
+            (w, h),
+            configured,
+            self.device.limits().max_texture_dimension_2d,
+        ) else {
             return;
-        }
-        let (w, h) = clamp_surface_size(w, h, self.device.limits().max_texture_dimension_2d);
+        };
         self.config.width = w;
         self.config.height = h;
+        self.configure_surface();
+    }
+
+    /// `Surface::configure` with its validation error captured instead of
+    /// handed to wgpu's default handler, which panics. On DX12,
+    /// `ResizeBuffers` can fail with `DXGI_ERROR_INVALID_CALL` ("window is in
+    /// use") while Windows is still settling a borderless-fullscreen window;
+    /// that is a transient surface state, not a bug in the app, and must not
+    /// take the process down. Returns whether the surface is now configured.
+    fn configure_surface(&self) -> bool {
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         self.surface.configure(&self.device, &self.config);
+        let ok = match pollster::block_on(scope.pop()) {
+            None => true,
+            Some(err) => {
+                log::warn!("agg-gui-wgpu: surface configure failed, will retry: {err}");
+                false
+            }
+        };
+        self.surface_configured
+            .store(ok, std::sync::atomic::Ordering::Relaxed);
+        ok
     }
 
     /// Acquire the next surface texture, recovering from a stale swapchain by
@@ -356,8 +419,20 @@ impl Gpu {
     /// invoked for the skip cases that can still recover on their own, so a
     /// reactive event loop (`ControlFlow::Wait`) wakes up to try again instead
     /// of idling forever; pass a closure that calls `Window::request_redraw`.
+    ///
+    /// A surface left unconfigured by a failed configure is configured again
+    /// first; while that keeps failing the frame is skipped and another one
+    /// requested.
     pub fn acquire_frame(&self, request_redraw: impl Fn()) -> Option<wgpu::SurfaceTexture> {
         use wgpu::CurrentSurfaceTexture as T;
+        if !self
+            .surface_configured
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && !self.configure_surface()
+        {
+            request_redraw();
+            return None;
+        }
         let first = self.surface.get_current_texture();
         match surface_acquire_action(&first) {
             SurfaceAcquire::Present => match first {
@@ -370,9 +445,12 @@ impl Gpu {
                 None
             }
             SurfaceAcquire::Reconfigure => {
-                // `configure` takes `&self`; the config already carries the
-                // current (nonzero, `resize`-clamped) size, so we just re-bind.
-                self.surface.configure(&self.device, &self.config);
+                // The config already carries the current (nonzero,
+                // `resize`-clamped) size, so we just re-bind.
+                if !self.configure_surface() {
+                    request_redraw();
+                    return None;
+                }
                 match self.surface.get_current_texture() {
                     T::Success(f) | T::Suboptimal(f) => Some(f),
                     _ => {
@@ -427,7 +505,7 @@ pub fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAc
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_surface_size, pick_alpha_mode, pick_present_mode, pick_surface_format,
+        clamp_surface_size, pick_alpha_mode, pick_present_mode, pick_surface_format, resize_target,
         surface_acquire_action, GpuInitError, SurfaceAcquire,
     };
     use wgpu::CurrentSurfaceTexture as T;
@@ -538,6 +616,43 @@ mod tests {
             cfg.optional_features & wgpu::Features::empty(),
             wgpu::Features::empty()
         );
+    }
+
+    #[test]
+    fn resize_to_the_current_size_does_not_reconfigure() {
+        // Showing a borderless-fullscreen window on Windows delivers a
+        // `Resized` at the size the swap chain was created with. Reconfiguring
+        // for it costs a `ResizeBuffers` that some DX12 drivers reject.
+        assert_eq!(resize_target((1920, 1080), (1920, 1080), true, 8192), None);
+        // Same after clamping: an oversized request that clamps to the
+        // current size is still a no-op.
+        assert_eq!(resize_target((8192, 1080), (10000, 1080), true, 8192), None);
+    }
+
+    #[test]
+    fn resize_after_a_failed_configure_retries_even_at_the_same_size() {
+        assert_eq!(
+            resize_target((1920, 1080), (1920, 1080), false, 8192),
+            Some((1920, 1080))
+        );
+    }
+
+    #[test]
+    fn resize_to_a_new_size_reconfigures_clamped() {
+        assert_eq!(
+            resize_target((1280, 720), (1920, 1080), true, 8192),
+            Some((1920, 1080))
+        );
+        assert_eq!(
+            resize_target((1280, 720), (10000, 1080), true, 8192),
+            Some((8192, 1080))
+        );
+    }
+
+    #[test]
+    fn minimized_resize_is_ignored() {
+        assert_eq!(resize_target((1920, 1080), (0, 1080), true, 8192), None);
+        assert_eq!(resize_target((1920, 1080), (1920, 0), false, 8192), None);
     }
 
     #[test]

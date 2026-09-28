@@ -30,6 +30,9 @@ agg-gui  = { path = "../agg-gui", version = "0.5", default-features = false }
 agg-rust = "1.1.0"
 bytemuck = { version = "1", features = ["derive"] }
 web-time = "1"
+# Facade only — a library must not print. Binaries choose a logger (or none,
+# in which case every call compiles down to a branch on a static).
+log = "0.4"
 # wgsl is enabled by default in wgpu; native backends are enabled per target below.
 wgpu = { version = "29", default-features = false, features = ["wgsl"] }
 
