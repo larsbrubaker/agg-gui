@@ -1,5 +1,6 @@
 //! One painted frame: surface acquire, the host's frame body, the deferred
-//! screenshot read-back, present.
+//! screenshot read-back, present — and the draw-request bookkeeping for a
+//! frame the surface refused.
 //!
 //! Split out of `run.rs` so the event loop file is about events. The state
 //! that only the paint path cares about — the render context, the layout-skip
@@ -83,6 +84,11 @@ impl Painter {
     /// reconfiguring the surface between `get_current_texture` and `present`
     /// is a validation error. Applying the coalesced size at the top of the
     /// frame means a reconfigure can never land inside one.
+    ///
+    /// When the surface hands out no texture the frame is skipped and the
+    /// immediate draw request is dropped ([`frame_skipped`]): the skip has
+    /// already arranged its own wake, and a request left set would keep the
+    /// loop polling.
     pub(crate) fn paint<H: ShellHost>(
         &mut self,
         gpu: &mut Gpu,
@@ -108,6 +114,7 @@ impl Painter {
 
         let started = Instant::now();
         let Some(surface_frame) = gpu.acquire_frame(|| window.request_redraw()) else {
+            frame_skipped();
             return Ok(PaintOutcome::default());
         };
         let view = surface_frame
@@ -166,5 +173,87 @@ impl Painter {
             painted: true,
             captured: false,
         })
+    }
+}
+
+/// Drop the immediate draw request after a frame the surface refused.
+///
+/// Only `App::paint` clears that request, and a skipped frame never reaches
+/// it — left set, `wants_draw()` stays true and the shell sits in
+/// `ControlFlow::Poll`, spinning while a failed surface configure backs off.
+/// Every skip has already arranged its own wake: `Gpu::acquire_frame` calls
+/// `request_redraw` for an immediate retry or a `Timeout`, and
+/// `request_draw_after` for a backed-off configure; an `Occluded` (macOS)
+/// window is woken by `WindowEvent::Occluded(false)` in the shell loop.
+///
+/// `clear_draw_request` is not a narrow clear, so two things it would lose are
+/// preserved:
+/// - pending cross-thread async wakeups are pumped first (through
+///   `async_state_epoch`), because the clear marks them seen without bumping
+///   the async-state epoch, and the next real paint would skip its dirty walk;
+/// - the scheduled deadline is re-armed, because the clear drops it, and it
+///   is what wakes a backed-off retry (or an animation) later. Re-arming goes
+///   through `request_draw_after`, which re-reads the clock, so the deadline
+///   can slip by the few microseconds this function takes.
+pub(crate) fn frame_skipped() {
+    use agg_gui::animation;
+    let _ = animation::async_state_epoch();
+    let deadline = animation::peek_next_draw_deadline();
+    animation::clear_draw_request();
+    if let Some(when) = deadline {
+        animation::request_draw_after(when.saturating_duration_since(Instant::now()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_skipped;
+    use agg_gui::animation;
+    use std::time::Duration;
+
+    // Animation state is thread-local and the test harness runs each test on
+    // its own thread, so these start from a clean slate.
+
+    #[test]
+    fn skipped_frame_drops_the_immediate_request_but_keeps_the_deadline() {
+        // A skipped frame never reaches `App::paint`, the only other place
+        // the immediate request is cleared. Left set, it keeps the shell in
+        // `ControlFlow::Poll` — a busy loop while the surface backs off.
+        animation::request_draw();
+        animation::request_draw_after(Duration::from_secs(60));
+        let deadline = animation::peek_next_draw_deadline();
+        assert!(deadline.is_some());
+
+        frame_skipped();
+
+        // Read the flag directly: `wants_draw()` also folds in a process-wide
+        // async counter that a sibling test's thread can bump at any time.
+        assert!(
+            !animation::peek_draw_signals().0,
+            "immediate request must be cleared"
+        );
+        // The deadline is how a backed-off surface retry wakes the loop. It
+        // is re-armed from a fresh clock read, so allow a small slip — but
+        // never earlier than asked.
+        let (before, after) = (deadline.unwrap(), animation::peek_next_draw_deadline());
+        let after = after.expect("scheduled deadline must survive the skip");
+        assert!(after >= before);
+        assert!(after - before < Duration::from_millis(50));
+    }
+
+    #[test]
+    fn skipped_frame_keeps_a_pending_async_state_bump() {
+        // A background load that finished before the skip must still force
+        // the dirty walk on the next real paint. Signalled from another
+        // thread: a same-thread signal also bumps the local epoch directly,
+        // which would hide a clear that swallows the cross-thread counter.
+        let before = animation::async_state_epoch();
+        std::thread::spawn(animation::signal_async_state_change)
+            .join()
+            .expect("signal thread");
+
+        frame_skipped();
+
+        assert_ne!(animation::async_state_epoch(), before);
     }
 }

@@ -217,6 +217,15 @@ impl<H: ShellHost> ShellLoop<H> {
                 self.paint(elwt);
             }
 
+            // macOS is the one platform whose surface reports `Occluded`, and
+            // an occluded skip neither requests another frame nor leaves the
+            // draw request set (see `paint::frame_skipped`) — so the frame
+            // that was skipped while hidden is painted when the window is
+            // uncovered, not at the next unrelated event.
+            WindowEvent::Occluded(false) => {
+                self.window.request_redraw();
+            }
+
             _ => {}
         }
     }
