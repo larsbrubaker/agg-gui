@@ -157,6 +157,7 @@ impl Painter {
             if should_capture(self.frames_painted, cfg.settle_frames) {
                 let (rgba, w, h) = self.ctx.read_screenshot();
                 let result = write_png(&cfg.path, &rgba, w, h);
+                self.ctx.clear_surface_texture();
                 surface_frame.present();
                 result.map_err(ShellError::Screenshot)?;
                 self.last_duration = started.elapsed();
@@ -167,6 +168,9 @@ impl Painter {
             }
         }
 
+        // Release our back-buffer handle before presenting; see
+        // `WgpuGfxCtx::clear_surface_texture`.
+        self.ctx.clear_surface_texture();
         surface_frame.present();
         self.last_duration = started.elapsed();
         Ok(PaintOutcome {

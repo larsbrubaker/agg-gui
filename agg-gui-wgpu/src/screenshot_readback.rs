@@ -18,6 +18,15 @@ impl WgpuGfxCtx {
         self.surface_texture = Some(tex);
     }
 
+    /// Drop the stashed surface texture.  The platform shell must call this
+    /// before `present`: on DX12 a live handle to a back buffer keeps the
+    /// swap chain referenced, so the next `ResizeBuffers` fails with
+    /// `DXGI_ERROR_INVALID_CALL` and recreating the swap chain for the same
+    /// window fails with `E_ACCESSDENIED`.
+    pub fn clear_surface_texture(&mut self) {
+        self.surface_texture = None;
+    }
+
     /// Stash captured screenshot pixels for the read-back closure to pick
     /// up.  See [`Self::take_pending_screenshot`].
     pub fn set_pending_screenshot(&mut self, captured: (Vec<u8>, u32, u32)) {
