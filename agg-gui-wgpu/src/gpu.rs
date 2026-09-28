@@ -12,7 +12,12 @@
 //! wasm shells configure their canvas surface through the browser and never
 //! block on an adapter request, so this module is native-only.
 
+use std::cell::Cell;
 use std::sync::Arc;
+
+use web_time::Instant;
+
+use crate::surface_retry::{ConfigureRetry, RetryAction, RetryLog};
 
 /// How badly the caller needs `COPY_SRC` on the surface texture.
 ///
@@ -114,6 +119,11 @@ pub enum GpuInitError {
     NoSurfaceFormats,
     /// The surface reported no supported composite alpha modes.
     NoAlphaModes,
+    /// The initial `Surface::configure` failed validation (unsupported
+    /// format / alpha mode / usage, or a size the backend rejects). Unlike a
+    /// later resize this is not a transient surface state, so it is reported
+    /// instead of retried. Carries wgpu's error text.
+    ConfigureSurface(String),
 }
 
 impl std::fmt::Display for GpuInitError {
@@ -127,6 +137,7 @@ impl std::fmt::Display for GpuInitError {
             }
             Self::NoSurfaceFormats => write!(f, "surface reports no supported texture formats"),
             Self::NoAlphaModes => write!(f, "surface reports no supported alpha modes"),
+            Self::ConfigureSurface(e) => write!(f, "configure wgpu surface: {e}"),
         }
     }
 }
@@ -218,11 +229,12 @@ pub struct Gpu {
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
     device_lost: Arc<std::sync::atomic::AtomicBool>,
-    /// False after a `Surface::configure` failed. wgpu drops the swap chain
-    /// on a failed configure, and acquiring from an unconfigured surface is
-    /// itself a fatal error, so no frame is acquired until a configure
-    /// succeeds again. Atomic only because `acquire_frame` takes `&self`.
-    surface_configured: std::sync::atomic::AtomicBool,
+    /// Whether the swap chain is configured, and if not, the retry backoff.
+    /// wgpu drops the swap chain on a failed configure, and acquiring from
+    /// an unconfigured surface is itself a fatal error, so no frame is
+    /// acquired until a configure succeeds again; [`ConfigureRetry`] paces
+    /// those attempts. A `Cell` only because `acquire_frame` takes `&self`.
+    configure_retry: Cell<ConfigureRetry>,
 }
 
 impl Gpu {
@@ -318,11 +330,16 @@ impl Gpu {
             surface_format,
             config: surface_config,
             device_lost,
-            surface_configured: std::sync::atomic::AtomicBool::new(false),
+            configure_retry: Cell::new(ConfigureRetry::default()),
         };
-        // A failure here is retried by the first `acquire_frame`, same as a
-        // failed resize.
-        gpu.configure_surface();
+        // The first configure creates the swap chain (`CreateSwapChainForHwnd`
+        // on DX12), not the `ResizeBuffers` that fails transiently. A
+        // validation error here means an unsupported format / alpha mode /
+        // size — a real bug — so fail loudly instead of retrying forever
+        // behind a blank window.
+        gpu.try_configure()
+            .map_err(GpuInitError::ConfigureSurface)?;
+        gpu.record_configure(true, Instant::now(), None);
         Ok(gpu)
     }
 
@@ -369,26 +386,54 @@ impl Gpu {
     /// (minimized) window is ignored — there is no presentable surface then,
     /// and wgpu rejects a zero extent.
     ///
-    /// A `Resized` to the size the swap chain already has is skipped. Windows
-    /// sends one when a borderless-fullscreen window is shown, and the
-    /// `ResizeBuffers` it would cost is the call that fails on some DX12
-    /// drivers. If the configure fails anyway, the next [`Self::acquire_frame`]
-    /// retries it instead of the app panicking.
+    /// A `Resized` to the size the swap chain already has is skipped (logged
+    /// at `debug`). Windows sends one when a borderless-fullscreen window is
+    /// shown, and the `ResizeBuffers` it would cost is the call that fails on
+    /// some DX12 drivers.
+    ///
+    /// A new size is new information, so it is configured immediately even
+    /// while a failed surface is backing off. It does not reset the backoff,
+    /// though: if it fails too, the failure run continues (no second `warn`,
+    /// next retry still spaced out) — a drag-resize over a broken surface
+    /// must not restart the schedule at every step. A same-size request on an
+    /// unconfigured surface carries no new information and waits for the
+    /// backoff like [`Self::acquire_frame`] does. The first retry after a
+    /// failure here is immediate, so the `acquire_frame` in the same paint
+    /// tries again at once — on DX12 that goes through
+    /// `CreateSwapChainForHwnd`, since the failed `ResizeBuffers` dropped the
+    /// swap chain — and only then does the backoff start. Either way a failed
+    /// configure is retried by `acquire_frame` instead of the app panicking.
     pub fn resize(&mut self, w: u32, h: u32) {
-        let configured = self
-            .surface_configured
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let Some((w, h)) = resize_target(
-            (self.config.width, self.config.height),
+        let now = Instant::now();
+        let retry = self.configure_retry.get();
+        let current = (self.config.width, self.config.height);
+        let Some(target) = resize_target(
+            current,
             (w, h),
-            configured,
+            retry.is_configured(),
             self.device.limits().max_texture_dimension_2d,
         ) else {
+            if w != 0 && h != 0 {
+                log::debug!(
+                    "agg-gui-wgpu: resize to {w}x{h} skipped, swap chain already {}x{}",
+                    current.0,
+                    current.1
+                );
+            }
             return;
         };
-        self.config.width = w;
-        self.config.height = h;
-        self.configure_surface();
+        if target == current {
+            if let RetryAction::WaitFor(d) = retry.attempt(now) {
+                log::debug!(
+                    "agg-gui-wgpu: same-size resize to {w}x{h} deferred, \
+                     configure retry due in {d:?}"
+                );
+                return;
+            }
+        }
+        self.config.width = target.0;
+        self.config.height = target.1;
+        self.configure_surface(now, None);
     }
 
     /// `Surface::configure` with its validation error captured instead of
@@ -396,42 +441,114 @@ impl Gpu {
     /// `ResizeBuffers` can fail with `DXGI_ERROR_INVALID_CALL` ("window is in
     /// use") while Windows is still settling a borderless-fullscreen window;
     /// that is a transient surface state, not a bug in the app, and must not
-    /// take the process down. Returns whether the surface is now configured.
-    fn configure_surface(&self) -> bool {
+    /// take the process down.
+    ///
+    /// A device lost before or during the configure also counts as a
+    /// failure: wgpu-core reports that as a `DeviceLost` error, which the
+    /// `Validation` scope does not capture, so the surface could look
+    /// configured when it is not — and acquiring from it would be fatal. Not
+    /// unit-tested: it needs a live device that can be lost on demand; the
+    /// policy that consumes the result is tested in `surface_retry`.
+    fn try_configure(&self) -> Result<(), String> {
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         self.surface.configure(&self.device, &self.config);
-        let ok = match pollster::block_on(scope.pop()) {
-            None => true,
-            Some(err) => {
-                log::warn!("agg-gui-wgpu: surface configure failed, will retry: {err}");
-                false
+        if let Some(err) = pollster::block_on(scope.pop()) {
+            return Err(err.to_string());
+        }
+        if self.device_lost() {
+            return Err("device lost".to_owned());
+        }
+        Ok(())
+    }
+
+    /// Configure the surface, record the outcome in the retry state and log
+    /// it. Returns whether the surface is now configured.
+    fn configure_surface(&self, now: Instant, request_redraw: Option<&dyn Fn()>) -> bool {
+        match self.try_configure() {
+            Ok(()) => self.record_configure(true, now, None),
+            Err(err) => self.record_configure(false, now, Some(&err)),
+        }
+        let ok = self.configure_retry.get().is_configured();
+        if !ok {
+            if let Some(request_redraw) = request_redraw {
+                self.schedule_retry(now, request_redraw);
             }
-        };
-        self.surface_configured
-            .store(ok, std::sync::atomic::Ordering::Relaxed);
+        }
         ok
+    }
+
+    /// Fold one configure outcome into the retry state and log what it is
+    /// worth: `warn` on the first failure of a run (with the size, since
+    /// that is what the backend rejected), `debug` on repeats so a
+    /// persistently failing surface does not flood the log, `info` on
+    /// recovery.
+    fn record_configure(&self, ok: bool, now: Instant, err: Option<&str>) {
+        let mut retry = self.configure_retry.get();
+        let log = retry.record(ok, now);
+        self.configure_retry.set(retry);
+        let (w, h) = (self.config.width, self.config.height);
+        let err = err.unwrap_or_default();
+        match log {
+            RetryLog::None => {}
+            RetryLog::FirstFailure => log::warn!(
+                "agg-gui-wgpu: surface configure at {w}x{h} failed, will retry with backoff: {err}"
+            ),
+            RetryLog::RepeatFailure => log::debug!(
+                "agg-gui-wgpu: surface configure at {w}x{h} failed again \
+                 ({} in a row): {err}",
+                retry.failures()
+            ),
+            RetryLog::Recovered { failures } => log::info!(
+                "agg-gui-wgpu: surface configured at {w}x{h} after {failures} failed attempt(s)"
+            ),
+        }
+    }
+
+    /// Arrange for the loop to come back when the next configure attempt is
+    /// due: an immediate retry asks for a redraw, a backed-off one schedules
+    /// a draw deadline (which a reactive shell turns into
+    /// `ControlFlow::WaitUntil`) so the loop idles instead of spinning.
+    fn schedule_retry(&self, now: Instant, request_redraw: &dyn Fn()) {
+        match self.configure_retry.get().attempt(now) {
+            RetryAction::Configured => {}
+            RetryAction::TryNow => request_redraw(),
+            RetryAction::WaitFor(d) => agg_gui::animation::request_draw_after(d),
+        }
     }
 
     /// Acquire the next surface texture, recovering from a stale swapchain by
     /// reconfiguring and retrying once.
     ///
-    /// Returns `None` when the frame must be skipped. `request_redraw` is
-    /// invoked for the skip cases that can still recover on their own, so a
-    /// reactive event loop (`ControlFlow::Wait`) wakes up to try again instead
-    /// of idling forever; pass a closure that calls `Window::request_redraw`.
+    /// Returns `None` when the frame must be skipped. For the skip cases that
+    /// can still recover on their own, the loop is woken to try again rather
+    /// than idling forever: immediately via `request_redraw` (pass a closure
+    /// that calls `Window::request_redraw`), or — while a failed configure is
+    /// backing off — via [`agg_gui::animation::request_draw_after`] at the
+    /// time the next attempt is due.
     ///
     /// A surface left unconfigured by a failed configure is configured again
-    /// first; while that keeps failing the frame is skipped and another one
-    /// requested.
+    /// first, paced by the retry backoff: the first retry is immediate (in
+    /// the same paint when the failure was a [`Self::resize`] at its top),
+    /// later ones wait 50 ms doubling up to 1 s, and a frame requested before
+    /// the next attempt is due is skipped without calling `configure` (each
+    /// attempt costs a full GPU wait-idle).
+    ///
+    /// Retries are scheduled through agg_gui's thread-local draw state, so
+    /// this must be called on the UI / event-loop thread.
     pub fn acquire_frame(&self, request_redraw: impl Fn()) -> Option<wgpu::SurfaceTexture> {
         use wgpu::CurrentSurfaceTexture as T;
-        if !self
-            .surface_configured
-            .load(std::sync::atomic::Ordering::Relaxed)
-            && !self.configure_surface()
-        {
-            request_redraw();
-            return None;
+        let now = Instant::now();
+        match self.configure_retry.get().attempt(now) {
+            RetryAction::Configured => {}
+            RetryAction::TryNow => {
+                if !self.configure_surface(now, Some(&request_redraw)) {
+                    return None;
+                }
+            }
+            RetryAction::WaitFor(d) => {
+                agg_gui::animation::request_draw_after(d);
+                return None;
+            }
         }
         let first = self.surface.get_current_texture();
         match surface_acquire_action(&first) {
@@ -446,9 +563,9 @@ impl Gpu {
             }
             SurfaceAcquire::Reconfigure => {
                 // The config already carries the current (nonzero,
-                // `resize`-clamped) size, so we just re-bind.
-                if !self.configure_surface() {
-                    request_redraw();
+                // `resize`-clamped) size, so we just re-bind. A failure here
+                // starts a retry run like any other failed configure.
+                if !self.configure_surface(now, Some(&request_redraw)) {
                     return None;
                 }
                 match self.surface.get_current_texture() {
