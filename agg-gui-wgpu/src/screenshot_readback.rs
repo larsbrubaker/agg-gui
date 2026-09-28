@@ -6,16 +6,68 @@
 //! stashes the frame texture before `begin_frame`, and after
 //! `end_frame` the capture closure copies it into a top-down RGBA8
 //! buffer via a padded staging buffer.
+//!
+//! Also owns the release half of that stash: [`WgpuGfxCtx::present`] /
+//! [`WgpuGfxCtx::release_frame_texture`] drop the ctx's frame handles before
+//! the swap chain gets the frame back (required on DX12 — see `present`).
 
 use crate::WgpuGfxCtx;
 
 impl WgpuGfxCtx {
     /// Stash a handle to the current frame's surface texture so a later
-    /// [`Self::read_screenshot`] call can copy from it.  Called from the
-    /// platform shell with `frame.texture.clone()` BEFORE [`begin_frame`](WgpuGfxCtx::begin_frame).
-    /// `wgpu::Texture` is internally ref-counted, so the clone is cheap.
+    /// [`Self::read_screenshot`] / `capture_screenshot` call can copy from
+    /// it.  Called from the platform shell with `frame.texture.clone()`
+    /// BEFORE [`begin_frame`](WgpuGfxCtx::begin_frame).  `wgpu::Texture` is
+    /// internally ref-counted, so the clone is cheap — but it is a live
+    /// reference to the swap-chain back buffer, so the frame MUST then be
+    /// presented through [`Self::present`] (or the stash dropped with
+    /// [`Self::release_frame_texture`]), never via a bare
+    /// `SurfaceTexture::present()`.
+    ///
+    /// If the previous frame's texture is still stashed (the shell never
+    /// released it), this logs a one-time `log::warn!` per ctx, since that
+    /// is the pattern that breaks DX12 swap-chain resize.
     pub fn set_surface_texture(&mut self, tex: wgpu::Texture) {
+        if self.surface_texture.is_some() && !self.warned_unreleased_frame {
+            self.warned_unreleased_frame = true;
+            log::warn!(
+                "agg-gui-wgpu: set_surface_texture called while the previous frame's \
+                 texture is still stashed. Present frames via WgpuGfxCtx::present (or call \
+                 release_frame_texture) — holding a back-buffer handle past present makes \
+                 DX12 swap-chain resizes fail (\"Invalid surface\")."
+            );
+        }
         self.surface_texture = Some(tex);
+    }
+
+    /// Release the ctx's per-frame handles: the [`Self::set_surface_texture`]
+    /// stash and the [`begin_frame`](WgpuGfxCtx::begin_frame) view if
+    /// `end_frame` did not already consume it.
+    ///
+    /// [`Self::present`] calls this for you — including when the stash is an
+    /// SSAA / scene texture rather than the surface itself.  Call it directly
+    /// only from shells that do not present a frame at all (e.g. a frame
+    /// abandoned mid-way or an offscreen-only render).  Screenshot read-back
+    /// must happen before this — afterwards [`Self::read_screenshot`]
+    /// returns an empty buffer.
+    pub fn release_frame_texture(&mut self) {
+        self.surface_texture = None;
+        self.surface_view = None;
+    }
+
+    /// Present `frame`, first releasing the ctx's per-frame handles
+    /// (see [`Self::release_frame_texture`]).
+    ///
+    /// This is THE way to present whenever the ctx was given the frame's
+    /// surface texture (via [`Self::set_surface_texture`] or
+    /// [`begin_frame`](WgpuGfxCtx::begin_frame)).  On Windows/DX12 a clone of
+    /// the back buffer that outlives `present()` keeps the swap chain
+    /// referenced, so the next `Surface::configure` (DXGI `ResizeBuffers`)
+    /// fails with "Invalid surface" and recreating the swap chain fails with
+    /// `E_ACCESSDENIED`.  Do any [`Self::read_screenshot`] before calling.
+    pub fn present(&mut self, frame: wgpu::SurfaceTexture) {
+        self.release_frame_texture();
+        frame.present();
     }
 
     /// Stash captured screenshot pixels for the read-back closure to pick
@@ -36,12 +88,13 @@ impl WgpuGfxCtx {
     /// The first `width * 4` bytes are the TOP row (Y-down image order).
     ///
     /// Must be called AFTER [`Self::end_frame`] has submitted the render and
-    /// BEFORE the platform shell calls `frame.present()`.  Requires the
-    /// platform shell to have called [`Self::set_surface_texture`] earlier
-    /// in the frame so we hold a handle into the surface that's still
-    /// valid post-render.
+    /// BEFORE the platform shell calls [`Self::present`] (which releases the
+    /// stashed texture).  Requires the platform shell to have called
+    /// [`Self::set_surface_texture`] earlier in the frame so we hold a handle
+    /// into the surface that's still valid post-render.
     ///
-    /// Returns an empty buffer if no surface texture is currently stashed.
+    /// Returns an empty buffer if no surface texture is currently stashed
+    /// (including after [`Self::present`] / [`Self::release_frame_texture`]).
     pub fn read_screenshot(&self) -> (Vec<u8>, u32, u32) {
         let Some(texture) = self.surface_texture.as_ref() else {
             return (Vec::new(), 0, 0);

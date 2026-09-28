@@ -638,7 +638,12 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
             });
         });
     }
-    frame.present();
+    // Present through the ctx so the stashed scene texture (and any
+    // un-consumed frame view) is released first — see `WgpuGfxCtx::present`.
+    WGPU_CTX.with(|ctx_cell| match ctx_cell.borrow_mut().as_mut() {
+        Some(wgpu_ctx) => wgpu_ctx.present(frame),
+        None => frame.present(),
+    });
 
     if frame_ms > 0.0 {
         FRAME_HISTORY.with(|c| {

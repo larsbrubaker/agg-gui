@@ -387,7 +387,9 @@ fn paint(w: u32, h: u32) -> bool {
             p.gpu.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        surface_frame.present();
+        // Releases the stashed texture (surface or SSAA resolve) before
+        // presenting — see `WgpuGfxCtx::present`.
+        p.ctx.present(surface_frame);
         p.last_duration = started.elapsed();
         PRESENTED.with(|c| c.set(true));
         with_app_host(|app, host| host.after_present(app, &frame));

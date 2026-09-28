@@ -42,8 +42,12 @@ ctx.reset(width, height);
 ctx.begin_frame(surface_view);
 app.paint(&mut ctx);
 ctx.end_frame();
-surface_texture.present();
+ctx.present(surface_texture); // releases the ctx's frame handles, then presents
 ```
+
+Always present via `ctx.present(...)` rather than `surface_texture.present()`:
+the ctx may hold a clone of the back buffer for screenshots, and on DX12 a
+clone that outlives present makes the next swap-chain resize fail.
 
 Turn-key platform shells (winit event loop, browser canvas + rAF loop) live in
 the agg-gui repo's `demo-wgpu` crate.

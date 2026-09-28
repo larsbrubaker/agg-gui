@@ -6,7 +6,7 @@
 //! begin_frame(&mut ctx, surface_view)
 //! render_app_frame(&mut ctx, &mut app, width, height, ...)
 //! ctx.end_frame()
-//! surface_texture.present()
+//! ctx.present(surface_texture)
 //! ```
 //!
 //! `begin_frame` issues the clear; `render_app_frame` does layout + paint;
@@ -40,7 +40,8 @@ pub fn begin_frame(ctx: &mut WgpuGfxCtx, view: wgpu::TextureView) {
 ///
 /// Identical logic to `demo-gl/src/frame.rs::render_app_frame`; only the
 /// context type differs.  The caller must call `ctx.end_frame()` after
-/// this function returns, then `surface_texture.present()`.
+/// this function returns, then `ctx.present(surface_texture)` (never a bare
+/// `surface_texture.present()` — see `WgpuGfxCtx::present`).
 #[allow(clippy::too_many_arguments)]
 pub fn render_app_frame(
     ctx: &mut WgpuGfxCtx,

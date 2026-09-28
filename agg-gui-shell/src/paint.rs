@@ -150,7 +150,7 @@ impl Painter {
             if should_capture(self.frames_painted, cfg.settle_frames) {
                 let (rgba, w, h) = self.ctx.read_screenshot();
                 let result = write_png(&cfg.path, &rgba, w, h);
-                surface_frame.present();
+                self.ctx.present(surface_frame);
                 result.map_err(ShellError::Screenshot)?;
                 self.last_duration = started.elapsed();
                 return Ok(PaintOutcome {
@@ -160,7 +160,9 @@ impl Painter {
             }
         }
 
-        surface_frame.present();
+        // Drops the ctx's back-buffer clone before presenting (DX12 resize
+        // fails otherwise) — see `WgpuGfxCtx::present`.
+        self.ctx.present(surface_frame);
         self.last_duration = started.elapsed();
         Ok(PaintOutcome {
             painted: true,

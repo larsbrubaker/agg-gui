@@ -30,8 +30,13 @@
 //! ctx.begin_frame(surface_view);   // clear + stash the target view
 //! app.paint(&mut ctx);             // 2-D commands accumulate
 //! ctx.end_frame();                 // flush everything to the GPU
-//! surface_texture.present();
+//! ctx.present(surface_texture);    // drop per-frame handles, then present
 //! ```
+//!
+//! Always present through [`WgpuGfxCtx::present`] rather than
+//! `SurfaceTexture::present()` directly: the ctx may hold a clone of the back
+//! buffer (for screenshots), and on DX12 a clone surviving present makes the
+//! next swap-chain resize fail.
 //!
 //! # Deferred draw command model
 //!
@@ -123,6 +128,8 @@ mod text_render;
 
 #[cfg(test)]
 mod clip_path_readback_tests;
+#[cfg(test)]
+mod frame_release_tests;
 #[cfg(test)]
 mod image_blit_readback_tests;
 #[cfg(test)]
@@ -366,16 +373,21 @@ pub struct WgpuGfxCtx {
     /// view through every call.
     pub(crate) surface_view: Option<wgpu::TextureView>,
     /// Cloned handle to the current frame's surface texture (the underlying
-    /// resource is internally ref-counted, so cloning the handle is cheap and
-    /// keeps the texture alive past `frame.present()` only if we still hold a
-    /// clone).  Used by [`Self::read_screenshot`] to issue a
-    /// `copy_texture_to_buffer` after `end_frame` has flushed the render —
-    /// the platform shell wires this up by calling `set_surface_texture`
-    /// before paint.
+    /// resource is internally ref-counted, so cloning the handle is cheap).
+    /// Used by [`Self::read_screenshot`] and `capture_screenshot` to copy
+    /// from the frame after `end_frame` has flushed the render — the
+    /// platform shell wires this up by calling `set_surface_texture` before
+    /// paint.  It must NOT outlive the frame: holding a back-buffer clone
+    /// past present breaks DX12 swap-chain resize, so it is dropped by
+    /// [`Self::present`] / [`Self::release_frame_texture`].
     pub(crate) surface_texture: Option<wgpu::Texture>,
+    /// Set once `set_surface_texture` has found the previous frame's texture
+    /// still stashed (the shell never presented via [`Self::present`]) and
+    /// logged the warning — keeps that warning to one per ctx.
+    pub(crate) warned_unreleased_frame: bool,
     /// Pixels captured during the active frame for the screenshot UI.  The
     /// platform shell must call [`Self::read_screenshot`] BEFORE
-    /// `frame.present()` (the swap-chain owns the texture after present),
+    /// [`Self::present`] (which releases the stashed texture),
     /// stash the result here, then the screenshot orchestration picks it
     /// up via [`Self::take_pending_screenshot`] in its read-back closure.
     pub(crate) pending_screenshot: Option<(Vec<u8>, u32, u32)>,
@@ -527,6 +539,7 @@ impl WgpuGfxCtx {
             glyph_cache: GlyphCache::new(),
             surface_view: None,
             surface_texture: None,
+            warned_unreleased_frame: false,
             pending_screenshot: None,
             capture_texture: None,
             pending_readback: None,
@@ -606,7 +619,7 @@ impl WgpuGfxCtx {
     /// Flush all deferred draw commands into a single wgpu command submission.
     ///
     /// Must be called after the frame's painting and before
-    /// `surface.present()`.  The render target was stashed by
+    /// [`Self::present`].  The render target was stashed by
     /// [`Self::begin_frame`] — the platform shell does not need to pass it
     /// again here.
     pub fn end_frame(&mut self) {
