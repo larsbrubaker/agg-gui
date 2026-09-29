@@ -216,9 +216,11 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
             39. / 255.,
             39. / 255.,
             39. / 255.,
-            255. / 255.,
-            255. / 255.,
-            255. / 255.,
+            // 255 / 255 (white) — written as 1.0 because clippy::eq_op
+            // rejects `255. / 255.`.
+            1.0,
+            1.0,
+            1.0,
         ),
         (
             220. / 255.,
@@ -232,9 +234,6 @@ pub fn rendering_test_view(font: Arc<Font>) -> Box<dyn Widget> {
     for &(fr, fg, fb, br, bg_b, bb) in text_rows {
         let fg_c = Color::rgb(fr, fg, fb);
         let bg_c = Color::rgb(br, bg_b, bb);
-        let (fi, bi) = ((fr * 255.0) as u32, (fr * 255.0) as u32);
-        let _ = fi;
-        let _ = bi;
         let fg_u = (
             (fr * 255.0) as u32,
             (fg * 255.0) as u32,

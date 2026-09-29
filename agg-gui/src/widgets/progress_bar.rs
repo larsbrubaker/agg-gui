@@ -249,8 +249,10 @@ impl Widget for ProgressBar {
         // Keep the pulse alive: re-arm ~60 fps without invalidating cached
         // widgets. The bar is uncached, so its next paint re-reads the phase
         // and redraws. Gated on `animating` AND actually painting, so the loop
-        // idles the instant the bar is culled or reaches 100%.
-        if animating {
+        // idles the instant the bar is culled or reaches 100%. "Culled"
+        // includes being clipped out of view by an ancestor (a scrolled
+        // `ScrollView`): the traversal still visits such a bar.
+        if animating && crate::widget::is_local_rect_in_paint_clip(ctx, 0.0, 0.0, w, h) {
             crate::animation::request_draw_after_tagged(
                 Duration::from_millis(16),
                 "progress_bar.pulse",
@@ -490,5 +492,74 @@ mod tests {
         let rec = paint_recorded(&mut pb);
         assert_eq!(rec.strokes, 0);
         assert_eq!(rec.filled_rounded_rects, 2);
+    }
+
+    /// Minimal 200×100 clipping parent standing in for a scrolled
+    /// `ScrollView` viewport; the real paint traversal clips its children.
+    struct ClipBox {
+        bounds: Rect,
+        children: Vec<Box<dyn Widget>>,
+    }
+
+    impl Widget for ClipBox {
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
+        fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _event: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+    }
+
+    /// Paint an animating bar placed at `bar_y` inside the clipping parent
+    /// through the real traversal and report whether a pulse wake was armed.
+    fn pulse_armed_at(bar_y: f64) -> bool {
+        let mut pb = ProgressBar::new(0.5, test_font())
+            .with_animate(true)
+            .with_show_text(false);
+        pb.set_bounds(Rect::new(0.0, bar_y, 200.0, WIDGET_H));
+        let mut parent = ClipBox {
+            bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
+            children: vec![Box::new(pb)],
+        };
+        let mut fb = crate::framebuffer::Framebuffer::new(200, 300);
+        let mut ctx = crate::gfx_ctx::GfxCtx::new(&mut fb);
+        crate::animation::clear_draw_request();
+        crate::widget::paint_subtree(&mut parent, &mut ctx);
+        let armed = crate::animation::peek_next_draw_deadline().is_some();
+        crate::animation::clear_draw_request();
+        armed
+    }
+
+    /// Regression: an animating bar clipped out of view by an ancestor is
+    /// still visited by the paint walk and used to re-arm its ~60 fps pulse
+    /// anyway, keeping a reactive host awake for invisible pixels.
+    #[test]
+    fn clipped_out_bar_does_not_keep_the_loop_awake() {
+        assert!(
+            !pulse_armed_at(200.0),
+            "an animating bar entirely outside the active paint clip must not re-arm"
+        );
+    }
+
+    #[test]
+    fn visible_bar_keeps_pulsing() {
+        assert!(pulse_armed_at(10.0), "a visible animating bar must re-arm");
+        assert!(
+            pulse_armed_at(90.0),
+            "a bar straddling the clip edge is still visible and must re-arm"
+        );
     }
 }

@@ -775,8 +775,8 @@ pub use backbuffer::{
     BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,
     BackbufferState, CompositingLayer,
 };
-pub(crate) use paint::paint_subtree_forced;
 pub use paint::{current_paint_clip, paint_global_overlays, paint_subtree};
+pub(crate) use paint::{is_local_rect_in_paint_clip, paint_subtree_forced};
 pub use tree::{
     activate_action_at, active_modal_path, cancel_action_path, default_action_path, dispatch_event,
     dispatch_event_broadcast, dispatch_event_dyn, dispatch_unconsumed_key, global_overlay_hit_path,

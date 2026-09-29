@@ -214,8 +214,22 @@ impl Widget for Spinner {
         }
 
         // Re-arm for the next step. Only runs while actually painted, so a
-        // hidden spinner does not keep the loop awake.
-        crate::animation::request_draw_after_tagged(Duration::from_millis(STEP_MS), "spinner.step");
+        // hidden spinner does not keep the loop awake — and only while some
+        // part of it survives the active clip: the traversal still visits a
+        // spinner a scrolled `ScrollView` has clipped out of view, and
+        // re-arming there would wake a reactive host every step forever.
+        if crate::widget::is_local_rect_in_paint_clip(
+            ctx,
+            0.0,
+            0.0,
+            self.bounds.width,
+            self.bounds.height,
+        ) {
+            crate::animation::request_draw_after_tagged(
+                Duration::from_millis(STEP_MS),
+                "spinner.step",
+            );
+        }
     }
 
     fn on_event(&mut self, _event: &Event) -> EventResult {
@@ -297,6 +311,79 @@ mod tests {
             "paint re-arms a scheduled draw for the next step"
         );
         crate::animation::clear_draw_request();
+    }
+
+    /// Minimal clipping parent: a 100×100 box whose children are clipped to
+    /// its bounds by the normal paint traversal — stands in for a
+    /// `ScrollView` viewport that has scrolled a spinner out of view.
+    struct ClipBox {
+        bounds: Rect,
+        children: Vec<Box<dyn Widget>>,
+    }
+
+    impl Widget for ClipBox {
+        fn bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+            &mut self.children
+        }
+        fn layout(&mut self, available: Size) -> Size {
+            available
+        }
+        fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+        fn on_event(&mut self, _event: &Event) -> EventResult {
+            EventResult::Ignored
+        }
+    }
+
+    /// Paint a spinner placed at `spinner_y` inside a 100×100 clipping parent
+    /// through the real traversal and report whether a wake was armed.
+    fn arms_deadline_at(spinner_y: f64) -> bool {
+        let mut spinner = Spinner::new();
+        spinner.layout(Size::new(100.0, 100.0));
+        spinner.set_bounds(Rect::new(0.0, spinner_y, 32.0, 32.0));
+        let mut parent = ClipBox {
+            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+            children: vec![Box::new(spinner)],
+        };
+        let mut fb = crate::framebuffer::Framebuffer::new(100, 300);
+        let mut ctx = crate::gfx_ctx::GfxCtx::new(&mut fb);
+        crate::animation::clear_draw_request();
+        crate::widget::paint_subtree(&mut parent, &mut ctx);
+        let armed = crate::animation::peek_next_draw_deadline().is_some();
+        crate::animation::clear_draw_request();
+        armed
+    }
+
+    /// Regression: a spinner scrolled outside its clipping ancestor (the
+    /// Widget Gallery's `ScrollView`) is still visited by the paint walk, and
+    /// used to re-arm its step wake anyway — keeping a reactive host waking
+    /// every 80 ms forever for pixels nobody can see.
+    #[test]
+    fn clipped_out_spinner_does_not_keep_the_loop_awake() {
+        assert!(
+            !arms_deadline_at(200.0),
+            "a spinner entirely outside the active paint clip must not re-arm"
+        );
+    }
+
+    #[test]
+    fn partially_visible_spinner_keeps_animating() {
+        assert!(
+            arms_deadline_at(10.0),
+            "a spinner inside the clip must keep re-arming its step"
+        );
+        assert!(
+            arms_deadline_at(80.0),
+            "a spinner straddling the clip edge is still visible and must re-arm"
+        );
     }
 
     #[test]

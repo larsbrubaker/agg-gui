@@ -297,7 +297,12 @@ impl Widget for ModalOverlay {
             self.bounds = Rect::new(0.0, 0.0, 0.0, 0.0);
             return Size::new(0.0, 0.0);
         }
-        let h = 180.0_f64.min(available.height.max(180.0));
+        // Fixed in-flow reservation while a modal is open.  This used to read
+        // `180.min(available.height.max(180))`, which always evaluates to 180
+        // (clippy::min_max); the constant states that behaviour directly.  The
+        // dialog itself paints as a global overlay centred in the viewport
+        // (see `modal_rect`), so this height only sets the in-column gap.
+        let h = 180.0_f64;
         let w = available.width;
         self.bounds = Rect::new(0.0, 0.0, w, h);
         Size::new(w, h)
