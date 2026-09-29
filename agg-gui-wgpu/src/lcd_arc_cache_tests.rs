@@ -21,6 +21,9 @@ use std::sync::Arc;
 
 use agg_gui::draw_ctx::DrawCtx;
 
+// The one shared test device (see its doc for why tests must not each create
+// their own instance + device).
+use crate::layer_text_readback_tests::try_device;
 use crate::text_render::{lcd_cache_decide, LcdCacheAction, LcdEntryMeta};
 use crate::WgpuGfxCtx;
 
@@ -160,29 +163,6 @@ fn make_mut_keeps_buffer_address_stable() {
 // ---------------------------------------------------------------------------
 // Headless-GPU cache behaviour
 // ---------------------------------------------------------------------------
-
-/// A live headless device + queue, or `None` when no adapter is present.
-fn try_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
-    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-    desc.backends = wgpu::Backends::all();
-    let instance = wgpu::Instance::new(desc);
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    }))
-    .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("lcd-cache-test"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        memory_hints: wgpu::MemoryHints::Performance,
-        experimental_features: wgpu::ExperimentalFeatures::default(),
-        trace: wgpu::Trace::Off,
-    }))
-    .ok()?;
-    Some((Arc::new(device), Arc::new(queue)))
-}
 
 fn test_ctx(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> WgpuGfxCtx {
     let mut ctx = WgpuGfxCtx::new(device, queue, wgpu::TextureFormat::Rgba8Unorm, 64.0, 64.0);

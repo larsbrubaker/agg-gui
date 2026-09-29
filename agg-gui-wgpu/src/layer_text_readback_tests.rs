@@ -19,7 +19,7 @@
 //! CI on a headless-without-GPU box does not spuriously fail; on a machine with
 //! a working adapter they run for real.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
@@ -32,10 +32,41 @@ use crate::WgpuGfxCtx;
 /// package.  SIL OFL 1.1, see `assets/fonts/Noto-LICENSE-OFL.txt`.
 const TEST_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 
-/// A live headless device + queue, or `None` when no adapter is present.
+/// The headless device + queue shared by every GPU test in this crate, or
+/// `None` when no adapter is present.  Used by all the `*_tests.rs` modules.
+///
+/// One device for the whole test binary, created on first use, never dropped.
+/// A fresh instance + device per test broke in two ways on Windows/NVIDIA, both
+/// seen in thread stacks captured from the hung/crashed test binary:
+///
+/// - **Deadlock under the parallel runner** with `Backends::all()`: each
+///   instance's GL backend spawns a "wgpu-hal WGL Instance Thread".  When that
+///   thread exits, `nvoglv64!DllMain` (thread-detach, run under the OS loader
+///   lock) blocks on a driver-internal lock, while other test threads inside
+///   Vulkan calls — served by the same `nvoglv64.dll` — block too; no thread
+///   made progress again.
+/// - **Access violation in `vulkan-1.dll`** (Vulkan loader 1.3.280), inside
+///   `vkSetDebugUtilsObjectNameEXT` called from
+///   `wgpu_hal::vulkan::DeviceShared::set_object_name` while building
+///   `WgpuPipelines`, after earlier tests had created and destroyed their own
+///   instances/devices — even with `--test-threads=1`.
+///
+/// Sharing one device avoids repeated instance/device create/destroy
+/// altogether (it is also far cheaper per test).  `Backends::PRIMARY` matches
+/// production `Gpu::new` and keeps the GL/WGL path out of the tests.  Sharing
+/// is safe here because every test builds its own `WgpuGfxCtx`, textures, and
+/// readback buffers; the only device-wide effect is that a blocking
+/// `device.poll` may also wait for other tests' submissions.
 pub(crate) fn try_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    type Shared = Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>;
+    static SHARED: OnceLock<Shared> = OnceLock::new();
+    SHARED.get_or_init(create_device).clone()
+}
+
+/// Build the one shared test device — see [`try_device`].
+fn create_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-    desc.backends = wgpu::Backends::all();
+    desc.backends = wgpu::Backends::PRIMARY;
     let instance = wgpu::Instance::new(desc);
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
