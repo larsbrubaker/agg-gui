@@ -60,6 +60,12 @@ pub struct App {
     /// rasterised retained backbuffers, not the previous frame's
     /// stale FBO contents.
     last_async_state_epoch: u64,
+    /// `async_state_epoch` snapshot taken at the start of the most recent
+    /// [`App::layout`] (`None` until the first layout).  When
+    /// [`App::paint`] observes a newer epoch, the async change landed after
+    /// this frame's layout, so paint requests one follow-up frame to
+    /// re-lay-out against it.
+    layout_async_state_epoch: Option<u64>,
 }
 
 impl App {
@@ -78,6 +84,7 @@ impl App {
             touch_state: crate::touch_state::TouchState::new(),
             touch_mouse_emu: crate::touch_emulation::TouchMouseEmu::new(),
             last_async_state_epoch: 0,
+            layout_async_state_epoch: None,
         }
     }
 
@@ -147,6 +154,9 @@ impl App {
     /// widget tree lays out in logical (device-independent) units.  Call once
     /// per frame before [`paint`][Self::paint].
     pub fn layout(&mut self, viewport: Size) {
+        // Snapshot BEFORE laying out: a signal arriving mid-layout is then
+        // treated as post-layout and earns a follow-up frame (see `paint`).
+        self.layout_async_state_epoch = Some(crate::animation::async_state_epoch());
         // Effective scale combines hardware DPR with the UX zoom
         // factor — mobile platforms set ux_scale ≈ 1.7 so widgets at
         // their natural logical size read comfortably at arm's length.
@@ -224,6 +234,17 @@ impl App {
         if async_epoch != self.last_async_state_epoch {
             tree::mark_subtree_dirty(self.root.as_mut());
             self.last_async_state_epoch = async_epoch;
+        }
+        // The dirty walk fixes pixels, not layout.  If the async change
+        // landed after this frame's layout (worker signal between the host's
+        // layout and this paint), ask for one more frame so the next layout
+        // sees it.  Advancing the snapshot makes this once-per-signal even
+        // for a host that repaints without re-laying-out — no redraw loop.
+        if let Some(laid_out) = self.layout_async_state_epoch {
+            if laid_out != async_epoch {
+                self.layout_async_state_epoch = Some(async_epoch);
+                crate::animation::request_draw_tagged("app.async_after_layout");
+            }
         }
         let viewport = self.viewport_size;
         crate::widgets::combo_box::begin_combo_popup_frame(viewport);

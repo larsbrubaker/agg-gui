@@ -35,6 +35,7 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 // Phase 1 — coordinate system invariants
 // ---------------------------------------------------------------------------
 
+mod async_wakeup_paint;
 mod backbuffer_scale;
 mod caret_deadline;
 mod clip_path_software;

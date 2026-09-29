@@ -399,16 +399,20 @@ pub fn async_state_epoch() -> u64 {
 /// widgets that still need a draw (animation in flight, focus blink, etc.)
 /// must re-arm during their draw, otherwise the loop goes idle.
 ///
-/// Also syncs this thread's cross-thread async-wakeup bookkeeping so a
-/// stale bump from before this clear cannot reappear on the next
-/// `wants_draw` read.  Without that sync, parallel tests calling
-/// [`signal_async_state_change`] would leak wakeups into unrelated
-/// tests that rely on `wants_draw()` returning `false` after a clear.
+/// Pending cross-thread async wakeups are *merged* first (advancing
+/// [`invalidation_epoch`] and [`async_state_epoch`]) and only then is the
+/// immediate flag cleared.  Merging — rather than just marking the counter
+/// seen — means a worker-thread [`signal_async_state_change`] landing after
+/// the host's last `wants_draw()` but before `App::paint` still reaches that
+/// paint's async-state dirty walk instead of being silently swallowed.
+/// Clearing the flag afterwards keeps the old guarantee that a stale bump
+/// cannot reappear on the next `wants_draw` read (parallel tests calling
+/// [`signal_async_state_change`] must not leak wakeups into unrelated tests
+/// that rely on `wants_draw()` returning `false` after a clear).
 pub fn clear_draw_request() {
+    pump_async_wakeup();
     NEEDS_DRAW.with(|c| c.set(false));
     NEXT_DRAW_AT.with(|c| c.set(None));
-    let current = ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire);
-    LAST_SEEN_ASYNC_WAKEUP.with(|c| c.set(current));
 }
 
 /// Clear **only** the immediate draw request ([`request_draw`]'s flag).
@@ -422,9 +426,11 @@ pub fn clear_draw_request() {
 ///
 /// Unlike [`clear_draw_request`], this leaves the scheduled deadline
 /// ([`request_draw_after`]) in place — it may be the very wake that retries
-/// the frame — and does not mark pending cross-thread
-/// [`signal_async_state_change`] bumps as seen, so they still surface (and
-/// still advance [`async_state_epoch`]) on the next read.
+/// the frame.  It also does not pump pending cross-thread
+/// [`signal_async_state_change`] bumps; they merge on the next read, where
+/// they both advance [`async_state_epoch`] and raise a draw request (whereas
+/// `clear_draw_request` merges them into the epochs and then clears the
+/// resulting request, since the paint it precedes consumes them).
 pub fn clear_immediate_draw_request() {
     NEEDS_DRAW.with(|c| c.set(false));
 }
