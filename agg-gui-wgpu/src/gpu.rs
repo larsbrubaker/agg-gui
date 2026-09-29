@@ -9,10 +9,21 @@
 //! about the `Timeout` case; this module is the single implementation both now
 //! use.
 //!
+//! Frame acquisition, and the retry of a failed `Surface::configure` it
+//! drives, live in the child module `gpu_acquire.rs`; the pure retry policy
+//! is `crate::surface_retry`.
+//!
 //! wasm shells configure their canvas surface through the browser and never
 //! block on an adapter request, so this module is native-only.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use crate::surface_retry::{ConfigureRetry, DEFAULT_RETRY_BUDGET};
+
+#[path = "gpu_acquire.rs"]
+mod acquire;
+pub use acquire::{FrameAcquire, RetryWake, SurfaceError};
 
 /// How badly the caller needs `COPY_SRC` on the surface texture.
 ///
@@ -59,6 +70,19 @@ pub struct GpuConfig {
     /// of failing to start). For an app renderer that can use, e.g.,
     /// `FLOAT32_BLENDABLE` when present and fall back when not.
     pub optional_features: wgpu::Features,
+    /// How long the swap chain may stay continuously unconfigured — every
+    /// `Surface::configure` retry failing — before [`Gpu::try_acquire_frame`]
+    /// gives up with [`SurfaceError`]. Default 10 s. See
+    /// [`GpuConfig::with_surface_retry_budget`].
+    ///
+    /// Measured from the first failure of the run and judged when a retry
+    /// fails. Giving up also needs a minimum number of failed attempts (12,
+    /// about 6.5 s of continuous retrying), so a caller that paused attempts
+    /// past the budget — agg-gui-shell does while its window is minimized
+    /// mid-run —
+    /// still gets a real retry run afterwards rather than an error at its
+    /// first failed retry.
+    pub surface_retry_budget: Duration,
 }
 
 impl Default for GpuConfig {
@@ -68,6 +92,7 @@ impl Default for GpuConfig {
             copy_src: CopySrc::Never,
             present_mode: wgpu::PresentMode::AutoVsync,
             optional_features: wgpu::Features::empty(),
+            surface_retry_budget: DEFAULT_RETRY_BUDGET,
         }
     }
 }
@@ -98,6 +123,16 @@ impl GpuConfig {
         self.optional_features = features;
         self
     }
+
+    /// Override how long a failing swap chain is retried before
+    /// [`Gpu::try_acquire_frame`] reports [`SurfaceError`] (default 10 s).
+    /// A minimum number of failed attempts is also required, so a very short
+    /// budget still gets roughly 6.5 s of actual retrying. `Duration::MAX`
+    /// retries forever. See [`GpuConfig::surface_retry_budget`].
+    pub fn with_surface_retry_budget(mut self, budget: Duration) -> Self {
+        self.surface_retry_budget = budget;
+        self
+    }
 }
 
 /// Why [`Gpu::new`] could not produce a usable surface.
@@ -114,6 +149,12 @@ pub enum GpuInitError {
     NoSurfaceFormats,
     /// The surface reported no supported composite alpha modes.
     NoAlphaModes,
+    /// The initial `Surface::configure` failed validation (or the device was
+    /// lost during it). The first configure creates the swap chain rather
+    /// than resizing one, so unlike a later resize this is not a transient
+    /// surface state; it is reported instead of retried. Carries wgpu's
+    /// error text.
+    ConfigureSurface(String),
 }
 
 impl std::fmt::Display for GpuInitError {
@@ -127,6 +168,7 @@ impl std::fmt::Display for GpuInitError {
             }
             Self::NoSurfaceFormats => write!(f, "surface reports no supported texture formats"),
             Self::NoAlphaModes => write!(f, "surface reports no supported alpha modes"),
+            Self::ConfigureSurface(e) => write!(f, "configure wgpu surface: {e}"),
         }
     }
 }
@@ -197,6 +239,15 @@ pub struct Gpu {
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
     device_lost: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the swap chain is configured, and if not, the retry backoff
+    /// and the latest error. wgpu drops the swap chain on a failed
+    /// configure, and acquiring from an unconfigured surface is itself fatal,
+    /// so no frame is acquired until a configure succeeds again. A `Mutex`
+    /// (not a `Cell`) because acquisition takes `&self` and `Gpu` must stay
+    /// `Sync`; it is never contended.
+    retry: Mutex<acquire::RetryState>,
+    /// [`GpuConfig::surface_retry_budget`].
+    retry_budget: Duration,
 }
 
 impl Gpu {
@@ -285,7 +336,13 @@ impl Gpu {
             alpha_mode,
             view_formats: vec![],
         };
-        surface.configure(&device, &surface_config);
+        // The first configure creates the swap chain (`CreateSwapChainForHwnd`
+        // on DX12), not the `ResizeBuffers` that fails transiently. A
+        // validation error here means an unsupported format / alpha mode /
+        // size — a real bug — so fail loudly instead of retrying forever
+        // behind a blank window.
+        acquire::try_configure(&device, &surface, &surface_config, &device_lost)
+            .map_err(GpuInitError::ConfigureSurface)?;
 
         Ok(Self {
             device: Arc::new(device),
@@ -294,6 +351,8 @@ impl Gpu {
             surface_format,
             config: surface_config,
             device_lost,
+            retry: Mutex::new(acquire::RetryState::new(ConfigureRetry::configured())),
+            retry_budget: config.surface_retry_budget,
         })
     }
 
@@ -339,6 +398,12 @@ impl Gpu {
     /// Reconfigure the swap chain for a new physical size. A zero-sized
     /// (minimized) window is ignored — there is no presentable surface then,
     /// and wgpu rejects a zero extent.
+    ///
+    /// A failed configure (DX12 `ResizeBuffers` rejecting a window Windows
+    /// is still settling) does not panic: it is recorded, logged, and retried
+    /// by [`Self::try_acquire_frame`] with backoff. A new size is new
+    /// information, so it is configured immediately even while an earlier
+    /// failure is backing off.
     pub fn resize(&mut self, w: u32, h: u32) {
         if w == 0 || h == 0 {
             return;
@@ -346,44 +411,7 @@ impl Gpu {
         let (w, h) = clamp_surface_size(w, h, self.device.limits().max_texture_dimension_2d);
         self.config.width = w;
         self.config.height = h;
-        self.surface.configure(&self.device, &self.config);
-    }
-
-    /// Acquire the next surface texture, recovering from a stale swapchain by
-    /// reconfiguring and retrying once.
-    ///
-    /// Returns `None` when the frame must be skipped. `request_redraw` is
-    /// invoked for the skip cases that can still recover on their own, so a
-    /// reactive event loop (`ControlFlow::Wait`) wakes up to try again instead
-    /// of idling forever; pass a closure that calls `Window::request_redraw`.
-    pub fn acquire_frame(&self, request_redraw: impl Fn()) -> Option<wgpu::SurfaceTexture> {
-        use wgpu::CurrentSurfaceTexture as T;
-        let first = self.surface.get_current_texture();
-        match surface_acquire_action(&first) {
-            SurfaceAcquire::Present => match first {
-                T::Success(f) | T::Suboptimal(f) => Some(f),
-                _ => None,
-            },
-            SurfaceAcquire::Skip => None,
-            SurfaceAcquire::SkipAndRetry => {
-                request_redraw();
-                None
-            }
-            SurfaceAcquire::Reconfigure => {
-                // `configure` takes `&self`; the config already carries the
-                // current (nonzero, `resize`-clamped) size, so we just re-bind.
-                self.surface.configure(&self.device, &self.config);
-                match self.surface.get_current_texture() {
-                    T::Success(f) | T::Suboptimal(f) => Some(f),
-                    _ => {
-                        // Still nothing after the reconfigure: come back next
-                        // frame rather than sitting in `ControlFlow::Wait`.
-                        request_redraw();
-                        None
-                    }
-                }
-            }
-        }
+        self.configure_and_record(web_time::Instant::now());
     }
 }
 
@@ -538,6 +566,15 @@ mod tests {
             cfg.optional_features & wgpu::Features::empty(),
             wgpu::Features::empty()
         );
+    }
+
+    #[test]
+    fn surface_retry_budget_defaults_to_ten_seconds_and_builds() {
+        use std::time::Duration;
+        let cfg = super::GpuConfig::new("t");
+        assert_eq!(cfg.surface_retry_budget, Duration::from_secs(10));
+        let cfg = cfg.with_surface_retry_budget(Duration::from_secs(3));
+        assert_eq!(cfg.surface_retry_budget, Duration::from_secs(3));
     }
 
     #[test]

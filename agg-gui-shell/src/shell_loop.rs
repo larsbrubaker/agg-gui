@@ -12,16 +12,17 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use agg_gui::{winit_adapter, App, Modifiers};
-use agg_gui_wgpu::{Gpu, GpuConfig};
+use agg_gui_wgpu::{Gpu, GpuConfig, RetryWake};
 use winit::event::{ElementState, Event, StartCause, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::event_loop::ActiveEventLoop;
 use winit::window::{Fullscreen, Window};
 
 use crate::bounds::{BoundsAutoSave, SavedBounds, WindowBoundsStore, WindowedSizeTracker};
 use crate::config::{RedrawPolicy, ScreenshotConfig};
 use crate::host::{ExitAction, ShellControl, ShellHost, WindowGeometry};
 use crate::input::{dispatch_touch, shift_held, wheel_delta};
-use crate::paint::{PaintRequest, Painter};
+use crate::paint::{schedule_skipped_frame, PaintRequest, Painter};
+use crate::redraw_schedule::{next_control_flow, paint_blocked, LoopState};
 use crate::screenshot::capture_exhausted;
 use crate::waker::HostWakerGuard;
 use crate::ShellError;
@@ -51,6 +52,9 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     pub(crate) mouse_buttons_down: u32,
     pub(crate) input_since_frame: bool,
     pub(crate) pending_resize: Option<(u32, u32)>,
+    /// When a backed-off surface configure retry is due, from the last
+    /// paint. Holds the loop in `WaitUntil` instead of `Poll` meanwhile.
+    pub(crate) surface_retry_at: Option<Instant>,
     pub(crate) bounds_store: Option<Box<dyn WindowBoundsStore>>,
     pub(crate) bounds_auto: BoundsAutoSave,
     /// Last size seen while the window was neither maximized nor fullscreen —
@@ -217,6 +221,15 @@ impl<H: ShellHost> ShellLoop<H> {
                 self.paint(elwt);
             }
 
+            // An occluded window's skipped frame arranges no wake of its own
+            // (`RetryWake::OnEvent`, and the paint dropped the immediate draw
+            // request — see `paint::schedule_skipped_frame`), so paint it when
+            // the window is uncovered rather than at the next unrelated
+            // event. macOS is the platform whose surface reports `Occluded`.
+            WindowEvent::Occluded(false) => {
+                self.window.request_redraw();
+            }
+
             _ => {}
         }
     }
@@ -268,22 +281,27 @@ impl<H: ShellHost> ShellLoop<H> {
         self.save_bounds_if_changed();
 
         // `wants_draw()` covers due scheduled deadlines, so `Poll` when it (or
-        // continuous mode, or a pending capture) is true. Otherwise re-arm
-        // `WaitUntil` from the non-destructive peek — this runs every idle
-        // iteration and is idempotent, so an intervening non-repainting event
-        // cannot lose the scheduled wake.
+        // continuous mode, or a pending capture) is true — unless the surface
+        // is backing off after a failed configure, or the window is minimized
+        // while its surface is unconfigured,
+        // where polling would only spin (see `next_control_flow`). Otherwise
+        // re-arm `WaitUntil` from the non-destructive peek — this runs every
+        // idle iteration and is idempotent, so an intervening non-repainting
+        // event cannot lose the scheduled wake.
         //
         // No `request_redraw` here: `Poll` brings us straight back to
         // `AboutToWait`, which paints. Asking for a redraw as well would paint
         // the same state twice per iteration while anything is animating.
-        let poll = capture_pending || self.policy == RedrawPolicy::Continuous;
-        if poll || self.app.wants_draw() {
-            elwt.set_control_flow(ControlFlow::Poll);
-        } else if let Some(t) = self.app.next_draw_deadline() {
-            elwt.set_control_flow(ControlFlow::WaitUntil(t));
-        } else {
-            elwt.set_control_flow(ControlFlow::Wait);
-        }
+        let state = LoopState {
+            capture_pending,
+            continuous: self.policy == RedrawPolicy::Continuous,
+            app_wants_draw: self.app.wants_draw(),
+            paint_blocked: self.paint_blocked(),
+            surface_retry_at: self.surface_retry_at,
+            app_deadline: self.app.next_draw_deadline(),
+            now: Instant::now(),
+        };
+        elwt.set_control_flow(next_control_flow(&state));
 
         if self.exit.get().is_some() {
             elwt.exit();
@@ -293,6 +311,15 @@ impl<H: ShellHost> ShellLoop<H> {
     /// Paint one frame, recovering the device first if it was lost. Returns
     /// whether a frame actually reached the compositor.
     pub(crate) fn paint(&mut self, elwt: &ActiveEventLoop) -> bool {
+        // Minimized with a configure-failure run in progress: every retry
+        // against the minimized window would fail and spend the surface
+        // retry budget. Restore delivers a nonzero `Resized`, whose arm
+        // requests the redraw that resumes painting. A minimized window
+        // whose surface is configured paints as usual.
+        if self.paint_blocked() {
+            schedule_skipped_frame(RetryWake::OnEvent, || {});
+            return false;
+        }
         if let Err(e) = self.recover_lost_device() {
             self.fail(e, elwt);
             return false;
@@ -318,6 +345,7 @@ impl<H: ShellHost> ShellLoop<H> {
         );
         match outcome {
             Ok(outcome) => {
+                self.surface_retry_at = outcome.retry_at;
                 if outcome.painted {
                     self.input_since_frame = false;
                     self.screenshot_last_paint = Instant::now();
@@ -333,6 +361,19 @@ impl<H: ShellHost> ShellLoop<H> {
                 false
             }
         }
+    }
+
+    /// See [`paint_blocked`]. With no `Gpu` (mid device-loss recovery) the
+    /// surface counts as configured: the rebuild is what runs next.
+    ///
+    /// Runs every frame, so the cheap in-process check goes first and
+    /// `Window::is_minimized` is only asked while the surface is
+    /// unconfigured: on X11 it can be a server round-trip, which a healthy
+    /// app must not pay per frame. A configured surface is never blocked, so
+    /// the short-circuit does not change the answer.
+    fn paint_blocked(&self) -> bool {
+        let configured = self.gpu.as_ref().is_none_or(Gpu::surface_configured);
+        !configured && paint_blocked(self.window.is_minimized(), configured)
     }
 
     /// Rebuild the device and surface after a device loss (TDR, driver reset,

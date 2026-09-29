@@ -130,6 +130,7 @@ where
         mouse_buttons_down: 0,
         input_since_frame: false,
         pending_resize: None,
+        surface_retry_at: None,
         bounds_store: config.bounds_store,
         bounds_auto,
         windowed_size,

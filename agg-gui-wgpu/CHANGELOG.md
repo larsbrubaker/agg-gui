@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Added
+
+- `Gpu::try_acquire_frame() -> Result<FrameAcquire, SurfaceError>`, with
+  `FrameAcquire::{Frame, Skip(RetryWake)}` and
+  `RetryWake::{Now, After(Duration), OnEvent}`: the caller, which owns the
+  event loop, arranges the retry wake. `RetryWake::OnEvent` means *no*
+  self-scheduled retry — the window is `Occluded`, or the acquire hit a
+  validation error — so a shell must wake itself from a window event (e.g.
+  request a redraw on `WindowEvent::Occluded(false)`); this is the old
+  "skip without requesting a redraw" behaviour, made explicit.
+- `SurfaceError::ConfigureRetriesExhausted` — the swap chain stayed
+  unconfigured for longer than the retry budget, over at least 12 failed
+  attempts. Carries wgpu's last error text, the span and the attempt count.
+- `Gpu::surface_configured()` — read-only: `false` while a configure-failure
+  run is in progress, so a shell can hold off attempts that cannot succeed
+  (agg-gui-shell uses it to stop painting a minimized window only then).
+- `GpuConfig::surface_retry_budget` / `with_surface_retry_budget` (default
+  10 s; `Duration::MAX` retries forever).
+- `GpuInitError::ConfigureSurface` — the initial configure failed (not
+  retried: it creates the swap chain, so failure is a real error).
+
+### Changed
+
+- A failed `Surface::configure` no longer panics the process. Every native
+  configure (`Gpu::new`, `Gpu::resize`, the stale-swap-chain reconfigure
+  during acquire) runs inside `Validation` and `Internal` error scopes and
+  checks for device loss. A failure after start-up is logged (`warn` once
+  per run, `debug` on repeats, `info` on recovery) and retried by
+  `try_acquire_frame`: first retry immediate, then 50 ms doubling to a 1 s
+  cap, no frame acquired from the unconfigured surface meanwhile.
+- `Gpu::acquire_frame` is now a compatibility wrapper over
+  `try_acquire_frame` (prefer the new method; it will be deprecated in 0.6).
+  It schedules `RetryWake::After` through
+  `agg_gui::animation::request_draw_after`, and panics with the
+  `SurfaceError` once the retry budget is spent — where it previously
+  panicked inside wgpu on the first failed configure.
+
+### Fixed
+
+- DX12 resize crash (`In Surface::configure - Invalid surface` /
+  `DXGI_ERROR_INVALID_CALL`, then `E_ACCESSDENIED` on swap-chain
+  re-creation): `WgpuGfxCtx` kept a clone of the frame's surface texture for
+  read-back and never dropped it, so the back buffer outlived `present()`.
+  New `WgpuGfxCtx::present(frame)` releases that stash (and any unconsumed
+  `begin_frame` view) and then presents; `release_frame_texture()` is the
+  release half for shells that don't present a frame. `set_surface_texture`
+  logs one `warn!` per context when it finds a texture still stashed from an
+  earlier frame. Shells should present through `WgpuGfxCtx::present` rather
+  than `SurfaceTexture::present`. Root cause found by Nick LeFors
+  (larsbrubaker/agg-gui#6).
+
 ## [0.5.2] - 2026-08-26
 
 ### Added

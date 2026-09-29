@@ -411,6 +411,24 @@ pub fn clear_draw_request() {
     LAST_SEEN_ASYNC_WAKEUP.with(|c| c.set(current));
 }
 
+/// Clear **only** the immediate draw request ([`request_draw`]'s flag).
+///
+/// For a host that tried to draw and could not — the surface refused the
+/// frame (swap chain backing off after a failed configure, window occluded).
+/// That frame never reaches `App::paint`, the only other place the flag is
+/// cleared, so left set it keeps `wants_draw()` true and a reactive host
+/// spinning in `ControlFlow::Poll`. The host has already arranged its own
+/// wake for the retry.
+///
+/// Unlike [`clear_draw_request`], this leaves the scheduled deadline
+/// ([`request_draw_after`]) in place — it may be the very wake that retries
+/// the frame — and does not mark pending cross-thread
+/// [`signal_async_state_change`] bumps as seen, so they still surface (and
+/// still advance [`async_state_epoch`]) on the next read.
+pub fn clear_immediate_draw_request() {
+    NEEDS_DRAW.with(|c| c.set(false));
+}
+
 /// Schedule a future draw.  Keeps the EARLIEST pending deadline, so multiple
 /// widgets asking for different delays will all be served by the soonest one
 /// (each widget re-arms its own deadline on the next draw anyway).
@@ -693,88 +711,5 @@ mod host_waker_tests {
 }
 
 #[cfg(test)]
-mod scheduled_draw_tests {
-    //! Regression coverage for the reactive-host lost-wakeup fix: the
-    //! scheduled-draw cell must be readable non-destructively, and a due
-    //! deadline must surface through `wants_draw`. Uses short real sleeps
-    //! (`web_time::Instant` has no injectable clock here); each test clears
-    //! shared thread-local state up front so it can't inherit a pending
-    //! deadline from a prior test on the same worker thread.
-    use super::*;
-    use std::thread::sleep;
-
-    /// (a) The lost-wakeup repro. A pending deadline read once must still be
-    /// visible on the SECOND read — the "intervening AboutToWait" that the
-    /// read-and-clear design silently dropped.
-    #[test]
-    fn peek_is_non_destructive() {
-        clear_draw_request();
-        request_draw_after(Duration::from_millis(50));
-        let first = peek_next_draw_deadline();
-        assert!(first.is_some(), "first peek sees the pending deadline");
-        let second = peek_next_draw_deadline();
-        assert_eq!(
-            first, second,
-            "second peek still sees the SAME pending deadline (lost-wakeup fix)"
-        );
-    }
-
-    /// (b) Once due, `wants_draw` returns true; after the paint-clear cycle
-    /// consumes it, a subsequent `wants_draw` is false absent a re-arm.
-    #[test]
-    fn due_deadline_surfaces_then_clears() {
-        clear_draw_request();
-        assert!(!wants_draw(), "baseline: nothing pending after clear");
-        request_draw_after(Duration::from_millis(20));
-        sleep(Duration::from_millis(40));
-        assert!(wants_draw(), "a due deadline makes wants_draw() true");
-        // Simulate the frame that honours it: paint clears the draw flags.
-        clear_draw_request();
-        assert!(
-            !wants_draw(),
-            "without a re-arm the loop goes idle again after the draw"
-        );
-    }
-
-    /// (c) A future (not-yet-due) deadline is peekable but does NOT make
-    /// `wants_draw` true — the host idles on `WaitUntil` instead of polling.
-    #[test]
-    fn future_deadline_peeks_but_does_not_want_draw() {
-        clear_draw_request();
-        request_draw_after(Duration::from_millis(500));
-        assert!(
-            peek_next_draw_deadline().is_some(),
-            "future deadline is visible to the host's WaitUntil"
-        );
-        assert!(
-            !wants_draw(),
-            "a future deadline must not force continuous polling"
-        );
-        // It also stays pending after that wants_draw() read.
-        assert!(
-            peek_next_draw_deadline().is_some(),
-            "a non-due wants_draw() must not consume the deadline"
-        );
-    }
-
-    /// (d) Earliest-deadline-wins still holds regardless of arm order.
-    #[test]
-    fn earliest_deadline_wins() {
-        clear_draw_request();
-        request_draw_after(Duration::from_millis(400));
-        let after_long = peek_next_draw_deadline().expect("long deadline armed");
-        request_draw_after(Duration::from_millis(20));
-        let after_short = peek_next_draw_deadline().expect("short deadline armed");
-        assert!(
-            after_short < after_long,
-            "a nearer deadline replaces a farther one"
-        );
-        // Reverse order: a farther deadline does not push the nearer one out.
-        request_draw_after(Duration::from_millis(400));
-        assert_eq!(
-            peek_next_draw_deadline(),
-            Some(after_short),
-            "arming a farther deadline keeps the earliest"
-        );
-    }
-}
+#[path = "animation_scheduled_draw_tests.rs"]
+mod scheduled_draw_tests;

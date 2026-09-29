@@ -60,9 +60,13 @@
 pub mod gpu;
 #[cfg(not(target_arch = "wasm32"))]
 pub use gpu::{
-    clamp_surface_size, surface_acquire_action, CopySrc, Gpu, GpuConfig, GpuInitError,
-    SurfaceAcquire,
+    clamp_surface_size, surface_acquire_action, CopySrc, FrameAcquire, Gpu, GpuConfig,
+    GpuInitError, RetryWake, SurfaceAcquire, SurfaceError,
 };
+/// When to retry a failed `Surface::configure`, when to give up, and what to
+/// log — the pure policy behind [`Gpu`]'s surface recovery.
+#[cfg(not(target_arch = "wasm32"))]
+mod surface_retry;
 
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};

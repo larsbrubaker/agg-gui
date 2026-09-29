@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Added
+
+- `ShellError::Surface` — the window's surface stayed unusable for the whole
+  swap-chain configure retry budget (see agg-gui-wgpu's
+  `GpuConfig::surface_retry_budget`); the shell exits with it instead of
+  showing a black window forever.
+
+### Changed
+
+- Frames are acquired with `Gpu::try_acquire_frame`. A refused frame arranges
+  its retry from the `RetryWake` (`Now` → window redraw, `After` → a draw
+  deadline, `OnEvent` → nothing) and drops the immediate draw request, so a
+  reactive loop no longer sits in `ControlFlow::Poll` while the surface backs
+  off. While a configure retry is backing off the loop waits for it
+  (`WaitUntil`) even in `RedrawPolicy::Continuous` or with a capture pending.
+- While the window is minimized *and* its surface is unconfigured (a
+  configure-failure run in progress), the paint is skipped entirely — no
+  acquire or configure, so no retry budget is spent against the minimized
+  window — and continuous mode stops polling; restoring (a nonzero
+  `Resized`) repaints and resumes the retries. A minimized window whose
+  surface is configured paints and polls exactly as before.
+- `WindowEvent::Occluded(false)` requests a redraw, since an occluded skip
+  (`RetryWake::OnEvent`) schedules no retry of its own.
+
+### Fixed
+
+- Frames are presented through `WgpuGfxCtx::present`, which releases the
+  context's stashed back-buffer handle first — the cause of the DX12 resize
+  crash (`Surface::configure` panicking with "Invalid surface").
+
 ## [0.5.1] - 2026-08-26
 
 ### Added

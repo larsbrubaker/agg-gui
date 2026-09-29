@@ -8,6 +8,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- `animation::clear_immediate_draw_request` — clears only the immediate draw
+  flag, leaving scheduled deadlines and pending cross-thread async wakeups in
+  place. For a host whose surface refused a frame: the frame never reaches
+  `App::paint`, so the flag would otherwise stay set and keep a reactive host
+  polling.
+
 ## [0.5.0] - 2026-08-25
 
 ### Added

@@ -62,6 +62,7 @@ mod config;
 mod host;
 mod input;
 mod paint;
+mod redraw_schedule;
 mod run;
 mod screenshot;
 mod shell_loop;
@@ -106,6 +107,11 @@ pub enum ShellError {
     /// wgpu could not produce a usable device or surface — at start-up, or
     /// when rebuilding after a device loss.
     Gpu(agg_gui_wgpu::GpuInitError),
+    /// The window's surface stayed unusable — every swap-chain configure
+    /// retry failing — for longer than the retry budget
+    /// ([`agg_gui_wgpu::GpuConfig::surface_retry_budget`]). The shell exits
+    /// with this instead of showing a black window forever.
+    Surface(agg_gui_wgpu::SurfaceError),
     /// A configured deterministic capture could not be produced.
     Screenshot(String),
     /// [`ShellControl::request_relaunch`] could not start the new process.
@@ -127,6 +133,7 @@ impl std::fmt::Display for ShellError {
             Self::EventLoop(e) => write!(f, "winit event loop: {e}"),
             Self::CreateWindow(e) => write!(f, "create window: {e}"),
             Self::Gpu(e) => write!(f, "wgpu init: {e}"),
+            Self::Surface(e) => write!(f, "wgpu surface: {e}"),
             Self::Screenshot(msg) => write!(f, "screenshot: {msg}"),
             Self::Relaunch(e) => write!(f, "relaunch: {e}"),
             Self::App(e) => write!(f, "app start-up: {e}"),
@@ -140,6 +147,7 @@ impl std::error::Error for ShellError {
             Self::EventLoop(e) => Some(e),
             Self::CreateWindow(e) => Some(e),
             Self::Gpu(e) => Some(e),
+            Self::Surface(e) => Some(e),
             Self::Relaunch(e) => Some(e),
             Self::App(e) => Some(e.as_ref()),
             Self::Screenshot(_) => None,
