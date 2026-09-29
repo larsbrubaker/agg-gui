@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui-wgpu"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 # wgpu 29 requires 1.87, and this crate uses `u32::div_ceil` (stable 1.73).
 rust-version = "1.87"
@@ -26,7 +26,7 @@ reflect = ["agg-gui/reflect"]
 # `default-features = false`: the renderer needs none of agg-gui's optional
 # features (reflect, clipboard, winit-adapter), so depending on them would
 # force `bevy_reflect` on every consumer of this crate.
-agg-gui  = { path = "../agg-gui", version = "0.5", default-features = false }
+agg-gui  = { path = "../agg-gui", version = "0.5.1", default-features = false }
 agg-rust = "1.1.0"
 bytemuck = { version = "1", features = ["derive"] }
 # Logging facade only: a library must not print (no eprintln!/println!) —

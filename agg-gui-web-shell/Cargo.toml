@@ -32,7 +32,7 @@ reflect = ["agg-gui/reflect", "agg-gui-wgpu/reflect"]
 [dependencies]
 # `version` is required for a `path` dependency to be publishable.
 agg-gui = { path = "../agg-gui", version = "0.5", default-features = false }
-agg-gui-wgpu = { path = "../agg-gui-wgpu", version = "0.5.2", default-features = false }
+agg-gui-wgpu = { path = "../agg-gui-wgpu", version = "0.5.3", default-features = false }
 wgpu = { version = "29", default-features = false, features = ["wgsl"] }
 web-time = "1"
 # Facade only — a library must not print.

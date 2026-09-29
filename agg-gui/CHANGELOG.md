@@ -8,13 +8,41 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-28
+
 ### Added
 
+- `DrawCtx::clip_path` — intersect the clip with the current path
+  (anti-aliased) until the matching `restore()`; `DrawCtx::supports_clip_path`
+  reports whether a backend implements it. The software `GfxCtx` rasterises an
+  8-bit coverage mask applied when the clip layer pops.
+- `DrawCtx::ellipse` — trait default built from cubic Béziers, with canvas-2D
+  angle semantics (`draw_ctx::defaults::ellipse_ops` / `EllipseOp`).
 - `animation::clear_immediate_draw_request` — clears only the immediate draw
   flag, leaving scheduled deadlines and pending cross-thread async wakeups in
   place. For a host whose surface refused a frame: the frame never reaches
   `App::paint`, so the flag would otherwise stay set and keep a reactive host
   polling.
+
+### Changed
+
+- `wheel::WheelNormalizer` no longer banks sub-notch travel: fractional
+  deltas pass straight through (a trackpad on the web scrolled in 40 px jumps;
+  now it is continuous, matching the native shell), while a classic wheel
+  still arrives as whole notches. It is now a stateless unit struct;
+  `WheelNormalizer::reset` is kept as a no-op so 0.5.0 callers still
+  compile, and will be removed in 0.6.
+- `DrawCtx::draw_image_rgba_corners` documents that corner quads are always
+  sampled with linear filtering.
+
+### Fixed
+
+- A cross-thread async wakeup (`signal_async_state_change`) that landed between
+  the host's last `wants_draw()` and `App::paint` was silently dropped — no
+  dirty walk, no retained-cache invalidation, no further draw.
+  `clear_draw_request` now pumps pending wakeups into the epochs before
+  clearing, and `App::paint` requests one follow-up draw when a signal arrived
+  after layout, so the next frame re-lays-out (larsbrubaker/agg-gui#6).
 
 ## [0.5.0] - 2026-08-25
 

@@ -105,11 +105,26 @@ impl WheelNormalizer {
     pub fn normalize(&mut self, delta_x: f64, delta_y: f64, mode: WheelDeltaMode) -> (f64, f64) {
         (to_notches(delta_x, mode), to_notches(delta_y, mode))
     }
+
+    /// No-op: the normalizer no longer banks partial travel, so there is
+    /// nothing to forget. Kept so 0.5.0 callers (which reset on canvas
+    /// blur / gesture cancel) still compile; it will be removed in 0.6.
+    pub fn reset(&mut self) {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `reset` survives for 0.5.x callers and changes nothing: there is
+    /// no banked travel to forget.
+    #[test]
+    fn reset_is_a_harmless_no_op() {
+        let mut n = WheelNormalizer::new();
+        assert_eq!(n.normalize(0.0, 4.0, WheelDeltaMode::Pixel), (0.0, 0.1));
+        n.reset();
+        assert_eq!(n.normalize(0.0, 4.0, WheelDeltaMode::Pixel), (0.0, 0.1));
+    }
 
     /// A classic wheel notch arrives whole in every mode a browser can
     /// report it in.

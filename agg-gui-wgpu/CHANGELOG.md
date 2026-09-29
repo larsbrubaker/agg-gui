@@ -6,10 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
-## [Unreleased]
+## [0.5.3] - 2026-09-28
 
 ### Added
 
+- `DrawCtx::clip_path` on `WgpuGfxCtx`: the clip layer is composited through
+  a tessellated mask mesh (new layer-mesh pipeline and masked layer pop).
+  Requires agg-gui 0.5.1, which adds the trait method.
 - `Gpu::try_acquire_frame() -> Result<FrameAcquire, SurfaceError>`, with
   `FrameAcquire::{Frame, Skip(RetryWake)}` and
   `RetryWake::{Now, After(Duration), OnEvent}`: the caller, which owns the
@@ -47,6 +50,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- `draw_image_rgba_corners` sampled images under the mipmap threshold with
+  nearest filtering, leaving rotated or scaled sprites jagged; corner quads
+  now always sample linearly. The axis-aligned 1:1 arc blit is unchanged.
 - DX12 resize crash (`In Surface::configure - Invalid surface` /
   `DXGI_ERROR_INVALID_CALL`, then `E_ACCESSDENIED` on swap-chain
   re-creation): `WgpuGfxCtx` kept a clone of the frame's surface texture for

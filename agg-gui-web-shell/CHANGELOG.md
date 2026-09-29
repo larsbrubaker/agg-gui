@@ -71,3 +71,6 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A global `set_redraw_policy` called inside `on_idle` was overwritten.
 - `start` errors detected synchronously (canvas not found) were silent unless
   the caller logged them; they now take the fatal path too.
+- Frames are presented through `WgpuGfxCtx::present`, which releases the
+  context's stashed back-buffer handle before presenting (the DX12 resize
+  crash fixed in agg-gui-wgpu 0.5.3, the minimum version this crate requires).
