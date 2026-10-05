@@ -19,7 +19,7 @@ impl ComboBox {
 
     pub(super) fn popup_top(&self) -> f64 {
         if self.popup_opens_up {
-            CLOSED_H + self.popup_h()
+            self.closed_h() + self.popup_h()
         } else {
             0.0
         }
@@ -63,7 +63,7 @@ impl ComboBox {
     }
 
     pub(super) fn in_button(&self, p: Point) -> bool {
-        p.x >= 0.0 && p.x <= self.bounds.width && p.y >= 0.0 && p.y <= CLOSED_H
+        p.x >= 0.0 && p.x <= self.bounds.width && p.y >= 0.0 && p.y <= self.closed_h()
     }
 
     pub(super) fn ensure_selected_visible(&mut self) {
@@ -151,7 +151,7 @@ impl ComboBox {
 
         let desired_h = n as f64 * ITEM_H;
         let below = (origin_y - POPUP_MARGIN).max(ITEM_H);
-        let above = (viewport_h - (origin_y + CLOSED_H) - POPUP_MARGIN).max(ITEM_H);
+        let above = (viewport_h - (origin_y + self.closed_h()) - POPUP_MARGIN).max(ITEM_H);
         self.popup_opens_up = below < desired_h && above > below;
         let available_h = if self.popup_opens_up { above } else { below };
         let fit_count = (available_h / ITEM_H).floor().max(1.0) as usize;

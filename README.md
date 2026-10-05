@@ -64,9 +64,9 @@ wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
 | `Button` | Themeable background, focus ring, click callback |
 | `CollapsingHeader` | Expand/collapse section with animated disclosure |
 | `Checkbox` | Animated check mark, shared state cell for two-way binding |
-| `ComboBox` | Popup-backed single-selection control |
+| `ComboBox` | Popup-backed single-selection control; per-instance closed-box fill/border/hover/radius/height via `with_style(ComboBoxStyle)` |
 | `ColorPicker` | Interactive color selection widget |
-| `Slider` | Linear value control with focus ring and keyboard nudge |
+| `Slider` | Linear value control with focus ring and keyboard nudge; per-instance track/thumb color and track radius via `with_style(SliderStyle)` |
 | `DragValue` | Click-drag to increment/decrement numeric values |
 | `RadioGroup` | Single-selection group with shared state |
 | `SegmentedControl` | macOS-style joined segment strip bound to a shared index cell; Left/Right keyboard selection, per-segment enable gates, compact size |

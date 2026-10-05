@@ -58,6 +58,9 @@ pub(super) struct ComboPopupRequest {
     /// from [`ComboBox::with_item_tooltips`]. Painted beside the hovered
     /// row by the popup drain pass.
     pub(super) hover_tooltip: Option<(String, Arc<Font>)>,
+    /// Resolved closed-box height (honours [`ComboBoxStyle::height`]) so the
+    /// popup attaches flush to the button.
+    pub(super) closed_h: f64,
 }
 
 thread_local! {
@@ -120,6 +123,10 @@ pub struct ComboBox {
     scrollbar: ScrollbarAxis,
     middle_dragging: bool,
     middle_last_pos: Point,
+    /// Per-instance closed-box overrides — see [`ComboBoxStyle`].
+    style: ComboBoxStyle,
+    /// Cursor is over the closed box (drives `ComboBoxStyle::hover_fill`).
+    button_hovered: bool,
 }
 
 impl ComboBox {
@@ -168,6 +175,8 @@ impl ComboBox {
             },
             middle_dragging: false,
             middle_last_pos: Point::ORIGIN,
+            style: ComboBoxStyle::default(),
+            button_hovered: false,
         }
     }
 
@@ -335,6 +344,8 @@ impl ComboBox {
 }
 
 mod geometry;
+mod style;
+pub use style::ComboBoxStyle;
 
 impl Widget for ComboBox {
     fn type_name(&self) -> &'static str {
@@ -413,12 +424,13 @@ impl Widget for ComboBox {
             }
         }
 
-        self.bounds = Rect::new(0.0, 0.0, available.width, CLOSED_H);
+        let closed_h = self.closed_h();
+        self.bounds = Rect::new(0.0, 0.0, available.width, closed_h);
         let inner_w = (available.width - PAD_X * 2.0 - ARROW_W).max(0.0);
 
         // Layout selected label.
-        let sl = self.selected_label.layout(Size::new(inner_w, CLOSED_H));
-        let sl_y = (CLOSED_H - sl.height) * 0.5;
+        let sl = self.selected_label.layout(Size::new(inner_w, closed_h));
+        let sl_y = (closed_h - sl.height) * 0.5;
         self.selected_label
             .set_bounds(Rect::new(PAD_X, sl_y, sl.width, sl.height));
 
@@ -433,37 +445,12 @@ impl Widget for ComboBox {
         }
         drop(labels);
 
-        Size::new(available.width, CLOSED_H)
+        Size::new(available.width, closed_h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let w = self.bounds.width;
-
-        // ── Button background ─────────────────────────────────────────────────
-        ctx.set_fill_color(v.widget_bg);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, CLOSED_H, CORNER_R);
-        ctx.fill();
-
-        ctx.set_stroke_color(v.widget_stroke);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, CLOSED_H, CORNER_R);
-        ctx.stroke();
-
-        // ── Dropdown arrow (▼) ────────────────────────────────────────────────
-        let arrow_x = w - ARROW_W * 0.5;
-        let arrow_cy = CLOSED_H * 0.5;
-        let arrow_sz = 4.0;
-        ctx.set_fill_color(v.text_dim);
-        ctx.begin_path();
-        // Small downward triangle.
-        ctx.move_to(arrow_x - arrow_sz, arrow_cy + arrow_sz * 0.5);
-        ctx.line_to(arrow_x + arrow_sz, arrow_cy + arrow_sz * 0.5);
-        ctx.line_to(arrow_x, arrow_cy - arrow_sz * 0.5);
-        ctx.close_path();
-        ctx.fill();
+        self.paint_closed_box(ctx);
 
         // ── Selected label ────────────────────────────────────────────────────
         self.selected_label.set_color(v.text_color);
@@ -525,6 +512,7 @@ impl Widget for ComboBox {
                     }
                     Some((text.clone(), Arc::clone(&self.font)))
                 }),
+                closed_h: self.closed_h(),
             });
         }
     }
@@ -634,6 +622,13 @@ impl Widget for ComboBox {
                         crate::animation::request_draw();
                     }
                     return EventResult::Consumed;
+                }
+                let button_hovered = self.in_button(*pos);
+                if button_hovered != self.button_hovered {
+                    self.button_hovered = button_hovered;
+                    if self.style.hover_fill.is_some() {
+                        crate::animation::request_draw();
+                    }
                 }
                 let hovered_item = self.item_for_pos(*pos);
                 let style = self.popup_scroll_style();

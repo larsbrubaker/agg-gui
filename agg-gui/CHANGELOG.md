@@ -8,6 +8,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- `ComboBox::with_style(ComboBoxStyle)` — optional per-instance overrides for
+  the closed box: `fill`, `border`, `hover_fill`, `radius` and `height`
+  (`height` also drives hit-testing and where the popup attaches). Every
+  field defaults to `None`, which keeps the existing `Visuals`-driven look.
+  `ComboBox::style()` reads it back.
+- `Slider::with_style(SliderStyle)` — optional per-instance `track` color,
+  `track_radius` and `thumb` color (a thumb override applies in every
+  interaction state). `None` fields keep the current appearance.
+  `Slider::style()` reads it back.
+
 ## [0.5.1] - 2026-09-28
 
 ### Added

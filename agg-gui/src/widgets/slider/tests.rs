@@ -151,3 +151,113 @@ fn value_cell_with_reversed_range_does_not_panic() {
     let _ = s.layout(Size::new(200.0, 22.0));
     assert_eq!(s.value(), 0.0);
 }
+
+// ── SliderStyle (per-instance track / thumb overrides) ─────────────────────
+
+const STYLE_W: f64 = 200.0;
+
+/// Paint a max-valued slider (thumb at the right end, no trailing fill so
+/// the rail's left end is bare) and return the framebuffer plus thumb x.
+fn render_styled(style: Option<SliderStyle>) -> (crate::Framebuffer, f64) {
+    let mut s = Slider::new(1.0, 0.0, 1.0, test_font())
+        .with_trailing_fill(false)
+        .with_show_value(false);
+    if let Some(style) = style {
+        s = s.with_style(style);
+    }
+    let _ = s.layout(Size::new(STYLE_W, WIDGET_H));
+    s.set_bounds(Rect::new(0.0, 0.0, STYLE_W, WIDGET_H));
+    let mut fb = crate::Framebuffer::new(STYLE_W as u32, WIDGET_H as u32);
+    {
+        let mut ctx = crate::GfxCtx::new(&mut fb);
+        ctx.clear(crate::Color::black());
+        paint_subtree(&mut s, &mut ctx);
+    }
+    let tx = s.thumb_pos();
+    (fb, tx)
+}
+
+fn px(fb: &crate::Framebuffer, x: u32, y: u32) -> [u8; 3] {
+    let i = ((y * fb.width() + x) * 4) as usize;
+    let p = &fb.pixels()[i..i + 4];
+    [p[0], p[1], p[2]]
+}
+
+fn rgb8(c: crate::Color) -> [u8; 3] {
+    [
+        (c.r * 255.0).round() as u8,
+        (c.g * 255.0).round() as u8,
+        (c.b * 255.0).round() as u8,
+    ]
+}
+
+fn near(a: [u8; 3], b: [u8; 3]) -> bool {
+    a.iter().zip(b.iter()).all(|(x, y)| x.abs_diff(*y) <= 3)
+}
+
+/// Mid-rail pixel (far from the thumb) and a pixel on the thumb's ring.
+fn rail_px(fb: &crate::Framebuffer) -> [u8; 3] {
+    px(fb, 100, (WIDGET_H * 0.5) as u32)
+}
+fn ring_px(fb: &crate::Framebuffer, tx: f64) -> [u8; 3] {
+    px(fb, tx as u32, (WIDGET_H * 0.5 + THUMB_R - 1.25) as u32)
+}
+
+#[test]
+fn slider_default_style_matches_visuals() {
+    let v = crate::theme::current_visuals();
+    for style in [None, Some(SliderStyle::default())] {
+        let (fb, tx) = render_styled(style);
+        assert!(
+            near(rail_px(&fb), rgb8(v.track_bg)),
+            "rail {:?}",
+            rail_px(&fb)
+        );
+        assert!(
+            near(ring_px(&fb, tx), rgb8(v.accent)),
+            "thumb {:?}",
+            ring_px(&fb, tx)
+        );
+    }
+}
+
+#[test]
+fn slider_style_track_and_thumb_colors_are_used() {
+    let track = crate::Color::rgb(1.0, 0.0, 0.0);
+    let thumb = crate::Color::rgb(0.0, 1.0, 0.0);
+    let (fb, tx) = render_styled(Some(SliderStyle {
+        track: Some(track),
+        thumb: Some(thumb),
+        ..Default::default()
+    }));
+    assert!(near(rail_px(&fb), rgb8(track)), "rail {:?}", rail_px(&fb));
+    assert!(
+        near(ring_px(&fb, tx), rgb8(thumb)),
+        "thumb {:?}",
+        ring_px(&fb, tx)
+    );
+}
+
+#[test]
+fn slider_style_track_radius_is_used() {
+    let track = crate::Color::rgb(1.0, 0.0, 0.0);
+    // Top-left corner pixel of the rail's bare left end.
+    let corner = |radius: Option<f64>| {
+        let (fb, _) = render_styled(Some(SliderStyle {
+            track: Some(track),
+            track_radius: radius,
+            ..Default::default()
+        }));
+        px(&fb, THUMB_R as u32, (WIDGET_H * 0.5 - TRACK_H * 0.5) as u32)[0]
+    };
+    let square = corner(Some(0.0));
+    let pill = corner(None);
+    assert!(
+        square > 240,
+        "radius 0 corner should be fully covered: {square}"
+    );
+    assert!(
+        pill + 40 < square,
+        "default pill corner {pill} vs square {square}"
+    );
+}

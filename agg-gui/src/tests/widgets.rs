@@ -1,6 +1,7 @@
 use super::*;
 
 mod button_touch;
+mod combo_style;
 mod password_reveal;
 mod window;
 

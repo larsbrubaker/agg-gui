@@ -49,7 +49,7 @@ pub(crate) fn paint_global_combo_popups(ctx: &mut dyn DrawCtx) {
 fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     let v = ctx.visuals();
     let popup_y = if request.opens_up {
-        request.y + super::CLOSED_H
+        request.y + request.closed_h
     } else {
         request.y - request.popup_h
     };

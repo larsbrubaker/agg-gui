@@ -12,7 +12,9 @@ impl Slider {
     /// Paint the draggable handle (circle or rect) centered at `(cx, cy)`.
     pub(super) fn paint_thumb(&self, ctx: &mut dyn DrawCtx, cx: f64, cy: f64) {
         let v = ctx.visuals();
-        let thumb_color = if self.dragging || self.focused {
+        let thumb_color = if let Some(c) = self.style.thumb {
+            c
+        } else if self.dragging || self.focused {
             v.accent_pressed
         } else if self.hovered {
             v.accent_hovered
@@ -71,24 +73,19 @@ impl Slider {
         let track_right = self.track_right();
         let track_w = (track_right - THUMB_R).max(0.0);
         let tx = self.thumb_pos();
+        let radius = self.track_radius();
 
         // Rail background.
-        ctx.set_fill_color(v.track_bg);
+        ctx.set_fill_color(self.style.track.unwrap_or(v.track_bg));
         ctx.begin_path();
-        ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, track_w, TRACK_H, TRACK_H * 0.5);
+        ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, track_w, TRACK_H, radius);
         ctx.fill();
 
         // Trailing fill up to the thumb.
         if self.trailing_fill && tx > THUMB_R {
             ctx.set_fill_color(v.accent);
             ctx.begin_path();
-            ctx.rounded_rect(
-                THUMB_R,
-                cy - TRACK_H * 0.5,
-                tx - THUMB_R,
-                TRACK_H,
-                TRACK_H * 0.5,
-            );
+            ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, tx - THUMB_R, TRACK_H, radius);
             ctx.fill();
         }
 
@@ -109,20 +106,21 @@ impl Slider {
         let cx = THUMB_R; // rail column near the left edge
         let (p0, p1) = self.position_range(); // (bottom, top) in pixels
         let ty = self.thumb_pos();
+        let radius = self.track_radius();
 
         // Rail background (full height between the shrunk ends).
         let top = p1.min(p0);
         let rail_h = (p0 - p1).abs();
-        ctx.set_fill_color(v.track_bg);
+        ctx.set_fill_color(self.style.track.unwrap_or(v.track_bg));
         ctx.begin_path();
-        ctx.rounded_rect(cx - TRACK_H * 0.5, top, TRACK_H, rail_h, TRACK_H * 0.5);
+        ctx.rounded_rect(cx - TRACK_H * 0.5, top, TRACK_H, rail_h, radius);
         ctx.fill();
 
         // Trailing fill from the bottom up to the thumb.
         if self.trailing_fill && ty < p0 {
             ctx.set_fill_color(v.accent);
             ctx.begin_path();
-            ctx.rounded_rect(cx - TRACK_H * 0.5, ty, TRACK_H, p0 - ty, TRACK_H * 0.5);
+            ctx.rounded_rect(cx - TRACK_H * 0.5, ty, TRACK_H, p0 - ty, radius);
             ctx.fill();
         }
 

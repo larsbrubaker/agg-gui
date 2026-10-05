@@ -26,6 +26,8 @@ use crate::widgets::slider_math::{
 };
 
 mod paint;
+mod style;
+pub use style::SliderStyle;
 
 /// Orientation of a [`Slider`]. Horizontal is the default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -167,6 +169,8 @@ pub struct Slider {
     /// `true` to preserve the widget's historical appearance across the app;
     /// egui's per-slider default is off, so demos set this explicitly.
     trailing_fill: bool,
+    /// Per-instance colour / radius overrides — see [`SliderStyle`].
+    style: SliderStyle,
 }
 
 impl Slider {
@@ -218,6 +222,7 @@ impl Slider {
             integer: false,
             suffix: String::new(),
             trailing_fill: true,
+            style: SliderStyle::default(),
         }
     }
 

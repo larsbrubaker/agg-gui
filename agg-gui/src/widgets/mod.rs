@@ -63,7 +63,7 @@ pub use color_picker::ColorPicker;
 pub use color_wheel_picker::{
     color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, ColorWheelPicker,
 };
-pub use combo_box::ComboBox;
+pub use combo_box::{ComboBox, ComboBoxStyle};
 pub use conditional::Conditional;
 pub use container::Container;
 pub use drag_value::DragValue;
@@ -106,7 +106,7 @@ pub use scroll_view::{
     ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility, ScrollView,
 };
 pub use segmented::SegmentedControl;
-pub use slider::{HandleShape, Slider, SliderClamping, SliderOrientation};
+pub use slider::{HandleShape, Slider, SliderClamping, SliderOrientation, SliderStyle};
 pub use spacers::{Separator, Spacer};
 pub use spinner::{Spinner, SpinnerSize};
 pub use splitter::{Splitter, SplitterRatio};

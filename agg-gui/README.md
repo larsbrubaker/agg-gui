@@ -45,9 +45,9 @@ agg-gui = { version = "0.5", features = ["winit-adapter", "clipboard"] }
 | `Button` | Themeable background, focus ring, disabled state, click callback |
 | `CollapsingHeader` | Expand/collapse section with animated disclosure |
 | `Checkbox` | Animated check mark, shared state cell for two-way binding |
-| `ComboBox` | Popup-backed single-selection control |
+| `ComboBox` | Popup-backed single-selection control; per-instance closed-box fill/border/hover/radius/height via `with_style(ComboBoxStyle)` |
 | `ColorPicker` | Interactive color selection widget |
-| `Slider` | Linear value control with focus ring and keyboard nudge |
+| `Slider` | Linear value control with focus ring and keyboard nudge; per-instance track/thumb color and track radius via `with_style(SliderStyle)` |
 | `DragValue` | Click-drag to increment/decrement numeric values |
 | `RadioGroup` | Single-selection group with shared state |
 | `ProgressBar` | Filled track with optional label |
