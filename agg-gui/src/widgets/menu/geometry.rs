@@ -222,13 +222,19 @@ pub fn item_at(items: &[MenuEntry], idx: usize) -> Option<&MenuItem> {
     }
 }
 
+/// Height of one entry's row: separators are thin, widget rows take their
+/// own height, every other item takes the (possibly touch-grown) row height.
+pub fn entry_height(entry: &MenuEntry, m: &MenuMetrics) -> f64 {
+    match entry {
+        MenuEntry::Item(item) => item.widget_row.map_or(m.row_h, |w| w.height),
+        MenuEntry::Separator => m.sep_h,
+    }
+}
+
 pub fn popup_height(items: &[MenuEntry], m: &MenuMetrics) -> f64 {
     items
         .iter()
-        .map(|entry| match entry {
-            MenuEntry::Item(_) => m.row_h,
-            MenuEntry::Separator => m.sep_h,
-        })
+        .map(|entry| entry_height(entry, m))
         .sum::<f64>()
         .max(m.row_h)
 }
@@ -270,10 +276,7 @@ fn row_layouts(items: &[MenuEntry], rect: Rect, m: &MenuMetrics) -> Vec<RowLayou
     let mut y = rect.y + rect.height;
     let mut rows = Vec::with_capacity(items.len());
     for (idx, entry) in items.iter().enumerate() {
-        let h = match entry {
-            MenuEntry::Item(_) => m.row_h,
-            MenuEntry::Separator => m.sep_h,
-        };
+        let h = entry_height(entry, m);
         y -= h;
         rows.push(RowLayout {
             rect: Rect::new(rect.x, y, rect.width, h),

@@ -64,7 +64,7 @@ wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
 | `Button` | Themeable background, focus ring, click callback |
 | `CollapsingHeader` | Expand/collapse section with animated disclosure |
 | `Checkbox` | Animated check mark, shared state cell for two-way binding |
-| `ComboBox` | Popup-backed single-selection control; per-instance closed-box fill/border/hover/radius/height via `with_style(ComboBoxStyle)` |
+| `ComboBox` | Popup-backed single-selection control; per-instance closed-box fill/border/hover/radius/height via `with_style(ComboBoxStyle)`, hover/focus outline, open fill and list/item colours via `with_state_style(ComboBoxStateStyle)`, optional empty selection with placeholder via `with_no_selection(..)` |
 | `ColorPicker` | Interactive color selection widget |
 | `Slider` | Linear value control with focus ring and keyboard nudge; per-instance track/thumb color and track radius via `with_style(SliderStyle)` |
 | `DragValue` | Click-drag to increment/decrement numeric values |
@@ -90,7 +90,7 @@ wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
 | `TreeView` | Hierarchical list with expand/collapse and drag-and-drop |
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
-| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; any widget also gets a hover tooltip via `with_tooltip(...)` |
+| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; popup rows can host any widget (`MenuItem::widget_row` + `PopupMenu::set_row_widget` / `push_widget_row`), and a host widget can open a `PopupMenu` at a local anchor (`open_at_local`, `handle_local_event`, `paint_local`); any widget also gets a hover tooltip via `with_tooltip(...)` |
 | `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
 | `Rebuilder` | Regenerates a child subtree from a builder closure when a shared version cell changes — for dynamic content sets (option lists, variable row counts) |
 | `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |

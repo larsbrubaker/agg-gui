@@ -15,11 +15,13 @@ use crate::widget::{current_viewport, BackbufferCache, Widget};
 use super::geometry::{contains, effective_metrics, item_at_path, DEFAULT_FONT_SIZE};
 use super::model::MenuEntry;
 use super::paint::{bar_button_text_color, paint_menu_bar_button_bg, paint_panel, MenuStyle};
+use super::row_widgets::RowWidgets;
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 
 use labels::{BarLabels, PopupLabels};
 
 mod labels;
+mod popup_local;
 mod popup_paint;
 
 /// Layout direction for `MenuBar`.
@@ -49,6 +51,13 @@ pub struct PopupMenu {
     pub style: MenuStyle,
     /// Cached row labels for popup text and shortcuts.
     labels: PopupLabels,
+    /// Widgets hosted by `MenuItem::widget_row` rows (`popup_local.rs`).
+    row_widgets: RowWidgets,
+    /// Set by `open_at_local`: the anchor in the host widget's local space,
+    /// re-applied whenever the host's root origin changes.
+    local_anchor: Option<Point>,
+    /// The host widget's (0, 0) in root coordinates — see `popup_local.rs`.
+    root_origin: Point,
 }
 
 impl PopupMenu {
@@ -58,14 +67,20 @@ impl PopupMenu {
             state: PopupMenuState::default(),
             style: MenuStyle::default(),
             labels: PopupLabels::new(),
+            row_widgets: RowWidgets::default(),
+            local_anchor: None,
+            root_origin: Point::ORIGIN,
         }
     }
 
     pub fn open_at(&mut self, pos: Point) {
+        self.local_anchor = None;
+        self.row_widgets.reset_interaction();
         self.state.open_at(pos, MenuAnchorKind::Context);
     }
 
     pub fn close(&mut self) {
+        self.row_widgets.reset_interaction();
         self.state.close();
     }
 
@@ -78,6 +93,12 @@ impl PopupMenu {
     }
 
     pub fn handle_event(&mut self, event: &Event, viewport: Size) -> (EventResult, MenuResponse) {
+        if self.state.open && !self.row_widgets.is_empty() {
+            let layouts = self.state.layouts(&self.items, viewport);
+            if let Some(result) = self.row_widgets.route(&self.items, &layouts, event) {
+                return (result, MenuResponse::None);
+            }
+        }
         self.state.handle_event(&mut self.items, event, viewport)
     }
 
@@ -134,6 +155,7 @@ impl PopupMenu {
                 &self.style,
                 &mut self.labels,
             );
+            self.row_widgets.paint_level(ctx, &self.items, layout);
         }
     }
 }
@@ -685,3 +707,5 @@ impl Widget for MenuBar {
 mod tests_1;
 #[cfg(test)]
 mod tests_2;
+#[cfg(test)]
+mod tests_rows;

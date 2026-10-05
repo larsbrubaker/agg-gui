@@ -44,6 +44,10 @@ pub(super) fn paint_popup_level(
         let Some(MenuEntry::Item(item)) = level_items.get(item_idx) else {
             continue;
         };
+        if item.widget_row.is_some() {
+            // Painted by the row's widget (`PopupMenu::paint`).
+            continue;
+        }
         let mut path = layout.path_prefix.clone();
         path.push(item_idx);
         let hovered = state.hover_path.as_ref() == Some(&path);

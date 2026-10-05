@@ -1,4 +1,4 @@
-﻿//! `ComboBox` — a single-selection dropdown widget.
+//! `ComboBox` — a single-selection dropdown widget.
 //!
 //! The widget always occupies its compact closed height.  When open, options
 //! are painted as a floating panel below the button in `paint_overlay()` so
@@ -44,7 +44,8 @@ pub(super) struct ComboPopupRequest {
     pub(super) opens_up: bool,
     pub(super) first_item: usize,
     pub(super) visible_count: usize,
-    pub(super) selected: usize,
+    /// Highlighted (selected) row; `None` while the combo has no selection.
+    pub(super) selected: Option<usize>,
     pub(super) hovered_item: Option<usize>,
     pub(super) scrollbar: Option<PreparedScrollbar>,
     pub(super) item_count: usize,
@@ -61,6 +62,8 @@ pub(super) struct ComboPopupRequest {
     /// Resolved closed-box height (honours [`ComboBoxStyle::height`]) so the
     /// popup attaches flush to the button.
     pub(super) closed_h: f64,
+    /// Per-instance popup colours — see [`ComboBoxStateStyle`].
+    pub(super) state_style: ComboBoxStateStyle,
 }
 
 thread_local! {
@@ -127,6 +130,14 @@ pub struct ComboBox {
     style: ComboBoxStyle,
     /// Cursor is over the closed box (drives `ComboBoxStyle::hover_fill`).
     button_hovered: bool,
+    /// Hover / focus / open / item colours — see [`ComboBoxStateStyle`].
+    state_style: ComboBoxStateStyle,
+    /// Keyboard focus (drives `ComboBoxStateStyle::focus_border`).
+    focused: bool,
+    /// `false` while nothing is selected — see `ComboBox::with_no_selection`.
+    has_selection: bool,
+    /// Text the closed box shows while nothing is selected.
+    placeholder: String,
 }
 
 impl ComboBox {
@@ -177,6 +188,10 @@ impl ComboBox {
             middle_last_pos: Point::ORIGIN,
             style: ComboBoxStyle::default(),
             button_hovered: false,
+            state_style: ComboBoxStateStyle::default(),
+            focused: false,
+            has_selection: true,
+            placeholder: String::new(),
         }
     }
 
@@ -206,14 +221,12 @@ impl ComboBox {
 
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.font_size = size;
-        self.selected_label = Self::make_label(
-            self.options
-                .get(self.selected)
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            size,
-            Arc::clone(&self.font),
-        );
+        let shown = if self.has_selection {
+            self.options.get(self.selected).map(|s| s.as_str())
+        } else {
+            Some(self.placeholder.as_str())
+        };
+        self.selected_label = Self::make_label(shown.unwrap_or(""), size, Arc::clone(&self.font));
         let new_labels: Vec<Label> = self
             .options
             .iter()
@@ -295,7 +308,11 @@ impl ComboBox {
             })
             .collect();
         *self.item_labels.borrow_mut() = new_labels;
-        if let Some(sel_font) = fonts.get(self.selected).cloned() {
+        if let Some(sel_font) = fonts
+            .get(self.selected)
+            .cloned()
+            .filter(|_| self.has_selection)
+        {
             self.selected_label = Label::new(
                 self.options
                     .get(self.selected)
@@ -326,6 +343,7 @@ impl ComboBox {
     pub fn set_selected(&mut self, idx: usize) {
         if idx < self.options.len() {
             self.selected = idx;
+            self.has_selection = true;
             // If per-item fonts are set, rebuild the selected label with
             // the matching face so the closed combo shows the correct
             // preview.  Otherwise just swap the text on the existing
@@ -344,8 +362,9 @@ impl ComboBox {
 }
 
 mod geometry;
+mod selection;
 mod style;
-pub use style::ComboBoxStyle;
+pub use style::{ComboBoxStateStyle, ComboBoxStyle};
 
 impl Widget for ComboBox {
     fn type_name(&self) -> &'static str {
@@ -500,7 +519,7 @@ impl Widget for ComboBox {
                 opens_up: self.popup_opens_up,
                 first_item: self.scroll_offset,
                 visible_count: self.popup_visible_count,
-                selected: self.selected,
+                selected: self.has_selection.then_some(self.selected),
                 hovered_item: self.hovered_item,
                 scrollbar,
                 item_count: self.options.len(),
@@ -513,6 +532,7 @@ impl Widget for ComboBox {
                     Some((text.clone(), Arc::clone(&self.font)))
                 }),
                 closed_h: self.closed_h(),
+                state_style: self.state_style,
             });
         }
     }
@@ -626,7 +646,7 @@ impl Widget for ComboBox {
                 let button_hovered = self.in_button(*pos);
                 if button_hovered != self.button_hovered {
                     self.button_hovered = button_hovered;
-                    if self.style.hover_fill.is_some() {
+                    if self.style.hover_fill.is_some() || self.state_style.hover_border.is_some() {
                         crate::animation::request_draw();
                     }
                 }
@@ -688,6 +708,10 @@ impl Widget for ComboBox {
                             EventResult::Ignored
                         }
                     }
+                    Key::ArrowDown | Key::ArrowUp if !self.has_selection => {
+                        self.select_first_from_none();
+                        EventResult::Consumed
+                    }
                     Key::ArrowDown => {
                         if self.selected + 1 < n {
                             self.set_selected(self.selected + 1);
@@ -709,7 +733,12 @@ impl Widget for ComboBox {
                     _ => EventResult::Ignored,
                 }
             }
+            Event::FocusGained => {
+                self.set_focused(true);
+                EventResult::Ignored
+            }
             Event::FocusLost => {
+                self.set_focused(false);
                 let was_open = self.open;
                 self.open = false;
                 self.hovered_item = None;

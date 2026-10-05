@@ -61,7 +61,8 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
     ctx.fill();
 
-    ctx.set_fill_color(v.widget_bg);
+    let st = request.state_style;
+    ctx.set_fill_color(st.popup_fill.unwrap_or(v.widget_bg));
     ctx.begin_path();
     ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
     ctx.fill();
@@ -85,13 +86,13 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
             break;
         }
         let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
-        let is_selected = idx == request.selected;
+        let is_selected = request.selected == Some(idx);
         let is_hovered = request.hovered_item == Some(idx);
         if is_selected || is_hovered {
             let bg = if is_selected {
                 v.accent
             } else {
-                v.widget_bg_hovered
+                st.item_hover_fill.unwrap_or(v.widget_bg_hovered)
             };
             ctx.set_fill_color(bg);
             ctx.begin_path();
@@ -106,10 +107,13 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
         }
 
         let label = &mut labels[idx];
+        let item_text = st.item_text.unwrap_or(v.text_color);
         label.set_color(if is_selected {
             Color::white()
+        } else if is_hovered {
+            st.item_hover_text.unwrap_or(item_text)
         } else {
-            v.text_color
+            item_text
         });
         // Translate the ctx so the Label paints at its desired global
         // popup position.  Label's own paint routes through its

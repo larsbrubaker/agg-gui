@@ -209,7 +209,9 @@ impl PopupMenuState {
         let next_hover = match hit_test(&layouts, pos) {
             Some(MenuHit::Item(path)) => {
                 if let Some(item) = item_at_path(items, &path) {
-                    if !item.enabled {
+                    // Widget rows take their own hover; the menu does not
+                    // highlight them (same bookkeeping as a disabled row).
+                    if !item.enabled || item.widget_row.is_some() {
                         if !self.open_path.starts_with(&path) {
                             self.open_path.truncate(path.len().saturating_sub(1));
                         }
@@ -396,7 +398,7 @@ impl PopupMenuState {
             .iter()
             .enumerate()
             .filter_map(|(idx, entry)| match entry {
-                MenuEntry::Item(item) if item.enabled => Some(idx),
+                MenuEntry::Item(item) if item.enabled && item.widget_row.is_none() => Some(idx),
                 _ => None,
             })
             .collect();

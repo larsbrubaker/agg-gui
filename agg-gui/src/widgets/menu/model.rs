@@ -2,6 +2,11 @@
 //!
 //! Menus are application-owned item trees. The widget layer interprets this
 //! model for painting, hit testing, keyboard navigation, and action dispatch.
+//!
+//! A row can also host an arbitrary widget ([`MenuItem::widget_row`]): the
+//! model carries only the row's id and height (so the model stays plain,
+//! `Send` data), and the widget itself is registered on the owning
+//! [`super::PopupMenu`] with `set_row_widget` (see `menu/row_widgets.rs`).
 
 use crate::color::Color;
 use crate::event::{Key, Modifiers};
@@ -34,6 +39,19 @@ pub struct MenuItem {
     pub action: Option<String>,
     pub submenu: Vec<MenuEntry>,
     pub close_on_activate: bool,
+    /// When `Some`, this row hosts the widget registered under
+    /// [`MenuWidgetRow::id`] on the owning `PopupMenu` instead of a label.
+    /// Widget rows are never hovered, keyboard-selected or activated by
+    /// the menu; pointer events inside them go to the widget.
+    pub widget_row: Option<MenuWidgetRow>,
+}
+
+/// A menu row that hosts a widget: the id it is registered under on the
+/// owning `PopupMenu` and the row's height (logical px).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MenuWidgetRow {
+    pub id: usize,
+    pub height: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +74,7 @@ impl MenuItem {
             action: Some(action.into()),
             submenu: Vec::new(),
             close_on_activate: true,
+            widget_row: None,
         }
     }
 
@@ -71,6 +90,28 @@ impl MenuItem {
             action: None,
             submenu,
             close_on_activate: false,
+            widget_row: None,
+        }
+    }
+
+    /// A row of `height` logical px hosting the widget registered under
+    /// `id` with `PopupMenu::set_row_widget`.  It has no label or action.
+    pub fn widget_row(id: usize, height: f64) -> Self {
+        Self {
+            label: String::new(),
+            icon: None,
+            swatch: None,
+            shortcut: None,
+            accelerator: None,
+            enabled: true,
+            selection: MenuSelection::None,
+            action: None,
+            submenu: Vec::new(),
+            close_on_activate: false,
+            widget_row: Some(MenuWidgetRow {
+                id,
+                height: height.max(0.0),
+            }),
         }
     }
 
