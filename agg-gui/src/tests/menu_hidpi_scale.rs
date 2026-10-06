@@ -12,14 +12,12 @@
 //! original size while every GL-FBO widget (windows) scaled correctly: the
 //! "menu tiny on mobile" report.  This pins the behaviour so it can't return.
 
-use super::*;
-
 use crate::framebuffer::Framebuffer;
 use crate::gfx_ctx::GfxCtx;
 use crate::text::Font;
 use crate::widget::{paint_subtree, Widget};
 use crate::widgets::menu::{MenuBar, TopMenu};
-use crate::{Color, DrawCtx, Rect, Size};
+use crate::{Color, Rect, Size};
 use std::sync::Arc;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
@@ -82,6 +80,15 @@ fn paint_and_count_ink(bar: &mut MenuBar, physical_w: f64, effective: f64) -> u6
 /// way it does in the running app.
 #[test]
 fn menu_bar_text_rerasters_when_effective_scale_changes() {
+    // The bar's height, font size and button widths come from
+    // `effective_metrics()`, which reads the PROCESS-GLOBAL input profile.
+    // Sibling tests flip it to `MobileIOS` under `profile_test_lock`; without
+    // holding the same lock a flip landing between this test's layout and
+    // paint lays the bar out touch-tall (44 px) but fills only the desktop
+    // 26 px, so the unfilled strip counts as "ink" and the 1x baseline balloons
+    // (ink 1x ≈ 7900 vs ≈ 320).  Hold the lock and pin Desktop for the body.
+    let _profile = crate::input_profile::profile_test_lock();
+    crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
     crate::font_settings::set_lcd_enabled(false); // mobile path: grayscale AA
     crate::device_scale::set_device_scale(1.0);
 
