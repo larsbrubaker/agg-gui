@@ -135,6 +135,7 @@ impl PopupLabels {
         if self.rows.len() != layouts.len() {
             self.rows.resize_with(layouts.len(), Vec::new);
         }
+        let platform = crate::platform::current_platform();
         for (level_idx, layout) in layouts.iter().enumerate() {
             let level_items = items_for_layout(items, &layout.path_prefix);
             let level = &mut self.rows[level_idx];
@@ -152,12 +153,15 @@ impl PopupLabels {
                     level[row_idx] = None;
                     continue;
                 };
+                // Platform-formatted (`⌘X` on a Mac, `Ctrl+X` elsewhere),
+                // never the raw declaration string.
+                let shortcut_text = item.shortcut_text_for_font(platform, font);
                 match &mut level[row_idx] {
                     Some(existing) => {
                         if existing.label.text_str() != item.label {
                             existing.label.set_text(&item.label);
                         }
-                        match (&mut existing.shortcut, item.shortcut.as_deref()) {
+                        match (&mut existing.shortcut, shortcut_text.as_deref()) {
                             (Some(slot), Some(text)) => {
                                 if slot.text_str() != text {
                                     slot.set_text(text);
@@ -173,8 +177,7 @@ impl PopupLabels {
                     slot @ None => {
                         *slot = Some(PopupRowLabels {
                             label: make_label(&item.label, font, font_size),
-                            shortcut: item
-                                .shortcut
+                            shortcut: shortcut_text
                                 .as_deref()
                                 .map(|s| make_shortcut_label(s, font, font_size)),
                         });

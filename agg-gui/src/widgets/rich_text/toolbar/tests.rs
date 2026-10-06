@@ -167,10 +167,24 @@ fn default_controls_carry_expected_tooltips() {
     assert_eq!(row2[4].as_deref(), Some("Bulleted list"));
     assert_eq!(row2[5].as_deref(), Some("Decrease indent"));
     assert_eq!(row2[6].as_deref(), Some("Increase indent"));
-    // Undo/Redo carry the platform primary-modifier + the bound key.
-    let m = crate::platform::primary_modifier_label();
-    assert_eq!(row2[7].as_deref(), Some(format!("Undo ({m}+Z)").as_str()));
-    assert_eq!(row2[8].as_deref(), Some(format!("Redo ({m}+Y)").as_str()));
+    // Undo/Redo carry the bound key, formatted like a menu shortcut for the
+    // platform: `Ctrl+Z` on Windows/Linux; on a Mac `⌘Z` when the tooltip font
+    // has the glyph, else `Cmd+Z` — never the literal "Ctrl".
+    let platform = crate::platform::current_platform();
+    let (undo, redo) = (row2[7].clone().unwrap(), row2[8].clone().unwrap());
+    if platform == crate::platform::Platform::MacOS {
+        let font = crate::font_settings::current_system_font().unwrap_or_else(font);
+        let glyphs = font.has_glyph('\u{2318}');
+        let (u, r) = if glyphs {
+            ("Undo (\u{2318}Z)", "Redo (\u{2318}Y)")
+        } else {
+            ("Undo (Cmd+Z)", "Redo (Cmd+Y)")
+        };
+        assert_eq!((undo.as_str(), redo.as_str()), (u, r));
+    } else {
+        assert_eq!(undo, "Undo (Ctrl+Z)");
+        assert_eq!(redo, "Redo (Ctrl+Y)");
+    }
 }
 
 /// `with_tooltips(false)` ships a bare strip: no control anywhere in the toolbar

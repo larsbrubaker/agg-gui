@@ -7,6 +7,7 @@ pub mod geometry;
 pub mod model;
 pub mod paint;
 mod row_widgets;
+mod shortcut_text;
 pub mod state;
 pub mod strip;
 pub mod widget;

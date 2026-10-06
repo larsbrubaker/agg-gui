@@ -293,16 +293,18 @@ pub fn install_font_bytes(
             .borrow_mut()
             .insert(name.to_string(), primary_bytes.clone());
     });
-    let mut font = Font::from_bytes(primary_bytes)?;
-    if let Some(icon_bytes) = icon_bytes {
-        let mut icon_font = Font::from_bytes(icon_bytes)?;
-        if let Some(emoji_bytes) = emoji_bytes {
-            icon_font = icon_font.with_fallback(Arc::new(Font::from_bytes(emoji_bytes)?));
-        }
-        font = font.with_fallback(Arc::new(icon_font));
-    } else if let Some(emoji_bytes) = emoji_bytes {
-        font = font.with_fallback(Arc::new(Font::from_bytes(emoji_bytes)?));
+    // Fallback chain: primary → icons → emoji → agg-gui's bundled shortcut
+    // symbols (⌘ ⇧ ⌥ ⌫ ⌦ ⏎, so Mac menus show `⌘X`).  Built tail-first because
+    // `with_fallback` replaces a face's fallback.  The symbol subset is ~3 KB,
+    // so embedding it doesn't undo the lazy font loading above.
+    let mut tail = agg_gui::fonts::shortcut_symbols_font();
+    if let Some(emoji_bytes) = emoji_bytes {
+        tail = Font::from_bytes(emoji_bytes)?.with_fallback(Arc::new(tail));
     }
+    if let Some(icon_bytes) = icon_bytes {
+        tail = Font::from_bytes(icon_bytes)?.with_fallback(Arc::new(tail));
+    }
+    let font = Font::from_bytes(primary_bytes)?.with_fallback(Arc::new(tail));
 
     let font = Arc::new(font);
     FONT_CACHE.with(|cache| {
@@ -367,5 +369,31 @@ mod tests {
     fn single_face_family_has_no_variants() {
         assert!(!family_has_bold("Pacifico"));
         assert!(!family_has_italic("Pacifico"));
+    }
+
+    /// The demo's installed chain (Nunito → FA → emoji → shortcut symbols)
+    /// draws Mac menu shortcuts as glyphs (`⌘X`), not the `Cmd+X` fallback.
+    #[test]
+    fn installed_chain_renders_mac_shortcut_glyphs() {
+        let read = |p: &str| std::fs::read(format!("{}/../demo/{p}", env!("CARGO_MANIFEST_DIR")));
+        let font = install_font_bytes(
+            "ShortcutGlyphTest",
+            read("assets/Nunito_Regular.ttf").expect("nunito"),
+            Some(read(FONT_AWESOME_PATH).expect("fa")),
+            Some(read(EMOJI_FONT_PATH).expect("emoji")),
+        )
+        .expect("font installs");
+        let mac = agg_gui::Platform::MacOS;
+        let label = |s: &str| {
+            agg_gui::MenuShortcut::parse(s)
+                .unwrap()
+                .display_text_for_font(mac, &font)
+        };
+        assert_eq!(label("Ctrl+X"), "\u{2318}X");
+        assert_eq!(label("Ctrl+Shift+Z"), "\u{21E7}\u{2318}Z");
+        assert_eq!(label("Alt+Backspace"), "\u{2325}\u{232B}");
+        // The demo's emoji face has ↩, so Enter gets Apple's preferred symbol.
+        assert_eq!(label("Ctrl+Enter"), "\u{2318}\u{21A9}");
+        assert!(font.has_glyph('\u{F0C4}'), "FA icons still resolve");
     }
 }

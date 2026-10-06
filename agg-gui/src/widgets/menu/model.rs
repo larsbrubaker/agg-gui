@@ -32,6 +32,9 @@ pub struct MenuItem {
     /// Intended for menus where each item represents a colour the
     /// user is picking (accent palette, brush colour, etc.).
     pub swatch: Option<Color>,
+    /// The shortcut as declared (e.g. `"Ctrl+X"`).  Not drawn verbatim when it
+    /// parses into [`Self::accelerator`]: the menu renders
+    /// [`MenuItem::shortcut_text_for_font`] so a Mac shows `⌘X`.
     pub shortcut: Option<String>,
     pub accelerator: Option<MenuShortcut>,
     pub enabled: bool,
@@ -193,6 +196,16 @@ pub enum ShortcutKey {
     Backspace,
     Enter,
     Escape,
+    Tab,
+    Space,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    ArrowDown,
+    Home,
+    End,
+    PageUp,
+    PageDown,
 }
 
 impl MenuShortcut {
@@ -221,6 +234,16 @@ impl MenuShortcut {
                 "backspace" => key = Some(ShortcutKey::Backspace),
                 "enter" | "return" => key = Some(ShortcutKey::Enter),
                 "esc" | "escape" => key = Some(ShortcutKey::Escape),
+                "tab" => key = Some(ShortcutKey::Tab),
+                "space" => key = Some(ShortcutKey::Space),
+                "left" | "arrowleft" => key = Some(ShortcutKey::ArrowLeft),
+                "right" | "arrowright" => key = Some(ShortcutKey::ArrowRight),
+                "up" | "arrowup" => key = Some(ShortcutKey::ArrowUp),
+                "down" | "arrowdown" => key = Some(ShortcutKey::ArrowDown),
+                "home" => key = Some(ShortcutKey::Home),
+                "end" => key = Some(ShortcutKey::End),
+                "pageup" | "pgup" => key = Some(ShortcutKey::PageUp),
+                "pagedown" | "pgdn" => key = Some(ShortcutKey::PageDown),
                 _ => {
                     let mut chars = token.chars();
                     let ch = chars.next()?;
@@ -251,21 +274,6 @@ impl MenuShortcut {
             && modifiers.alt == self.alt
             && self.key.matches(key)
     }
-
-    pub fn display_text(self) -> String {
-        let mut parts = Vec::new();
-        if self.command {
-            parts.push(platform::primary_modifier_label().to_string());
-        }
-        if self.shift {
-            parts.push("Shift".to_string());
-        }
-        if self.alt {
-            parts.push("Alt".to_string());
-        }
-        parts.push(self.key.display_text());
-        parts.join("+")
-    }
 }
 
 impl ShortcutKey {
@@ -278,19 +286,18 @@ impl ShortcutKey {
             | (Self::Delete, Key::Delete)
             | (Self::Backspace, Key::Backspace)
             | (Self::Enter, Key::Enter)
-            | (Self::Escape, Key::Escape) => true,
+            | (Self::Escape, Key::Escape)
+            | (Self::Tab, Key::Tab)
+            | (Self::Space, Key::Char(' '))
+            | (Self::ArrowLeft, Key::ArrowLeft)
+            | (Self::ArrowRight, Key::ArrowRight)
+            | (Self::ArrowUp, Key::ArrowUp)
+            | (Self::ArrowDown, Key::ArrowDown)
+            | (Self::Home, Key::Home)
+            | (Self::End, Key::End)
+            | (Self::PageUp, Key::PageUp)
+            | (Self::PageDown, Key::PageDown) => true,
             _ => false,
-        }
-    }
-
-    fn display_text(self) -> String {
-        match self {
-            Self::Char(ch) => ch.to_string(),
-            Self::Insert => "Insert".to_string(),
-            Self::Delete => "Delete".to_string(),
-            Self::Backspace => "Backspace".to_string(),
-            Self::Enter => "Enter".to_string(),
-            Self::Escape => "Esc".to_string(),
         }
     }
 }
