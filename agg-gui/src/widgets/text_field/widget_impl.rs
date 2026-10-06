@@ -385,6 +385,14 @@ impl Widget for TextField {
                     self.edit.borrow_mut().cursor = new_cur;
                     self.edit.borrow_mut().anchor = new_cur;
                 }
+                // The click that focused a `select_all_on_focus` field selects
+                // everything on release unless it drags out a range (C#
+                // `InternalTextEditWidget.selectAllOnMouseUpIfNoSelection`).
+                // Later clicks position the caret as usual.
+                self.select_all_on_mouse_up = self.select_all_on_focus
+                    && !mods.shift
+                    && self.focus_press_epoch == Some(crate::animation::pointer_press_epoch());
+                self.focus_press_epoch = None;
                 // Reset blink phase on click so cursor is immediately visible.
                 self.focus_time = Some(Instant::now());
                 crate::animation::request_draw();
@@ -409,6 +417,15 @@ impl Widget for TextField {
                 ..
             } => {
                 self.mouse_down = false;
+                if std::mem::take(&mut self.select_all_on_mouse_up) {
+                    let mut st = self.edit.borrow_mut();
+                    if st.cursor == st.anchor {
+                        st.anchor = 0;
+                        st.cursor = st.text.len();
+                        drop(st);
+                        crate::animation::request_draw();
+                    }
+                }
                 EventResult::Ignored
             }
 
@@ -416,6 +433,7 @@ impl Widget for TextField {
                 self.focused = true;
                 self.focus_time = Some(Instant::now());
                 self.text_on_focus = self.text();
+                self.focus_press_epoch = Some(crate::animation::pointer_press_epoch());
                 if self.select_all_on_focus {
                     let len = self.edit.borrow().text.len();
                     self.edit.borrow_mut().anchor = 0;
@@ -430,6 +448,8 @@ impl Widget for TextField {
                 self.focused = false;
                 self.focus_time = None;
                 self.mouse_down = false;
+                self.focus_press_epoch = None;
+                self.select_all_on_mouse_up = false;
                 self.flush_pending();
                 if self.text() != self.text_on_focus {
                     self.notify_edit_complete();
