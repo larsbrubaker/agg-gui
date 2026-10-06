@@ -56,6 +56,7 @@ pub mod draw_ctx;
 pub mod event;
 pub mod focus;
 pub mod font_settings;
+pub mod fonts;
 pub mod framebuffer;
 pub mod fullscreen;
 pub mod gamepad;

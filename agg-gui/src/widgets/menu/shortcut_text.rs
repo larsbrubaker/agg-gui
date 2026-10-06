@@ -14,8 +14,12 @@
 //! runtime platform (which WASM hosts set from the browser's user agent).
 //!
 //! The glyphs are only used when the font that will draw them actually has
-//! them ([`MenuShortcut::display_text_for_font`]); otherwise the Mac label
-//! falls back to spelled-out text (`Cmd+Shift+Z`) instead of tofu boxes.
+//! them ([`MenuShortcut::display_text_for_font`]), so nothing renders as tofu:
+//! without the modifier glyphs the whole Mac label is spelled out
+//! (`Cmd+Shift+Z`); a key symbol the font lacks degrades on its own — to an
+//! alternative symbol (`↩` → `⏎`) or the key's name (`⌘Esc`).  The crate's
+//! bundled symbol face ([`crate::fonts::SHORTCUT_SYMBOLS`]) supplies the
+//! modifier glyphs plus `⌫ ⌦ ⏎`.
 
 use crate::platform::{self, Platform};
 use crate::text::Font;
@@ -46,18 +50,37 @@ impl MenuShortcut {
         }
     }
 
-    /// Like [`Self::display_text_for`], but on macOS falls back to the
-    /// spelled-out `Cmd+Shift+Z` form when `font` (including its fallback
-    /// chain) cannot draw every glyph of the symbol form.
+    /// Like [`Self::display_text_for`], but only uses symbols `font`
+    /// (including its fallback chain) can draw.  On macOS: if any modifier
+    /// glyph is missing the whole label is spelled out (`Cmd+Shift+Z`);
+    /// otherwise the key uses its first drawable symbol, else its name.
     pub fn display_text_for_font(self, platform: Platform, font: &Font) -> String {
-        let text = self.display_text_for(platform);
-        if platform == Platform::MacOS && !text.chars().all(|ch| font.has_glyph(ch)) {
+        if platform != Platform::MacOS {
+            return self.display_text_for(platform);
+        }
+        let drawable = |s: &str| s.chars().all(|ch| font.has_glyph(ch));
+        let mut text = self.mac_modifier_glyphs();
+        if !drawable(&text) {
             return self.plain_text("Cmd");
+        }
+        match self.key.mac_symbols().iter().find(|sym| drawable(sym)) {
+            Some(sym) => text.push_str(sym),
+            None => text.push_str(&self.key.plain_text()),
         }
         text
     }
 
     fn mac_glyph_text(self) -> String {
+        let mut text = self.mac_modifier_glyphs();
+        match self.key.mac_symbols().first() {
+            Some(sym) => text.push_str(sym),
+            None => text.push_str(&self.key.plain_text()),
+        }
+        text
+    }
+
+    /// Modifier glyphs in Apple's order (⌥ ⇧ ⌘).
+    fn mac_modifier_glyphs(self) -> String {
         let mut text = String::new();
         if self.alt {
             text.push(MAC_OPTION);
@@ -67,10 +90,6 @@ impl MenuShortcut {
         }
         if self.command {
             text.push(MAC_COMMAND);
-        }
-        text.push_str(self.key.mac_text());
-        if let ShortcutKey::Char(ch) = self.key {
-            text.extend(ch.to_uppercase());
         }
         text
     }
@@ -92,26 +111,26 @@ impl MenuShortcut {
 }
 
 impl ShortcutKey {
-    /// Apple's symbol for a named key; empty for `Char` (appended by the
-    /// caller, uppercased) and for keys a Mac has no symbol for.
-    fn mac_text(self) -> &'static str {
+    /// Apple's symbols for a named key, preferred first (the rest are
+    /// fallbacks when a font lacks the first).  Empty for characters and for
+    /// keys a Mac labels by name (Insert, Space): those use
+    /// [`Self::plain_text`].
+    fn mac_symbols(self) -> &'static [&'static str] {
         match self {
-            Self::Char(_) => "",
-            Self::Insert => "Insert",
-            Self::Delete => "\u{2326}",    // ⌦ forward delete
-            Self::Backspace => "\u{232B}", // ⌫
-            Self::Enter => "\u{21A9}",     // ↩
-            Self::Escape => "\u{238B}",    // ⎋
-            Self::Tab => "\u{21E5}",       // ⇥
-            Self::Space => "Space",
-            Self::ArrowLeft => "\u{2190}",
-            Self::ArrowRight => "\u{2192}",
-            Self::ArrowUp => "\u{2191}",
-            Self::ArrowDown => "\u{2193}",
-            Self::Home => "\u{2196}",     // ↖
-            Self::End => "\u{2198}",      // ↘
-            Self::PageUp => "\u{21DE}",   // ⇞
-            Self::PageDown => "\u{21DF}", // ⇟
+            Self::Char(_) | Self::Insert | Self::Space => &[],
+            Self::Delete => &["\u{2326}"],    // ⌦ forward delete
+            Self::Backspace => &["\u{232B}"], // ⌫
+            Self::Enter => &["\u{21A9}", "\u{23CE}"], // ↩, else ⏎
+            Self::Escape => &["\u{238B}"],    // ⎋
+            Self::Tab => &["\u{21E5}"],       // ⇥
+            Self::ArrowLeft => &["\u{2190}"],
+            Self::ArrowRight => &["\u{2192}"],
+            Self::ArrowUp => &["\u{2191}"],
+            Self::ArrowDown => &["\u{2193}"],
+            Self::Home => &["\u{2196}"],     // ↖
+            Self::End => &["\u{2198}"],      // ↘
+            Self::PageUp => &["\u{21DE}"],   // ⇞
+            Self::PageDown => &["\u{21DF}"], // ⇟
         }
     }
 
