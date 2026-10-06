@@ -118,12 +118,32 @@ fn captured_drag_sees_shift_release() {
     app.on_modifiers_changed(Modifiers::default());
     app.on_mouse_move(70.0, 50.0);
     app.on_mouse_up(70.0, 50.0, MouseButton::Left, Modifiers::default());
+    assert!(!app.has_captured_pointer());
+    // The last `Move` is not part of the drag: once capture ends,
+    // `on_mouse_up` re-resolves hover at the release point (so the widget
+    // under the pointer reclaims the cursor icon) by sending it a
+    // `MouseMove`. It must see the released modifier state, not the Shift
+    // the drag started with.
     assert_eq!(
         *seen.borrow(),
         vec![
             Seen::Move { shift: true },
             Seen::Changed { shift: false },
             Seen::Move { shift: false },
+            Seen::Move { shift: false },
         ]
     );
+}
+
+#[test]
+fn hover_refresh_after_release_uses_release_modifiers() {
+    let (mut app, seen) = app_with_recorder();
+    app.on_mouse_down(50.0, 50.0, MouseButton::Left, SHIFT);
+    app.on_mouse_move(60.0, 50.0);
+    // Shift let go while the button was held, but the only report of it is
+    // the release event's own modifiers (no key-up, no ModifiersChanged).
+    // The hover refresh `on_mouse_up` sends must not carry the stale Shift.
+    app.on_mouse_up(60.0, 50.0, MouseButton::Left, Modifiers::default());
+    assert!(!current_modifiers().shift);
+    assert_eq!(seen.borrow().last(), Some(&Seen::Move { shift: false }));
 }
