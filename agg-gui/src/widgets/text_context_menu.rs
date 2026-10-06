@@ -280,6 +280,11 @@ mod tests {
     /// own hit-testing, and closes the menu.
     #[test]
     fn clicking_copy_row_activates_copy_and_closes() {
+        // Popup row geometry comes from `effective_metrics()`, which reads the
+        // process-global input profile; hold the lock and pin Desktop so a
+        // sibling test flipping it to touch can't move the row under the click.
+        let _profile = crate::input_profile::profile_test_lock();
+        crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
         crate::widget::set_current_viewport(crate::geometry::Size::new(800.0, 600.0));
         let mut m = TextContextMenu::new();
         m.open(Point::new(10.0, 10.0), true, true);

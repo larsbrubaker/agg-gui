@@ -2,6 +2,8 @@
 //!
 //! Popup menus are global overlays, so geometry is expressed in the owning
 //! widget's local coordinate space but clamped against the current viewport.
+//! Popup widths come from [`stack_layout_with_width`]'s width callback;
+//! [`stack_layout`] uses the fixed (touch-grown) `menu_w`.
 
 use crate::geometry::{Point, Rect, Size};
 
@@ -131,6 +133,27 @@ pub fn stack_layout(
     open_path: &[usize],
     viewport: Size,
 ) -> Vec<PopupLayout> {
+    stack_layout_with_width(
+        root_items,
+        anchor,
+        anchor_kind,
+        open_path,
+        viewport,
+        &|_, m: &MenuMetrics| m.menu_w,
+    )
+}
+
+/// [`stack_layout`] with a caller-chosen width per popup level: `width` gets
+/// the level's entries and this frame's metrics and returns that panel's
+/// width (see [`super::fit_width`] for the content-fitted policy).
+pub fn stack_layout_with_width(
+    root_items: &[MenuEntry],
+    anchor: Point,
+    anchor_kind: MenuAnchorKind,
+    open_path: &[usize],
+    viewport: Size,
+    width: &dyn Fn(&[MenuEntry], &MenuMetrics) -> f64,
+) -> Vec<PopupLayout> {
     // One source of truth for every popup dimension this frame — paint and
     // hit-test both flow through here, so they can never diverge.
     let m = effective_metrics();
@@ -141,7 +164,8 @@ pub fn stack_layout(
     let mut prefix = Vec::new();
 
     loop {
-        let rect = popup_rect(items, Point::new(x, y_top), anchor_kind, viewport, &m);
+        let w = width(items, &m);
+        let rect = popup_rect(items, Point::new(x, y_top), anchor_kind, viewport, w, &m);
         let rows = row_layouts(items, rect, &m);
         layouts.push(PopupLayout {
             rect,
@@ -169,7 +193,8 @@ pub fn stack_layout(
         };
         prefix.push(next_idx);
         items = &item.submenu;
-        x = (rect.x + rect.width - 2.0).min(viewport.width - m.menu_w - MARGIN);
+        let sub_w = width(items, &m);
+        x = (rect.x + rect.width - 2.0).min(viewport.width - sub_w - MARGIN);
         // For top/context popups (open downward) the cascade
         // anchors at the row's TOP so the submenu's top edge
         // aligns with the parent row's top. For BottomBar popups
@@ -251,12 +276,13 @@ fn popup_rect(
     anchor: Point,
     anchor_kind: MenuAnchorKind,
     viewport: Size,
+    w: f64,
     m: &MenuMetrics,
 ) -> Rect {
     let h = popup_height(items, m);
     let x = anchor
         .x
-        .clamp(MARGIN, (viewport.width - m.menu_w - MARGIN).max(MARGIN));
+        .clamp(MARGIN, (viewport.width - w - MARGIN).max(MARGIN));
     let (min_y, raw_y) = match anchor_kind {
         // Top bar — popup hangs below the anchor (extends toward
         // smaller y in Y-up). `Bar` allows negative-y clamp so a
@@ -269,7 +295,7 @@ fn popup_rect(
         MenuAnchorKind::Context => (MARGIN, anchor.y - h),
     };
     let y = raw_y.clamp(min_y, (viewport.height - h - MARGIN).max(min_y));
-    Rect::new(x, y, m.menu_w, h)
+    Rect::new(x, y, w, h)
 }
 
 fn row_layouts(items: &[MenuEntry], rect: Rect, m: &MenuMetrics) -> Vec<RowLayout> {

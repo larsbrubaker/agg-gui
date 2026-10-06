@@ -156,6 +156,11 @@ mod tests {
 
     #[test]
     fn copy_item_copies_selection_via_clipboard() {
+        // Popup row geometry comes from `effective_metrics()`, which reads the
+        // process-global input profile; hold the lock and pin Desktop so a
+        // sibling test flipping it to touch can't move the row under the click.
+        let _profile = crate::input_profile::profile_test_lock();
+        crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
         let mut ta = laid_out("hello world");
         ta.select_all_text();
         right_click(&mut ta, 20.0, 50.0);

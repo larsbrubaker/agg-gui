@@ -10,6 +10,22 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Content-fitted popup menus: `MenuWidth::{Fixed, FitContent}` (re-exported
+  from `widgets::menu`). `PopupMenu::with_width` / `set_width` and
+  `MenuBar::with_menu_width` opt in; with `FitContent` each popup level (root
+  and every cascaded submenu) is as wide as its widest row's natural width —
+  label from `MenuStyle::label_x`, the shortcut `fit_width::SHORTCUT_GAP`
+  (20 px) after it, then `MenuStyle::shortcut_right` — rounded up to a whole
+  px and floored at `fit_width::FIT_MIN_W` (156 px, agg-sharp's 150 px row
+  minimum plus its 3 px row inset each side; touch-grown with the other
+  metrics). Rows are measured exactly as their `Label`s lay out (system font
+  override and font-size scale included). `PopupMenu::set_measure_font` gives
+  a fitted popup its font before the first paint so early events hit-test
+  the fitted panel; `paint` refreshes it every frame. Lower-level pieces:
+  `PopupMenuState::set_width` / `width` / `set_fit_measure`, `FitMeasure`, and
+  `geometry::stack_layout_with_width`. `MenuWidth::Fixed` stays the default,
+  so existing menus keep their width.
+
 - `Button::with_focus_on_click(bool)` — opt a button out of click-to-focus.
   With `false`, a click still fires `on_click` but clears keyboard focus
   instead of taking it, so a following Space / Enter reaches the
@@ -39,6 +55,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `Slider::style()` reads it back.
 
 ### Fixed
+
+- `MenuBar` paints its background over its laid-out bounds instead of
+  re-reading `effective_metrics().bar_h` at paint time, so an input-profile
+  or touch-latch flip between layout and paint no longer fills a strip of the
+  wrong height for a frame (and the fill always covers the bounds, as the
+  `LcdCoverage` backbuffer mode requires).
+
+- The text context-menu tests (`TextContextMenu`, `TextField`, `TextArea`,
+  rich-text editor) that click popup rows hold `profile_test_lock()` and pin
+  `InputProfile::Desktop`, so a sibling test flipping the profile to touch
+  can no longer move a row out from under the click.
 
 - Pointer capture, hover, focus and gesture capture now follow their widget
   when a parent reorders its children. `App` stored them as child-index

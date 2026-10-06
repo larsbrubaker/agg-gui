@@ -3,6 +3,7 @@
 //! This module provides the shared model, geometry, state, painter, and widget
 //! adapters used by context menus and top menu bars.
 
+pub mod fit_width;
 pub mod geometry;
 pub mod model;
 pub mod paint;
@@ -12,6 +13,7 @@ pub mod state;
 pub mod strip;
 pub mod widget;
 
+pub use fit_width::{FitMeasure, MenuWidth};
 pub use geometry::{
     effective_metrics, menu_bar_height, menu_vertical_row_height, MenuMetrics, BAR_H as MENU_BAR_H,
     MENU_W, ROW_H, TOUCH_MIN, VERTICAL_ROW_H,

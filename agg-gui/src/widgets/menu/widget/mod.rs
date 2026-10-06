@@ -12,6 +12,7 @@ use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
 use crate::widget::{current_viewport, BackbufferCache, Widget};
 
+use super::fit_width::{FitMeasure, MenuWidth};
 use super::geometry::{contains, effective_metrics, item_at_path, DEFAULT_FONT_SIZE};
 use super::model::MenuEntry;
 use super::paint::{bar_button_text_color, paint_menu_bar_button_bg, paint_panel, MenuStyle};
@@ -73,6 +74,25 @@ impl PopupMenu {
         }
     }
 
+    /// Choose the popup width policy — [`MenuWidth::FitContent`] sizes each
+    /// panel to its widest row.  The default is [`MenuWidth::Fixed`].
+    pub fn with_width(mut self, width: MenuWidth) -> Self {
+        self.state.set_width(width);
+        self
+    }
+
+    pub fn set_width(&mut self, width: MenuWidth) {
+        self.state.set_width(width);
+    }
+
+    /// Give a [`MenuWidth::FitContent`] popup the font and size it will be
+    /// painted with, so events routed before its first paint hit-test the
+    /// fitted panel.  [`Self::paint`] refreshes it every frame.
+    pub fn set_measure_font(&mut self, font: Arc<Font>, font_size: f64) {
+        self.state
+            .set_fit_measure(FitMeasure::new(font, font_size, &self.style));
+    }
+
     pub fn open_at(&mut self, pos: Point) {
         self.local_anchor = None;
         self.row_widgets.reset_interaction();
@@ -130,6 +150,7 @@ impl PopupMenu {
         font_size: f64,
         viewport: Size,
     ) {
+        self.set_measure_font(Arc::clone(&font), font_size);
         let layouts = self.state.layouts(&self.items, viewport);
         // Refresh the per-row `Label` cache against the current open
         // tree.  Cheap when nothing changed — `sync_to` only mutates
@@ -261,6 +282,21 @@ impl MenuBar {
         self
     }
 
+    /// Width policy for the bar's popups (default [`MenuWidth::Fixed`]);
+    /// [`MenuWidth::FitContent`] sizes each popup to its widest row.
+    /// Unrelated to [`Self::with_fit_width`], which sizes the bar itself.
+    pub fn with_menu_width(mut self, width: MenuWidth) -> Self {
+        self.popup.set_width(width);
+        self
+    }
+
+    /// Keep the popup's fit-width measuring font in step with the font it
+    /// paints with, so hit-testing matches the painted panels.
+    fn sync_popup_measure(&mut self) {
+        let (font, size) = (self.active_font(), self.effective_font_size());
+        self.popup.set_measure_font(font, size);
+    }
+
     /// Resolve the text size the bar / its popup should use this frame.
     /// An explicit [`with_font_size`](Self::with_font_size) override wins;
     /// otherwise the size comes from [`effective_metrics`], which grows it
@@ -334,6 +370,7 @@ impl MenuBar {
                 MenuAnchorKind::Context,
             ),
         };
+        self.sync_popup_measure();
         self.popup.state.open_at(anchor, kind);
         self.open_index = Some(idx);
         self.hover_index = Some(idx);
@@ -494,13 +531,12 @@ impl Widget for MenuBar {
         let v = ctx.visuals();
         ctx.set_fill_color(v.top_bar_bg);
         ctx.begin_path();
-        let bg_h = match self.orientation {
-            MenuOrientation::Horizontal | MenuOrientation::HorizontalBottom => {
-                effective_metrics().bar_h
-            }
-            MenuOrientation::Vertical => self.bounds.height,
-        };
-        ctx.rect(0.0, 0.0, self.bounds.width, bg_h);
+        // Fill the laid-out bounds, never a height re-read from
+        // `effective_metrics()`: the touch latch / input profile can flip
+        // between layout and paint, and a re-read would fill a strip of the
+        // wrong height for a frame.  Covering the bounds is also what the
+        // `LcdCoverage` backbuffer mode requires.
+        ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
         ctx.fill();
         // First pass: button chrome under the text.
         for (idx, menu) in self.menus.iter().enumerate() {
@@ -566,6 +602,7 @@ impl Widget for MenuBar {
             }
         }
         if self.popup.is_open() {
+            self.sync_popup_measure();
             if let Event::KeyDown { key, .. } = event {
                 if self.should_switch_top_menu(key) {
                     return match key {
@@ -707,5 +744,7 @@ impl Widget for MenuBar {
 mod tests_1;
 #[cfg(test)]
 mod tests_2;
+#[cfg(test)]
+mod tests_fit;
 #[cfg(test)]
 mod tests_rows;

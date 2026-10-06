@@ -6,7 +6,10 @@
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Size};
 
-use super::geometry::{hit_test, item_at_path, stack_layout, MenuHit, PopupLayout};
+use super::fit_width::{FitMeasure, MenuWidth};
+use super::geometry::{
+    hit_test, item_at_path, stack_layout, stack_layout_with_width, MenuHit, PopupLayout,
+};
 use super::model::{MenuEntry, MenuSelection};
 
 /// Wall-clock window during which a touch event still classifies follow-up
@@ -44,6 +47,11 @@ pub struct PopupMenuState {
     pub hover_path: Option<Vec<usize>>,
     suppress_next_mouse_up: bool,
     activate_on_mouse_up: bool,
+    /// Popup width policy; see [`MenuWidth`].
+    width: MenuWidth,
+    /// Font the [`MenuWidth::FitContent`] policy measures rows with.  Until
+    /// one is set a fitted popup lays out at the fixed width.
+    fit_measure: Option<FitMeasure>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +71,8 @@ impl Default for PopupMenuState {
             hover_path: None,
             suppress_next_mouse_up: false,
             activate_on_mouse_up: false,
+            width: MenuWidth::Fixed,
+            fit_measure: None,
         }
     }
 }
@@ -123,17 +133,42 @@ impl PopupMenuState {
         suppress
     }
 
+    /// Choose how wide the popup panels are (default [`MenuWidth::Fixed`]).
+    pub fn set_width(&mut self, width: MenuWidth) {
+        self.width = width;
+    }
+
+    pub fn width(&self) -> MenuWidth {
+        self.width
+    }
+
+    /// Set the font, size and row style a [`MenuWidth::FitContent`] popup
+    /// measures with.  `PopupMenu` / `MenuBar` keep this in step with the
+    /// font they paint with, so hit-testing sees the painted widths.
+    pub fn set_fit_measure(&mut self, measure: FitMeasure) {
+        self.fit_measure = Some(measure);
+    }
+
     pub fn layouts(&self, items: &[MenuEntry], viewport: Size) -> Vec<PopupLayout> {
-        if self.open {
-            stack_layout(
+        if !self.open {
+            return Vec::new();
+        }
+        match (self.width, &self.fit_measure) {
+            (MenuWidth::FitContent, Some(measure)) => stack_layout_with_width(
                 items,
                 self.anchor,
                 self.anchor_kind,
                 &self.open_path,
                 viewport,
-            )
-        } else {
-            Vec::new()
+                &|level, m| measure.popup_width(level, m),
+            ),
+            _ => stack_layout(
+                items,
+                self.anchor,
+                self.anchor_kind,
+                &self.open_path,
+                viewport,
+            ),
         }
     }
 
