@@ -419,13 +419,10 @@ fn unconsumed_shortcut_fires_top_menu_action() {
     );
 
     assert_eq!(
-        bar.on_unconsumed_key(
-            &Key::Char('n'),
-            Modifiers {
-                ctrl: true,
-                ..Modifiers::default()
-            },
-        ),
+        // "Ctrl+N" declares the portable command shortcut (Cmd on macOS,
+        // Ctrl elsewhere), so press whatever the current platform's
+        // command key is.
+        bar.on_unconsumed_key(&Key::Char('n'), crate::platform::command_modifiers()),
         EventResult::Consumed
     );
 

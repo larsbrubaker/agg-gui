@@ -487,7 +487,7 @@ mod tests {
     #[test]
     fn smart_aim_round_numbers() {
         assert_eq!(best_in_range_f64(-0.2, 0.0), 0.0);
-        assert_eq!(best_in_range_f64(-10_004.23, 3.14), 0.0);
+        assert_eq!(best_in_range_f64(-10_004.23, std::f64::consts::PI), 0.0);
         assert_eq!(best_in_range_f64(7.8, 17.8), 10.0);
         assert_eq!(best_in_range_f64(99.0, 300.0), 100.0);
         assert_eq!(best_in_range_f64(-99.0, -300.0), -100.0);

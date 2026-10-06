@@ -40,6 +40,25 @@ pub fn command_modifier_pressed(modifiers: Modifiers) -> bool {
     }
 }
 
+/// The [`Modifiers`] a user holds for the platform's command key: `meta`
+/// (Cmd) on macOS, `ctrl` elsewhere.  The inverse of
+/// [`command_modifier_pressed`]; tests use it to synthesize portable
+/// shortcuts (e.g. a menu item declared as `"Ctrl+N"`) without hard-coding
+/// one OS's modifier.
+#[cfg(test)]
+pub(crate) fn command_modifiers() -> Modifiers {
+    match current_platform() {
+        Platform::MacOS => Modifiers {
+            meta: true,
+            ..Modifiers::default()
+        },
+        Platform::Windows | Platform::Linux | Platform::Other => Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        },
+    }
+}
+
 pub fn command_modifier_released(modifiers: Modifiers) -> bool {
     !modifiers.ctrl && !modifiers.meta
 }
