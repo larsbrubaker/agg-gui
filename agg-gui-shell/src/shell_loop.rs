@@ -152,6 +152,9 @@ impl<H: ShellHost> ShellLoop<H> {
 
             WindowEvent::ModifiersChanged(state) => {
                 self.mods = winit_adapter::modifiers(state.state());
+                // Deliver modifier-only changes (Shift mid-drag) to the
+                // captured widget, not just to the focused one via KeyDown.
+                self.app.on_modifiers_changed(self.mods);
             }
 
             WindowEvent::MouseInput { state, button, .. } => {

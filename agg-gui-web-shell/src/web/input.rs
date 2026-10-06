@@ -94,7 +94,11 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
             } else {
                 // Self-healing idle guard: re-derive held buttons from the event.
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
-                with_app(|app| app.on_mouse_move(x, y));
+                // Mouse events carry modifier state; feeding it here keeps
+                // `current_modifiers()` exact during drags and delivers a
+                // mid-drag Shift change to the captured widget.
+                let mods = event_mods(&e);
+                with_app(|app| app.on_mouse_move_mods(x, y, mods));
                 // Reflect the hovered widget's preferred cursor on the canvas.
                 let icon = agg_gui::current_cursor_icon();
                 let _ = c.style().set_property("cursor", icon.to_css());

@@ -36,7 +36,17 @@ impl App {
         full
     }
 
+    /// Mouse cursor moved with an explicit modifier state. Equivalent to
+    /// [`App::on_modifiers_changed`] followed by [`App::on_mouse_move`], for
+    /// shells whose pointer events carry modifiers (browser `MouseEvent`).
+    pub fn on_mouse_move_mods(&mut self, screen_x: f64, screen_y: f64, mods: Modifiers) {
+        self.on_modifiers_changed(mods);
+        self.on_mouse_move(screen_x, screen_y);
+    }
+
     /// Mouse cursor moved. `screen_y` is Y-down physical pixels.
+    /// `Event::MouseMove` carries no modifiers; widgets read
+    /// [`crate::event::current_modifiers`] while handling it.
     pub fn on_mouse_move(&mut self, screen_x: f64, screen_y: f64) {
         // Reset cursor so the hovered widget can set it; Default if nothing sets it.
         crate::cursor::reset_cursor_icon();
@@ -65,6 +75,7 @@ impl App {
         button: MouseButton,
         mods: Modifiers,
     ) {
+        self.on_modifiers_changed(mods);
         let screen = self.flip_y(screen_x, screen_y);
         // On-screen keyboard captures pointer events on its panel area
         // before anything in the tree gets a look. Returning here also
@@ -142,6 +153,7 @@ impl App {
         button: MouseButton,
         mods: Modifiers,
     ) {
+        self.on_modifiers_changed(mods);
         let screen = self.flip_y(screen_x, screen_y);
         // On-screen keyboard owns release events on its panel; releases
         // here commit a key tap and synthesize a `KeyDown`. After

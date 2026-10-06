@@ -23,7 +23,7 @@
 //! slices — agg-gui has no gradient primitive, but 1-px slices at this scale
 //! are cheap and banding-free.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -124,6 +124,9 @@ enum Drag {
 
 // ── Widget ───────────────────────────────────────────────────────────────────
 
+/// Select callback shared between [`ColorPicker`] and its Select button.
+type SharedSelectCallback = Rc<RefCell<Option<Box<dyn FnMut(Color)>>>>;
+
 /// Inline colour picker bound to a shared `Color` cell.
 pub struct ColorPicker {
     bounds: Rect,
@@ -138,7 +141,12 @@ pub struct ColorPicker {
     color_cell: Rc<Cell<Color>>,
 
     /// Snapshot taken when the picker was opened — restored on Cancel.
-    saved: Color,
+    /// Shared with the Cancel button's click callback.
+    saved: Rc<Cell<Color>>,
+    /// The working HSVA colour (ignoring "No Color"), kept current after
+    /// every `on_event` so the Select button's click callback can commit it
+    /// without going through `ColorPicker::on_event`.
+    working: Rc<Cell<Color>>,
 
     /// Working state while the panel is open.
     open: bool,
@@ -157,8 +165,9 @@ pub struct ColorPicker {
     /// Last local mouse position — fed into child widget layout for hit tests.
     hovered: bool,
 
-    /// Optional callback invoked on Select with the final colour.
-    on_select: Option<Box<dyn FnMut(Color)>>,
+    /// Optional callback invoked on Select with the final colour.  Shared
+    /// with the Select button's click callback, which commits directly.
+    on_select: SharedSelectCallback,
 
     // ── Sub-widget indices into `children` ───────────────────────────────────
     /// Set during `build_children` so paint/layout can find them quickly.
@@ -169,7 +178,9 @@ pub struct ColorPicker {
     /// Shared "no color" checkbox state.  Owned by `ColorPicker` so `on_event`
     /// can react to changes without going through a callback chain.
     none_cell: Rc<Cell<bool>>,
-    /// Shared flags the sub-buttons flip; read + cleared by `on_event`.
+    /// Shared flags the sub-buttons flip after committing / restoring the
+    /// colour cell themselves; read + cleared by `on_event` / `layout` to
+    /// close the panel and resync the working HSVA state.
     cancel_flag: Rc<Cell<bool>>,
     select_flag: Rc<Cell<bool>>,
 }
@@ -189,7 +200,8 @@ impl ColorPicker {
             font: Arc::clone(&font),
             font_size: 13.0,
             color_cell,
-            saved: initial,
+            saved: Rc::new(Cell::new(initial)),
+            working: Rc::new(Cell::new(initial)),
             open: false,
             h,
             s,
@@ -199,7 +211,7 @@ impl ColorPicker {
             allow_none: false,
             drag: Drag::None,
             hovered: false,
-            on_select: None,
+            on_select: Rc::new(RefCell::new(None)),
             idx_cancel: 0,
             idx_select: 1,
             idx_none: None,
@@ -220,8 +232,8 @@ impl ColorPicker {
         self.build_children();
         self
     }
-    pub fn on_select(mut self, cb: impl FnMut(Color) + 'static) -> Self {
-        self.on_select = Some(Box::new(cb));
+    pub fn on_select(self, cb: impl FnMut(Color) + 'static) -> Self {
+        *self.on_select.borrow_mut() = Some(Box::new(cb));
         self
     }
 
@@ -252,8 +264,40 @@ impl ColorPicker {
         let cf = Rc::clone(&self.cancel_flag);
         let sf = Rc::clone(&self.select_flag);
 
-        let cancel = Button::new("Cancel", Arc::clone(&self.font)).on_click(move || cf.set(true));
-        let select = Button::new("Select", Arc::clone(&self.font)).on_click(move || sf.set(true));
+        // The buttons commit / restore the bound colour cell from their own
+        // click callbacks: the framework may route a click straight to the
+        // child Button (it is in `children()`), bypassing
+        // `ColorPicker::on_event`, so deferring the commit to the picker's
+        // next event would leave Select doing nothing until a later pointer
+        // event.  The flags only tell the picker to close + resync itself.
+        let cancel = {
+            let cell = Rc::clone(&self.color_cell);
+            let saved = Rc::clone(&self.saved);
+            Button::new("Cancel", Arc::clone(&self.font)).on_click(move || {
+                cell.set(saved.get());
+                cf.set(true);
+                crate::animation::request_draw();
+            })
+        };
+        let select = {
+            let cell = Rc::clone(&self.color_cell);
+            let working = Rc::clone(&self.working);
+            let none = Rc::clone(&self.none_cell);
+            let on_select = Rc::clone(&self.on_select);
+            Button::new("Select", Arc::clone(&self.font)).on_click(move || {
+                let c = if none.get() {
+                    Color::transparent()
+                } else {
+                    working.get()
+                };
+                cell.set(c);
+                if let Some(cb) = on_select.borrow_mut().as_mut() {
+                    cb(c);
+                }
+                sf.set(true);
+                crate::animation::request_draw();
+            })
+        };
 
         if self.allow_none {
             let none_check = Checkbox::new(
@@ -285,23 +329,30 @@ impl ColorPicker {
         }
     }
 
-    fn commit(&mut self) {
-        let c = self.sync_color_from_hsva();
-        self.color_cell.set(c);
-        if let Some(cb) = self.on_select.as_mut() {
-            cb(c);
-        }
+    /// Publish the working HSVA colour for the Select button's callback.
+    fn sync_working(&self) {
+        let (r, g, b) = hsv_to_rgb(self.h, self.s, self.v);
+        self.working.set(Color::rgba(r, g, b, self.a));
+    }
+
+    /// Close after Select.  The Select button's callback has already written
+    /// the colour cell and fired `on_select`.
+    fn finish_select(&mut self) {
+        self.no_color = self.none_cell.get();
         self.open = false;
     }
 
+    /// Close after Cancel and resync the working state from the snapshot.
+    /// The Cancel button's callback has already restored the colour cell.
     fn cancel(&mut self) {
-        self.color_cell.set(self.saved);
-        let (h, s, v) = rgb_to_hsv(self.saved.r, self.saved.g, self.saved.b);
+        let saved = self.saved.get();
+        self.color_cell.set(saved);
+        let (h, s, v) = rgb_to_hsv(saved.r, saved.g, saved.b);
         self.h = h;
         self.s = s;
         self.v = v;
-        self.a = self.saved.a;
-        self.no_color = self.saved.a <= 0.0;
+        self.a = saved.a;
+        self.no_color = saved.a <= 0.0;
         self.none_cell.set(self.no_color);
         self.open = false;
     }
@@ -373,3 +424,6 @@ struct PanelRegions {
 }
 
 mod widget_impl;
+
+#[cfg(test)]
+mod tests;

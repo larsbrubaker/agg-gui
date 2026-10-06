@@ -40,6 +40,9 @@ impl Widget for ColorPicker {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // A Select / Cancel click routed straight to the child Button
+        // committed already; close the panel before sizing it.
+        self.handle_btn_flags();
         // Sync no_color from cell if someone else flipped it.
         self.no_color = self.none_cell.get();
 
@@ -168,6 +171,14 @@ impl Widget for ColorPicker {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        let result = self.handle_event(event);
+        self.sync_working();
+        result
+    }
+}
+
+impl ColorPicker {
+    fn handle_event(&mut self, event: &Event) -> EventResult {
         // Let sub-widgets (No Color, Cancel, Select) see pointer events that
         // actually land on them.  `Button::on_event` consumes every
         // MouseDown / MouseUp regardless of hit-test, so we MUST gate by
@@ -223,13 +234,14 @@ impl Widget for ColorPicker {
                     if contains(&r.swatch, *pos) {
                         // Open.
                         self.open = true;
-                        self.saved = self.color_cell.get();
-                        let (h, s, v) = rgb_to_hsv(self.saved.r, self.saved.g, self.saved.b);
+                        let saved = self.color_cell.get();
+                        self.saved.set(saved);
+                        let (h, s, v) = rgb_to_hsv(saved.r, saved.g, saved.b);
                         self.h = h;
                         self.s = s;
                         self.v = v;
-                        self.a = self.saved.a;
-                        self.no_color = self.saved.a <= 0.0;
+                        self.a = saved.a;
+                        self.no_color = saved.a <= 0.0;
                         self.none_cell.set(self.no_color);
                         crate::animation::request_draw();
                         return EventResult::Consumed;
@@ -310,7 +322,7 @@ impl ColorPicker {
         }
         if self.select_flag.get() {
             self.select_flag.set(false);
-            self.commit();
+            self.finish_select();
         }
         if self.open {
             let want = self.none_cell.get();

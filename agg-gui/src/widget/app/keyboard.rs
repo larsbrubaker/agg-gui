@@ -13,9 +13,33 @@ use crate::widget::tree::{
 use crate::widget::App;
 
 impl App {
+    /// The platform reported a change in held modifier keys (winit
+    /// `WindowEvent::ModifiersChanged`, or a browser key event carrying a
+    /// new modifier state).
+    ///
+    /// Records the state for [`crate::event::current_modifiers`] and, when it
+    /// actually changed, delivers [`Event::ModifiersChanged`] to the widget
+    /// holding mouse capture (so a drag sees Shift pressed/released mid-drag
+    /// even though keys normally go only to the focused widget). With no
+    /// capture it goes to the focused widget instead. `on_key_down` /
+    /// `on_key_up` / `on_mouse_down` / `on_mouse_up` call this with their
+    /// modifiers too, so delivery doesn't depend on which of a key event or
+    /// a modifiers event the platform sends first.
+    pub fn on_modifiers_changed(&mut self, mods: Modifiers) {
+        if !crate::event::set_current_modifiers(mods) {
+            return;
+        }
+        let target = self.captured.clone().or_else(|| self.focus.clone());
+        if let Some(path) = target {
+            let event = Event::ModifiersChanged { modifiers: mods };
+            dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
+        }
+    }
+
     /// Key pressed. Delivered to the focused widget first, then to the visible
     /// widget tree as an unconsumed key if focus ignores it.
     pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
+        self.on_modifiers_changed(mods);
         // Ctrl/Meta+Tab is a *direct* focus-traversal escape hatch: it advances
         // focus without ever offering the event to the focused widget, so a
         // widget that consumes plain Tab (e.g. the rich-text editor indenting)
@@ -96,6 +120,7 @@ impl App {
 
     /// Key released. Delivered to the focused widget.
     pub fn on_key_up(&mut self, key: Key, mods: Modifiers) {
+        self.on_modifiers_changed(mods);
         let event = Event::KeyUp {
             key,
             modifiers: mods,
