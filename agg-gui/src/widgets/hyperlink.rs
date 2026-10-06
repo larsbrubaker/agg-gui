@@ -182,6 +182,10 @@ impl Widget for Hyperlink {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
+                // Links show the pointing hand, as in browsers and egui.
+                if self.hovered {
+                    crate::cursor::set_cursor_icon(crate::cursor::CursorIcon::PointingHand);
+                }
                 if was != self.hovered {
                     crate::animation::request_draw();
                     return EventResult::Consumed;

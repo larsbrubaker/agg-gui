@@ -141,3 +141,49 @@ fn drag_writes_back_to_value_cell() {
     assert_eq!(dv.value(), 15.0);
     assert_eq!(cell.get(), 15.0, "drag must write back to the shared cell");
 }
+
+/// Cursor convention (egui): horizontal-resize arrow over a DragValue
+/// and throughout a scrub drag that leaves it; I-beam while editing
+/// inline; the arrow once the pointer is off it.
+#[test]
+fn drag_value_cursor_hover_drag_and_edit() {
+    use crate::cursor::{current_cursor_icon, reset_cursor_icon, CursorIcon};
+    use crate::event::{Modifiers, MouseButton};
+    use crate::geometry::Point;
+
+    fn moved(dv: &mut DragValue, x: f64, y: f64) -> CursorIcon {
+        reset_cursor_icon();
+        dv.on_event(&Event::MouseMove {
+            pos: Point::new(x, y),
+        });
+        current_cursor_icon()
+    }
+
+    let mut dv = DragValue::new(5.0, 0.0, 100.0, test_font());
+    let size = dv.layout(Size::new(120.0, 30.0));
+    dv.set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
+    let (cx, cy) = (size.width * 0.5, size.height * 0.5);
+
+    assert_eq!(moved(&mut dv, cx, cy), CursorIcon::ResizeHorizontal);
+    assert_eq!(moved(&mut dv, -1.0, -1.0), CursorIcon::Default);
+
+    dv.on_event(&Event::MouseDown {
+        pos: Point::new(cx, cy),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    assert_eq!(
+        moved(&mut dv, cx + 400.0, cy),
+        CursorIcon::ResizeHorizontal,
+        "scrub drag past the widget keeps the resize arrow"
+    );
+    dv.on_event(&Event::MouseUp {
+        pos: Point::new(cx + 400.0, cy),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    assert_eq!(moved(&mut dv, cx + 400.0, cy), CursorIcon::Default);
+
+    dv.enter_edit_mode();
+    assert_eq!(moved(&mut dv, cx, cy), CursorIcon::Text, "editing inline");
+}

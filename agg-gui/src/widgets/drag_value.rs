@@ -348,6 +348,24 @@ impl DragValue {
 
 // ── Widget impl ────────────────────────────────────────────────────────────
 
+impl DragValue {
+    /// Cursor convention (egui's `DragValue`): a horizontal-resize arrow
+    /// while hovered or being dragged, since dragging left/right scrubs
+    /// the value; the I-beam once it switches to inline text editing.
+    fn apply_cursor(&self) {
+        use crate::cursor::{set_cursor_icon, CursorIcon};
+        if self.dragging {
+            set_cursor_icon(CursorIcon::ResizeHorizontal);
+        } else if self.hovered {
+            set_cursor_icon(if self.editing {
+                CursorIcon::Text
+            } else {
+                CursorIcon::ResizeHorizontal
+            });
+        }
+    }
+}
+
 impl Widget for DragValue {
     fn type_name(&self) -> &'static str {
         "DragValue"
@@ -605,9 +623,11 @@ impl Widget for DragValue {
                     if self.dragging {
                         self.update_from_drag(pos.x);
                         crate::animation::request_draw();
+                        self.apply_cursor();
                         return EventResult::Consumed;
                     }
                 }
+                self.apply_cursor();
                 if was != self.hovered {
                     crate::animation::request_draw();
                     return EventResult::Consumed;

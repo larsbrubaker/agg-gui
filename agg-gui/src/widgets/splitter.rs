@@ -13,6 +13,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
@@ -208,6 +209,27 @@ impl Splitter {
         self
     }
 
+    /// The resize cursor for this split's orientation: a left/right
+    /// split drags horizontally, a top/bottom split vertically. Matches
+    /// egui's side/top panel resize handles.
+    fn resize_cursor(&self) -> CursorIcon {
+        if self.vertical {
+            CursorIcon::ResizeVertical
+        } else {
+            CursorIcon::ResizeHorizontal
+        }
+    }
+
+    /// Show the resize cursor while the bar is hovered and for the whole
+    /// of a drag — the splitter holds mouse capture then, so it keeps
+    /// receiving moves (and keeps the cursor) after the pointer leaves
+    /// the bar. Otherwise leave the framework's per-move `Default`.
+    fn apply_cursor(&self) {
+        if self.hovered || self.dragging {
+            set_cursor_icon(self.resize_cursor());
+        }
+    }
+
     /// Length of the bounds along the splitting axis.
     fn axis_length(&self) -> f64 {
         if self.vertical {
@@ -390,6 +412,7 @@ impl Widget for Splitter {
                     let over_div = pos.y >= div_y - 2.0 && pos.y <= div_end + 2.0;
                     let was = self.hovered;
                     self.hovered = over_div;
+                    self.apply_cursor();
                     if self.dragging {
                         if total > div {
                             // ratio is fraction going to top — that's the
@@ -445,6 +468,7 @@ impl Widget for Splitter {
                     let over_div = pos.x >= div_x - 2.0 && pos.x <= div_end + 2.0;
                     let was = self.hovered;
                     self.hovered = over_div;
+                    self.apply_cursor();
                     if self.dragging {
                         let total = self.bounds.width;
                         if total > self.divider_width {

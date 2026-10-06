@@ -168,6 +168,10 @@ impl<H: ShellHost> ShellLoop<H> {
                         self.app.on_mouse_up(x, y, btn, self.mods);
                     }
                 }
+                // Press can claim a drag cursor and release re-resolves the
+                // hover cursor at the release point; reflect either now
+                // rather than waiting for the next move.
+                winit_adapter::apply_cursor(&self.window, agg_gui::current_cursor_icon());
             }
 
             WindowEvent::MouseWheel { delta, .. } => {

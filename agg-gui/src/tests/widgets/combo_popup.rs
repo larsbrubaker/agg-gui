@@ -316,6 +316,10 @@ fn test_combo_popup_middle_drag_scrolls_popup_not_parent() {
         bounds: Rect,
         children: Vec<Box<dyn Widget>>,
         middle_drags: usize,
+        /// True only between this widget's own middle press and release,
+        /// so plain hover moves (e.g. the hover refresh after a release)
+        /// are not mistaken for drags.
+        middle_held: bool,
     }
 
     impl Widget for MiddleDragParent {
@@ -351,9 +355,20 @@ fn test_combo_popup_middle_drag_scrolls_popup_not_parent() {
                 Event::MouseDown {
                     button: MouseButton::Middle,
                     ..
-                }
-                | Event::MouseMove { .. } => {
+                } => {
+                    self.middle_held = true;
                     self.middle_drags += 1;
+                    EventResult::Consumed
+                }
+                Event::MouseMove { .. } if self.middle_held => {
+                    self.middle_drags += 1;
+                    EventResult::Consumed
+                }
+                Event::MouseUp {
+                    button: MouseButton::Middle,
+                    ..
+                } if self.middle_held => {
+                    self.middle_held = false;
                     EventResult::Consumed
                 }
                 _ => EventResult::Ignored,
@@ -379,6 +394,7 @@ fn test_combo_popup_middle_drag_scrolls_popup_not_parent() {
         bounds: Rect::default(),
         children: vec![Box::new(combo)],
         middle_drags: 0,
+        middle_held: false,
     };
     let mut app = App::new(Box::new(root));
     let viewport = Size::new(180.0, 220.0);

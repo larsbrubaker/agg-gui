@@ -170,6 +170,7 @@ impl App {
                 .take()
                 .unwrap_or_else(|| self.extend_modal_path(&path, pos));
             dispatch_event(&mut self.root, &path, &event, pos);
+            self.refresh_hover_after_release(pos);
             return;
         }
         // Deliver release to captured widget first (if any), then clear capture.
@@ -181,5 +182,25 @@ impl App {
                 dispatch_event(&mut self.root, &path, &event, pos);
             }
         }
+        self.refresh_hover_after_release(pos);
+    }
+
+    /// Re-resolve hover (and with it the cursor icon) at the release
+    /// point. Capture has just ended, so the widget that owned the drag
+    /// (a splitter bar, a text selection) no longer gets every move; a
+    /// release away from it would otherwise leave its drag cursor
+    /// latched until the next real mouse move. Mirrors `on_mouse_move`:
+    /// reset to `Default`, then let the widget now under the pointer
+    /// claim the cursor. The shells re-apply `current_cursor_icon()`
+    /// after every press and release.
+    fn refresh_hover_after_release(&mut self, pos: Point) {
+        crate::cursor::reset_cursor_icon();
+        if let Some(path) = active_modal_path(self.root.as_ref()) {
+            let path = self.extend_modal_path(&path, pos);
+            dispatch_event(&mut self.root, &path, &Event::MouseMove { pos }, pos);
+            self.hovered = Some(path);
+            return;
+        }
+        self.dispatch_mouse_move(pos);
     }
 }

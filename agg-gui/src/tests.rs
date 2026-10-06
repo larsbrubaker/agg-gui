@@ -73,6 +73,7 @@ mod stack_aligned;
 mod tooltip_window_hover;
 mod touch_scroll;
 mod tree_view;
+mod widget_cursors;
 mod widgets;
 mod window_layout;
 mod window_maximize;

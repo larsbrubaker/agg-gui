@@ -458,7 +458,9 @@ impl Widget for TextArea {
                 };
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
-                if self.hovered {
+                // Keep the I-beam for the whole selection drag, which may
+                // leave the area (it holds capture).
+                if self.hovered || self.selecting_drag {
                     set_cursor_icon(CursorIcon::Text);
                 }
                 if self.selecting_drag {

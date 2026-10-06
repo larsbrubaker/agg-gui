@@ -325,6 +325,12 @@ impl Widget for TextField {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
                 self.hovered = self.hit_test(*pos);
+                // I-beam over the field and throughout a selection drag
+                // (the field holds capture, so the drag may leave it).
+                // Read-only fields keep it too: their text is selectable.
+                if self.hovered || (self.mouse_down && self.focused) {
+                    crate::cursor::set_cursor_icon(crate::cursor::CursorIcon::Text);
+                }
                 if self.mouse_down && self.focused {
                     let tx = pos.x - self.padding + self.scroll_x;
                     let text = self.edit.borrow().text.clone();

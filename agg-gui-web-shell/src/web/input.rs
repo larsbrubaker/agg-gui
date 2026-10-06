@@ -126,6 +126,9 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
                 let button = mouse_button_from_dom(e.button());
                 let mods = event_mods(&e);
                 with_app(|app| app.on_mouse_down(x, y, button, mods));
+                // A press can claim a drag cursor before any move arrives.
+                let icon = agg_gui::current_cursor_icon();
+                let _ = c.style().set_property("cursor", icon.to_css());
             }
             note_input();
         });
@@ -149,6 +152,10 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
                 let button = mouse_button_from_dom(e.button());
                 let mods = event_mods(&e);
                 with_app(|app| app.on_mouse_up(x, y, button, mods));
+                // Release re-resolves hover at the release point, so a drag
+                // cursor (splitter arrows) drops without waiting for a move.
+                let icon = agg_gui::current_cursor_icon();
+                let _ = c.style().set_property("cursor", icon.to_css());
             }
             note_input();
         });

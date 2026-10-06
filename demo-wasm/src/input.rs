@@ -109,6 +109,13 @@ pub fn software_keyboard_enabled() -> bool {
 #[wasm_bindgen]
 pub fn on_mouse_move(x: f64, y: f64) {
     with_app_mut(|app| app.on_mouse_move(x, y));
+    apply_canvas_cursor();
+}
+
+/// Reflect the app's current cursor icon on the canvas element. Called
+/// after moves, presses (which can claim a drag cursor) and releases
+/// (which re-resolve hover at the release point).
+fn apply_canvas_cursor() {
     if let Some(window) = web_sys::window() {
         if let Some(doc) = window.document() {
             if let Some(el) = doc.get_element_by_id("canvas") {
@@ -129,6 +136,7 @@ pub fn on_mouse_down(x: f64, y: f64, button: u8) {
         n => MouseButton::Other(n),
     };
     with_app_mut(|app| app.on_mouse_down(x, y, btn, Modifiers::default()));
+    apply_canvas_cursor();
 }
 
 #[wasm_bindgen]
@@ -141,6 +149,7 @@ pub fn on_mouse_up(x: f64, y: f64, button: u8) {
         n => MouseButton::Other(n),
     };
     with_app_mut(|app| app.on_mouse_up(x, y, btn, Modifiers::default()));
+    apply_canvas_cursor();
 }
 
 #[wasm_bindgen]
