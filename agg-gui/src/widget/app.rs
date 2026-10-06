@@ -1,6 +1,7 @@
 use super::*;
 
 mod gesture;
+mod hover_chain;
 mod keyboard;
 mod path_anchor;
 mod pointer;
@@ -23,6 +24,9 @@ pub struct App {
     focus: Option<Vec<usize>>,
     /// Path to the widget last seen under the cursor (for hover clearing).
     hovered: Option<Vec<usize>>,
+    /// Hovered chain last announced with `MouseEnter`/`MouseLeave`; equals
+    /// `hovered` except while pointer capture holds. See [`hover_chain`].
+    hover_chain: Option<Vec<usize>>,
     /// Mouse-captured widget path. Set when a widget consumes `MouseDown`;
     /// cleared on `MouseUp`. While set, `MouseMove` events go to the captured
     /// widget regardless of cursor position — enabling slider drag-outside-bounds.
@@ -79,6 +83,7 @@ impl App {
             root,
             focus: None,
             hovered: None,
+            hover_chain: None,
             captured: None,
             gesture_captured: None,
             anchors: path_anchor::TrackedAnchors::default(),
@@ -599,6 +604,9 @@ impl App {
         if let Some(ref mut p) = self.hovered {
             shift_path(p, depth, win_idx, new_idx);
         }
+        if let Some(ref mut p) = self.hover_chain {
+            shift_path(p, depth, win_idx, new_idx);
+        }
         if let Some(ref mut p) = self.captured {
             shift_path(p, depth, win_idx, new_idx);
         }
@@ -648,6 +656,7 @@ impl App {
 
     fn dispatch_mouse_move(&mut self, pos: Point) {
         let new_hit = self.compute_hit(pos);
+        self.update_hover_chain(new_hit.as_deref());
 
         // If the hovered widget changed, clear the old one — but skip the clear
         // event when the old widget still has mouse capture (it should keep

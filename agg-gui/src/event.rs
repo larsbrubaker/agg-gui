@@ -145,6 +145,24 @@ pub enum Event {
     /// (`MouseMove`) don't carry modifiers; read [`current_modifiers`]
     /// while handling them instead.
     ModifiersChanged { modifiers: Modifiers },
+    /// The pointer entered this widget's bounds: it is now on the hovered
+    /// chain (the widget under the pointer, or one of its ancestors).
+    ///
+    /// Sent by [`crate::widget::App`] to **every** widget that joins the
+    /// chain, shallowest first, before the `MouseMove` that caused it is
+    /// dispatched — whichever descendant then handles that move. This is
+    /// agg-sharp's `MouseEnterBounds`: a composite (a field wrapper, a tab
+    /// strip) learns the pointer arrived even though a child takes the
+    /// moves. Delivered straight to the widget (it does not bubble); the
+    /// result only decides whether a repaint is scheduled. While a widget
+    /// holds pointer capture its ancestors stay on the chain and only the
+    /// captured widget itself leaves and re-enters as the pointer crosses
+    /// it; everything else is settled when capture ends.
+    MouseEnter,
+    /// The pointer left this widget's bounds (it is no longer on the
+    /// hovered chain). agg-sharp's `MouseLeaveBounds`. Sent deepest first,
+    /// before the `MouseMove` that caused it; see [`Event::MouseEnter`].
+    MouseLeave,
 }
 
 thread_local! {

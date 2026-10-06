@@ -10,6 +10,22 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Pointer enter/leave for every widget on the hovered chain:
+  `Event::MouseEnter` / `Event::MouseLeave` (agg-sharp's `MouseEnterBounds` /
+  `MouseLeaveBounds`). Whenever the pointer moves, `App` sends `MouseLeave` to
+  each widget that is no longer under it (deepest first) and `MouseEnter` to
+  each that now is (shallowest first) — the root and every ancestor of the
+  hit widget, not just the deepest — before the `MouseMove` is dispatched,
+  so a composite whose child handles the moves (a wrapper around a
+  `TextField`, a tab strip) still learns the pointer arrived and left. They
+  are delivered directly (no bubbling); returning `Consumed` only schedules a
+  repaint. While pointer capture holds, the captured widget's ancestors stay
+  entered and only the captured widget leaves and re-enters as the pointer
+  crosses it; the rest settles when capture ends. Leaving the window sends
+  `MouseLeave` up the whole chain. Who handles `MouseMove`, and the
+  `(-1, -1)` hover-clear move, are unchanged; widgets that ignore unknown
+  events need no change (code matching `Event` exhaustively must add the two
+  variants).
 - Widget code can clear keyboard focus: `focus::request_blur()` clears it
   whatever holds it; `focus::release_focus(id)` clears it only if the widget
   whose `focus_id` is `id` still holds it (a no-op otherwise, so a stale

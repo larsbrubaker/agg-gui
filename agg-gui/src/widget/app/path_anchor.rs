@@ -2,7 +2,7 @@
 //! same widgets when a parent reorders its children.
 //!
 //! `App` addresses the focused, hovered, pointer-captured and
-//! gesture-captured widgets by child-index path (`Vec<usize>`). A path alone
+//! gesture-captured widgets (and the enter/leave hover chain) by child-index path (`Vec<usize>`). A path alone
 //! goes stale the moment a parent reorders its children — a tab strip moving
 //! the dragged tab past a neighbour, a list re-sorting — and the rest of the
 //! drag (moves *and* the release) would land on whichever widget now sits at
@@ -31,24 +31,27 @@ use crate::widget::{App, Widget};
 /// element). Empty when the slot holds no path.
 type Anchor = Vec<usize>;
 
-/// Anchors for the four index paths [`App`] keeps between events.
+/// Anchors for the index paths [`App`] keeps between events.
 #[derive(Default)]
 pub(super) struct TrackedAnchors {
     focus: Anchor,
     hovered: Anchor,
     captured: Anchor,
     gesture_captured: Anchor,
+    /// The hovered chain the last enter/leave notification described (see
+    /// `hover_chain.rs`); differs from `hovered` while pointer capture holds.
+    pub(super) hover_chain: Anchor,
 }
 
 /// The identity of a widget: the address of its data. Stable while the widget
 /// lives, whatever happens to the `Box` that owns it.
-fn identity(w: &dyn Widget) -> usize {
+pub(super) fn identity(w: &dyn Widget) -> usize {
     w as *const dyn Widget as *const () as usize
 }
 
 /// Record the identity of every widget along `path`. Stops at the first index
 /// that does not exist (the anchor then covers the valid prefix).
-fn anchor_of(root: &dyn Widget, path: Option<&[usize]>) -> Anchor {
+pub(super) fn anchor_of(root: &dyn Widget, path: Option<&[usize]>) -> Anchor {
     let mut anchor = Vec::new();
     let Some(path) = path else {
         return anchor;
@@ -91,7 +94,7 @@ fn resolve(root: &dyn Widget, path: &mut [usize], anchor: &[usize]) {
 
 impl App {
     /// Follow every stored path (focus, hover, pointer capture, gesture
-    /// capture) to where its widgets now sit, after any reordering of
+    /// capture, the enter/leave hover chain) to where its widgets now sit, after any reordering of
     /// children since the path was recorded.
     pub(super) fn resolve_tracked_paths(&mut self) {
         let root = self.root.as_ref();
@@ -101,6 +104,7 @@ impl App {
             (&mut self.hovered, &anchors.hovered),
             (&mut self.captured, &anchors.captured),
             (&mut self.gesture_captured, &anchors.gesture_captured),
+            (&mut self.hover_chain, &anchors.hover_chain),
         ] {
             if let Some(path) = path {
                 resolve(root, path, anchor);

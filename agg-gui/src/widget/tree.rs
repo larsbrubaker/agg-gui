@@ -310,6 +310,30 @@ pub fn dispatch_event_dyn(
     result
 }
 
+/// Deliver `event` to exactly the widget at `path` — no bubbling — with the
+/// usual automatic-invalidation policy, marking every ancestor on the path
+/// dirty when the delivery requested a draw. Returns `None` (delivering
+/// nothing) when `path` no longer resolves. Used for pointer enter/leave,
+/// which each widget on the hovered chain receives in its own right.
+pub(crate) fn deliver_exact(
+    widget: &mut dyn Widget,
+    path: &[usize],
+    event: &Event,
+) -> Option<EventResult> {
+    let before = crate::animation::invalidation_epoch();
+    let result = match path.split_first() {
+        None => deliver(widget, event),
+        Some((&idx, rest)) => {
+            let child = widget.children_mut().get_mut(idx)?;
+            deliver_exact(child.as_mut(), rest, event)?
+        }
+    };
+    if result.requests_redraw() || before != crate::animation::invalidation_epoch() {
+        widget.mark_dirty();
+    }
+    Some(result)
+}
+
 /// Give visible widgets a chance to handle a key ignored by the focused path.
 ///
 /// Traverses in reverse paint order so topmost windows/menu bars win.

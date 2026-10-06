@@ -68,6 +68,7 @@ impl App {
         set_current_mouse_world(pos);
         if let Some(path) = active_modal_path(self.root.as_ref()) {
             let path = self.extend_modal_path(&path, pos);
+            self.update_hover_chain(Some(&path));
             let event = Event::MouseMove { pos };
             dispatch_event(&mut self.root, &path, &event, pos);
             self.store_hovered(Some(path));
@@ -221,6 +222,7 @@ impl App {
         crate::cursor::reset_cursor_icon();
         if let Some(path) = active_modal_path(self.root.as_ref()) {
             let path = self.extend_modal_path(&path, pos);
+            self.update_hover_chain(Some(&path));
             dispatch_event(&mut self.root, &path, &Event::MouseMove { pos }, pos);
             self.store_hovered(Some(path));
             return;
