@@ -463,6 +463,12 @@ impl Widget for TextField {
             Event::KeyDown { key, modifiers } if self.focused => {
                 // Reset blink on any keypress so cursor is visible immediately.
                 self.focus_time = Some(Instant::now());
+                // A wrapper's interceptor sees the key before the built-in
+                // handling (C#'s `KeyDown` event fires before `OnKeyDown`'s body).
+                if self.run_key_intercept(key, modifiers) {
+                    crate::animation::request_draw();
+                    return EventResult::Consumed;
+                }
                 let result = self.handle_key(key, *modifiers);
                 // Any text-editing keystroke that reached the focused field
                 // visibly mutates the text / cursor / selection; repaint.

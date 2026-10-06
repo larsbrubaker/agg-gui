@@ -5,6 +5,9 @@
 //!
 //! Feature set mirrors C# agg-sharp `InternalTextEditWidget`:
 //! - Character / word navigation (arrows, Ctrl+arrow, Home, End)
+//! - Up / Down / PageUp / PageDown and (read-only) Space are consumed, so they
+//!   never leak to app shortcuts; wrappers claim keys first through
+//!   `with_key_intercept` (see `text_field/vertical_keys.rs`)
 //! - Keyboard selection (Shift+movement), Ctrl+A select-all
 //! - Mouse click to position cursor, drag to extend selection
 //! - Double-click to select the word under the cursor
@@ -51,6 +54,7 @@ mod password;
 mod pointer;
 mod sig;
 mod theme;
+mod vertical_keys;
 mod widget_impl;
 
 #[cfg(test)]
@@ -142,6 +146,10 @@ pub struct TextField {
     on_edit_complete: Option<Box<dyn FnMut(&str)>>,
     text_cell: Option<Rc<RefCell<String>>>,
 
+    /// Pre-default key interceptor. See
+    /// [`with_key_intercept`](Self::with_key_intercept).
+    on_key_intercept: Option<Rc<RefCell<crate::widgets::text_area::KeyIntercept>>>,
+
     /// Per-character allow-list. See [`with_char_filter`].
     char_filter: Option<Rc<dyn Fn(char) -> bool>>,
 
@@ -209,6 +217,7 @@ impl TextField {
             on_enter: None,
             on_edit_complete: None,
             text_cell: None,
+            on_key_intercept: None,
             char_filter: None,
             focus_request_id: None,
             keyboard_mode: Rc::new(Cell::new(
@@ -505,6 +514,11 @@ impl TextField {
         // Ctrl/Alt+Delete.
         let word = mods.ctrl || mods.alt;
 
+        // Up / Down / PageUp / PageDown and read-only Space (`vertical_keys.rs`).
+        if let Some(result) = self.handle_vertical_key(key, mods) {
+            return result;
+        }
+
         match key {
             // ── Printable characters (and Ctrl/Cmd shortcuts on Char) ──────
             Key::Char(c) if !self.read_only || cmd => {
@@ -636,43 +650,6 @@ impl TextField {
                 } else {
                     cur
                 };
-                let new_anchor = if mods.shift { anchor } else { new_cur };
-                let mut st = self.edit.borrow_mut();
-                st.cursor = new_cur;
-                st.anchor = new_anchor;
-                drop(st);
-                self.ensure_cursor_visible();
-                EventResult::Consumed
-            }
-
-            // ── Arrow Up / Down ──────────────────────────────────────────
-            // Single-line field, so vertical arrows only matter for the Mac
-            // `Cmd+Up` / `Cmd+Down` (start / end of document) convention —
-            // treat as Home / End.  Plain arrows fall through so callers
-            // can spin numeric-input-style steppers, etc.
-            Key::ArrowUp if mods.meta => {
-                self.flush_pending();
-                let (_, anchor) = {
-                    let st = self.edit.borrow();
-                    (st.cursor, st.anchor)
-                };
-                let new_cur = 0;
-                let new_anchor = if mods.shift { anchor } else { new_cur };
-                let mut st = self.edit.borrow_mut();
-                st.cursor = new_cur;
-                st.anchor = new_anchor;
-                drop(st);
-                self.scroll_x = 0.0;
-                EventResult::Consumed
-            }
-            Key::ArrowDown if mods.meta => {
-                self.flush_pending();
-                let len = self.edit.borrow().text.len();
-                let (_, anchor) = {
-                    let st = self.edit.borrow();
-                    (st.cursor, st.anchor)
-                };
-                let new_cur = len;
                 let new_anchor = if mods.shift { anchor } else { new_cur };
                 let mut st = self.edit.borrow_mut();
                 st.cursor = new_cur;

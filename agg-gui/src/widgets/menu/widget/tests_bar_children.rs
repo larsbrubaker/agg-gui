@@ -1,6 +1,6 @@
 //! MenuBar tests for the per-title child widgets (`MenuTitle`), the
-//! settable bar height, and the on-open items provider (`top_menu.rs`,
-//! `bar.rs`).
+//! settable bar height, the on-open items provider and the bar's own
+//! widget id (`top_menu.rs`, `bar.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -222,4 +222,18 @@ fn items_provider_gates_shortcuts_on_a_closed_bar() {
     enabled.set(true);
     assert_eq!(bar.on_unconsumed_key(&key, mods), EventResult::Consumed);
     assert_eq!(actions.borrow().as_slice(), ["file.new"]);
+}
+
+#[test]
+fn with_id_names_the_bar() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    assert_eq!(file_edit_bar().id(), None);
+    let mut bar = file_edit_bar().with_id("Sheet Menu Bar");
+    bar.layout(Size::new(300.0, BAR_H));
+    assert_eq!(bar.id(), Some("Sheet Menu Bar"));
+    let found = find_widget_by_id(&bar, "Sheet Menu Bar").expect("bar by id");
+    assert_eq!(found.type_name(), "MenuBar");
+    // the per-title children keep their own names
+    assert!(find_widget_by_id(&bar, "Edit Menu").is_some());
 }

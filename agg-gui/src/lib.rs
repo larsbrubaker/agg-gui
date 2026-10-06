@@ -106,6 +106,11 @@ pub mod winit_adapter;
 #[cfg(target_arch = "wasm32")]
 pub mod web_adapter;
 
+/// Which forwarded browser keydowns suppress the browser's default action.
+/// Pure logic, compiled everywhere so its tests run natively; used by
+/// `web_adapter`.
+mod web_key_policy;
+
 // Re-export the most commonly used types at the crate root.
 pub use app_state::{OsWindowHandle, OsWindowState};
 pub use color::Color;

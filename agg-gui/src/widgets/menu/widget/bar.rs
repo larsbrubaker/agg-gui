@@ -58,6 +58,8 @@ pub struct MenuBar {
     /// `(id, label)` of each [`MenuTitle`] child, to rebuild them only when
     /// the titles change.
     title_keys: Vec<(String, String)>,
+    /// Instance id from [`MenuBar::with_id`], reported by [`Widget::id`].
+    id: Option<String>,
 }
 
 impl MenuBar {
@@ -83,7 +85,17 @@ impl MenuBar {
             bar_labels: BarLabels::new(),
             bar_height: None,
             title_keys: Vec::new(),
+            id: None,
         }
+    }
+
+    /// Give this bar a widget id ([`Widget::id`]) so an app or a test can
+    /// find it by name (e.g. "Sheet Menu Bar") with
+    /// [`find_widget_by_id`](crate::widget::find_widget_by_id).  A bar has
+    /// no id by default.
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
+        self
     }
 
     /// Height of a horizontal bar (logical px) — e.g. a compact 20-px bar
@@ -339,6 +351,10 @@ impl MenuBar {
 impl Widget for MenuBar {
     fn type_name(&self) -> &'static str {
         "MenuBar"
+    }
+
+    fn id(&self) -> Option<&str> {
+        self.id.as_deref()
     }
 
     fn bounds(&self) -> Rect {

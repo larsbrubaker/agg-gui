@@ -90,41 +90,6 @@ fn modifiers_of(e: &web_sys::KeyboardEvent) -> Modifiers {
     }
 }
 
-/// Whether a forwarded keydown should suppress the browser's default
-/// action.  The listeners sit at window level, so this must block only
-/// page side effects of in-app typing (space scrolls, arrows scroll,
-/// `'` / `/` open Firefox quick-find, Backspace navigates back) while
-/// leaving browser chrome usable: `Tab` focus-navigation, F-keys
-/// (`Key::Other`), and modified shortcuts like Ctrl+R / Cmd+L stay with
-/// the browser.  Ctrl/Cmd C, X, A, Z, Y are the app's clipboard/undo
-/// set and are claimed.  Alt combos (Alt+Left = history back, AltGr
-/// chars report ctrl+alt) are never suppressed.
-fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
-    if mods.ctrl || mods.meta {
-        return matches!(k, Key::Char(c)
-            if matches!(c.to_ascii_lowercase(), 'c' | 'x' | 'a' | 'z' | 'y'))
-            && !mods.alt;
-    }
-    if mods.alt {
-        return false;
-    }
-    matches!(
-        k,
-        Key::Char(_)
-            | Key::ArrowLeft
-            | Key::ArrowRight
-            | Key::ArrowUp
-            | Key::ArrowDown
-            | Key::Backspace
-            | Key::Delete
-            | Key::Home
-            | Key::End
-            | Key::PageUp
-            | Key::PageDown
-            | Key::Enter
-    )
-}
-
 /// Install window-level keyboard + clipboard listeners that feed an
 /// agg-gui [`App`](crate::App) hosted in a `<canvas>`.
 ///
@@ -145,9 +110,10 @@ fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
 ///   written by the widget's Ctrl+C/X handler) to the system clipboard.
 /// - Typing/navigation keys are `preventDefault()`ed so space / arrows /
 ///   quote don't scroll the page or trigger browser quick-find, but
-///   browser chrome stays reachable: `Tab`, F-keys, and modified
-///   shortcuts other than the app's clipboard/undo set (Ctrl/Cmd
-///   C, X, A, Z, Y) keep their default action.
+///   browser chrome stays reachable: `Tab`, the F-keys other than F1
+///   (the app's help key), and modified shortcuts other than the app's
+///   clipboard/undo set (Ctrl/Cmd C, X, A, Z, Y) keep their default
+///   action. The policy lives in `web_key_policy.rs`.
 ///
 /// Listeners live for the page lifetime (the closures are leaked — call
 /// this once at startup).
@@ -175,7 +141,7 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
             let Some(k) = key(&name) else {
                 return;
             };
-            if should_prevent_default(&k, mods) {
+            if crate::web_key_policy::should_prevent_default(&k, mods) {
                 e.prevent_default();
             }
             (on_key.borrow_mut())(k, mods, true);
