@@ -28,8 +28,10 @@ constructed.
   flashes an OS-default white background.
 - **Input** — mouse move/down/up, cursor-leave, modifiers, wheel (with the
   shift→horizontal remap and no sign flipping, so the OS scroll-direction
-  preference is respected), keyboard **down and up**, and raw touch forwarded
-  to agg-gui's gesture aggregation.
+  preference is respected), keyboard **down and up**, raw touch forwarded
+  to agg-gui's gesture aggregation, and file drag-and-drop: `HoveredFile` /
+  `HoveredFileCancelled` → `App::on_file_drag_hover` / `on_file_drag_leave`,
+  `DroppedFile` → `App::on_file_dropped`.
 - **Redraw scheduling** — `Poll` while the app wants frames, `WaitUntil` for a
   scheduled deadline, `Wait` otherwise; or `RedrawPolicy::Continuous` for an
   app that wants every frame. The agg-gui host waker is installed so a

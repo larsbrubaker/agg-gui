@@ -119,6 +119,47 @@ pub enum Event {
         pos: Point,
         paths: Vec<std::path::PathBuf>,
     },
+    /// One or more files were dropped onto the window at `pos`, delivered
+    /// as their contents rather than as paths.
+    ///
+    /// The browser counterpart of [`Event::FileDropped`]: a web page never
+    /// sees a dropped file's path, only its name and bytes, so the web shell
+    /// reads every dropped file and sends them together in one event once
+    /// all have been read. Native shells keep sending `FileDropped` (paths).
+    /// An app that runs in both places handles both variants. `files` is
+    /// non-empty; routing and coordinates are exactly those of
+    /// `FileDropped`.
+    FileDataDropped {
+        pos: Point,
+        files: Vec<DroppedFileData>,
+    },
+    /// A file drag from outside the app is over the window at `pos` (it
+    /// entered, or moved).
+    ///
+    /// Lets a widget show drop-target feedback or a live preview before the
+    /// drop. Routed like a drop: to the widget under `pos`, bubbling, then
+    /// offered to the rest of the tree if nothing on that path consumed it.
+    /// The drag ends with [`Event::FileDragLeave`].
+    ///
+    /// `paths` lists the dragged files where the platform reveals them
+    /// (native: winit reports each hovered path). It is **empty in the
+    /// browser**, which hides file names and contents until the drop.
+    ///
+    /// How often it arrives depends on the platform: the browser sends one
+    /// per `dragover` (continuously as the pointer moves); native shells
+    /// send one per hovered file when the drag enters, then again on every
+    /// cursor move the OS reports during the drag — on Windows and macOS
+    /// winit reports none, so the position is the entry point.
+    FileDragHover {
+        pos: Point,
+        paths: Vec<std::path::PathBuf>,
+    },
+    /// The file drag that sent [`Event::FileDragHover`] is over: it left the
+    /// window, was cancelled, or ended in a drop. Delivered to **every**
+    /// widget in the tree (it does not bubble and cannot be consumed), so
+    /// any widget showing drag feedback can clear it. On a drop it arrives
+    /// before the `FileDropped` / `FileDataDropped` event.
+    FileDragLeave,
     /// A two-or-more-finger touch gesture is active this frame.
     ///
     /// Routed like a captured pointer: on the frame the gesture begins,
@@ -163,6 +204,38 @@ pub enum Event {
     /// hovered chain). agg-sharp's `MouseLeaveBounds`. Sent deepest first,
     /// before the `MouseMove` that caused it; see [`Event::MouseEnter`].
     MouseLeave,
+}
+
+/// One file of an [`Event::FileDataDropped`]: its name (no directory — the
+/// browser never reveals one) and its contents.
+///
+/// The bytes are reference-counted so the event can be cloned as it descends
+/// the widget tree without copying file contents.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DroppedFileData {
+    /// The file name as the platform reports it, e.g. `"part.stl"`.
+    pub name: String,
+    /// The whole file.
+    pub bytes: std::sync::Arc<[u8]>,
+}
+
+impl DroppedFileData {
+    pub fn new(name: impl Into<String>, bytes: impl Into<std::sync::Arc<[u8]>>) -> Self {
+        Self {
+            name: name.into(),
+            bytes: bytes.into(),
+        }
+    }
+}
+
+impl std::fmt::Debug for DroppedFileData {
+    // The contents can be megabytes; the length is what a log needs.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DroppedFileData")
+            .field("name", &self.name)
+            .field("len", &self.bytes.len())
+            .finish()
+    }
 }
 
 thread_local! {

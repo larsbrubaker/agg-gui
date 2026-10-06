@@ -8,6 +8,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- winit `HoveredFile` / `HoveredFileCancelled` are forwarded to
+  `App::on_file_drag_hover` / `App::on_file_drag_leave`: each hover carries
+  every path of the drag seen so far, at the live cursor position, and a
+  `CursorMoved` during the drag (where the platform reports one) re-sends the
+  hover at the new position. A drop clears the drag.
+
 ### Changed
 
 - `Frame::needs_layout` is also `true` while a widget's

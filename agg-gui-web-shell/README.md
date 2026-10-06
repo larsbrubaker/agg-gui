@@ -49,7 +49,10 @@ The app is built by a closure that runs *after* the GPU exists
   Calling `start` twice returns `WebShellError::AlreadyStarted`.
 - **Input** — pointer events for mouse, pen and multi-touch, wheel (DOM deltas
   normalised to notches), pointer-leave, keyboard down/up and the clipboard
-  bridge, cursor icon, `touch-action: none`.
+  bridge, cursor icon, `touch-action: none`, and file drag-and-drop: a file
+  drag over the canvas sends `App::on_file_drag_hover` / `on_file_drag_leave`,
+  and a drop reads each file and sends names + bytes through
+  `App::on_file_data_dropped` (`Event::FileDataDropped`).
 - **Lifecycle** — `visibilitychange`/`pagehide` → `on_page_hide`, and a
   window-level pointer-release listener so a drag that ends outside the canvas
   can't wedge the pointer-idle guard an auto-save waits on.

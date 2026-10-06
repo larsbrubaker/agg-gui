@@ -128,6 +128,7 @@ where
         cursor: (0.0, 0.0),
         mods: Modifiers::default(),
         mouse_buttons_down: 0,
+        hovered_files: Vec::new(),
         input_since_frame: false,
         pending_resize: None,
         surface_retry_at: None,

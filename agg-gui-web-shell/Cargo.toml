@@ -62,6 +62,12 @@ web-sys = { version = "0.3.82", features = [
     "PointerEvent",
     "MouseEvent",
     "WheelEvent",
+    # File drag-and-drop (web/file_drop.rs)
+    "DragEvent",
+    "DataTransfer",
+    "FileList",
+    "File",
+    "Blob",
     "Navigator",
     "MediaQueryList",
     "Storage",

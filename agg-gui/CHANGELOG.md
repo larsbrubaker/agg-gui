@@ -10,6 +10,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- File drag-and-drop beyond native path drops. `Event::FileDataDropped
+  { pos, files: Vec<DroppedFileData> }` carries dropped files as name + bytes
+  (`DroppedFileData`, bytes shared through an `Arc<[u8]>`) for the browser,
+  which never reveals paths; native shells keep sending `Event::FileDropped`.
+  `Event::FileDragHover { pos, paths }` reports a file drag over the window
+  (paths where the platform reveals them, empty in the browser) and
+  `Event::FileDragLeave` ends it — delivered to every widget, once per drag,
+  when the drag leaves, is cancelled or ends in a drop (then before the drop
+  event). Hovers and byte drops route like `FileDropped`: the widget under
+  `pos` (local coordinates), then the rest of the tree if that path ignored
+  it. Entry points: `App::on_file_data_dropped`, `App::on_file_drag_hover`,
+  `App::on_file_drag_leave`, `App::file_drag_active`. Code that matches
+  `Event` exhaustively needs arms for the three new variants.
+
 - Pointer enter/leave for every widget on the hovered chain:
   `Event::MouseEnter` / `Event::MouseLeave` (agg-sharp's `MouseEnterBounds` /
   `MouseLeaveBounds`). Whenever the pointer moves, `App` sends `MouseLeave` to

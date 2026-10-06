@@ -1,5 +1,6 @@
 use super::*;
 
+mod file_drop;
 mod gesture;
 mod hover_chain;
 mod keyboard;
@@ -44,6 +45,9 @@ pub struct App {
     /// detect the `None`→`Some` start edge (when it hit-tests) versus an
     /// ongoing gesture (when it delivers to the captured path only).
     gesture_in_progress: bool,
+    /// A file drag is over the window: a `FileDragHover` was delivered and
+    /// no `FileDragLeave` has ended it yet. See [`file_drop`].
+    file_drag_active: bool,
     /// Viewport height in pixels — used for Y-down → Y-up conversion.
     viewport_height: f64,
     /// Viewport size in logical pixels from the most recent layout pass.
@@ -88,6 +92,7 @@ impl App {
             gesture_captured: None,
             anchors: path_anchor::TrackedAnchors::default(),
             gesture_in_progress: false,
+            file_drag_active: false,
             viewport_height: 1.0,
             viewport_size: Size::new(1.0, 1.0),
             global_key_handler: None,
@@ -484,48 +489,6 @@ impl App {
         self.resolve_tracked_paths();
         crate::cursor::reset_cursor_icon();
         self.dispatch_mouse_move(Point::new(-1.0, -1.0));
-    }
-
-    /// Native drag-and-drop landed `paths` on the window at the given
-    /// screen position. Dispatches an [`Event::FileDropped`] to the
-    /// widget under the cursor (same hit-test path as `on_mouse_down`),
-    /// so a widget can opt in by handling the event in `on_event`.
-    ///
-    /// Native shells typically receive one path per `DroppedFile` event
-    /// from winit; they may forward each separately, or batch a single
-    /// drag gesture into one call. The widget receives `paths` as-is.
-    pub fn on_file_dropped(
-        &mut self,
-        screen_x: f64,
-        screen_y: f64,
-        paths: Vec<std::path::PathBuf>,
-    ) {
-        if paths.is_empty() {
-            return;
-        }
-        let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
-        let event = Event::FileDropped { pos, paths };
-        let hit = self.compute_hit(pos);
-        let consumed = match hit {
-            Some(path) => dispatch_event(&mut self.root, &path, &event, pos),
-            // No hit target: dispatch to the root anyway so app-level
-            // handlers (e.g. "open the dropped .atmr project") can run
-            // even when the user drops on chrome rather than canvas.
-            None => dispatch_event(&mut self.root, &[], &event, pos),
-        }
-        .is_consumed();
-        if !consumed {
-            // The widget under the drop point ignored the files. Offer
-            // the event to the rest of the tree before giving up — the
-            // reported position is often wrong through no fault of the
-            // user (winit's Windows backend discards the OLE drop point
-            // and emits no CursorMoved during the drag, so shells fall
-            // back to the last pre-drag cursor position). A drop must
-            // find the app's file handler even when it "lands" on
-            // chrome or a sibling pane.
-            super::tree::dispatch_event_broadcast(&mut self.root, &event, pos);
-        }
-        crate::animation::request_draw();
     }
 
     // --- Touch ingestion ---

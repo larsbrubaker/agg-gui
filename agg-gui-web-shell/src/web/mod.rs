@@ -7,6 +7,7 @@
 //! - [`frame`] — the `requestAnimationFrame` loop: sizing, the paint
 //!   decision, and one painted frame;
 //! - [`input`] — canvas pointer / wheel / context-menu listeners;
+//! - [`file_drop`] — canvas file drag-hover and drop listeners;
 //! - [`lifecycle`] — window-level pointer-release resync, page-hide flush;
 //! - [`platform`] — client-platform detection, fullscreen, fatal panel;
 //! - [`sensors`] — tilt + gamepad (moved from `demo-wgpu`).
@@ -29,6 +30,7 @@ use crate::host::WebShellHost;
 use crate::pointer::PointerTracker;
 use crate::policy::FirstPaintGate;
 
+mod file_drop;
 mod frame;
 mod gpu;
 mod input;
@@ -193,6 +195,7 @@ where
 
     input::install_keyboard();
     input::install_pointer_listeners(&canvas);
+    file_drop::install_file_drop_listeners(&canvas);
     lifecycle::install_window_pointer_release();
     lifecycle::install_page_hide();
     lifecycle::install_resize();

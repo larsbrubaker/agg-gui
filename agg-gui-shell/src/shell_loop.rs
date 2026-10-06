@@ -50,6 +50,9 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     pub(crate) cursor: (f64, f64),
     pub(crate) mods: Modifiers,
     pub(crate) mouse_buttons_down: u32,
+    /// Paths of the file drag over the window (winit sends one
+    /// `HoveredFile` per file); empty when no file drag is in progress.
+    pub(crate) hovered_files: Vec<std::path::PathBuf>,
     pub(crate) input_since_frame: bool,
     pub(crate) pending_resize: Option<(u32, u32)>,
     /// When a backed-off surface configure retry is due, from the last
@@ -142,6 +145,13 @@ impl<H: ShellHost> ShellLoop<H> {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
                 self.input_since_frame = true;
+                if !self.hovered_files.is_empty() {
+                    // A platform that reports the cursor during a file drag
+                    // keeps the drop target's feedback following it.
+                    let paths = self.hovered_files.clone();
+                    self.app
+                        .on_file_drag_hover(self.cursor.0, self.cursor.1, paths);
+                }
                 self.app.on_mouse_move(self.cursor.0, self.cursor.1);
                 winit_adapter::apply_cursor(&self.window, agg_gui::current_cursor_icon());
             }
@@ -213,7 +223,31 @@ impl<H: ShellHost> ShellLoop<H> {
                 // tracked position on other platforms.
                 let (x, y) =
                     crate::input::live_cursor_in_window(&self.window).unwrap_or(self.cursor);
+                // The drop ends the drag: `on_file_dropped` sends
+                // `FileDragLeave` first. winit sends no `HoveredFileCancelled`
+                // after a drop.
+                self.hovered_files.clear();
                 self.app.on_file_dropped(x, y, vec![path]);
+            }
+
+            WindowEvent::HoveredFile(path) => {
+                self.input_since_frame = true;
+                // One event per dragged file, all as the drag enters; each
+                // hover carries every path seen so far. The cursor is as stale
+                // as for a drop (see above), so query it live.
+                self.hovered_files.push(path);
+                let (x, y) =
+                    crate::input::live_cursor_in_window(&self.window).unwrap_or(self.cursor);
+                let paths = self.hovered_files.clone();
+                self.app.on_file_drag_hover(x, y, paths);
+                self.window.request_redraw();
+            }
+
+            WindowEvent::HoveredFileCancelled => {
+                self.input_since_frame = true;
+                self.hovered_files.clear();
+                self.app.on_file_drag_leave();
+                self.window.request_redraw();
             }
 
             WindowEvent::Touch(touch) => {

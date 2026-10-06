@@ -38,8 +38,11 @@ pub(super) fn install_keyboard() {
     });
 }
 
-fn add_listener<E>(target: &web_sys::EventTarget, event: &str, handler: impl FnMut(E) + 'static)
-where
+pub(super) fn add_listener<E>(
+    target: &web_sys::EventTarget,
+    event: &str,
+    handler: impl FnMut(E) + 'static,
+) where
     E: wasm_bindgen::convert::FromWasmAbi + 'static,
 {
     let cb = Closure::<dyn FnMut(E)>::new(handler);
@@ -52,7 +55,7 @@ where
     }
 }
 
-fn pos(canvas: &web_sys::HtmlCanvasElement, client_x: i32, client_y: i32) -> (f64, f64) {
+pub(super) fn pos(canvas: &web_sys::HtmlCanvasElement, client_x: i32, client_y: i32) -> (f64, f64) {
     let rect = canvas.get_bounding_client_rect();
     client_to_physical(
         client_x as f64,

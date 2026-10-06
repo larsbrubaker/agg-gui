@@ -10,6 +10,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- File drag-and-drop on the canvas: `dragenter` / `dragover` of a drag that
+  carries files are accepted (so the browser delivers the drop instead of
+  opening the file) and sent as `App::on_file_drag_hover` with no paths;
+  `dragleave` sends `App::on_file_drag_leave`; `drop` ends the hover at once,
+  reads every file's bytes, and sends them together through
+  `App::on_file_data_dropped` at the drop position.
+
 - `Frame::needs_layout` honours `agg_gui::animation::request_layout()`: a
   pending request lays out the frame even when the layout key is unchanged.
 

@@ -113,7 +113,9 @@ pub use cursor::{current_cursor_icon, reset_cursor_icon, set_cursor_icon, Cursor
 pub use device_scale::{device_scale, set_device_scale};
 pub use draw_cell::{DrawCell, DrawRefCell, DrawRefMut};
 pub use draw_ctx::{DrawCtx, FillRule, GlPaint};
-pub use event::{current_modifiers, Event, EventResult, Key, Modifiers, MouseButton};
+pub use event::{
+    current_modifiers, DroppedFileData, Event, EventResult, Key, Modifiers, MouseButton,
+};
 pub use font_settings::current_typography_epoch;
 pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};

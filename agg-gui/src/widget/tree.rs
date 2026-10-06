@@ -399,6 +399,14 @@ fn translate_event(event: &Event, new_pos: Point) -> Event {
             pos: new_pos,
             paths: paths.clone(),
         },
+        Event::FileDataDropped { files, .. } => Event::FileDataDropped {
+            pos: new_pos,
+            files: files.clone(),
+        },
+        Event::FileDragHover { paths, .. } => Event::FileDragHover {
+            pos: new_pos,
+            paths: paths.clone(),
+        },
         // Localize the centroid exactly like a mouse `pos`, but leave the
         // deltas untouched: `translation_delta` (and zoom/rotation) are
         // displacement vectors, invariant under the pure-translation change
@@ -446,6 +454,27 @@ pub fn dispatch_event_broadcast(
         root.mark_dirty();
     }
     result
+}
+
+/// Deliver a position-less `event` to every widget in the subtree, visible
+/// or not, parents before children, ignoring what each returns.
+///
+/// For notifications every widget may need regardless of where the pointer
+/// is — [`Event::FileDragLeave`] foremost, since the widget showing drag
+/// feedback may not be the one under the last reported position.
+///
+/// Returns whether any widget consumed it; every ancestor of a consumer is
+/// marked dirty, as [`dispatch_event`] does along its path, so retained
+/// backbuffers repaint the change.
+pub(crate) fn deliver_to_all(widget: &mut dyn Widget, event: &Event) -> bool {
+    let mut changed = deliver(widget, event).is_consumed();
+    for child in widget.children_mut().iter_mut() {
+        changed |= deliver_to_all(child.as_mut(), event);
+    }
+    if changed {
+        widget.mark_dirty();
+    }
+    changed
 }
 
 #[cfg(test)]
