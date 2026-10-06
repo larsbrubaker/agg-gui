@@ -26,6 +26,9 @@ impl App {
     /// modifiers too, so delivery doesn't depend on which of a key event or
     /// a modifiers event the platform sends first.
     pub fn on_modifiers_changed(&mut self, mods: Modifiers) {
+        // Every key and button entry point starts here: follow any child
+        // reorder before the focus / capture paths are used.
+        self.resolve_tracked_paths();
         if !crate::event::set_current_modifiers(mods) {
             return;
         }

@@ -30,6 +30,7 @@ impl App {
     /// [`Event::MultiTouch`]. Called once per `paint`, right after the
     /// aggregate is recomputed and published.
     pub(super) fn dispatch_gesture(&mut self) {
+        self.resolve_tracked_paths();
         match self.touch_state.current() {
             Some(info) => {
                 let event = Event::MultiTouch { info };
@@ -43,7 +44,7 @@ impl App {
                             dispatch_event(&mut self.root, &path, &event, info.center_pos)
                                 .is_consumed();
                         if consumed {
-                            self.gesture_captured = Some(path);
+                            self.store_gesture_captured(Some(path));
                         }
                     }
                 } else if let Some(path) = self.gesture_captured.clone() {
