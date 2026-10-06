@@ -31,6 +31,16 @@
 //! The host loop draws iff `wants_draw()` (now inclusive of due deadlines).
 //! Between draws it idles with `WaitUntil(peek_next_draw_deadline())`; no
 //! frames are drawn while nothing has changed.
+//!
+//! 3. **Layout request** — [`request_layout`] / [`layout_requested`].  A
+//!    widget with more work for its *next layout pass* (a model executor
+//!    pumped from `layout`, a measurement that settles over several passes)
+//!    calls `request_layout()`.  Unlike the immediate draw flag, the request
+//!    survives `App::paint`'s [`clear_draw_request`]: only `App::layout`
+//!    consumes it ([`take_layout_request`], at the *start* of the pass, so a
+//!    request made during layout or paint stays pending for the following
+//!    frame).  [`wants_draw`] reports `true` while one is pending, and the
+//!    shells force `needs_layout` for that frame.
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -108,6 +118,8 @@ pub fn request_draw_after_tagged(delay: Duration, reason: &'static str) {
 std::thread_local! {
     static NEEDS_DRAW:        Cell<bool>            = Cell::new(false);
     static NEXT_DRAW_AT:      Cell<Option<Instant>> = Cell::new(None);
+    /// Pending [`request_layout`]; consumed only by `App::layout`.
+    static LAYOUT_REQUESTED:  Cell<bool>            = const { Cell::new(false) };
     static INVALIDATION_EPOCH: Cell<u64>             = Cell::new(0);
     /// Bumped whenever an async source (image fetch + decode, font
     /// load, etc.) finishes outside the event-dispatch path.  Retained
@@ -306,6 +318,42 @@ pub fn request_draw_without_invalidation() {
     NEEDS_DRAW.with(|c| c.set(true));
 }
 
+/// Request another layout **and** paint pass.
+///
+/// For a widget whose next `layout` has more work to do — mattercad's design
+/// page pumps its model executor from `layout` while a rebuild is running, for
+/// example.  A plain [`request_draw`] made during layout is dropped by the
+/// [`clear_draw_request`] at the top of `App::paint`, and a `needs_draw()`
+/// that stays `true` repaints every frame without ever laying out again.
+///
+/// The request stays pending until the next `App::layout` begins (see
+/// [`take_layout_request`]), so calling it from `layout`, `paint` or an event
+/// handler always yields one more laid-out frame.  While pending,
+/// [`wants_draw`] returns `true` and the shells (`agg-gui-shell`,
+/// `agg-gui-web-shell`, demo-wgpu's `render_app_frame`) lay out the frame
+/// regardless of their layout-skip key.  It also behaves as a [`request_draw`]
+/// (advancing [`invalidation_epoch`]), so a host that only keys layout on the
+/// epoch re-lays out too.  Re-request on each pass for as long as work
+/// remains; the loop goes idle once a pass makes no request.
+pub fn request_layout() {
+    record_draw_trace("animation.request_layout");
+    LAYOUT_REQUESTED.with(|c| c.set(true));
+    request_draw();
+}
+
+/// Non-destructive read of the pending [`request_layout`] flag.  Hosts OR this
+/// into their "does this frame need layout" decision.
+pub fn layout_requested() -> bool {
+    LAYOUT_REQUESTED.with(|c| c.get())
+}
+
+/// Consume the pending [`request_layout`], returning whether one was pending.
+/// `App::layout` calls this before laying out the tree, so a request made
+/// during that same pass remains pending for the next frame.
+pub fn take_layout_request() -> bool {
+    LAYOUT_REQUESTED.with(|c| c.replace(false))
+}
+
 /// Non-destructive read of the immediate-draw signal, *plus* the promotion
 /// point for a due scheduled deadline.  Hosts call this after drawing to
 /// decide control-flow for the next loop iteration.
@@ -325,7 +373,7 @@ pub fn request_draw_without_invalidation() {
 /// docs on the lost-wakeup fix.
 pub fn wants_draw() -> bool {
     pump_async_wakeup();
-    if NEEDS_DRAW.with(|c| c.get()) {
+    if NEEDS_DRAW.with(|c| c.get()) || layout_requested() {
         return true;
     }
     let due = NEXT_DRAW_AT.with(|c| match c.get() {
@@ -409,6 +457,9 @@ pub fn async_state_epoch() -> u64 {
 /// cannot reappear on the next `wants_draw` read (parallel tests calling
 /// [`signal_async_state_change`] must not leak wakeups into unrelated tests
 /// that rely on `wants_draw()` returning `false` after a clear).
+///
+/// A pending [`request_layout`] is deliberately left alone: only `App::layout`
+/// consumes it.
 pub fn clear_draw_request() {
     pump_async_wakeup();
     NEEDS_DRAW.with(|c| c.set(false));
@@ -719,3 +770,7 @@ mod host_waker_tests {
 #[cfg(test)]
 #[path = "animation_scheduled_draw_tests.rs"]
 mod scheduled_draw_tests;
+
+#[cfg(test)]
+#[path = "animation_layout_request_tests.rs"]
+mod layout_request_tests;

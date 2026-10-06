@@ -32,7 +32,8 @@ pub struct Frame {
     /// Count of frames painted so far, this one included (1-based).
     pub index: u64,
     /// Whether anything that feeds layout changed since the last laid-out
-    /// frame. A host overriding [`WebShellHost::paint`] should honour it.
+    /// frame, or a widget called `agg_gui::animation::request_layout`. A host
+    /// overriding [`WebShellHost::paint`] should honour it.
     pub needs_layout: bool,
     /// Whether any input event arrived since the last painted frame.
     pub input_since_last_frame: bool,

@@ -27,7 +27,8 @@ pub struct Frame {
     /// Count of frames painted so far, this one included (1-based).
     pub index: u64,
     /// Whether anything that feeds layout changed since the last painted
-    /// frame — surface size, device scale, or the invalidation epoch. A host
+    /// frame — surface size, device scale, or the invalidation epoch — or a
+    /// widget called `agg_gui::animation::request_layout`. A host
     /// that overrides [`ShellHost::paint`] should honour it rather than laying
     /// out unconditionally.
     pub needs_layout: bool,

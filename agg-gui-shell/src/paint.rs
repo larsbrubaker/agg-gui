@@ -134,8 +134,8 @@ impl Painter {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Skip layout when nothing that feeds it changed: same surface size,
-        // same DPI, same invalidation epoch.
+        // Skip layout when nothing that feeds it changed (same surface size,
+        // same DPI, same invalidation epoch) and no widget asked for one.
         let next_layout_key = (
             win_w,
             win_h,
@@ -149,7 +149,7 @@ impl Painter {
             device_scale: agg_gui::device_scale(),
             duration: self.last_duration,
             index: self.frames_painted,
-            needs_layout: self.layout_key != Some(next_layout_key),
+            needs_layout: frame_needs_layout(self.layout_key, next_layout_key),
             input_since_last_frame,
         };
 
@@ -193,6 +193,14 @@ impl Painter {
     }
 }
 
+/// Whether a frame keyed `next` must lay out after a frame keyed `last`: the
+/// key changed, or a widget called [`agg_gui::animation::request_layout`]
+/// (which survives `App::paint`'s draw-request clear and is consumed only by
+/// `App::layout`).
+fn frame_needs_layout(last: Option<(u32, u32, u64, u64)>, next: (u32, u32, u64, u64)) -> bool {
+    last != Some(next) || agg_gui::animation::layout_requested()
+}
+
 /// Arrange the retry for a frame the surface refused, then drop the
 /// immediate draw request.
 ///
@@ -230,7 +238,7 @@ pub(crate) fn retry_deadline(wake: RetryWake, now: Instant) -> Option<Instant> {
 
 #[cfg(test)]
 mod tests {
-    use super::{retry_deadline, schedule_skipped_frame};
+    use super::{frame_needs_layout, retry_deadline, schedule_skipped_frame};
     use agg_gui::animation;
     use agg_gui_wgpu::RetryWake;
     use std::cell::Cell;
@@ -300,5 +308,20 @@ mod tests {
         let deadline = animation::peek_next_draw_deadline();
         schedule_skipped_frame(RetryWake::OnEvent, || {});
         assert_eq!(animation::peek_next_draw_deadline(), deadline);
+    }
+
+    /// A pending `request_layout` forces layout even when the skip key is
+    /// unchanged; without one an unchanged key still skips.
+    #[test]
+    fn layout_request_forces_layout_with_unchanged_key() {
+        animation::take_layout_request();
+        let key = (10, 10, 0, 0);
+        assert!(!frame_needs_layout(Some(key), key));
+        assert!(frame_needs_layout(None, key));
+        animation::request_layout();
+        assert!(frame_needs_layout(Some(key), key));
+        animation::take_layout_request();
+        animation::clear_draw_request();
+        assert!(!frame_needs_layout(Some(key), key));
     }
 }

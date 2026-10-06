@@ -157,6 +157,10 @@ impl App {
         // Snapshot BEFORE laying out: a signal arriving mid-layout is then
         // treated as post-layout and earns a follow-up frame (see `paint`).
         self.layout_async_state_epoch = Some(crate::animation::async_state_epoch());
+        // Consume a pending `request_layout` before the pass for the same
+        // reason: a widget re-requesting during this layout keeps its request
+        // pending, so the host lays out again next frame.
+        crate::animation::take_layout_request();
         // Effective scale combines hardware DPR with the UX zoom
         // factor — mobile platforms set ux_scale ≈ 1.7 so widgets at
         // their natural logical size read comfortably at arm's length.
@@ -292,7 +296,9 @@ impl App {
     /// their event-loop control flow to continuous polling while it's `true`.
     ///
     /// Combines the visibility-gated tree-walk signal ([`Widget::needs_draw`])
-    /// with the immediate draw request flag ([`crate::animation::wants_draw`]).
+    /// with the immediate draw request flag ([`crate::animation::wants_draw`],
+    /// which also stays `true` while a [`crate::animation::request_layout`] is
+    /// pending).
     /// Widgets call `request_draw` for ordinary visual invalidation; scheduled
     /// draw needs such as cursor blink should use `needs_draw` /
     /// `next_draw_deadline` so hidden subtrees do not keep the loop awake.

@@ -25,7 +25,9 @@ use super::{platform, sensors, APP, CANVAS, CONFIG, DIRTY, FIRST_PAINT, HOST};
 use crate::dom_math::{fit_backing, sanitize_dpr};
 use crate::error::WebShellError;
 use crate::host::{CanvasGeometry, Frame, WebShellControl, WebShellHost};
-use crate::policy::{layout_key, policy_after_idle, wants_paint, GeometryTracker, LayoutKey};
+use crate::policy::{
+    frame_needs_layout, layout_key, policy_after_idle, wants_paint, GeometryTracker, LayoutKey,
+};
 use crate::recovery::{RebuildBackoff, RebuildVerdict};
 
 /// GPU-side per-canvas state.
@@ -328,7 +330,7 @@ fn paint(w: u32, h: u32) -> bool {
             device_scale: agg_gui::device_scale(),
             duration: p.last_duration,
             index: p.frames,
-            needs_layout: p.layout_key != Some(next_key),
+            needs_layout: frame_needs_layout(p.layout_key, next_key),
             input_since_last_frame: INPUT_SINCE_FRAME.with(|c| c.replace(false)),
         };
         DIRTY.with(|d| d.set(false));

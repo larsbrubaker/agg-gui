@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Changed
+
+- `Frame::needs_layout` is also `true` while a widget's
+  `agg_gui::animation::request_layout()` is pending, so a request made during
+  layout gets the next frame laid out even when the size, scale and
+  invalidation epoch are unchanged.
+
 ## [0.5.2] - 2026-09-28
 
 ### Added

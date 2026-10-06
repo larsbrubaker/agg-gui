@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `animation::request_layout()` — ask for another layout *and* paint pass.
+  Unlike `request_draw`, the request survives `App::paint`'s
+  `clear_draw_request()` and is consumed only at the start of `App::layout`,
+  so a widget calling it from `layout` (or `paint`) gets one more laid-out
+  frame. `animation::wants_draw()` stays `true` while it is pending;
+  `animation::layout_requested()` peeks it and
+  `animation::take_layout_request()` consumes it. `request_draw` is unchanged.
+
 - `ComboBox::with_style(ComboBoxStyle)` — optional per-instance overrides for
   the closed box: `fill`, `border`, `hover_fill`, `radius` and `height`
   (`height` also drives hit-testing and where the popup attaches). Every

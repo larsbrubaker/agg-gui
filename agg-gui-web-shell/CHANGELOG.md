@@ -10,6 +10,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `Frame::needs_layout` honours `agg_gui::animation::request_layout()`: a
+  pending request lays out the frame even when the layout key is unchanged.
+
 - First release: the browser counterpart of `agg-gui-shell`, extracted from
   `demo-wgpu`'s `web_shell` and merged with AtomArtist's hand-rolled web shell.
 - `start(WebShellConfig, builder)` — canvas lookup, client-platform detection

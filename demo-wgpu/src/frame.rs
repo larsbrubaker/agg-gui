@@ -105,7 +105,10 @@ pub fn render_app_frame(
     ctx.set_lcd_mode(agg_gui::font_settings::lcd_enabled());
 
     let layout_key = (width, height, agg_gui::animation::invalidation_epoch());
-    let needs_layout = LAYOUT_FRAME_KEY.with(|last| last.get() != Some(layout_key));
+    // A pending `request_layout` (it survives `App::paint`'s draw-request
+    // clear) forces the pass even when the key is unchanged.
+    let needs_layout = LAYOUT_FRAME_KEY.with(|last| last.get() != Some(layout_key))
+        || agg_gui::animation::layout_requested();
     if needs_layout {
         app.layout(Size::new(width as f64, height as f64));
         LAYOUT_FRAME_KEY.with(|last| last.set(Some(layout_key)));

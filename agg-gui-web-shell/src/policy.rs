@@ -103,6 +103,14 @@ pub(crate) fn layout_key(width: u32, height: u32) -> LayoutKey {
     )
 }
 
+/// Whether a frame keyed `next` must lay out after a frame keyed `last`: the
+/// key changed, or a widget called [`agg_gui::animation::request_layout`]
+/// (which survives `App::paint`'s draw-request clear and is consumed only by
+/// `App::layout`).
+pub(crate) fn frame_needs_layout(last: Option<LayoutKey>, next: LayoutKey) -> bool {
+    last != Some(next) || agg_gui::animation::layout_requested()
+}
+
 /// The redraw policy after a host's `on_idle`.
 ///
 /// The host can switch policy two ways: through its [`crate::WebShellControl`]
@@ -241,6 +249,19 @@ mod tests {
             Some(now),
             later
         ));
+    }
+
+    #[test]
+    fn layout_request_forces_layout_with_unchanged_key() {
+        agg_gui::animation::take_layout_request();
+        let key = layout_key(10, 10);
+        assert!(!frame_needs_layout(Some(key), key));
+        assert!(frame_needs_layout(None, key));
+        agg_gui::animation::request_layout();
+        assert!(frame_needs_layout(Some(key), key));
+        agg_gui::animation::take_layout_request();
+        agg_gui::animation::clear_draw_request();
+        assert!(!frame_needs_layout(Some(key), key));
     }
 
     #[test]
