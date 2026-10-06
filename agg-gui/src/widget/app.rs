@@ -206,7 +206,22 @@ impl App {
     /// change made in the same handler that requested focus. Moves focus to
     /// the focusable widget whose [`Widget::focus_id`] matches; no-op when
     /// there's no request or no match.
+    ///
+    /// A pending blur ([`crate::focus::request_blur`] /
+    /// [`crate::focus::release_focus`]) is applied first, as `set_focus(None)`
+    /// so the widget that had focus receives `FocusLost`.
     fn apply_pending_focus(&mut self) {
+        if let Some(blur) = crate::focus::take_blur_request() {
+            let applies = match blur {
+                crate::focus::BlurRequest::Any => true,
+                crate::focus::BlurRequest::Owner(id) => self.focus.as_ref().is_some_and(|p| {
+                    widget_at_path_ref(self.root.as_ref(), p).focus_id() == Some(id)
+                }),
+            };
+            if applies {
+                self.set_focus(None);
+            }
+        }
         let Some(id) = crate::focus::take_focus_request() else {
             return;
         };

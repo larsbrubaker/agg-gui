@@ -53,6 +53,7 @@ mod drawing;
 mod ellipse_path;
 mod flex_gap;
 mod focus;
+mod focus_blur;
 mod inspector_hover;
 mod inspector_tree;
 mod keyboard_lift;

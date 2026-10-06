@@ -10,6 +10,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Widget code can clear keyboard focus: `focus::request_blur()` clears it
+  whatever holds it; `focus::release_focus(id)` clears it only if the widget
+  whose `focus_id` is `id` still holds it (a no-op otherwise, so a stale
+  release never steals focus from another widget). Both are serviced on the
+  next `App::layout` like `request_focus`: the widget that had focus gets
+  `FocusLost`, and later keys take the unconsumed-key path. The latest of
+  `request_focus` / `request_blur` wins; `release_focus` cancels only a
+  pending `request_focus` for its own id. Lower level:
+  `focus::BlurRequest::{Any, Owner(id)}`, `take_blur_request`,
+  `clear_blur_request`.
 - Adjustable floor for content-fitted popups: `PopupMenu::with_min_width` /
   `set_min_width(f64)`, `MenuBar::with_menu_min_width(f64)`, and the lower-level
   `PopupMenuState::set_min_width` / `min_width` and
