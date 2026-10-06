@@ -22,7 +22,7 @@ pub use model::{MenuEntry, MenuItem, MenuSelection, MenuShortcut, MenuWidgetRow,
 pub use paint::MenuStyle;
 pub use state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 pub use strip::MenuBarStrip;
-pub use widget::{MenuBar, MenuOrientation, PopupMenu, TopMenu};
+pub use widget::{MenuBar, MenuOrientation, MenuTitle, PopupMenu, TopMenu};
 
 #[cfg(test)]
 mod tests {
