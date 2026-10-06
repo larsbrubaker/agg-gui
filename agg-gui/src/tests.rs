@@ -64,6 +64,7 @@ mod multi_touch_routing;
 mod on_screen_keyboard;
 pub(crate) mod paint_recorder;
 mod pointer_modifiers;
+mod rasterizer_clip;
 #[cfg(feature = "reflect")]
 mod reflect_roundtrip;
 mod reserve_inset;

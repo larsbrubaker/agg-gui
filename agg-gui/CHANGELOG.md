@@ -28,6 +28,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   interaction state). `None` fields keep the current appearance.
   `Slider::style()` reads it back.
 
+### Fixed
+
+- Software rendering of paths that run far off screen no longer costs time
+  proportional to their length. `GfxCtx` fills and strokes, `fill_text_gsv`
+  and the LCD coverage mask now also clip in AGG's cell rasterizer
+  (`RasterizerScanlineAa::clip_box`, set to the active scissor intersected
+  with the target plus a 1 px margin), not only at the renderer. A 1 px
+  stroke from (−200000, −20000) to (40000, −4000) on a 1300×800 buffer drops
+  from ~6 ms to ~0.14 ms per frame (release build), the cost of an empty
+  frame. Paths inside the clip render bit-for-bit as
+  before; edges that cross it can differ by one unit in a channel, since
+  AGG restarts them at the clip boundary on its 1/256-pixel grid.
+
 ## [0.5.1] - 2026-09-28
 
 ### Added

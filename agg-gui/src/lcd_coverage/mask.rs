@@ -643,6 +643,16 @@ fn rasterize_paths_into_gray<F>(
         rb.clip_box_i(x1, y1, x2, y2);
     }
     let mut ras = RasterizerScanlineAa::new();
+    // Clip edges in the rasterizer too, so glyph/path edges far outside the
+    // mask never generate cells.  X is snapped to whole mask pixels before
+    // the 3× scale, exactly like the renderer clip above, so the rasterizer
+    // box never starts inside a pixel the renderer still draws.
+    let gray_clip = clip.map(|(cx, cy, cw, ch)| {
+        let x1 = cx.floor() * 3.0;
+        let x2 = (cx + cw).ceil() * 3.0;
+        (x1, cy, x2 - x1, ch)
+    });
+    crate::gfx_ctx::clip_rasterizer(&mut ras, gray_clip, gray_w, gray_h);
     ras.filling_rule(to_agg_fill_rule(fill_rule));
     let mut sl = ScanlineU8::new();
 

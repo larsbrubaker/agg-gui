@@ -761,6 +761,7 @@ impl<'a> GfxCtx<'a> {
         apply_clip(&mut rb, clip);
 
         let mut ras = RasterizerScanlineAa::new();
+        clip_rasterizer(&mut ras, clip, w, h);
         let mut sl = ScanlineU8::new();
 
         let mut gsv = GsvText::new();
@@ -778,8 +779,12 @@ impl<'a> GfxCtx<'a> {
 
 mod draw_impl;
 mod layers;
+mod raster_clip;
 mod sampled;
 mod stroke;
 
 use draw_impl::{active_fb, composite_framebuffers};
 pub(crate) use draw_impl::{apply_clip, rasterize_fill, rasterize_stroke};
+pub(crate) use raster_clip::clip_rasterizer;
+#[cfg(test)]
+pub(crate) use raster_clip::{raster_clip_rect, RASTER_CLIP_MARGIN};

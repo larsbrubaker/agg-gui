@@ -103,7 +103,9 @@ pub(super) fn composite_framebuffers(
 // ---------------------------------------------------------------------------
 // Free rasterization helpers — take explicit path and fb references so they
 // can be called for both self.path draws and per-glyph text draws without
-// borrow-checker conflicts.
+// borrow-checker conflicts.  Each clips twice: the renderer (`apply_clip`)
+// for exact pixels, and the rasterizer (`raster_clip::clip_rasterizer`) so
+// edges far outside the visible area never generate cells.
 // ---------------------------------------------------------------------------
 
 pub(crate) fn rasterize_fill(
@@ -125,6 +127,7 @@ pub(crate) fn rasterize_fill(
     apply_clip(&mut rb, clip);
 
     let mut ras = RasterizerScanlineAa::new();
+    super::raster_clip::clip_rasterizer(&mut ras, clip, w, h);
     ras.filling_rule(to_agg_fill_rule(fill_rule));
     let mut sl = ScanlineU8::new();
     let mut curves = ConvCurve::new(path);
@@ -208,6 +211,7 @@ fn rasterize_stroke_source<VS: VertexSource>(
     apply_clip(&mut rb, clip);
 
     let mut ras = RasterizerScanlineAa::new();
+    super::raster_clip::clip_rasterizer(&mut ras, clip, w, h);
     let mut sl = ScanlineU8::new();
     let mut stroke = ConvStroke::new(source);
     stroke.set_width(width);
