@@ -1,12 +1,17 @@
-//! Change-notification wiring for [`TextArea`], split out of `text_area.rs`
-//! to keep that file under the project's 800-line cap.
+//! Change- and edit-complete-notification wiring for [`TextArea`], split out
+//! of `text_area.rs` to keep that file under the project's 800-line cap.
 //!
-//! Mirrors `TextField`'s `on_change` semantics (see
+//! `on_change` mirrors `TextField`'s `on_change` semantics (see
 //! `text_field/filter.rs::notify_change`): a `FnMut(&str)` callback that fires
 //! after every text mutation, letting a caller capture edits back into a shared
 //! cell. The dispatcher is invoked from the two internal mutation funnels
 //! ([`TextArea::insert_str`] and [`TextArea::delete`]) and, when the content
 //! epoch advances, from the pre-default key-chord interceptor in `widget_impl`.
+//!
+//! `on_edit_complete` mirrors `TextField`'s `on_edit_complete`: it fires once
+//! when focus leaves after the text changed since focus was gained. Unlike
+//! `TextField`, no key commits — Enter (with or without modifiers) inserts a
+//! newline in a multi-line editor, so focus loss is the only commit point.
 
 use super::*;
 
@@ -31,6 +36,33 @@ impl TextArea {
             let t = self.edit.borrow().text.clone();
             cb(&t);
             self.on_change = Some(cb);
+        }
+    }
+
+    /// Install a callback fired when the user finishes an edit: focus leaves
+    /// the area and the text differs from what it was when focus arrived.
+    /// Focusing and leaving without a change does not fire it.
+    ///
+    /// Mirrors `TextField::on_edit_complete`, except that no key commits:
+    /// Enter (including Ctrl/Cmd+Enter) inserts a newline in a `TextArea`, so
+    /// focus loss is the only trigger.
+    pub fn on_edit_complete(mut self, cb: impl FnMut(&str) + 'static) -> Self {
+        self.on_edit_complete = Some(Box::new(cb));
+        self
+    }
+
+    /// Called on `FocusLost`: fire `on_edit_complete` when the text differs
+    /// from the `FocusGained` snapshot, then re-snapshot so a repeated
+    /// `FocusLost` without a new edit does not fire again.
+    pub(crate) fn notify_edit_complete_if_changed(&mut self) {
+        let t = self.text();
+        if t == self.text_on_focus {
+            return;
+        }
+        self.text_on_focus = t.clone();
+        if let Some(mut cb) = self.on_edit_complete.take() {
+            cb(&t);
+            self.on_edit_complete = Some(cb);
         }
     }
 }

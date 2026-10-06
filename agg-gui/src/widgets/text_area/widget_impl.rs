@@ -524,12 +524,14 @@ impl Widget for TextArea {
             Event::FocusGained => {
                 self.focused = true;
                 self.focus_time = Some(Instant::now());
+                self.text_on_focus = self.text();
                 crate::animation::request_draw();
                 EventResult::Ignored
             }
             Event::FocusLost => {
                 self.focused = false;
                 self.selecting_drag = false;
+                self.notify_edit_complete_if_changed();
                 crate::animation::request_draw();
                 EventResult::Ignored
             }
