@@ -28,6 +28,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   interaction state). `None` fields keep the current appearance.
   `Slider::style()` reads it back.
 
+### Fixed
+
+- `TextField` with `select_all_on_focus`: the click that focuses the field now
+  selects all of its text on release, so typing replaces the value instead of
+  inserting at the click point (previously the focusing click's caret
+  placement cleared the focus selection, turning "20" into "2030" when typing
+  "30"). A drag during that click selects the dragged range instead, and
+  later clicks position the caret as before. Tab focus still selects all
+  immediately. Matches agg-sharp `InternalTextEditWidget`.
+
 ## [0.5.1] - 2026-09-28
 
 ### Added

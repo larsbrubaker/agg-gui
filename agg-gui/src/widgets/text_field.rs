@@ -104,6 +104,14 @@ pub struct TextField {
     hovered: bool,
     mouse_down: bool,
     scroll_x: f64,
+    // Pointer-press epoch current when focus was gained (see
+    // `crate::animation::pointer_press_epoch`). A left press carrying the
+    // same epoch is the click that focused the field.
+    focus_press_epoch: Option<u64>,
+    // C# `selectAllOnMouseUpIfNoSelection`: set by the focusing click of a
+    // `select_all_on_focus` field; on release, select all unless the press
+    // dragged out a selection.
+    select_all_on_mouse_up: bool,
 
     // Cursor blink: set to Some(Instant::now()) on FocusGained.
     focus_time: Option<Instant>,
@@ -188,6 +196,8 @@ impl TextField {
             hovered: false,
             mouse_down: false,
             scroll_x: 0.0,
+            focus_press_epoch: None,
+            select_all_on_mouse_up: false,
             focus_time: None,
             blink_last_phase: std::cell::Cell::new(u64::MAX),
             multi_click: crate::widgets::multi_click::MultiClickTracker::default(),
@@ -240,6 +250,10 @@ impl TextField {
         self.context_menu_enabled = v;
         self
     }
+    /// Select all text when the field gains focus, so typing replaces it.
+    /// Keyboard (Tab) focus selects at once; the click that focuses the field
+    /// selects all on release unless it drags out a range (C# agg-sharp
+    /// `SelectAllOnFocus`). Clicks while already focused place the caret.
     pub fn with_select_all_on_focus(mut self, v: bool) -> Self {
         self.select_all_on_focus = v;
         self
