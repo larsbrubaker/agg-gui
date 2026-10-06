@@ -261,3 +261,59 @@ fn slider_style_track_radius_is_used() {
         "default pill corner {pill} vs square {square}"
     );
 }
+
+fn mouse_up(x: f64, y: f64) -> Event {
+    Event::MouseUp {
+        pos: Point::new(x, y),
+        button: MouseButton::Left,
+        modifiers: Default::default(),
+    }
+}
+
+/// `on_release` fires exactly once per drag, with the final value, so an app
+/// can commit a single undo step; moves during the drag don't fire it.
+#[test]
+fn on_release_fires_once_per_drag_with_final_value() {
+    let releases = Rc::new(std::cell::RefCell::new(Vec::<f64>::new()));
+    let changes = Rc::new(Cell::new(0usize));
+    let (r, c) = (Rc::clone(&releases), Rc::clone(&changes));
+    let mut s = Slider::new(0.0, 0.0, 100.0, test_font())
+        .with_smart_aim(false)
+        .on_change(move |_| c.set(c.get() + 1))
+        .on_release(move |v| r.borrow_mut().push(v));
+    let _ = s.layout(Size::new(300.0, WIDGET_H));
+    s.set_bounds(Rect::new(0.0, 0.0, 300.0, WIDGET_H));
+
+    let y = WIDGET_H * 0.5;
+    s.on_event(&mouse_down(50.0, y));
+    s.on_event(&mouse_move(100.0, y));
+    s.on_event(&mouse_move(150.0, y));
+    assert!(releases.borrow().is_empty(), "fired before release");
+    assert!(changes.get() >= 3, "on_change should stream live values");
+    s.on_event(&mouse_up(150.0, y));
+    assert_eq!(releases.borrow().len(), 1);
+    assert_eq!(releases.borrow()[0], s.value());
+
+    // A stray release with no drag in progress must not fire again.
+    s.on_event(&mouse_up(150.0, y));
+    assert_eq!(releases.borrow().len(), 1);
+
+    // A plain click (down + up) is one more release.
+    s.on_event(&mouse_down(20.0, y));
+    s.on_event(&mouse_up(20.0, y));
+    assert_eq!(releases.borrow().len(), 2);
+}
+
+/// A drag torn down by focus loss (no MouseUp) still ends with one release.
+#[test]
+fn on_release_fires_when_drag_ends_by_focus_loss() {
+    let count = Rc::new(Cell::new(0usize));
+    let c = Rc::clone(&count);
+    let mut s = Slider::new(0.0, 0.0, 100.0, test_font()).on_release(move |_| c.set(c.get() + 1));
+    let _ = s.layout(Size::new(300.0, WIDGET_H));
+    s.set_bounds(Rect::new(0.0, 0.0, 300.0, WIDGET_H));
+    s.on_event(&mouse_down(50.0, WIDGET_H * 0.5));
+    s.on_event(&Event::FocusLost);
+    s.on_event(&Event::FocusLost);
+    assert_eq!(count.get(), 1);
+}

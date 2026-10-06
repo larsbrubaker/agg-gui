@@ -135,6 +135,40 @@ pub enum Event {
     /// deltas are displacement vectors and are **not** translated — they
     /// are the same in every coordinate frame.
     MultiTouch { info: MultiTouchInfo },
+    /// The set of held modifier keys changed with no other key involved
+    /// (e.g. Shift pressed or released mid-drag).
+    ///
+    /// Sent by [`crate::widget::App::on_modifiers_changed`] to the widget
+    /// holding mouse capture (an in-progress drag), and to the focused
+    /// widget when that is a different widget. Widgets that don't care can
+    /// ignore it. Pointer events that predate this variant
+    /// (`MouseMove`) don't carry modifiers; read [`current_modifiers`]
+    /// while handling them instead.
+    ModifiersChanged { modifiers: Modifiers },
+}
+
+thread_local! {
+    static CURRENT_MODIFIERS: std::cell::Cell<Modifiers> =
+        std::cell::Cell::new(Modifiers::default());
+}
+
+/// The keyboard modifiers held as of the most recent input event the
+/// [`crate::widget::App`] processed.
+///
+/// `Event::MouseMove` has no `modifiers` field (adding one would break every
+/// `MouseMove { pos }` pattern in downstream apps), so a widget that needs
+/// Shift/Ctrl during hover or a drag reads this while handling the move.
+/// The App updates it on every modifier-carrying input (mouse down/up, key
+/// down/up, wheel) and on [`crate::widget::App::on_modifiers_changed`],
+/// which platform shells call whenever the OS reports a modifier change.
+pub fn current_modifiers() -> Modifiers {
+    CURRENT_MODIFIERS.with(|m| m.get())
+}
+
+/// Record the current modifier state. Returns `true` when it changed.
+/// Called by the App's input entry points; widgets should not need it.
+pub(crate) fn set_current_modifiers(mods: Modifiers) -> bool {
+    CURRENT_MODIFIERS.with(|m| m.replace(mods) != mods)
 }
 
 /// What a widget returns from [`crate::widget::Widget::on_event`].

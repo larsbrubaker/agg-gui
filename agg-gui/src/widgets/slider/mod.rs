@@ -140,6 +140,8 @@ pub struct Slider {
     focused: bool,
     hovered: bool,
     on_change: Option<Box<dyn FnMut(f64)>>,
+    /// Fired once when a pointer drag (or click) on the slider ends.
+    on_release: Option<Box<dyn FnMut(f64)>>,
     /// Optional external mirror of `value`.  When `Some`, `layout()` re-reads
     /// the cell every frame so a second widget that writes the same cell
     /// drives this slider live; `set_value` writes back.  Mirrors the
@@ -211,6 +213,7 @@ impl Slider {
             focused: false,
             hovered: false,
             on_change: None,
+            on_release: None,
             value_cell: None,
             value_label,
             last_value_text: String::new(),
@@ -349,6 +352,23 @@ impl Slider {
     pub fn on_change(mut self, cb: impl FnMut(f64) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
         self
+    }
+
+    /// Called once with the final value when a pointer drag (or a plain
+    /// click) on the slider ends — on `MouseUp`, or on `FocusLost` if the
+    /// drag is torn down without a release. Use it to commit one undo step
+    /// per drag while `on_change` streams live values. Keyboard nudges don't
+    /// fire it: each is already a discrete, complete edit.
+    pub fn on_release(mut self, cb: impl FnMut(f64) + 'static) -> Self {
+        self.on_release = Some(Box::new(cb));
+        self
+    }
+
+    fn fire_release(&mut self) {
+        let v = self.props.value;
+        if let Some(cb) = self.on_release.as_mut() {
+            cb(v);
+        }
     }
 
     pub fn value(&self) -> f64 {
@@ -666,6 +686,7 @@ impl Widget for Slider {
                 let was = self.dragging;
                 self.dragging = false;
                 if was {
+                    self.fire_release();
                     crate::animation::request_draw();
                 }
                 EventResult::Consumed
@@ -704,6 +725,9 @@ impl Widget for Slider {
                 let was_dragging = self.dragging;
                 self.focused = false;
                 self.dragging = false;
+                if was_dragging {
+                    self.fire_release();
+                }
                 if was_focused || was_dragging {
                     crate::animation::request_draw();
                     EventResult::Consumed
