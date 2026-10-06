@@ -280,11 +280,11 @@ impl App {
         let viewport = self.viewport_size;
         crate::widgets::combo_box::begin_combo_popup_frame(viewport);
         crate::widgets::tooltip::begin_tooltip_frame(viewport);
-        // Central tooltip pass: find the deepest hovered widget carrying a
-        // `with_tooltip` string and drive the app-wide tip state machine. Any
-        // resulting tip is submitted to the tooltip queue and painted below in
-        // the global-overlay drain, above all clips.
-        self.drive_tooltip_controller();
+        // Central tooltip pass: record the deepest hovered widget carrying a
+        // `with_tooltip` string. Popup-menu rows offer their tips while the
+        // tree paints, and `paint_lifted_tree` resolves the frame after the
+        // global-overlay pass, so the tip paints above all clips and menus.
+        self.begin_tooltip_controller_frame();
         // Recompute the multi-touch aggregate once per paint and publish
         // to the thread-local — widgets read it during `on_event` or
         // `paint` without an explicit `&App` reference.
@@ -633,25 +633,27 @@ impl App {
             .or_else(|| hit_test_subtree(self.root.as_ref(), pos))
     }
 
-    /// Feed the central tooltip controller from the current hover path: the
-    /// deepest hovered widget whose [`Widget::tooltip_text`] is `Some` supplies
-    /// the tip (its index-path identity + text), anchored at the pointer.
-    fn drive_tooltip_controller(&self) {
+    /// Start the central tooltip controller's frame from the current hover
+    /// path: the deepest hovered widget whose [`Widget::tooltip_text`] is
+    /// `Some` supplies the widget tip (its index-path identity + text),
+    /// anchored at the pointer.
+    fn begin_tooltip_controller_frame(&self) {
         let target = self
             .hovered
             .as_deref()
             .and_then(|path| deepest_tipped(self.root.as_ref(), path));
-        crate::widgets::tooltip::controller::drive(target, current_mouse_world());
+        crate::widgets::tooltip::controller::begin_frame(target, current_mouse_world());
     }
 
     /// Test hook: run the central tooltip pass without a full paint (no
-    /// `DrawCtx` needed). Mirrors what [`paint`](Self::paint) does after
-    /// `begin_tooltip_frame`, so a test can drive hover + clock + this and then
-    /// assert controller state.
+    /// `DrawCtx` needed, so no popup-row offers). Mirrors what
+    /// [`paint`](Self::paint) does around the tree paint, so a test can drive
+    /// hover + clock + this and then assert controller state.
     #[cfg(test)]
     pub fn update_tooltips_for_test(&self) {
         crate::widgets::tooltip::begin_tooltip_frame(self.viewport_size);
-        self.drive_tooltip_controller();
+        self.begin_tooltip_controller_frame();
+        crate::widgets::tooltip::controller::finish_frame();
     }
 
     fn dispatch_mouse_move(&mut self, pos: Point) {

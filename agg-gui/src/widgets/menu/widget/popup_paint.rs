@@ -8,10 +8,14 @@
 //! path.  It consumes the row rects produced by
 //! [`super::super::geometry::stack_layout`], so it automatically paints at
 //! whatever (possibly touch-grown) metrics that layout used.
+//!
+//! `offer_hovered_row_tooltip` hands the pointer-hovered row's
+//! `MenuItem::tooltip` to the central tooltip controller each frame the
+//! popup paints, so a closed popup (which does not paint) offers nothing.
 
 use crate::draw_ctx::DrawCtx;
 
-use super::super::geometry::PopupLayout;
+use super::super::geometry::{hit_test, item_at_path, MenuHit, PopupLayout};
 use super::super::model::{MenuEntry, MenuSelection};
 use super::super::paint::{
     paint_check_mark, paint_item_row_bg, paint_separator, paint_submenu_chevron,
@@ -146,4 +150,29 @@ fn items_for_layout<'a>(items: &'a [MenuEntry], path: &[usize]) -> &'a [MenuEntr
         current = &item.submenu;
     }
     current
+}
+
+/// Offer the hovered row's tooltip to the central controller for this frame.
+/// Only a row the pointer is actually over counts: a keyboard-selected row
+/// has no pointer to anchor its tip to, so it shows none.
+pub(super) fn offer_hovered_row_tooltip(
+    items: &[MenuEntry],
+    state: &PopupMenuState,
+    layouts: &[PopupLayout],
+) {
+    let Some(path) = state.hover_path.as_deref() else {
+        return;
+    };
+    let Some(text) = item_at_path(items, path).and_then(|item| item.tooltip.as_deref()) else {
+        return;
+    };
+    let Some(pointer) = crate::widget::current_mouse_world() else {
+        return;
+    };
+    match hit_test(layouts, pointer) {
+        Some(MenuHit::Item(hit)) if hit == path => {
+            crate::widgets::tooltip::controller::offer_overlay_target(path, text);
+        }
+        _ => {}
+    }
 }

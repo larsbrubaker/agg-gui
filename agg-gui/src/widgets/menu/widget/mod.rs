@@ -192,6 +192,7 @@ impl PopupMenu {
             );
             self.row_widgets.paint_level(ctx, &self.items, layout);
         }
+        popup_paint::offer_hovered_row_tooltip(&self.items, &self.state, &layouts);
     }
 }
 
@@ -768,3 +769,5 @@ mod tests_2;
 mod tests_fit;
 #[cfg(test)]
 mod tests_rows;
+#[cfg(test)]
+mod tests_tooltip;

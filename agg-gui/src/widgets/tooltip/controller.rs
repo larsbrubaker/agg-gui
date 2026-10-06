@@ -5,10 +5,14 @@
 //! [`Widget::with_tooltip`](crate::widget::Widget::with_tooltip)). Once per
 //! frame the [`App`](crate::widget::App) finds the deepest hovered widget whose
 //! [`tooltip_text`](crate::widget::Widget::tooltip_text) is `Some` and feeds it
-//! to [`drive`]. This module owns the single, app-wide state machine that
+//! to [`begin_frame`]. Surfaces that are not widgets — `PopupMenu` rows with a
+//! `MenuItem::tooltip` — offer their hovered tip while they paint
+//! ([`offer_overlay_target`]), and after the global-overlay pass
+//! [`finish_frame`] feeds the winner (overlay first, then widget) to
+//! [`drive`]. This module owns the single, app-wide state machine that
 //! decides *when* a tip is visible and, while it is, submits it to the shared
-//! [`render`](super::render) queue so it paints in the global-overlay pass
-//! above all clips.
+//! [`render`](super::render) queue, drained after the global-overlay pass so
+//! the tip paints above all clips, menus and modal layers.
 //!
 //! # One tip, app-wide
 //!
@@ -253,6 +257,73 @@ pub(crate) fn drive(target: Option<(Vec<usize>, String)>, anchor: Option<Point>)
     });
 }
 
+// --- Per-frame resolution: widget tips + overlay (popup-row) tips ----------------
+
+/// Tip candidates gathered during one `App::paint`, resolved by
+/// [`finish_frame`]. Widget tips come from the hover path before the tree
+/// paints; overlay tips are *offered* while it paints by surfaces that are not
+/// widgets themselves — `PopupMenu` rows — and win, because those surfaces
+/// float above the widget under the pointer.
+#[derive(Default)]
+struct FrameInputs {
+    open: bool,
+    widget: Option<(Vec<usize>, String)>,
+    overlay: Option<(Vec<usize>, String)>,
+    anchor: Option<Point>,
+}
+
+thread_local! {
+    static FRAME: std::cell::RefCell<FrameInputs> =
+        std::cell::RefCell::new(FrameInputs::default());
+}
+
+/// Overlay identities start with this marker so they can never equal a
+/// widget's child-index path (no widget has `usize::MAX` children).
+const OVERLAY_IDENTITY_MARKER: usize = usize::MAX;
+
+/// Start a frame: record the hovered widget's tip (if any) and the pointer,
+/// and clear the overlay offers from the previous frame. Called by the App
+/// before it paints the tree; [`finish_frame`] resolves after the paint.
+pub(crate) fn begin_frame(widget_target: Option<(Vec<usize>, String)>, anchor: Option<Point>) {
+    FRAME.with(|f| {
+        *f.borrow_mut() = FrameInputs {
+            open: true,
+            widget: widget_target,
+            overlay: None,
+            anchor,
+        };
+    });
+}
+
+/// Offer an overlay surface's hovered tip for the current frame. `key`
+/// identifies the hovered element within the surface (a popup row path);
+/// moving to an element with a different key re-arms the hover delay. A later
+/// offer in the same frame replaces an earlier one (it painted on top).
+/// Outside an App frame (no [`begin_frame`]) this is a no-op.
+pub(crate) fn offer_overlay_target(key: &[usize], text: &str) {
+    FRAME.with(|f| {
+        let mut f = f.borrow_mut();
+        if f.open {
+            let mut identity = Vec::with_capacity(key.len() + 1);
+            identity.push(OVERLAY_IDENTITY_MARKER);
+            identity.extend_from_slice(key);
+            f.overlay = Some((identity, text.to_string()));
+        }
+    });
+}
+
+/// Resolve the frame: drive the state machine with the overlay offer when
+/// there is one, otherwise the widget tip. Called after the global-overlay
+/// paint pass and before the final tooltip drain, so the tip it submits
+/// paints this frame. A second call in the same frame is a no-op.
+pub(crate) fn finish_frame() {
+    let inputs = FRAME.with(|f| std::mem::take(&mut *f.borrow_mut()));
+    if !inputs.open {
+        return;
+    }
+    drive(inputs.overlay.or(inputs.widget), inputs.anchor);
+}
+
 /// A press hides any visible tip and keeps it hidden until the pointer leaves
 /// and re-enters a tipped widget (Windows press-hide behaviour).
 pub(crate) fn on_pointer_down() {
@@ -298,6 +369,7 @@ pub fn visible_rect() -> Option<Rect> {
 #[doc(hidden)]
 pub fn reset() {
     CONTROLLER.with(|c| *c.borrow_mut() = Controller::default());
+    FRAME.with(|f| *f.borrow_mut() = FrameInputs::default());
 }
 
 #[cfg(test)]

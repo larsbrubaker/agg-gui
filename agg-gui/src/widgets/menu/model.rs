@@ -47,6 +47,11 @@ pub struct MenuItem {
     /// Widget rows are never hovered, keyboard-selected or activated by
     /// the menu; pointer events inside them go to the widget.
     pub widget_row: Option<MenuWidgetRow>,
+    /// Hover help for this row.  While the pointer rests on the row the
+    /// owning `PopupMenu` hands it to the app-wide tooltip controller, so it
+    /// appears after the normal hover delay, anchored at the pointer like
+    /// every other tooltip.  Set with [`MenuItem::tooltip()`].
+    pub tooltip: Option<String>,
 }
 
 /// A menu row that hosts a widget: the id it is registered under on the
@@ -78,6 +83,7 @@ impl MenuItem {
             submenu: Vec::new(),
             close_on_activate: true,
             widget_row: None,
+            tooltip: None,
         }
     }
 
@@ -94,6 +100,7 @@ impl MenuItem {
             submenu,
             close_on_activate: false,
             widget_row: None,
+            tooltip: None,
         }
     }
 
@@ -115,6 +122,7 @@ impl MenuItem {
                 id,
                 height: height.max(0.0),
             }),
+            tooltip: None,
         }
     }
 
@@ -165,6 +173,12 @@ impl MenuItem {
     pub fn accelerator(mut self, accelerator: MenuShortcut) -> Self {
         self.shortcut = Some(accelerator.display_text());
         self.accelerator = Some(accelerator);
+        self
+    }
+
+    /// Show `text` as hover help for this row (see the `tooltip` field).
+    pub fn tooltip(mut self, text: impl Into<String>) -> Self {
+        self.tooltip = Some(text.into());
         self
     }
 
