@@ -6,7 +6,7 @@
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Size};
 
-use super::fit_width::{FitMeasure, MenuWidth};
+use super::fit_width::{FitMeasure, MenuWidth, FIT_MIN_W};
 use super::geometry::{
     hit_test, item_at_path, stack_layout, stack_layout_with_width, MenuHit, PopupLayout,
 };
@@ -52,6 +52,9 @@ pub struct PopupMenuState {
     /// Font the [`MenuWidth::FitContent`] policy measures rows with.  Until
     /// one is set a fitted popup lays out at the fixed width.
     fit_measure: Option<FitMeasure>,
+    /// Desktop floor of a fitted popup's width (logical px), applied to the
+    /// root and every submenu level alike.  Defaults to [`FIT_MIN_W`].
+    min_width: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +76,7 @@ impl Default for PopupMenuState {
             activate_on_mouse_up: false,
             width: MenuWidth::Fixed,
             fit_measure: None,
+            min_width: FIT_MIN_W,
         }
     }
 }
@@ -142,6 +146,19 @@ impl PopupMenuState {
         self.width
     }
 
+    /// Set the narrowest a [`MenuWidth::FitContent`] popup may be, in desktop
+    /// logical px (touch-grown with the other metrics).  The default is
+    /// [`FIT_MIN_W`]; `0.0` drops the floor so each panel is exactly its
+    /// widest row.  One value covers the root and every submenu.  Has no
+    /// effect on [`MenuWidth::Fixed`] popups.
+    pub fn set_min_width(&mut self, min_width: f64) {
+        self.min_width = min_width;
+    }
+
+    pub fn min_width(&self) -> f64 {
+        self.min_width
+    }
+
     /// Set the font, size and row style a [`MenuWidth::FitContent`] popup
     /// measures with.  `PopupMenu` / `MenuBar` keep this in step with the
     /// font they paint with, so hit-testing sees the painted widths.
@@ -160,7 +177,7 @@ impl PopupMenuState {
                 self.anchor_kind,
                 &self.open_path,
                 viewport,
-                &|level, m| measure.popup_width(level, m),
+                &|level, m| measure.popup_width_with_min(level, m, self.min_width),
             ),
             _ => stack_layout(
                 items,

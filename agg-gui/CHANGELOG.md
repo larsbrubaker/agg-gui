@@ -10,6 +10,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Adjustable floor for content-fitted popups: `PopupMenu::with_min_width` /
+  `set_min_width(f64)`, `MenuBar::with_menu_min_width(f64)`, and the lower-level
+  `PopupMenuState::set_min_width` / `min_width` and
+  `FitMeasure::popup_width_with_min`. The default stays
+  `fit_width::FIT_MIN_W` (156 px), so existing menus are unchanged; `0.0`
+  drops the floor so each `MenuWidth::FitContent` panel is exactly its widest
+  row rounded up (agg-sharp menus that reset `row.MinimumSize` to `(0, …)`).
+  The value is desktop logical px, touch-grown like the default, and applies
+  to the root and every submenu alike. It has no effect on `MenuWidth::Fixed`.
 - Content-fitted popup menus: `MenuWidth::{Fixed, FitContent}` (re-exported
   from `widgets::menu`). `PopupMenu::with_width` / `set_width` and
   `MenuBar::with_menu_width` opt in; with `FitContent` each popup level (root

@@ -122,6 +122,87 @@ fn fitted_popup_of_short_rows_keeps_the_minimum_width() {
     assert_eq!(fitted_root_width(items, &test_font()), FIT_MIN_W);
 }
 
+fn short_items() -> Vec<MenuEntry> {
+    vec![
+        MenuItem::action("Cut", "cut").into(),
+        MenuEntry::Separator,
+        MenuItem::action("Copy", "copy").into(),
+        MenuItem::submenu("Snap", vec![MenuItem::action("1", "one").into()]).into(),
+    ]
+}
+
+/// With the floor dropped, a popup of short rows is exactly its widest row,
+/// and the same floor applies to its submenu.
+fn assert_zero_min_fits_short_rows(device_scale: f64) {
+    let _guard = profile_test_lock();
+    reset_env();
+    crate::device_scale::set_device_scale(device_scale);
+    let font = test_font();
+    let items = short_items();
+    let widest = items
+        .iter()
+        .filter_map(|e| match e {
+            MenuEntry::Item(item) => Some(painted_row_width(&font, item, 14.0)),
+            MenuEntry::Separator => None,
+        })
+        .fold(0.0_f64, f64::max);
+    let leaf = painted_row_width(&font, &MenuItem::action("1", "one"), 14.0);
+    let mut popup = PopupMenu::new(items)
+        .with_width(MenuWidth::FitContent)
+        .with_min_width(0.0);
+    popup.set_measure_font(Arc::clone(&font), 14.0);
+    popup.open_at(Point::new(20.0, 500.0));
+    popup.state.open_path = vec![3];
+    let layouts = popup.state.layouts(&popup.items, Size::new(1200.0, 600.0));
+    reset_env();
+    assert!(widest < FIT_MIN_W, "fixture rows must be under the floor");
+    let root = layouts[0].rect.width;
+    assert!(
+        (root - widest).abs() <= 1.0,
+        "unfloored popup at {device_scale}x is {root} px, widest row is {widest} px"
+    );
+    let sub = layouts[1].rect.width;
+    assert!(
+        (sub - leaf).abs() <= 1.0,
+        "unfloored submenu at {device_scale}x is {sub} px, its row is {leaf} px"
+    );
+}
+
+#[test]
+fn zero_min_width_popup_matches_widest_short_row_at_1x() {
+    assert_zero_min_fits_short_rows(1.0);
+}
+
+#[test]
+fn zero_min_width_popup_matches_widest_short_row_at_2x() {
+    assert_zero_min_fits_short_rows(2.0);
+}
+
+#[test]
+fn min_width_defaults_to_the_fit_floor() {
+    let _guard = profile_test_lock();
+    reset_env();
+    assert_eq!(PopupMenu::new(Vec::new()).state.min_width(), FIT_MIN_W);
+    assert_eq!(fitted_root_width(short_items(), &test_font()), FIT_MIN_W);
+}
+
+#[test]
+fn custom_min_width_floors_the_popup_and_bar_forwards_it() {
+    let _guard = profile_test_lock();
+    reset_env();
+    let mut popup = PopupMenu::new(short_items())
+        .with_width(MenuWidth::FitContent)
+        .with_min_width(120.0);
+    popup.set_measure_font(test_font(), 14.0);
+    popup.open_at(Point::new(20.0, 500.0));
+    let width = popup.state.layouts(&popup.items, Size::new(1200.0, 600.0))[0]
+        .rect
+        .width;
+    assert_eq!(width, 120.0);
+    let bar = MenuBar::new(test_font(), vec![], |_| {}).with_menu_min_width(0.0);
+    assert_eq!(bar.popup.state.min_width(), 0.0);
+}
+
 #[test]
 fn fitted_submenu_sizes_to_its_own_rows() {
     let _guard = profile_test_lock();

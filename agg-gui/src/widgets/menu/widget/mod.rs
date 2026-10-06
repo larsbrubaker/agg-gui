@@ -85,6 +85,20 @@ impl PopupMenu {
         self.state.set_width(width);
     }
 
+    /// Narrowest a [`MenuWidth::FitContent`] panel may be (desktop logical
+    /// px, touch-grown).  Defaults to [`super::fit_width::FIT_MIN_W`];
+    /// `0.0` makes every panel exactly its widest row.  Applies to the root
+    /// and all submenus.  Widget rows contribute no width of their own, so a
+    /// popup of only widget rows needs a non-zero floor.
+    pub fn with_min_width(mut self, min_width: f64) -> Self {
+        self.state.set_min_width(min_width);
+        self
+    }
+
+    pub fn set_min_width(&mut self, min_width: f64) {
+        self.state.set_min_width(min_width);
+    }
+
     /// Give a [`MenuWidth::FitContent`] popup the font and size it will be
     /// painted with, so events routed before its first paint hit-test the
     /// fitted panel.  [`Self::paint`] refreshes it every frame.
@@ -287,6 +301,12 @@ impl MenuBar {
     /// Unrelated to [`Self::with_fit_width`], which sizes the bar itself.
     pub fn with_menu_width(mut self, width: MenuWidth) -> Self {
         self.popup.set_width(width);
+        self
+    }
+
+    /// Floor for the bar's fitted popups; see [`PopupMenu::with_min_width`].
+    pub fn with_menu_min_width(mut self, min_width: f64) -> Self {
+        self.popup.set_min_width(min_width);
         self
     }
 

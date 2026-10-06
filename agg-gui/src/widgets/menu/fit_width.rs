@@ -20,7 +20,13 @@
 //!   paint;
 //! * no row is narrower than [`FIT_MIN_W`] — agg-sharp's 150 px
 //!   `MenuItem.MinimumSize` plus its 3 px `MenuRowInset` on both sides — grown
-//!   in lock-step with the touch metrics like the fixed width is.
+//!   in lock-step with the touch metrics like the fixed width is.  A host can
+//!   lower or drop that floor per popup ([`super::PopupMenu::with_min_width`],
+//!   stored in [`super::PopupMenuState`]); `0.0` makes the popup exactly its
+//!   widest row, the way agg-sharp menus that reset `row.MinimumSize` to
+//!   `(0, …)` size themselves (`GridOptionsPanel.ShowGridOptions`).  The one
+//!   value covers the whole cascade: every submenu level uses the same floor
+//!   as the root.
 //!
 //! Text is measured exactly as the row's [`crate::widgets::label::Label`]
 //! measures it at paint time (system font override and font-size scale
@@ -109,6 +115,14 @@ impl FitMeasure {
     /// width, rounded up to a whole logical px so no glyph is clipped, and
     /// never below the (touch-grown) [`FIT_MIN_W`] floor.
     pub fn popup_width(&self, items: &[MenuEntry], m: &MenuMetrics) -> f64 {
+        self.popup_width_with_min(items, m, FIT_MIN_W)
+    }
+
+    /// [`Self::popup_width`] with a caller-chosen desktop floor `min_w`
+    /// (logical px, touch-grown like [`FIT_MIN_W`]).  `0.0` means no floor:
+    /// the popup is the widest row rounded up.  Negative or NaN floors count
+    /// as `0.0`.
+    pub fn popup_width_with_min(&self, items: &[MenuEntry], m: &MenuMetrics, min_w: f64) -> f64 {
         let widest = items
             .iter()
             .filter_map(|entry| match entry {
@@ -116,7 +130,8 @@ impl FitMeasure {
                 MenuEntry::Separator => None,
             })
             .fold(0.0_f64, f64::max);
-        let floor = FIT_MIN_W * (m.menu_w / MENU_W);
+        let min_w = if min_w > 0.0 { min_w } else { 0.0 };
+        let floor = min_w * (m.menu_w / MENU_W);
         widest.ceil().max(floor)
     }
 }
