@@ -10,6 +10,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `Button::with_focus_on_click(bool)` — opt a button out of click-to-focus.
+  With `false`, a click still fires `on_click` but clears keyboard focus
+  instead of taking it, so a following Space / Enter reaches the
+  unconsumed-key / global key handling rather than re-clicking the button
+  (toolbar buttons). Tab traversal and programmatic focus still focus the
+  button, and Space / Enter activate it when focused that way. Backed by the
+  new `WidgetBase::focus_on_click` field (default `true`), which the `App`'s
+  click-to-focus rule reads for any widget embedding a `WidgetBase`.
+  Default behaviour is unchanged.
+
 - `animation::request_layout()` — ask for another layout *and* paint pass.
   Unlike `request_draw`, the request survives `App::paint`'s
   `clear_draw_request()` and is consumed only at the start of `App::layout`,

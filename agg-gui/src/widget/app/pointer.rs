@@ -10,6 +10,14 @@ use crate::widget::tree::{active_modal_path, dispatch_event, hit_test_subtree};
 use crate::widget::tree_inspector::set_current_mouse_world;
 use crate::widget::{App, Widget};
 
+/// The click-to-focus rule: a pointer press focuses the hit widget when it
+/// is focusable and hasn't opted out via
+/// [`WidgetBase::focus_on_click`](crate::WidgetBase::focus_on_click).
+/// Widgets without a `WidgetBase` always accept click focus.
+fn takes_click_focus(w: &dyn Widget) -> bool {
+    w.is_focusable() && w.widget_base().map_or(true, |b| b.focus_on_click)
+}
+
 impl App {
     /// Extend the active modal widget's path by hit-testing inside its
     /// subtree at `pos_in_root`, so the modal's own children (buttons,
@@ -106,7 +114,7 @@ impl App {
             // click, with the same click-to-focus rule as the normal path
             // (text fields in dialogs need focus to type).
             let path = self.extend_modal_path(&path, pos);
-            if widget_at_path(&mut self.root, &path).is_focusable() {
+            if takes_click_focus(widget_at_path(&mut self.root, &path)) {
                 self.set_focus(Some(path.clone()));
             } else {
                 self.set_focus(None);
@@ -118,10 +126,11 @@ impl App {
         }
         let hit = self.compute_hit(pos);
 
-        // Click-to-focus: if the hit widget is focusable, give it focus.
+        // Click-to-focus: if the hit widget is focusable (and accepts focus
+        // from a click), give it focus.
         if let Some(ref path) = hit {
             let w = widget_at_path(&mut self.root, path);
-            if w.is_focusable() {
+            if takes_click_focus(w) {
                 self.set_focus(Some(path.clone()));
             } else {
                 self.set_focus(None);

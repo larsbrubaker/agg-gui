@@ -389,6 +389,16 @@ pub struct WidgetBase {
     /// of closing itself, so the Cancel handler owns dismissal. Set via
     /// `Button::with_cancel_action`.
     pub cancel_action: bool,
+    /// Whether a pointer click on this widget gives it keyboard focus
+    /// (default `true`). Only matters for focusable widgets. When `false`
+    /// the [`App`](crate::widget::App) treats a click on the widget like a
+    /// click on a non-focusable one — focus is cleared — while Tab
+    /// traversal and programmatic focus still reach it. Toolbar buttons use
+    /// this so a click doesn't leave them holding focus and swallowing a
+    /// following Space / Enter meant for the page. Set via
+    /// `Button::with_focus_on_click(false)`; any widget embedding a
+    /// `WidgetBase` can opt out the same way.
+    pub focus_on_click: bool,
 }
 
 impl WidgetBase {
@@ -406,6 +416,7 @@ impl WidgetBase {
             tooltip: None,
             default_action: false,
             cancel_action: false,
+            focus_on_click: true,
         }
     }
 

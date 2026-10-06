@@ -231,6 +231,18 @@ impl Button {
         self
     }
 
+    /// Whether a pointer click gives this button keyboard focus (default
+    /// `true`). Pass `false` for toolbar buttons: a click still fires
+    /// `on_click` but clears focus instead of taking it, so a following
+    /// Space / Enter reaches the page's unconsumed-key handling rather than
+    /// re-clicking the button. Tab still focuses the button, and Space /
+    /// Enter activate it when it was focused that way. Stored on the
+    /// [`WidgetBase`] (`focus_on_click`).
+    pub fn with_focus_on_click(mut self, focus_on_click: bool) -> Self {
+        self.base.focus_on_click = focus_on_click;
+        self
+    }
+
     /// Paint an icon glyph at the leading edge of the label.
     /// `icon_font` carries the glyph (e.g. a Font Awesome face);
     /// the label text continues to render in the button's main
