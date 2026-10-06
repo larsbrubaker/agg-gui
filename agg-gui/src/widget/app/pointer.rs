@@ -57,6 +57,7 @@ impl App {
     /// [`crate::event::current_modifiers`] while handling it.
     pub fn on_mouse_move(&mut self, screen_x: f64, screen_y: f64) {
         // Reset cursor so the hovered widget can set it; Default if nothing sets it.
+        self.resolve_tracked_paths();
         crate::cursor::reset_cursor_icon();
         let screen = self.flip_y(screen_x, screen_y);
         if crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_move(screen) {
@@ -69,7 +70,7 @@ impl App {
             let path = self.extend_modal_path(&path, pos);
             let event = Event::MouseMove { pos };
             dispatch_event(&mut self.root, &path, &event, pos);
-            self.hovered = Some(path);
+            self.store_hovered(Some(path));
             return;
         }
         self.dispatch_mouse_move(pos);
@@ -84,6 +85,7 @@ impl App {
         mods: Modifiers,
     ) {
         self.on_modifiers_changed(mods);
+        self.resolve_tracked_paths();
         let screen = self.flip_y(screen_x, screen_y);
         // On-screen keyboard captures pointer events on its panel area
         // before anything in the tree gets a look. Returning here also
@@ -120,7 +122,7 @@ impl App {
                 self.set_focus(None);
             }
             if dispatch_event(&mut self.root, &path, &event, pos).is_consumed() {
-                self.captured = Some(path);
+                self.store_captured(Some(path));
             }
             return;
         }
@@ -144,7 +146,7 @@ impl App {
             if result.is_consumed() {
                 self.maybe_bring_to_front(&mut path);
                 let capture_path = self.compute_hit(pos).unwrap_or(path);
-                self.captured = Some(capture_path);
+                self.store_captured(Some(capture_path));
             }
         }
         // NO blanket request_draw.  Mouse-down on an inert area must not
@@ -163,6 +165,7 @@ impl App {
         mods: Modifiers,
     ) {
         self.on_modifiers_changed(mods);
+        self.resolve_tracked_paths();
         let screen = self.flip_y(screen_x, screen_y);
         // On-screen keyboard owns release events on its panel; releases
         // here commit a key tap and synthesize a `KeyDown`. After
@@ -219,7 +222,7 @@ impl App {
         if let Some(path) = active_modal_path(self.root.as_ref()) {
             let path = self.extend_modal_path(&path, pos);
             dispatch_event(&mut self.root, &path, &Event::MouseMove { pos }, pos);
-            self.hovered = Some(path);
+            self.store_hovered(Some(path));
             return;
         }
         self.dispatch_mouse_move(pos);

@@ -2,6 +2,7 @@ use super::*;
 
 mod gesture;
 mod keyboard;
+mod path_anchor;
 mod pointer;
 mod touch;
 mod tree_paths;
@@ -32,6 +33,9 @@ pub struct App {
     /// semantics) even as the centroid drifts. Cleared when the aggregate
     /// returns to `None`. See [`super::app::gesture`].
     gesture_captured: Option<Vec<usize>>,
+    /// Widget identities along the four paths above, so they follow their
+    /// widgets when a parent reorders its children. See [`path_anchor`].
+    anchors: path_anchor::TrackedAnchors,
     /// Whether last frame's aggregate was `Some` — lets the gesture router
     /// detect the `None`→`Some` start edge (when it hit-tests) versus an
     /// ongoing gesture (when it delivers to the captured path only).
@@ -77,6 +81,7 @@ impl App {
             hovered: None,
             captured: None,
             gesture_captured: None,
+            anchors: path_anchor::TrackedAnchors::default(),
             gesture_in_progress: false,
             viewport_height: 1.0,
             viewport_size: Size::new(1.0, 1.0),
@@ -183,6 +188,8 @@ impl App {
         self.root
             .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
         self.root.layout(logical);
+        // Layout is where containers adopt queued reorders; follow them.
+        self.resolve_tracked_paths();
         self.apply_pending_focus();
         // Re-evaluate the keyboard-avoidance lift against FRESH bounds
         // (see `keyboard_scroll::relift_after_layout` for the why).
@@ -380,6 +387,7 @@ impl App {
         delta_y: f64,
         modifiers: Modifiers,
     ) {
+        self.resolve_tracked_paths();
         let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         set_current_mouse_world(pos);
         let hit = active_modal_path(self.root.as_ref())
@@ -453,6 +461,7 @@ impl App {
 
     /// Call when the cursor leaves the window to clear hover state.
     pub fn on_mouse_leave(&mut self) {
+        self.resolve_tracked_paths();
         crate::cursor::reset_cursor_icon();
         self.dispatch_mouse_move(Point::new(-1.0, -1.0));
     }
@@ -514,7 +523,7 @@ impl App {
     /// the end of its parent's children list so it paints on top of siblings.
     /// All stored paths (focus, hovered, captured, plus the clicked path itself)
     /// are updated to reflect the new index.
-    fn maybe_bring_to_front(&mut self, clicked_path: &mut Vec<usize>) {
+    fn maybe_bring_to_front(&mut self, clicked_path: &mut [usize]) {
         // Walk the clicked path and record the deepest Window encountered.
         // At each step we descend into children[idx]; after descending, if the
         // new node is a Window we record (parent_path, win_idx).  We keep
@@ -557,7 +566,7 @@ impl App {
         let depth = parent_path.len(); // depth at which the window index sits
 
         // Update any stored path whose element at `depth` was affected by the move.
-        fn shift_path(p: &mut Vec<usize>, depth: usize, old: usize, new: usize) {
+        fn shift_path(p: &mut [usize], depth: usize, old: usize, new: usize) {
             if p.len() > depth {
                 let i = p[depth];
                 if i == old {
@@ -629,7 +638,7 @@ impl App {
         // event when the old widget still has mouse capture (it should keep
         // receiving real positions, not a (-1,-1) sentinel that snaps state).
         if new_hit != self.hovered {
-            if let Some(old_path) = self.hovered.take() {
+            if let Some(old_path) = self.hovered.clone() {
                 let is_captured = self.captured.as_ref() == Some(&old_path);
                 if !is_captured {
                     let clear = Event::MouseMove {
@@ -638,7 +647,7 @@ impl App {
                     dispatch_event(&mut self.root, &old_path, &clear, Point::new(-1.0, -1.0));
                 }
             }
-            self.hovered = new_hit.clone();
+            self.store_hovered(new_hit.clone());
         }
 
         let event = Event::MouseMove { pos };
@@ -660,7 +669,7 @@ impl App {
         if let Some(old) = self.focus.take() {
             dispatch_event(&mut self.root, &old, &Event::FocusLost, Point::ORIGIN);
         }
-        self.focus = new_path.clone();
+        self.store_focus(new_path.clone());
         if let Some(new) = new_path.clone() {
             dispatch_event(&mut self.root, &new, &Event::FocusGained, Point::ORIGIN);
         }

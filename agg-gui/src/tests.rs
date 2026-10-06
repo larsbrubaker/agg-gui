@@ -38,6 +38,7 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 mod async_wakeup_paint;
 mod backbuffer_scale;
 mod button_click_focus;
+mod capture_reorder;
 mod caret_deadline;
 mod clip_path_software;
 mod color_clickaway;

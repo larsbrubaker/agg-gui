@@ -40,6 +40,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- Pointer capture, hover, focus and gesture capture now follow their widget
+  when a parent reorders its children. `App` stored them as child-index
+  paths, so a container that moved children during a drag (a tab strip
+  reordering the dragged tab past its neighbours) sent the rest of the drag,
+  including the release, to whichever widget took the old index. Each stored
+  path is now anchored to the identities of the widgets along it (their heap
+  addresses, which a `Vec<Box<dyn Widget>>` reorder never changes) and
+  re-resolved after every layout pass and at the start of each input entry
+  point. No API change: containers may reorder `children` at any time
+  (in `layout`, in `on_event`, or through `App::root_mut`).
+
 - `TextField` with `select_all_on_focus`: the click that focuses the field now
   selects all of its text on release, so typing replaces the value instead of
   inserting at the click point (previously the focusing click's caret
