@@ -168,6 +168,23 @@ impl TextContextMenu {
         None
     }
 
+    /// Test-only: the shortcut label the open menu shows for `action` on
+    /// `platform`, as the popup renders it (`None` when closed / absent).
+    #[cfg(test)]
+    pub(crate) fn shortcut_text(
+        &self,
+        action: TextMenuAction,
+        platform: crate::platform::Platform,
+    ) -> Option<String> {
+        let menu = self.menu.as_ref()?;
+        menu.items.iter().find_map(|entry| match entry {
+            MenuEntry::Item(item) if item.action.as_deref() == Some(action.id()) => {
+                item.shortcut_text_for(platform)
+            }
+            _ => None,
+        })
+    }
+
     /// Test-only: the center point of an action's laid-out row, so a test can
     /// dispatch a real click there (through the widget or the menu directly).
     #[cfg(test)]
@@ -233,6 +250,30 @@ mod tests {
         assert_eq!(m.action_enabled(TextMenuAction::Copy), Some(true));
         assert_eq!(m.action_enabled(TextMenuAction::Paste), Some(false));
         assert_eq!(m.action_enabled(TextMenuAction::SelectAll), Some(true));
+    }
+
+    /// The menu declares portable `Ctrl+…` shortcuts; a Mac must show Apple's
+    /// glyph form (`⌘X`), never the literal "Ctrl+X" declaration.
+    #[test]
+    fn shortcut_labels_follow_platform_conventions() {
+        use crate::platform::Platform;
+        let mut m = TextContextMenu::new();
+        m.open(Point::new(10.0, 10.0), true, true);
+        let expected = [
+            (TextMenuAction::Cut, "\u{2318}X", "Ctrl+X"),
+            (TextMenuAction::Copy, "\u{2318}C", "Ctrl+C"),
+            (TextMenuAction::Paste, "\u{2318}V", "Ctrl+V"),
+            (TextMenuAction::SelectAll, "\u{2318}A", "Ctrl+A"),
+        ];
+        for (action, mac, other) in expected {
+            assert_eq!(
+                m.shortcut_text(action, Platform::MacOS).as_deref(),
+                Some(mac)
+            );
+            for p in [Platform::Windows, Platform::Linux] {
+                assert_eq!(m.shortcut_text(action, p).as_deref(), Some(other));
+            }
+        }
     }
 
     /// A real click on the Copy row returns the Copy action through the menu's

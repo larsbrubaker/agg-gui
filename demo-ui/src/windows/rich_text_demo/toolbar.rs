@@ -15,8 +15,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use agg_gui::platform::primary_modifier_label;
 use agg_gui::widgets::rich_text::{CommonStyle, ListKind};
+use agg_gui::MenuShortcut;
 use agg_gui::{Button, ComboBox, FlexRow, Font, RichCommand, RichEditHandle, TextHAlign, Widget};
 
 use super::PickerKind;
@@ -154,7 +154,13 @@ fn row_one(
 
 /// Row 2: alignment, lists, indent, undo/redo.
 fn row_two(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
-    let modifier = primary_modifier_label();
+    // Same formatting as menu shortcuts: `⌘Z` on a Mac (when the tooltip's
+    // system font has the glyph, else `Cmd+Z`), `Ctrl+Z` elsewhere.
+    let tip_font =
+        agg_gui::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(font));
+    let platform = agg_gui::current_platform();
+    let hint = |ch| MenuShortcut::command_char(ch).display_text_for_font(platform, &tip_font);
+    let (undo_hint, redo_hint) = (hint('Z'), hint('Y'));
     let mut row = FlexRow::new().with_gap(4.0);
 
     row = row.add(tip(
@@ -198,12 +204,12 @@ fn row_two(font: &Arc<Font>, handle: &RichEditHandle) -> Box<dyn Widget> {
     // `{mod}+Z` / `{mod}+Y`), so they get a shortcut hint.
     row = row.add(tip(
         undo_button(font, handle),
-        format!("Undo ({modifier}+Z)"),
+        format!("Undo ({undo_hint})"),
         font,
     ));
     row = row.add(tip(
         redo_button(font, handle),
-        format!("Redo ({modifier}+Y)"),
+        format!("Redo ({redo_hint})"),
         font,
     ));
 

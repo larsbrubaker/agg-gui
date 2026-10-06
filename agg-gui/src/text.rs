@@ -249,6 +249,14 @@ impl Font {
         set
     }
 
+    /// Whether this font, or any font in its fallback chain, has a real
+    /// (non-`.notdef`) glyph for `ch` — i.e. whether drawing `ch` with this
+    /// font stack produces the character rather than a tofu box.
+    pub fn has_glyph(&self, ch: char) -> bool {
+        self.with_ttf_face(|face| face.glyph_index(ch).is_some())
+            || self.fallback.as_ref().is_some_and(|fb| fb.has_glyph(ch))
+    }
+
     /// Recursion terminates because the fallback chain cannot contain cycles:
     /// `with_fallback` consumes `self` and the chain is immutable after
     /// construction, so it is always a finite linked list.

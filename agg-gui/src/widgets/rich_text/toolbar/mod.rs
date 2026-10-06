@@ -82,10 +82,10 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::platform::primary_modifier_label;
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::flex::FlexColumn;
+use crate::widgets::menu::MenuShortcut;
 
 use super::commands::CommonStyle;
 use super::editor::RichEditHandle;
@@ -478,7 +478,6 @@ impl RichTextToolbar {
 
     /// Row 2: alignment, lists, indent, history.
     fn build_row2(&self) -> Box<dyn Widget> {
-        let modifier = primary_modifier_label();
         let mut row = controls::new_row();
         if self.cfg.alignment {
             row = row.add(self.tip(
@@ -552,13 +551,14 @@ impl RichTextToolbar {
         if self.cfg.history {
             // Undo/redo are the only toolbar actions with a real key binding
             // (the editor binds `{mod}+Z` / `{mod}+Y`), so they get a shortcut hint.
+            let (undo, redo) = history_shortcut_hints(&self.font);
             row = row.add(self.tip(
                 controls::undo_button(&self.font, &self.handle),
-                format!("Undo ({modifier}+Z)"),
+                format!("Undo ({undo})"),
             ));
             row = row.add(self.tip(
                 controls::redo_button(&self.font, &self.handle),
-                format!("Redo ({modifier}+Y)"),
+                format!("Redo ({redo})"),
             ));
         }
         Box::new(row)
@@ -673,3 +673,14 @@ impl Drop for RichTextToolbar {
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+/// Undo / redo shortcut hints for the toolbar tooltips, formatted like menu
+/// shortcuts (`⌘Z` on a Mac, `Ctrl+Z` elsewhere).  Tooltips draw with the
+/// system font, so glyph coverage is checked against it (falling back to the
+/// toolbar font when no system font is installed).
+pub(crate) fn history_shortcut_hints(font: &Arc<Font>) -> (String, String) {
+    let font = crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(font));
+    let platform = crate::platform::current_platform();
+    let hint = |ch| MenuShortcut::command_char(ch).display_text_for_font(platform, &font);
+    (hint('Z'), hint('Y'))
+}
