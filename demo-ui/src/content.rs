@@ -57,6 +57,7 @@ pub(crate) fn build_demo_content(
         "\u{F0C3} Rendering Test" => rendering_test::rendering_test_view(font),
         "\u{F013} System" => windows::system_view(font),
         "\u{F002} Scene" => windows::scene_demo(font),
+        "\u{F1B2} Tumble Cube" => windows::tumble_cube_demo(),
         "\u{F030} Screenshot" => windows::screenshot_demo(
             font,
             screenshot_request,

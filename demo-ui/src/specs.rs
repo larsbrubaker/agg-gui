@@ -296,6 +296,14 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         win_h: 260.0,
     },
     DemoSpec {
+        title: "\u{F1B2} Tumble Cube",
+        label: "\u{F1B2} Tumble Cube",
+        group: "Graphics",
+        open: false,
+        win_w: 360.0,
+        win_h: 300.0,
+    },
+    DemoSpec {
         title: "\u{F013} System",
         label: "\u{F013} System",
         group: "Tools",

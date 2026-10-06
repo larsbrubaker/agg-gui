@@ -174,7 +174,8 @@ pub use widgets::{
     SizedBox, Slider, SliderClamping, SliderOrientation, SliderStyle, Spacer, Spinner, SpinnerSize,
     Splitter, SplitterRatio, Stack, TabView, Table, TableBuilder, TableColumn, TableRows, TextArea,
     TextAreaScrollInfo, TextEditState, TextField, TextHAlign, TextVAlign, ToggleSwitch, Tooltip,
-    TooltipTimings, TopMenu, TreeView, Window, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
+    TooltipTimings, TopMenu, TreeView, TumbleCube, TumbleCubeCamera, Window, DEFAULT_COLUMN_GAP,
+    DEFAULT_ROW_GAP,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

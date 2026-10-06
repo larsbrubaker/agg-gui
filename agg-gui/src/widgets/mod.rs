@@ -52,6 +52,7 @@ pub mod text_field_core;
 pub mod toggle_switch;
 pub mod tooltip;
 pub mod tree_view;
+pub mod tumble_cube;
 pub mod window;
 pub mod window_title_bar;
 
@@ -122,4 +123,5 @@ pub use text_field_core::TextEditState;
 pub use toggle_switch::ToggleSwitch;
 pub use tooltip::{set_tooltip_timings, tooltip_timings, Tooltip, TooltipTimings};
 pub use tree_view::{NodeIcon, TreeView};
+pub use tumble_cube::{TumbleCube, TumbleCubeCamera, TumbleCubeGpuRenderer};
 pub use window::{ClickAwayAction, CloseReason, Window};

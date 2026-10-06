@@ -47,6 +47,22 @@ pub fn current_typography_epoch() -> u64 {
 /// writes.  Keeps the epoch in lock-step with the globals.
 fn bump_typography_epoch() {
     TYPOGRAPHY_EPOCH.fetch_add(1, Ordering::Relaxed);
+    THREAD_TYPOGRAPHY_EPOCH.with(|e| e.set(e.get() + 1));
+}
+
+thread_local! {
+    /// Per-thread twin of [`TYPOGRAPHY_EPOCH`].  The settings themselves
+    /// are thread-local, so a thread-local cache keyed on them (the tumble
+    /// cube's face labels) only needs to see *this* thread's changes —
+    /// and must not be flushed by another thread's (e.g. parallel tests).
+    static THREAD_TYPOGRAPHY_EPOCH: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+}
+
+/// Epoch of the calling thread's typography settings: bumped by every
+/// setter in this module, like [`current_typography_epoch`], but only for
+/// changes made on this thread.
+pub fn current_thread_typography_epoch() -> u64 {
+    THREAD_TYPOGRAPHY_EPOCH.with(|e| e.get())
 }
 
 // ---------------------------------------------------------------------------

@@ -35,6 +35,7 @@ mod system_fonts;
 mod tests;
 mod text_demos;
 mod text_edit_demo;
+mod tumble_cube_demo;
 
 // Re-export every public demo builder so callers use `windows::foo(font)`.
 pub use animation::{bezier_curve, dancing_strings, painting};
@@ -76,6 +77,7 @@ pub use text_demos::{
     window_options_with_cells, WindowOptionCells,
 };
 pub use text_edit_demo::text_edit;
+pub use tumble_cube_demo::tumble_cube_demo;
 
 use agg_gui::{DrawCtx, Event, EventResult, Font, MarkdownView, Rect, ScrollView, Size, Widget};
 

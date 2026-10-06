@@ -72,7 +72,9 @@ pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
 
 pub mod ssaa;
+pub mod tumble_cube;
 pub use ssaa::{ssaa_linear_scale, SsaaFramebuffer};
+pub use tumble_cube::WgpuTumbleCubeRenderer;
 
 /// Screenshot read-back methods on [`WgpuGfxCtx`] (GPU→CPU frame copy).
 mod screenshot_readback;
