@@ -23,22 +23,35 @@ impl Slider {
         };
         match self.handle_shape {
             HandleShape::Circle => {
-                ctx.set_fill_color(thumb_color);
-                ctx.begin_path();
-                ctx.circle(cx, cy, THUMB_R);
-                ctx.fill();
+                let r = self.thumb_radius();
+                let ring = self.thumb_ring_width();
+                if self.style.thumb_hollow {
+                    // Outline only: a ring whose outer edge is the radius,
+                    // centre left unpainted so the track shows through.
+                    ctx.set_stroke_color(thumb_color);
+                    ctx.set_line_width(ring);
+                    ctx.begin_path();
+                    ctx.circle(cx, cy, r - ring * 0.5);
+                    ctx.stroke();
+                } else {
+                    ctx.set_fill_color(thumb_color);
+                    ctx.begin_path();
+                    ctx.circle(cx, cy, r);
+                    ctx.fill();
 
-                ctx.set_fill_color(v.widget_bg);
-                ctx.begin_path();
-                ctx.circle(cx, cy, THUMB_R - 2.5);
-                ctx.fill();
+                    ctx.set_fill_color(self.style.thumb_center.unwrap_or(v.widget_bg));
+                    ctx.begin_path();
+                    ctx.circle(cx, cy, r - ring);
+                    ctx.fill();
+                }
             }
             HandleShape::Rect { aspect_ratio } => {
                 // Long axis follows the slider orientation.
+                let r = self.thumb_radius();
                 let (hw, hh) = if self.is_vertical() {
-                    (THUMB_R * 0.9, THUMB_R * aspect_ratio)
+                    (r * 0.9, r * aspect_ratio)
                 } else {
-                    (THUMB_R * aspect_ratio, THUMB_R * 0.9)
+                    (r * aspect_ratio, r * 0.9)
                 };
                 ctx.set_fill_color(thumb_color);
                 ctx.begin_path();
@@ -71,21 +84,24 @@ impl Slider {
         let v = ctx.visuals();
         let cy = self.bounds.height * 0.5;
         let track_right = self.track_right();
-        let track_w = (track_right - THUMB_R).max(0.0);
+        let thumb_r = self.thumb_radius();
+        let track_h = self.track_height();
+        let track_w = (track_right - thumb_r).max(0.0);
         let tx = self.thumb_pos();
         let radius = self.track_radius();
+        let rail_y = self.track_start(cy);
 
         // Rail background.
         ctx.set_fill_color(self.style.track.unwrap_or(v.track_bg));
         ctx.begin_path();
-        ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, track_w, TRACK_H, radius);
+        ctx.rounded_rect(thumb_r, rail_y, track_w, track_h, radius);
         ctx.fill();
 
         // Trailing fill up to the thumb.
-        if self.trailing_fill && tx > THUMB_R {
-            ctx.set_fill_color(v.accent);
+        if self.trailing_fill && tx > thumb_r {
+            ctx.set_fill_color(self.style.fill.unwrap_or(v.accent));
             ctx.begin_path();
-            ctx.rounded_rect(THUMB_R, cy - TRACK_H * 0.5, tx - THUMB_R, TRACK_H, radius);
+            ctx.rounded_rect(thumb_r, rail_y, tx - thumb_r, track_h, radius);
             ctx.fill();
         }
 
@@ -93,7 +109,7 @@ impl Slider {
             ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(2.0);
             ctx.begin_path();
-            ctx.circle(tx, cy, THUMB_R + 3.0);
+            ctx.circle(tx, cy, thumb_r + 3.0);
             ctx.stroke();
         }
 
@@ -103,24 +119,27 @@ impl Slider {
 
     pub(super) fn paint_vertical(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let cx = THUMB_R; // rail column near the left edge
+        let thumb_r = self.thumb_radius();
+        let track_h = self.track_height();
+        let cx = thumb_r; // rail column near the left edge
         let (p0, p1) = self.position_range(); // (bottom, top) in pixels
         let ty = self.thumb_pos();
         let radius = self.track_radius();
+        let rail_x = self.track_start(cx);
 
         // Rail background (full height between the shrunk ends).
         let top = p1.min(p0);
         let rail_h = (p0 - p1).abs();
         ctx.set_fill_color(self.style.track.unwrap_or(v.track_bg));
         ctx.begin_path();
-        ctx.rounded_rect(cx - TRACK_H * 0.5, top, TRACK_H, rail_h, radius);
+        ctx.rounded_rect(rail_x, top, track_h, rail_h, radius);
         ctx.fill();
 
         // Trailing fill from the bottom up to the thumb.
         if self.trailing_fill && ty < p0 {
-            ctx.set_fill_color(v.accent);
+            ctx.set_fill_color(self.style.fill.unwrap_or(v.accent));
             ctx.begin_path();
-            ctx.rounded_rect(cx - TRACK_H * 0.5, ty, TRACK_H, p0 - ty, radius);
+            ctx.rounded_rect(rail_x, ty, track_h, p0 - ty, radius);
             ctx.fill();
         }
 
@@ -128,7 +147,7 @@ impl Slider {
             ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(2.0);
             ctx.begin_path();
-            ctx.circle(cx, ty, THUMB_R + 3.0);
+            ctx.circle(cx, ty, thumb_r + 3.0);
             ctx.stroke();
         }
 

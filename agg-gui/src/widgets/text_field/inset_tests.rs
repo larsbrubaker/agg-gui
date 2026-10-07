@@ -164,3 +164,53 @@ fn layout_honours_min_size() {
         .with_min_size(Size::new(500.0, 0.0));
     assert_eq!(wide.layout(ROOM).width, 500.0);
 }
+
+#[test]
+fn set_text_insets_after_build_relayouts_and_drops_the_cache_signature() {
+    let mut f = TextField::new(font())
+        .with_font_size(12.0)
+        .with_padding(3.0)
+        .with_line_box(LineBox::Em)
+        .with_text("abcd");
+    assert_eq!(f.layout(ROOM).height, 18.0);
+    let before = f.last_sig.clone();
+    assert!(before.is_some());
+
+    f.set_text_insets(Insets {
+        left: 40.0,
+        right: 3.0,
+        top: 6.0,
+        bottom: 4.0,
+    });
+    assert_eq!(f.text_insets().left, 40.0);
+    // Height follows the new vertical insets on the next layout, and the
+    // backbuffer signature changes so the stale bitmap is not blitted.
+    assert_eq!(f.layout(ROOM).height, 22.0);
+    assert!(f.last_sig != before);
+
+    // The caret now starts at the new leading inset.
+    f.on_event(&Event::FocusGained);
+    press(&mut f, 0.0);
+    assert_eq!(f.cursor_pos(), 0);
+    assert_eq!(f.caret_x(), 40.0);
+}
+
+#[test]
+fn set_text_insets_matching_the_builder_lays_out_identically() {
+    let insets = Insets {
+        left: 10.0,
+        right: 2.0,
+        top: 1.0,
+        bottom: 5.0,
+    };
+    let mut built = TextField::new(font())
+        .with_font_size(12.0)
+        .with_line_box(LineBox::Em)
+        .with_text_insets(insets);
+    let mut set = TextField::new(font())
+        .with_font_size(12.0)
+        .with_line_box(LineBox::Em);
+    set.set_text_insets(insets);
+    assert_eq!(built.layout(ROOM), set.layout(ROOM));
+    assert_eq!(built.text_center_y(18.0), set.text_center_y(18.0));
+}

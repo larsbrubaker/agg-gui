@@ -32,4 +32,8 @@ pub(super) struct TextFieldSig {
     // unchanged (the real text), so the cache would otherwise keep blitting the
     // stale masked/plaintext bitmap until another sig field happened to change.
     pub(super) masking: bool,
+    // The effective text insets (left, right, top, bottom) as bits: the text
+    // clip, caret and text origin all derive from them, so a live
+    // `set_text_insets` must drop the cached bitmap.
+    pub(super) insets_bits: [u64; 4],
 }

@@ -31,6 +31,20 @@ impl TextField {
         self
     }
 
+    /// Change the per-side text insets after the field is built (see
+    /// [`with_text_insets`](Self::with_text_insets)).  Requests a relayout
+    /// (the height can depend on the vertical insets) and a repaint; the
+    /// insets are part of the backbuffer signature, so the cached bitmap is
+    /// re-rendered on the next layout.
+    pub fn set_text_insets(&mut self, insets: Insets) {
+        if self.text_insets == Some(insets) {
+            return;
+        }
+        self.text_insets = Some(insets);
+        crate::animation::request_layout();
+        crate::animation::request_draw();
+    }
+
     /// The effective text insets: [`with_text_insets`](Self::with_text_insets)
     /// when set, otherwise `padding` on every side.
     pub fn text_insets(&self) -> Insets {

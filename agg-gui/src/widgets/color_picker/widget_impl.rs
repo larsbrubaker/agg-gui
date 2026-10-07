@@ -1,4 +1,10 @@
-﻿use super::*;
+//! `Widget` implementation, event handling and drawing helpers for
+//! [`super::ColorPicker`].  The panel layout (`regions`) lives in
+//! `color_picker.rs`; the round-swatch popup mode's geometry and overlay
+//! painting live in `popup.rs`, and the trait hooks that route to them are
+//! here.
+
+use super::*;
 
 impl Widget for ColorPicker {
     fn type_name(&self) -> &'static str {
@@ -46,6 +52,13 @@ impl Widget for ColorPicker {
         // Sync no_color from cell if someone else flipped it.
         self.no_color = self.none_cell.get();
 
+        if let Some(d) = self.popup_swatch {
+            // Popup mode: the widget is only the swatch; the panel floats.
+            self.bounds = Rect::new(0.0, 0.0, d, d);
+            self.layout_panel_children();
+            return Size::new(d, d);
+        }
+
         let w = if self.open {
             PANEL_W.min(available.width.max(PANEL_W))
         } else {
@@ -59,30 +72,7 @@ impl Widget for ColorPicker {
         };
 
         self.bounds = Rect::new(0.0, 0.0, w, h);
-
-        if self.open {
-            let r = self.regions();
-            // Position sub-widgets.
-            if let Some(none_rect) = r.none {
-                if let Some(idx) = self.idx_none {
-                    let cb = &mut self.children[idx];
-                    cb.layout(Size::new(none_rect.width, none_rect.height));
-                    cb.set_bounds(none_rect);
-                }
-            }
-            let cb = &mut self.children[self.idx_cancel];
-            cb.layout(Size::new(r.cancel.width, r.cancel.height));
-            cb.set_bounds(r.cancel);
-
-            let sb = &mut self.children[self.idx_select];
-            sb.layout(Size::new(r.select.width, r.select.height));
-            sb.set_bounds(r.select);
-        } else {
-            // Give children zero bounds off-panel so they don't paint.
-            for c in self.children.iter_mut() {
-                c.set_bounds(Rect::new(0.0, 0.0, 0.0, 0.0));
-            }
-        }
+        self.layout_panel_children();
 
         Size::new(w, h)
     }
@@ -90,6 +80,12 @@ impl Widget for ColorPicker {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
         let r = self.regions();
+
+        if self.popup_swatch.is_some() {
+            // The panel paints in `paint_global_overlay`.
+            self.paint_round_swatch(ctx, r.swatch);
+            return;
+        }
 
         // Outer panel background (if open).
         if self.open {
@@ -120,6 +116,79 @@ impl Widget for ColorPicker {
         if !self.open {
             return;
         }
+        self.paint_panel_rows(ctx, &r);
+    }
+
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if self.popup_swatch.is_some() && self.open {
+            self.paint_popup(ctx);
+        }
+    }
+
+    fn hit_test(&self, local_pos: Point) -> bool {
+        let b = self.bounds;
+        let in_bounds = local_pos.x >= 0.0
+            && local_pos.x <= b.width
+            && local_pos.y >= 0.0
+            && local_pos.y <= b.height;
+        in_bounds || self.pos_in_popup(local_pos)
+    }
+
+    fn hit_test_global_overlay(&self, local_pos: Point) -> bool {
+        self.pos_in_popup(local_pos)
+    }
+
+    /// Popup mode routes its panel's buttons itself (see `handle_event`), so
+    /// they never take focus from the picker — focus leaving the picker is
+    /// then a genuine click outside, which closes the popup.
+    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
+        self.popup_swatch.is_some()
+    }
+
+    fn is_focusable(&self) -> bool {
+        self.popup_swatch.is_some()
+    }
+
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        let result = self.handle_event(event);
+        self.sync_working();
+        result
+    }
+}
+
+impl ColorPicker {
+    /// Position the panel's sub-widgets (No Color, Cancel, Select) in their
+    /// regions while open; zero bounds while closed so they neither paint
+    /// nor hit.
+    pub(super) fn layout_panel_children(&mut self) {
+        if self.open {
+            let r = self.regions();
+            if let Some(none_rect) = r.none {
+                if let Some(idx) = self.idx_none {
+                    let cb = &mut self.children[idx];
+                    cb.layout(Size::new(none_rect.width, none_rect.height));
+                    cb.set_bounds(none_rect);
+                }
+            }
+            let cb = &mut self.children[self.idx_cancel];
+            cb.layout(Size::new(r.cancel.width, r.cancel.height));
+            cb.set_bounds(r.cancel);
+
+            let sb = &mut self.children[self.idx_select];
+            sb.layout(Size::new(r.select.width, r.select.height));
+            sb.set_bounds(r.select);
+        } else {
+            for c in self.children.iter_mut() {
+                c.set_bounds(Rect::new(0.0, 0.0, 0.0, 0.0));
+            }
+        }
+    }
+
+    /// The open panel's rows: hue strip, SV square, alpha strip, hex
+    /// readout and the sub-widgets.  Shared by the inline and popup modes.
+    pub(super) fn paint_panel_rows(&mut self, ctx: &mut dyn DrawCtx, r: &PanelRegions) {
+        let v = ctx.visuals();
+        let cur = self.sync_color_from_hsva();
 
         // ── Hue slider ──────────────────────────────────────────────────────
         paint_hue_strip(ctx, r.hue);
@@ -170,15 +239,10 @@ impl Widget for ColorPicker {
         }
     }
 
-    fn on_event(&mut self, event: &Event) -> EventResult {
-        let result = self.handle_event(event);
-        self.sync_working();
-        result
-    }
-}
-
-impl ColorPicker {
     fn handle_event(&mut self, event: &Event) -> EventResult {
+        if let Some(result) = self.handle_popup_event(event) {
+            return result;
+        }
         // Let sub-widgets (No Color, Cancel, Select) see pointer events that
         // actually land on them.  `Button::on_event` consumes every
         // MouseDown / MouseUp regardless of hit-test, so we MUST gate by
@@ -232,18 +296,7 @@ impl ColorPicker {
                 let r = self.regions();
                 if !self.open {
                     if contains(&r.swatch, *pos) {
-                        // Open.
-                        self.open = true;
-                        let saved = self.color_cell.get();
-                        self.saved.set(saved);
-                        let (h, s, v) = rgb_to_hsv(saved.r, saved.g, saved.b);
-                        self.h = h;
-                        self.s = s;
-                        self.v = v;
-                        self.a = saved.a;
-                        self.no_color = saved.a <= 0.0;
-                        self.none_cell.set(self.no_color);
-                        crate::animation::request_draw();
+                        self.open_panel();
                         return EventResult::Consumed;
                     }
                     return EventResult::Ignored;
@@ -315,6 +368,22 @@ impl ColorPicker {
 }
 
 impl ColorPicker {
+    /// Open the panel, snapshotting the bound colour for Cancel and loading
+    /// it into the working HSVA state.
+    pub(super) fn open_panel(&mut self) {
+        self.open = true;
+        let saved = self.color_cell.get();
+        self.saved.set(saved);
+        let (h, s, v) = rgb_to_hsv(saved.r, saved.g, saved.b);
+        self.h = h;
+        self.s = s;
+        self.v = v;
+        self.a = saved.a;
+        self.no_color = saved.a <= 0.0;
+        self.none_cell.set(self.no_color);
+        crate::animation::request_draw();
+    }
+
     fn handle_btn_flags(&mut self) {
         if self.cancel_flag.get() {
             self.cancel_flag.set(false);
@@ -343,7 +412,7 @@ impl ColorPicker {
 
 // ── Drawing helpers ──────────────────────────────────────────────────────────
 
-fn contains(r: &Rect, p: Point) -> bool {
+pub(super) fn contains(r: &Rect, p: Point) -> bool {
     p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
 }
 

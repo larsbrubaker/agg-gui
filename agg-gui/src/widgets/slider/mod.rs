@@ -76,6 +76,8 @@ const VERT_LEN: f64 = 140.0;
 
 const TRACK_H: f64 = 4.0;
 const THUMB_R: f64 = 7.0;
+/// Width of the default circle thumb's accent ring.
+const THUMB_RING_W: f64 = 2.5;
 /// Total widget height.  Needs to fit the thumb (diameter `2 * THUMB_R`)
 /// plus a little breathing room for the focus ring — `22 px` keeps rows
 /// compact in settings-style panels while still being easy to grab.
@@ -405,8 +407,8 @@ impl Slider {
     /// handle never overhangs the ends.
     fn handle_extent(&self) -> f64 {
         match self.handle_shape {
-            HandleShape::Circle => THUMB_R,
-            HandleShape::Rect { aspect_ratio } => THUMB_R * aspect_ratio,
+            HandleShape::Circle => self.thumb_radius(),
+            HandleShape::Rect { aspect_ratio } => self.thumb_radius() * aspect_ratio,
         }
     }
 
@@ -419,7 +421,8 @@ impl Slider {
         } else {
             0.0
         };
-        (self.bounds.width - reserved - THUMB_R).max(THUMB_R + 1.0)
+        let r = self.thumb_radius();
+        (self.bounds.width - reserved - r).max(r + 1.0)
     }
 
     /// The pixel positions (along the main axis) of normalized `0.0` and `1.0`.
@@ -431,7 +434,7 @@ impl Slider {
             let top = hr; // normalized 1
             (bottom, top)
         } else {
-            (THUMB_R, self.track_right()) // normalized 0..1
+            (self.thumb_radius(), self.track_right()) // normalized 0..1
         }
     }
 
@@ -742,3 +745,6 @@ impl Widget for Slider {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod style_tests;

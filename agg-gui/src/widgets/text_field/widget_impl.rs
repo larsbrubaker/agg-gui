@@ -149,6 +149,15 @@ impl Widget for TextField {
             font_ptr: Arc::as_ptr(&font) as usize,
             font_size_bits: self.font_size.to_bits(),
             masking: self.masking_active(),
+            insets_bits: {
+                let i = self.text_insets();
+                [
+                    i.left.to_bits(),
+                    i.right.to_bits(),
+                    i.top.to_bits(),
+                    i.bottom.to_bits(),
+                ]
+            },
         };
         drop(st);
         if self.last_sig.as_ref() != Some(&sig) {

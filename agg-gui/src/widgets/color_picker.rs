@@ -10,6 +10,12 @@
 //! when open it returns the full expanded height so sibling widgets are pushed
 //! down (works naturally inside a `ScrollView` or a `Window::with_auto_size`).
 //!
+//! [`ColorPicker::with_round_popup_swatch`] switches to a compact mode like
+//! agg-sharp's `ItemColorButton`: the widget is a round swatch of a given
+//! diameter, and the panel opens as a floating popup below (or above) it,
+//! painted and hit-tested in the global overlay pass instead of growing the
+//! widget.  That mode lives in `color_picker/popup.rs`.
+//!
 //! # Composition
 //!
 //! ```text
@@ -183,6 +189,16 @@ pub struct ColorPicker {
     /// close the panel and resync the working HSVA state.
     cancel_flag: Rc<Cell<bool>>,
     select_flag: Rc<Cell<bool>>,
+
+    /// Round-swatch popup mode: the swatch diameter.  `None` (the default)
+    /// is the inline-expanding picker.  See `color_picker/popup.rs`.
+    popup_swatch: Option<f64>,
+    /// Outline drawn around the swatch: colour and width.  `None` uses
+    /// `Visuals::widget_stroke` at 1 px.
+    swatch_outline: Option<(Color, f64)>,
+    /// Popup mode: whether the panel opens above the swatch (decided from
+    /// the room below it each time the popup paints).
+    popup_opens_up: bool,
 }
 
 impl ColorPicker {
@@ -218,6 +234,9 @@ impl ColorPicker {
             none_cell,
             cancel_flag,
             select_flag,
+            popup_swatch: None,
+            swatch_outline: None,
+            popup_opens_up: false,
         };
         me.build_children();
         me
@@ -358,49 +377,58 @@ impl ColorPicker {
     }
 
     /// Local-coord rect for each interactive region of the open panel.
-    /// Y-up: swatch is at the TOP, panel grows DOWNWARD below it in the
-    /// visual sense → higher Y values for the swatch, lower for buttons.
+    /// Inline: Y-up, the swatch is at the TOP and the panel fills the rest
+    /// of the bounds below it.  Popup mode: the swatch is the whole widget
+    /// and the panel floats outside it (see `popup_panel_rect`).
     fn regions(&self) -> PanelRegions {
         let w = self.bounds.width;
         let h = self.bounds.height;
 
-        let swatch = Rect::new(0.0, h - SWATCH_H, w, SWATCH_H);
+        let (swatch, panel) = match self.popup_swatch {
+            Some(d) => (Rect::new(0.0, 0.0, d, d), self.popup_panel_rect()),
+            None => (
+                Rect::new(0.0, h - SWATCH_H, w, SWATCH_H),
+                Rect::new(0.0, 0.0, w, h - SWATCH_H),
+            ),
+        };
+        let (px, pw) = (panel.x, panel.width);
 
-        // Panel top starts just below the swatch (Y-up → smaller Y).
-        let mut y = h - SWATCH_H - PAD;
+        // Rows run down from the panel's top (Y-up → smaller Y).
+        let mut y = panel.y + panel.height - PAD;
 
         y -= HUE_H;
-        let hue = Rect::new(PAD, y, w - PAD * 2.0, HUE_H);
+        let hue = Rect::new(px + PAD, y, pw - PAD * 2.0, HUE_H);
         y -= ROW_GAP;
 
         y -= SV_H;
-        let sv = Rect::new(PAD, y, w - PAD * 2.0, SV_H);
+        let sv = Rect::new(px + PAD, y, pw - PAD * 2.0, SV_H);
         y -= ROW_GAP;
 
         y -= ALPHA_H;
-        let alpha = Rect::new(PAD, y, w - PAD * 2.0, ALPHA_H);
+        let alpha = Rect::new(px + PAD, y, pw - PAD * 2.0, ALPHA_H);
         y -= ROW_GAP;
 
         y -= HEX_H;
-        let hex = Rect::new(PAD, y, w - PAD * 2.0, HEX_H);
+        let hex = Rect::new(px + PAD, y, pw - PAD * 2.0, HEX_H);
         y -= ROW_GAP;
 
         let none = if self.allow_none {
             y -= CHECK_H;
-            let r = Rect::new(PAD, y, w - PAD * 2.0, CHECK_H);
+            let r = Rect::new(px + PAD, y, pw - PAD * 2.0, CHECK_H);
             Some(r)
         } else {
             None
         };
         let _ = y;
 
-        let btns_y = PAD;
-        let btn_w = (w - PAD * 3.0) * 0.5;
-        let cancel = Rect::new(PAD, btns_y, btn_w, BTN_H);
-        let select = Rect::new(PAD + btn_w + PAD, btns_y, btn_w, BTN_H);
+        let btns_y = panel.y + PAD;
+        let btn_w = (pw - PAD * 3.0) * 0.5;
+        let cancel = Rect::new(px + PAD, btns_y, btn_w, BTN_H);
+        let select = Rect::new(px + PAD + btn_w + PAD, btns_y, btn_w, BTN_H);
 
         PanelRegions {
             swatch,
+            panel,
             hue,
             sv,
             alpha,
@@ -414,6 +442,8 @@ impl ColorPicker {
 
 struct PanelRegions {
     swatch: Rect,
+    /// The panel's own rect (the area behind the rows below).
+    panel: Rect,
     hue: Rect,
     sv: Rect,
     alpha: Rect,
@@ -423,7 +453,11 @@ struct PanelRegions {
     select: Rect,
 }
 
+mod popup;
 mod widget_impl;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod popup_tests;

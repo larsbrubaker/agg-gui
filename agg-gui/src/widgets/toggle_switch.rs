@@ -1,9 +1,10 @@
-﻿//! `ToggleSwitch` — an iOS-style pill-shaped boolean toggle widget.
+//! `ToggleSwitch` — an iOS-style pill-shaped boolean toggle widget.
 //!
 //! Renders as a rounded-rectangle (pill) with a sliding white circle inside.
 //! The pill is gray when off and blue when on.  Supports keyboard activation
 //! (Space / Enter) and an optional shared [`Cell<bool>`] for two-way binding
-//! with external state.
+//! with external state.  Colours and geometry can be overridden per instance
+//! with a [`ToggleSwitchStyle`] (`toggle_switch/style.rs`).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -15,6 +16,9 @@ use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
+mod style;
+pub use style::ToggleSwitchStyle;
+
 // ── Geometry constants ─────────────────────────────────────────────────────
 //
 // Sized to fit within a typical 16-18 px text line (13-14 px font) so the
@@ -22,8 +26,6 @@ use crate::widget::Widget;
 
 const PILL_W: f64 = 32.0;
 const PILL_H: f64 = 18.0;
-/// Corner radius of the pill — a full semicircle on each end.
-const PILL_R: f64 = PILL_H / 2.0;
 /// Gap between the pill edge and the circle edge.
 const CIRCLE_MARGIN: f64 = 2.5;
 /// Circle radius derived from pill height and the margin.
@@ -45,8 +47,9 @@ const PILL_HALO: f64 = 1.0;
 // back.  The MatterCAD version used a radius ratio of ~2.44× the circle
 // radius (22 vs 9 px) and ~50/255 alpha with quadratic ease-out.
 
-/// Maximum radius of the press-ring overlay (~2.4× the circle radius).
-const RING_MAX_R: f64 = CIRCLE_R * 2.4;
+/// Maximum radius of the press-ring overlay as a multiple of the knob
+/// radius (~2.4×).
+const RING_MAX_RATIO: f64 = 2.4;
 /// Peak alpha of the press-ring at full expansion.
 const RING_PEAK_ALPHA: f32 = 0.20;
 /// Duration of the press-ring expand / retract animation in seconds.
@@ -86,6 +89,8 @@ pub struct ToggleSwitch {
     /// `RoundedToggleSwitch` ripple overlay.
     press_anim: crate::animation::Tween,
     on_change: Option<Box<dyn FnMut(bool)>>,
+    /// Per-instance colour / geometry overrides — see [`ToggleSwitchStyle`].
+    style: ToggleSwitchStyle,
 }
 
 // ── Constructors & builder methods ─────────────────────────────────────────
@@ -105,6 +110,7 @@ impl ToggleSwitch {
             pressed: false,
             press_anim: crate::animation::Tween::new(0.0, RING_ANIM_SECS),
             on_change: None,
+            style: ToggleSwitchStyle::default(),
         }
     }
 
@@ -173,11 +179,19 @@ impl ToggleSwitch {
     /// X-center of the sliding circle given an interpolated position `t`
     /// in `[0, 1]` (0 = off, 1 = on).  Expressed in widget-local coords,
     /// so the `PILL_HALO` inset is baked in — callers don't need to know
-    /// about it.
-    fn circle_cx_at(t: f64) -> f64 {
-        let x_off = PILL_HALO + CIRCLE_MARGIN + CIRCLE_R;
-        let x_on = PILL_HALO + PILL_W - CIRCLE_MARGIN - CIRCLE_R;
+    /// about it.  The centre sits on the centre of the bar's end cap
+    /// (`CIRCLE_MARGIN + CIRCLE_R == PILL_H / 2` for the default pill).
+    fn circle_cx_at(&self, t: f64) -> f64 {
+        let (ox, _) = self.pill_origin();
+        let half_h = self.pill_h() * 0.5;
+        let x_off = ox + half_h;
+        let x_on = ox + self.pill_w() - half_h;
         x_off + (x_on - x_off) * t.clamp(0.0, 1.0)
+    }
+
+    /// Y-center of the knob (the bar's centre line).
+    fn circle_cy(&self) -> f64 {
+        self.pill_origin().1 + self.pill_h() * 0.5
     }
 }
 
@@ -250,7 +264,7 @@ impl Widget for ToggleSwitch {
     /// every side); the available space is ignored.  See [`PILL_HALO`]
     /// for why the margin is needed.
     fn layout(&mut self, _available: Size) -> Size {
-        Size::new(PILL_W + 2.0 * PILL_HALO, PILL_H + 2.0 * PILL_HALO)
+        self.outer_size()
     }
 
     fn needs_draw(&self) -> bool {
@@ -274,32 +288,44 @@ impl Widget for ToggleSwitch {
         // Inset the pill by the halo margin so halo-AA has room inside
         // the widget's own clip.  Origin (0,0) is the widget's bottom-
         // left in Y-up; the framework has already translated there.
-        let pill_x = PILL_HALO;
-        let pill_y = PILL_HALO;
+        // (Plus any knob overhang from a style's oversized knob.)
+        let (pill_x, pill_y) = self.pill_origin();
+        let (pill_w, pill_h) = (self.pill_w(), self.pill_h());
+        let pill_r = pill_h * 0.5;
 
         // ── Pill background ────────────────────────────────────────────────
         // Interpolate between the off colour (gray) and the on colour (accent);
-        // a separate hover tint is applied as a multiplicative brighten.
-        let off_color = v.widget_stroke;
-        let on_color = v.accent;
-        let mut bg = lerp_color(off_color, on_color, t as f32);
-        if self.hovered {
-            let hover_off = v.widget_bg_hovered;
-            let hover_on = v.accent_hovered;
-            bg = lerp_color(hover_off, hover_on, t as f32);
-        }
+        // under the mouse both ends switch to their hover tints (unless a
+        // style pins them).
+        let (off_color, on_color) = self.track_colors(&v);
+        let bg = lerp_color(off_color, on_color, t as f32);
         ctx.set_fill_color(bg);
         ctx.begin_path();
-        ctx.rounded_rect(pill_x, pill_y, PILL_W, PILL_H, PILL_R);
+        ctx.rounded_rect(pill_x, pill_y, pill_w, pill_h, pill_r);
         ctx.fill();
+        if let Some(outline) = self.style.track_outline {
+            ctx.set_stroke_color(outline);
+            ctx.set_line_width(self.style.track_outline_width.unwrap_or(1.0));
+            ctx.begin_path();
+            ctx.rounded_rect(pill_x, pill_y, pill_w, pill_h, pill_r);
+            ctx.stroke();
+        }
 
-        // ── Sliding white circle ───────────────────────────────────────────
-        let cx = Self::circle_cx_at(t);
-        let cy = PILL_HALO + PILL_H * 0.5;
-        ctx.set_fill_color(Color::white());
+        // ── Sliding circle (white by default) ──────────────────────────────
+        let cx = self.circle_cx_at(t);
+        let cy = self.circle_cy();
+        let (knob_off, knob_on) = self.knob_colors();
+        ctx.set_fill_color(lerp_color(knob_off, knob_on, t as f32));
         ctx.begin_path();
-        ctx.circle(cx, cy, CIRCLE_R);
+        ctx.circle(cx, cy, self.knob_r());
         ctx.fill();
+        if let Some(outline) = self.style.knob_outline {
+            ctx.set_stroke_color(outline);
+            ctx.set_line_width(self.style.knob_outline_width.unwrap_or(1.0));
+            ctx.begin_path();
+            ctx.circle(cx, cy, self.knob_r());
+            ctx.stroke();
+        }
 
         // The press-ring itself is drawn in `paint_overlay` — it needs to
         // expand beyond the widget's own bounds, which requires escaping the
@@ -320,13 +346,9 @@ impl Widget for ToggleSwitch {
         }
 
         let v = ctx.visuals();
-        let cx = Self::circle_cx_at(self.anim.value());
-        let cy = PILL_HALO + PILL_H * 0.5;
-        let toggle_color = if self.is_on() {
-            v.accent
-        } else {
-            v.widget_stroke
-        };
+        let cx = self.circle_cx_at(self.anim.value());
+        let cy = self.circle_cy();
+        let toggle_color = self.ripple_color(&v);
         let alpha = RING_PEAK_ALPHA * (ring_t as f32);
 
         ctx.save();
@@ -338,7 +360,7 @@ impl Widget for ToggleSwitch {
             alpha,
         ));
         ctx.begin_path();
-        ctx.circle(cx, cy, RING_MAX_R * ring_t);
+        ctx.circle(cx, cy, self.knob_r() * RING_MAX_RATIO * ring_t);
         ctx.fill();
         ctx.restore();
     }
@@ -397,10 +419,16 @@ impl Widget for ToggleSwitch {
     /// Hit test restricted to the pill bounds (matches the visible shape).
     /// The halo margin is excluded so the ~1 px ring around the pill
     /// doesn't register as pointer-over.
+    /// With a style's oversized knob the knob's overhang counts too.
     fn hit_test(&self, local_pos: crate::geometry::Point) -> bool {
-        local_pos.x >= PILL_HALO
-            && local_pos.x <= PILL_HALO + PILL_W
-            && local_pos.y >= PILL_HALO
-            && local_pos.y <= PILL_HALO + PILL_H
+        let o = self.pill_origin().0;
+        let oh = o - PILL_HALO; // knob overhang
+        local_pos.x >= o - oh
+            && local_pos.x <= o + self.pill_w() + oh
+            && local_pos.y >= o - oh
+            && local_pos.y <= o + self.pill_h() + oh
     }
 }
+
+#[cfg(test)]
+mod tests;
