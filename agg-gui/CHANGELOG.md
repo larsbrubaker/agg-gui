@@ -10,6 +10,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Popup menu styling: `MenuStyle` gains `row_h` (item row height,
+  touch-floored), `shadow` (drop shadow on/off), `background` /
+  `border_color` (panel fill and outline, `None` = theme colours),
+  `border_width` (`0.0` = no outline), `width` / `min_width` (fixed or
+  content-fitted width and its floor) and `shortcut_format`
+  (`ShortcutFormat::Platform`, today's `⌘X` on macOS / `Ctrl+X` elsewhere, or
+  `ShortcutFormat::Plain`, `Ctrl+X` everywhere as agg-sharp shows it).
+  `set_menu_style` / `current_menu_style` / `reset_menu_style` install a
+  thread-local default every `PopupMenu` created afterwards starts from
+  (context menus, menu bars, the text-editing menus); `PopupMenu::with_style`
+  / `set_style` restyle one popup. Defaults are unchanged. `MenuStyle` is now
+  `Copy + Debug + PartialEq`; `FitMeasure` gained a `shortcut_format` field.
+
 - File drag-and-drop beyond native path drops. `Event::FileDataDropped
   { pos, files: Vec<DroppedFileData> }` carries dropped files as name + bytes
   (`DroppedFileData`, bytes shared through an `Arc<[u8]>`) for the browser,

@@ -154,9 +154,47 @@ pub fn stack_layout_with_width(
     viewport: Size,
     width: &dyn Fn(&[MenuEntry], &MenuMetrics) -> f64,
 ) -> Vec<PopupLayout> {
+    stack_layout_with_metrics(
+        root_items,
+        anchor,
+        anchor_kind,
+        open_path,
+        viewport,
+        width,
+        effective_metrics(),
+    )
+}
+
+/// [`effective_metrics`] with the item row height replaced by `row_h`
+/// (desktop logical px, a [`super::MenuStyle::row_h`]).  On touch the row is
+/// still floored at the touch minimum.  `row_h == ROW_H` returns
+/// [`effective_metrics`] unchanged.
+pub fn metrics_with_row_h(row_h: f64) -> MenuMetrics {
+    let mut m = effective_metrics();
+    if row_h == ROW_H || !row_h.is_finite() || row_h <= 0.0 {
+        return m;
+    }
+    m.row_h = if crate::input_profile::touch_ui_active() {
+        row_h.max(TOUCH_MIN / crate::ux_scale::ux_scale().max(0.01))
+    } else {
+        row_h
+    };
+    m
+}
+
+/// [`stack_layout_with_width`] with caller-supplied metrics `m` (see
+/// [`metrics_with_row_h`]) instead of this frame's [`effective_metrics`].
+pub fn stack_layout_with_metrics(
+    root_items: &[MenuEntry],
+    anchor: Point,
+    anchor_kind: MenuAnchorKind,
+    open_path: &[usize],
+    viewport: Size,
+    width: &dyn Fn(&[MenuEntry], &MenuMetrics) -> f64,
+    m: MenuMetrics,
+) -> Vec<PopupLayout> {
     // One source of truth for every popup dimension this frame — paint and
     // hit-test both flow through here, so they can never diverge.
-    let m = effective_metrics();
     let mut layouts = Vec::new();
     let mut items = root_items;
     let mut x = anchor.x;

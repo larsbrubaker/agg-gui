@@ -25,6 +25,7 @@ use crate::platform::{self, Platform};
 use crate::text::Font;
 
 use super::model::{MenuItem, MenuShortcut, ShortcutKey};
+use super::style::ShortcutFormat;
 
 /// Apple's modifier glyphs.  `MenuShortcut` has no separate Control flag
 /// (its portable `command` is ⌘ on a Mac), so only ⌥ ⇧ ⌘ are emitted — in
@@ -68,6 +69,21 @@ impl MenuShortcut {
             None => text.push_str(&self.key.plain_text()),
         }
         text
+    }
+
+    /// The label under `format`: [`ShortcutFormat::Platform`] is
+    /// [`Self::display_text_for_font`]; [`ShortcutFormat::Plain`] is
+    /// `Ctrl+Shift+Z` on every platform.
+    pub fn display_text_formatted(
+        self,
+        platform: Platform,
+        font: &Font,
+        format: ShortcutFormat,
+    ) -> String {
+        match format {
+            ShortcutFormat::Platform => self.display_text_for_font(platform, font),
+            ShortcutFormat::Plain => self.plain_text("Ctrl"),
+        }
     }
 
     fn mac_glyph_text(self) -> String {
@@ -173,6 +189,20 @@ impl MenuItem {
     pub fn shortcut_text_for_font(&self, platform: Platform, font: &Font) -> Option<String> {
         match self.accelerator {
             Some(acc) => Some(acc.display_text_for_font(platform, font)),
+            None => self.shortcut.clone(),
+        }
+    }
+
+    /// [`Self::shortcut_text_for_font`] under a [`ShortcutFormat`] — what a
+    /// popup with that [`super::MenuStyle::shortcut_format`] draws.
+    pub fn shortcut_text_formatted(
+        &self,
+        platform: Platform,
+        font: &Font,
+        format: ShortcutFormat,
+    ) -> Option<String> {
+        match self.accelerator {
+            Some(acc) => Some(acc.display_text_formatted(platform, font, format)),
             None => self.shortcut.clone(),
         }
     }

@@ -8,7 +8,8 @@ use crate::geometry::{Point, Size};
 
 use super::fit_width::{FitMeasure, MenuWidth, FIT_MIN_W};
 use super::geometry::{
-    hit_test, item_at_path, stack_layout, stack_layout_with_width, MenuHit, PopupLayout,
+    hit_test, item_at_path, metrics_with_row_h, stack_layout_with_metrics, MenuHit, MenuMetrics,
+    PopupLayout, ROW_H,
 };
 use super::model::{MenuEntry, MenuSelection};
 
@@ -55,6 +56,8 @@ pub struct PopupMenuState {
     /// Desktop floor of a fitted popup's width (logical px), applied to the
     /// root and every submenu level alike.  Defaults to [`FIT_MIN_W`].
     min_width: f64,
+    /// Desktop item-row height (logical px); see [`super::MenuStyle::row_h`].
+    row_h: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +80,7 @@ impl Default for PopupMenuState {
             width: MenuWidth::Fixed,
             fit_measure: None,
             min_width: FIT_MIN_W,
+            row_h: ROW_H,
         }
     }
 }
@@ -159,6 +163,16 @@ impl PopupMenuState {
         self.min_width
     }
 
+    /// Set the desktop item-row height (logical px, touch-floored).  The
+    /// default is [`ROW_H`].
+    pub fn set_row_height(&mut self, row_h: f64) {
+        self.row_h = row_h;
+    }
+
+    pub fn row_height(&self) -> f64 {
+        self.row_h
+    }
+
     /// Set the font, size and row style a [`MenuWidth::FitContent`] popup
     /// measures with.  `PopupMenu` / `MenuBar` keep this in step with the
     /// font they paint with, so hit-testing sees the painted widths.
@@ -170,21 +184,25 @@ impl PopupMenuState {
         if !self.open {
             return Vec::new();
         }
+        let m = metrics_with_row_h(self.row_h);
         match (self.width, &self.fit_measure) {
-            (MenuWidth::FitContent, Some(measure)) => stack_layout_with_width(
+            (MenuWidth::FitContent, Some(measure)) => stack_layout_with_metrics(
                 items,
                 self.anchor,
                 self.anchor_kind,
                 &self.open_path,
                 viewport,
                 &|level, m| measure.popup_width_with_min(level, m, self.min_width),
+                m,
             ),
-            _ => stack_layout(
+            _ => stack_layout_with_metrics(
                 items,
                 self.anchor,
                 self.anchor_kind,
                 &self.open_path,
                 viewport,
+                &|_, m: &MenuMetrics| m.menu_w,
+                m,
             ),
         }
     }

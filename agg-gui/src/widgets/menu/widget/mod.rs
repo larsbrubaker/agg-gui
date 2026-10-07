@@ -16,6 +16,7 @@ use super::model::MenuEntry;
 use super::paint::{paint_panel, MenuStyle};
 use super::row_widgets::RowWidgets;
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
+use super::style::current_menu_style;
 
 use labels::PopupLabels;
 
@@ -65,8 +66,11 @@ pub struct PopupMenu {
 }
 
 impl PopupMenu {
+    /// A closed popup over `items`, styled with this thread's
+    /// [`current_menu_style`] ([`MenuStyle::default`] unless the host
+    /// installed another with [`super::set_menu_style`]).
     pub fn new(items: Vec<MenuEntry>) -> Self {
-        Self {
+        let mut menu = Self {
             items,
             state: PopupMenuState::default(),
             style: MenuStyle::default(),
@@ -74,7 +78,25 @@ impl PopupMenu {
             row_widgets: RowWidgets::default(),
             local_anchor: None,
             root_origin: Point::ORIGIN,
-        }
+        };
+        menu.set_style(current_menu_style());
+        menu
+    }
+
+    /// Restyle this popup.  Besides the paint values this applies the
+    /// style's row height, width policy and fitted-width floor to the
+    /// layout, so prefer it over assigning [`Self::style`] directly.
+    /// A later [`Self::set_width`] / [`Self::set_min_width`] still wins.
+    pub fn with_style(mut self, style: MenuStyle) -> Self {
+        self.set_style(style);
+        self
+    }
+
+    pub fn set_style(&mut self, style: MenuStyle) {
+        self.state.set_width(style.width);
+        self.state.set_min_width(style.min_width);
+        self.state.set_row_height(style.row_h);
+        self.style = style;
     }
 
     /// Choose the popup width policy — [`MenuWidth::FitContent`] sizes each
@@ -172,7 +194,13 @@ impl PopupMenu {
         // Refresh the per-row `Label` cache against the current open
         // tree.  Cheap when nothing changed — `sync_to` only mutates
         // entries whose text or font differs from the cached state.
-        self.labels.sync_to(&font, font_size, &self.items, &layouts);
+        self.labels.sync_to(
+            &font,
+            font_size,
+            &self.items,
+            &layouts,
+            self.style.shortcut_format,
+        );
 
         // Set the popup's default font / size on the ctx for the
         // inline glyphs we still paint directly (icons, check / radio
@@ -211,5 +239,7 @@ mod tests_fit;
 mod tests_image_icon;
 #[cfg(test)]
 mod tests_rows;
+#[cfg(test)]
+mod tests_style;
 #[cfg(test)]
 mod tests_tooltip;

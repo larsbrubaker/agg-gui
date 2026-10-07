@@ -11,6 +11,7 @@ mod row_widgets;
 mod shortcut_text;
 pub mod state;
 pub mod strip;
+pub mod style;
 pub mod widget;
 
 pub use fit_width::{FitMeasure, MenuWidth};
@@ -22,6 +23,7 @@ pub use model::{MenuEntry, MenuItem, MenuSelection, MenuShortcut, MenuWidgetRow,
 pub use paint::MenuStyle;
 pub use state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 pub use strip::MenuBarStrip;
+pub use style::{current_menu_style, reset_menu_style, set_menu_style, ShortcutFormat};
 pub use widget::{MenuBar, MenuOrientation, MenuTitle, PopupMenu, TopMenu};
 
 #[cfg(test)]

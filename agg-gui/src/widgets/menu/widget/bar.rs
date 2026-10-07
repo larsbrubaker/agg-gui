@@ -209,13 +209,14 @@ impl MenuBar {
             .unwrap_or_else(|| effective_metrics().default_font_size)
     }
 
-    /// Override the popup's [`MenuStyle`] — geometry and inline-glyph
-    /// characters (submenu chevron, check mark, radio mark).  Hosts
-    /// that bundle Font Awesome typically swap the default Unicode
-    /// chars for FA equivalents so the menu indicators visually match
-    /// the icons used everywhere else.
+    /// Override the popup's [`MenuStyle`] (row geometry, panel chrome,
+    /// width policy, shortcut format) — see [`PopupMenu::set_style`].
+    /// Without it the bar's popups use the thread's
+    /// [`super::super::current_menu_style`].  Call before
+    /// [`Self::with_menu_width`] / [`Self::with_menu_min_width`] if both are
+    /// used, since the style carries its own width policy.
     pub fn with_menu_style(mut self, style: MenuStyle) -> Self {
-        self.popup.style = style;
+        self.popup.set_style(style);
         self.cache.invalidate();
         self
     }

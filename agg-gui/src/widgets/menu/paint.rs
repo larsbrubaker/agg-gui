@@ -13,36 +13,7 @@ use crate::geometry::Rect;
 
 use super::geometry::SEP_H;
 
-/// Style values shared between the bar and popup painters.
-///
-/// Geometry only — every chrome indicator (submenu chevron, check
-/// mark, radio dot) is painted as vector primitives by the menu
-/// widget, so the menu renders the same on every host regardless of
-/// which icon font (if any) it bundles.
-#[derive(Clone)]
-pub struct MenuStyle {
-    pub radius: f64,
-    pub shadow_offset: (f64, f64),
-    pub shadow_alpha: f32,
-    pub pad_x: f64,
-    pub icon_x: f64,
-    pub label_x: f64,
-    pub shortcut_right: f64,
-}
-
-impl Default for MenuStyle {
-    fn default() -> Self {
-        Self {
-            radius: 5.0,
-            shadow_offset: (5.0, -5.0),
-            shadow_alpha: 0.22,
-            pad_x: 8.0,
-            icon_x: 14.0,
-            label_x: 32.0,
-            shortcut_right: 28.0,
-        }
-    }
-}
+pub use super::style::MenuStyle;
 
 /// Three points (apex on the right, top-left, bottom-left) of the
 /// submenu-indicator chevron painted at the right edge of a popup row.
@@ -150,28 +121,35 @@ pub fn popup_row_text_color(ctx: &dyn DrawCtx, enabled: bool, open: bool) -> Col
     }
 }
 
+/// Paint one popup panel's chrome: the optional drop shadow, the fill and
+/// the outline, each taken from `style` (theme colours where the style
+/// leaves them `None`).
 pub fn paint_panel(ctx: &mut dyn DrawCtx, rect: Rect, style: &MenuStyle) {
     let v = ctx.visuals();
-    ctx.set_fill_color(Color::black().with_alpha(style.shadow_alpha));
-    ctx.begin_path();
-    ctx.rounded_rect(
-        rect.x + style.shadow_offset.0,
-        rect.y + style.shadow_offset.1,
-        rect.width,
-        rect.height,
-        style.radius,
-    );
-    ctx.fill();
+    if style.shadow {
+        ctx.set_fill_color(Color::black().with_alpha(style.shadow_alpha));
+        ctx.begin_path();
+        ctx.rounded_rect(
+            rect.x + style.shadow_offset.0,
+            rect.y + style.shadow_offset.1,
+            rect.width,
+            rect.height,
+            style.radius,
+        );
+        ctx.fill();
+    }
 
-    ctx.set_fill_color(v.panel_fill);
+    ctx.set_fill_color(style.background.unwrap_or(v.panel_fill));
     ctx.begin_path();
     ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, style.radius);
     ctx.fill();
-    ctx.set_stroke_color(v.widget_stroke);
-    ctx.set_line_width(1.0);
-    ctx.begin_path();
-    ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, style.radius);
-    ctx.stroke();
+    if style.border_width > 0.0 {
+        ctx.set_stroke_color(style.border_color.unwrap_or(v.widget_stroke));
+        ctx.set_line_width(style.border_width);
+        ctx.begin_path();
+        ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, style.radius);
+        ctx.stroke();
+    }
 }
 
 pub fn paint_separator(ctx: &mut dyn DrawCtx, rect: Rect) {

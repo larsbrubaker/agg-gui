@@ -43,6 +43,7 @@ use crate::text::{measure_advance, Font};
 use super::geometry::{MenuMetrics, MENU_W};
 use super::model::{MenuEntry, MenuItem};
 use super::paint::MenuStyle;
+use super::style::ShortcutFormat;
 
 /// Gap between a row's label and its shortcut in a fitted popup (logical px).
 pub const SHORTCUT_GAP: f64 = 20.0;
@@ -67,6 +68,7 @@ pub struct FitMeasure {
     pub font_size: f64,
     pub label_x: f64,
     pub shortcut_right: f64,
+    pub shortcut_format: ShortcutFormat,
 }
 
 impl std::fmt::Debug for FitMeasure {
@@ -86,6 +88,7 @@ impl FitMeasure {
             font_size,
             label_x: style.label_x,
             shortcut_right: style.shortcut_right,
+            shortcut_format: style.shortcut_format,
         }
     }
 
@@ -106,7 +109,7 @@ impl FitMeasure {
         let platform = crate::platform::current_platform();
         let label_w = self.text_width(&item.label);
         let shortcut_w = item
-            .shortcut_text_for_font(platform, &self.font)
+            .shortcut_text_formatted(platform, &self.font, self.shortcut_format)
             .map_or(0.0, |text| SHORTCUT_GAP + self.text_width(&text));
         self.label_x + label_w + shortcut_w + self.shortcut_right
     }

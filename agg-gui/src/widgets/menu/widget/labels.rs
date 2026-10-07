@@ -18,6 +18,7 @@ use crate::widgets::label::{Label, LabelAlign};
 use super::super::geometry::PopupLayout;
 use super::super::model::MenuEntry;
 use super::super::paint::popup_row_text_color;
+use super::super::style::ShortcutFormat;
 
 /// Per-bar-button `Label` cache.  Keyed by index into the bar's
 /// `menus: Vec<TopMenu>`; rebuilt when the menu list changes
@@ -122,6 +123,7 @@ impl PopupLabels {
         font_size: f64,
         items: &[MenuEntry],
         layouts: &[PopupLayout],
+        shortcut_format: ShortcutFormat,
     ) {
         let font_ptr = Arc::as_ptr(font);
         let font_changed =
@@ -153,9 +155,10 @@ impl PopupLabels {
                     level[row_idx] = None;
                     continue;
                 };
-                // Platform-formatted (`⌘X` on a Mac, `Ctrl+X` elsewhere),
-                // never the raw declaration string.
-                let shortcut_text = item.shortcut_text_for_font(platform, font);
+                // Formatted per the popup's `ShortcutFormat` (by default
+                // `⌘X` on a Mac, `Ctrl+X` elsewhere), never the raw
+                // declaration string of a parsed shortcut.
+                let shortcut_text = item.shortcut_text_formatted(platform, font, shortcut_format);
                 match &mut level[row_idx] {
                     Some(existing) => {
                         if existing.label.text_str() != item.label {
