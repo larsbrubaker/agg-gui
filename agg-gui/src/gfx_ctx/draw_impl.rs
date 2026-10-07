@@ -673,14 +673,43 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         dst_w: f64,
         dst_h: f64,
     ) {
-        // Scale the source image into a temporary Framebuffer at dst size,
-        // then composite it onto the current render target using the CTM origin.
-        if img_w == 0 || img_h == 0 || dst_w < 1.0 || dst_h < 1.0 {
+        // Map the logical destination rect through the CTM to its on-screen
+        // (device-pixel) footprint, resample the source image to exactly that
+        // size, then composite it at the transformed origin.  `dst_w`/`dst_h`
+        // are LOGICAL units: under a HiDPI `scale(2, 2)` a backbuffered widget
+        // hands over a bitmap rasterised at 2x with a logical dst rect, and the
+        // blit must land texel-for-pixel.  Resampling to the bare logical size
+        // (as this used to) shrank every CPU backbuffer — Labels, TextFields —
+        // to 1x ink size under a scaled CTM.  Axis-aligned transforms (the
+        // HiDPI / ux-zoom case) map exactly, including mirroring; for rotated
+        // or skewed CTMs the image keeps its transformed origin and is sized
+        // by the CTM's scale magnitudes (the software blit is axis-aligned).
+        if img_w == 0 || img_h == 0 {
             return;
         }
-
-        let out_w = dst_w.round() as u32;
-        let out_h = dst_h.round() as u32;
+        let t = self.transform();
+        let axis_aligned = t.shx.abs() < 1e-9 && t.shy.abs() < 1e-9;
+        let (x_a, x_b, y_a, y_b, flip_x, flip_y) = if axis_aligned {
+            let x_a = dst_x * t.sx + t.tx;
+            let x_b = (dst_x + dst_w) * t.sx + t.tx;
+            let y_a = dst_y * t.sy + t.ty;
+            let y_b = (dst_y + dst_h) * t.sy + t.ty;
+            (x_a, x_b, y_a, y_b, x_b < x_a, y_b < y_a)
+        } else {
+            let (sx, sy) = t.scaling_abs();
+            let ox = dst_x * t.sx + dst_y * t.shx + t.tx;
+            let oy = dst_x * t.shy + dst_y * t.sy + t.ty;
+            (ox, ox + dst_w * sx, oy, oy + dst_h * sy, false, false)
+        };
+        let (left, right) = (x_a.min(x_b), x_a.max(x_b));
+        let (bottom, top) = (y_a.min(y_b), y_a.max(y_b));
+        let out_w = (right - left).round();
+        let out_h = (top - bottom).round();
+        if out_w < 1.0 || out_h < 1.0 {
+            return;
+        }
+        let out_w = out_w as u32;
+        let out_h = out_h as u32;
         let mut scaled = crate::framebuffer::Framebuffer::new(out_w, out_h);
 
         // Nearest-neighbour scale — sufficient for README screenshots / badges.
@@ -691,9 +720,14 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         let px = scaled.pixels_mut();
         for dy in 0..out_h {
             for dx in 0..out_w {
-                let sx = (dx as f64 / out_w as f64 * img_w as f64) as u32;
+                // Sample at the destination pixel centre (exact at 1:1).
+                let fx = (dx as f64 + 0.5) / out_w as f64;
+                let fx = if flip_x { 1.0 - fx } else { fx };
+                let sx = (fx * img_w as f64).floor().clamp(0.0, (img_w - 1) as f64) as u32;
                 // Image is top-row-first; Y-up dst means we flip sy.
-                let sy_img = ((1.0 - (dy as f64 + 0.5) / out_h as f64) * img_h as f64)
+                let fy = (dy as f64 + 0.5) / out_h as f64;
+                let fy = if flip_y { 1.0 - fy } else { fy };
+                let sy_img = ((1.0 - fy) * img_h as f64)
                     .floor()
                     .clamp(0.0, (img_h - 1) as f64) as u32;
                 let si = ((sy_img * img_w + sx) * 4) as usize;
@@ -716,13 +750,9 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
             }
         }
 
-        // Apply CTM translation to get screen-space origin.
-        let (tx, ty) = {
-            let t = self.transform();
-            (t.tx, t.ty)
-        };
-        let screen_x = (tx + dst_x).round() as i32;
-        let screen_y = (ty + dst_y).round() as i32;
+        // Screen-space (device-pixel) origin of the transformed dst rect.
+        let screen_x = left.round() as i32;
+        let screen_y = bottom.round() as i32;
         // Honor the active `global_alpha` so backbuffered widgets (Labels,
         // buttons) inside a faded subtree fade uniformly with the rest of the
         // group — without this the blit composited at full opacity regardless
