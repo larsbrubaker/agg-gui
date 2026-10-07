@@ -294,7 +294,7 @@ impl TextArea {
             children: Vec::new(),
             base: WidgetBase::new(),
             font,
-            font_size: 13.0,
+            font_size: crate::font_settings::default_font_size_or(13.0),
             padding: 8.0,
             hint: "Type here…".to_string(),
             content_h_align: TextHAlign::Left,

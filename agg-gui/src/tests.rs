@@ -79,6 +79,7 @@ mod rich_toolbar_color_overlay;
 mod scene_focus;
 mod scroll_view;
 mod stack_aligned;
+mod text_defaults;
 mod text_field_select_all;
 mod tooltip_window_hover;
 mod touch_scroll;

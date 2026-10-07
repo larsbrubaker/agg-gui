@@ -62,7 +62,7 @@ impl TabView {
             active_tab: 0,
             tab_bar_height: 36.0,
             font,
-            font_size: 13.0,
+            font_size: crate::font_settings::default_font_size_or(13.0),
             hovered_tab: None,
             action_label: None,
             action_hovered: false,

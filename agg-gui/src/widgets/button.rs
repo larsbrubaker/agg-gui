@@ -110,7 +110,7 @@ impl Button {
     /// Create a button with the given label.
     pub fn new(label: impl Into<String>, font: Arc<Font>) -> Self {
         let label_text: String = label.into();
-        let font_size = 14.0;
+        let font_size = crate::font_settings::default_font_size_or(14.0);
         let theme = ButtonTheme::default();
         let child = Self::build_label(&label_text, &font, font_size, &theme);
         Self {

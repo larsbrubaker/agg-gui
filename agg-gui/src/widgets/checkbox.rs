@@ -69,7 +69,7 @@ pub struct Checkbox {
 impl Checkbox {
     pub fn new(label: impl Into<String>, font: Arc<Font>, checked: bool) -> Self {
         let label_text: String = label.into();
-        let font_size = 14.0;
+        let font_size = crate::font_settings::default_font_size_or(14.0);
         let label_widget = Label::new(&label_text, Arc::clone(&font)).with_font_size(font_size);
         Self {
             bounds: Rect::default(),

@@ -121,7 +121,7 @@ impl TreeView {
             row_height: 24.0,
             indent_width: 16.0,
             font,
-            font_size: 13.0,
+            font_size: crate::font_settings::default_font_size_or(13.0),
             drag_enabled: false,
             toggle_on_row_click: false,
             hover_repaint: true,

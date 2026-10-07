@@ -135,6 +135,9 @@ pub struct Label {
     /// `Widget::lcd_preference`; Label is the only widget that reads it
     /// today.
     lcd_pref: Option<bool>,
+    /// Per-instance line box; `None` follows
+    /// [`font_settings::current_line_box`](crate::font_settings::current_line_box).
+    line_box: Option<crate::font_settings::LineBox>,
 
     // ── Layout measurement cache ──────────────────────────────────────────────
     /// Cached text advance width from last `measure_advance()` call.
@@ -163,7 +166,7 @@ impl Label {
             base: WidgetBase::new(),
             text: text.into(),
             font,
-            font_size: 14.0,
+            font_size: crate::font_settings::default_font_size_or(14.0),
             color: None, // resolved from ctx.visuals() at paint time
             dim: false,
             strong: false,
@@ -187,6 +190,7 @@ impl Label {
             wrap: false,
             ignore_system_font: false,
             lcd_pref: None,
+            line_box: None,
             layout_text: String::new(),
             layout_font_size: 0.0,
             layout_width: 0.0,
@@ -226,6 +230,12 @@ impl Label {
     /// dark/light theme switches.
     pub fn with_strong(mut self, strong: bool) -> Self {
         self.strong = strong;
+        self
+    }
+    /// Pin this label's line box, ignoring the app-wide
+    /// [`font_settings::set_line_box`](crate::font_settings::set_line_box).
+    pub fn with_line_box(mut self, line_box: crate::font_settings::LineBox) -> Self {
+        self.line_box = Some(line_box);
         self
     }
     pub fn with_align(mut self, align: LabelAlign) -> Self {
@@ -311,6 +321,20 @@ impl Label {
             self.font_size
         } else {
             self.font_size * crate::font_settings::current_font_size_scale()
+        }
+    }
+
+    /// Height of one line at `size`: 1.5 em for [`LineBox::Standard`], one em
+    /// for [`LineBox::Em`] (agg-sharp's `TextWidget`, whose box is the font
+    /// size tall with the text centred on its ascent/descent span).
+    ///
+    /// [`LineBox::Standard`]: crate::font_settings::LineBox::Standard
+    /// [`LineBox::Em`]: crate::font_settings::LineBox::Em
+    fn line_height(&self, size: f64) -> f64 {
+        use crate::font_settings::{current_line_box, LineBox};
+        match self.line_box.unwrap_or_else(current_line_box) {
+            LineBox::Standard => size * 1.5,
+            LineBox::Em => size,
         }
     }
 
@@ -452,7 +476,7 @@ impl Widget for Label {
         // system scale is mid-transition.
         let font = self.active_font();
         let size = self.active_font_size();
-        let line_h = size * 1.5;
+        let line_h = self.line_height(size);
 
         // Drop the pre-rasterized bitmap the moment we notice a font or size
         // swap — unconditionally, before any other branching.  Without this
@@ -545,7 +569,7 @@ impl Widget for Label {
         // lives here.  Label is just a widget that draws text.
         ctx.set_fill_color(color);
         if is_wrapped {
-            let line_h = size * 1.5;
+            let line_h = self.line_height(size);
             let total_h = self.wrapped_lines.len() as f64 * line_h;
             for (i, line) in self.wrapped_lines.iter().enumerate() {
                 if line.is_empty() {
@@ -603,7 +627,7 @@ impl Widget for Label {
         // to compute a content-bound for height.
         let font = self.active_font();
         let size = self.active_font_size();
-        let line_h = size * 1.5;
+        let line_h = self.line_height(size);
         if self.wrap && available_w > 0.0 {
             let lines = wrap_text(&font, &self.text, size, available_w);
             (lines.len().max(1) as f64) * line_h

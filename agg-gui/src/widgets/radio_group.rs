@@ -66,7 +66,7 @@ pub struct RadioGroup {
 
 impl RadioGroup {
     pub fn new(options: Vec<impl Into<String>>, selected: usize, font: Arc<Font>) -> Self {
-        let font_size = 14.0;
+        let font_size = crate::font_settings::default_font_size_or(14.0);
         let opts: Vec<String> = options.into_iter().map(|s| s.into()).collect();
         let children: Vec<Box<dyn Widget>> = opts
             .iter()

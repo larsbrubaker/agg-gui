@@ -138,6 +138,9 @@ pub struct TextField {
     pub placeholder: String,
 
     // Layout
+    /// Inset of the text from the left and right edges; with
+    /// [`LineBox::Em`](crate::font_settings::LineBox::Em) also above and
+    /// below the one-em text line.
     pub padding: f64,
 
     // Callbacks
@@ -182,6 +185,9 @@ pub struct TextField {
     /// [`with_context_menu(false)`](Self::with_context_menu).
     context_menu: TextContextMenu,
     context_menu_enabled: bool,
+    /// Per-instance line box; `None` follows
+    /// [`font_settings::current_line_box`](crate::font_settings::current_line_box).
+    pub(super) line_box: Option<crate::font_settings::LineBox>,
 }
 
 impl TextField {
@@ -195,7 +201,7 @@ impl TextField {
             pending_insert: None,
             text_on_focus: String::new(),
             font,
-            font_size: 14.0,
+            font_size: crate::font_settings::default_font_size_or(14.0),
             read_only: false,
             select_all_on_focus: false,
             password_mode: false,
@@ -228,6 +234,7 @@ impl TextField {
             last_sig: None,
             context_menu: TextContextMenu::new(),
             context_menu_enabled: true,
+            line_box: None,
         }
     }
 

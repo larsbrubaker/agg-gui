@@ -41,7 +41,7 @@ impl Hyperlink {
             base: WidgetBase::new(),
             text: text.into(),
             font,
-            font_size: 14.0,
+            font_size: crate::font_settings::default_font_size_or(14.0),
             hovered: false,
             on_click: None,
             cache: crate::widget::BackbufferCache::default(),

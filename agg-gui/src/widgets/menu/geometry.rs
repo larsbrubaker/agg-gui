@@ -66,7 +66,7 @@ pub fn effective_metrics() -> MenuMetrics {
         bar_h: BAR_H,
         vertical_row_h: VERTICAL_ROW_H,
         menu_w: MENU_W,
-        default_font_size: DEFAULT_FONT_SIZE,
+        default_font_size: crate::font_settings::default_font_size_or(DEFAULT_FONT_SIZE),
     };
     if !crate::input_profile::touch_ui_active() {
         return base;
@@ -87,7 +87,7 @@ pub fn effective_metrics() -> MenuMetrics {
         bar_h,
         vertical_row_h,
         menu_w: MENU_W * grow,
-        default_font_size: DEFAULT_FONT_SIZE * grow,
+        default_font_size: base.default_font_size * grow,
     }
 }
 

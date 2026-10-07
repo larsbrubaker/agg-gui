@@ -141,7 +141,7 @@ impl DragValue {
             decimals: 2,
             suffix: String::new(),
             font,
-            font_size: 13.0,
+            font_size: crate::font_settings::default_font_size_or(13.0),
             dragging: false,
             mouse_pressed: false,
             press_x: 0.0,

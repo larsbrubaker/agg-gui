@@ -155,7 +155,7 @@ impl Widget for TextField {
             self.last_sig = Some(sig);
             self.cache.invalidate();
         }
-        Size::new(available.width, (self.font_size * 2.4).max(28.0))
+        Size::new(available.width, self.natural_height())
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {

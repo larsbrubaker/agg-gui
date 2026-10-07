@@ -17,7 +17,7 @@
 //! — analogous to how a `ScrollView` takes the global scroll style unless
 //! the caller wired an explicit one.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -160,6 +160,86 @@ pub fn current_font_size_scale() -> f64 {
 pub fn set_font_size_scale(scale: f64) {
     let clamped = scale.clamp(0.5, 3.0);
     FONT_SIZE_SCALE.with(|c| *c.borrow_mut() = clamped);
+    bump_typography_epoch();
+}
+
+// ---------------------------------------------------------------------------
+// App-wide default font size
+// ---------------------------------------------------------------------------
+//
+// Widgets that ship a hard-coded default size (`Label`/`Button`/`TextField`
+// 14 px, `TreeView`/`ComboBox` 13 px, the menu bar 14 px, ...) take this
+// override instead when it is set.  agg-sharp gives every text widget the
+// same default point size, so an app that wants to look like it sets one
+// value here rather than calling `with_font_size` on every widget.
+//
+// Read when the widget is **constructed** (menus read it per layout through
+// `effective_metrics`): set it before building the widget tree.  An explicit
+// `with_font_size` / `set_font_size` still wins, and the System window's
+// [`current_font_size_scale`] multiplier still applies on top.
+
+thread_local! {
+    /// `None` = every widget keeps its own built-in default.
+    static DEFAULT_FONT_SIZE: Cell<Option<f64>> = const { Cell::new(None) };
+}
+
+/// The app-wide default font size in logical px, if one was set with
+/// [`set_default_font_size`].
+pub fn default_font_size() -> Option<f64> {
+    DEFAULT_FONT_SIZE.with(|c| c.get())
+}
+
+/// The size a widget whose built-in default is `builtin` should start at:
+/// the app-wide default when set, otherwise `builtin` unchanged.
+pub fn default_font_size_or(builtin: f64) -> f64 {
+    default_font_size().unwrap_or(builtin)
+}
+
+/// Make `px` the starting size of every text widget built afterwards on this
+/// thread.  Non-finite or non-positive values are ignored.
+pub fn set_default_font_size(px: f64) {
+    if px.is_finite() && px > 0.0 {
+        DEFAULT_FONT_SIZE.with(|c| c.set(Some(px)));
+        bump_typography_epoch();
+    }
+}
+
+/// Return every widget to its own built-in default size.
+pub fn clear_default_font_size() {
+    DEFAULT_FONT_SIZE.with(|c| c.set(None));
+    bump_typography_epoch();
+}
+
+// ---------------------------------------------------------------------------
+// Line box
+// ---------------------------------------------------------------------------
+
+/// How tall a single line of text lays out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LineBox {
+    /// Each widget's own line height (`Label`: 1.5 em per line; `TextField`:
+    /// 2.4 em, at least 28 px).
+    #[default]
+    Standard,
+    /// One em per line, text centred on its ascent/descent span, as
+    /// agg-sharp's `TextWidget` (its height is the font size) and
+    /// `TextEditWidget` (one em of content plus its padding on every side).
+    Em,
+}
+
+thread_local! {
+    static LINE_BOX: Cell<LineBox> = const { Cell::new(LineBox::Standard) };
+}
+
+/// The app-wide line box used by widgets with no per-widget override.
+/// Read at layout time.
+pub fn current_line_box() -> LineBox {
+    LINE_BOX.with(|c| c.get())
+}
+
+/// Set the app-wide line box (see [`LineBox`]).
+pub fn set_line_box(line_box: LineBox) {
+    LINE_BOX.with(|c| c.set(line_box));
     bump_typography_epoch();
 }
 
@@ -421,6 +501,36 @@ mod tests {
         assert_eq!(snap_baseline_y(12.25), 12.25);
 
         set_hinting_enabled(false);
+    }
+
+    #[test]
+    fn test_default_font_size_unset_keeps_builtin() {
+        clear_default_font_size();
+        assert_eq!(default_font_size(), None);
+        assert_eq!(default_font_size_or(14.0), 14.0);
+        assert_eq!(default_font_size_or(13.0), 13.0);
+    }
+
+    #[test]
+    fn test_default_font_size_override_and_clear() {
+        set_default_font_size(16.0);
+        assert_eq!(default_font_size(), Some(16.0));
+        assert_eq!(default_font_size_or(13.0), 16.0);
+        // Garbage is ignored, not stored.
+        set_default_font_size(0.0);
+        set_default_font_size(f64::NAN);
+        assert_eq!(default_font_size(), Some(16.0));
+        clear_default_font_size();
+        assert_eq!(default_font_size_or(13.0), 13.0);
+    }
+
+    #[test]
+    fn test_line_box_default_standard() {
+        assert_eq!(LineBox::default(), LineBox::Standard);
+        set_line_box(LineBox::Em);
+        assert_eq!(current_line_box(), LineBox::Em);
+        set_line_box(LineBox::Standard);
+        assert_eq!(current_line_box(), LineBox::Standard);
     }
 
     #[test]
