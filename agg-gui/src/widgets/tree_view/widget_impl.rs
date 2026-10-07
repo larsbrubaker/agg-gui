@@ -140,7 +140,8 @@ impl Widget for TreeView {
                 font_size,
                 ind,
                 rh,
-            );
+            )
+            .with_icon_image(node.icon_image.clone());
 
             tree_row.layout(Size::new(w, rh));
             tree_row.set_bounds(Rect::new(0.0, y_bot, w, rh));

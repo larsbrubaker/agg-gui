@@ -208,6 +208,8 @@ mod tests_bar_children;
 #[cfg(test)]
 mod tests_fit;
 #[cfg(test)]
+mod tests_image_icon;
+#[cfg(test)]
 mod tests_rows;
 #[cfg(test)]
 mod tests_tooltip;

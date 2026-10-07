@@ -1,8 +1,9 @@
 //! Async remote image loading for `MarkdownView`.
 //!
 //! The markdown widget keeps rendering lightweight placeholders while this
-//! module fetches and decodes HTTP(S) images. Native and WASM are both handled
-//! by `ehttp`, which calls the completion callback when bytes are available.
+//! module fetches and decodes HTTP(S) images. Fetching goes through
+//! [`crate::http_fetch::fetch_bytes`] (pure-Rust TLS on native, the browser's
+//! fetch on wasm), which calls the completion callback when bytes arrive.
 
 use std::sync::{Arc, Mutex};
 
@@ -11,12 +12,12 @@ use crate::framebuffer::unpremultiply_rgba_inplace;
 use super::{ImagePixels, ImageState};
 
 pub(super) fn load_remote_image(url: String, state: Arc<Mutex<ImageState>>) {
-    ehttp::fetch(ehttp::Request::get(url), move |result| {
+    crate::http_fetch::fetch_bytes(url, move |result| {
         let next = match result {
-            Ok(response) if response.ok => decode_image(&response.bytes)
+            Ok(bytes) => decode_image(&bytes)
                 .map(|image| ImageState::Ready { image, seen: false })
                 .unwrap_or(ImageState::Failed),
-            _ => ImageState::Failed,
+            Err(_) => ImageState::Failed,
         };
 
         if let Ok(mut state) = state.lock() {

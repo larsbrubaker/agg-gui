@@ -10,6 +10,7 @@
 
 use crate::color::Color;
 use crate::event::{Key, Modifiers};
+use crate::icon_image::IconImage;
 use crate::platform;
 
 #[derive(Clone, Debug)]
@@ -22,6 +23,12 @@ pub enum MenuEntry {
 pub struct MenuItem {
     pub label: String,
     pub icon: Option<char>,
+    /// Image painted in the icon slot (e.g. an artwork icon ported from
+    /// another app).  When `Some`, takes precedence over the `icon` glyph;
+    /// a `swatch` still wins over both.  Drawn at its logical size,
+    /// rasterised for the current device scale.  Set with
+    /// [`MenuItem::image_icon`].
+    pub icon_image: Option<IconImage>,
     /// Colour swatch painted in the icon slot.  When `Some`, takes
     /// precedence over `icon` and over the check / radio selection
     /// glyph — the popup paints a rounded filled rect in the icon
@@ -74,6 +81,7 @@ impl MenuItem {
         Self {
             label: label.into(),
             icon: None,
+            icon_image: None,
             swatch: None,
             shortcut: None,
             accelerator: None,
@@ -91,6 +99,7 @@ impl MenuItem {
         Self {
             label: label.into(),
             icon: None,
+            icon_image: None,
             swatch: None,
             shortcut: None,
             accelerator: None,
@@ -110,6 +119,7 @@ impl MenuItem {
         Self {
             label: String::new(),
             icon: None,
+            icon_image: None,
             swatch: None,
             shortcut: None,
             accelerator: None,
@@ -154,6 +164,19 @@ impl MenuItem {
     pub fn icon(mut self, icon: char) -> Self {
         self.icon = Some(icon);
         self
+    }
+
+    /// Paint `image` in the icon slot instead of a glyph.  See
+    /// [`MenuItem::icon_image`].
+    pub fn image_icon(mut self, image: IconImage) -> Self {
+        self.icon_image = Some(image);
+        self
+    }
+
+    /// True when the row shows something in its leading icon slot
+    /// (glyph, image or swatch).
+    pub fn has_leading_icon(&self) -> bool {
+        self.swatch.is_some() || self.icon_image.is_some() || self.icon.is_some()
     }
 
     /// Paint a colour swatch in the icon slot instead of a glyph.  See

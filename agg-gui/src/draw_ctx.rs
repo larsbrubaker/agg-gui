@@ -508,6 +508,20 @@ pub trait DrawCtx {
     /// in row-major order, **top-row first** (Y-down image storage convention).
     /// The image is scaled to fit `(dst_x, dst_y, dst_w, dst_h)`.
     ///
+    /// **Alpha convention: straight (non-premultiplied).**  Every backend
+    /// treats `data` as straight alpha: the software [`crate::GfxCtx`]
+    /// premultiplies each sample before its premultiplied src-over
+    /// composite, and the wgpu textured-quad pipeline blends with
+    /// `SrcAlpha / OneMinusSrcAlpha`.  Render targets themselves
+    /// ([`crate::Framebuffer`], layers) store **premultiplied** RGBA, so a
+    /// buffer rendered by agg-gui goes through
+    /// [`crate::framebuffer::unpremultiply_rgba_inplace`] (after
+    /// [`crate::Framebuffer::pixels_flipped`]) before it is passed here.
+    /// Colour operations defined on straight alpha (tinting, lightness
+    /// inversion) can therefore be applied directly to `data`.  The same
+    /// convention holds for `draw_image_rgba_arc` and
+    /// `draw_image_rgba_corners`.
+    ///
     /// Default implementation: no-op (GL path or software paths that do not
     /// implement blitting can leave this as a placeholder).
     fn draw_image_rgba(

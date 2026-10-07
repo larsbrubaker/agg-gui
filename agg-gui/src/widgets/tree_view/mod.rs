@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use crate::event::{EventResult, Key, Modifiers};
 use crate::geometry::{Point, Rect, Size};
+use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -158,6 +159,7 @@ impl TreeView {
             n.is_expanded.hash(&mut h);
             n.is_selected.hash(&mut h);
             (n.icon as u8).hash(&mut h);
+            n.icon_image.as_ref().map(IconImage::identity).hash(&mut h);
         }
         self.focused.hash(&mut h);
         // Drag state affects which row to skip in the build.
@@ -241,6 +243,15 @@ impl TreeView {
         self.nodes
             .push(TreeNode::new(label, icon, Some(parent_idx), order));
         idx
+    }
+
+    /// Show `image` instead of the procedural icon for the node at `idx`
+    /// (`None` restores the procedural icon).  Out-of-range indices are
+    /// ignored.
+    pub fn set_node_icon_image(&mut self, idx: usize, image: Option<IconImage>) {
+        if let Some(node) = self.nodes.get_mut(idx) {
+            node.icon_image = image;
+        }
     }
 
     /// Expand the node at `idx`.

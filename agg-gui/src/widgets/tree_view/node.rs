@@ -1,6 +1,7 @@
 //! Data types and flat-row engine for `TreeView`.
 
 use crate::geometry::Point;
+use crate::icon_image::IconImage;
 
 // ---------------------------------------------------------------------------
 // Public data types
@@ -10,6 +11,10 @@ use crate::geometry::Point;
 pub struct TreeNode {
     pub label: String,
     pub icon: NodeIcon,
+    /// Image drawn instead of the procedural `icon` when `Some` (set with
+    /// `TreeView::set_node_icon_image`).  `icon` still decides drop
+    /// behaviour (folders and packages accept children).
+    pub icon_image: Option<IconImage>,
     /// Index of the parent node; `None` means root-level.
     pub parent: Option<usize>,
     pub is_expanded: bool,
@@ -28,6 +33,7 @@ impl TreeNode {
         Self {
             label: label.into(),
             icon,
+            icon_image: None,
             parent,
             is_expanded: false,
             is_selected: false,

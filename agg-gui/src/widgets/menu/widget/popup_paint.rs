@@ -24,6 +24,10 @@ use super::super::paint::{
 use super::super::state::PopupMenuState;
 use super::labels::PopupLabels;
 
+/// Opacity of an image icon on a disabled row (glyph icons dim through the
+/// disabled text colour instead).
+const DISABLED_IMAGE_ALPHA: f64 = 0.45;
+
 /// Paint one popup panel: hover backgrounds, separators, icons,
 /// check / radio marks, submenu chevrons, AND each row's text via the
 /// shared `PopupLabels` cache.  Text colour is resolved per-row from
@@ -92,6 +96,20 @@ pub(super) fn paint_popup_level(
                 ctx.rounded_rect(sx - 2.0, sy - 2.0, size + 4.0, size + 4.0, 4.0);
                 ctx.stroke();
             }
+        } else if let Some(image) = &item.icon_image {
+            // Artwork icon: left edge at the glyph column, centred on the
+            // row.  Disabled rows fade it like they fade glyph text.
+            let size = image.size();
+            let ix = row_layout.rect.x + style.icon_x;
+            let iy = row_layout.rect.y + (row_layout.rect.height - size.height) * 0.5;
+            if !item.enabled {
+                ctx.save();
+                ctx.set_global_alpha(DISABLED_IMAGE_ALPHA);
+            }
+            image.draw(ctx, ix, iy);
+            if !item.enabled {
+                ctx.restore();
+            }
         } else if let Some(icon) = item.icon {
             let icon = icon.to_string();
             ctx.fill_text(
@@ -112,7 +130,7 @@ pub(super) fn paint_popup_level(
             MenuSelection::Check { selected: true } | MenuSelection::Radio { selected: true }
         );
         if selected {
-            let has_left_marker = item.swatch.is_some() || item.icon.is_some();
+            let has_left_marker = item.has_leading_icon();
             let cx = if has_left_marker {
                 let right_offset = if item.has_submenu() { 30.0 } else { 12.0 };
                 row_layout.rect.x + row_layout.rect.width - right_offset

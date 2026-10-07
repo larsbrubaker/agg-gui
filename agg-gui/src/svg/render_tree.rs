@@ -7,7 +7,9 @@
 //! are pulled in through `super`.
 //!
 //! Re-entry points exposed back to the parent: [`render_group`] is the
-//! top-level entry the public `render_svg_tree_*` functions call.
+//! top-level entry the public `render_svg_tree_*` functions call.  Groups
+//! with a `mask` are handed to `mask.rs`, which renders them offscreen and
+//! re-enters through [`render_group`] / [`render_children`].
 
 use crate::draw_ctx::DrawCtx;
 use crate::framebuffer::unpremultiply_rgba_inplace;
@@ -32,6 +34,10 @@ pub(super) fn render_group(
         return Ok(());
     }
 
+    if let Some(mask) = group.mask() {
+        return super::mask::render_masked_group(group, mask, ctx, parent_state);
+    }
+
     let group_opacity = group.opacity().get();
     if group_opacity < 1.0 && parent_state.opacity > 0.0 && ctx.supports_compositing_layers() {
         return render_isolated_group_with_opacity(group, ctx, parent_state, group_opacity);
@@ -41,19 +47,29 @@ pub(super) fn render_group(
         opacity: parent_state.opacity * group_opacity,
         ..parent_state
     };
+    render_children(group, ctx, state)
+}
 
+/// Render `group`'s clip and children with `state`, ignoring the group's own
+/// opacity and mask (callers that isolate the group apply those themselves).
+pub(super) fn render_children(
+    group: &usvg::Group,
+    ctx: &mut dyn DrawCtx,
+    state: SvgRenderState,
+) -> Result<(), SvgRenderError> {
     ctx.save();
     apply_group_clip(ctx, group);
-    for node in group.children() {
-        match node {
-            usvg::Node::Group(group) => render_group(group, ctx, state)?,
-            usvg::Node::Path(path) => render_path(path, ctx, state),
-            usvg::Node::Image(image) => render_image(image, ctx, state)?,
-            usvg::Node::Text(text) => render_text(text, ctx, state)?,
+    let result = group.children().iter().try_for_each(|node| match node {
+        usvg::Node::Group(group) => render_group(group, ctx, state),
+        usvg::Node::Path(path) => {
+            render_path(path, ctx, state);
+            Ok(())
         }
-    }
+        usvg::Node::Image(image) => render_image(image, ctx, state),
+        usvg::Node::Text(text) => render_text(text, ctx, state),
+    });
     ctx.restore();
-    Ok(())
+    result
 }
 
 fn render_isolated_group_with_opacity(
@@ -77,17 +93,7 @@ fn render_isolated_group_with_opacity(
         opacity: 1.0,
         ..parent_state
     };
-    ctx.save();
-    apply_group_clip(ctx, group);
-    for node in group.children() {
-        match node {
-            usvg::Node::Group(group) => render_group(group, ctx, state)?,
-            usvg::Node::Path(path) => render_path(path, ctx, state),
-            usvg::Node::Image(image) => render_image(image, ctx, state)?,
-            usvg::Node::Text(text) => render_text(text, ctx, state)?,
-        }
-    }
-    ctx.restore();
+    render_children(group, ctx, state)?;
     ctx.pop_layer();
     ctx.restore();
     Ok(())

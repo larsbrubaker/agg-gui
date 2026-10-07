@@ -6,6 +6,11 @@
 // 800-line cap.
 #[path = "button_events.rs"]
 mod events;
+// Leading icon (glyph or image): builders, measuring and painting.
+#[path = "button_icon.rs"]
+mod icon;
+
+pub use icon::ButtonIcon;
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,23 +19,11 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
+use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::{measure_advance, Font};
+use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::label::{Label, LabelAlign};
-
-/// Icon glyph drawn at the leading edge of a [`Button`]'s label.
-/// The glyph is rendered with a separate font so callers can pair
-/// e.g. a Font Awesome glyph with a Latin-only text font.
-#[derive(Clone)]
-pub struct ButtonIcon {
-    pub glyph: char,
-    pub font: Arc<Font>,
-    pub font_size: f64,
-}
-
-/// Spacing between the icon glyph and the label text, in pixels.
-const ICON_GAP: f64 = 8.0;
 
 /// Default horizontal padding used to inset a left- or right-aligned label
 /// from the button edge.  Center-aligned labels ignore this and centre
@@ -98,6 +91,9 @@ pub struct Button {
     /// Optional icon glyph painted at the leading edge of the label.
     /// See [`with_icon`](Self::with_icon).
     icon: Option<ButtonIcon>,
+    /// Optional image icon; takes precedence over `icon`.
+    /// See [`with_image_icon`](Self::with_image_icon).
+    icon_image: Option<IconImage>,
 
     /// When true, drop the 48 px touch-target width floor and shrink
     /// the horizontal padding. Right for icon-only toolbar buttons
@@ -134,6 +130,7 @@ impl Button {
             label_align: LabelAlign::Center,
             label_pad_h: LEFT_LABEL_PAD,
             icon: None,
+            icon_image: None,
             compact: false,
             hovered: false,
             pressed: false,
@@ -243,37 +240,6 @@ impl Button {
         self
     }
 
-    /// Paint an icon glyph at the leading edge of the label.
-    /// `icon_font` carries the glyph (e.g. a Font Awesome face);
-    /// the label text continues to render in the button's main
-    /// font, so callers can pair a Latin text font with an
-    /// icon-only font without merging them.
-    ///
-    /// Defaults `font_size` to the button's current `font_size`.
-    /// Use [`with_icon_sized`](Self::with_icon_sized) to scale the
-    /// icon independently.
-    pub fn with_icon(mut self, glyph: char, icon_font: Arc<Font>) -> Self {
-        let font_size = self.font_size;
-        self.icon = Some(ButtonIcon {
-            glyph,
-            font: icon_font,
-            font_size,
-        });
-        self
-    }
-
-    /// Like [`with_icon`](Self::with_icon) but with an explicit
-    /// icon font size — useful when the icon font's glyphs read
-    /// larger or smaller than the text at the same point size.
-    pub fn with_icon_sized(mut self, glyph: char, icon_font: Arc<Font>, font_size: f64) -> Self {
-        self.icon = Some(ButtonIcon {
-            glyph,
-            font: icon_font,
-            font_size,
-        });
-        self
-    }
-
     /// Use a transparent inactive background + faint text-coloured
     /// hover/pressed overlay instead of the muted `widget_bg` fill.
     /// Implies [`with_subtle`] (theme text colour, accent on active).
@@ -322,18 +288,6 @@ impl Button {
         self.active_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
 
-    /// Spacing reserved between the leading icon glyph and the label.
-    /// Collapses to zero for icon-only buttons (empty label) so the glyph
-    /// centres in the button instead of being shoved left by a gap that
-    /// precedes no text.
-    fn icon_gap(&self) -> f64 {
-        if self.label_text.is_empty() {
-            0.0
-        } else {
-            ICON_GAP
-        }
-    }
-
     pub fn with_margin(mut self, m: Insets) -> Self {
         self.base.margin = m;
         self
@@ -364,11 +318,7 @@ impl Button {
     fn position_label(&mut self, size: Size, label_size: Size) {
         // Width contributed by the leading icon glyph (icon advance
         // + spacing gap). Zero when no icon is configured.
-        let icon_block_w = self
-            .icon
-            .as_ref()
-            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap())
-            .unwrap_or(0.0);
+        let icon_block_w = self.icon_block_w();
         // The (icon + gap + label) group is positioned as a unit;
         // align uses the COMBINED width so the icon stays directly
         // left of the label for any alignment mode.
@@ -426,43 +376,6 @@ impl Button {
                 .with_color(color)
                 .with_align(LabelAlign::Center),
         )
-    }
-
-    /// Render the configured icon glyph centred vertically in the
-    /// button using the glyph's *actual* outline bounding box — not
-    /// the font's worst-case ascender/descender. Icon fonts (Font
-    /// Awesome especially) place each glyph in a sub-rectangle of
-    /// the design space; centring by the font metric leaves the glyph
-    /// visibly high on the button (the "icons floating to the top"
-    /// regression we've hit repeatedly). With the per-glyph bbox we
-    /// solve for the baseline that puts the glyph's vertical midpoint
-    /// at `button_h / 2`.
-    fn paint_icon(
-        ctx: &mut dyn DrawCtx,
-        icon: &Option<ButtonIcon>,
-        _label_font: &Arc<Font>,
-        _label_font_size: f64,
-        x: f64,
-        button_h: f64,
-        color: Color,
-    ) {
-        let Some(icon) = icon else { return };
-        // (y_min, y_max) is the glyph's actual extent in pixels
-        // relative to baseline, Y-up. y_min is usually negative
-        // (descender region) or ~0, y_max is the cap-height of the
-        // glyph. Pick the baseline so that
-        //   baseline + (y_min + y_max) / 2  ==  button_h / 2
-        // i.e. the glyph's midpoint sits at the button's midpoint.
-        // Fall back to the font metric only if the glyph has no
-        // outline (e.g. a space or a missing glyph).
-        let baseline_y = match icon.font.glyph_visual_bounds(icon.glyph, icon.font_size) {
-            Some((y_min, y_max)) => (button_h * 0.5 - (y_min + y_max) * 0.5).max(0.0),
-            None => ((button_h - icon.font_size) * 0.5).max(0.0),
-        };
-        ctx.set_font(Arc::clone(&icon.font));
-        ctx.set_font_size(icon.font_size);
-        ctx.set_fill_color(color);
-        ctx.fill_text(&icon.glyph.to_string(), x, baseline_y);
     }
 }
 
@@ -540,11 +453,7 @@ impl Widget for Button {
             self.font_size * 1.2
         };
         let label_size = self.children[0].layout(Size::new(available.width, height));
-        let icon_block_w = self
-            .icon
-            .as_ref()
-            .map(|i| measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap())
-            .unwrap_or(0.0);
+        let icon_block_w = self.icon_block_w();
         let min_w = if self.compact { 0.0 } else { 48.0 };
         let natural_w = (label_size.width + icon_block_w + pad_h)
             .max(min_w)
@@ -705,13 +614,7 @@ impl Widget for Button {
 
             let font = crate::font_settings::current_system_font()
                 .unwrap_or_else(|| Arc::clone(&self.font));
-            let icon_block_w = self
-                .icon
-                .as_ref()
-                .map(|i| {
-                    measure_advance(&i.font, &i.glyph.to_string(), i.font_size) + self.icon_gap()
-                })
-                .unwrap_or(0.0);
+            let icon_block_w = self.icon_block_w();
             ctx.set_font(font);
             ctx.set_font_size(self.font_size * crate::font_settings::current_font_size_scale());
             ctx.set_fill_color(disabled_text);
@@ -721,22 +624,14 @@ impl Widget for Button {
                 let tx = group_x + icon_block_w;
                 let ty = m.centered_baseline_y(h).max(0.0);
                 ctx.fill_text(&self.label_text, tx, ty);
-                Self::paint_icon(
-                    ctx,
-                    &self.icon,
-                    &self.font,
-                    self.font_size,
-                    group_x,
-                    h,
-                    disabled_text,
-                );
+                self.paint_leading_icon(ctx, group_x, h, disabled_text, false);
             }
             return;
         }
 
         // Enabled state — only paint the icon (label has already been
         // drawn by the framework via the child Label's paint).
-        if let Some(icon) = self.icon.clone() {
+        if self.icon.is_some() || self.icon_image.is_some() {
             let active = self.is_active();
             let muted = self.subtle && !active;
             let label_color = if muted {
@@ -749,18 +644,8 @@ impl Widget for Button {
                 .first()
                 .map(|c| c.bounds().x)
                 .unwrap_or_default();
-            let icon_block_w = measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size)
-                + self.icon_gap();
-            let group_x = (label_x - icon_block_w).max(0.0);
-            Self::paint_icon(
-                ctx,
-                &Some(icon),
-                &self.font,
-                self.font_size,
-                group_x,
-                h,
-                label_color,
-            );
+            let group_x = (label_x - self.icon_block_w()).max(0.0);
+            self.paint_leading_icon(ctx, group_x, h, label_color, true);
         }
     }
 

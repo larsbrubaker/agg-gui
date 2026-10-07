@@ -638,6 +638,9 @@ mod opacity_tests;
 mod text_tests;
 
 mod font_defaults;
+mod mask;
+#[cfg(test)]
+mod mask_tests;
 mod paint;
 mod pattern;
 mod render_tree;

@@ -10,6 +10,7 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
+use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
@@ -156,11 +157,14 @@ impl Widget for ExpandToggle {
 // NodeIconWidget
 // ---------------------------------------------------------------------------
 
-/// Draws the coloured icon glyph for a node.
-/// Width is `ICON_W + ICON_GAP`; height fills the row.
+/// Draws the coloured icon glyph for a node, or its image icon when one is
+/// set ([`NodeIconWidget::with_image`]).
+/// Width is `ICON_W + ICON_GAP` (wider for a wider image); height fills the row.
 pub struct NodeIconWidget {
     bounds: Rect,
     pub icon: NodeIcon,
+    /// Image drawn instead of the procedural `icon` when `Some`.
+    pub image: Option<IconImage>,
     children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
 }
@@ -170,9 +174,17 @@ impl NodeIconWidget {
         Self {
             bounds: Rect::default(),
             icon,
+            image: None,
             children: Vec::new(),
             base: WidgetBase::new(),
         }
+    }
+
+    /// Draw `image` (at its logical size, device-resolution raster) instead
+    /// of the procedural icon.  `None` keeps the procedural icon.
+    pub fn with_image(mut self, image: Option<IconImage>) -> Self {
+        self.image = image;
+        self
     }
 }
 
@@ -216,13 +228,21 @@ impl Widget for NodeIconWidget {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        Size::new(ICON_W + ICON_GAP, available.height)
+        let icon_w = self
+            .image
+            .as_ref()
+            .map_or(ICON_W, |image| image.size().width.max(ICON_W));
+        Size::new(icon_w + ICON_GAP, available.height)
     }
 
     // The framework has already translated `ctx` to this widget's bottom-left origin.
     // All drawing coordinates are widget-local (0,0 = bottom-left of this widget).
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let h = self.bounds.height;
+        if let Some(image) = &self.image {
+            image.draw(ctx, 0.0, (h - image.size().height) * 0.5);
+            return;
+        }
         let iy = (h - ICON_W) * 0.5;
 
         ctx.set_fill_color(icon_color(self.icon));
@@ -261,6 +281,9 @@ impl Widget for NodeIconWidget {
 pub struct TreeRow {
     bounds: Rect,
     pub node_idx: usize,
+    /// The node's procedural icon, kept so [`TreeRow::with_icon_image`] can
+    /// rebuild the icon cell.
+    icon: NodeIcon,
     /// Bounds of the `ExpandToggle` in row-local coordinates (set in `layout()`).
     /// For leaf nodes (`has_children = false`), this field is `Rect::default()` (all zeros)
     /// and is never read — `TreeView` uses `None` for the corresponding `RowMeta::toggle_rect`.
@@ -297,12 +320,21 @@ impl TreeRow {
         Self {
             bounds: Rect::default(),
             node_idx,
+            icon,
             toggle_local_bounds: Rect::default(),
             is_selected,
             focused,
             children,
             base: WidgetBase::new(),
         }
+    }
+
+    /// Show `image` in the icon cell instead of the procedural icon.
+    pub fn with_icon_image(mut self, image: Option<IconImage>) -> Self {
+        if image.is_some() {
+            self.children[2] = Box::new(NodeIconWidget::new(self.icon).with_image(image));
+        }
+        self
     }
 }
 
