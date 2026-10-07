@@ -101,7 +101,7 @@ fn draw_image_rgba_maps_dst_rect_through_ctm_scale() {
     use crate::DrawCtx;
     // 4x4 opaque red image, logical dst 2x2 at (1, 1); CTM = translate(3, 0)
     // then scale(2) ⇒ device rect x ∈ [5, 9), y ∈ [2, 6).
-    let img = vec![255u8, 0, 0, 255].repeat(16);
+    let img = [255u8, 0, 0, 255].repeat(16);
     let mut fb = Framebuffer::new(16, 16);
     {
         let mut ctx = GfxCtx::new(&mut fb);
