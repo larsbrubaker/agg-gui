@@ -58,6 +58,8 @@ mod vertical_keys;
 mod widget_impl;
 
 #[cfg(test)]
+mod inset_tests;
+#[cfg(test)]
 mod selection_tests;
 
 use crate::widgets::text_context_menu::TextContextMenu;
@@ -142,6 +144,9 @@ pub struct TextField {
     /// [`LineBox::Em`](crate::font_settings::LineBox::Em) also above and
     /// below the one-em text line.
     pub padding: f64,
+    /// Per-side text insets overriding `padding`; see
+    /// [`with_text_insets`](Self::with_text_insets).
+    pub(super) text_insets: Option<crate::layout_props::Insets>,
 
     // Callbacks
     on_change: Option<Box<dyn FnMut(&str)>>,
@@ -219,6 +224,7 @@ impl TextField {
             select_pivot: (0, 0),
             placeholder: String::new(),
             padding: 8.0,
+            text_insets: None,
             on_change: None,
             on_enter: None,
             on_edit_complete: None,

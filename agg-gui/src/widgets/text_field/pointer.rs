@@ -72,7 +72,8 @@ impl TextField {
         if self.bounds.width < 1.0 {
             return;
         }
-        let inner_w = (self.bounds.width - self.padding * 2.0).max(0.0);
+        let ins = self.text_insets();
+        let inner_w = (self.bounds.width - ins.left - ins.right).max(0.0);
         let font = self.active_font();
         let cx = {
             let st = self.edit.borrow();

@@ -155,14 +155,20 @@ impl Widget for TextField {
             self.last_sig = Some(sig);
             self.cache.invalidate();
         }
-        Size::new(available.width, self.natural_height())
+        // Honour this field's own `min_size` floor (a themed field design
+        // height, or a minimum width) without relying on the parent to clamp.
+        let min = self.base.min_size;
+        Size::new(
+            available.width.max(min.width),
+            self.natural_height().max(min.height),
+        )
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
         let r = self.theme.border_radius.unwrap_or(6.0);
-        let pad = self.padding;
+        let ins = self.text_insets();
         let (raw_text, raw_cursor, raw_anchor) = {
             let st = self.edit.borrow();
             (st.text.clone(), st.cursor, st.anchor)
@@ -191,15 +197,15 @@ impl Widget for TextField {
         ctx.fill();
 
         // ── Text area clip ────────────────────────────────────────────────
-        ctx.clip_rect(pad, 0.0, (w - pad * 2.0).max(0.0), h);
+        ctx.clip_rect(ins.left, 0.0, (w - ins.left - ins.right).max(0.0), h);
 
         let font = self.active_font();
         ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
 
         let m = ctx.measure_text("Ag").unwrap_or_default();
-        let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
-        let text_x = pad - self.scroll_x;
+        let baseline_y = self.text_center_y(h) - (m.ascent - m.descent) * 0.5;
+        let text_x = ins.left - self.scroll_x;
 
         // ── Selection highlight ───────────────────────────────────────────
         if cursor != anchor {
@@ -207,8 +213,8 @@ impl Widget for TextField {
             let hi = cursor.max(anchor);
             let lo_x = measure_advance(&font, &text[..lo], self.font_size);
             let hi_x = measure_advance(&font, &text[..hi], self.font_size);
-            let sx = (text_x + lo_x).max(pad);
-            let sw = (text_x + hi_x).min(w - pad) - sx;
+            let sx = (text_x + lo_x).max(ins.left);
+            let sw = (text_x + hi_x).min(w - ins.right) - sx;
             if sw > 0.0 {
                 let hl_bot = baseline_y - m.descent;
                 let hl_h = (m.ascent + m.descent) * 1.2;
@@ -290,14 +296,14 @@ impl Widget for TextField {
         }
 
         let h = self.bounds.height;
-        let pad = self.padding;
+        let ins = self.text_insets();
         let v = ctx.visuals();
 
         let font = self.active_font();
         ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
         let m = ctx.measure_text("Ag").unwrap_or_default();
-        let baseline_y = h * 0.5 - (m.ascent - m.descent) * 0.5;
+        let baseline_y = self.text_center_y(h) - (m.ascent - m.descent) * 0.5;
         let cx = self.caret_x();
         let top = baseline_y + m.ascent;
         let bot = baseline_y - m.descent;
@@ -305,7 +311,12 @@ impl Widget for TextField {
         // Clip to the text area so the cursor can't spill past the
         // padding or the border.
         ctx.save();
-        ctx.clip_rect(pad, 0.0, (self.bounds.width - pad * 2.0).max(0.0), h);
+        ctx.clip_rect(
+            ins.left,
+            0.0,
+            (self.bounds.width - ins.left - ins.right).max(0.0),
+            h,
+        );
         ctx.set_stroke_color(self.theme.cursor_color.unwrap_or(v.accent));
         ctx.set_line_width(1.5);
         ctx.begin_path();
@@ -332,7 +343,7 @@ impl Widget for TextField {
                     crate::cursor::set_cursor_icon(crate::cursor::CursorIcon::Text);
                 }
                 if self.mouse_down && self.focused {
-                    let tx = pos.x - self.padding + self.scroll_x;
+                    let tx = pos.x - self.text_insets().left + self.scroll_x;
                     let text = self.edit.borrow().text.clone();
                     let new_cur = self.click_to_cursor(&text, tx);
                     self.extend_selection_drag(&text, new_cur);
@@ -352,7 +363,7 @@ impl Widget for TextField {
                 modifiers: mods,
             } => {
                 self.mouse_down = true;
-                let tx = pos.x - self.padding + self.scroll_x;
+                let tx = pos.x - self.text_insets().left + self.scroll_x;
                 let text = self.edit.borrow().text.clone();
                 let new_cur = self.click_to_cursor(&text, tx);
 
@@ -500,6 +511,14 @@ impl TextField {
         } else {
             measure_advance(&font, &st.text[..st.cursor], self.font_size)
         };
-        self.padding - self.scroll_x + advance
+        self.text_insets().left - self.scroll_x + advance
+    }
+
+    /// Y (widget-local, Y-up) of the text line's vertical centre: the middle
+    /// of the field, shifted by half the difference of the bottom and top
+    /// insets (exactly `h / 2` when they match, as with plain `padding`).
+    pub(super) fn text_center_y(&self, h: f64) -> f64 {
+        let ins = self.text_insets();
+        h * 0.5 + (ins.bottom - ins.top) * 0.5
     }
 }

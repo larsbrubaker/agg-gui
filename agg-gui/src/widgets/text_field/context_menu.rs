@@ -58,7 +58,7 @@ impl TextField {
     /// the current selection first moves the caret there (standard); a
     /// right-click on an existing selection keeps it.
     pub(super) fn open_context_menu(&mut self, pos: Point) {
-        let tx = pos.x - self.padding + self.scroll_x;
+        let tx = pos.x - self.text_insets().left + self.scroll_x;
         let text = self.edit.borrow().text.clone();
         let click = self.click_to_cursor(&text, tx);
         if !self.selection_contains(click) {
