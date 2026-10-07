@@ -297,6 +297,7 @@ impl ColorPicker {
                 if !self.open {
                     if contains(&r.swatch, *pos) {
                         self.open_panel();
+                        self.place_popup_at_open(*pos);
                         return EventResult::Consumed;
                     }
                     return EventResult::Ignored;
@@ -304,6 +305,7 @@ impl ColorPicker {
                 if contains(&r.hue, *pos) {
                     self.drag = Drag::Hue;
                     self.h = ((pos.x - r.hue.x) / r.hue.width).clamp(0.0, 1.0) as f32;
+                    self.preview_edit();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -311,12 +313,14 @@ impl ColorPicker {
                     self.drag = Drag::Sv;
                     self.s = ((pos.x - r.sv.x) / r.sv.width).clamp(0.0, 1.0) as f32;
                     self.v = ((pos.y - r.sv.y) / r.sv.height).clamp(0.0, 1.0) as f32;
+                    self.preview_edit();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
                 if contains(&r.alpha, *pos) {
                     self.drag = Drag::Alpha;
                     self.a = ((pos.x - r.alpha.x) / r.alpha.width).clamp(0.0, 1.0) as f32;
+                    self.preview_edit();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }
@@ -343,10 +347,7 @@ impl ColorPicker {
                 }
                 // Live-preview: push working colour to the cell so the demo's
                 // preview updates as the user drags.  Cancel restores `saved`.
-                if !self.no_color {
-                    let c = self.sync_color_from_hsva();
-                    self.color_cell.set(c);
-                }
+                self.preview_edit();
                 crate::animation::request_draw();
                 EventResult::Consumed
             }
@@ -381,6 +382,7 @@ impl ColorPicker {
         self.a = saved.a;
         self.no_color = saved.a <= 0.0;
         self.none_cell.set(self.no_color);
+        self.live_dirty.set(false);
         crate::animation::request_draw();
     }
 
@@ -400,10 +402,8 @@ impl ColorPicker {
                 if want {
                     // Preview transparent immediately.
                     self.color_cell.set(Color::transparent());
-                } else {
-                    let c = self.sync_color_from_hsva();
-                    self.color_cell.set(c);
                 }
+                self.preview_edit();
                 crate::animation::request_draw();
             }
         }

@@ -147,6 +147,9 @@ pub struct TextField {
     /// Per-side text insets overriding `padding`; see
     /// [`with_text_insets`](Self::with_text_insets).
     pub(super) text_insets: Option<crate::layout_props::Insets>,
+    /// Shared per-side text insets read at layout and paint; overrides
+    /// `text_insets`.  See [`with_text_insets_cell`](Self::with_text_insets_cell).
+    pub(super) text_insets_cell: Option<Rc<Cell<crate::layout_props::Insets>>>,
 
     // Callbacks
     on_change: Option<Box<dyn FnMut(&str)>>,
@@ -225,6 +228,7 @@ impl TextField {
             placeholder: String::new(),
             padding: 8.0,
             text_insets: None,
+            text_insets_cell: None,
             on_change: None,
             on_enter: None,
             on_edit_complete: None,

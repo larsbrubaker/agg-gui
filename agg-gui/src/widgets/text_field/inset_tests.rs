@@ -5,6 +5,7 @@
 //! exactly as with the uniform `padding`.  Driven through the production
 //! `layout` / `on_event` / `caret_x` paths, no logic copies.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use super::*;
@@ -213,4 +214,52 @@ fn set_text_insets_matching_the_builder_lays_out_identically() {
     set.set_text_insets(insets);
     assert_eq!(built.layout(ROOM), set.layout(ROOM));
     assert_eq!(built.text_center_y(18.0), set.text_center_y(18.0));
+}
+
+#[test]
+fn text_insets_cell_is_read_at_layout_and_changes_the_signature() {
+    let cell = Rc::new(std::cell::Cell::new(Insets {
+        left: 3.0,
+        right: 3.0,
+        top: 3.0,
+        bottom: 3.0,
+    }));
+    let mut f = TextField::new(font())
+        .with_font_size(12.0)
+        .with_line_box(LineBox::Em)
+        .with_text_insets(Insets {
+            left: 99.0,
+            right: 99.0,
+            top: 99.0,
+            bottom: 99.0,
+        })
+        .with_text_insets_cell(Rc::clone(&cell))
+        .with_text("abcd");
+    // The cell overrides the builder insets.
+    assert_eq!(f.layout(ROOM).height, 18.0);
+    let before = f.last_sig.clone();
+
+    // A holder that only has the cell (the field boxed away) changes it;
+    // the next layout picks it up and drops the cached bitmap.
+    cell.set(Insets {
+        left: 40.0,
+        right: 3.0,
+        top: 6.0,
+        bottom: 4.0,
+    });
+    assert_eq!(f.layout(ROOM).height, 22.0);
+    assert!(f.last_sig != before);
+    f.on_event(&Event::FocusGained);
+    press(&mut f, 0.0);
+    assert_eq!(f.caret_x(), 40.0);
+
+    // `set_text_insets` writes through to the shared cell.
+    f.set_text_insets(Insets {
+        left: 7.0,
+        right: 7.0,
+        top: 3.0,
+        bottom: 3.0,
+    });
+    assert_eq!(cell.get().left, 7.0);
+    assert_eq!(f.text_insets().left, 7.0);
 }

@@ -7,6 +7,9 @@
 //! height `layout` reports) lives here too, beside the line-box builder,
 //! together with the per-side text insets that feed it.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use super::TextField;
 use crate::font_settings::{current_line_box, LineBox};
 use crate::geometry::Size;
@@ -31,23 +34,49 @@ impl TextField {
         self
     }
 
+    /// Read the per-side text insets from a shared cell at every layout and
+    /// paint, overriding [`with_text_insets`](Self::with_text_insets).  Lets
+    /// an owner that holds the field only as a boxed `dyn Widget` change the
+    /// insets later (say, after measuring a unit label drawn over the field):
+    /// write the cell, then call [`crate::animation::request_layout`].  The
+    /// insets are part of the backbuffer signature, so the next layout drops
+    /// the cached bitmap.
+    pub fn with_text_insets_cell(mut self, cell: Rc<Cell<Insets>>) -> Self {
+        self.text_insets_cell = Some(cell);
+        self
+    }
+
     /// Change the per-side text insets after the field is built (see
     /// [`with_text_insets`](Self::with_text_insets)).  Requests a relayout
     /// (the height can depend on the vertical insets) and a repaint; the
     /// insets are part of the backbuffer signature, so the cached bitmap is
-    /// re-rendered on the next layout.
+    /// re-rendered on the next layout.  With a
+    /// [`with_text_insets_cell`](Self::with_text_insets_cell) attached, this
+    /// writes the shared cell.
     pub fn set_text_insets(&mut self, insets: Insets) {
-        if self.text_insets == Some(insets) {
-            return;
+        if let Some(cell) = &self.text_insets_cell {
+            if cell.get() == insets {
+                return;
+            }
+            cell.set(insets);
+        } else {
+            if self.text_insets == Some(insets) {
+                return;
+            }
+            self.text_insets = Some(insets);
         }
-        self.text_insets = Some(insets);
         crate::animation::request_layout();
         crate::animation::request_draw();
     }
 
-    /// The effective text insets: [`with_text_insets`](Self::with_text_insets)
-    /// when set, otherwise `padding` on every side.
+    /// The effective text insets: the
+    /// [`with_text_insets_cell`](Self::with_text_insets_cell) value when
+    /// attached, else [`with_text_insets`](Self::with_text_insets) when set,
+    /// otherwise `padding` on every side.
     pub fn text_insets(&self) -> Insets {
+        if let Some(cell) = &self.text_insets_cell {
+            return cell.get();
+        }
         self.text_insets.unwrap_or(Insets {
             left: self.padding,
             right: self.padding,

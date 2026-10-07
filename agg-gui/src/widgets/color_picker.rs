@@ -14,7 +14,12 @@
 //! agg-sharp's `ItemColorButton`: the widget is a round swatch of a given
 //! diameter, and the panel opens as a floating popup below (or above) it,
 //! painted and hit-tested in the global overlay pass instead of growing the
-//! widget.  That mode lives in `color_picker/popup.rs`.
+//! widget, kept inside the viewport.  That mode lives in
+//! `color_picker/popup.rs`.
+//!
+//! Edits preview live into the bound cell; [`ColorPicker::on_change`] also
+//! reports them live (agg-sharp's colour popup applies as the user drags),
+//! with Select committing through `on_select` and Cancel / Escape restoring.
 //!
 //! # Composition
 //!
@@ -197,8 +202,21 @@ pub struct ColorPicker {
     /// `Visuals::widget_stroke` at 1 px.
     swatch_outline: Option<(Color, f64)>,
     /// Popup mode: whether the panel opens above the swatch (decided from
-    /// the room below it each time the popup paints).
+    /// the room around it when the popup opens and each time it paints).
     popup_opens_up: bool,
+    /// Popup mode: the panel's x offset from the swatch's left edge, shifted
+    /// left when the panel would run past the viewport's right edge.
+    popup_dx: f64,
+    /// Optional live-apply callback: fired with the working colour on every
+    /// edit while the panel is open, and with the restored colour on Cancel
+    /// / Escape.  Shared with the Cancel button's click callback.
+    on_change: SharedSelectCallback,
+    /// Whether `on_change` reported an edit since the panel opened, so
+    /// Cancel knows to report the restored colour.
+    live_dirty: Rc<Cell<bool>>,
+    /// Round swatch fill for a fully transparent colour; `None` paints the
+    /// transparent colour itself (only the outline shows).
+    transparent_swatch_fill: Option<Color>,
 }
 
 impl ColorPicker {
@@ -237,6 +255,10 @@ impl ColorPicker {
             popup_swatch: None,
             swatch_outline: None,
             popup_opens_up: false,
+            popup_dx: 0.0,
+            on_change: Rc::new(RefCell::new(None)),
+            live_dirty: Rc::new(Cell::new(false)),
+            transparent_swatch_fill: None,
         };
         me.build_children();
         me
@@ -253,6 +275,18 @@ impl ColorPicker {
     }
     pub fn on_select(self, cb: impl FnMut(Color) + 'static) -> Self {
         *self.on_select.borrow_mut() = Some(Box::new(cb));
+        self
+    }
+
+    /// Live apply, like agg-sharp's colour popup: `cb` receives the working
+    /// colour on every edit while the panel is open (a click or drag on the
+    /// hue, saturation/value or alpha area, or toggling No Color), and the
+    /// colour the panel opened with when Cancel or Escape restores it.
+    /// Select (and closing the popup by clicking elsewhere) still commits
+    /// through [`on_select`](Self::on_select).  Without it nothing fires
+    /// before Select.
+    pub fn on_change(self, cb: impl FnMut(Color) + 'static) -> Self {
+        *self.on_change.borrow_mut() = Some(Box::new(cb));
         self
     }
 
@@ -292,8 +326,11 @@ impl ColorPicker {
         let cancel = {
             let cell = Rc::clone(&self.color_cell);
             let saved = Rc::clone(&self.saved);
+            let on_change = Rc::clone(&self.on_change);
+            let dirty = Rc::clone(&self.live_dirty);
             Button::new("Cancel", Arc::clone(&self.font)).on_click(move || {
                 cell.set(saved.get());
+                report_restore(&on_change, &dirty, saved.get());
                 cf.set(true);
                 crate::animation::request_draw();
             })
@@ -358,14 +395,36 @@ impl ColorPicker {
     /// the colour cell and fired `on_select`.
     fn finish_select(&mut self) {
         self.no_color = self.none_cell.get();
+        self.live_dirty.set(false);
         self.open = false;
+    }
+
+    /// Live preview of an edit: push the working colour into the bound cell
+    /// (unless No Color is checked, which previews transparent itself) and
+    /// report it to the live-apply listener.
+    fn preview_edit(&mut self) {
+        let c = self.sync_color_from_hsva();
+        if !self.no_color {
+            self.color_cell.set(c);
+        }
+        self.report_live(c);
+    }
+
+    /// Report a live edit to [`on_change`](Self::on_change), if set.
+    fn report_live(&self, c: Color) {
+        if let Some(cb) = self.on_change.borrow_mut().as_mut() {
+            cb(c);
+            self.live_dirty.set(true);
+        }
     }
 
     /// Close after Cancel and resync the working state from the snapshot.
     /// The Cancel button's callback has already restored the colour cell.
+    /// A live-apply listener hears the restored colour (once).
     fn cancel(&mut self) {
         let saved = self.saved.get();
         self.color_cell.set(saved);
+        report_restore(&self.on_change, &self.live_dirty, saved);
         let (h, s, v) = rgb_to_hsv(saved.r, saved.g, saved.b);
         self.h = h;
         self.s = s;
@@ -436,6 +495,16 @@ impl ColorPicker {
             none,
             cancel,
             select,
+        }
+    }
+}
+
+/// Report the colour Cancel restored to a live-apply listener that heard
+/// edits since the panel opened.
+fn report_restore(on_change: &SharedSelectCallback, dirty: &Cell<bool>, saved: Color) {
+    if dirty.replace(false) {
+        if let Some(cb) = on_change.borrow_mut().as_mut() {
+            cb(saved);
         }
     }
 }
