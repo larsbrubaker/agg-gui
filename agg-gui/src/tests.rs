@@ -53,6 +53,7 @@ mod default_action;
 mod draw_report;
 mod drawing;
 mod ellipse_path;
+mod event_pointer;
 mod flex_gap;
 mod focus;
 mod focus_blur;

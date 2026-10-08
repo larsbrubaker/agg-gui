@@ -29,7 +29,7 @@
 use std::cell::RefCell;
 
 use super::Widget;
-use crate::geometry::Rect;
+use crate::geometry::{Point, Rect};
 use crate::TransAffine;
 
 std::thread_local! {
@@ -41,6 +41,21 @@ std::thread_local! {
 /// dispatched through the tree.
 pub fn event_root_transform() -> Option<TransAffine> {
     EVENT_ROOT_STACK.with(|s| s.borrow().last().copied())
+}
+
+/// The pointer in the local space of the widget whose `on_event` is running
+/// (agg-sharp's `MouseEventArgs.Position`), or `None` outside event dispatch
+/// or before the pointer has been seen. Events that carry no position —
+/// `MouseEnter`/`MouseLeave` (agg-sharp's `MouseEnterBounds`/
+/// `MouseLeaveBounds`, which do carry one), `MouseOver`/`MouseOut` — read it
+/// here, so a widget built under a still pointer learns where the pointer is
+/// from its enter alone.
+pub fn event_pointer_local() -> Option<Point> {
+    let to_root = event_root_transform()?;
+    let world = super::tree_inspector::current_mouse_world()?;
+    let (mut x, mut y) = (world.x, world.y);
+    to_root.inverse_transform(&mut x, &mut y);
+    Some(Point::new(x, y))
 }
 
 /// The root-space axis-aligned bounds of `local` (a rect in the local space
