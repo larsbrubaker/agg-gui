@@ -282,7 +282,11 @@ impl Gpu {
             // offers, so asking for an absent one degrades instead of failing
             // `request_device`.
             required_features: config.optional_features & adapter.features(),
-            required_limits: wgpu::Limits::default(),
+            // The default limits, raised to the adapter's real texture size limit
+            // (usually 16384, against the default 8192): a supersampled 3D view on
+            // a fullscreen HiDPI window needs textures several times the window's
+            // size, and the default would force it down to a softer frame.
+            required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
             memory_hints: wgpu::MemoryHints::Performance,
             experimental_features: wgpu::ExperimentalFeatures::default(),
             trace: wgpu::Trace::Off,
