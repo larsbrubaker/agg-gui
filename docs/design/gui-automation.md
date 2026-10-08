@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (16 onward) fill agg-gui's gaps test-first, port the 76 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (17 onward) fill agg-gui's gaps test-first, port the 76 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -299,7 +299,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
 | PresentFailureContainmentTests (1) | `live/present_failure_containment_tests.rs` | skipped on a CPU host, as in C# |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | all ported |
-| TextEditTests (13) | `text_edit_tests.rs` | TextEditWidget → TextField/TextArea; NumEdit → NumberField |
+| TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberField; 7 ported |
 | ThreadStackDumpTests (10) | `thread_stack_dump_tests.rs` | `stack-dump` feature |
 | ToolTipTests (7) | `tool_tip_tests.rs` | `Thread.Sleep` → `delay`/virtual clock advance |
 
@@ -307,8 +307,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 16 | TextEdit, part 1 | CorectLineCounts, TextEditTextSelectionTests, TextSelectionWithShiftClick, TextChangedEventsTests, TextEditGetsFocusTests, AddThenDeleteCausesNoVisualChange |
-| 17 | TextEdit, part 2 (+ G16) | MultiLineTests, TextEditingSpecialKeysWork, ScrollingToEndShowsEnd |
+| 17 | TextEdit, part 2 (+ G16, and the image match of slice 23) | MultiLineTests, ScrollingToEndShowsEnd |
 | 18 | ToolTips, part 1 | ToolTipInitialOpenTests, ToolTipsShow, ToolTipCloseOnLeave, MoveFromToolTipToToolTip |
 | 19 | ToolTips, part 2 | MoveFastFromToolTipToToolTip, MoveFromToolTipToOverlappingWidgetWithNoToolTip, ClearAlsoDropsAToolTipThatIsArmedButNotYetShown |
 | 20 | G13 NumberField | NumEditHandlesNonNumberChars, NumEditWithTextParserAcceptsLettersAndCommitsTheParsedValue, NumEditRefusesKeysItCannotRead, NumEditTakesLeadingEqualsOnlyWhenExpressionEntryIsAllowed |
@@ -329,7 +328,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (76 still to port): AutomationRunnerTests 11 (8 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3 (3 ported): **103**.
+**Tally** (69 still to port): AutomationRunnerTests 11 (8 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (7 ported), ThreadStackDump 10, ToolTip 7, WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 

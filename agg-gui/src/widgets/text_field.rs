@@ -342,13 +342,18 @@ impl TextField {
         st.text[lo..hi].to_string()
     }
 
+    /// Replace the text programmatically (C# agg-sharp's `Text` setter):
+    /// new text puts the caret at its start and shows its beginning; setting
+    /// the text the field already holds leaves caret and selection alone.
     pub fn set_text(&mut self, s: impl Into<String>) {
         let t = s.into();
-        let len = t.len();
         let mut st = self.edit.borrow_mut();
-        st.text = t.clone();
-        st.cursor = len;
-        st.anchor = len;
+        if st.text != t {
+            st.text = t.clone();
+            st.cursor = 0;
+            st.anchor = 0;
+            self.scroll_x = 0.0;
+        }
         drop(st);
         if let Some(cell) = &self.text_cell {
             *cell.borrow_mut() = t;

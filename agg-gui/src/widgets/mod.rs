@@ -68,6 +68,7 @@ pub mod splitter;
 pub mod tab_view;
 pub mod table;
 pub mod text_area;
+pub mod text_caret_navigation;
 pub mod text_context_menu;
 pub mod text_field;
 pub mod text_field_core;

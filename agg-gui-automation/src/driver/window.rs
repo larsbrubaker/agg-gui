@@ -129,6 +129,12 @@ impl HeadlessWindow {
         });
     }
 
+    /// C# `Keyboard.SetKeyDownState` for the modifier keys: the modifiers
+    /// held from now on, which later presses, moves and releases carry.
+    pub fn set_modifiers(&mut self, modifiers: Modifiers) {
+        self.deliver(ForwarderEvent::ModifiersChanged(modifiers));
+    }
+
     /// C# `OnKeyDown`.
     pub fn on_key_down(&mut self, key: Key, modifiers: Modifiers) {
         self.deliver(ForwarderEvent::KeyDown {

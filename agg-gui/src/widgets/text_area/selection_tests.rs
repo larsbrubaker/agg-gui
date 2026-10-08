@@ -195,14 +195,16 @@ fn place_selection(ta: &TextArea, anchor: usize, cursor: usize) {
     st.cursor = cursor;
 }
 
+/// Word moves stop where agg-sharp's `IndexOfNextToken`/`IndexOfPreviousToken`
+/// put them: at the start of a token, past the spaces after a word.
 #[test]
 fn ctrl_right_and_left_move_by_word() {
     let mut ta = laid_out("hello world foo", 400.0, 120.0);
     place_cursor(&ta, 0);
     key_mods(&mut ta, Key::ArrowRight, ctrl());
-    assert_eq!(ta.cursor(), 5); // end of "hello"
+    assert_eq!(ta.cursor(), 6); // start of "world"
     key_mods(&mut ta, Key::ArrowRight, ctrl());
-    assert_eq!(ta.cursor(), 11); // end of "world"
+    assert_eq!(ta.cursor(), 12); // start of "foo"
     key_mods(&mut ta, Key::ArrowLeft, ctrl());
     assert_eq!(ta.cursor(), 6); // start of "world"
     assert_eq!(
@@ -217,8 +219,8 @@ fn ctrl_shift_right_extends_selection_by_word() {
     let mut ta = laid_out("hello world", 400.0, 120.0);
     place_cursor(&ta, 0);
     key_mods(&mut ta, Key::ArrowRight, ctrl_shift());
-    assert_eq!(ta.cursor(), 5);
-    assert_eq!(ta.selection(), Some((0, 5)), "Shift keeps the anchor put");
+    assert_eq!(ta.cursor(), 6);
+    assert_eq!(ta.selection(), Some((0, 6)), "Shift keeps the anchor put");
     key_mods(&mut ta, Key::ArrowRight, ctrl_shift());
     assert_eq!(ta.selection(), Some((0, 11)));
 }
@@ -237,7 +239,8 @@ fn ctrl_delete_deletes_next_word() {
     let mut ta = laid_out("hello world", 400.0, 120.0);
     place_cursor(&ta, 0);
     key_mods(&mut ta, Key::Delete, ctrl());
-    assert_eq!(ta.text(), " world");
+    // up to the start of the next token, as Control+Right moves
+    assert_eq!(ta.text(), "world");
     assert_eq!(ta.cursor(), 0);
 }
 

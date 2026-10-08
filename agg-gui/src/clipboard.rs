@@ -3,6 +3,10 @@
 //! Native builds use `arboard` when the `clipboard` feature is enabled. WASM
 //! builds write into the in-process clipboard bridge that the demo shell
 //! forwards to browser clipboard events.
+//!
+//! [`simulate`] swaps in an in-process clipboard for the calling thread (C#
+//! agg-sharp's `Clipboard.SetSystemClipboard(new SimulatedClipboard())`), so
+//! a test can copy and paste without touching the user's real clipboard.
 
 #[cfg(all(feature = "clipboard", not(test)))]
 use std::borrow::Cow;
@@ -15,8 +19,39 @@ thread_local! {
     static TEST_TEXT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
+thread_local! {
+    /// The calling thread's simulated clipboard while one is installed: the
+    /// outer `Option` is "installed", the inner one its text.
+    static SIMULATED: std::cell::RefCell<Option<Option<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A simulated clipboard installed by [`simulate`]; dropping it puts back
+/// whatever clipboard the thread had before.
+#[must_use = "dropping the guard uninstalls the simulated clipboard"]
+pub struct SimulatedClipboard {
+    previous: Option<Option<String>>,
+}
+
+impl Drop for SimulatedClipboard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        let _ = SIMULATED.try_with(|slot| *slot.borrow_mut() = previous);
+    }
+}
+
+/// Install an empty in-process clipboard for this thread until the returned
+/// guard is dropped: every read and write of plain or rich text goes to it
+/// instead of the system clipboard.
+pub fn simulate() -> SimulatedClipboard {
+    let previous = SIMULATED.with(|slot| slot.borrow_mut().replace(None));
+    SimulatedClipboard { previous }
+}
+
 /// Read plain text from the clipboard.
 pub fn get_text() -> Option<String> {
+    if let Some(text) = SIMULATED.with(|slot| slot.borrow().clone()) {
+        return text;
+    }
     get_text_impl()
 }
 
@@ -42,7 +77,21 @@ fn get_text_impl() -> Option<String> {
 
 /// Write plain text to the clipboard.
 pub fn set_text(text: &str) {
+    if set_simulated(text) {
+        return;
+    }
     set_text_impl(text);
+}
+
+/// Write `text` to the simulated clipboard when one is installed.
+fn set_simulated(text: &str) -> bool {
+    SIMULATED.with(|slot| match slot.borrow_mut().as_mut() {
+        Some(simulated) => {
+            *simulated = Some(text.to_string());
+            true
+        }
+        None => false,
+    })
 }
 
 #[cfg(all(feature = "clipboard", not(test)))]
@@ -67,6 +116,9 @@ fn set_text_impl(text: &str) {
 
 /// Write HTML plus a plain-text fallback to the clipboard.
 pub fn set_rich_text(plain_text: &str, html_text: &str) {
+    if set_simulated(plain_text) {
+        return;
+    }
     let html = html_fragment_for_clipboard(html_text);
     set_rich_text_impl(plain_text, &html);
 }

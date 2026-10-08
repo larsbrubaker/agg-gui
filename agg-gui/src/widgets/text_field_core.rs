@@ -8,6 +8,8 @@ use crate::text::measure_advance;
 use crate::text::Font;
 use crate::undo::UndoRedoCommand;
 
+use super::text_caret_navigation::{index_of_next_token, index_of_previous_token};
+
 // ---------------------------------------------------------------------------
 // UTF-8 boundary helpers
 // ---------------------------------------------------------------------------
@@ -44,47 +46,23 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Ctrl+Right: advance to end of next token (skip whitespace then non-whitespace).
+/// Ctrl+Right: the byte offset of the start of the next token, as C#'s
+/// `IndexOfNextToken` places it (see [`super::text_caret_navigation`]).
 pub fn next_word_boundary(s: &str, pos: usize) -> usize {
-    let mut chars = s[pos..].char_indices().peekable();
-    let mut advanced = 0usize;
-    // skip leading whitespace
-    while let Some(&(i, c)) = chars.peek() {
-        if !c.is_whitespace() {
-            break;
-        }
-        advanced = i + c.len_utf8();
-        chars.next();
-    }
-    // skip non-whitespace
-    while let Some(&(i, c)) = chars.peek() {
-        if c.is_whitespace() {
-            break;
-        }
-        advanced = i + c.len_utf8();
-        chars.next();
-    }
-    pos + advanced
+    let char_pos = s[..pos].chars().count();
+    char_to_byte(s, index_of_next_token(s, char_pos))
 }
 
-/// Ctrl+Left: retreat to start of previous token.
+/// Ctrl+Left: the byte offset of the start of the previous token, as C#'s
+/// `IndexOfPreviousToken` places it.
 pub fn prev_word_boundary(s: &str, pos: usize) -> usize {
-    if pos == 0 {
-        return 0;
-    }
-    let chars: Vec<(usize, char)> = s[..pos].char_indices().collect();
-    let mut i = chars.len();
-    while i > 0 && chars[i - 1].1.is_whitespace() {
-        i -= 1;
-    }
-    while i > 0 && !chars[i - 1].1.is_whitespace() {
-        i -= 1;
-    }
-    if i < chars.len() {
-        chars[i].0
-    } else {
-        0
-    }
+    let char_pos = s[..pos].chars().count();
+    char_to_byte(s, index_of_previous_token(s, char_pos))
+}
+
+/// The byte offset of character `index` (the end for an index past it).
+fn char_to_byte(s: &str, index: usize) -> usize {
+    s.char_indices().nth(index).map_or(s.len(), |(i, _)| i)
 }
 
 /// Returns `[start, end)` byte range of the word under `byte_pos`
