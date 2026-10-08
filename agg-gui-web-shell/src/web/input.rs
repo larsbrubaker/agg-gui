@@ -1,7 +1,7 @@
 //! DOM input → [`agg_gui::App`]: canvas pointer (mouse / pen / multi-touch),
-//! wheel, pointer-leave and context-menu listeners, plus the window-level
-//! keyboard + clipboard bridge from `agg_gui::web_adapter`. Each DOM event
-//! becomes an `agg_gui::shell_input::ForwarderEvent` carrying its own
+//! wheel (a ctrl+wheel is a trackpad pinch), pointer-leave and context-menu
+//! listeners, plus the window-level keyboard + clipboard bridge from
+//! `agg_gui::web_adapter`. Each DOM event becomes an `agg_gui::shell_input::ForwarderEvent` carrying its own
 //! position and modifiers, handed to the shell's forwarder ([`forward`]).
 //!
 //! Extracted from `demo-wgpu`'s `web_shell` (pointer events, touch pipeline,
@@ -10,7 +10,8 @@
 //! in [`crate::dom_math`], unit tested natively.
 
 use agg_gui::shell_input::{ClickCount, ForwarderEvent};
-use agg_gui::wheel::{WheelDeltaMode, WheelNormalizer};
+use agg_gui::trackpad_pinch::browser_wheel_notches;
+use agg_gui::wheel::WheelDeltaMode;
 use agg_gui::TouchPhase;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -202,16 +203,17 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
     {
         let c = canvas.clone();
         // DOM deltas → agg-gui notches (fractional for precision devices).
-        let mut wheel = WheelNormalizer::new();
         add_listener(target, "wheel", move |e: web_sys::WheelEvent| {
             e.prevent_default();
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             // DOM deltaY is positive-scroll-DOWN; App wants positive =
-            // wheel rotated forward (winit convention).
-            let (dx, dy) = wheel.normalize(
-                -e.delta_x(),
-                -e.delta_y(),
+            // wheel rotated forward (winit convention). A ctrl+wheel is a
+            // trackpad pinch and zooms as the native pinch does.
+            let (dx, dy) = browser_wheel_notches(
+                e.delta_x(),
+                e.delta_y(),
                 WheelDeltaMode::from_dom(e.delta_mode()),
+                e.ctrl_key(),
             );
             if dx == 0.0 && dy == 0.0 {
                 return;

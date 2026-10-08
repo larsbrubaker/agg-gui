@@ -101,6 +101,13 @@ pub enum ForwarderEvent {
         delta_y: f64,
         modifiers: Option<Modifiers>,
     },
+    /// One trackpad magnify event: the incremental change of scale (`0.1` is
+    /// 10% bigger). Becomes a marked wheel; see `App::on_trackpad_pinch`.
+    TrackpadPinch {
+        at: Option<(f64, f64)>,
+        magnification: f64,
+        modifiers: Option<Modifiers>,
+    },
     /// A modifier-only change (Shift pressed mid-drag).
     ModifiersChanged(Modifiers),
     KeyDown {
@@ -292,6 +299,15 @@ impl InputForwarder {
                 let (x, y) = self.place(at);
                 let mods = self.resolve(modifiers);
                 app.on_mouse_wheel_xy_mods(x, y, delta_x, delta_y, mods);
+            }
+            ForwarderEvent::TrackpadPinch {
+                at,
+                magnification,
+                modifiers,
+            } => {
+                let (x, y) = self.place(at);
+                let mods = self.resolve(modifiers);
+                app.on_trackpad_pinch(x, y, magnification, mods);
             }
             ForwarderEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods;

@@ -90,6 +90,7 @@ mod text_defaults;
 mod text_field_select_all;
 mod tooltip_window_hover;
 mod touch_scroll;
+mod trackpad_pinch;
 mod tree_view;
 mod under_mouse_state;
 mod widget_cursors;

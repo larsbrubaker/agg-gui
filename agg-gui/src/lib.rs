@@ -96,6 +96,7 @@ pub mod timestep;
 pub mod touch_emulation;
 pub mod touch_points;
 pub mod touch_state;
+pub mod trackpad_pinch;
 pub mod ui_thread;
 pub mod undo;
 pub mod unhandled;

@@ -24,7 +24,8 @@
 //! - Window creation with DPI-safe restore of a saved size (see
 //!   [`WindowBoundsStore`]) and the paint-first-then-show ordering that avoids
 //!   a white flash on start-up.
-//! - Mouse, wheel (including the shift→horizontal remap), keyboard **down and
+//! - Mouse, wheel (including the shift→horizontal remap), trackpad pinch (as
+//!   a marked wheel), keyboard **down and
 //!   up**, touch, cursor-leave, modifiers, and the OS cursor icon.
 //! - Reactive redraw scheduling: `Poll` while the app wants frames,
 //!   `WaitUntil` for a scheduled deadline, `Wait` otherwise — or

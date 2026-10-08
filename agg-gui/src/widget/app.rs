@@ -5,6 +5,7 @@ mod gesture;
 mod hover_chain;
 mod keyboard;
 mod path_anchor;
+mod pinch;
 pub use path_anchor::WidgetAnchor;
 mod pointer;
 mod touch;

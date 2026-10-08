@@ -212,6 +212,19 @@ impl<H: ShellHost> ShellLoop<H> {
                 });
             }
 
+            // A trackpad pinch (macOS magnify). agg-sharp's MacTrackpadGestures
+            // sends it as a wheel marked FromTrackpadPinch; App::on_trackpad_pinch
+            // does the same, through the shared magnification conversion. NaN
+            // (which winit documents as possible) becomes no zoom there.
+            WindowEvent::PinchGesture { delta, .. } => {
+                self.input_since_frame = true;
+                self.forward(ForwarderEvent::TrackpadPinch {
+                    at: None,
+                    magnification: delta,
+                    modifiers: None,
+                });
+            }
+
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
