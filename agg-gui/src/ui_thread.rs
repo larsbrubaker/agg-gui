@@ -35,8 +35,10 @@
 //!   thread's [`current_queue`] handle, or binds to it with
 //!   [`UiQueue::attach_current_thread`] (which is also how several threads
 //!   pump one queue).
-//! - When the thread that owns the main queue ends, the next UI thread to bind
-//!   adopts it, with anything still queued on it.
+//! - When the thread that owns the main queue ends, or is done being a UI
+//!   thread before it ends ([`unbind_current_thread`]: a headless test's
+//!   harness on a test thread that outlives the test), the next UI thread to
+//!   bind adopts it, with anything still queued on it.
 //!
 //! Not ported: the `Func<Task>` overloads and `SwitchToUiThreadAsync` /
 //! `YieldToFrame` (async/await plumbing with no Rust counterpart),
@@ -215,6 +217,23 @@ pub fn is_ui_thread() -> bool {
 pub fn mark_current_thread_as_ui_thread() {
     bind_current_thread();
     PUMPS.with(|p| p.set(true));
+}
+
+/// The calling thread is done being a UI thread (no C# counterpart: C#'s one
+/// UI thread lives as long as the process). It forgets its queue and that it
+/// is the UI thread, and when it owned the main queue the next UI thread to
+/// bind adopts it now, with anything still queued on it, instead of when this
+/// thread ends. For a UI that ends before its thread does: a headless test's
+/// harness, whose test thread's thread-locals are torn down only after the
+/// test runner has moved on to the next test. Binding again later (draining,
+/// marking) makes the thread a UI thread again.
+pub fn unbind_current_thread() {
+    // Taken out before it drops, so this thread-local is not borrowed while
+    // `MainOwnership::drop` takes the main queue's lock.
+    let ownership = OWNS_MAIN.with(|o| o.borrow_mut().take());
+    drop(ownership);
+    BOUND.with(|b| *b.borrow_mut() = None);
+    PUMPS.with(|p| p.set(false));
 }
 
 /// C# `Count`: deferred actions waiting for their time on this thread's queue.
