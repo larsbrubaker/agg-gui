@@ -186,3 +186,22 @@ fn focus_follows_widget_when_layout_swaps_children() {
     app.on_key_down(Key::Char('x'), none());
     assert_eq!(*log.borrow(), ["a key"]);
 }
+
+#[test]
+fn rust_only_a_release_over_a_replaced_capture_holder_refreshes_the_new_widget() {
+    // The widget that took the press is replaced mid-press by a new one at
+    // the same index (an item view rebuilt by what the press did). The
+    // release lands on the newcomer, which never saw the pointer: it gets the
+    // hover refresh move, unlike a capture holder released over itself.
+    // (The release itself still goes down the capture path, as it always
+    // has for a holder that was dropped.)
+    let (mut app, log, _swap) = strip_app();
+    app.on_mouse_move(50.0, 50.0);
+    app.on_mouse_down(50.0, 50.0, MouseButton::Left, none());
+    let fresh = leaf("a", &log);
+    app.root_mut().children_mut()[0] = fresh;
+    app.layout(SIZE);
+    log.borrow_mut().clear();
+    app.on_mouse_up(50.0, 50.0, MouseButton::Left, none());
+    assert_eq!(*log.borrow(), ["a up", "a move"]);
+}
