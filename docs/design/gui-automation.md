@@ -240,7 +240,7 @@ pub fn show_window_and_execute_tests<S, R>(
 Headless paints into a software `Framebuffer`, so paint is exercised and `get_current_screen` works. The policy is `agg_gui::frame_policy` (`LayoutKey`, `LayoutTracker::tick` with `TickMode::Reactive`/`Forced`, `wants_frame`), which the native and web shells already use; the headless driver uses it too.
 
 **Clocks**
-- **`agg_gui::clock`** is a thread-local UI clock, real by default or virtual (`scoped_virtual`/`set_virtual`, `advance`), behind every behavioural time read in agg-gui and the node editor. Still to move onto it: MatterCAD's `click_clock` (M1).
+- **`agg_gui::clock`** is a thread-local UI clock, real by default or virtual (`scoped_virtual`/`set_virtual`, `advance`), behind every behavioural time read in agg-gui and the node editor.
 - **Headless default (`ClockPolicy::Virtual`):** each pumped frame advances `frame_interval` = 10 ms, the RunOnIdle tick C# cites. `ClockPolicy::Real` is available for tests whose background workers run in real time (MatterCAD's `with_compute_workers`).
 - **Live:** the real clock always.
 
@@ -409,7 +409,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Notes |
 |---|---|---|
-| M1 | Remove mattercad-app's own clock and idle queue | `mattercad_app::ui_thread` becomes `pub use agg_gui::ui_thread::*;` and its tests go (agg-gui has them). Its two per-drain pumps (`running_tasks::pump_this_thread`, `library_executor::pump`) are registered with `ui_thread::add_drain_hook` (in `build_app` and the test harness). `mattercad-native` and `mattercad-web` stop calling `invoke_pending_actions`/`mark_current_thread_as_ui_thread` (the shells do). `TestHarness::new` calls `mark_current_thread_as_ui_thread()` before building, so each test's thread owns its queue. Worker posts (`update_download`'s progress callback, `reload_all` off the window thread) reach the app's UI thread through the main queue; a test that needs a worker's posts on its own thread captures `ui_thread::current_queue()` for it. `mattercad_renderer::click_clock` delegates to `agg_gui::clock`. The 14 existing tests stay green. |
 | M2 | Back `TestHarness` with the runner | `TestHarness` owns a `HeadlessDriver` (settings isolation, sample part, compute workers move to a `MatterCadAppWindow` builder) and exposes `runner()`. `frame`/`settle`/`pump_until_idle` use the driver's frame and `ClockPolicy::Real` when workers are on. Existing helpers delegate. |
 | M3 | Delete the name hacks | mattercad-app's View3D and design page implement `find_named_targets` (Object3D controls by C# name, scene children); `CONTROL_KEYS` and `scene_objects`/`controls` string parsing go. `menu_automation` uses menu-row named targets. |
 | M4 | `run_test` and `new_part_tab_test` | Equivalents of C# `MatterCADUtilities.RunTest`/`NewPartTabTest` over `show_window_and_execute_tests`, with automatic `mark_test_complete`, C#'s 1280×720 default, and `AutomationFileService` (dialog provider) installed. `complete_dialog`, `add_item_to_bed`, `navigate_to_folder` and friends become extension traits on `AutomationRunner`. |
@@ -417,6 +416,8 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | M10 | Remove the old helpers | Delete the deprecated `TestHarness` helpers (`click`, `type_keys`, `drag`, `MAX_WAIT_FRAMES`); update crate docs. That leaves 47 of the 61 C# AutomationTests files, which can then be ported one per slice with the same API. |
 
 ## 10. Risks
+
+- **Cross-thread wakeups:** `ui_thread::run_on_idle` and `signal_async_state_change` bump a process-wide counter every thread folds into its invalidation epoch and draw request, so parallel headless tests see each other's wakeups when they assert idle / no relayout. Decision: make the wakeup counter per UI thread (with the main queue's owner seeing worker posts) in slice 6, test-first.
 
 - **Virtual time vs. real worker threads.** Covered by `ClockPolicy::Real` and the `background_busy` hook, so `settle` keeps working.
 - **A timed-out body thread keeps running.** It only touches its own thread-locals, and it unwinds at its next runner call.
