@@ -64,6 +64,7 @@ mod image_icons;
 mod inspector_hover;
 mod inspector_tree;
 mod keyboard_lift;
+mod label_ellipsis;
 mod label_hidpi_backbuffer;
 mod label_theme;
 mod layer_compositing;

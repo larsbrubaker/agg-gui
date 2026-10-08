@@ -23,7 +23,9 @@
 //! which is correct for Y-up rendering.
 
 mod bezier_flat;
+mod ellipsis;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
+pub use ellipsis::{ellipsize_to_width, ellipsize_with};
 
 use std::collections::BTreeSet;
 use std::sync::Arc;

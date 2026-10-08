@@ -62,6 +62,8 @@ pub(crate) struct PaintRecorder {
     pub strokes: Vec<PaintOp>,
     /// Path-building calls in order, with coordinates.
     pub path_ops: Vec<PathOp>,
+    /// Every `fill_text` call: the text and its baseline origin.
+    pub texts: Vec<(String, f64, f64)>,
 }
 
 impl PaintRecorder {
@@ -75,6 +77,7 @@ impl PaintRecorder {
             fills: Vec::new(),
             strokes: Vec::new(),
             path_ops: Vec::new(),
+            texts: Vec::new(),
         }
     }
 
@@ -163,7 +166,9 @@ impl DrawCtx for PaintRecorder {
         self.stroke();
     }
     fn draw_triangles_aa(&mut self, _vertices: &[[f32; 3]], _indices: &[u32], _color: Color) {}
-    fn fill_text(&mut self, _text: &str, _x: f64, _y: f64) {}
+    fn fill_text(&mut self, text: &str, x: f64, y: f64) {
+        self.texts.push((text.to_string(), x, y));
+    }
     fn fill_text_gsv(&mut self, _text: &str, _x: f64, _y: f64, _size: f64) {}
     fn measure_text(&self, text: &str) -> Option<TextMetrics> {
         Some(TextMetrics {

@@ -122,6 +122,11 @@ pub struct Label {
     /// `available.width`.  The label height expands to fit all lines.
     /// Disabled by default; enable with `.with_wrap(true)`.
     wrap: bool,
+    /// agg-sharp `TextWidget.EllipsisIfClipped`: a single line wider than the
+    /// label's bounds is cut back to end in "..." (see
+    /// [`crate::text::ellipsize_with`]) instead of being cut mid-glyph by the
+    /// clip. Off by default; enable with `.with_ellipsis_if_clipped(true)`.
+    ellipsis_if_clipped: bool,
     /// When `true`, this Label ignores the system-wide font override
     /// (`font_settings::current_system_font`) and always renders with
     /// the specific `self.font` passed to `Label::new`.  Used by font
@@ -188,6 +193,7 @@ impl Label {
             buffered: true,
             cache: crate::widget::BackbufferCache::new(),
             wrap: false,
+            ellipsis_if_clipped: false,
             ignore_system_font: false,
             lcd_pref: None,
             line_box: None,
@@ -249,6 +255,44 @@ impl Label {
     /// Enable or disable word-wrapping.  When `true`, long lines are broken at
     /// word boundaries to fit the available width; the label height expands to
     /// accommodate all lines.  Newlines in the text are always honoured.
+    pub fn with_ellipsis_if_clipped(mut self, on: bool) -> Self {
+        self.set_ellipsis_if_clipped(on);
+        self
+    }
+
+    /// agg-sharp `TextWidget.EllipsisIfClipped` setter.
+    pub fn set_ellipsis_if_clipped(&mut self, on: bool) {
+        if self.ellipsis_if_clipped != on {
+            self.ellipsis_if_clipped = on;
+            self.cache.invalidate();
+        }
+    }
+
+    /// agg-sharp `TextWidget.EllipsisActive`: ellipsis is on and the full text is
+    /// wider than the label's laid-out bounds (single-line labels only).
+    pub fn ellipsis_active(&self) -> bool {
+        self.ellipsis_if_clipped
+            && !self.wrap
+            && self.layout_text == self.text
+            && self.layout_width > self.bounds.width
+    }
+
+    /// The text a paint draws now: the full text, or its ellipsized form while
+    /// [`Self::ellipsis_active`].
+    pub fn shown_text(&self) -> String {
+        if self.ellipsis_active() {
+            let font = self.active_font();
+            crate::text::ellipsize_to_width(
+                &font,
+                &self.text,
+                self.active_font_size(),
+                self.bounds.width,
+            )
+        } else {
+            self.text.clone()
+        }
+    }
+
     pub fn with_wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
         self
@@ -587,14 +631,26 @@ impl Widget for Label {
                     ctx.fill_text(line, tx, ty);
                 }
             }
-        } else if let Some(m) = ctx.measure_text(&self.text) {
-            let ty = m.centered_baseline_y(h);
-            let tx = match self.align {
-                LabelAlign::Left => 0.0,
-                LabelAlign::Center => (w - m.width) * 0.5,
-                LabelAlign::Right => w - m.width,
+        } else {
+            // Ellipsis is measured with the paint context, the same metrics the
+            // line is drawn with, so the shortened line lands inside the box.
+            let text = match ctx.measure_text(&self.text) {
+                Some(full) if self.ellipsis_if_clipped && full.width > w => {
+                    crate::text::ellipsize_with(&self.text, w, |s| {
+                        ctx.measure_text(s).map_or(0.0, |m| m.width)
+                    })
+                }
+                _ => self.text.clone(),
             };
-            ctx.fill_text(&self.text, tx, ty);
+            if let Some(m) = ctx.measure_text(&text) {
+                let ty = m.centered_baseline_y(h);
+                let tx = match self.align {
+                    LabelAlign::Left => 0.0,
+                    LabelAlign::Center => (w - m.width) * 0.5,
+                    LabelAlign::Right => w - m.width,
+                };
+                ctx.fill_text(&text, tx, ty);
+            }
         }
 
         ctx.restore();
@@ -646,6 +702,7 @@ impl Widget for Label {
             ("text", self.text.clone()),
             ("font_size", format!("{:.1}", self.font_size)),
             ("align", format!("{:?}", self.align)),
+            ("ellipsis_active", self.ellipsis_active().to_string()),
             (
                 "has_backbuffer",
                 if self.buffered { "true" } else { "false" }.to_string(),
