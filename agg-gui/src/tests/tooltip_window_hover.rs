@@ -16,14 +16,10 @@ use super::*;
 use crate::geometry::{Point, Rect};
 use crate::text::Font;
 use crate::widgets::tooltip::controller;
-use crate::widgets::tooltip::{
-    advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock, tooltip_timings,
-};
+use crate::widgets::tooltip::{reset_tooltip_test_state, tooltip_timings};
 use crate::widgets::window::Window;
 use crate::{Rebuilder, Stack};
 use std::sync::Arc;
-use web_time::Instant;
-
 const VP_W: f64 = 700.0;
 const VP_H: f64 = 560.0;
 
@@ -46,7 +42,7 @@ impl Drop for Guard {
 fn pin() -> Guard {
     reset_tooltip_test_state();
     controller::reset();
-    set_tooltip_test_clock(Some(Instant::now()));
+    crate::clock::start_virtual();
     crate::font_settings::set_system_font(Some(Arc::new(
         Font::from_slice(TEST_FONT).expect("test font must load"),
     )));
@@ -174,7 +170,7 @@ fn hovering_toolbar_button_in_window_shows_tip() {
     );
 
     // Advance past the initial delay and run the per-frame tooltip pass again.
-    advance_tooltip_test_clock(tooltip_timings().initial_delay);
+    crate::clock::advance(tooltip_timings().initial_delay);
     app.update_tooltips_for_test();
 
     assert!(

@@ -369,7 +369,7 @@ pub fn handle_software_keyboard_mouse_down(
             s.last_painted_keys.get(i).and_then(|k| match k.action {
                 key::KeyAction::Backspace => Some(state::KeyRepeatState {
                     key_index: i,
-                    pressed_at: web_time::Instant::now(),
+                    pressed_at: crate::clock::now(),
                     last_fired_at: None,
                 }),
                 _ => None,
@@ -504,7 +504,7 @@ fn commit_key_press(index: usize, modifiers: Modifiers) {
 fn handle_layer_switch(target: Layer) {
     if target == Layer::Shifted || target == Layer::Letters {
         with_state_mut(|s| {
-            let now = web_time::Instant::now();
+            let now = crate::clock::now();
             let recently_tapped = s
                 .last_shift_tap
                 .map(|t| now.duration_since(t) <= state::SHIFT_DOUBLE_TAP_WINDOW)
@@ -542,7 +542,7 @@ fn handle_layer_switch(target: Layer) {
 /// down long enough we synthesize a `Backspace` and request another
 /// draw so the loop keeps pumping for the next repeat.
 fn tick_key_repeat() {
-    let now = web_time::Instant::now();
+    let now = crate::clock::now();
     let action = with_state_mut(|s| {
         let Some(repeat) = s.key_repeat.as_mut() else {
             return None;

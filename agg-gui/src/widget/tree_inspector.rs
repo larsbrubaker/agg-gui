@@ -497,7 +497,7 @@ pub fn debug_draw_report(root: &dyn Widget) -> String {
     use std::fmt::Write;
     let mut s = String::new();
     let (needs_flag, deadline) = crate::animation::peek_draw_signals();
-    let now = web_time::Instant::now();
+    let now = crate::clock::now();
 
     let _ = writeln!(s, "== agg-gui draw report ==");
     let _ = writeln!(s, "immediate needs_draw flag: {needs_flag}");

@@ -8,8 +8,6 @@
 //! menu gets identical rich-fragment behaviour with no duplicated logic. Select
 //! All uses the core's programmatic path.
 
-use web_time::Instant;
-
 use crate::event::{Event, EventResult};
 use crate::geometry::Point;
 use crate::widgets::text_context_menu::TextMenuAction;
@@ -63,7 +61,7 @@ impl RichTextEdit {
         let has_sel = self.has_selection();
         // The editor is always editable.
         self.context_menu.open(pos, has_sel, true);
-        self.focus_time = Some(Instant::now());
+        self.focus_time = Some(crate::clock::now());
         crate::animation::request_draw();
     }
 

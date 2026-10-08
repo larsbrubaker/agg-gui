@@ -70,7 +70,7 @@ impl TextField {
         let editable = !self.read_only;
         self.context_menu.open(pos, has_sel, editable);
         // Keep the caret solid while the menu is up.
-        self.focus_time = Some(Instant::now());
+        self.focus_time = Some(crate::clock::now());
         crate::animation::request_draw();
     }
 

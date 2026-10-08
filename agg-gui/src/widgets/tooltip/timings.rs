@@ -16,9 +16,9 @@
 //!
 //! The values live in a thread-local (GUI is single-threaded; mirrors
 //! [`crate::device_scale`] / [`crate::platform`]). Native shells override them
-//! from the OS at startup; the wasm shell keeps the defaults. A `#[doc(hidden)]`
-//! injectable clock lets the timing state machine be unit-tested deterministically
-//! (mirrors `touch_state`'s `clear_last_touch_event_for_testing`).
+//! from the OS at startup; the wasm shell keeps the defaults. Every timing read
+//! goes through [`crate::clock`], so a test on the virtual clock drives the
+//! delay/reshow/autopop state machine deterministically.
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -72,12 +72,9 @@ impl TooltipTimings {
 
 thread_local! {
     static TIMINGS: Cell<TooltipTimings> = Cell::new(TooltipTimings::default());
-    /// Wall-clock time a tooltip was last visible anywhere. Frozen the moment
+    /// UI-clock time a tooltip was last visible anywhere. Frozen the moment
     /// the pointer leaves, so it measures the gap since the last tip vanished.
     static LAST_VISIBLE_AT: Cell<Option<Instant>> = const { Cell::new(None) };
-    /// Injectable test clock. When `Some`, all tooltip timing reads it instead
-    /// of the real wall clock so the state machine is deterministic in tests.
-    static TEST_CLOCK: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
 /// Install the tooltip delays used by every [`Tooltip`](super::Tooltip).
@@ -93,10 +90,9 @@ pub fn tooltip_timings() -> TooltipTimings {
     TIMINGS.with(|c| c.get())
 }
 
-/// Current time on the tooltip clock — the injected test clock when set,
-/// otherwise the real wall clock.
+/// Current time for tooltip timing: the UI clock ([`crate::clock::now`]).
 pub(super) fn tooltip_now() -> Instant {
-    TEST_CLOCK.with(|c| c.get()).unwrap_or_else(Instant::now)
+    crate::clock::now()
 }
 
 /// Record that a tip is visible right now, warming the reshow window.
@@ -111,30 +107,35 @@ pub(super) fn last_tooltip_visible_at() -> Option<Instant> {
 
 // --- Test hooks ---------------------------------------------------------------
 
-/// Pin the tooltip clock to `now` (or release it back to the wall clock with
-/// `None`). Test-only: lets a unit test drive the delay/reshow/autopop state
-/// machine without sleeping.
+/// Put this thread on the virtual UI clock at `now`, or back on the real clock
+/// with `None`. Kept for existing callers; it is [`crate::clock::set_virtual`]
+/// / [`crate::clock::use_real`], and so moves every UI timer, not only
+/// tooltips.
 #[doc(hidden)]
 pub fn set_tooltip_test_clock(now: Option<Instant>) {
-    TEST_CLOCK.with(|c| c.set(now));
+    match now {
+        Some(at) => crate::clock::set_virtual(at),
+        None => crate::clock::use_real(),
+    }
 }
 
-/// Advance the pinned test clock by `by`. Panics if no test clock is set.
+/// Advance the virtual UI clock by `by` ([`crate::clock::advance`]). Panics if
+/// the thread is on the real clock, as the old tooltip-only clock did.
 #[doc(hidden)]
 pub fn advance_tooltip_test_clock(by: Duration) {
-    TEST_CLOCK.with(|c| {
-        let base = c
-            .get()
-            .expect("advance_tooltip_test_clock without a test clock");
-        c.set(Some(base + by));
-    });
+    assert!(
+        crate::clock::is_virtual(),
+        "advance_tooltip_test_clock without a test clock"
+    );
+    crate::clock::advance(by);
 }
 
-/// Reset all tooltip timing globals (clock, reshow window, delays) so tests do
-/// not leak state into one another on a reused harness thread.
+/// Reset all tooltip timing globals (UI clock back to real, reshow window,
+/// delays) so tests do not leak state into one another on a reused harness
+/// thread.
 #[doc(hidden)]
 pub fn reset_tooltip_test_state() {
-    TEST_CLOCK.with(|c| c.set(None));
+    crate::clock::use_real();
     LAST_VISIBLE_AT.with(|c| c.set(None));
     TIMINGS.with(|c| c.set(TooltipTimings::default()));
 }

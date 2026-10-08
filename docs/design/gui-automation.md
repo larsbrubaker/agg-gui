@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (3 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (4 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -40,7 +40,7 @@
 - `path_anchor` tracks widget identity by heap address.
 - Nearly all state is thread-local. Exceptions: `CURRENT_PLATFORM` and the input profile are process-global atomics.
 - Widget names (`WidgetBase.name`, `Widget::with_name`, default `id()`, `widgets::Named`), typed downcasts (`Widget::as_any`/`as_any_mut` on the core widgets) and an origin-placing container (`widgets::AbsoluteLayout` over `WidgetBase.origin`) exist.
-- **Missing pieces:** an idle queue (MatterCAD has its own `ui_thread.rs`), `is_enabled`, click counts in mouse events, a virtual clock (about 29 `Instant::now()` call sites), and paint-panic containment.
+- **Missing pieces:** an idle queue (MatterCAD has its own `ui_thread.rs`), `is_enabled`, click counts in mouse events, and paint-panic containment.
 
 **`mattercad-app-test`**
 - `TestHarness` builds the real tree headless, sends input straight to `App::on_*`, and copies the shells' frame policy (`input_frame`/`shell_frame`/layout key).
@@ -243,7 +243,7 @@ pub fn show_window_and_execute_tests<S, R>(
 Headless paints into a software `Framebuffer`, so paint is exercised and `get_current_screen` works. That shell policy moves into agg-gui as `agg_gui::frame_policy` so the native shell, web shell and headless driver share one copy instead of three.
 
 **Clocks**
-- **New in agg-gui: `agg_gui::clock`.** A thread-local clock, either real or virtual, behind every time read: animation deadlines, multi-click, tooltip timings (replacing their private test clock), caret blink, spinners, `ui_thread` delays, and MatterCAD's `click_clock`.
+- **`agg_gui::clock`** is a thread-local UI clock, real by default or virtual (`scoped_virtual`/`set_virtual`, `advance`), behind every behavioural time read in agg-gui and the node editor. Still to move onto it: `ui_thread` delays (slice 4) and MatterCAD's `click_clock` (M1).
 - **Headless default (`ClockPolicy::Virtual`):** each pumped frame advances `frame_interval` = 10 ms, the RunOnIdle tick C# cites. `ClockPolicy::Real` is available for tests whose background workers run in real time (MatterCAD's `with_compute_workers`).
 - **Live:** the real clock always.
 
@@ -340,7 +340,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Gap | Slice |
 |---|---|---|
-| G4 | `agg_gui::clock` (virtual or real), replacing all `Instant::now()` time reads | 3 |
 | G5 | `agg_gui::ui_thread`, promoted from mattercad-app: `run_on_idle`, `_after`, intervals, `invoke_pending_actions`, panic containment and reporting, one queue per UI thread; shells drain it | 4 |
 | G6 | `agg_gui::frame_policy` (layout key and needs-layout), shared by all shells | 5 |
 | G7 | `agg_gui::shell_input::InputForwarder`, adopted by agg-gui-shell and the web shell | 5 |
@@ -378,7 +377,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 3 | G4 `clock`; move multi-click and tooltip test clocks onto it | (unit) |
 | 4 | G5 `ui_thread` in agg-gui (port MatterCAD's file and its tests), per-thread queues | (unit) |
 | 5 | G6 + G7; agg-gui-shell and web shell adopt the forwarder | (unit; shells still build) |
 | 6 | `HeadlessDriver`, `HeadlessWindow`, `ProbeWidget`, `tree_query` (handles, rects, clipping, visibility), G8 handles | MouseInteraction: ExtensionMethodsTests |

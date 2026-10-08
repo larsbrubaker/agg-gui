@@ -25,7 +25,6 @@
 use super::{Scene, DBL_CLICK_MS, MAX_CLICK_DIST, ZOOM_SENSITIVITY};
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::Point;
-use web_time::Instant;
 
 impl Scene {
     /// Entry point called from `Widget::on_event`.
@@ -90,7 +89,7 @@ impl Scene {
             // (pan) clears any pending click so pan-then-press can never
             // fire an unintended reset.
             if self.pan_is_left && !self.pan_moved {
-                let now = Instant::now();
+                let now = crate::clock::now();
                 // A double-click needs two background clicks that are both
                 // recent AND *consecutive* — no other press in between.  The
                 // second condition is what the pointer-press epoch buys us:

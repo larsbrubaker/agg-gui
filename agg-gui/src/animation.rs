@@ -363,7 +363,7 @@ pub fn take_layout_request() -> bool {
 /// in the result.
 ///
 /// If no immediate draw is pending but a [`request_draw_after`] deadline has
-/// come due (`Instant::now() >= deadline`), this clears the scheduled cell and
+/// come due on the UI clock (`clock::now() >= deadline`), this clears the scheduled cell and
 /// raises [`NEEDS_DRAW`], returning `true`.  That makes a due deadline
 /// indistinguishable from an immediate [`request_draw`]: the normal
 /// request_draw → paint → [`clear_draw_request`] cycle then applies, and
@@ -377,7 +377,7 @@ pub fn wants_draw() -> bool {
         return true;
     }
     let due = NEXT_DRAW_AT.with(|c| match c.get() {
-        Some(when) if Instant::now() >= when => {
+        Some(when) if crate::clock::now() >= when => {
             c.set(None);
             true
         }
@@ -490,7 +490,7 @@ pub fn clear_immediate_draw_request() {
 /// widgets asking for different delays will all be served by the soonest one
 /// (each widget re-arms its own deadline on the next draw anyway).
 pub fn request_draw_after(delay: Duration) {
-    let when = Instant::now() + delay;
+    let when = crate::clock::now() + delay;
     NEXT_DRAW_AT.with(|c| match c.get() {
         Some(existing) if existing <= when => {}
         _ => c.set(Some(when)),
@@ -520,6 +520,9 @@ pub fn peek_draw_signals() -> (bool, Option<Instant>) {
 /// the deadline actually comes due — [`wants_draw`] promotes it to an
 /// immediate draw — or by [`clear_draw_request`] at the start of a paint,
 /// after which consumers re-arm.
+///
+/// The deadline is in UI-clock time ([`crate::clock`]); with the real clock
+/// (every shell) that is the wall clock.
 pub fn peek_next_draw_deadline() -> Option<Instant> {
     NEXT_DRAW_AT.with(|c| c.get())
 }
@@ -568,7 +571,7 @@ impl Tween {
         if (self.target - new_target).abs() > 1e-9 {
             self.start_value = self.current;
             self.target = new_target;
-            self.start_time = Some(Instant::now());
+            self.start_time = Some(crate::clock::now());
         }
     }
 
@@ -577,7 +580,7 @@ impl Tween {
     /// [`request_draw`] so the host keeps drawing frames until completion.
     pub fn tick(&mut self) -> f64 {
         if let Some(start) = self.start_time {
-            let elapsed = start.elapsed().as_secs_f64();
+            let elapsed = crate::clock::since(start).as_secs_f64();
             let p = (elapsed / self.duration).min(1.0);
             let eased = 1.0 - (1.0 - p).powi(3);
             self.current = self.start_value + (self.target - self.start_value) * eased;

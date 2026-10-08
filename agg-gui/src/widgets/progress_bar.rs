@@ -84,7 +84,7 @@ impl ProgressBar {
             font,
             animate_on_hover: false,
             hovered: false,
-            anim_start: Instant::now(),
+            anim_start: crate::clock::now(),
         }
     }
 
@@ -225,7 +225,7 @@ impl Widget for ProgressBar {
         // a smooth 0.78..1.0 sine). This is the ONLY animated element: no arc,
         // dot, or moving handle at the head that could read as interactive.
         let base_fill = self.props.fill_color.unwrap_or(v.accent);
-        let time = self.anim_start.elapsed().as_secs_f64();
+        let time = crate::clock::since(self.anim_start).as_secs_f64();
         let fill_color = if animating {
             // sin maps to 0..1 via (sin+1)/2, then into the 0.78..1.0 range.
             let pulse = (time * std::f64::consts::TAU * 0.6).sin() * 0.5 + 0.5;

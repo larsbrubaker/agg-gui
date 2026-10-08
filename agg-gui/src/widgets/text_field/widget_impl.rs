@@ -70,7 +70,7 @@ impl Widget for TextField {
         let Some(t) = self.focus_time else {
             return false;
         };
-        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        let current_phase = (crate::clock::since(t).as_millis() / 500) as u64;
         current_phase != self.blink_last_phase.get()
     }
 
@@ -79,7 +79,7 @@ impl Widget for TextField {
             return None;
         }
         let t = self.focus_time?;
-        let ms = t.elapsed().as_millis() as u64;
+        let ms = crate::clock::since(t).as_millis() as u64;
         let next_phase = (ms / 500) + 1;
         Some(t + std::time::Duration::from_millis(next_phase * 500))
     }
@@ -287,7 +287,7 @@ impl Widget for TextField {
         // host-side deadline bookkeeping, the widget drives itself.
         if self.focused {
             if let Some(t) = self.focus_time {
-                let phase = (t.elapsed().as_millis() / 500) as u64;
+                let phase = (crate::clock::since(t).as_millis() / 500) as u64;
                 self.blink_last_phase.set(phase);
             }
         }
@@ -298,7 +298,7 @@ impl Widget for TextField {
                 st.cursor == st.anchor
             }
             && match self.focus_time {
-                Some(t) => (t.elapsed().as_millis() / 500) % 2 == 0,
+                Some(t) => (crate::clock::since(t).as_millis() / 500) % 2 == 0,
                 None => false,
             };
         if !cursor_visible {
@@ -415,7 +415,7 @@ impl Widget for TextField {
                     && self.focus_press_epoch == Some(crate::animation::pointer_press_epoch());
                 self.focus_press_epoch = None;
                 // Reset blink phase on click so cursor is immediately visible.
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
             }
@@ -452,7 +452,7 @@ impl Widget for TextField {
 
             Event::FocusGained => {
                 self.focused = true;
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 self.text_on_focus = self.text();
                 self.focus_press_epoch = Some(crate::animation::pointer_press_epoch());
                 if self.select_all_on_focus {
@@ -483,7 +483,7 @@ impl Widget for TextField {
 
             Event::KeyDown { key, modifiers } if self.focused => {
                 // Reset blink on any keypress so cursor is visible immediately.
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 // A wrapper's interceptor sees the key before the built-in
                 // handling (C#'s `KeyDown` event fires before `OnKeyDown`'s body).
                 if self.run_key_intercept(key, modifiers) {

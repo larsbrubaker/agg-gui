@@ -58,7 +58,7 @@ fn focused_editor_deadline_reaches_app_root() {
 
     // The blink deadline must now be visible at the App root, within one
     // 500 ms interval of now.
-    let now = web_time::Instant::now();
+    let now = crate::clock::now();
     let deadline = app
         .next_draw_deadline()
         .expect("a focused editor must surface its blink deadline at the App root");

@@ -277,7 +277,7 @@ impl NodeEditor {
                     // resulting "collapse this node" signal is drained
                     // in `NodeEditor::layout`.)
                     if hit_title_bar(&layouts, node_id, canvas_pos) {
-                        let now = web_time::Instant::now();
+                        let now = agg_gui::clock::now();
                         let is_double = self
                             .last_click
                             .as_ref()

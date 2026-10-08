@@ -45,7 +45,7 @@ impl MultiClickTracker {
     /// wraps back to `1`, and any press outside the time window or travel
     /// tolerance restarts the sequence at `1`.
     pub fn register(&mut self, pos: Point) -> u32 {
-        let now = Instant::now();
+        let now = crate::clock::now();
         let in_time = self
             .last_time
             .map(|t| now.duration_since(t).as_millis() < MULTI_CLICK_MS)

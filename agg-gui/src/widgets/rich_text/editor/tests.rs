@@ -499,11 +499,10 @@ fn invalidate_layout_changes_cache_sig() {
 #[test]
 fn focused_idle_editor_does_not_redraw_every_frame() {
     use std::time::Duration;
-    use web_time::Instant;
 
     let mut ed = laid_out_editor(plain_doc(&["hello"]), 400.0, 120.0);
     ed.focused = true;
-    let now = Instant::now();
+    let now = crate::clock::now();
     ed.focus_time = Some(now);
     ed.blink_last_phase.set(0);
 
@@ -524,11 +523,10 @@ fn focused_idle_editor_does_not_redraw_every_frame() {
 #[test]
 fn blink_boundary_requests_one_draw_then_reschedules() {
     use std::time::Duration;
-    use web_time::Instant;
 
     let mut ed = laid_out_editor(plain_doc(&["hello"]), 400.0, 120.0);
     ed.focused = true;
-    ed.focus_time = Some(Instant::now() - Duration::from_millis(600));
+    ed.focus_time = Some(crate::clock::now() - Duration::from_millis(600));
     ed.blink_last_phase.set(0);
     assert!(
         ed.needs_draw(),

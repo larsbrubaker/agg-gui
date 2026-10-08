@@ -350,7 +350,7 @@ pub fn current_multi_touch() -> Option<MultiTouchInfo> {
 /// Record that a touch lifecycle event just fired.  Called from
 /// `App::on_touch_start/move/end/cancel`.
 pub(crate) fn note_touch_event() {
-    LAST_TOUCH_EVENT_AT.with(|c| c.set(Some(web_time::Instant::now())));
+    LAST_TOUCH_EVENT_AT.with(|c| c.set(Some(crate::clock::now())));
     TOUCH_SEEN_THIS_SESSION.with(|c| c.set(true));
 }
 
@@ -371,7 +371,9 @@ pub fn touch_seen_this_session() -> bool {
 /// tell touch-synthesised mouse events apart from real desktop
 /// clicks check this against a small threshold.
 pub fn last_touch_event_age() -> Option<std::time::Duration> {
-    LAST_TOUCH_EVENT_AT.with(|c| c.get()).map(|t| t.elapsed())
+    LAST_TOUCH_EVENT_AT
+        .with(|c| c.get())
+        .map(crate::clock::since)
 }
 
 /// Forget any prior touch event so the next mouse event reads as

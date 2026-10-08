@@ -173,7 +173,7 @@ impl RichTextEdit {
             multi_click: MultiClickTracker::default(),
             select_granularity: SelectGranularity::default(),
             select_pivot: (DocPos::new(0, 0), DocPos::new(0, 0)),
-            start: Instant::now(),
+            start: crate::clock::now(),
             last_layout_rev: None,
             cache: BackbufferCache::default(),
             last_sig: None,
@@ -427,7 +427,7 @@ impl Widget for RichTextEdit {
 
         // Feed the undoer once per frame (time-coalescing snapshots); keep
         // frames coming while a change is still settling.
-        let time = self.start.elapsed().as_secs_f64();
+        let time = crate::clock::since(self.start).as_secs_f64();
         let in_flux = self.core.borrow_mut().feed_undo(time);
         if in_flux {
             crate::animation::request_draw_after_tagged(
@@ -488,7 +488,7 @@ impl Widget for RichTextEdit {
         let Some(t) = self.focus_time else {
             return false;
         };
-        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        let current_phase = (crate::clock::since(t).as_millis() / 500) as u64;
         current_phase != self.blink_last_phase.get()
     }
 
@@ -497,7 +497,7 @@ impl Widget for RichTextEdit {
             return None;
         }
         let t = self.focus_time?;
-        let ms = t.elapsed().as_millis() as u64;
+        let ms = crate::clock::since(t).as_millis() as u64;
         let next_phase = (ms / 500) + 1;
         Some(t + std::time::Duration::from_millis(next_phase * 500))
     }

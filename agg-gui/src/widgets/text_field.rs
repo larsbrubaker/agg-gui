@@ -119,7 +119,7 @@ pub struct TextField {
     // dragged out a selection.
     select_all_on_mouse_up: bool,
 
-    // Cursor blink: set to Some(Instant::now()) on FocusGained.
+    // Cursor blink: set to Some(crate::clock::now()) on FocusGained.
     focus_time: Option<Instant>,
     // Blink phase (floor(elapsed_ms / 500)) last drawn by `paint_overlay`.
     // `needs_draw` compares the current phase against this and reports

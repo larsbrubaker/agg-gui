@@ -68,7 +68,7 @@ impl TextArea {
         let has_sel = self.selection().map(|(l, h)| l != h).unwrap_or(false);
         // A TextArea has no read-only mode: it is always editable.
         self.context_menu.open(pos, has_sel, true);
-        self.focus_time = Some(Instant::now());
+        self.focus_time = Some(crate::clock::now());
         crate::animation::request_draw();
     }
 

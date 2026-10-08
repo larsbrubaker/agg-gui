@@ -132,11 +132,12 @@ fn interactive_tip_opens_after_delay() {
     let mut t = interactive_tooltip(Arc::new(AtomicUsize::new(0)));
     t.hovered = true;
     // Not yet past the delay.
-    t.hover_started_at = Some(Instant::now());
+    t.hover_started_at = Some(crate::clock::now());
     t.update_interactive_state();
     assert!(!t.tip_open);
     // Past the delay.
-    t.hover_started_at = Some(Instant::now() - (TOOLTIP_INITIAL_DELAY + Duration::from_millis(20)));
+    t.hover_started_at =
+        Some(crate::clock::now() - (TOOLTIP_INITIAL_DELAY + Duration::from_millis(20)));
     t.update_interactive_state();
     assert!(t.tip_open);
 }
@@ -164,7 +165,7 @@ fn interactive_tip_closes_after_grace_when_left() {
     assert!(t.close_requested_at.is_some());
     // After the grace period it closes.
     t.close_requested_at =
-        Some(Instant::now() - (interactive::TOOLTIP_CLOSE_GRACE + Duration::from_millis(20)));
+        Some(crate::clock::now() - (interactive::TOOLTIP_CLOSE_GRACE + Duration::from_millis(20)));
     t.update_interactive_state();
     assert!(!t.tip_open);
 }
@@ -193,7 +194,8 @@ fn escape_close_sticks_while_still_hovering_anchor() {
     // frame — reopening requires leaving and re-entering the anchor.
     let mut t = interactive_tooltip(Arc::new(AtomicUsize::new(0)));
     t.hovered = true;
-    t.hover_started_at = Some(Instant::now() - (TOOLTIP_INITIAL_DELAY + Duration::from_millis(20)));
+    t.hover_started_at =
+        Some(crate::clock::now() - (TOOLTIP_INITIAL_DELAY + Duration::from_millis(20)));
     t.tip_open = true;
 
     assert_eq!(
@@ -230,7 +232,7 @@ fn interactive_forwards_click_into_content() {
 // --- Lightweight tooltip timing state machine ----------------------------
 //
 // These drive the delay/reshow/autopop/press-hide behaviour against an
-// injected clock so no real time passes. `ClockGuard` pins the clock at a
+// virtual UI clock so no real time passes. `ClockGuard` pins the clock at a
 // base instant and resets all tooltip timing globals on drop (including on a
 // test panic via unwind) so sibling tests are unaffected.
 
@@ -242,10 +244,11 @@ impl Drop for ClockGuard {
     }
 }
 
-/// Pin the tooltip clock at `base` and clear the shared reshow window / timings.
+/// Put the UI clock on virtual time at `base` and clear the shared reshow
+/// window / timings; the guard puts the clock back on real time.
 fn pin_clock(base: Instant) -> ClockGuard {
     reset_tooltip_test_state();
-    set_tooltip_test_clock(Some(base));
+    crate::clock::set_virtual(base);
     ClockGuard
 }
 
@@ -275,7 +278,7 @@ fn no_tip_before_initial_delay() {
     assert!(!t.update_visibility());
 
     // Just short of the initial delay: still hidden.
-    advance_tooltip_test_clock(timings.initial_delay - Duration::from_millis(1));
+    crate::clock::advance(timings.initial_delay - Duration::from_millis(1));
     assert!(!t.update_visibility());
 }
 
@@ -286,7 +289,7 @@ fn tip_appears_after_initial_delay() {
     let mut t = text_tooltip();
 
     move_to(&mut t, 10.0, 10.0); // enter
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     assert!(t.update_visibility());
     assert!(t.tooltip_visible);
 }
@@ -300,12 +303,12 @@ fn reshow_delay_applies_between_controls_within_window() {
     // Control A: hover long enough to show its tip, warming the subsystem.
     let mut a = text_tooltip();
     move_to(&mut a, 10.0, 10.0);
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     assert!(a.update_visibility());
     move_to(&mut a, 100.0, 100.0); // leave A (tip hides, window stays warm)
 
     // A short move to control B, still inside the reshow window.
-    advance_tooltip_test_clock(timings.reshow_delay);
+    crate::clock::advance(timings.reshow_delay);
     let mut b = text_tooltip();
     move_to(&mut b, 10.0, 10.0); // enter B
     assert_eq!(
@@ -316,7 +319,7 @@ fn reshow_delay_applies_between_controls_within_window() {
     // B is not shown before the (short) reshow delay elapses...
     assert!(!b.update_visibility());
     // ...but appears once it does — well before a full initial delay.
-    advance_tooltip_test_clock(timings.reshow_delay);
+    crate::clock::advance(timings.reshow_delay);
     assert!(b.update_visibility());
 }
 
@@ -329,12 +332,12 @@ fn full_initial_delay_after_reshow_window_expires() {
     // Control A shows and warms the subsystem, then the pointer leaves.
     let mut a = text_tooltip();
     move_to(&mut a, 10.0, 10.0);
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     assert!(a.update_visibility());
     move_to(&mut a, 100.0, 100.0); // leave A
 
     // Idle past the reshow window so the subsystem goes cold again.
-    advance_tooltip_test_clock(timings.reshow_window() + Duration::from_millis(1));
+    crate::clock::advance(timings.reshow_window() + Duration::from_millis(1));
     let mut b = text_tooltip();
     move_to(&mut b, 10.0, 10.0);
     assert_eq!(
@@ -350,7 +353,7 @@ fn press_hides_tip_and_suppresses_reshow() {
     let mut t = text_tooltip();
 
     move_to(&mut t, 10.0, 10.0);
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     assert!(t.update_visibility());
 
     // A press over the control hides the tip immediately...
@@ -367,7 +370,7 @@ fn press_hides_tip_and_suppresses_reshow() {
         button: MouseButton::Left,
         modifiers: Default::default(),
     });
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     assert!(!t.update_visibility());
 }
 
@@ -378,16 +381,16 @@ fn autopop_dismisses_tip_after_timeout() {
     let mut t = text_tooltip();
 
     move_to(&mut t, 10.0, 10.0);
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     assert!(t.update_visibility());
 
     // Pointer just sits there: after the autopop timeout the tip dismisses.
-    advance_tooltip_test_clock(timings.autopop);
+    crate::clock::advance(timings.autopop);
     assert!(!t.update_visibility());
     assert!(!t.tooltip_visible);
 
     // It does not re-show while the pointer stays put (suppressed until re-entry).
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     assert!(!t.update_visibility());
 }
 

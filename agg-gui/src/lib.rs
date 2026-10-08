@@ -30,6 +30,8 @@
 //!   widget set (buttons, text editing, windows, flex layout, menus, …).
 //! - [`draw_ctx`] — the [`DrawCtx`] drawing trait every widget paints
 //!   through; [`gfx_ctx`] is the software AGG implementation.
+//! - [`clock`] — the UI clock (real, or virtual for tests) behind every
+//!   behavioural time read: animation deadlines, click and tooltip timing.
 //! - [`theme`] — dark / light / system visuals read via `ctx.visuals()`.
 //! - [`overlay_insets`] + [`widgets::ReserveInset`] + [`card`] — safe-area
 //!   overlay placement: reserved screen edges (the on-screen keyboard
@@ -47,6 +49,7 @@ pub mod animation;
 pub mod app_state;
 pub mod card;
 pub mod clipboard;
+pub mod clock;
 pub mod color;
 pub mod confetti;
 pub mod cursor;

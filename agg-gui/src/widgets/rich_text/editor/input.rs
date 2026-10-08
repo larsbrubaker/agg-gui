@@ -7,8 +7,6 @@
 //! structural edits instead of a flat string.  Every handled event is
 //! `Consumed` so the auto-invalidation convention schedules the redraw.
 
-use web_time::Instant;
-
 use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::widgets::multi_click::SelectGranularity;
@@ -68,7 +66,7 @@ impl RichTextEdit {
                 let clicks = self.multi_click.register(*pos);
                 self.begin_pointer_selection(target, clicks, modifiers.shift);
                 self.selecting_drag = true;
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
             }
@@ -102,7 +100,7 @@ impl RichTextEdit {
             }
             Event::FocusGained => {
                 self.focused = true;
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 crate::animation::request_draw();
                 EventResult::Ignored
             }
@@ -227,7 +225,7 @@ impl RichTextEdit {
         }
         let caret = self.core.borrow().caret();
         self.ensure_pos_visible(caret);
-        self.focus_time = Some(Instant::now());
+        self.focus_time = Some(crate::clock::now());
         crate::animation::request_draw();
         EventResult::Consumed
     }

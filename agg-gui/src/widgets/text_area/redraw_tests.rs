@@ -14,7 +14,6 @@ use std::time::Duration;
 
 use super::*;
 use crate::widget::Widget;
-use web_time::Instant;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
 
@@ -34,7 +33,7 @@ fn focused_idle_editor_does_not_redraw_every_frame() {
     let mut ta = laid_out(TextArea::new(font()).with_text("hello"), 200.0, 100.0);
     // Simulate a paint that just recorded the current blink phase (phase 0).
     ta.focused = true;
-    let now = Instant::now();
+    let now = crate::clock::now();
     ta.focus_time = Some(now);
     ta.blink_last_phase.set(0);
 
@@ -60,7 +59,7 @@ fn blink_boundary_requests_one_draw_then_reschedules() {
     let mut ta = laid_out(TextArea::new(font()).with_text("hello"), 200.0, 100.0);
     ta.focused = true;
     // Focused 600 ms ago → current phase 1, last painted phase 0: a flip is due.
-    let past = Instant::now() - Duration::from_millis(600);
+    let past = crate::clock::now() - Duration::from_millis(600);
     ta.focus_time = Some(past);
     ta.blink_last_phase.set(0);
     assert!(
@@ -78,7 +77,7 @@ fn blink_boundary_requests_one_draw_then_reschedules() {
     let deadline = ta
         .next_draw_deadline()
         .expect("still schedules the next flip");
-    let remaining = deadline.saturating_duration_since(Instant::now());
+    let remaining = deadline.saturating_duration_since(crate::clock::now());
     assert!(
         remaining <= Duration::from_millis(500),
         "reschedule should be within one interval, got {remaining:?}"

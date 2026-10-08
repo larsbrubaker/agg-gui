@@ -253,7 +253,7 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
             if window.in_title_bar(*pos) {
                 // Double-click detection.
                 let is_double = if is_left_click {
-                    let now = Instant::now();
+                    let now = crate::clock::now();
                     window
                         .last_title_click
                         .map(|t| now.duration_since(t).as_millis() < DBL_CLICK_MS)
@@ -271,7 +271,7 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
                     crate::animation::request_draw();
                 } else {
                     if is_left_click {
-                        window.last_title_click = Some(Instant::now());
+                        window.last_title_click = Some(crate::clock::now());
                     }
                     let world = Point::new(pos.x + window.bounds.x, pos.y + window.bounds.y);
                     window.drag_mode = DragMode::Move;

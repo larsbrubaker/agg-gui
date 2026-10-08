@@ -177,7 +177,7 @@ impl RichTextEdit {
             return;
         }
         if let Some(t) = self.focus_time {
-            let phase = (t.elapsed().as_millis() / 500) as u64;
+            let phase = (crate::clock::since(t).as_millis() / 500) as u64;
             self.blink_last_phase.set(phase);
             if phase % 2 == 1 {
                 return;

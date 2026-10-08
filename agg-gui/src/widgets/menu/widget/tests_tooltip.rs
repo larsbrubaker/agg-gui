@@ -13,8 +13,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use web_time::Instant;
-
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
@@ -24,9 +22,7 @@ use crate::gfx_ctx::GfxCtx;
 use crate::text::Font;
 use crate::widget::{App, Widget};
 use crate::widgets::tooltip::controller;
-use crate::widgets::tooltip::{
-    advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock, tooltip_timings,
-};
+use crate::widgets::tooltip::{reset_tooltip_test_state, tooltip_timings};
 
 use super::super::geometry::{hit_test, MenuHit};
 use super::super::model::{MenuEntry, MenuItem};
@@ -59,7 +55,7 @@ fn pin() -> Guard {
     crate::device_scale::set_device_scale(1.0);
     reset_tooltip_test_state();
     controller::reset();
-    set_tooltip_test_clock(Some(Instant::now()));
+    crate::clock::start_virtual();
     crate::font_settings::set_system_font(Some(test_font()));
     Guard
 }
@@ -204,7 +200,7 @@ fn hovered_row_tooltip_shows_after_hover_delay() {
     h.frame();
     assert!(!controller::is_visible(), "no tip before the hover delay");
 
-    advance_tooltip_test_clock(tooltip_timings().initial_delay);
+    crate::clock::advance(tooltip_timings().initial_delay);
     h.frame();
     assert_eq!(
         controller::visible_text().as_deref(),
@@ -227,7 +223,7 @@ fn row_without_tooltip_shows_none() {
 
     h.hover(row);
     h.frame();
-    advance_tooltip_test_clock(tooltip_timings().initial_delay);
+    crate::clock::advance(tooltip_timings().initial_delay);
     h.frame();
     assert!(
         !controller::is_visible(),
@@ -245,7 +241,7 @@ fn moving_to_another_row_switches_and_leaving_clears() {
 
     h.hover(a);
     h.frame();
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     h.frame();
     assert_eq!(
         controller::visible_text().as_deref(),
@@ -257,7 +253,7 @@ fn moving_to_another_row_switches_and_leaving_clears() {
     h.hover(b);
     h.frame();
     assert!(!controller::is_visible(), "A's tip leaves with the pointer");
-    advance_tooltip_test_clock(timings.reshow_delay);
+    crate::clock::advance(timings.reshow_delay);
     h.frame();
     assert_eq!(
         controller::visible_text().as_deref(),
@@ -271,7 +267,7 @@ fn moving_to_another_row_switches_and_leaving_clears() {
 
     // Leaving the menu body entirely keeps it cleared.
     h.hover(Point::new(380.0, 20.0));
-    advance_tooltip_test_clock(timings.initial_delay);
+    crate::clock::advance(timings.initial_delay);
     h.frame();
     assert!(!controller::is_visible(), "no tip outside the menu");
 }
@@ -285,7 +281,7 @@ fn closing_the_menu_clears_the_tip() {
 
     h.hover(row);
     h.frame();
-    advance_tooltip_test_clock(tooltip_timings().initial_delay);
+    crate::clock::advance(tooltip_timings().initial_delay);
     h.frame();
     assert!(controller::is_visible());
 
@@ -314,7 +310,7 @@ fn submenu_row_tooltip_shows() {
     let deep = h.row_center(&[3, 0]);
     h.hover(deep);
     h.frame();
-    advance_tooltip_test_clock(tooltip_timings().initial_delay);
+    crate::clock::advance(tooltip_timings().initial_delay);
     h.frame();
     assert_eq!(
         controller::visible_text().as_deref(),

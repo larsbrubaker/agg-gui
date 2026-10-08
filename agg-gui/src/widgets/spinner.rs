@@ -78,7 +78,7 @@ impl Spinner {
             base: WidgetBase::new(),
             size: SpinnerSize::Regular,
             color: None,
-            anim_start: Instant::now(),
+            anim_start: crate::clock::now(),
         }
     }
 
@@ -195,7 +195,7 @@ impl Widget for Spinner {
         let inner_r = d * 0.27;
         let line_w = (d * 0.085).max(1.0);
         let ink = self.color.unwrap_or_else(|| ctx.visuals().text_dim);
-        let head = Self::step_for(self.anim_start.elapsed());
+        let head = Self::step_for(crate::clock::since(self.anim_start));
 
         ctx.set_line_width(line_w);
         ctx.set_line_cap(LineCap::Round);

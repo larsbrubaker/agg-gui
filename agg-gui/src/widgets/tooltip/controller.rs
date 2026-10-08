@@ -383,9 +383,7 @@ mod tests {
     use crate::widget::{App, Widget};
     use std::sync::Arc;
 
-    use super::super::timings::{
-        advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock,
-    };
+    use super::super::timings::reset_tooltip_test_state;
 
     const FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
 
@@ -402,7 +400,7 @@ mod tests {
     fn pin() -> Guard {
         reset_tooltip_test_state();
         reset();
-        set_tooltip_test_clock(Some(Instant::now()));
+        crate::clock::start_virtual();
         crate::font_settings::set_system_font(Some(Arc::new(
             Font::from_bytes(FONT_BYTES.to_vec()).expect("bundled font"),
         )));
@@ -471,7 +469,7 @@ mod tests {
         app.update_tooltips_for_test();
         assert!(!is_visible(), "no tip before the initial delay elapses");
 
-        advance_tooltip_test_clock(timings.initial_delay);
+        crate::clock::advance(timings.initial_delay);
         app.update_tooltips_for_test();
         assert!(is_visible(), "tip appears once the initial delay elapses");
         assert_eq!(visible_text().as_deref(), Some("Bold"));
@@ -487,14 +485,14 @@ mod tests {
 
         // Enter A and show its tip, warming the reshow window.
         drive(Some((vec![0], "A".into())), anchor);
-        advance_tooltip_test_clock(timings.initial_delay);
+        crate::clock::advance(timings.initial_delay);
         drive(Some((vec![0], "A".into())), anchor);
         assert_eq!(visible_text().as_deref(), Some("A"));
 
         // Leave A (tip hides, window stays warm), then a short move to B.
         drive(None, anchor);
         assert!(!is_visible());
-        advance_tooltip_test_clock(timings.reshow_delay);
+        crate::clock::advance(timings.reshow_delay);
         drive(Some((vec![1], "B".into())), anchor);
         assert!(
             !is_visible(),
@@ -503,7 +501,7 @@ mod tests {
 
         // After only the reshow delay — well short of a full initial delay — B's
         // tip appears, and it is the only tip.
-        advance_tooltip_test_clock(timings.reshow_delay);
+        crate::clock::advance(timings.reshow_delay);
         drive(Some((vec![1], "B".into())), anchor);
         assert!(is_visible());
         assert_eq!(visible_text().as_deref(), Some("B"), "exactly one tip: B's");
@@ -527,7 +525,7 @@ mod tests {
         // Install A, hover, and let the tip appear: it submits with font A.
         crate::font_settings::set_system_font(Some(Arc::clone(&font_a)));
         drive(Some((vec![0], "Tip".into())), anchor);
-        advance_tooltip_test_clock(timings.initial_delay);
+        crate::clock::advance(timings.initial_delay);
         drive(Some((vec![0], "Tip".into())), anchor);
         assert!(is_visible(), "tip visible after the initial delay");
         let submitted_a =
@@ -568,7 +566,7 @@ mod tests {
         // hover timer; the tip shows on the pass after the initial delay.
         hover(&mut app, 798.0, 300.0);
         app.update_tooltips_for_test();
-        advance_tooltip_test_clock(timings.initial_delay);
+        crate::clock::advance(timings.initial_delay);
         app.update_tooltips_for_test();
 
         assert!(is_visible());
@@ -590,22 +588,18 @@ mod tests {
     /// comes due — with no second explicit paint request. That is exactly the
     /// signal a reactive host needs to draw the frame that reveals the tip.
     ///
-    /// Deliberately uses the REAL wall clock (no test clock) with a short
-    /// initial delay: the controller's `should_show` reads `tooltip_now()`
-    /// while the arm goes through `animation::request_draw_after`
-    /// (`Instant::now`). Those are independent clocks, so pinning the test
-    /// clock would let real time drift past the animation deadline while the
-    /// controller thinks no time passed. Sharing one wall clock keeps the two
-    /// machines consistent; the sleep is kept short.
+    /// The controller's `should_show` and `animation::request_draw_after` both
+    /// read [`crate::clock`], so advancing the virtual clock past the delay
+    /// moves the two machines together.
     #[test]
     fn armed_hover_delay_surfaces_through_wants_draw() {
         reset_tooltip_test_state();
         reset();
-        set_tooltip_test_clock(None); // real wall clock drives both machines
         super::super::timings::set_tooltip_timings(
             super::super::timings::TooltipTimings::from_initial_delay(Duration::from_millis(20)),
         );
         let _g = Guard;
+        crate::clock::start_virtual();
 
         let mut app = App::new(Box::new(Tipped::new("Bold")));
         app.layout(Size::new(800.0, 600.0));
@@ -625,7 +619,7 @@ mod tests {
             "the hover delay has not elapsed yet, so no immediate draw"
         );
 
-        std::thread::sleep(Duration::from_millis(40));
+        crate::clock::advance(Duration::from_millis(20));
 
         assert!(
             crate::animation::wants_draw(),

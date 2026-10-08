@@ -205,7 +205,7 @@ impl NodeEditor {
             return false;
         };
         self.view_anim = Some(ViewAnimation {
-            started: Instant::now(),
+            started: agg_gui::clock::now(),
             duration_ms: FIT_ANIM_MS,
             from_scale: self.canvas_scale,
             to_scale: scale,
@@ -236,7 +236,7 @@ impl NodeEditor {
         let Some(anim) = self.view_anim.clone() else {
             return false;
         };
-        let elapsed = anim.started.elapsed().as_secs_f64() * 1000.0;
+        let elapsed = agg_gui::clock::since(anim.started).as_secs_f64() * 1000.0;
         let raw = (elapsed / anim.duration_ms).clamp(0.0, 1.0);
         let t = ease_in_out_cubic(raw);
         let scale = anim.from_scale + (anim.to_scale - anim.from_scale) * t;

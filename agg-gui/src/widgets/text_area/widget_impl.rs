@@ -410,7 +410,7 @@ impl Widget for TextArea {
             return;
         }
         if let Some(t) = self.focus_time {
-            let phase = (t.elapsed().as_millis() / 500) as u64;
+            let phase = (crate::clock::since(t).as_millis() / 500) as u64;
             self.blink_last_phase.set(phase);
             if phase % 2 == 1 {
                 return;
@@ -490,7 +490,7 @@ impl Widget for TextArea {
                 let clicks = self.multi_click.register(*pos);
                 self.begin_pointer_selection(off, clicks, modifiers.shift);
                 self.selecting_drag = true;
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
             }
@@ -524,7 +524,7 @@ impl Widget for TextArea {
             }
             Event::FocusGained => {
                 self.focused = true;
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 self.text_on_focus = self.text();
                 crate::animation::request_draw();
                 EventResult::Ignored
@@ -671,7 +671,7 @@ impl Widget for TextArea {
                 // Keep the caret on-screen after any edit or navigation
                 // (re-wraps if the edit dirtied the cache, then scrolls).
                 self.ensure_cursor_visible();
-                self.focus_time = Some(Instant::now());
+                self.focus_time = Some(crate::clock::now());
                 crate::animation::request_draw();
                 EventResult::Consumed
             }
@@ -712,7 +712,7 @@ impl Widget for TextArea {
         let Some(t) = self.focus_time else {
             return false;
         };
-        let current_phase = (t.elapsed().as_millis() / 500) as u64;
+        let current_phase = (crate::clock::since(t).as_millis() / 500) as u64;
         current_phase != self.blink_last_phase.get()
     }
 
@@ -721,7 +721,7 @@ impl Widget for TextArea {
             return None;
         }
         let t = self.focus_time?;
-        let ms = t.elapsed().as_millis() as u64;
+        let ms = crate::clock::since(t).as_millis() as u64;
         let next_phase = (ms / 500) + 1;
         Some(t + std::time::Duration::from_millis(next_phase * 500))
     }

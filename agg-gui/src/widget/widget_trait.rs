@@ -768,8 +768,9 @@ pub trait Widget {
         self.children().iter().any(|c| c.needs_draw())
     }
 
-    /// Return the earliest wall-clock instant at which this widget (or any
-    /// visible descendant) wants the next draw.  `None` = no scheduled wake.
+    /// Return the earliest instant, on the UI clock ([`crate::clock`]), at
+    /// which this widget (or any visible descendant) wants the next draw.
+    /// `None` = no scheduled wake.
     /// The host loop turns a `Some(t)` into `ControlFlow::WaitUntil(t)` so
     /// e.g. a cursor blink fires without continuous polling.
     ///
