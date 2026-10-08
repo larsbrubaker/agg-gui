@@ -102,11 +102,20 @@ pub enum ForwarderEvent {
         modifiers: Option<Modifiers>,
     },
     /// One trackpad magnify event: the incremental change of scale (`0.1` is
-    /// 10% bigger). Becomes a marked wheel; see `App::on_trackpad_pinch`.
+    /// 10% bigger). Becomes a marked wheel and virtual fingers; see
+    /// `App::on_trackpad_magnify`.
     TrackpadPinch {
         at: Option<(f64, f64)>,
         magnification: f64,
+        phase: crate::trackpad_pinch_fingers::TrackpadGesturePhase,
         modifiers: Option<Modifiers>,
+    },
+    /// One trackpad rotate event: degrees, counter-clockwise positive.
+    /// Becomes virtual fingers; see `App::on_trackpad_rotate`.
+    TrackpadRotate {
+        at: Option<(f64, f64)>,
+        degrees: f64,
+        phase: crate::trackpad_pinch_fingers::TrackpadGesturePhase,
     },
     /// A modifier-only change (Shift pressed mid-drag).
     ModifiersChanged(Modifiers),
@@ -303,11 +312,16 @@ impl InputForwarder {
             ForwarderEvent::TrackpadPinch {
                 at,
                 magnification,
+                phase,
                 modifiers,
             } => {
                 let (x, y) = self.place(at);
                 let mods = self.resolve(modifiers);
-                app.on_trackpad_pinch(x, y, magnification, mods);
+                app.on_trackpad_magnify(x, y, magnification, phase, mods);
+            }
+            ForwarderEvent::TrackpadRotate { at, degrees, phase } => {
+                let (x, y) = self.place(at);
+                app.on_trackpad_rotate(x, y, degrees, phase);
             }
             ForwarderEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods;

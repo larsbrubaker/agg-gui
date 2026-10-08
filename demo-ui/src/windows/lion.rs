@@ -273,8 +273,8 @@ impl LionView {
     /// `Consumed → request_draw → mark_dirty` chain, so the re-raster and
     /// the next frame both flow with no gesture-specific `needs_draw` latch.
     fn fold_multi_touch(&mut self, mt: &agg_gui::MultiTouchInfo) {
-        self.mouse_scale = (self.mouse_scale * mt.zoom_delta as f64).clamp(0.05, 50.0);
-        self.angle += mt.rotation_delta as f64;
+        self.mouse_scale = (self.mouse_scale * mt.zoom_delta).clamp(0.05, 50.0);
+        self.angle += mt.rotation_delta;
         self.offset_x += mt.translation_delta.x;
         self.offset_y += mt.translation_delta.y;
         self.rotate_grip = None;
@@ -282,6 +282,10 @@ impl LionView {
 }
 
 impl Widget for LionView {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn type_name(&self) -> &'static str {
         "LionView"
     }
@@ -449,6 +453,12 @@ impl Widget for LionView {
                 }
             }
             Event::MouseWheel { pos, delta_y, .. } => {
+                if agg_gui::trackpad_pinch::wheel_from_trackpad_pinch() {
+                    // The pinch's virtual fingers zoom and turn the lion
+                    // (`fold_multi_touch`); the wheel copy would zoom twice
+                    // (agg-sharp LionView.OnMouseWheel).
+                    return EventResult::Consumed;
+                }
                 // Exponential zoom: each wheel notch multiplies scale by
                 // a fixed factor so zoom-in and zoom-out are symmetric
                 // and never cross zero.  Positive `delta_y` = wheel down
@@ -543,8 +553,6 @@ mod tests {
             EventResult::Consumed,
             "consuming the gesture is what marks the cached window subtree dirty"
         );
-        // Tolerance absorbs the `f32` deltas widening to `f64` in the fold
-        // (0.3_f32 as f64 == 0.30000001…), not any behavioural slack.
         assert!(
             (v.angle - (angle0 + 0.3)).abs() < 1e-6,
             "rotation_delta must add to angle: {} vs {}",
@@ -563,6 +571,36 @@ mod tests {
             v.offset_x,
             v.offset_y
         );
+    }
+
+    /// agg-sharp `LionWindowTests.ATrackpadPinchZoomsOnceFromItsFingersNotItsWheel`.
+    #[test]
+    fn a_trackpad_pinch_zooms_once_from_its_fingers_not_its_wheel() {
+        let mut app = agg_gui::App::new(Box::new(view()));
+        app.layout(agg_gui::Size::new(400.0, 300.0));
+        let scale = |app: &agg_gui::App| {
+            let v = app
+                .root()
+                .as_any()
+                .and_then(|a| a.downcast_ref::<LionView>());
+            v.expect("the root is the lion view").mouse_scale
+        };
+        let (px, py) = (200.0, 150.0);
+
+        app.on_trackpad_pinch(px, py, 0.2, Modifiers::default());
+        assert_eq!(scale(&app), 1.0);
+
+        app.on_trackpad_magnify(
+            px,
+            py,
+            1.0,
+            agg_gui::TrackpadGesturePhase::Began,
+            Modifiers::default(),
+        );
+        let mut fb = agg_gui::Framebuffer::new(400, 300);
+        let mut ctx = agg_gui::GfxCtx::new(&mut fb);
+        app.paint(&mut ctx);
+        assert!((scale(&app) - 2.0).abs() < 1e-9, "scale = {}", scale(&app));
     }
 
     /// Regression guard: the classic left-drag rotate still works.

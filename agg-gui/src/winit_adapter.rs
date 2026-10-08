@@ -35,6 +35,22 @@ pub fn mouse_button(b: WinitMouseButton) -> MouseButton {
     }
 }
 
+/// A trackpad gesture's winit phase as the virtual fingers' phase (C#
+/// `MacTrackpadGestures.ToPhase`): a cancelled gesture ends like a finished
+/// one.
+pub fn trackpad_phase(
+    phase: winit::event::TouchPhase,
+) -> crate::trackpad_pinch_fingers::TrackpadGesturePhase {
+    use crate::trackpad_pinch_fingers::TrackpadGesturePhase;
+    match phase {
+        winit::event::TouchPhase::Started => TrackpadGesturePhase::Began,
+        winit::event::TouchPhase::Moved => TrackpadGesturePhase::Changed,
+        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+            TrackpadGesturePhase::Ended
+        }
+    }
+}
+
 /// Map a winit [`ModifiersState`] to this crate's [`Modifiers`].
 pub fn modifiers(s: ModifiersState) -> Modifiers {
     Modifiers {

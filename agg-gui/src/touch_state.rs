@@ -13,6 +13,11 @@
 //! [`crate::touch_emulation::TouchMouseEmu`], so existing widgets keep
 //! working with no changes.
 //!
+//! A trackpad's pinch and rotate arrive here too, as two virtual fingers on
+//! [`crate::trackpad_pinch_fingers::VIRTUAL_TRACKPAD_DEVICE`]
+//! ([`TouchState::apply_virtual_frame`], fed by `App::on_trackpad_magnify` /
+//! `on_trackpad_rotate`); they never drive the mouse emulation.
+//!
 //! The API shape deliberately mirrors egui's (`zoom_delta`,
 //! `rotation_delta`, `translation_delta`, `num_touches`, `center_pos`)
 //! so ports from egui code read cleanly.
@@ -73,11 +78,13 @@ pub struct MultiTouchInfo {
     pub num_touches: usize,
     /// Multiplicative zoom factor since the last frame.  `1.0` means
     /// "no pinch this frame"; `1.1` means the fingers spread by 10 %.
-    pub zoom_delta: f32,
+    /// `f64`, as agg-sharp's `MultiTouchInfo.ZoomDelta`, so a virtual
+    /// trackpad pinch reads back its magnification exactly.
+    pub zoom_delta: f64,
     /// Rotation in radians since the last frame.  Positive = CCW in
     /// widget-local (Y-up) space, i.e. visually counter-clockwise on
     /// screen.
-    pub rotation_delta: f32,
+    pub rotation_delta: f64,
     /// Translation of the centroid since the last frame, in widget-
     /// local pixels.  Widgets that want the gesture to orbit the pinch
     /// centre should combine this with `zoom_delta` / `rotation_delta`.
@@ -116,18 +123,13 @@ pub struct TouchState {
     /// fewer than two fingers are down on any one device.  Published
     /// to the thread-local so widgets can read it during paint.
     last: Option<MultiTouchInfo>,
-    /// Set by Start / End / Cancel so `update_gesture` can reseed
-    /// `prev_pos` on the frame after a finger count change — without
-    /// this, newly-arrived fingers contribute a spurious delta equal
-    /// to their full spread on their first move.
-    topology_changed: bool,
 }
 
 /// Fold an angle (radians) into the canonical `[-pi, pi]` range.  Used to
 /// keep each finger's per-frame rotation step honest across the atan2 ±pi
 /// seam before the steps are averaged.
-fn wrap_angle(a: f32) -> f32 {
-    use std::f32::consts::PI;
+fn wrap_angle(a: f64) -> f64 {
+    use std::f64::consts::PI;
     let mut a = a;
     while a > PI {
         a -= 2.0 * PI;
@@ -152,7 +154,7 @@ impl TouchState {
                 force: force.unwrap_or(0.0),
             },
         );
-        self.topology_changed = true;
+        self.latch_baseline();
     }
 
     pub fn on_move(&mut self, device: TouchDeviceId, id: TouchId, pos: Point, force: Option<f32>) {
@@ -166,20 +168,65 @@ impl TouchState {
 
     pub fn on_end_or_cancel(&mut self, device: TouchDeviceId, id: TouchId) {
         if self.active.remove(&(device, id)).is_some() {
-            self.topology_changed = true;
+            self.latch_baseline();
         }
         if self.active.len() < 2 {
             self.last = None;
         }
     }
 
+    /// A finger landed or lifted: every finger's current position becomes
+    /// the baseline the next [`Self::update_gesture`] measures from.
+    ///
+    /// Comparing across a count change would read the new finger's whole
+    /// spread as a one-frame zoom, so the change itself reports nothing - but
+    /// moves made *after* it, before the next frame is aggregated, are real
+    /// and are kept. (Zeroing the whole next frame instead would drop a
+    /// virtual trackpad pinch's first event, which lands its fingers and
+    /// moves them before a single paint.)
+    fn latch_baseline(&mut self) {
+        for t in self.active.values_mut() {
+            t.prev_pos = t.pos;
+        }
+    }
+
+    /// Applies one frame of positions on `device`, as agg-sharp's
+    /// `MultiTouchGesture.Update` takes a multi-position mouse move: finger
+    /// `i` is touch id `i`. Fingers past the frame's count lift; a frame of
+    /// fewer than two positions ends the whole gesture on that device (every
+    /// consumer ends its pinch on a single-position frame). Used for the
+    /// virtual trackpad fingers ([`crate::trackpad_pinch_fingers`]), which
+    /// never drive the mouse emulation real touches do.
+    pub fn apply_virtual_frame(&mut self, device: TouchDeviceId, frame: &[Point]) {
+        let keep = if frame.len() < 2 { 0 } else { frame.len() };
+        let lifted: Vec<(TouchDeviceId, TouchId)> = self
+            .active
+            .keys()
+            .filter(|(d, id)| *d == device && id.0 as usize >= keep)
+            .copied()
+            .collect();
+        for (d, id) in lifted {
+            self.on_end_or_cancel(d, id);
+        }
+        for (i, pos) in frame.iter().enumerate().take(keep) {
+            let id = TouchId(i as u64);
+            if self.active.contains_key(&(device, id)) {
+                self.on_move(device, id, *pos, None);
+            } else {
+                self.on_start(device, id, *pos, None);
+            }
+        }
+    }
+
     /// Every active finger's current position, for the per-finger
     /// registry ([`crate::touch_points`]) that virtual-gamepad widgets
     /// poll. Positions are app-local (the space touch events arrive
-    /// in after the shell's screen→world conversion).
+    /// in after the shell's screen→world conversion). The virtual trackpad
+    /// fingers are not on the screen, so they are left out.
     pub fn active_points(&self) -> Vec<crate::touch_points::TouchPoint> {
         self.active
             .iter()
+            .filter(|((d, _), _)| *d != crate::trackpad_pinch_fingers::VIRTUAL_TRACKPAD_DEVICE)
             .map(|((_, id), t)| crate::touch_points::TouchPoint {
                 id: id.0,
                 pos: t.pos,
@@ -194,7 +241,19 @@ impl TouchState {
         // Only the most-populated device contributes — the common case
         // is a single touchscreen, and cross-device gestures aren't a
         // useful abstraction.
-        let device = self.active.keys().next().map(|(d, _)| *d);
+        // Ties go to the lowest device id, so a real touchscreen wins over
+        // the virtual trackpad fingers.
+        let mut counts: BTreeMap<TouchDeviceId, usize> = BTreeMap::new();
+        for (d, _) in self.active.keys() {
+            *counts.entry(*d).or_default() += 1;
+        }
+        let device = counts
+            .iter()
+            .fold(None::<(TouchDeviceId, usize)>, |best, (d, n)| match best {
+                Some((_, bn)) if bn >= *n => best,
+                _ => Some((*d, *n)),
+            })
+            .map(|(d, _)| d);
         let Some(device) = device else {
             self.last = None;
             return;
@@ -228,16 +287,16 @@ impl TouchState {
         // Average pinch + rotation across pairs.  Using every
         // (touch, centroid) ray means the signal scales sensibly with
         // finger count; egui does the same.
-        let mut zoom_sum = 0.0_f32;
-        let mut rotation_sum = 0.0_f32;
+        let mut zoom_sum = 0.0_f64;
+        let mut rotation_sum = 0.0_f64;
         let mut force_sum = 0.0_f32;
         let mut zoom_count = 0;
         for t in &touches {
             force_sum += t.force;
-            let dx = (t.pos.x - cx) as f32;
-            let dy = (t.pos.y - cy) as f32;
-            let pdx = (t.prev_pos.x - pcx) as f32;
-            let pdy = (t.prev_pos.y - pcy) as f32;
+            let dx = t.pos.x - cx;
+            let dy = t.pos.y - cy;
+            let pdx = t.prev_pos.x - pcx;
+            let pdy = t.prev_pos.y - pcy;
             let r = (dx * dx + dy * dy).sqrt();
             let pr = (pdx * pdx + pdy * pdy).sqrt();
             if pr > 1.0 && r > 1.0 {
@@ -255,26 +314,20 @@ impl TouchState {
                 zoom_count += 1;
             }
         }
-        // Skip producing a frame-delta when topology just changed —
-        // the jump from "no prev_pos" to "current pos" would otherwise
-        // read as a huge one-frame zoom.  We still emit an info entry
-        // so widgets can react to finger count; just with zeroed
-        // deltas.
-        let (zoom_delta, rotation_delta) = if self.topology_changed || zoom_count == 0 {
+        // A finger count change already latched every baseline
+        // (`latch_baseline`), so the deltas here only ever cover moves
+        // made since the fingers that are down now were all down.
+        let (zoom_delta, rotation_delta) = if zoom_count == 0 {
             (1.0, 0.0)
         } else {
             // Per-finger deltas are already wrapped, so their average is
             // well-behaved; this final wrap is a cheap belt-and-braces
             // clamp for the pathological many-finger case.
-            let rot = wrap_angle(rotation_sum / zoom_count as f32);
-            (zoom_sum / zoom_count as f32, rot)
+            let rot = wrap_angle(rotation_sum / zoom_count as f64);
+            (zoom_sum / zoom_count as f64, rot)
         };
 
-        let translation_delta = if self.topology_changed {
-            Point::new(0.0, 0.0)
-        } else {
-            Point::new(cx - pcx, cy - pcy)
-        };
+        let translation_delta = Point::new(cx - pcx, cy - pcy);
 
         self.last = Some(MultiTouchInfo {
             device_id: device,
@@ -286,12 +339,8 @@ impl TouchState {
             center_pos: Point::new(cx, cy),
         });
 
-        // Latch current positions as the new baseline for the next
-        // frame, then clear the topology flag.
-        for t in self.active.values_mut() {
-            t.prev_pos = t.pos;
-        }
-        self.topology_changed = false;
+        // Latch current positions as the new baseline for the next frame.
+        self.latch_baseline();
     }
 
     pub fn current(&self) -> Option<MultiTouchInfo> {
@@ -469,7 +518,7 @@ mod tests {
         ts.update_gesture();
 
         let info = ts.current().expect("gesture present");
-        let expected = 30.0_f32.to_radians();
+        let expected = 30.0_f64.to_radians();
         assert!(
             (info.rotation_delta - expected).abs() < 1e-3,
             "rotation_delta = {} (expected ~+{} rad, +30° CCW)",
@@ -591,7 +640,7 @@ mod tests {
         ts.update_gesture();
 
         let info = ts.current().expect("gesture present");
-        let expected = 4.0_f32.to_radians();
+        let expected = 4.0_f64.to_radians();
         assert!(
             (info.rotation_delta - expected).abs() < 1e-3,
             "rotation_delta = {} (expected ~+{} rad, +4° CCW); a seam-crossing \
@@ -604,6 +653,46 @@ mod tests {
             "pure rotation must not zoom, got {}",
             info.zoom_delta
         );
+    }
+
+    /// Fingers that land and move before the next `update_gesture` (a
+    /// virtual trackpad pinch's first event, or a fast real pinch between
+    /// two paints) keep the move: the landing latched the baseline, so only
+    /// the landing itself reads as no change.
+    #[test]
+    fn moves_after_landing_count_in_the_first_frame() {
+        let mut ts = TouchState::new();
+        ts.on_start(DEV, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(DEV, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.on_move(DEV, TouchId(0), Point::new(50.0, 100.0), None);
+        ts.on_move(DEV, TouchId(1), Point::new(250.0, 100.0), None);
+        ts.update_gesture();
+
+        let info = ts.current().expect("gesture present");
+        assert!(
+            (info.zoom_delta - 2.0).abs() < 1e-12,
+            "zoom_delta = {} (expected 2.0)",
+            info.zoom_delta
+        );
+        assert_eq!(info.translation_delta.x, 0.0);
+        assert_eq!(info.translation_delta.y, 0.0);
+    }
+
+    /// The device with the most fingers down drives the aggregate, so one
+    /// resting finger on a touchscreen doesn't hide a two-finger gesture on
+    /// another device.
+    #[test]
+    fn the_device_with_most_fingers_drives_the_gesture() {
+        let mut ts = TouchState::new();
+        let other = TouchDeviceId(7);
+        ts.on_start(DEV, TouchId(0), Point::new(10.0, 10.0), None);
+        ts.on_start(other, TouchId(0), Point::new(100.0, 100.0), None);
+        ts.on_start(other, TouchId(1), Point::new(200.0, 100.0), None);
+        ts.update_gesture();
+
+        let info = ts.current().expect("two fingers on one device");
+        assert_eq!(info.device_id, other);
+        assert_eq!(info.num_touches, 2);
     }
 
     /// Two `update_gesture` calls with no movement in between: the second

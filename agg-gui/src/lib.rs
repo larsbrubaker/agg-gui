@@ -97,6 +97,7 @@ pub mod touch_emulation;
 pub mod touch_points;
 pub mod touch_state;
 pub mod trackpad_pinch;
+pub mod trackpad_pinch_fingers;
 pub mod ui_thread;
 pub mod undo;
 pub mod unhandled;
@@ -173,6 +174,9 @@ pub use theme::{
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_emulation::{EmuCmd, TouchMouseEmu, TOUCH_SCROLL_THRESHOLD};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
+pub use trackpad_pinch_fingers::{
+    TrackpadGesturePhase, TrackpadPinchFingers, VIRTUAL_TRACKPAD_DEVICE,
+};
 pub use undo::{DoUndoActions, Settings as UndoerSettings, UndoBuffer, UndoRedoCommand, Undoer};
 pub use unhandled::report_unhandled;
 #[cfg(feature = "reflect")]

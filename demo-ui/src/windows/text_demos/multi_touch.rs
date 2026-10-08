@@ -240,8 +240,8 @@ impl Widget for MultiTouchView {
             // `gesture_this_frame` latch tells `paint` to thicken the stroke
             // and skip the reset-decay branch this frame.
             agg_gui::Event::MultiTouch { info } => {
-                self.zoom *= info.zoom_delta as f64;
-                self.rotation += info.rotation_delta as f64;
+                self.zoom *= info.zoom_delta;
+                self.rotation += info.rotation_delta;
                 // Pan delta comes in widget pixels; store in normalised units
                 // so the accumulator is resolution-independent.
                 let scale = self.unit_scale();
@@ -262,6 +262,12 @@ impl Widget for MultiTouchView {
                 modifiers,
                 ..
             } => {
+                if agg_gui::trackpad_pinch::wheel_from_trackpad_pinch() {
+                    // The pinch's virtual fingers zoom the arrow through
+                    // `Event::MultiTouch`; the wheel copy would zoom twice, or
+                    // scroll it (agg-sharp MultiTouchView.OnMouseWheel).
+                    return agg_gui::EventResult::Consumed;
+                }
                 let scale = self.unit_scale();
                 if modifiers.ctrl || modifiers.meta {
                     let zoom_delta = (1.0 + *delta_y * 0.002).clamp(0.2, 5.0);
@@ -284,6 +290,10 @@ impl Widget for MultiTouchView {
 
     fn needs_draw(&self) -> bool {
         true
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 }
 
@@ -433,5 +443,51 @@ mod tests {
         assert!((v.force - 0.4).abs() < 1e-6);
         assert_eq!(v.num_touches, 2);
         assert!(v.gesture_this_frame, "paint reads this to drive the stroke");
+    }
+
+    /// agg-sharp `MultiTouchWindowTests.ATrackpadPinchIsAMultiTouchZoomNotAScroll`:
+    /// the pinch's marked wheel neither scrolls nor zooms the arrow; its
+    /// virtual fingers zoom it by exactly the magnification, without a slide.
+    #[test]
+    fn a_trackpad_pinch_is_a_multi_touch_zoom_not_a_scroll() {
+        let mut app = agg_gui::App::new(Box::new(MultiTouchView::new()));
+        app.layout(agg_gui::Size::new(400.0, 300.0));
+        let view = |app: &agg_gui::App| {
+            let v = app
+                .root()
+                .as_any()
+                .and_then(|a| a.downcast_ref::<MultiTouchView>());
+            let v = v.expect("the root is the view");
+            (v.zoom, v.translation_x, v.translation_y)
+        };
+        let paint = |app: &mut agg_gui::App| {
+            let mut fb = agg_gui::Framebuffer::new(400, 300);
+            let mut ctx = agg_gui::GfxCtx::new(&mut fb);
+            app.paint(&mut ctx);
+        };
+        // The view's centre; screen Y is down, which is the same centre.
+        let (px, py) = (200.0, 150.0);
+
+        app.on_trackpad_pinch(px, py, 0.2, agg_gui::Modifiers::default());
+        assert_eq!(
+            view(&app),
+            (1.0, 0.0, 0.0),
+            "the marked wheel is left alone"
+        );
+
+        app.on_trackpad_magnify(
+            px,
+            py,
+            0.5,
+            agg_gui::TrackpadGesturePhase::Began,
+            agg_gui::Modifiers::default(),
+        );
+        paint(&mut app);
+        let (zoom, tx, ty) = view(&app);
+        assert!((zoom - 1.5).abs() < 1e-9, "zoom = {zoom}");
+        assert!(
+            (tx * tx + ty * ty).sqrt() < 1e-9,
+            "translation = ({tx}, {ty})"
+        );
     }
 }

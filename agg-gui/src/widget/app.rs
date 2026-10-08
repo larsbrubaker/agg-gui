@@ -73,6 +73,9 @@ pub struct App {
     /// its commands are replayed through `on_mouse_*` so shells only
     /// ever forward raw touches.  See [`crate::touch_emulation`].
     touch_mouse_emu: crate::touch_emulation::TouchMouseEmu,
+    /// A trackpad's pinch and rotate as two virtual fingers, fed into
+    /// `touch_state` on their own device. See `app/pinch.rs`.
+    trackpad_fingers: crate::trackpad_pinch_fingers::TrackpadPinchFingers,
     /// Last `async_state_epoch` `App::paint` observed.  At the top of
     /// each paint, if the current epoch differs we explicitly mark
     /// every widget dirty via `mark_subtree_dirty`, so a freshly-
@@ -109,6 +112,9 @@ impl App {
             global_key_handler: None,
             touch_state: crate::touch_state::TouchState::new(),
             touch_mouse_emu: crate::touch_emulation::TouchMouseEmu::new(),
+            trackpad_fingers: crate::trackpad_pinch_fingers::TrackpadPinchFingers::new(
+                crate::trackpad_pinch_fingers::TRACKPAD_FINGER_RADIUS,
+            ),
             last_async_state_epoch: 0,
             layout_async_state_epoch: None,
         }

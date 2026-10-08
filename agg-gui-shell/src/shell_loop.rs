@@ -213,15 +213,28 @@ impl<H: ShellHost> ShellLoop<H> {
             }
 
             // A trackpad pinch (macOS magnify). agg-sharp's MacTrackpadGestures
-            // sends it as a wheel marked FromTrackpadPinch; App::on_trackpad_pinch
-            // does the same, through the shared magnification conversion. NaN
-            // (which winit documents as possible) becomes no zoom there.
-            WindowEvent::PinchGesture { delta, .. } => {
+            // sends it as a wheel marked FromTrackpadPinch and as two virtual
+            // fingers; App::on_trackpad_magnify does both, through the shared
+            // magnification conversion. NaN (which winit documents as
+            // possible) becomes no zoom there.
+            WindowEvent::PinchGesture { delta, phase, .. } => {
                 self.input_since_frame = true;
                 self.forward(ForwarderEvent::TrackpadPinch {
                     at: None,
                     magnification: delta,
+                    phase: winit_adapter::trackpad_phase(phase),
                     modifiers: None,
+                });
+            }
+
+            // A trackpad rotation (macOS rotate): degrees, counter-clockwise
+            // positive, turning the same virtual fingers.
+            WindowEvent::RotationGesture { delta, phase, .. } => {
+                self.input_since_frame = true;
+                self.forward(ForwarderEvent::TrackpadRotate {
+                    at: None,
+                    degrees: delta as f64,
+                    phase: winit_adapter::trackpad_phase(phase),
                 });
             }
 
