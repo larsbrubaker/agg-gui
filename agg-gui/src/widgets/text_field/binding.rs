@@ -1,3 +1,6 @@
+//! Setting a [`TextField`]'s text and caret from outside: the external text
+//! cell binding, and C# agg-sharp's `SetCursorPosition`.
+
 use super::*;
 
 impl TextField {
@@ -20,5 +23,25 @@ impl TextField {
         if external != self.edit.borrow().text {
             self.set_text(external);
         }
+    }
+
+    /// C# `SetCursorPosition`: put the caret before character `char_index`
+    /// (clamped to the text), collapse the selection and keep the caret in
+    /// view. `set_text` followed by this is C#'s
+    /// `SetTextAsUndoBaseline(text, charIndex)` seeding.
+    pub fn set_cursor_position(&mut self, char_index: usize) {
+        self.flush_pending();
+        {
+            let mut st = self.edit.borrow_mut();
+            let byte = st
+                .text
+                .char_indices()
+                .nth(char_index)
+                .map_or(st.text.len(), |(i, _)| i);
+            st.cursor = byte;
+            st.anchor = byte;
+        }
+        self.ensure_cursor_visible();
+        crate::animation::request_draw();
     }
 }

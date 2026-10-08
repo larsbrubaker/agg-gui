@@ -127,3 +127,25 @@ fn double_click_near_word_edge() {
     press(&mut f, x);
     assert_eq!(f.selection(), "cat");
 }
+
+/// `set_text` with new text puts the caret at the start (C#'s `Text`
+/// setter); `set_cursor_position` places it by character index, clamped,
+/// collapsing any selection (C#'s `SetCursorPosition`), which is how an
+/// editor seeds its text with the caret at the end
+/// (`SetTextAsUndoBaseline(text, text.Length)`).
+#[test]
+fn set_text_starts_the_caret_at_zero_and_set_cursor_position_moves_it() {
+    let mut f = laid_out("abc");
+    f.set_text("héllo");
+    assert_eq!(f.cursor_pos(), 0);
+    f.set_cursor_position(5);
+    assert_eq!(f.cursor_pos(), "héllo".len());
+    assert_eq!(f.selection(), "");
+    f.set_cursor_position(99);
+    assert_eq!(f.cursor_pos(), "héllo".len());
+    f.set_cursor_position(2);
+    assert_eq!(f.cursor_pos(), "hé".len());
+    // the same text again leaves the caret where it is
+    f.set_text("héllo");
+    assert_eq!(f.cursor_pos(), "hé".len());
+}
