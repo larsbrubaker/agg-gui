@@ -120,6 +120,16 @@ impl Widget for ColorPicker {
         self.paint_panel_rows(ctx, &r);
     }
 
+    /// The sub-widgets (No Color, Cancel, Select) paint only from
+    /// `paint_panel_rows`, inside the open panel (inline) or the popup's
+    /// overlay pass.  The ordinary child traversal must not paint them: while
+    /// closed they sit at zero bounds at the origin, where the No Color
+    /// checkbox (whose box and label don't depend on its bounds) would draw
+    /// over the swatch, and while open inline it would paint them twice.
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        Some((0.0, 0.0, 0.0, 0.0))
+    }
+
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if self.popup_swatch.is_some() && self.open {
             self.paint_popup(ctx);
@@ -159,8 +169,8 @@ impl Widget for ColorPicker {
 
 impl ColorPicker {
     /// Position the panel's sub-widgets (No Color, Cancel, Select) in their
-    /// regions while open; zero bounds while closed so they neither paint
-    /// nor hit.
+    /// regions while open; zero bounds while closed so they take no hits
+    /// (painting is gated separately, see `clip_children_rect`).
     pub(super) fn layout_panel_children(&mut self) {
         if self.open {
             let r = self.regions();

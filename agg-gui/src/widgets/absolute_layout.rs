@@ -153,9 +153,14 @@ impl AbsoluteLayout {
             );
             let w = w.clamp(min.width, max.width).max(0.0);
             let h = h.clamp(min.height, max.height).max(0.0);
-            if w != natural.width || h != natural.height {
-                // Re-lay the child at the size it was given so its own
-                // content fills the box it actually occupies.
+            if w != room.width || h != room.height {
+                // The child arranged its own children against `room`; re-lay
+                // it at the box it actually occupies.  Comparing with the
+                // measured `room` (not the reported `natural`) matters for a
+                // fitted child: a content-fitted `FlexColumn` reports less
+                // than `room` but placed its rows from the top (and centred
+                // them) within `room`, so without this pass they would sit
+                // above/right of its box and be clipped away.
                 child.layout(Size::new(w, h));
             }
             // C# `OriginRelativeParent`'s setter rounds with Math.Round

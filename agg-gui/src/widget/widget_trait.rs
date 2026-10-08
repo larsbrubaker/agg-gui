@@ -51,6 +51,13 @@ pub trait Widget {
     /// The parent passes the space it can offer; the widget returns the size it
     /// actually wants to occupy. The parent uses the returned size to set this
     /// widget's bounds before calling `layout` on the next sibling.
+    ///
+    /// The widget arranges its own children against `available`.  A parent
+    /// that then gives it bounds of a different size (a fitted child that
+    /// reported less than it was offered, a cross-axis anchor) calls
+    /// `layout` again with that final size, so the children land inside the
+    /// box the widget actually occupies (`FlexColumn`, `FlexRow` and
+    /// `AbsoluteLayout` do).
     fn layout(&mut self, available: Size) -> Size;
 
     /// Paint this widget's own content into `ctx`.

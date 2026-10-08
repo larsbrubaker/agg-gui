@@ -118,6 +118,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A content-fitted child (a `FlexColumn` with `fit_width` or no flex rows)
+  keeps its rows inside its own box. `AbsoluteLayout` lays a child out again
+  whenever its final box differs from the space it was measured in (it used
+  to compare with the size the child reported, so a fitted column kept rows
+  placed from the top of, and centred in, the larger offered space), and
+  `FlexColumn` lays a child out again at its final width when that differs
+  from the slot (a centred or fit-width child). The `Widget::layout` docs
+  state the contract.
+
+- `ColorPicker` no longer paints its "No Color (Pass Through)" checkbox over
+  the swatch while the panel is closed; the panel's sub-widgets paint only
+  with the open panel (and no longer twice in the inline panel).
+
 - `MenuBar` paints its background over its laid-out bounds instead of
   re-reading `effective_metrics().bar_h` at paint time, so an input-profile
   or touch-latch flip between layout and paint no longer fills a strip of the

@@ -481,10 +481,20 @@ impl Widget for FlexColumn {
 
             // Round to integers so bitmap content (cached text, images) lands on
             // exact pixel boundaries and isn't sub-pixel sampled into blur.
+            let final_w = child_w.round();
+            // Re-lay at the final width when it differs from the slot the
+            // child was just laid out in (a fit-width child that is
+            // centred, right-aligned or narrower than the slot): the child
+            // arranged its own children against `slot_w`, so a centred
+            // grandchild would otherwise sit right of the child's box and be
+            // clipped.  Same contract as `FlexRow`'s cross-axis re-layout.
+            if (final_w - slot_w).abs() > 0.5 {
+                self.children[i].layout(Size::new(final_w, content_h));
+            }
             self.children[i].set_bounds(Rect::new(
                 child_x.round(),
                 child_bottom.round(),
-                child_w.round(),
+                final_w,
                 content_h.round(),
             ));
 

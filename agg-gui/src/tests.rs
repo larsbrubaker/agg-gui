@@ -54,6 +54,7 @@ mod draw_report;
 mod drawing;
 mod ellipse_path;
 mod event_pointer;
+mod fitted_layout;
 mod flex_gap;
 mod focus;
 mod focus_blur;
