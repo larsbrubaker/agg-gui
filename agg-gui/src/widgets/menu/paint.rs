@@ -3,7 +3,7 @@
 //! Text rendering is composed: the bar and popup widgets own `Label` widgets
 //! for every text-bearing element (bar button text, item labels, shortcut
 //! strings).  This module paints the chrome (backgrounds, hover panels,
-//! separators, submenu chevrons, check/radio glyphs) inline, and the bar /
+//! separators, submenu chevrons, check marks and radio circles) inline, and the bar /
 //! popup widgets paint their owned `Label` children through `paint_subtree`
 //! so the framework's backbuffer + LCD subpixel path renders every glyph.
 
@@ -44,6 +44,29 @@ pub fn paint_check_mark(ctx: &mut dyn DrawCtx, cx: f64, cy: f64, color: Color) {
     ctx.move_to(cx - 5.0, cy - 0.5);
     ctx.line_to(cx - 1.5, cy - 4.0);
     ctx.line_to(cx + 5.0, cy + 3.5);
+    ctx.stroke();
+}
+
+/// Radius of the radio circle's outline: agg-sharp `RadioImage.BorderRadius`
+/// (`BoxWidth / 2`, `BoxWidth` = 10 logical px).
+pub const RADIO_RADIUS: f64 = 5.0;
+
+/// Paint a radio mark centred at `(cx, cy)`: agg-sharp
+/// `RadioImage.DrawCircle` — a 1 px circle outline of [`RADIO_RADIUS`] and,
+/// when `selected`, a filled centre dot of half that radius
+/// (`BoxWidth / 4`).  Used by rows under a
+/// [`super::style::SelectionColumn`].
+pub fn paint_radio_mark(ctx: &mut dyn DrawCtx, cx: f64, cy: f64, color: Color, selected: bool) {
+    if selected {
+        ctx.set_fill_color(color);
+        ctx.begin_path();
+        ctx.circle(cx, cy, RADIO_RADIUS * 0.5);
+        ctx.fill();
+    }
+    ctx.set_stroke_color(color);
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.circle(cx, cy, RADIO_RADIUS);
     ctx.stroke();
 }
 

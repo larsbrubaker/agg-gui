@@ -23,7 +23,9 @@ pub use model::{MenuEntry, MenuItem, MenuSelection, MenuShortcut, MenuWidgetRow,
 pub use paint::MenuStyle;
 pub use state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 pub use strip::MenuBarStrip;
-pub use style::{current_menu_style, reset_menu_style, set_menu_style, ShortcutFormat};
+pub use style::{
+    current_menu_style, reset_menu_style, set_menu_style, SelectionColumn, ShortcutFormat,
+};
 pub use widget::{MenuBar, MenuOrientation, MenuTitle, PopupMenu, TopMenu};
 
 #[cfg(test)]

@@ -240,6 +240,8 @@ mod tests_image_icon;
 #[cfg(test)]
 mod tests_rows;
 #[cfg(test)]
+mod tests_selection_column;
+#[cfg(test)]
 mod tests_style;
 #[cfg(test)]
 mod tests_tooltip;

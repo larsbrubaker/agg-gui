@@ -2,7 +2,8 @@
 //! that file under the 800-line cap.
 //!
 //! `paint_popup_level` draws one open popup panel — hover / open
-//! backgrounds, separators, inline icon / check / radio glyphs, submenu
+//! backgrounds, separators, inline icon / check / radio glyphs (in their
+//! own leading column under a `MenuStyle::selection_column`), submenu
 //! chevrons — and delegates the row text to the shared [`PopupLabels`]
 //! cache so every glyph flows through the framework's backbuffer + LCD
 //! path.  It consumes the row rects produced by
@@ -18,10 +19,11 @@ use crate::draw_ctx::DrawCtx;
 use super::super::geometry::{hit_test, item_at_path, MenuHit, PopupLayout};
 use super::super::model::{MenuEntry, MenuSelection};
 use super::super::paint::{
-    paint_check_mark, paint_item_row_bg, paint_separator, paint_submenu_chevron,
+    paint_check_mark, paint_item_row_bg, paint_radio_mark, paint_separator, paint_submenu_chevron,
     popup_row_text_color, MenuStyle,
 };
 use super::super::state::PopupMenuState;
+use super::super::style::{row_icon_x, row_label_x, row_selection_column};
 use super::labels::PopupLabels;
 
 /// Opacity of an image icon on a disabled row (glyph icons dim through the
@@ -100,7 +102,7 @@ pub(super) fn paint_popup_level(
             // Artwork icon: left edge at the glyph column, centred on the
             // row.  Disabled rows fade it like they fade glyph text.
             let size = image.size();
-            let ix = row_layout.rect.x + style.icon_x;
+            let ix = row_layout.rect.x + row_icon_x(style, item);
             let iy = row_layout.rect.y + (row_layout.rect.height - size.height) * 0.5;
             if !item.enabled {
                 ctx.save();
@@ -114,7 +116,7 @@ pub(super) fn paint_popup_level(
             let icon = icon.to_string();
             ctx.fill_text(
                 &icon,
-                row_layout.rect.x + style.icon_x,
+                row_layout.rect.x + row_icon_x(style, item),
                 row_layout.rect.y + 7.0,
             );
         }
@@ -129,7 +131,21 @@ pub(super) fn paint_popup_level(
             item.selection,
             MenuSelection::Check { selected: true } | MenuSelection::Radio { selected: true }
         );
-        if selected {
+        if let Some(column) = row_selection_column(style.selection_column, item) {
+            // Opt-in leading column (agg-sharp's gutter): a radio row always
+            // shows its circle, a check row its mark only when checked.
+            let cx = row_layout.rect.x + column.mark_x;
+            let cy = row_layout.rect.y + row_layout.rect.height * 0.5;
+            match item.selection {
+                MenuSelection::Radio { selected } => {
+                    paint_radio_mark(ctx, cx, cy, inline_color, selected)
+                }
+                MenuSelection::Check { selected: true } => {
+                    paint_check_mark(ctx, cx, cy, inline_color)
+                }
+                _ => {}
+            }
+        } else if selected {
             let has_left_marker = item.has_leading_icon();
             let cx = if has_left_marker {
                 let right_offset = if item.has_submenu() { 30.0 } else { 12.0 };
@@ -151,7 +167,7 @@ pub(super) fn paint_popup_level(
             level_idx,
             row_idx,
             row_layout.rect,
-            style.label_x,
+            row_label_x(style.label_x, style.selection_column, item),
             style.shortcut_right,
             item.enabled,
             open && item.enabled,

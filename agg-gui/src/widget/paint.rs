@@ -44,13 +44,7 @@ pub fn current_paint_clip() -> Option<Rect> {
 /// wake re-arm on this: the traversal still visits children a clipping
 /// ancestor (e.g. a scrolled `ScrollView`) has hidden, and re-arming there
 /// would keep a reactive host waking forever for invisible pixels.
-pub(crate) fn is_local_rect_in_paint_clip(
-    ctx: &dyn DrawCtx,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-) -> bool {
+pub fn is_local_rect_in_paint_clip(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) -> bool {
     let Some(clip) = current_paint_clip() else {
         return true;
     };

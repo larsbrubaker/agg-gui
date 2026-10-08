@@ -5,7 +5,9 @@
 //! [`hit_test_subtree`], [`active_modal_path`], [`global_overlay_hit_path`]
 //! — returns a `Vec<usize>` path of child indices identifying the deepest
 //! widget that claims a position; the App event router uses that path to
-//! dispatch mouse events to the right subtree.
+//! dispatch mouse events to the right subtree. The dispatch family keeps
+//! [`event_root`](super::event_root)'s local → root stack in step with the
+//! path it walks, so handlers can ask where they sit in root space.
 //!
 //! # Coordinate system
 //!
@@ -15,6 +17,7 @@
 //! pre-converts platform Y-down input coordinates via `App::flip_y`
 //! before calling in — do not flip Y here.
 
+use super::event_root;
 use super::*;
 
 /// Map a point from a parent's local space into the local space of its child
@@ -215,49 +218,7 @@ pub fn dispatch_event(
     event: &Event,
     pos_in_root: Point,
 ) -> EventResult {
-    if path.is_empty() {
-        let before = crate::animation::invalidation_epoch();
-        let result = deliver(root.as_mut(), event);
-        if result.requests_redraw() || before != crate::animation::invalidation_epoch() {
-            root.mark_dirty();
-        }
-        return result;
-    }
-    let idx = path[0];
-    // Path can become stale between when it was captured (hit-test or
-    // previous-frame hovered/focus) and when it is dispatched — e.g. a
-    // CollapsingHeader collapsed since then and dropped its child.  Rather
-    // than panic, just stop descending and deliver the event at this level.
-    if idx >= root.children().len() {
-        return deliver(root.as_mut(), event);
-    }
-    let child_bounds = root.children()[idx].bounds();
-    let child_pos = child_local_pos(root.as_ref(), child_bounds, pos_in_root);
-    let translated_event = translate_event(event, child_pos);
-
-    let before_child = crate::animation::invalidation_epoch();
-    let child_result = dispatch_event(
-        &mut root.children_mut()[idx],
-        &path[1..],
-        &translated_event,
-        child_pos,
-    );
-    // A child (or descendant) that requested a draw bumped the epoch —
-    // invalidate our own cache so the retained backbuffer re-rasters. A
-    // quiet consume bumps nothing, so it correctly leaves the cache alone.
-    if before_child != crate::animation::invalidation_epoch() {
-        root.mark_dirty();
-    }
-    if child_result.is_consumed() {
-        return child_result;
-    }
-    // Bubble: deliver to this widget too (with original pos_in_root coords).
-    let before_self = crate::animation::invalidation_epoch();
-    let result = deliver(root.as_mut(), event);
-    if result.requests_redraw() || before_self != crate::animation::invalidation_epoch() {
-        root.mark_dirty();
-    }
-    result
+    dispatch_event_dyn(root.as_mut(), path, event, pos_in_root)
 }
 
 /// Variant of [`dispatch_event`] that accepts `&mut dyn Widget` as the
@@ -265,7 +226,22 @@ pub fn dispatch_event(
 /// `Window`'s `title_bar: WindowTitleBar`) and wants to route an event
 /// into it via the framework's standard hit-test + bubble dispatch,
 /// instead of running coordinate hit-tests inline.
+///
+/// Every widget on the path can query its root-space placement while it
+/// handles the event ([`event_rect_to_root`](super::event_rect_to_root)).
 pub fn dispatch_event_dyn(
+    root: &mut dyn Widget,
+    path: &[usize],
+    event: &Event,
+    pos_in_root: Point,
+) -> EventResult {
+    let _root = event_root::enter_dispatch(root);
+    dispatch_path(root, path, event, pos_in_root)
+}
+
+/// The recursive body of [`dispatch_event_dyn`]: `root`'s local → root
+/// transform is already on the event-root stack.
+fn dispatch_path(
     root: &mut dyn Widget,
     path: &[usize],
     event: &Event,
@@ -280,6 +256,10 @@ pub fn dispatch_event_dyn(
         return result;
     }
     let idx = path[0];
+    // Path can become stale between when it was captured (hit-test or
+    // previous-frame hovered/focus) and when it is dispatched — e.g. a
+    // CollapsingHeader collapsed since then and dropped its child.  Rather
+    // than panic, just stop descending and deliver the event at this level.
     if idx >= root.children().len() {
         return deliver(root, event);
     }
@@ -288,20 +268,25 @@ pub fn dispatch_event_dyn(
     let translated_event = translate_event(event, child_pos);
 
     let before_child = crate::animation::invalidation_epoch();
-    // After the first hop we're inside the Vec<Box<dyn Widget>>, so we
-    // can fall back to the regular Box-based dispatcher.
-    let child_result = dispatch_event(
-        &mut root.children_mut()[idx],
-        &path[1..],
-        &translated_event,
-        child_pos,
-    );
+    let child_result = {
+        let _child = event_root::enter_child(root, child_bounds);
+        dispatch_path(
+            root.children_mut()[idx].as_mut(),
+            &path[1..],
+            &translated_event,
+            child_pos,
+        )
+    };
+    // A child (or descendant) that requested a draw bumped the epoch —
+    // invalidate our own cache so the retained backbuffer re-rasters. A
+    // quiet consume bumps nothing, so it correctly leaves the cache alone.
     if before_child != crate::animation::invalidation_epoch() {
         root.mark_dirty();
     }
     if child_result.is_consumed() {
         return child_result;
     }
+    // Bubble: deliver to this widget too (with original pos_in_root coords).
     let before_self = crate::animation::invalidation_epoch();
     let result = deliver(root, event);
     if result.requests_redraw() || before_self != crate::animation::invalidation_epoch() {
@@ -320,12 +305,24 @@ pub(crate) fn deliver_exact(
     path: &[usize],
     event: &Event,
 ) -> Option<EventResult> {
+    let _root = event_root::enter_dispatch(widget);
+    deliver_exact_path(widget, path, event)
+}
+
+/// The recursive body of [`deliver_exact`].
+fn deliver_exact_path(
+    widget: &mut dyn Widget,
+    path: &[usize],
+    event: &Event,
+) -> Option<EventResult> {
     let before = crate::animation::invalidation_epoch();
     let result = match path.split_first() {
         None => deliver(widget, event),
         Some((&idx, rest)) => {
+            let child_bounds = widget.children().get(idx)?.bounds();
+            let _child = event_root::enter_child(widget, child_bounds);
             let child = widget.children_mut().get_mut(idx)?;
-            deliver_exact(child.as_mut(), rest, event)?
+            deliver_exact_path(child.as_mut(), rest, event)?
         }
     };
     if result.requests_redraw() || before != crate::animation::invalidation_epoch() {
@@ -436,6 +433,12 @@ pub fn dispatch_event_broadcast(
     event: &Event,
     pos_in_root: Point,
 ) -> EventResult {
+    let _root = event_root::enter_dispatch(root.as_ref());
+    broadcast_path(root, event, pos_in_root)
+}
+
+/// The recursive body of [`dispatch_event_broadcast`].
+fn broadcast_path(root: &mut Box<dyn Widget>, event: &Event, pos_in_root: Point) -> EventResult {
     if !root.is_visible() {
         return EventResult::Ignored;
     }
@@ -443,7 +446,10 @@ pub fn dispatch_event_broadcast(
         let child_bounds = root.children()[i].bounds();
         let child_pos = child_local_pos(root.as_ref(), child_bounds, pos_in_root);
         let translated = translate_event(event, child_pos);
-        let r = dispatch_event_broadcast(&mut root.children_mut()[i], &translated, child_pos);
+        let r = {
+            let _child = event_root::enter_child(root.as_ref(), child_bounds);
+            broadcast_path(&mut root.children_mut()[i], &translated, child_pos)
+        };
         if r.is_consumed() {
             root.mark_dirty();
             return r;

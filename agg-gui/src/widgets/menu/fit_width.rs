@@ -11,7 +11,9 @@
 //! row layout ([`super::paint::MenuStyle`]):
 //!
 //! * the label starts at `style.label_x` (the icon gutter plus row inset —
-//!   agg-sharp's `MenuGutterWidth` left padding plus `MenuRowInset`);
+//!   agg-sharp's `MenuGutterWidth` left padding plus `MenuRowInset`), or,
+//!   for a check / radio row with an icon under a
+//!   [`super::style::SelectionColumn`], at the column's `icon_label_x`;
 //! * a shortcut sits [`SHORTCUT_GAP`] past the label (agg-sharp's
 //!   `MenuPadding` right of 20 on the label, which is the separation it
 //!   intends) and ends `style.shortcut_right` from the row's right edge;
@@ -43,7 +45,7 @@ use crate::text::{measure_advance, Font};
 use super::geometry::{MenuMetrics, MENU_W};
 use super::model::{MenuEntry, MenuItem};
 use super::paint::MenuStyle;
-use super::style::ShortcutFormat;
+use super::style::{row_label_x, SelectionColumn, ShortcutFormat};
 
 /// Gap between a row's label and its shortcut in a fitted popup (logical px).
 pub const SHORTCUT_GAP: f64 = 20.0;
@@ -69,6 +71,9 @@ pub struct FitMeasure {
     pub label_x: f64,
     pub shortcut_right: f64,
     pub shortcut_format: ShortcutFormat,
+    /// The style's selection column, which moves a check / radio row's
+    /// label past its icon ([`super::style::row_label_x`]).
+    pub selection_column: Option<SelectionColumn>,
 }
 
 impl std::fmt::Debug for FitMeasure {
@@ -89,6 +94,7 @@ impl FitMeasure {
             label_x: style.label_x,
             shortcut_right: style.shortcut_right,
             shortcut_format: style.shortcut_format,
+            selection_column: style.selection_column,
         }
     }
 
@@ -111,7 +117,10 @@ impl FitMeasure {
         let shortcut_w = item
             .shortcut_text_formatted(platform, &self.font, self.shortcut_format)
             .map_or(0.0, |text| SHORTCUT_GAP + self.text_width(&text));
-        self.label_x + label_w + shortcut_w + self.shortcut_right
+        row_label_x(self.label_x, self.selection_column, item)
+            + label_w
+            + shortcut_w
+            + self.shortcut_right
     }
 
     /// Width of a fitted popup holding `items`: the widest row's natural
