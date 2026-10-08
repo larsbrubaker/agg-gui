@@ -60,4 +60,8 @@ pub trait UiDriver {
     /// Deliver a simulated input event (physical pixels, Y-down) through the
     /// window's input forwarder.
     fn send(&mut self, event: agg_gui::shell_input::ForwarderEvent);
+    /// Ask the window to close, as the platform's close chord (Alt+F4) or
+    /// close button does. The request is recorded for the run's close
+    /// phase; the window and its tree stay up until then.
+    fn request_close(&mut self);
 }

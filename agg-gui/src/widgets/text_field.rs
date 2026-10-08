@@ -281,8 +281,15 @@ impl TextField {
     /// selects all on release unless it drags out a range (C# agg-sharp
     /// `SelectAllOnFocus`). Clicks while already focused place the caret.
     pub fn with_select_all_on_focus(mut self, v: bool) -> Self {
-        self.select_all_on_focus = v;
+        self.set_select_all_on_focus(v);
         self
+    }
+
+    /// Setter form of [`with_select_all_on_focus`](Self::with_select_all_on_focus),
+    /// for a field already in the tree (C# assigns `SelectAllOnFocus` at any
+    /// time); takes effect at the next focus.
+    pub fn set_select_all_on_focus(&mut self, v: bool) {
+        self.select_all_on_focus = v;
     }
 
     // Password-mode builders + the `masking_active` helper live in

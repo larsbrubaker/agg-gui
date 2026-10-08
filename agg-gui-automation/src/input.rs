@@ -1,11 +1,12 @@
-//! How simulated pointer input reaches the window — the port of agg-sharp
-//! `GuiAutomation/AggInputMethods.cs` (`IInputMethod`, `AggInputMethods`)
-//! and `MouseConsts.cs`.
+//! How simulated pointer and keyboard input reaches the window — the port
+//! of agg-sharp `GuiAutomation/AggInputMethods.cs` (`IInputMethod`,
+//! `AggInputMethods`) and `MouseConsts.cs`.
 //!
 //! [`InputMethod`] is C#'s `IInputMethod`: what the runner's pointer gestures
-//! (`runner/pointer.rs`) talk to. [`SimulatedInput`] is C#'s
-//! `AggInputMethods`: it turns each move, press and release into a
-//! [`ForwarderEvent`] and hands it to the driver's
+//! (`runner/pointer.rs`) and keyboard calls (`runner/keyboard.rs`) talk to.
+//! [`SimulatedInput`] is C#'s `AggInputMethods`: it turns each move, press,
+//! release, key stroke and modifier change into a [`ForwarderEvent`] and
+//! hands it to the driver's
 //! [`InputForwarder`](agg_gui::shell_input::InputForwarder), the same
 //! bookkeeping the native and web shells feed their OS events through, so a
 //! simulated click runs the product's input path.
@@ -25,15 +26,38 @@
 //! - [`InputMethod::left_button_down`] follows the last button event
 //!   whether or not it reached the window.
 //!
-//! The keyboard members of `IInputMethod` (`PressModifierKeys`,
-//! `ReleaseModifierKeys`, `Type`) and `GetCurrentScreen` join this trait
-//! with the keyboard and image slices of `docs/design/gui-automation.md`;
-//! `GetCurrentScreenHeight` (always 0 in C#) and `Dispose` are not ported.
+//!
+//! Keyboard (C#'s `Type`, `SendStroke`, `PressModifierKeys`,
+//! `ReleaseModifierKeys`):
+//! - A stroke is a key down then a key up of [`TypedKey::agg_key`]; agg-gui
+//!   has no separate KeyPress (a typed character is `Key::Char`), so a
+//!   widget that would suppress C#'s KeyPress consumes the key down instead.
+//! - A stroke's modifiers are the held modifiers plus its own, carried in
+//!   both events; afterwards the held set is restored (C# sets and clears
+//!   `Keyboard` state around each stroke), so `"^a"` leaves no Control
+//!   behind for the next click.
+//! - Pressing modifiers sends the new held set (`ModifiersChanged`), then a
+//!   key down for each modifier key; releasing sends the reduced set, then a
+//!   key up for each. Only the named modifiers are released: C#'s
+//!   `ReleaseModifierKeys` cleared every held modifier whatever it was asked
+//!   to release (it derived the remaining set from a key event that carried
+//!   no modifier bits), so releasing Shift also dropped a held Control.
+//!
+//! The close chord (`%{F4}`) is not a stroke: the runner asks the window to
+//! close itself. `GetCurrentScreen` joins this trait with the image slice of
+//! `docs/design/gui-automation.md`; `GetCurrentScreenHeight` (always 0 in
+//! C#) and `Dispose` are not ported.
 
 use agg_gui::shell_input::{ClickCount, ForwarderEvent};
 use agg_gui::MouseButton;
 
 use crate::driver::UiDriver;
+use crate::keys::Keys;
+use crate::typed_key_parser::TypedKey;
+
+/// The modifier bits an input method holds (C# `Keys.Shift`, `Control`,
+/// `Alt`).
+const MODIFIER_BITS: Keys = Keys(Keys::SHIFT.0 | Keys::CONTROL.0 | Keys::ALT.0);
 
 /// C# `Point2D`: an integer point. In the runner's pointer space it is
 /// physical pixels, Y-down; as a widget offset it is logical units, Y-up
@@ -152,6 +176,21 @@ pub trait InputMethod {
         y: i32,
         clicks: u32,
     );
+
+    /// C# `PressModifierKeys`: hold the modifiers whose bits
+    /// ([`Keys::SHIFT`], [`Keys::CONTROL`], [`Keys::ALT`]) are set in
+    /// `modifier_keys`, on top of any already held. Key codes are ignored:
+    /// or'd together they cannot be told apart (`ShiftKey | ControlKey` is
+    /// `ControlKey`).
+    fn press_modifier_keys(&mut self, driver: &mut dyn UiDriver, modifier_keys: Keys);
+
+    /// C# `ReleaseModifierKeys`: let go of the modifiers whose bits are set
+    /// in `modifier_keys`; the others stay held.
+    fn release_modifier_keys(&mut self, driver: &mut dyn UiDriver, modifier_keys: Keys);
+
+    /// C# `Type` after parsing: put each stroke through the window, in
+    /// order.
+    fn type_strokes(&mut self, driver: &mut dyn UiDriver, strokes: &[TypedKey]);
 }
 
 /// C# `AggInputMethods`: input delivered through the driver's input
@@ -163,6 +202,9 @@ pub struct SimulatedInput {
     right_button_down: bool,
     middle_button_down: bool,
     click_count: u32,
+    /// The modifiers held by [`InputMethod::press_modifier_keys`] (modifier
+    /// bits only).
+    held_modifiers: Keys,
 }
 
 impl SimulatedInput {
@@ -178,6 +220,26 @@ impl SimulatedInput {
     /// C# `MiddleButtonDown`.
     pub fn middle_button_down(&self) -> bool {
         self.middle_button_down
+    }
+
+    /// The modifiers held by [`InputMethod::press_modifier_keys`] and not
+    /// yet released (C#'s `Keyboard` state), as modifier bits.
+    pub fn held_modifiers(&self) -> Keys {
+        self.held_modifiers
+    }
+
+    /// The modifier keys whose bits are set in `bits`, in Shift, Control,
+    /// Alt order, as agg-gui keys.
+    fn modifier_keys_of(bits: Keys) -> Vec<agg_gui::Key> {
+        [
+            (Keys::SHIFT, Keys::SHIFT_KEY),
+            (Keys::CONTROL, Keys::CONTROL_KEY),
+            (Keys::ALT, Keys::MENU),
+        ]
+        .into_iter()
+        .filter(|(bit, _)| bits.contains(*bit))
+        .map(|(_, key)| key.to_agg_key())
+        .collect()
     }
 
     /// Whether `p` is inside the window (edges included).
@@ -253,5 +315,51 @@ impl InputMethod for SimulatedInput {
         self.left_button_down = action == MouseAction::LeftDown;
         self.middle_button_down = action == MouseAction::MiddleDown;
         self.right_button_down = action == MouseAction::RightDown;
+    }
+
+    fn press_modifier_keys(&mut self, driver: &mut dyn UiDriver, modifier_keys: Keys) {
+        let pressed = modifier_keys & MODIFIER_BITS;
+        self.held_modifiers |= pressed;
+        let mods = self.held_modifiers.to_agg_modifiers();
+        driver.send(ForwarderEvent::ModifiersChanged(mods));
+        for key in Self::modifier_keys_of(pressed) {
+            driver.send(ForwarderEvent::KeyDown {
+                key,
+                modifiers: Some(mods),
+            });
+        }
+    }
+
+    fn release_modifier_keys(&mut self, driver: &mut dyn UiDriver, modifier_keys: Keys) {
+        let released = modifier_keys & MODIFIER_BITS;
+        self.held_modifiers = Keys(self.held_modifiers.0 & !released.0);
+        let mods = self.held_modifiers.to_agg_modifiers();
+        driver.send(ForwarderEvent::ModifiersChanged(mods));
+        for key in Self::modifier_keys_of(released) {
+            driver.send(ForwarderEvent::KeyUp {
+                key,
+                modifiers: Some(mods),
+            });
+        }
+    }
+
+    fn type_strokes(&mut self, driver: &mut dyn UiDriver, strokes: &[TypedKey]) {
+        let held = self.held_modifiers.to_agg_modifiers();
+        for stroke in strokes {
+            let mods = (self.held_modifiers | stroke.key().modifiers()).to_agg_modifiers();
+            let key = stroke.agg_key();
+            driver.send(ForwarderEvent::KeyDown {
+                key: key.clone(),
+                modifiers: Some(mods),
+            });
+            driver.send(ForwarderEvent::KeyUp {
+                key,
+                modifiers: Some(mods),
+            });
+            // C#'s `finally`: the stroke's own modifiers end with it.
+            if mods != held {
+                driver.send(ForwarderEvent::ModifiersChanged(held));
+            }
+        }
     }
 }

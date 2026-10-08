@@ -1,7 +1,7 @@
 //! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`.
 //!
 //! Only the tests whose subjects have landed are here; the rest of the class
-//! (typing, image waits, the close protocol) arrives with the runner slices listed
+//! (image waits, the close protocol) arrives with the runner slices listed
 //! in `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
 //! [`AutomationWindow`], built on the run's own UI thread; C#'s captured
 //! locals are shared atomics when the calling thread sets them, and state
@@ -16,13 +16,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agg_gui::event::{self, Event, EventResult};
-use agg_gui::widgets::Button;
+use agg_gui::widgets::{Button, TextArea};
 use agg_gui::{Font, Rect, Size, Widget};
 use agg_gui_automation::runner::DEFAULT_WIDGET_WAIT_SECONDS;
+use agg_gui_automation::tree_query::find_by_name;
 use agg_gui_automation::WaitOpts;
 use agg_gui_automation::{
-    show_window_and_execute_tests, static_delay, AutomationError, AutomationWindow, ProbeWidget,
-    RunOptions,
+    show_window_and_execute_tests, static_delay, AutomationError, AutomationRunner,
+    AutomationWindow, ProbeWidget, RunOptions,
 };
 
 #[test]
@@ -298,4 +299,44 @@ fn double_click_by_name_sends_two_full_click_pairs_with_production_click_counts(
         },
     )
     .expect("a double click by name is two full click pairs");
+}
+
+#[test]
+fn type_delivers_punctuation_into_a_multi_line_field() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        || {
+            let mut system_window = AutomationWindow::new(300.0, 200.0);
+            // C# `new TextEditWidget("", 10, 10, pixelWidth: 200, pixelHeight: 100,
+            // multiLine: true) { Name = "field" }`.
+            let mut field =
+                TextArea::new(Arc::new(agg_gui::fonts::standard_ui_font())).with_name("field");
+            field.set_bounds(Rect::new(10.0, 10.0, 200.0, 100.0));
+            system_window.add_child(Box::new(field));
+            (system_window, ())
+        },
+        |test_runner, _| {
+            test_runner.click_by_name("field");
+            test_runner.type_text("q!\"#$%&'()*+,-./ok");
+            assert_eq!(text_area_text(test_runner, "field"), "q!\"#$%&'()*+,-./ok");
+
+            // Select-all is "^a" - the same spelling Windows' SendKeys reads.
+            test_runner.type_text("^a");
+            test_runner.type_text("z");
+            assert_eq!(text_area_text(test_runner, "field"), "z");
+
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("typed punctuation lands in a multi-line field and ^a selects it all");
+}
+
+/// C# `field.Text` for the `TextArea` named `name`.
+fn text_area_text(test_runner: &AutomationRunner, name: &str) -> String {
+    let root = test_runner.app().root();
+    find_by_name(root, name)
+        .first()
+        .and_then(|handle| handle.downcast::<TextArea>(root))
+        .map(TextArea::text)
+        .unwrap_or_else(|| panic!("no TextArea named {name}"))
 }

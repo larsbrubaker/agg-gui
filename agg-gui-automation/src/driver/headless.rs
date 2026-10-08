@@ -31,6 +31,7 @@ pub struct HeadlessDriver {
     clock: ClockPolicy,
     frames: u64,
     painted: u64,
+    close_requested: bool,
     // Last, so the app (and anything it reads the clock for while dropping)
     // goes first and the thread's clock is restored after.
     _clock: Option<ClockGuard>,
@@ -58,6 +59,7 @@ impl HeadlessDriver {
             clock,
             frames: 0,
             painted: 0,
+            close_requested: false,
             _clock: guard,
         }
     }
@@ -105,6 +107,12 @@ impl HeadlessDriver {
     /// The input bookkeeping, mutably (click policy, real-input gate).
     pub fn forwarder_mut(&mut self) -> &mut InputForwarder {
         &mut self.forwarder
+    }
+
+    /// Whether something asked the window to close
+    /// ([`UiDriver::request_close`], e.g. typing `%{F4}`).
+    pub fn close_requested(&self) -> bool {
+        self.close_requested
     }
 
     /// Frames pumped so far.
@@ -176,5 +184,9 @@ impl UiDriver for HeadlessDriver {
 
     fn send(&mut self, event: ForwarderEvent) {
         HeadlessDriver::send(self, event);
+    }
+
+    fn request_close(&mut self) {
+        self.close_requested = true;
     }
 }

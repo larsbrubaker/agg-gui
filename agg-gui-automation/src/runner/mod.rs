@@ -2,10 +2,9 @@
 //! `GuiAutomation/AutomationRunner.cs`. This file holds its configuration and
 //! run control; `waits.rs` the frame-pumping waits (`delay`, `wait_for`,
 //! `assert`, ...) and `named.rs` the name lookups and the waits that poll
-//! them, `pointer.rs` the pointer gestures (stepped moves, clicks) and
-//! `drag.rs` the drags and drops built on them. The
-//! keyboard members arrive in a later slice of
-//! `docs/design/gui-automation.md`.
+//! them, `pointer.rs` the pointer gestures (stepped moves, clicks),
+//! `drag.rs` the drags and drops built on them, and `keyboard.rs` typing
+//! and held modifiers.
 //!
 //! A runner is created by [`crate::execute::show_window_and_execute_tests`]
 //! on the run's own UI thread and handed to the test body. It owns the
@@ -24,11 +23,13 @@ use crate::input::{InputMethod, SimulatedInput};
 use crate::tree_query::WidgetHandle;
 
 mod drag;
+mod keyboard;
 mod named;
 mod pointer;
 mod waits;
 
 pub use drag::{DragDropOpts, DragOpts};
+pub use keyboard::{ModifierKeys, CLOSE_CHORD};
 pub use named::{WaitOpts, WidgetPredicate, DEFAULT_WIDGET_WAIT_SECONDS};
 pub use pointer::{cubic_out, mouse_move_steps, ClickOpts, ClickOrigin};
 pub use waits::{
