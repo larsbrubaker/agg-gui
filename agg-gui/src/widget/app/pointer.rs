@@ -77,7 +77,12 @@ impl App {
         self.dispatch_mouse_move(pos);
     }
 
-    /// Mouse button pressed. `screen_y` is Y-down physical pixels.
+    /// Mouse button pressed. `screen_y` is Y-down physical pixels. The
+    /// press reports a click count of 1 that is not stated
+    /// ([`crate::event::current_click_count`]); a shell that counts clicks
+    /// goes through [`InputForwarder`](crate::shell_input::InputForwarder),
+    /// and a caller that knows the count uses
+    /// [`on_mouse_down_clicks`](Self::on_mouse_down_clicks).
     pub fn on_mouse_down(
         &mut self,
         screen_x: f64,
@@ -85,6 +90,40 @@ impl App {
         button: MouseButton,
         mods: Modifiers,
     ) {
+        self.on_mouse_down_counted(screen_x, screen_y, button, mods, 1, false);
+    }
+
+    /// Mouse button pressed with a stated click count (C#'s
+    /// `MouseEventArgs.Clicks`): 2 for the second press of a double click,
+    /// 1 for a single click. Widgets read it while handling the press
+    /// ([`crate::event::current_click_count`],
+    /// [`crate::event::is_double_click`]), and a stated count overrides the
+    /// text editors' own multi-click timing. `screen_y` is Y-down physical
+    /// pixels.
+    pub fn on_mouse_down_clicks(
+        &mut self,
+        screen_x: f64,
+        screen_y: f64,
+        button: MouseButton,
+        mods: Modifiers,
+        clicks: u32,
+    ) {
+        self.on_mouse_down_counted(screen_x, screen_y, button, mods, clicks, true);
+    }
+
+    /// A press whose click count is `clicks`; `stated` when its sender said
+    /// so rather than the forwarder working it out (see
+    /// `event::click_count`).
+    pub(crate) fn on_mouse_down_counted(
+        &mut self,
+        screen_x: f64,
+        screen_y: f64,
+        button: MouseButton,
+        mods: Modifiers,
+        clicks: u32,
+        stated: bool,
+    ) {
+        crate::event::begin_press(clicks, stated);
         self.on_modifiers_changed(mods);
         self.resolve_tracked_paths();
         let screen = self.flip_y(screen_x, screen_y);
@@ -157,7 +196,9 @@ impl App {
         // calling `crate::animation::request_draw` itself.
     }
 
-    /// Mouse button released. `screen_y` is Y-down.
+    /// Mouse button released. `screen_y` is Y-down. The release reports a
+    /// click count of 1 while the press it ends is remembered for
+    /// [`crate::event::is_double_click`] until it has been dispatched.
     pub fn on_mouse_up(
         &mut self,
         screen_x: f64,
@@ -165,6 +206,12 @@ impl App {
         button: MouseButton,
         mods: Modifiers,
     ) {
+        crate::event::begin_release();
+        self.release(screen_x, screen_y, button, mods);
+        crate::event::end_release();
+    }
+
+    fn release(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
         self.on_modifiers_changed(mods);
         self.resolve_tracked_paths();
         let screen = self.flip_y(screen_x, screen_y);

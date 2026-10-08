@@ -6,7 +6,9 @@
 //! second selects the word, a third selects the line/paragraph/block. Rather
 //! than each widget re-deriving the timing gate, they share this tracker so the
 //! window and travel tolerance match each other — and match the Scene's
-//! double-click reset (`scene::DBL_CLICK_MS` / `MAX_CLICK_DIST`).
+//! double-click reset (`scene::DBL_CLICK_MS` / `MAX_CLICK_DIST`). A press
+//! that states its click count (simulated input through
+//! `App::on_mouse_down_clicks`) is taken at that count.
 
 use crate::geometry::Point;
 use web_time::Instant;
@@ -49,8 +51,28 @@ impl MultiClickTracker {
     /// sequence: `1` = single, `2` = double, `3` = triple. A fourth quick click
     /// wraps back to `1`, and any press outside the time window or travel
     /// tolerance restarts the sequence at `1`.
+    ///
+    /// A press whose sender stated its click count
+    /// ([`crate::event::stated_click_count`], e.g. a simulated double
+    /// click) is taken at that count instead; see
+    /// [`register_with_count`](Self::register_with_count).
     pub fn register(&mut self, pos: Point) -> u32 {
+        self.register_with_count(pos, crate::event::stated_click_count())
+    }
+
+    /// Register a press at `pos` whose click count is `given` when known.
+    /// `Some(n)` is honoured as the press's place in the sequence (wrapping
+    /// past triple as the timing does: 4 → 1, 5 → 2, ...); `None` counts by
+    /// the time window and travel tolerance, as [`register`](Self::register)
+    /// does for a real press.
+    pub fn register_with_count(&mut self, pos: Point, given: Option<u32>) -> u32 {
         let now = crate::clock::now();
+        if let Some(n) = given {
+            self.count = (n.max(1) - 1) % 3 + 1;
+            self.last_time = Some(now);
+            self.last_pos = Some(pos);
+            return self.count;
+        }
         let in_time = self
             .last_time
             .map(|t| now.duration_since(t).as_millis() < MULTI_CLICK_MS)
@@ -97,6 +119,18 @@ mod tests {
         assert_eq!(t.register(Point::new(10.0, 10.0)), 3);
         // Fourth quick click restarts the sequence.
         assert_eq!(t.register(Point::new(10.0, 10.0)), 1);
+    }
+
+    #[test]
+    fn rust_only_a_given_count_is_honoured_and_wraps_past_triple() {
+        let mut t = MultiClickTracker::default();
+        let p = Point::new(10.0, 10.0);
+        assert_eq!(t.register_with_count(p, Some(2)), 2);
+        assert_eq!(t.register_with_count(p, Some(1)), 1);
+        assert_eq!(t.register_with_count(p, Some(4)), 1);
+        assert_eq!(t.register_with_count(p, Some(5)), 2);
+        // A counted press continues from the given count.
+        assert_eq!(t.register_with_count(p, None), 3);
     }
 
     #[test]

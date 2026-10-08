@@ -25,7 +25,7 @@
 //!   configuration (`AutomationConfig` with C#'s defaults), its waits
 //!   (`delay`, `wait_for`, `assert`, `wait_for_draw`) and its name lookups
 //!   (`get_widget_by_name`, `wait_for_name`, `wait_for_widget_enabled`, ...)
-//!   and its pointer gestures (`click_by_name`, `right_click_by_name`,
+//!   and its pointer gestures (`click_by_name`, `double_click_by_name`, `right_click_by_name`,
 //!   `move_to_by_name`, `set_mouse_cursor_position`, ...).
 //! - [`input`] — `InputMethod` (C# `IInputMethod`) and `SimulatedInput`
 //!   (`AggInputMethods`): pointer input through the shells' input forwarder.

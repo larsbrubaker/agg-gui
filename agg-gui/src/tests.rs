@@ -39,6 +39,7 @@ mod absolute_layout;
 mod async_wakeup_paint;
 mod backbuffer_scale;
 mod button_click_focus;
+mod button_click_semantics;
 mod capture_reorder;
 mod caret_deadline;
 mod clip_path_software;
@@ -71,6 +72,7 @@ mod menu_hidpi_scale;
 mod multi_touch_routing;
 mod on_screen_keyboard;
 pub(crate) mod paint_recorder;
+mod platform_multi_click;
 mod pointer_modifiers;
 mod rasterizer_clip;
 #[cfg(feature = "reflect")]

@@ -3,7 +3,10 @@
 //! (`on_mouse_move`, `on_mouse_down`, `on_key_down`, …) while tracking what
 //! every shell needs to know about input: the cursor position, held buttons
 //! and modifiers, the click count of the last press, and whether real
-//! platform input is let through at all.
+//! platform input is let through at all. Each press reaches the `App` with
+//! its click count; a [`ClickCount::Explicit`] count arrives *stated* (it
+//! overrides the text editors' own multi-click timing), an
+//! [`ClickCount::Auto`] one does not (`event::current_click_count`).
 //!
 //! `agg-gui-shell` (winit) and `agg-gui-web-shell` (DOM) translate OS events
 //! into `ForwarderEvent`s and hand them here; agg-gui-automation's simulated
@@ -264,8 +267,9 @@ impl InputForwarder {
                 if !self.held.contains(&button) {
                     self.held.push(button);
                 }
-                self.register_press(button, (x, y), clicks);
-                app.on_mouse_down(x, y, button, mods);
+                let count = self.register_press(button, (x, y), clicks);
+                let stated = matches!(clicks, ClickCount::Explicit(_));
+                app.on_mouse_down_counted(x, y, button, mods, count, stated);
             }
             ForwarderEvent::MouseUp {
                 at,
@@ -341,7 +345,8 @@ impl InputForwarder {
         self.modifiers
     }
 
-    fn register_press(&mut self, button: MouseButton, pos: (f64, f64), clicks: ClickCount) {
+    /// Record a press and return its click count.
+    fn register_press(&mut self, button: MouseButton, pos: (f64, f64), clicks: ClickCount) -> u32 {
         let now = crate::clock::now();
         let count = match clicks {
             ClickCount::Explicit(n) => n,
@@ -356,6 +361,7 @@ impl InputForwarder {
             button,
             count,
         });
+        count
     }
 
     /// Whether a press of `button` at `pos` at `now` continues `last`'s

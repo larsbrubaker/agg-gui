@@ -1,26 +1,28 @@
 //! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`.
 //!
 //! Only the tests whose subjects have landed are here; the rest of the class
-//! (double clicks, typing, image waits) arrives with the runner slices listed
+//! (typing, image waits, the close protocol) arrives with the runner slices listed
 //! in `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
 //! [`AutomationWindow`], built on the run's own UI thread; C#'s captured
 //! locals are shared atomics when the calling thread sets them, and state
 //! `build` returns beside the window (a click counter) when the widgets do,
 //! as both the widgets and the body run on that thread.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use agg_gui::event::{self, Event, EventResult};
 use agg_gui::widgets::Button;
 use agg_gui::{Font, Rect, Size, Widget};
 use agg_gui_automation::runner::DEFAULT_WIDGET_WAIT_SECONDS;
 use agg_gui_automation::WaitOpts;
 use agg_gui_automation::{
-    show_window_and_execute_tests, static_delay, AutomationError, AutomationWindow, RunOptions,
+    show_window_and_execute_tests, static_delay, AutomationError, AutomationWindow, ProbeWidget,
+    RunOptions,
 };
 
 #[test]
@@ -234,4 +236,66 @@ fn placed_button(text: &str, x: f64, y: f64, font: Arc<Font>) -> Button {
     let size = button.layout(Size::new(f64::MAX, f64::MAX));
     button.set_bounds(Rect::new(x, y, size.width, size.height));
     button
+}
+
+#[test]
+fn double_click_by_name_sends_two_full_click_pairs_with_production_click_counts() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        || {
+            let events = Rc::new(RefCell::new(Vec::<String>::new()));
+
+            let mut system_window = AutomationWindow::new(300.0, 200.0);
+
+            // C#'s MouseDown/MouseUp subscriptions; the target takes the
+            // press, as every C# GuiWidget does.
+            let log = Rc::clone(&events);
+            let target = ProbeWidget::new("target")
+                .with_bounds(Rect::new(0.0, 0.0, 100.0, 100.0))
+                .on_event_with(move |event| match event {
+                    Event::MouseDown { .. } => {
+                        log.borrow_mut()
+                            .push(format!("down:{}", event::current_click_count()));
+                        EventResult::Consumed
+                    }
+                    Event::MouseUp { .. } => {
+                        let kind = if event::is_double_click() {
+                            "double"
+                        } else {
+                            "single"
+                        };
+                        log.borrow_mut()
+                            .push(format!("up:{}:{kind}", event::current_click_count()));
+                        EventResult::Consumed
+                    }
+                    _ => EventResult::Ignored,
+                });
+            system_window.add_child(Box::new(target));
+            (system_window, events)
+        },
+        |test_runner, events| {
+            test_runner.click_by_name("target");
+
+            // Joined so the assertion is order-exact - the SEQUENCE is the contract.
+            assert_eq!(
+                events.borrow().join(","),
+                "down:1,up:1:single",
+                "a single click is one press/release pair and must not read as a double click"
+            );
+
+            events.borrow_mut().clear();
+            test_runner.double_click_by_name("target");
+
+            assert_eq!(
+                events.borrow().join(","),
+                "down:1,up:1:single,down:2,up:1:double",
+                "a double click is two full pairs; only the second down carries Clicks == 2, \
+                 and the final up - which the platform reports with Clicks == 1 - must still \
+                 answer IsDoubleClick"
+            );
+
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("a double click by name is two full click pairs");
 }

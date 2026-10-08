@@ -62,12 +62,13 @@ impl Button {
                 if was_pressed {
                     crate::animation::request_draw();
                 }
-                // Fire when the release lands within the button. Checking
-                // the release position (rather than only the cached hover
-                // flag) makes taps work on touch, where no MouseMove ever
-                // sets `hovered`, while still cancelling a press that drags
-                // off the button before release.
-                if was_pressed && (self.hovered || self.hit_test(*pos)) {
+                // Fire when the release lands within the button, as
+                // agg-sharp's `GuiWidget.OnMouseUp` decides a click. The
+                // release position decides, never the hover flag cached
+                // from the last move: taps on touch never set `hovered`,
+                // and a release can be reported somewhere the pointer was
+                // never seen moving to, which must not click.
+                if was_pressed && self.hit_test(*pos) {
                     self.fire_click();
                     // Clear the focus ring after a mouse click — the ring is a
                     // keyboard-navigation aid and should not persist after a

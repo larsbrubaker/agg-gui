@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (10 onward) fill agg-gui's gaps test-first, port the 98 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (12 onward) fill agg-gui's gaps test-first, port the 98 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -43,7 +43,8 @@
 - `agg_gui::ui_thread` is the idle queue (`run_on_idle`, `run_on_idle_after`, intervals, `invoke_pending_actions`), one queue per UI thread, delays on `agg_gui::clock`, drained by both shells every loop iteration. Frame-loop wakeups are counted per queue: a post or `signal_async_state_change` wakes the thread that drains that queue (an unbound worker's, the main queue's owner), never another UI thread. Queued work runs under panic containment and reports through `agg_gui::report_unhandled` (`agg_gui::unhandled`, a per-thread handler set with `set_unhandled_handler`; with none, the first panic is re-raised after the rest of the drain).
 - `agg_gui::frame_policy` holds the frame policy both shells use: `LayoutKey` (size, device scale, invalidation epoch), `LayoutTracker` (needs-layout, `layout_if_needed`, and the GPU-free `tick` a headless driver runs), and `wants_frame` (the paint decision). `agg_gui::shell_input::InputForwarder` holds the input bookkeeping both shells feed their OS events through as `ForwarderEvent`s.
 - `Widget::is_enabled` reports a widget's own enabled state (default true; `Button`, `SegmentedControl` and `ChevronWidget` report theirs).
-- **Missing pieces:** click counts in mouse events (the forwarder counts them; `App` does not take them yet, G9), and paint-panic containment.
+- Click counts: `App::on_mouse_down_clicks` takes a stated count, the forwarder passes every press's count, and widgets read `event::current_click_count()` / `event::is_double_click()` (C#'s `Clicks` / `IsDoubleClick`); `MultiClickTracker` honours only a stated count.
+- **Missing piece:** paint-panic containment.
 
 **`mattercad-app-test`**
 - `TestHarness` builds the real tree headless, sends input straight to `App::on_*`, and keeps its own copy of the shells' frame policy (`input_frame`/`shell_frame`/layout key) instead of `agg_gui::frame_policy` (M2 replaces it).
@@ -67,7 +68,7 @@ Modules (each under 800 lines, each opening with a purpose comment):
 src/lib.rs                 crate docs, re-exports
 src/runner/mod.rs          (exists) AutomationRunner, AutomationConfig, MarkTestComplete; ModifierKeys to come
 src/runner/named.rs        (exists) Get*/Wait*/NameExists/NamedWidgetExists/ChildExists/GetRegionByName; GetObjectByName, ScrollIntoView to come
-src/runner/pointer.rs      (exists) stepped moves, ClickOrigin/ClickOpts, Click*/RightClick*/MoveToByName/SetMouseCursorPosition; DoubleClickByName, Drag*/Drop* to come
+src/runner/pointer.rs      (exists) stepped moves, ClickOrigin/ClickOpts, Click*/DoubleClickByName/RightClick*/MoveToByName/SetMouseCursorPosition; Drag*/Drop* to come
 src/runner/keyboard.rs     Type, Press/ReleaseModifierKeys, SelectAll/None
 src/runner/waits.rs        (exists) Delay, WaitFor/WaitUntil, Assert, WaitForPendingUiWork, WaitforDraw
 src/runner/images.rs       ClickImage/DragImage/DropImage/ImageExists/WaitForImage, GetCurrentScreen
@@ -80,7 +81,7 @@ src/driver/headless.rs     (exists) HeadlessDriver
 src/driver/window.rs       (exists) HeadlessWindow (the "SystemWindow" for tests that use no runner)
 src/driver/live.rs         (feature live) LiveDriver over agg_gui_shell::ShellSession
 src/execute/              (exists) show_window_and_execute_tests, RunOptions, AutomationWindow, AutomationError, load watchdog; close watchdog to come
-src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks)
+src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks, C# Click semantics)
 src/overlay.rs             RenderMouse (simulated pointer drawing)
 src/dialog_provider.rs     AutomationFileDialog (AutomationDialogProvider)
 src/startup_failure_log.rs StartupFailureLog
@@ -126,7 +127,6 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 
 | C# | Rust |
 |---|---|
-| `DoubleClickByName` | `double_click_by_name`. Sends down(1), up, down(2) back to back, then the hold and the release, exactly as C# does. |
 | `DragByName` / `DropByName` / `DragDropByName` / `DragWidget(widget, travel)` / `DragToPosition` / `Drop` | Same names in snake_case. `DragWidget`'s `travel` stays Y-down, matching C#'s screen-space add. |
 
 **Keyboard**
@@ -161,7 +161,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 
 **Rule:** the runner never calls widget `on_event` directly. Everything goes through the code shells use, so nothing that hover, capture, focus, modals, tooltips or the on-screen keyboard do can be bypassed.
 
-1. **`agg_gui::shell_input::InputForwarder`** owns the shell-neutral bookkeeping (cursor, held buttons and modifiers, click counting by `ClickPolicy` or `ClickCount::Explicit`, the real-input gate via `InputSource::Platform`/`Simulated`) and calls the `App::on_*` entry points; agg-gui-shell and the web shell feed it `ForwarderEvent`s. `SimulatedInput` produces the same `ForwarderEvent`s (`forwarder.simulated(...)`), so headless and live clicks run identical code. Once G9 lands, the forwarder passes its click count to `App::on_mouse_down_clicks`.
+1. **`agg_gui::shell_input::InputForwarder`** owns the shell-neutral bookkeeping (cursor, held buttons and modifiers, click counting by `ClickPolicy` or `ClickCount::Explicit`, the real-input gate via `InputSource::Platform`/`Simulated`) and calls the `App::on_*` entry points; agg-gui-shell and the web shell feed it `ForwarderEvent`s. `SimulatedInput` produces the same `ForwarderEvent`s (`forwarder.simulated(...)`), so headless and live clicks run identical code.
 2. **Headless:** `HeadlessDriver` owns the `App` and a forwarder. Input is delivered immediately, then the runner pumps a frame where the operation calls for one (see section 5).
 3. **Live:** `LiveDriver` holds an `agg_gui_shell::ShellSession` (new; see section 7) and feeds the same forwarder that its winit handler uses. Real winit input is dropped while `set_platform_input_enabled(false)` is in effect; that is the `RealInputIgnored` equivalent. `DesktopDeactivationIgnored` maps to `set_platform_deactivation_enabled(false)`.
 4. **Order of events:** C# queues simulated input on RunOnIdle, so it runs FIFO with other idle actions. The Rust shells dispatch OS input before the frame's idle drain, and the runner follows the shells (the product path), not that C# simulation artifact. This ordering is pinned by a runner test.
@@ -296,7 +296,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | # | Gap | Slice |
 |---|---|---|
 | G8 | Hovered chain query | 13 |
-| G9 | Explicit click counts: `App::on_mouse_down_clicks`, `event::current_click_count()`, `is_double_click` that remembers the down, `MultiClickTracker` honouring the given count | 11 |
 | G10 | "First under mouse" events (`MouseOver`/`MouseOut`) plus an `UnderMouseState` query, next to the existing bounds Enter/Leave | 13 |
 | G11 | `Widget::find_named_targets`; ComboBox per-item names and enabled state; menu rows | 24 |
 | G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
@@ -311,7 +310,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | C# class (count) | Rust file | Notes |
 |---|---|---|
-| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 5 to go (StaticDelayExpires…, ZeroSecondWaitsReportWhatIsThereNow, WindowLoadTimeIsNotChargedToTheTestBudget, AutomationRunnerTimeoutTest, GetWidgetByNameTestNoRegionSingleWindow and GetWidgetByNameTestRegionSingleWindow are ported) |
+| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 4 to go (StaticDelayExpires…, ZeroSecondWaitsReportWhatIsThereNow, WindowLoadTimeIsNotChargedToTheTestBudget, AutomationRunnerTimeoutTest, GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow and DoubleClickByNameSendsTwoFullClickPairsWithProductionClickCounts are ported) |
 | AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
 | MacTextEditKeyBindingTests (12) | `mac_text_edit_key_binding_tests.rs` | `HeadlessWindow` + `app.on_key_down` |
@@ -323,14 +322,11 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | TextEditTests (13) | `text_edit_tests.rs` | TextEditWidget → TextField/TextArea; NumEdit → NumberField |
 | ThreadStackDumpTests (10) | `thread_stack_dump_tests.rs` | `stack-dump` feature |
 | ToolTipTests (7) | `tool_tip_tests.rs` | `Thread.Sleep` → `delay`/virtual clock advance |
-| WidgetClickTests (3) | `widget_click_tests.rs` | |
 
 ## 9. Slice plan (about 25 minutes each, one agent; each ends with `cargo test` green)
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 10 | Click semantics on probe widgets and Button | WidgetClick: ClickFiresOnCorrectWidgets, ClickSuppressedOnExternalMouseUp, ClickSuppressedOnMouseUpWithinChild2 |
-| 11 | G9 click counts plus `double_click_by_name` | DoubleClickByNameSendsTwoFullClickPairsWithProductionClickCounts |
 | 12 | Drag*/Drop* | Mouse: DoClickButtonInWindow, RadioButtonSiblingsAreChildren, ValidateSimpleLeftClick, ValidateOnlyTopWidgetGetsLeftClick |
 | 13 | G10 under-mouse state, G8 hovered chain | Mouse: ValidateSimpleMouseUpDown, ValidateOnlyTopWidgetGetsMouseUp, ValidateEnterAndLeaveEvents, ValidateEnterAndLeaveEventsWhenNested |
 | 14 | Capture and overlap behaviour | Mouse: ValidateEnterAndLeaveEventsWhenCoverd, ValidateEnterAndLeaveInOverlapArea, MouseCapturedSpressesLeaveEvents, MouseCapturedSpressesLeaveEventsInButtonsSameAsRectangles |
@@ -357,7 +353,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (96 still to port): AutomationRunnerTests 11 (6 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (1 ported), Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3: **103**.
+**Tally** (92 still to port): AutomationRunnerTests 11 (7 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (1 ported), Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 

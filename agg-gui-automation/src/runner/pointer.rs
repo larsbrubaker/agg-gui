@@ -1,4 +1,5 @@
-//! The runner's pointer gestures — the port of `ClickByName`, `ClickWidget`,
+//! The runner's pointer gestures — the port of `ClickByName`,
+//! `DoubleClickByName`, `ClickWidget`,
 //! `RightClickByName`, `RightClickWidget`, `MoveToByName`,
 //! `SetMouseCursorPosition`, `CurrentMousePosition`, `MoveMouseToWidget`,
 //! `PaceMouseMove`, `HoldButton` and the point forms of
@@ -288,6 +289,30 @@ impl AutomationRunner {
             opts.is_double_click,
         );
         self
+    }
+
+    /// C# `DoubleClickByName` with its defaults (a 2 s wait).
+    pub fn double_click_by_name(&mut self, widget_name: &str) -> &mut Self {
+        self.double_click_by_name_with(
+            widget_name,
+            &ClickOpts {
+                secs_to_wait: 2.0,
+                ..ClickOpts::default()
+            },
+        )
+    }
+
+    /// C# `DoubleClickByName`: [`click_by_name_with`](Self::click_by_name_with)
+    /// as a double click — down(1), up, down(2) back to back, then the hold
+    /// and the release.
+    pub fn double_click_by_name_with(&mut self, widget_name: &str, opts: &ClickOpts) -> &mut Self {
+        self.click_by_name_with(
+            widget_name,
+            &ClickOpts {
+                is_double_click: true,
+                ..*opts
+            },
+        )
     }
 
     /// C# `ClickWidget`: click `widget` at its center.

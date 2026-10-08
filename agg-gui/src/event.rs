@@ -3,9 +3,20 @@
 //! All coordinates in events are **first-quadrant (Y-up)** by the time any
 //! widget code sees them. The single Y-down → Y-up conversion happens at the
 //! platform boundary inside [`crate::widget::App`].
+//!
+//! The click count of the button event being processed (C#'s
+//! `MouseEventArgs.Clicks`, `IsDoubleClick`) lives in the `click_count`
+//! submodule and is re-exported here.
 
 use crate::geometry::Point;
 use crate::touch_state::MultiTouchInfo;
+
+mod click_count;
+
+pub(crate) use click_count::{begin_press, begin_release, end_release};
+pub use click_count::{
+    current_click_count, is_double_click, stated_click_count, DOUBLE_CLICK_WINDOW,
+};
 
 /// Which mouse button triggered a `MouseDown` or `MouseUp` event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
