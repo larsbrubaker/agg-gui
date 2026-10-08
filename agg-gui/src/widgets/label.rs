@@ -442,6 +442,36 @@ fn strengthen(c: Color) -> Color {
     }
 }
 
+impl Label {
+    /// How far `(below, above)` the face's descent and ascent reach past the
+    /// label's bounds at the baselines `paint` uses: the one-em line box
+    /// ([`LineBox::Em`](crate::font_settings::LineBox::Em)) is shorter than
+    /// most faces' ink span, so its text overhangs the box a little.
+    fn ink_overhang(&self) -> (f64, f64) {
+        let font = self.active_font();
+        let size = self.active_font_size();
+        let h = self.bounds.height;
+        let m = crate::text::measure_text_metrics(&font, "", size);
+        let (lowest, highest) = if self.wrap && !self.wrapped_lines.is_empty() {
+            // Line i is centred at total_h - (i + 0.5) * line_h (see `paint`).
+            let line_h = self.line_height(size);
+            let total_h = self.wrapped_lines.len() as f64 * line_h;
+            let baseline = m.centered_baseline_y(line_h);
+            (
+                total_h - self.wrapped_lines.len() as f64 * line_h + baseline,
+                total_h - line_h + baseline,
+            )
+        } else {
+            let baseline = m.centered_baseline_y(h);
+            (baseline, baseline)
+        };
+        (
+            (m.descent - lowest).max(0.0),
+            (highest + m.ascent - h).max(0.0),
+        )
+    }
+}
+
 impl Widget for Label {
     crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
@@ -493,6 +523,11 @@ impl Widget for Label {
         } else {
             None
         }
+    }
+
+    fn backbuffer_ink_outset(&self) -> Option<(f64, f64)> {
+        let (below, above) = self.ink_overhang();
+        (below > 0.0 || above > 0.0).then_some((below, above))
     }
 
     fn backbuffer_mode(&self) -> crate::widget::BackbufferMode {
@@ -604,8 +639,12 @@ impl Widget for Label {
         // (LCD mode) would otherwise draw glyphs past the bounds.  An
         // explicit clip makes both modes behave identically — text
         // never escapes the label's rect.
+        // Vertically the clip reaches as far as the text's ink overhangs the
+        // box (a one-em line box is shorter than the face's ascent + descent),
+        // so descenders and tall ascenders are never cut off.
+        let (below, above) = self.ink_overhang();
         ctx.save();
-        ctx.clip_rect(0.0, 0.0, w, h);
+        ctx.clip_rect(0.0, -below, w, h + below + above);
 
         // Labels always paint through `ctx.fill_text` — the backend
         // decides LCD vs grayscale AA internally based on

@@ -200,13 +200,25 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
     // Quantize the extents and the blit offset to whole PHYSICAL pixels so the
     // LCD subpixel structure is never resampled by a fractional shift.
     let band = widget.backbuffer_band();
-    let (over_top_phys, over_bottom_phys, blit_dy_phys) = match band {
-        Some(bd) => (
+    // Ink outset (text overhanging its one-em box, `Widget::backbuffer_ink_outset`):
+    // the same taller buffer as a band, rounded out to whole physical pixels so
+    // no partly covered row is lost, and blitted unclipped by the widget's bounds.
+    let ink = match band {
+        Some(_) => None,
+        None => widget.backbuffer_ink_outset(),
+    };
+    let (over_top_phys, over_bottom_phys, blit_dy_phys) = match (band, ink) {
+        (Some(bd), _) => (
             (bd.overscan_top.max(0.0) * dps_y).round() as u32,
             (bd.overscan_bottom.max(0.0) * dps_y).round() as u32,
             (bd.blit_dy * dps_y).round(),
         ),
-        None => (0, 0, 0.0),
+        (None, Some((below, above))) => (
+            (above.max(0.0) * dps_y).ceil() as u32,
+            (below.max(0.0) * dps_y).ceil() as u32,
+            0.0,
+        ),
+        (None, None) => (0, 0, 0.0),
     };
 
     // Physical pixel dimensions of the offscreen render target. The band grows
@@ -413,7 +425,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                             // so their drawing lands on the physical pixel grid.
                             sub.scale(dps_x, dps_y);
                         }
-                        // Band: reserve the bottom over-scan margin so the widget's
+                        // Band or ink outset: reserve the bottom margin so the widget's
                         // own origin sits above it inside the taller buffer.
                         if over_bottom_logical != 0.0 {
                             sub.translate(0.0, over_bottom_logical);
@@ -461,7 +473,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                             // the physical-pixel LCD buffer.
                             sub.scale(dps_x, dps_y);
                         }
-                        // Band: reserve the bottom over-scan margin (see RGBA branch).
+                        // Band or ink outset: reserve the bottom margin (see RGBA branch).
                         if over_bottom_logical != 0.0 {
                             sub.translate(0.0, over_bottom_logical);
                         }
@@ -565,6 +577,12 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
         tm.blit_ms += pt::ms(&t_blit);
         ctx.restore();
     } else {
+        // An ink outset's bottom margin sits below the widget's origin.
+        let ink_shift = over_bottom_phys as f64 / dps_y;
+        if ink_shift != 0.0 {
+            ctx.save();
+            ctx.translate(0.0, -ink_shift);
+        }
         let t_blit = pt::start();
         match (cache.pixels.as_ref(), cache.lcd_alpha.as_ref()) {
             (Some(color), Some(alpha)) => {
@@ -586,6 +604,9 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
             _ => {}
         }
         tm.blit_ms += pt::ms(&t_blit);
+        if ink_shift != 0.0 {
+            ctx.restore();
+        }
     }
     let _ = has_bitmap;
 

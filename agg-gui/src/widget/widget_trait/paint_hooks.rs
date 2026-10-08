@@ -98,6 +98,19 @@ macro_rules! widget_paint_hooks {
             None
         }
 
+        /// Logical pixels of ink this widget paints `(below, above)` its bounds:
+        /// text on a one-em line box overhangs the box by however far the face's
+        /// ascent and descent reach past an em. A backbuffered widget's bitmap
+        /// grows by these margins and is blitted without clipping to the widget's
+        /// own bounds (its parent's clip still applies), so the overhang shows.
+        ///
+        /// Only consulted when [`backbuffer_cache_mut`](Self::backbuffer_cache_mut)
+        /// returns `Some` and [`backbuffer_band`](Self::backbuffer_band) returns
+        /// `None`. Default `None`: the bitmap is exactly the bounds.
+        fn backbuffer_ink_outset(&self) -> Option<(f64, f64)> {
+            None
+        }
+
         /// Storage format for this widget's backbuffer.  Ignored unless
         /// [`backbuffer_cache_mut`] returns `Some`.  Default
         /// [`BackbufferMode::Rgba`] — correct for any widget.
