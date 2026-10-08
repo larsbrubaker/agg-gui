@@ -1,12 +1,14 @@
 //! Rust-only checks of `agg_gui::ui_thread`'s process-wide main queue: which
 //! queue an unbound worker posts to, and how a UI thread claims, keeps and
-//! hands on the main queue. One test in its own binary, because the main
+//! hands on the main queue, and which UI thread a worker's post or async
+//! signal wakes (the main queue's owner, and only it). One test in its own binary, because the main
 //! queue is process state that parallel tests would race for; the per-thread
 //! behaviour is in `ui_thread.rs`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use agg_gui::animation::{clear_draw_request, signal_async_state_change, wants_draw};
 use agg_gui::ui_thread;
 
 fn post_from_worker(ran: &Arc<AtomicUsize>, add: usize) {
@@ -34,13 +36,25 @@ fn rust_only_workers_post_to_the_main_ui_thread_which_later_threads_adopt() {
             let main = ui_thread::current_queue();
             ui_thread::invoke_pending_actions();
             assert_eq!(ran.load(Ordering::SeqCst), 1);
+            clear_draw_request();
             post_from_worker(&ran, 10);
+            assert!(wants_draw(), "a worker's post wakes the main queue's owner");
+            clear_draw_request();
+            std::thread::spawn(signal_async_state_change)
+                .join()
+                .expect("signalling worker");
+            assert!(wants_draw(), "a worker's async signal wakes the owner");
             ui_thread::invoke_pending_actions();
             assert_eq!(ran.load(Ordering::SeqCst), 11);
 
             // A second UI thread while this one lives gets a queue of its own.
             let second_was_main = std::thread::spawn(move || {
                 ui_thread::mark_current_thread_as_ui_thread();
+                clear_draw_request();
+                std::thread::spawn(signal_async_state_change)
+                    .join()
+                    .expect("signalling worker");
+                assert!(!wants_draw(), "workers wake the main queue's owner only");
                 ui_thread::current_queue().same_queue(&main)
             })
             .join()

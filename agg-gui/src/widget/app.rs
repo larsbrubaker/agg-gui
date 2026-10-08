@@ -5,6 +5,7 @@ mod gesture;
 mod hover_chain;
 mod keyboard;
 mod path_anchor;
+pub use path_anchor::WidgetAnchor;
 mod pointer;
 mod touch;
 mod tree_paths;
@@ -476,6 +477,13 @@ impl App {
         }
         s.push(']');
         s
+    }
+
+    /// The child-index path from the root to the focused widget, if any
+    /// (C#'s `Focused` / `ContainsFocus` reduce to "is this path, or a
+    /// prefix of it").
+    pub fn focused_path(&self) -> Option<&[usize]> {
+        self.focus.as_deref()
     }
 
     /// Returns `true` if any widget currently holds keyboard focus.

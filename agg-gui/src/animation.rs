@@ -43,7 +43,6 @@
 //!    shells force `needs_layout` for that frame.
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use web_time::Instant;
@@ -132,11 +131,11 @@ std::thread_local! {
     /// layout reserved (the user-visible "wrong scale on first
     /// frame" bug).
     static ASYNC_STATE_EPOCH: Cell<u64> = Cell::new(0);
-    /// Per-thread snapshot of `ASYNC_WAKEUP_COUNTER` last observed by
-    /// [`pump_async_wakeup`].  When the global atomic is ahead of this,
-    /// the current thread's [`NEEDS_DRAW`], [`INVALIDATION_EPOCH`] and
-    /// [`ASYNC_STATE_EPOCH`] are bumped — see the module docs above
-    /// `ASYNC_WAKEUP_COUNTER` for why this indirection is required.
+    /// Per-thread snapshot of its queue's wakeup count last observed by
+    /// [`pump_async_wakeup`].  When the count differs from this, the
+    /// current thread's [`NEEDS_DRAW`], [`INVALIDATION_EPOCH`] and
+    /// [`ASYNC_STATE_EPOCH`] are bumped — see the comment above the host
+    /// waker for why this indirection is required.
     static LAST_SEEN_ASYNC_WAKEUP: Cell<u64> = Cell::new(0);
     /// Monotonic counter bumped once per pointer press that reaches the
     /// widget tree (see [`bump_pointer_press_epoch`]).  A widget that runs
@@ -163,18 +162,15 @@ pub fn pointer_press_epoch() -> u64 {
     POINTER_PRESS_EPOCH.with(|c| c.get())
 }
 
-/// Process-global counter bumped by [`signal_async_state_change`] from
-/// any thread.  The async fetch / decode runs on a background worker
-/// (e.g. ehttp's `std::thread::spawn`), so thread-locals it sets are
-/// invisible to the main event loop.  The main thread pumps this
-/// atomic into its own thread-local epochs on every
-/// `wants_draw` / `invalidation_epoch` / `async_state_epoch` read —
-/// see [`pump_async_wakeup`].
-static ASYNC_WAKEUP_COUNTER: AtomicU64 = AtomicU64::new(0);
+// Cross-thread wakeups are counted per UI-thread queue
+// (`crate::ui_thread::UiQueue::signal_async_state_change`): a worker's bump is
+// invisible to the UI thread's thread-locals, so the UI thread merges its
+// queue's count into its own epochs on every `wants_draw` /
+// `invalidation_epoch` / `async_state_epoch` read — see [`pump_async_wakeup`].
 
 // ── Host waker ───────────────────────────────────────────────────────────────
 //
-// Bumping `ASYNC_WAKEUP_COUNTER` is only half the story for a *reactive* host.
+// Bumping a queue's wakeup counter is only half the story for a *reactive* host.
 // The main thread merges the bump in `pump_async_wakeup`, but that runs only
 // when something already made the host read `wants_draw()` / an epoch.  A host
 // parked in winit's `ControlFlow::Wait` (or `WaitUntil` with a far deadline) is
@@ -254,7 +250,7 @@ fn host_waker() -> Option<HostWaker> {
 /// the layout pass and paints the freshly-decoded SVG into the
 /// previous layout's placeholder rect.
 fn pump_async_wakeup() {
-    let current = ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire);
+    let current = crate::ui_thread::current_wakeups();
     let changed = LAST_SEEN_ASYNC_WAKEUP.with(|c| {
         let prev = c.get();
         if prev == current {
@@ -265,9 +261,22 @@ fn pump_async_wakeup() {
         }
     });
     if changed {
-        NEEDS_DRAW.with(|c| c.set(true));
-        INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
-        ASYNC_STATE_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+        bump_local_async_state();
+    }
+}
+
+/// Raise the calling thread's draw request and advance its invalidation and
+/// async-state epochs: what a merged wakeup does.
+pub(crate) fn bump_local_async_state() {
+    NEEDS_DRAW.with(|c| c.set(true));
+    INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+    ASYNC_STATE_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+}
+
+/// Run the installed host waker, if any, with its lock released.
+pub(crate) fn wake_host() {
+    if let Some(waker) = host_waker() {
+        waker();
     }
 }
 
@@ -400,36 +409,26 @@ pub fn invalidation_epoch() -> u64 {
 }
 
 /// Note that an async-side state change happened (image loader finished,
-/// font loaded, etc.).  Safe to call from any thread; the main event
-/// loop observes the bump via [`pump_async_wakeup`] on its next
-/// `wants_draw` / `invalidation_epoch` / `async_state_epoch` read.
+/// font loaded, etc.).  Safe to call from any thread: it wakes the UI thread
+/// whose queue the caller posts to ([`crate::ui_thread::current_queue`]) —
+/// the caller itself on a UI thread, the main queue's owner from an unbound
+/// worker — which observes it on its next `wants_draw` /
+/// `invalidation_epoch` / `async_state_epoch` read.  A worker serving another
+/// UI thread signals through that thread's queue handle
+/// ([`crate::ui_thread::UiQueue::signal_async_state_change`]).  Other UI
+/// threads are not woken, so parallel headless tests stay independent.
 ///
-/// This used to only bump thread-local epochs, which silently broke
-/// when callers ran on background threads (ehttp spawns its own
-/// `std::thread`) — the main thread never observed the change and
-/// `render_app_frame`'s layout-key cache skipped the layout pass that
-/// would have given freshly-decoded SVG badges their natural
-/// dimensions (the user-visible "wrong scale until any other event"
+/// The bump must reach the UI thread from background threads (ehttp spawns
+/// its own `std::thread`); a thread-local-only bump once left the main loop's
+/// layout-key cache skipping the layout pass that gives freshly-decoded SVG
+/// badges their natural dimensions (the "wrong scale until any other event"
 /// bug).
 ///
 /// If a host waker is installed ([`set_host_waker`]), it is invoked after the
 /// cross-thread bump so a reactive host parked in `ControlFlow::Wait` wakes and
-/// observes the already-published counter value.
+/// observes the already-published count.
 pub fn signal_async_state_change() {
-    // Cross-thread visible bump.  Main thread merges via pump_async_wakeup.
-    ASYNC_WAKEUP_COUNTER.fetch_add(1, Ordering::AcqRel);
-    // Best-effort thread-local bump for same-thread callers (most
-    // hosts / tests).  Background threads only set their own
-    // thread-locals here, which is harmless — the atomic above is
-    // what the main thread actually consumes.
-    NEEDS_DRAW.with(|c| c.set(true));
-    INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
-    ASYNC_STATE_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
-    // Nudge a parked reactive host.  Cloned out of the lock first: the waker is
-    // arbitrary host code and must not run while HOST_WAKER is held.
-    if let Some(waker) = host_waker() {
-        waker();
-    }
+    crate::ui_thread::current_queue().signal_async_state_change();
 }
 
 /// Current async-state epoch.  Backbuffer caches store this and force
@@ -625,13 +624,14 @@ mod host_waker_tests {
     //! [`signal_async_state_change`] must be able to nudge a host parked in
     //! `ControlFlow::Wait`.
     //!
-    //! `HOST_WAKER` and `ASYNC_WAKEUP_COUNTER` are process-global, and other
-    //! tests in this crate call `signal_async_state_change` concurrently — so
+    //! `HOST_WAKER` and the main queue's wakeup count (which these unbound test
+    //! threads read) are process-global, and other tests in this crate call
+    //! `signal_async_state_change` concurrently — so
     //! these tests serialize against each other with a local mutex, count
     //! *their own* invocations rather than reading the global counter after
     //! the fact, and assert with `>=` where a foreign signal could add more.
     use super::*;
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     /// Serializes only these tests; unrelated tests may still signal in
     /// parallel, which is why every assertion below tolerates extra fires.
@@ -662,17 +662,14 @@ mod host_waker_tests {
     #[test]
     fn waker_sees_counter_already_bumped() {
         let _guard = serial();
-        let before = ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire);
+        let before = crate::ui_thread::current_wakeups();
         let observed = Arc::new(AtomicU64::new(0));
         let sink = Arc::clone(&observed);
         set_host_waker(move || {
             // Snapshot from inside the waker: the host is woken only after the
             // bump is published, otherwise it would park again having seen
             // nothing.
-            sink.store(
-                ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire),
-                Ordering::Release,
-            );
+            sink.store(crate::ui_thread::current_wakeups(), Ordering::Release);
         });
 
         signal_async_state_change();
@@ -761,10 +758,10 @@ mod host_waker_tests {
         let _guard = serial();
         clear_host_waker();
         // Must not panic and must still publish the cross-thread bump.
-        let before = ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire);
+        let before = crate::ui_thread::current_wakeups();
         signal_async_state_change();
         assert!(
-            ASYNC_WAKEUP_COUNTER.load(Ordering::Acquire) > before,
+            crate::ui_thread::current_wakeups() > before,
             "counter-only behaviour is unchanged when no waker is installed"
         );
     }

@@ -8,11 +8,19 @@
 //! frame; a headless driver drains it once per pumped frame. Queued work runs
 //! under panic containment and reports through [`crate::report_unhandled`].
 //!
-//! Waking the frame loop is [`crate::animation`]'s: queuing calls
-//! `signal_async_state_change` (safe from any thread; it wakes a parked native
-//! loop through the shell's waker and the web loop on its next tick), and each
-//! drain arms `request_draw_after` for the earliest deferred action or
-//! interval still pending, so a reactive loop sleeps exactly until it is due.
+//! Queuing wakes the frame loop of the thread that drains the queue
+//! ([`UiQueue::signal_async_state_change`]: safe from any thread; it wakes a
+//! parked native loop through the shell's waker and the web loop on its next
+//! tick), and each drain arms `request_draw_after` for the earliest deferred
+//! action or interval still pending, so a reactive loop sleeps exactly until
+//! it is due.
+//!
+//! **Wakeups are per queue, so per UI thread.** Each queue counts the wakeups
+//! aimed at it, and [`crate::animation`] merges only the calling thread's
+//! queue's count into its draw request and epochs ([`current_wakeups`]). A
+//! post or `animation::signal_async_state_change` from an unbound worker goes
+//! to the main queue and wakes its owner; parallel UI threads (headless tests)
+//! never see each other's wakeups.
 //!
 //! **One queue per UI thread.** C# has one process-wide queue; agg-gui's UI
 //! state is per thread, and tests run windows on threads of their own in
@@ -140,6 +148,27 @@ impl UiQueue {
 /// main queue. Capture it on a UI thread to post from a worker that serves it.
 pub fn current_queue() -> UiQueue {
     bound().unwrap_or_else(main_queue)
+}
+
+/// The wakeup count of the queue the calling thread reads its wakeups from
+/// (its bound queue, otherwise the main queue). [`crate::animation`] merges a
+/// change into the thread's draw request and epochs. Zero while thread-locals
+/// are being torn down.
+pub(crate) fn current_wakeups() -> u64 {
+    match BOUND.try_with(|b| b.borrow().as_ref().map(UiQueue::wakeups)) {
+        Ok(Some(count)) => count,
+        Ok(None) => main_queue().wakeups(),
+        Err(_) => 0,
+    }
+}
+
+/// Whether the calling thread reads its wakeups from `queue`.
+fn reads_wakeups_of(queue: &UiQueue) -> bool {
+    match BOUND.try_with(|b| b.borrow().as_ref().map(|q| q.same_queue(queue))) {
+        Ok(Some(same)) => same,
+        Ok(None) => main_queue().same_queue(queue),
+        Err(_) => false,
+    }
 }
 
 /// C# `CurrentTimerMs`: milliseconds on this thread's UI clock since the

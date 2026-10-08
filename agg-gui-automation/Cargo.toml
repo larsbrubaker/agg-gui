@@ -8,7 +8,7 @@ edition = "2021"
 rust-version = "1.87"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 license = "MIT"
-description = "GUI test automation for agg-gui: typed-key parsing, search regions and waits (a port of agg-sharp's GuiAutomation)"
+description = "GUI test automation for agg-gui: headless driver, widget handles, typed-key parsing, search regions and waits (a port of agg-sharp's GuiAutomation)"
 repository = "https://github.com/larsbrubaker/agg-gui"
 publish = false
 

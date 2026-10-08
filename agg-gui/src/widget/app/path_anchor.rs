@@ -26,6 +26,9 @@
 //! `App::focus_is_anchored` detects that so `App::set_focus` can treat
 //! focusing the replacement as a real focus change.
 //!
+//! [`WidgetAnchor`] exposes the same anchoring for code outside `App` (GUI
+//! automation's widget handles).
+//!
 //! `maybe_bring_to_front` (in `app.rs`) still shifts the paths itself when it
 //! raises a window; the anchors stay valid across that because identities do
 //! not change.
@@ -154,5 +157,54 @@ impl App {
     pub(super) fn store_gesture_captured(&mut self, path: Option<Vec<usize>>) {
         self.anchors.gesture_captured = anchor_of(self.root.as_ref(), path.as_deref());
         self.gesture_captured = path;
+    }
+}
+
+/// A widget's place in a tree that follows the widget, not its indices: the
+/// child-index path to it plus the identity of each widget along that path
+/// (the same anchoring [`App`] uses for its focus, hover and capture paths).
+///
+/// GUI automation holds one per found widget (agg-gui-automation's
+/// `WidgetHandle`) across frames: [`resolve`](Self::resolve) follows the
+/// widget when a parent reorders its children, and reports it gone once it
+/// (or any ancestor) has left the tree. Identity is the widget's heap
+/// address, so a widget dropped and replaced by a new allocation at the same
+/// address between two resolves reads as still present.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetAnchor {
+    path: Vec<usize>,
+    identities: Vec<usize>,
+}
+
+impl WidgetAnchor {
+    /// Anchor the widget at `path` under `root` (an empty path is `root`
+    /// itself). `None` when the path does not name a widget.
+    pub fn new(root: &dyn Widget, path: &[usize]) -> Option<Self> {
+        let identities = anchor_of(root, Some(path));
+        (identities.len() == path.len()).then(|| Self {
+            path: path.to_vec(),
+            identities,
+        })
+    }
+
+    /// The path recorded when the anchor was made (or last re-anchored).
+    pub fn path(&self) -> &[usize] {
+        &self.path
+    }
+
+    /// The widget's current path under `root`, following any reordering of
+    /// its ancestors' children; `None` when it or an ancestor is gone.
+    pub fn resolve(&self, root: &dyn Widget) -> Option<Vec<usize>> {
+        let mut path = self.path.clone();
+        resolve(root, &mut path, &self.identities);
+        (anchor_of(root, Some(&path)) == self.identities).then_some(path)
+    }
+
+    /// [`resolve`](Self::resolve), also storing the resolved path so the next
+    /// resolve starts from it.
+    pub fn refresh(&mut self, root: &dyn Widget) -> Option<&[usize]> {
+        let path = self.resolve(root)?;
+        self.path = path;
+        Some(&self.path)
     }
 }

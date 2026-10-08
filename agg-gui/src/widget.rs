@@ -35,7 +35,7 @@ pub(crate) mod paint_timing;
 mod tree;
 mod tree_inspector;
 
-pub use app::App;
+pub use app::{App, WidgetAnchor};
 pub(crate) use backbuffer::next_content_version;
 pub use backbuffer::{
     BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,
@@ -56,6 +56,6 @@ pub use tree_inspector::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use tree_inspector::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
     debug_draw_report, find_widget_by_id, find_widget_by_id_mut, find_widget_by_type,
-    find_widget_screen_rect, set_current_mouse_world, set_current_viewport, walk_path_mut,
-    InspectorNode, InspectorOverlay, WidgetBaseEdit, WidgetBaseField,
+    find_widget_screen_rect, set_current_mouse_world, set_current_viewport, walk_path,
+    walk_path_mut, InspectorNode, InspectorOverlay, WidgetBaseEdit, WidgetBaseField,
 };

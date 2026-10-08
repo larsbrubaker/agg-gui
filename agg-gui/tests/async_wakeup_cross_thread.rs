@@ -15,7 +15,8 @@
 //! next frame's layout pass finally gave the badge its real width.
 //!
 //! These tests live in an integration-test binary (separate process) so the
-//! global atomic that backs cross-thread signalling is isolated from the
+//! main queue's wakeup count, which an unbound worker's signal bumps and these
+//! unbound test threads read, is isolated from the
 //! unit-test binary's other tests, which rely on `wants_draw() == false`
 //! after `clear_draw_request()`.
 

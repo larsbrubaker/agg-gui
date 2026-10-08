@@ -15,6 +15,7 @@
 //! is not the UI's) is stamped by the next drain, so a virtual UI clock
 //! governs it either way.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -85,6 +86,11 @@ struct Pending {
 #[derive(Default)]
 pub(super) struct Shared {
     pending: Mutex<Pending>,
+    /// Frame-loop wakeups aimed at the thread(s) that drain this queue:
+    /// bumped by posts and [`UiQueue::signal_async_state_change`], merged
+    /// into a draining thread's draw request and epochs by
+    /// `crate::animation` (see [`super::current_wakeups`]).
+    wakeups: AtomicU64,
 }
 
 /// A UI-thread work queue. Cheap to clone (a shared handle) and `Send`, so a
@@ -127,7 +133,7 @@ impl UiQueue {
     /// when called from the thread that drains it.
     pub fn run_on_idle(&self, action: impl FnOnce() + Send + 'static) {
         lock(&self.shared.pending).call_later.push(Box::new(action));
-        crate::animation::signal_async_state_change();
+        self.signal_async_state_change();
     }
 
     /// C# `RunOnIdle(action, delayInSeconds)`.
@@ -137,7 +143,7 @@ impl UiQueue {
             .deferred
             .push((due, Box::new(action)));
         // Wake once so the drain arms a timed redraw for it.
-        crate::animation::signal_async_state_change();
+        self.signal_async_state_change();
     }
 
     /// C# `SetInterval`: run `action` every `interval`, first after one
@@ -156,8 +162,30 @@ impl UiQueue {
         lock(&self.shared.pending)
             .intervals
             .push(Arc::clone(&running));
-        crate::animation::signal_async_state_change();
+        self.signal_async_state_change();
         running
+    }
+
+    /// Wake the thread(s) that drain this queue: their next
+    /// `animation::wants_draw` / epoch read sees a draw request and advances
+    /// the invalidation and async-state epochs, as
+    /// [`crate::animation::signal_async_state_change`] does for the calling
+    /// thread's own queue. Safe from any thread; a worker serving a UI thread
+    /// other than the main one signals through that thread's
+    /// [`super::current_queue`] handle. Also runs the host waker.
+    pub fn signal_async_state_change(&self) {
+        self.shared.wakeups.fetch_add(1, Ordering::AcqRel);
+        if super::reads_wakeups_of(self) {
+            // Same-thread caller: raise its flags now as well, so a read in
+            // the same dispatch sees them without waiting for the merge.
+            crate::animation::bump_local_async_state();
+        }
+        crate::animation::wake_host();
+    }
+
+    /// The wakeup counter [`Self::signal_async_state_change`] bumps.
+    pub(super) fn wakeups(&self) -> u64 {
+        self.shared.wakeups.load(Ordering::Acquire)
     }
 
     /// C# `Count`: deferred actions waiting for their time.

@@ -9,9 +9,10 @@
 //! follow-up draw so the next frame re-lays-out.  These tests pin both halves:
 //! the follow-up happens, and it cannot turn into a perpetual redraw loop.
 //!
-//! Integration-test binary (own process) so the process-global wakeup counter
-//! is not shared with the unit-test binary's signalling tests; the tests here
-//! serialize on a local mutex so they cannot signal into each other.
+//! Integration-test binary (own process) so the main queue's wakeup count,
+//! which these unbound test threads and their workers share, is not shared
+//! with the unit-test binary's signalling tests; the tests here serialize on
+//! a local mutex so they cannot signal into each other.
 
 use std::sync::Mutex;
 

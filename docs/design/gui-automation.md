@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (6 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (7 onward) fill agg-gui's gaps test-first, port the 101 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -37,10 +37,10 @@
   - `on_key_down`/`on_key_up(Key, mods)`, where `Key::Char` is the character (there is no separate KeyPress)
   - wheel, file drop and modifier calls.
 - Tree lookup: `Widget::id()` (overridden by only a few agg-gui widgets), `find_widget_by_id`, `find_widget_screen_rect`.
-- `path_anchor` tracks widget identity by heap address.
+- `path_anchor` tracks widget identity by heap address; `agg_gui::WidgetAnchor` exposes it (a path that follows its widget through reorders and reports it gone), with `widget::walk_path` and `App::focused_path`.
 - Nearly all state is thread-local. Exceptions: `CURRENT_PLATFORM` and the input profile are process-global atomics.
 - Widget names (`WidgetBase.name`, `Widget::with_name`, default `id()`, `widgets::Named`), typed downcasts (`Widget::as_any`/`as_any_mut` on the core widgets) and an origin-placing container (`widgets::AbsoluteLayout` over `WidgetBase.origin`) exist.
-- `agg_gui::ui_thread` is the idle queue (`run_on_idle`, `run_on_idle_after`, intervals, `invoke_pending_actions`), one queue per UI thread, delays on `agg_gui::clock`, drained by both shells every loop iteration. Queued work runs under panic containment and reports through `agg_gui::report_unhandled` (`agg_gui::unhandled`, a per-thread handler set with `set_unhandled_handler`; with none, the first panic is re-raised after the rest of the drain).
+- `agg_gui::ui_thread` is the idle queue (`run_on_idle`, `run_on_idle_after`, intervals, `invoke_pending_actions`), one queue per UI thread, delays on `agg_gui::clock`, drained by both shells every loop iteration. Frame-loop wakeups are counted per queue: a post or `signal_async_state_change` wakes the thread that drains that queue (an unbound worker's, the main queue's owner), never another UI thread. Queued work runs under panic containment and reports through `agg_gui::report_unhandled` (`agg_gui::unhandled`, a per-thread handler set with `set_unhandled_handler`; with none, the first panic is re-raised after the rest of the drain).
 - `agg_gui::frame_policy` holds the frame policy both shells use: `LayoutKey` (size, device scale, invalidation epoch), `LayoutTracker` (needs-layout, `layout_if_needed`, and the GPU-free `tick` a headless driver runs), and `wants_frame` (the paint decision). `agg_gui::shell_input::InputForwarder` holds the input bookkeeping both shells feed their OS events through as `ForwarderEvent`s.
 - **Missing pieces:** `is_enabled`, click counts in mouse events (the forwarder counts them; `App` does not take them yet, G9), and paint-panic containment.
 
@@ -53,7 +53,7 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region` and `waits` (`static_delay`); the modules below marked as later slices are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms); the other modules below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
 - Features, each added with the slice whose code uses it (none exist yet; headless is the default):
@@ -72,13 +72,14 @@ src/runner/waits.rs        Delay, WaitFor, Assert, WaitForPendingUiWork, Waitfor
 src/runner/images.rs       ClickImage/DragImage/DropImage/ImageExists/WaitForImage, GetCurrentScreen
 src/input.rs               InputMethod trait (IInputMethod) + SimulatedInput (AggInputMethods), MouseConsts→enum
 src/pointer_reach.rs       PointerReach
-src/tree_query.rs          WidgetHandle, NamedHit (GetByNameResults), screen/clip rects, ActuallyVisibleOnScreen, Parents/Children
+src/tree_query.rs          (exists) WidgetHandle, screen/clip rects, ActuallyVisibleOnScreen, Parents/Children; NamedHit (GetByNameResults) lands with named.rs
 src/image_match.rs         FindLeastSquaresMatch over agg_gui::Framebuffer
-src/driver/mod.rs          UiDriver trait, FrameKind, ClockPolicy
-src/driver/headless.rs     HeadlessDriver + HeadlessWindow (the "SystemWindow" for tests that use no runner)
+src/driver/mod.rs          (exists) UiDriver trait, FrameKind, ClockPolicy
+src/driver/headless.rs     (exists) HeadlessDriver
+src/driver/window.rs       (exists) HeadlessWindow (the "SystemWindow" for tests that use no runner)
 src/driver/live.rs         (feature live) LiveDriver over agg_gui_shell::ShellSession
 src/execute.rs             show_window_and_execute_tests, RunOptions, AutomationError, watchdogs
-src/probe.rs               ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks)
+src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks)
 src/overlay.rs             RenderMouse (simulated pointer drawing)
 src/dialog_provider.rs     AutomationFileDialog (AutomationDialogProvider)
 src/startup_failure_log.rs StartupFailureLog
@@ -232,9 +233,9 @@ pub fn show_window_and_execute_tests<S, R>(
 
   The runner captures the first report, fails the run with it, and starts the close.
 
-**Frames.** One pumped frame matches the shells' reactive tick:
-1. drain `ui_thread` (the idle queue)
-2. advance the clock
+**Frames.** One pumped frame (`HeadlessDriver::pump`) matches the shells' reactive tick:
+1. advance the virtual clock by one frame interval
+2. drain `ui_thread` (the idle queue)
 3. if `app.wants_draw()` or a draw is forced: lay out when the layout key (size, scale, invalidation epoch) changed or layout was requested, then paint.
 
 Headless paints into a software `Framebuffer`, so paint is exercised and `get_current_screen` works. The policy is `agg_gui::frame_policy` (`LayoutKey`, `LayoutTracker::tick` with `TickMode::Reactive`/`Forced`, `wants_frame`), which the native and web shells already use; the headless driver uses it too.
@@ -337,7 +338,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Gap | Slice |
 |---|---|---|
-| G8 | Public `WidgetAnchor`/handle resolve, `App::focused_path`, hovered chain query, `Widget::is_enabled` | 6, 8 |
+| G8 | Hovered chain query, `Widget::is_enabled` | 8 |
 | G9 | Explicit click counts: `App::on_mouse_down_clicks`, `event::current_click_count()`, `is_double_click` that remembers the down, `MultiClickTracker` honouring the given count | 11 |
 | G10 | "First under mouse" events (`MouseOver`/`MouseOut`) plus an `UnderMouseState` query, next to the existing bounds Enter/Leave | 13 |
 | G11 | `Widget::find_named_targets`; ComboBox per-item names and enabled state; menu rows | 24 |
@@ -358,7 +359,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
 | MacTextEditKeyBindingTests (12) | `mac_text_edit_key_binding_tests.rs` | `HeadlessWindow` + `app.on_key_down` |
 | MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox |
-| MouseInteractionTests (13) | `mouse_interaction_tests.rs` | `ProbeWidget` for GuiWidget; RadioButton → RadioGroup buttons |
+| MouseInteractionTests (13) | `mouse_interaction_tests.rs` | `ProbeWidget` for GuiWidget; RadioButton → RadioGroup buttons; 12 to go (ExtensionMethodsTests is ported) |
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
 | PresentFailureContainmentTests (1) | `live/present_failure_containment_tests.rs` | skipped on a CPU host, as in C# |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | |
@@ -371,7 +372,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 6 | `HeadlessDriver`, `HeadlessWindow`, `ProbeWidget`, `tree_query` (handles, rects, clipping, visibility), G8 handles | MouseInteraction: ExtensionMethodsTests |
 | 7 | `execute.rs`: thread per run, Loaded/bring-up, wall budget plus `cancel`, `catch_unwind`, MarkTestComplete, `on_load` | AutomationRunnerTimeoutTest, WindowLoadTimeIsNotChargedToTheTestBudget |
 | 8 | Name lookup and waits (`named.rs`, `waits.rs`, PointerReach), G8 `is_enabled` | ZeroSecondWaitsReportWhatIsThereNow |
 | 9 | `SimulatedInput` plus stepped moves and pacing, Click*/RightClick*/MoveToByName/SetMouseCursorPosition | GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow |
@@ -403,7 +403,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (102 still to port): AutomationRunnerTests 11 (1 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13, Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3: **103**.
+**Tally** (101 still to port): AutomationRunnerTests 11 (1 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (1 ported), Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3: **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 
@@ -417,8 +417,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 ## 10. Risks
 
-- **Cross-thread wakeups:** `ui_thread::run_on_idle` and `signal_async_state_change` bump a process-wide counter every thread folds into its invalidation epoch and draw request, so parallel headless tests see each other's wakeups when they assert idle / no relayout. Decision: make the wakeup counter per UI thread (with the main queue's owner seeing worker posts) in slice 6, test-first.
-
+- **Workers that serve a non-main UI thread** must wake it through that thread's queue (`ui_thread::current_queue()` captured on the UI thread, then `UiQueue::run_on_idle` / `UiQueue::signal_async_state_change`); an unbound worker's `animation::signal_async_state_change` wakes only the main queue's owner. MatterCAD's workers (`running_tasks`, `design_scene`, `library_executor`) call the free function, so a headless test on a non-main thread sees their wakeups only through its own pumping (M2 should capture the queue).
 - **Virtual time vs. real worker threads.** Covered by `ClockPolicy::Real` and the `background_busy` hook, so `settle` keeps working.
 - **A timed-out body thread keeps running.** It only touches its own thread-locals, and it unwinds at its next runner call.
 - **Process-global agg-gui state** (`platform`, input profile, tilt, fullscreen). It needs thread-local overrides (slice 21) or `serial_test` for the few tests that touch it.

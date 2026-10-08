@@ -568,6 +568,16 @@ pub fn debug_draw_report(root: &dyn Widget) -> String {
     s
 }
 
+/// The widget at `path` under `root` (an empty path is `root`); `None` when
+/// the path indexes past the children at any level.
+pub fn walk_path<'a>(root: &'a dyn Widget, path: &[usize]) -> Option<&'a dyn Widget> {
+    let mut node = root;
+    for &idx in path {
+        node = node.children().get(idx)?.as_ref();
+    }
+    Some(node)
+}
+
 /// Walk the widget tree from `root` along `path` and return the deepest
 /// reachable widget as a mutable reference.  Returns `None` if the path
 /// indexes past the available children at any level — useful when the path
