@@ -92,6 +92,7 @@ impl ImageView {
 }
 
 impl Widget for ImageView {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "ImageView"
     }

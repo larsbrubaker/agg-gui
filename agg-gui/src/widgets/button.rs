@@ -380,6 +380,7 @@ impl Button {
 }
 
 impl Widget for Button {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Button"
     }

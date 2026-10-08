@@ -81,6 +81,7 @@ impl Hyperlink {
 }
 
 impl Widget for Hyperlink {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Hyperlink"
     }

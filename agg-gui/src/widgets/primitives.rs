@@ -104,6 +104,7 @@ impl Default for Stack {
 }
 
 impl Widget for Stack {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Stack"
     }
@@ -320,6 +321,7 @@ impl Padding {
 }
 
 impl Widget for Padding {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Padding"
     }
@@ -459,6 +461,7 @@ impl Default for SizedBox {
 }
 
 impl Widget for SizedBox {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "SizedBox"
     }

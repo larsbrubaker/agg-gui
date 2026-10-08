@@ -282,6 +282,7 @@ impl Scene {
 }
 
 impl Widget for Scene {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Scene"
     }

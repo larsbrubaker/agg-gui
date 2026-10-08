@@ -1,3 +1,23 @@
+//! The widget library: every concrete [`Widget`](crate::widget::Widget)
+//! agg-gui ships, plus their re-exports.
+
+/// Implements [`Widget::as_any`](crate::widget::Widget::as_any) and
+/// [`Widget::as_any_mut`](crate::widget::Widget::as_any_mut) as `Some(self)`
+/// inside an `impl Widget for T` block, so callers holding a `&dyn Widget`
+/// can downcast to the core widget types.
+macro_rules! widget_as_any {
+    () => {
+        fn as_any(&self) -> Option<&dyn std::any::Any> {
+            Some(self)
+        }
+        fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+            Some(self)
+        }
+    };
+}
+pub(crate) use widget_as_any;
+
+pub mod absolute_layout;
 pub mod button;
 pub mod button_theme;
 pub mod checkbox;
@@ -20,6 +40,7 @@ pub mod markdown;
 pub mod menu;
 pub mod modal_sheet;
 pub mod multi_click;
+pub mod named;
 pub mod on_screen_keyboard;
 pub mod performance;
 pub mod popup;
@@ -56,6 +77,7 @@ pub mod tumble_cube;
 pub mod window;
 pub mod window_title_bar;
 
+pub use absolute_layout::AbsoluteLayout;
 pub use button::{Button, ButtonIcon, ButtonTheme};
 pub use checkbox::Checkbox;
 pub use chevron::{ChevronWidget, CHEVRON_SIZE};
@@ -80,6 +102,7 @@ pub use menu::{
     PopupMenu, ShortcutKey, TopMenu,
 };
 pub use modal_sheet::ModalSheet;
+pub use named::Named;
 pub use performance::{
     paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView, RunMode,
     RunModeDesc, RunModeRow, SharedFrameHistory,

@@ -367,6 +367,7 @@ mod style;
 pub use style::{ComboBoxStateStyle, ComboBoxStyle};
 
 impl Widget for ComboBox {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "ComboBox"
     }

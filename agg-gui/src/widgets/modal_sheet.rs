@@ -212,6 +212,7 @@ impl ModalSheet {
 }
 
 impl Widget for ModalSheet {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "ModalSheet"
     }

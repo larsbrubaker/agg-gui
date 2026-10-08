@@ -350,6 +350,7 @@ impl MenuBar {
 }
 
 impl Widget for MenuBar {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "MenuBar"
     }

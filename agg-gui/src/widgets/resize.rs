@@ -149,6 +149,7 @@ impl Resize {
 }
 
 impl Widget for Resize {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Resize"
     }

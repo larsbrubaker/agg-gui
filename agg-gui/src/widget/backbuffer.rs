@@ -81,6 +81,25 @@ impl BackbufferSpec {
             rounded_clip: None,
         }
     }
+
+    /// The spec [`Widget::backbuffer_spec`](crate::widget::Widget::backbuffer_spec)
+    /// returns by default: a cached software buffer in `mode` when the widget
+    /// owns a [`BackbufferCache`] (`has_cache`), otherwise [`none`](Self::none).
+    pub fn default_for(mode: BackbufferMode, has_cache: bool) -> Self {
+        if !has_cache {
+            return Self::none();
+        }
+        Self {
+            kind: match mode {
+                BackbufferMode::Rgba => BackbufferKind::SoftwareRgba,
+                BackbufferMode::LcdCoverage => BackbufferKind::SoftwareLcd,
+            },
+            cached: true,
+            alpha: 1.0,
+            outsets: Insets::ZERO,
+            rounded_clip: None,
+        }
+    }
 }
 
 impl Default for BackbufferSpec {

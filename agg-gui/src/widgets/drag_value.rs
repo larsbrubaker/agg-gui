@@ -367,6 +367,7 @@ impl DragValue {
 }
 
 impl Widget for DragValue {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "DragValue"
     }

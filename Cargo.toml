@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "agg-gui",
+    "agg-gui-automation",
     "agg-gui-shell",
     "agg-gui-wgpu",
     "agg-gui-web-shell",
@@ -12,6 +13,7 @@ members = [
 ]
 default-members = [
     "agg-gui",
+    "agg-gui-automation",
     "agg-gui-shell",
     "agg-gui-wgpu",
     "agg-gui-web-shell",

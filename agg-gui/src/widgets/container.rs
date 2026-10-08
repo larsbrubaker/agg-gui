@@ -136,6 +136,7 @@ impl Default for Container {
 }
 
 impl Widget for Container {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Container"
     }

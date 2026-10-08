@@ -62,6 +62,7 @@ impl Default for Spacer {
 }
 
 impl Widget for Spacer {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Spacer"
     }
@@ -183,6 +184,7 @@ impl Separator {
 }
 
 impl Widget for Separator {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Separator"
     }

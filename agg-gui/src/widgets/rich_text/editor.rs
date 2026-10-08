@@ -341,6 +341,7 @@ impl RichTextEdit {
 }
 
 impl Widget for RichTextEdit {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "RichTextEdit"
     }

@@ -7,6 +7,7 @@
 use super::*;
 
 impl Widget for ColorPicker {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "ColorPicker"
     }

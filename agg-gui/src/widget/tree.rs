@@ -483,6 +483,24 @@ pub(crate) fn deliver_to_all(widget: &mut dyn Widget, event: &Event) -> bool {
     changed
 }
 
+/// Earliest [`Widget::next_draw_deadline`] among `children` — the default
+/// walk behind that trait method (the caller has already checked its own
+/// visibility; each child applies its own).
+pub(crate) fn earliest_child_draw_deadline(
+    children: &[Box<dyn Widget>],
+) -> Option<web_time::Instant> {
+    let mut best: Option<web_time::Instant> = None;
+    for c in children {
+        if let Some(t) = c.next_draw_deadline() {
+            best = Some(match best {
+                Some(b) if b <= t => b,
+                _ => t,
+            });
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

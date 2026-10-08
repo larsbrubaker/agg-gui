@@ -163,6 +163,7 @@ impl Default for FlexRow {
 }
 
 impl Widget for FlexRow {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "FlexRow"
     }

@@ -289,6 +289,7 @@ enum ButtonOutcome {
 // ── Widget impl ──────────────────────────────────────────────────────────────
 
 impl Widget for ColorWheelPicker {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "ColorWheelPicker"
     }

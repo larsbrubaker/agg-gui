@@ -628,6 +628,7 @@ fn is_fetchable_url(url: &str) -> bool {
 }
 
 impl Widget for MarkdownView {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "MarkdownView"
     }

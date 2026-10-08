@@ -220,6 +220,7 @@ impl TumbleCube {
 }
 
 impl Widget for TumbleCube {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "TumbleCube"
     }

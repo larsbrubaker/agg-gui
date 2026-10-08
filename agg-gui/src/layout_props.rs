@@ -37,7 +37,7 @@
 //! is `gap + 4 + 6 = 10 + gap`, not `max(4, 6) = 6`.  This matches the
 //! original C# agg-sharp behaviour.
 
-use crate::geometry::Size;
+use crate::geometry::{Point, Size};
 
 // ---------------------------------------------------------------------------
 // Insets
@@ -399,6 +399,17 @@ pub struct WidgetBase {
     /// `Button::with_focus_on_click(false)`; any widget embedding a
     /// `WidgetBase` can opt out the same way.
     pub focus_on_click: bool,
+    /// Per-instance name (C# `GuiWidget.Name`).  [`Widget::id`](crate::widget::Widget::id)
+    /// returns it by default, so `find_widget_by_id` and GUI automation find
+    /// the widget by this name.  Set via
+    /// [`Widget::with_name`](crate::widget::Widget::with_name).
+    pub name: Option<String>,
+    /// Requested position of this widget's bottom-left corner in its
+    /// parent's Y-up space (C# `GuiWidget.OriginRelativeParent`).  Only
+    /// parents that place children by position read it —
+    /// [`AbsoluteLayout`](crate::widgets::AbsoluteLayout); flow and stack
+    /// containers compute positions themselves.
+    pub origin: Point,
 }
 
 impl WidgetBase {
@@ -417,6 +428,8 @@ impl WidgetBase {
             default_action: false,
             cancel_action: false,
             focus_on_click: true,
+            name: None,
+            origin: Point::new(0.0, 0.0),
         }
     }
 
@@ -445,6 +458,17 @@ impl WidgetBase {
     /// Attach hover-help text read by the central tooltip controller.
     pub fn with_tooltip(mut self, text: impl Into<String>) -> Self {
         self.tooltip = Some(text.into());
+        self
+    }
+    /// Name this widget (C# `GuiWidget.Name`); see [`name`](Self::name).
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+    /// Position this widget in its parent (C# `OriginRelativeParent`); see
+    /// [`origin`](Self::origin).
+    pub fn with_origin(mut self, origin: Point) -> Self {
+        self.origin = origin;
         self
     }
 

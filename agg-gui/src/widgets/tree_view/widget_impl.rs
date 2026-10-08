@@ -18,6 +18,7 @@ use super::row::{icon_color, TreeRow, EXPAND_W};
 use super::{RowMeta, TreeView, SCROLLBAR_W};
 
 impl Widget for TreeView {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "TreeView"
     }

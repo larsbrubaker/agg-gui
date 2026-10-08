@@ -209,6 +209,7 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 // ── Widget impl ────────────────────────────────────────────────────────────
 
 impl Widget for ToggleSwitch {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "ToggleSwitch"
     }

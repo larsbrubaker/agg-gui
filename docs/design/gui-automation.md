@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** 33 slices fill agg-gui's gaps test-first, port all 103 Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (3 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -39,7 +39,8 @@
 - Tree lookup: `Widget::id()` (overridden by only a few agg-gui widgets), `find_widget_by_id`, `find_widget_screen_rect`.
 - `path_anchor` tracks widget identity by heap address.
 - Nearly all state is thread-local. Exceptions: `CURRENT_PLATFORM` and the input profile are process-global atomics.
-- **Missing pieces:** an idle queue (MatterCAD has its own `ui_thread.rs`), widget names on `WidgetBase`, `is_enabled`, `as_any`, click counts in mouse events, a virtual clock (about 29 `Instant::now()` call sites), and paint-panic containment.
+- Widget names (`WidgetBase.name`, `Widget::with_name`, default `id()`, `widgets::Named`), typed downcasts (`Widget::as_any`/`as_any_mut` on the core widgets) and an origin-placing container (`widgets::AbsoluteLayout` over `WidgetBase.origin`) exist.
+- **Missing pieces:** an idle queue (MatterCAD has its own `ui_thread.rs`), `is_enabled`, click counts in mouse events, a virtual clock (about 29 `Instant::now()` call sites), and paint-panic containment.
 
 **`mattercad-app-test`**
 - `TestHarness` builds the real tree headless, sends input straight to `App::on_*`, and copies the shells' frame policy (`input_frame`/`shell_frame`/layout key).
@@ -50,13 +51,12 @@
 
 ## 2. Where the code goes
 
-**New crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency).
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region` and `waits` (`static_delay`); the modules below marked as later slices are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
-- Features:
-  - `default = []` gives headless only.
-  - `live = ["dep:agg-gui-shell"]`
-  - `stack-dump = ["dep:minidump-writer", "dep:minidump-processor", "dep:minidump-unwind"]`
+- Features, each added with the slice whose code uses it (none exist yet; headless is the default):
+  - `live = ["dep:agg-gui-shell"]` (slice 31)
+  - `stack-dump = ["dep:minidump-writer", "dep:minidump-processor", "dep:minidump-unwind"]` (slice 30)
 
 Modules (each under 800 lines, each opening with a purpose comment):
 
@@ -66,11 +66,9 @@ src/runner/mod.rs          AutomationRunner, AutomationConfig, ClickOrigin, Modi
 src/runner/named.rs        Get*/Wait*/NameExists/NamedWidgetExists/ChildExists/GetRegionByName/ScrollIntoView
 src/runner/pointer.rs      stepped moves, Click*/RightClick*/DoubleClick*/Drag*/Drop*/MoveToByName/SetMouseCursorPosition
 src/runner/keyboard.rs     Type, Press/ReleaseModifierKeys, SelectAll/None
-src/runner/waits.rs        Delay, WaitFor, Assert, StaticDelay, WaitForPendingUiWork, WaitforDraw
+src/runner/waits.rs        Delay, WaitFor, Assert, WaitForPendingUiWork, WaitforDraw (AutomationRunner::static_delay delegates to waits::static_delay)
 src/runner/images.rs       ClickImage/DragImage/DropImage/ImageExists/WaitForImage, GetCurrentScreen
 src/input.rs               InputMethod trait (IInputMethod) + SimulatedInput (AggInputMethods), MouseConsts→enum
-src/typed_key_parser.rs    TypedKeyParser/TypedKey
-src/search_region.rs       ScreenRectangle, SearchRegion
 src/pointer_reach.rs       PointerReach
 src/tree_query.rs          WidgetHandle, NamedHit (GetByNameResults), screen/clip rects, ActuallyVisibleOnScreen, Parents/Children
 src/image_match.rs         FindLeastSquaresMatch over agg_gui::Framebuffer
@@ -117,7 +115,6 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 |---|---|
 | `Delay(s = .2)` | `delay(secs)`: advances driver time in frame-sized steps, one frame each |
 | `WaitForPendingUiWork(ms = 250)` | `wait_for_pending_ui_work(max) -> bool` |
-| `StaticDelay(cond, max, interval = 10)` (static) | `AutomationRunner::static_delay(...) -> bool`: wall clock, final look after the deadline |
 | `WaitFor(cond, 5, 10)` | `wait_for(cond, max, interval) -> &mut Self`, plus `wait_until(...) -> bool` |
 | `Assert(cond, msg, 5, 10)` | `assert(cond, msg, ...)`: panics with "Require Failed: {msg}" |
 | `WaitforDraw(window, 30)` | `wait_for_draw()`: forces a layout+paint frame (headless) or the next presented frame (live) |
@@ -174,14 +171,9 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `ShowWindowAndExecuteTests(window, test, secs = 30, images, closeWindow, timeoutIsTheExpectedOutcome)` | `show_window_and_execute_tests(build, body, RunOptions) -> Result<R, AutomationError>` (section 5) |
 
 **Supporting types**
-- `SearchRegion { screen_rect: ScreenRectangle, image: OnceCell<Framebuffer> }` captures its image lazily. `ScreenRectangle::intersection` is ported as is.
-- `TypedKeyParser::parse(&str) -> Result<Vec<TypedKey>, ParseError>`:
-  - Same CharToKeys table, aliases and error messages.
-  - `TypedKey { key: Key, mods: Modifiers, character: Option<char> }`.
-  - `^` means the **platform command modifier**: ctrl on Windows/Linux, meta on macOS (`platform::command_modifier_pressed`). Without that, "^a"/"^z" in MatterCAD tests would not mean the same thing on a Mac.
-- **How a stroke is sent:**
-  - A stroke that types a character becomes `on_key_down(Key::Char(c), mods)` then `on_key_up`.
-  - A key token becomes `on_key_down(Key::Enter, ...)` and so on.
+- `SearchRegion::image(capture)` takes the runner's `get_current_screen` as its capture function.
+- **How a stroke is sent** (`TypedKey::agg_key`/`agg_modifiers` give the key and modifiers):
+  - `on_key_down(stroke.agg_key(), stroke.agg_modifiers())` then `on_key_up`.
   - agg-gui has no KeyPress. A widget suppressing a KeyPress in C# corresponds to consuming the KeyDown.
 - `InputMethod` trait (= `IInputMethod`): `current_mouse_position`, `left_button_down`, `click_count`, `set_cursor_position`, `mouse_event(MouseAction, x, y, clicks)`, `press_modifier_keys`, `release_modifier_keys`, `type_strokes`, `current_screen`. `MouseConsts` becomes `enum MouseAction { LeftDown, LeftUp, RightDown, ... }`.
 - `SimulatedInput` keeps C#'s rules:
@@ -276,9 +268,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 ## 6. Name lookup and search regions
 
 **Names**
-- **New in agg-gui:** `WidgetBase.name: Option<String>`. `Widget::id()`'s default returns `widget_base().name`, and widgets that override `id()` keep their own (`Window` uses its title).
-- Also new: a `with_name()` builder on the `Widget` trait (like `with_tooltip`) and an `agg_gui::widgets::Named` wrapper. The wrapper replaces MatterCAD's three ad-hoc `Named` structs.
-- In this design `id()` **is** C#'s `Name`.
+- `id()` **is** C#'s `Name` (`WidgetBase.name` by default; `Window` reports its title). MatterCAD's three ad-hoc `Named` structs move to `agg_gui::widgets::Named` in slice M3.
 
 **Non-widget named targets** (C#'s `FindDescendants` override plus `NamedObject`/`OffsetHint`)
 - New in agg-gui: `Widget::find_named_targets(&self, name, out: &mut Vec<NamedTarget>)`, defaulting to nothing.
@@ -303,8 +293,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 - Image searches use `region.image`, or a fresh whole-window capture.
 
 **Reading widget state from tests** (C# reads `field.Text`, `IsOpen`, `ContainsFocus` straight off objects):
-- New in agg-gui: `Widget::as_any`/`as_any_mut`, default None, implemented by the core widgets.
-- Test helpers:
+- Test helpers (over `Widget::as_any`/`as_any_mut`):
   - `runner.with_widget::<TextField, _>("field", |f| f.text())`
   - `runner.with_handle_mut(...)`
   - `runner.contains_focus(&handle)`, which needs a new public `App::focused_path()`
@@ -351,9 +340,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Gap | Slice |
 |---|---|---|
-| G1 | `WidgetBase.name`, `with_name`, default `id()`, `Named` | 2 |
-| G2 | `as_any` | 2 |
-| G3 | Absolute-position container honouring `WidgetBase.origin` (C# `OriginRelativeParent`, `new Button(x, y)`) | 2 |
 | G4 | `agg_gui::clock` (virtual or real), replacing all `Instant::now()` time reads | 3 |
 | G5 | `agg_gui::ui_thread`, promoted from mattercad-app: `run_on_idle`, `_after`, intervals, `invoke_pending_actions`, panic containment and reporting, one queue per UI thread; shells drain it | 4 |
 | G6 | `agg_gui::frame_policy` (layout key and needs-layout), shared by all shells | 5 |
@@ -374,7 +360,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | C# class (count) | Rust file | Notes |
 |---|---|---|
-| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests` |
+| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 10 to go (StaticDelayExpires… is ported) |
 | AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
 | MacTextEditKeyBindingTests (12) | `mac_text_edit_key_binding_tests.rs` | `HeadlessWindow` + `app.on_key_down` |
@@ -392,8 +378,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 1 | Crate skeleton, `TypedKeyParser` (plus parser unit tests), `ScreenRectangle`/`SearchRegion`, `static_delay` | StaticDelayExpiresOnTotalElapsedTimeNotTheSecondsComponent |
-| 2 | G1, G2, G3 in agg-gui | (agg-gui unit tests) |
 | 3 | G4 `clock`; move multi-click and tooltip test clocks onto it | (unit) |
 | 4 | G5 `ui_thread` in agg-gui (port MatterCAD's file and its tests), per-thread queues | (unit) |
 | 5 | G6 + G7; agg-gui-shell and web shell adopt the forwarder | (unit; shells still build) |
@@ -429,7 +413,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally:** AutomationRunnerTests 11, Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13, Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3: **103**.
+**Tally** (102 still to port): AutomationRunnerTests 11 (1 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13, Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3: **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 
@@ -448,7 +432,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 - **A timed-out body thread keeps running.** It only touches its own thread-locals, and it unwinds at its next runner call.
 - **Process-global agg-gui state** (`platform`, input profile, tilt, fullscreen). It needs thread-local overrides (slice 21) or `serial_test` for the few tests that touch it.
 - **Headless software paint can be slow on MatterCAD's tree.** Frames paint only when `wants_draw`, so idle `delay`/`wait_for` frames are cheap.
-- **The `^` → command-modifier choice** differs from C#'s literal Control on macOS. It is deliberate, and a parser test pins it per platform.
+- **The `^` → command-modifier choice** differs from C#'s literal Control on macOS. It is deliberate; `rust_only_caret_is_the_platform_command_modifier` pins it per platform.
 
 ### Critical files for implementation
 - /Users/larsbrubaker/Development/MatterCAD/Submodules/agg-sharp/GuiAutomation/AutomationRunner.cs

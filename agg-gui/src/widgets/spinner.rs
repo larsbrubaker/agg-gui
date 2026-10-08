@@ -136,6 +136,7 @@ impl Default for Spinner {
 }
 
 impl Widget for Spinner {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Spinner"
     }

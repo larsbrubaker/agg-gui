@@ -1,0 +1,16 @@
+# GUI automation for agg-gui: the port of agg-sharp's GuiAutomation
+# (AutomationRunner and friends). A test-only crate: consumers take it as a
+# dev-dependency. Design and remaining slices: docs/design/gui-automation.md.
+[package]
+name = "agg-gui-automation"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+license = "MIT"
+description = "GUI test automation for agg-gui: typed-key parsing, search regions and waits (a port of agg-sharp's GuiAutomation)"
+repository = "https://github.com/larsbrubaker/agg-gui"
+publish = false
+
+[dependencies]
+agg-gui = { path = "../agg-gui" }

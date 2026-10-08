@@ -399,6 +399,7 @@ fn strengthen(c: Color) -> Color {
 }
 
 impl Widget for Label {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "Label"
     }

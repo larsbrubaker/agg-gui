@@ -225,6 +225,7 @@ impl TabView {
 }
 
 impl Widget for TabView {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "TabView"
     }
