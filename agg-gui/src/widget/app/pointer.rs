@@ -251,14 +251,8 @@ impl App {
             return;
         }
         // Deliver release to captured widget first (if any), then clear capture.
-        // Whether the capture path still names the widget that took the
-        // press: one replaced since (an item view rebuilt by what the press
-        // did) never saw the pointer, so the release rules below that spare
-        // the capture holder a move do not apply to its replacement.
-        let holder_present = self.capture_holder_present();
-        let captured = self.captured.take();
-        let released = captured.clone().filter(|_| holder_present);
-        if let Some(path) = &captured {
+        let released = self.captured.take();
+        if let Some(path) = &released {
             dispatch_event(&mut self.root, path, &event, pos);
         } else {
             let hit = self.compute_hit(pos);

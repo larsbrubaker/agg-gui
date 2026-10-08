@@ -145,15 +145,6 @@ impl App {
         self.hovered = path;
     }
 
-    /// Whether the pointer-capture path still names the widgets it was
-    /// anchored to (false with no capture, or once the holder was replaced
-    /// or dropped). Call after `resolve_tracked_paths`.
-    pub(super) fn capture_holder_present(&self) -> bool {
-        self.captured
-            .as_deref()
-            .is_some_and(|path| anchor_of(self.root.as_ref(), Some(path)) == self.anchors.captured)
-    }
-
     /// Store the pointer-capture path and anchor it to the widgets it names
     /// now.
     pub(super) fn store_captured(&mut self, path: Option<Vec<usize>>) {
