@@ -74,6 +74,7 @@ mod on_screen_keyboard;
 pub(crate) mod paint_recorder;
 mod platform_multi_click;
 mod pointer_modifiers;
+mod radio_button;
 mod rasterizer_clip;
 #[cfg(feature = "reflect")]
 mod reflect_roundtrip;

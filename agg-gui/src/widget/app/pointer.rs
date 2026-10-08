@@ -68,7 +68,7 @@ impl App {
         set_current_mouse_world(pos);
         if let Some(path) = active_modal_path(self.root.as_ref()) {
             let path = self.extend_modal_path(&path, pos);
-            self.update_hover_chain(Some(&path));
+            self.update_hover_chain(Some(&path), None);
             let event = Event::MouseMove { pos };
             dispatch_event(&mut self.root, &path, &event, pos);
             self.store_hovered(Some(path));
@@ -156,7 +156,7 @@ impl App {
             // click, with the same click-to-focus rule as the normal path
             // (text fields in dialogs need focus to type).
             let path = self.extend_modal_path(&path, pos);
-            self.update_hover_chain(Some(&path));
+            self.update_hover_chain(Some(&path), None);
             if takes_click_focus(widget_at_path(&mut self.root, &path)) {
                 self.set_focus(Some(path.clone()));
             } else {
@@ -171,7 +171,7 @@ impl App {
         // The press announces where it landed (agg-sharp's `OnMouseDown`
         // updates `UnderMouseState`), so a press with no move before it
         // still enters and leaves the widgets it lands on and leaves.
-        self.update_hover_chain(hit.as_deref());
+        self.update_hover_chain(hit.as_deref(), Some(pos));
 
         // Click-to-focus: if the hit widget is focusable (and accepts focus
         // from a click), give it focus.
@@ -251,13 +251,31 @@ impl App {
             return;
         }
         // Deliver release to captured widget first (if any), then clear capture.
-        if let Some(path) = self.captured.take() {
-            dispatch_event(&mut self.root, &path, &event, pos);
+        let released = self.captured.take();
+        if let Some(path) = &released {
+            dispatch_event(&mut self.root, path, &event, pos);
         } else {
             let hit = self.compute_hit(pos);
             if let Some(path) = hit {
                 dispatch_event(&mut self.root, &path, &event, pos);
             }
+        }
+        // A release over the widget that held the capture leaves it where it
+        // is: it is still the hovered widget, it just handled the pointer at
+        // this very spot, and its cursor stands. agg-sharp sends no move on a
+        // release, so it gets none here either; only the hovered set catches
+        // up with what capture held still.
+        if released.is_some() && self.compute_hit(pos) == released {
+            self.update_hover_chain(released.as_deref(), Some(pos));
+            self.store_hovered(released);
+            return;
+        }
+        // The widget that held the capture saw every move with its real
+        // position and now the release, so it already knows where the
+        // pointer is: it gets no off-widget hover-clearing move (which
+        // agg-sharp, sending no move on a release, would not send either).
+        if released.is_some() && self.hovered == released {
+            self.store_hovered(None);
         }
         self.refresh_hover_after_release(pos);
     }
@@ -274,7 +292,7 @@ impl App {
         crate::cursor::reset_cursor_icon();
         if let Some(path) = active_modal_path(self.root.as_ref()) {
             let path = self.extend_modal_path(&path, pos);
-            self.update_hover_chain(Some(&path));
+            self.update_hover_chain(Some(&path), None);
             dispatch_event(&mut self.root, &path, &Event::MouseMove { pos }, pos);
             self.store_hovered(Some(path));
             return;

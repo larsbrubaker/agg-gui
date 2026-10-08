@@ -80,7 +80,7 @@ pub(super) fn anchor_of(root: &dyn Widget, path: Option<&[usize]>) -> Anchor {
 /// widget; otherwise the parent's children are searched for it. Resolution
 /// stops (leaving the rest of the path untouched) at a level whose widget is
 /// gone.
-fn resolve(root: &dyn Widget, path: &mut [usize], anchor: &[usize]) {
+pub(super) fn resolve(root: &dyn Widget, path: &mut [usize], anchor: &[usize]) {
     let mut node = root;
     for (depth, &want) in anchor.iter().enumerate() {
         let Some(slot) = path.get_mut(depth) else {

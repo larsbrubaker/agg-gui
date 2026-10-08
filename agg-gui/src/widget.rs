@@ -28,6 +28,7 @@ pub use widget_trait::Widget;
 
 mod app;
 mod backbuffer;
+mod event_observer;
 mod event_root;
 pub(crate) mod keyboard_scroll;
 mod paint;
@@ -41,6 +42,7 @@ pub use backbuffer::{
     BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,
     BackbufferState, CompositingLayer,
 };
+pub use event_observer::{observe_events, EventObserver};
 pub use event_root::{event_rect_to_root, event_root_transform};
 pub(crate) use paint::paint_subtree_forced;
 pub use paint::{

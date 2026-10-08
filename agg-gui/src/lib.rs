@@ -179,9 +179,10 @@ pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
     debug_draw_report, event_rect_to_root, event_root_transform, find_widget_by_id,
-    find_widget_by_id_mut, find_widget_by_type, find_widget_screen_rect, under_mouse_state_of, App,
-    BackbufferKind, BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay,
-    UnderMouseState, Widget, WidgetAnchor, WidgetBaseEdit, WidgetBaseField, WidgetId,
+    find_widget_by_id_mut, find_widget_by_type, find_widget_screen_rect, observe_events,
+    under_mouse_state_of, App, BackbufferKind, BackbufferSpec, BackbufferState, EventObserver,
+    InspectorNode, InspectorOverlay, UnderMouseState, Widget, WidgetAnchor, WidgetBaseEdit,
+    WidgetBaseField, WidgetId,
 };
 pub use widgets::{
     color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, current_scroll_style,
@@ -193,15 +194,15 @@ pub use widgets::{
     Hyperlink, ImageView, InspectorPanel, InspectorSavedState, Label, LabelAlign, MarkdownView,
     MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
     ModalSheet, NodeIcon, Padding, PerformanceView, Popup, PopupClickOutcome, PopupCloseBehavior,
-    PopupMenu, ProgressBar, QrView, RadioGroup, Rebuilder, RectAlign, Resize, RichCommand, RichDoc,
-    RichEditHandle, RichTextEdit, RichTextToolbar, RichTextView, RunMode, RunModeDesc, RunModeRow,
-    Scene, SceneTransform, ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility,
-    ScrollView, SegmentedControl, Separator, SharedFrameHistory, SharedResolver, ShortcutKey,
-    SizedBox, Slider, SliderClamping, SliderOrientation, SliderStyle, Spacer, Spinner, SpinnerSize,
-    Splitter, SplitterRatio, Stack, TabView, Table, TableBuilder, TableColumn, TableRows, TextArea,
-    TextAreaScrollInfo, TextEditState, TextField, TextHAlign, TextVAlign, ToggleSwitch,
-    ToggleSwitchStyle, Tooltip, TooltipTimings, TopMenu, TreeView, TumbleCube, TumbleCubeCamera,
-    Window, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
+    PopupMenu, ProgressBar, QrView, RadioButton, RadioGroup, Rebuilder, RectAlign, Resize,
+    RichCommand, RichDoc, RichEditHandle, RichTextEdit, RichTextToolbar, RichTextView, RunMode,
+    RunModeDesc, RunModeRow, Scene, SceneTransform, ScrollBarColor, ScrollBarKind, ScrollBarStyle,
+    ScrollBarVisibility, ScrollView, SegmentedControl, Separator, SharedFrameHistory,
+    SharedResolver, ShortcutKey, SizedBox, Slider, SliderClamping, SliderOrientation, SliderStyle,
+    Spacer, Spinner, SpinnerSize, Splitter, SplitterRatio, Stack, TabView, Table, TableBuilder,
+    TableColumn, TableRows, TextArea, TextAreaScrollInfo, TextEditState, TextField, TextHAlign,
+    TextVAlign, ToggleSwitch, ToggleSwitchStyle, Tooltip, TooltipTimings, TopMenu, TreeView,
+    TumbleCube, TumbleCubeCamera, Window, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

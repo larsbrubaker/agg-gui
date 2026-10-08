@@ -158,7 +158,9 @@ fn capture_follows_widget_when_children_reordered_between_events() {
     log.borrow_mut().clear();
     app.on_mouse_move(70.0, 50.0);
     app.on_mouse_up(70.0, 50.0, MouseButton::Left, none());
-    assert_eq!(*log.borrow(), ["a move", "a up", "a move"]);
+    // The release lands on "a" itself, which held the capture: no hover
+    // refresh move follows (agg-sharp sends no move on a release).
+    assert_eq!(*log.borrow(), ["a move", "a up"]);
 }
 
 #[test]

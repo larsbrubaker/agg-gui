@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (14 onward) fill agg-gui's gaps test-first, port the 85 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (15 onward) fill agg-gui's gaps test-first, port the 80 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -44,7 +44,9 @@
 - `agg_gui::frame_policy` holds the frame policy both shells use: `LayoutKey` (size, device scale, invalidation epoch), `LayoutTracker` (needs-layout, `layout_if_needed`, and the GPU-free `tick` a headless driver runs), and `wants_frame` (the paint decision). `agg_gui::shell_input::InputForwarder` holds the input bookkeeping both shells feed their OS events through as `ForwarderEvent`s.
 - `Widget::is_enabled` reports a widget's own enabled state (default true; `Button`, `SegmentedControl` and `ChevronWidget` report theirs).
 - Click counts: `App::on_mouse_down_clicks` takes a stated count, the forwarder passes every press's count, and widgets read `event::current_click_count()` / `event::is_double_click()` (C#'s `Clicks` / `IsDoubleClick`); `MultiClickTracker` honours only a stated count.
-- Under the mouse: the hovered chain sends bounds `MouseEnter`/`MouseLeave` and first-under-mouse `MouseOver`/`MouseOut` (C#'s `MouseEnter`/`MouseLeave`), a press updates it as a move does, and `App::hovered_chain`/`first_under_mouse`/`under_mouse_state`/`captured_path` plus the thread snapshot `agg_gui::under_mouse_state_of(WidgetId)` answer C#'s `UnderMouseState`, `MouseCaptured` and `ChildHasMouseCaptured`.
+- Under the mouse: the hovered chain and the widgets it covers (under a sibling drawn above them, `UnderMouseNotFirst`) send bounds `MouseEnter`/`MouseLeave`, the chain's deepest widget gets first-under-mouse `MouseOver`/`MouseOut` (C#'s `MouseEnter`/`MouseLeave`), a press updates them as a move does, capture follows the captured widget's own area and freezes everything else, a release over the capture holder sends no hover-refresh move, and `App::hovered_chain`/`first_under_mouse`/`under_mouse_state`/`captured_path` plus the thread snapshot `agg_gui::under_mouse_state_of(WidgetId)` answer C#'s `UnderMouseState`, `MouseCaptured` and `ChildHasMouseCaptured`.
+- `agg_gui::observe_events(WidgetId, callback)` watches the events one widget receives (C#'s per-widget `MouseMove +=` and friends) without wrapping it.
+- `widgets::RadioButton` is C#'s standalone `RadioButton`: a widget per option, exclusive with the radio buttons in its parent (settled by the dispatch walk before its callbacks run), individually disableable, with `on_checked_state_changed`/`on_click` and `check_radio_child` for a programmatic check.
 - **Missing piece:** paint-panic containment.
 
 **`mattercad-app-test`**
@@ -308,7 +310,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
 | MacTextEditKeyBindingTests (12) | `mac_text_edit_key_binding_tests.rs` | `HeadlessWindow` + `app.on_key_down` |
 | MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox |
-| MouseInteractionTests (13) | `mouse_interaction_tests.rs` (+ `mouse_interaction/*.rs`) | `ProbeWidget::capturing_presses` for GuiWidget; 5 to go: the 4 of slice 14 and RadioButtonSiblingsAreChildren, which needs a standalone agg-gui radio button that unchecks its siblings (C#'s `RadioButton`; `RadioGroup` keeps its options inside one widget, so they cannot be found by name) |
+| MouseInteractionTests (13) | `mouse_interaction_tests.rs` (+ `mouse_interaction/*.rs`) | all ported |
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
 | PresentFailureContainmentTests (1) | `live/present_failure_containment_tests.rs` | skipped on a CPU host, as in C# |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | |
@@ -320,8 +322,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 13b | Standalone `RadioButton` in agg-gui (siblings in one parent are exclusive) | Mouse: RadioButtonSiblingsAreChildren |
-| 14 | Capture and overlap behaviour | Mouse: ValidateEnterAndLeaveEventsWhenCoverd, ValidateEnterAndLeaveInOverlapArea, MouseCapturedSpressesLeaveEvents, MouseCapturedSpressesLeaveEventsInButtonsSameAsRectangles |
 | 15 | Keyboard (`type_text`, modifiers, `select_all`/`none`) | TypeDeliversPunctuationIntoAMultiLineField; TextEditFocus: VerifyFocusMakesTextWidgetEditable, VerifyFocusProperty, SelectAllOnFocusCanStillClickAfterSelection |
 | 16 | TextEdit, part 1 | CorectLineCounts, TextEditTextSelectionTests, TextSelectionWithShiftClick, TextChangedEventsTests, TextEditGetsFocusTests, AddThenDeleteCausesNoVisualChange |
 | 17 | TextEdit, part 2 (+ G16) | MultiLineTests, TextEditingSpecialKeysWork, ScrollingToEndShowsEnd |
@@ -345,7 +345,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (85 still to port): AutomationRunnerTests 11 (7 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (8 ported), Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3 (3 ported): **103**.
+**Tally** (80 still to port): AutomationRunnerTests 11 (7 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 

@@ -19,6 +19,7 @@
 
 use std::cell::RefCell;
 
+use super::hover_chain::HoverCovered;
 use super::path_anchor::{anchor_of, identity};
 use crate::widget::{App, Widget};
 
@@ -57,6 +58,8 @@ struct Snapshot {
     chain: Vec<usize>,
     /// Whether the deepest entry is first under the mouse.
     has_first: bool,
+    /// Identities of the covered widgets (under the mouse, not first).
+    covered: Vec<usize>,
 }
 
 thread_local! {
@@ -79,12 +82,11 @@ fn state_at(chain_index: usize, chain_len: usize, has_first: bool) -> UnderMouse
 pub fn under_mouse_state_of(id: WidgetId) -> UnderMouseState {
     SNAPSHOT.with(|s| {
         let s = s.borrow();
-        s.chain
-            .iter()
-            .position(|&w| w == id.0)
-            .map_or(UnderMouseState::NotUnderMouse, |i| {
-                state_at(i, s.chain.len(), s.has_first)
-            })
+        match s.chain.iter().position(|&w| w == id.0) {
+            Some(i) => state_at(i, s.chain.len(), s.has_first),
+            None if s.covered.contains(&id.0) => UnderMouseState::UnderMouseNotFirst,
+            None => UnderMouseState::NotUnderMouse,
+        }
     })
 }
 
@@ -110,6 +112,9 @@ impl App {
             Some(chain) if chain.starts_with(path) => {
                 state_at(path.len(), chain.len() + 1, self.hover_first)
             }
+            _ if self.hover_covered.paths().any(|p| p == path) => {
+                UnderMouseState::UnderMouseNotFirst
+            }
             _ => UnderMouseState::NotUnderMouse,
         }
     }
@@ -122,7 +127,12 @@ impl App {
 
     /// Publish the chain `chain` (first under the mouse when `has_first`) for
     /// [`under_mouse_state_of`]. Called before its events are delivered.
-    pub(super) fn publish_under_mouse(&self, chain: Option<&[usize]>, has_first: bool) {
+    pub(super) fn publish_under_mouse(
+        &self,
+        chain: Option<&[usize]>,
+        has_first: bool,
+        covered: &HoverCovered,
+    ) {
         let ids = match chain {
             Some(path) => {
                 let mut ids = vec![identity(self.root.as_ref())];
@@ -135,6 +145,10 @@ impl App {
             *s.borrow_mut() = Snapshot {
                 chain: ids,
                 has_first: has_first && chain.is_some(),
+                covered: covered
+                    .paths()
+                    .filter_map(|p| anchor_of(self.root.as_ref(), Some(p)).last().copied())
+                    .collect(),
             }
         });
     }

@@ -29,7 +29,11 @@ use super::*;
 /// and only then is the child's `bounds()` offset removed.  Bounds are thus
 /// interpreted *inside* the transform, matching how [`paint_subtree`] applies
 /// the transform to the whole child group before translating per child.
-fn child_local_pos(parent: &dyn Widget, child_bounds: Rect, pos_in_parent: Point) -> Point {
+pub(crate) fn child_local_pos(
+    parent: &dyn Widget,
+    child_bounds: Rect,
+    pos_in_parent: Point,
+) -> Point {
     let mut x = pos_in_parent.x;
     let mut y = pos_in_parent.y;
     if let Some(t) = parent.child_transform() {
@@ -193,6 +197,7 @@ pub fn global_overlay_hit_path(widget: &dyn Widget, local_pos: Point) -> Option<
 /// recurring bug class where a widget mutates paint-affecting state on an
 /// event but forgets to request a draw, leaving part of itself stale.
 fn deliver(widget: &mut dyn Widget, event: &Event) -> EventResult {
+    super::event_observer::notify(widget, event);
     auto_request_draw(widget.on_event(event))
 }
 
@@ -218,7 +223,9 @@ pub fn dispatch_event(
     event: &Event,
     pos_in_root: Point,
 ) -> EventResult {
-    dispatch_event_dyn(root.as_mut(), path, event, pos_in_root)
+    let result = dispatch_event_dyn(root.as_mut(), path, event, pos_in_root);
+    crate::widgets::radio_button::settle_pending_check_at_root(root.as_mut());
+    result
 }
 
 /// Variant of [`dispatch_event`] that accepts `&mut dyn Widget` as the
@@ -277,6 +284,9 @@ fn dispatch_path(
             child_pos,
         )
     };
+    // A radio button the event checked unchecks its siblings here, where
+    // its parent is in hand (see `widgets/radio_button.rs`).
+    crate::widgets::radio_button::settle_pending_check(root, idx);
     // A child (or descendant) that requested a draw bumped the epoch —
     // invalidate our own cache so the retained backbuffer re-rasters. A
     // quiet consume bumps nothing, so it correctly leaves the cache alone.

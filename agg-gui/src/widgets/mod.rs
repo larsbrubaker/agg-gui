@@ -48,6 +48,7 @@ pub mod primitives;
 pub mod progress_bar;
 pub mod property_row;
 pub mod qr_view;
+pub mod radio_button;
 pub mod radio_group;
 pub mod rebuilder;
 pub mod reserve_inset;
@@ -115,6 +116,7 @@ pub use property_row::{
     RowValue, VisibleWhen,
 };
 pub use qr_view::QrView;
+pub use radio_button::{check_child as check_radio_child, RadioButton};
 pub use radio_group::RadioGroup;
 pub use rebuilder::Rebuilder;
 pub use reserve_inset::{ReserveInset, ReservedEdge};

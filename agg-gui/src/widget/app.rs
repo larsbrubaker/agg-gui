@@ -34,6 +34,8 @@ pub struct App {
     /// Whether the deepest widget of `hover_chain` is first under the mouse
     /// (see `under_mouse.rs`).
     hover_first: bool,
+    /// Widgets under the pointer that are not on `hover_chain` (covered).
+    hover_covered: hover_chain::HoverCovered,
     /// Mouse-captured widget path. Set when a widget consumes `MouseDown`;
     /// cleared on `MouseUp`. While set, `MouseMove` events go to the captured
     /// widget regardless of cursor position — enabling slider drag-outside-bounds.
@@ -95,6 +97,7 @@ impl App {
             hovered: None,
             hover_chain: None,
             hover_first: false,
+            hover_covered: Default::default(),
             captured: None,
             gesture_captured: None,
             anchors: path_anchor::TrackedAnchors::default(),
@@ -635,7 +638,7 @@ impl App {
 
     fn dispatch_mouse_move(&mut self, pos: Point) {
         let new_hit = self.compute_hit(pos);
-        self.update_hover_chain(new_hit.as_deref());
+        self.update_hover_chain(new_hit.as_deref(), Some(pos));
 
         // If the hovered widget changed, clear the old one — but skip the clear
         // event when the old widget still has mouse capture (it should keep

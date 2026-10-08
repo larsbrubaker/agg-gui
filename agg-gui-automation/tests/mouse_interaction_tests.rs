@@ -1,10 +1,7 @@
 //! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/MouseInteractionTests.cs`.
 //!
-//! Only the tests whose subjects have landed are here; the rest of the class
-//! (covered widgets, overlap and capture) arrives with the runner slices
-//! listed in `docs/design/gui-automation.md`, and
-//! `RadioButtonSiblingsAreChildren` waits for a standalone agg-gui radio
-//! button (agg-gui's `RadioGroup` keeps its options inside one widget).
+//! The whole class is here; the longer tests live in `mouse_interaction/`
+//! (enter/leave, covered and overlapping widgets, capture, radio buttons).
 //!
 //! C#'s bare `GuiWidget`s are [`ProbeWidget`]s that capture presses (as
 //! every C# `GuiWidget` does), and C# widget references are
@@ -39,8 +36,14 @@ use agg_gui_automation::{
     ProbeWidget, RunOptions, UiDriver, WidgetHandle,
 };
 
+#[path = "mouse_interaction/capture.rs"]
+mod capture;
+#[path = "mouse_interaction/covered_and_overlap.rs"]
+mod covered_and_overlap;
 #[path = "mouse_interaction/enter_leave.rs"]
 mod enter_leave;
+#[path = "mouse_interaction/radio_buttons.rs"]
+mod radio_buttons;
 
 #[test]
 fn extension_methods_tests() {
@@ -85,6 +88,93 @@ fn extension_methods_tests() {
     }
 
     assert!(parent_count == 3);
+}
+
+/// What one watched widget received: C#'s `MouseEnter`/`MouseLeave`
+/// (`Event::MouseOver`/`MouseOut`), `MouseEnterBounds`/`MouseLeaveBounds`
+/// (`Event::MouseEnter`/`MouseLeave`), `MouseMove` and `MouseUpCaptured`
+/// (a release, which only the capture holder receives in these tests).
+#[derive(Default)]
+struct Watched {
+    enter: Cell<u32>,
+    leave: Cell<u32>,
+    enter_bounds: Cell<u32>,
+    leave_bounds: Cell<u32>,
+    moves: Cell<u32>,
+    ups: Cell<u32>,
+}
+
+impl Watched {
+    fn reset(&self) {
+        for c in [
+            &self.enter,
+            &self.leave,
+            &self.enter_bounds,
+            &self.leave_bounds,
+            &self.moves,
+            &self.ups,
+        ] {
+            c.set(0);
+        }
+    }
+
+    /// C#'s four `gotLeave`/`gotEnter`/`gotLeaveBounds`/`gotEnterBounds`
+    /// asserts, in that order.
+    #[track_caller]
+    fn assert_counts(&self, leave: u32, enter: u32, leave_bounds: u32, enter_bounds: u32) {
+        assert!(self.leave.get() == leave);
+        assert!(self.enter.get() == enter);
+        assert!(self.leave_bounds.get() == leave_bounds);
+        assert!(self.enter_bounds.get() == enter_bounds);
+    }
+}
+
+/// Box `probe` and count what it receives, with the state checks every C#
+/// handler of these tests makes (each throws, here panics, on a wrong state).
+fn watch(probe: ProbeWidget) -> (Box<ProbeWidget>, Rc<Watched>) {
+    let mut probe = Box::new(probe);
+    let id = WidgetId::of(probe.as_ref());
+    let watched = Rc::new(Watched::default());
+    let w = Rc::clone(&watched);
+    probe.set_event_handler(move |event| {
+        let state = under_mouse_state_of(id);
+        let bump = |c: &Cell<u32>| c.set(c.get() + 1);
+        match event {
+            Event::MouseOver => {
+                assert!(
+                    state != UnderMouseState::NotUnderMouse,
+                    "It must be under the mouse."
+                );
+                bump(&w.enter);
+            }
+            Event::MouseOut => {
+                assert!(
+                    state != UnderMouseState::FirstUnderMouse,
+                    "It must not be under the mouse."
+                );
+                bump(&w.leave);
+            }
+            Event::MouseEnter => {
+                assert!(
+                    state != UnderMouseState::NotUnderMouse,
+                    "It must be under the mouse."
+                );
+                bump(&w.enter_bounds);
+            }
+            Event::MouseLeave => {
+                assert!(
+                    state == UnderMouseState::NotUnderMouse,
+                    "It must not be under the mouse."
+                );
+                bump(&w.leave_bounds);
+            }
+            Event::MouseMove { .. } => bump(&w.moves),
+            Event::MouseUp { .. } => bump(&w.ups),
+            _ => {}
+        }
+        EventResult::Ignored
+    });
+    (probe, watched)
 }
 
 /// C# `new Button(text, x, y)`: a button labelled `text` at (`x`, `y`), at
