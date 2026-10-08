@@ -1,7 +1,7 @@
 //! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`.
 //!
 //! Only the tests whose subjects have landed are here; the rest of the class
-//! (name lookup, clicks, image waits) arrives with the runner slices listed
+//! (clicks, typing, image waits) arrives with the runner slices listed
 //! in `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
 //! [`AutomationWindow`], built on the run's own UI thread; C#'s captured
 //! locals that the body sets are shared atomics, as the body runs on that
@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use agg_gui::widgets::Button;
 use agg_gui::{Font, Rect, Size, Widget};
+use agg_gui_automation::runner::DEFAULT_WIDGET_WAIT_SECONDS;
 use agg_gui_automation::{
     show_window_and_execute_tests, static_delay, AutomationError, AutomationWindow, RunOptions,
 };
@@ -29,6 +30,60 @@ fn static_delay_expires_on_total_elapsed_time_not_the_seconds_component() {
         timer.elapsed().as_secs_f64() < 0.9,
         "a .2 second wait must expire on total elapsed time, not on whole seconds ticking over"
     );
+}
+
+/// A zero-second wait is a single look: it answers whether the widget is
+/// there right now.
+///
+/// The waits used to decide their answer by the clock (any elapsed time past
+/// secondsToWait meant "not found"), so with 0 seconds they reported a
+/// missing widget even when it was on screen.
+#[test]
+fn zero_second_waits_report_what_is_there_now() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        || {
+            let mut system_window = AutomationWindow::new(300.0, 200.0);
+
+            let font = Arc::new(agg_gui::fonts::standard_ui_font());
+            system_window.add_child(Box::new(placed_button("present", 10.0, 40.0, font)));
+            (system_window, ())
+        },
+        |test_runner, _| {
+            test_runner.wait_for_name("present", DEFAULT_WIDGET_WAIT_SECONDS);
+
+            assert!(
+                test_runner.wait_for_name("present", 0.0),
+                "the widget is on screen, so a single look finds it"
+            );
+            assert!(
+                test_runner.name_exists("present", 0.0, true),
+                "NameExists is WaitForName by another name"
+            );
+            assert!(
+                !test_runner.wait_for_name("absent", 0.0),
+                "no widget has that name"
+            );
+            assert!(
+                test_runner.wait_for_widget_disappear("absent", 0.0),
+                "a widget that is not there has already disappeared"
+            );
+            assert!(
+                !test_runner.wait_for_widget_disappear("present", 0.0),
+                "the widget is still on screen"
+            );
+
+            assert!(
+                static_delay(|| true, 0.0, 10),
+                "a condition already met is met, however short the wait"
+            );
+
+            test_runner.wait_for_widget_enabled("present", 0.0);
+
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("zero-second waits report what is there now");
 }
 
 /// The test's budget measures the test, not the window coming up before it.
@@ -94,8 +149,14 @@ fn automation_runner_timeout_test() {
 /// C# `new Button("left", 10, 40) { Name = "left" }`: a button at (10, 40)
 /// at its own size.
 fn left_button(font: Arc<Font>) -> Button {
-    let mut left_button = Button::new("left", font).with_name("left");
-    let size = left_button.layout(Size::new(f64::MAX, f64::MAX));
-    left_button.set_bounds(Rect::new(10.0, 40.0, size.width, size.height));
-    left_button
+    placed_button("left", 10.0, 40.0, font)
+}
+
+/// C# `new Button(text, x, y) { Name = text }`: a button named and labelled
+/// `text` at (`x`, `y`), at its own size.
+fn placed_button(text: &str, x: f64, y: f64, font: Arc<Font>) -> Button {
+    let mut button = Button::new(text, font).with_name(text);
+    let size = button.layout(Size::new(f64::MAX, f64::MAX));
+    button.set_bounds(Rect::new(x, y, size.width, size.height));
+    button
 }

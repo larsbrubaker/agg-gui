@@ -238,10 +238,6 @@ impl SegmentedControl {
         }
     }
 
-    fn is_enabled(&self) -> bool {
-        self.enabled_fn.as_ref().map(|f| f()).unwrap_or(true)
-    }
-
     fn segment_enabled(&self, i: usize) -> bool {
         self.is_enabled()
             && self
@@ -498,6 +494,9 @@ impl Widget for SegmentedControl {
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
         &mut self.children
+    }
+    fn is_enabled(&self) -> bool {
+        self.enabled_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
     fn is_focusable(&self) -> bool {
         self.is_enabled() && !self.labels.is_empty()

@@ -121,6 +121,10 @@ impl Widget for ChevronWidget {
         paint_chevron(ctx, cx, cy, self.collapsed.get(), self.color.get());
     }
 
+    fn is_enabled(&self) -> bool {
+        self.enabled.get()
+    }
+
     fn hit_test(&self, local: Point) -> bool {
         self.enabled.get()
             && local.x >= 0.0

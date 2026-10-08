@@ -1,7 +1,9 @@
 //! `AutomationRunner`: what a test body drives — the port of agg-sharp
-//! `GuiAutomation/AutomationRunner.cs` (its configuration and run control;
-//! the waits, name lookup, pointer and keyboard members arrive in the later
-//! slices of `docs/design/gui-automation.md`).
+//! `GuiAutomation/AutomationRunner.cs`. This file holds its configuration and
+//! run control; `waits.rs` the frame-pumping waits (`delay`, `wait_for`,
+//! `assert`, ...) and `named.rs` the name lookups and the waits that poll
+//! them. The pointer and keyboard members arrive in the later slices of
+//! `docs/design/gui-automation.md`.
 //!
 //! A runner is created by [`crate::execute::show_window_and_execute_tests`]
 //! on the run's own UI thread and handed to the test body. It owns the
@@ -16,6 +18,15 @@ use std::sync::Arc;
 use agg_gui::App;
 
 use crate::driver::{HeadlessDriver, UiDriver};
+
+mod named;
+mod waits;
+
+pub use named::{WaitOpts, WidgetPredicate, DEFAULT_WIDGET_WAIT_SECONDS};
+pub use waits::{
+    DEFAULT_CHECK_INTERVAL_MILLISECONDS, DEFAULT_CONDITION_WAIT_SECONDS, DEFAULT_DELAY_SECONDS,
+    DEFAULT_UI_WORK_WAIT_MILLISECONDS,
+};
 
 /// The panic message of a runner call made after its run timed out.
 pub const TEST_TIMED_OUT: &str = "test timed out";

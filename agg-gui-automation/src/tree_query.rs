@@ -1,8 +1,9 @@
 //! Finding widgets and asking where they are: [`WidgetHandle`] (a found
 //! widget that stays found across frames), lookup by name, a widget's screen
 //! rectangle and its rectangle after every ancestor's clip, C#'s
-//! `ActuallyVisibleOnScreen`, and the `Parents<T>()` / `Children<T>()`
-//! extension methods (agg-sharp `Gui/ExtensionMethods.cs`).
+//! `ActuallyVisibleOnScreen`, C#'s inherited `Enabled`, [`NamedHit`] (C#'s
+//! `GetByNameResults`), and the `Parents<T>()` / `Children<T>()` extension
+//! methods (agg-sharp `Gui/ExtensionMethods.cs`).
 //!
 //! A handle wraps agg-gui's [`WidgetAnchor`]: the child-index path plus the
 //! identity of each widget along it, so a handle follows its widget when a
@@ -17,7 +18,7 @@
 //! `inspector_child_transform`). Conversion to the runner's Y-down pixel
 //! search regions belongs to the name-lookup layer.
 
-use agg_gui::{Rect, Size, TransAffine, Widget, WidgetAnchor};
+use agg_gui::{Point, Rect, Size, TransAffine, Widget, WidgetAnchor};
 
 /// A found widget (the Rust side of C# holding a `GuiWidget` reference).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +75,18 @@ impl WidgetHandle {
     pub fn name(&self, root: &dyn Widget) -> Option<String> {
         self.widget(root)?.id().map(str::to_string)
     }
+}
+
+/// A widget found by name — C#'s `GetByNameResults`. Non-widget named
+/// targets (C#'s `NamedObject`) join it with `Widget::find_named_targets`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NamedHit {
+    /// The widget that carries the name.
+    pub handle: WidgetHandle,
+    /// Where in the widget a click should land, in its local space (Y-up,
+    /// from its lower-left corner): its centre (C# `Position`, `Width / 2,
+    /// Height / 2`).
+    pub offset_hint: Point,
 }
 
 /// Every widget under `root` (itself included) whose name is `name`, in paint
@@ -233,6 +246,25 @@ pub fn actually_visible_on_screen(
     placement(root, handle, viewport).is_some_and(|p| {
         p.visible_chain && p.clipped_rect.width > 0.0 && p.clipped_rect.height > 0.0
     })
+}
+
+/// C#'s `Enabled`: the widget and every ancestor report
+/// [`Widget::is_enabled`] (a disabled parent disables its children). False
+/// once the handle is detached.
+pub fn actually_enabled(root: &dyn Widget, handle: &WidgetHandle) -> bool {
+    let Some(path) = handle.resolve(root) else {
+        return false;
+    };
+    let mut node = root;
+    let mut enabled = node.is_enabled();
+    for &idx in &path {
+        match node.children().get(idx) {
+            Some(child) => node = child.as_ref(),
+            None => return false,
+        }
+        enabled &= node.is_enabled();
+    }
+    enabled
 }
 
 /// The overlap of two rectangles; zero-sized at the nearer edge when they do

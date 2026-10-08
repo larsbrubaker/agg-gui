@@ -27,6 +27,8 @@
 //! [`AutomationRunner`](crate::runner::AutomationRunner).
 
 mod error;
+#[cfg(test)]
+mod tests;
 mod window;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -126,8 +128,23 @@ pub fn show_window_and_execute_tests<S, R>(
 where
     R: Send + 'static,
 {
+    run_with_bring_up_floor(opts, MIN_BRING_UP, build, body)
+}
+
+/// [`show_window_and_execute_tests`] with the bring-up floor as a setting
+/// rather than [`MIN_BRING_UP`], so this crate's tests can reach the
+/// bring-up timeout without waiting out a real machine's 30 s.
+pub(crate) fn run_with_bring_up_floor<S, R>(
+    opts: RunOptions,
+    min_bring_up: Duration,
+    build: impl FnOnce() -> (AutomationWindow, S) + Send + 'static,
+    body: impl FnOnce(&mut AutomationRunner, &S) -> R + Send + 'static,
+) -> Result<R, AutomationError>
+where
+    R: Send + 'static,
+{
     let budget = secs_to_duration(opts.secs_to_test_failure);
-    let bring_up = budget.max(MIN_BRING_UP);
+    let bring_up = budget.max(min_bring_up);
     let cancel = Arc::new(AtomicBool::new(false));
     let (tx, rx) = mpsc::channel();
 

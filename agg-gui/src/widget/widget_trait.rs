@@ -226,6 +226,14 @@ pub trait Widget {
         true
     }
 
+    /// Whether this widget takes input right now (C# `GuiWidget.Enabled`,
+    /// the widget's own flag).  Default `true`; widgets that can be
+    /// disabled (`Button`, `SegmentedControl`, `ChevronWidget`) report it.
+    /// Ancestors are not consulted here — GUI automation walks the chain.
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
     /// Return type-specific properties for the inspector properties pane.
     ///
     /// Each entry is `(name, display_value)`.  The default returns an empty

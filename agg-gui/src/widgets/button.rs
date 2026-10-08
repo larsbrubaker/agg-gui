@@ -280,10 +280,6 @@ impl Button {
         self
     }
 
-    fn is_enabled(&self) -> bool {
-        self.enabled_fn.as_ref().map(|f| f()).unwrap_or(true)
-    }
-
     fn is_active(&self) -> bool {
         self.active_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
@@ -396,6 +392,10 @@ impl Widget for Button {
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
         &mut self.children
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
 
     fn is_focusable(&self) -> bool {

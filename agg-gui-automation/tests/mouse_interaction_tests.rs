@@ -37,7 +37,10 @@ fn extension_methods_tests() {
         assert!(child == all_widgets[3]);
     }
 
-    for _child in children(root, &all_widgets[3]) {
+    // C# loops over the children and throws inside the loop body. A loop
+    // whose body always panics trips clippy's `never_loop` deny, so the same
+    // check looks at the first child instead: any child at all fails.
+    if let Some(_child) = children(root, &all_widgets[3]).first() {
         panic!("there are no children we should not get here");
     }
 
