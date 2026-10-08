@@ -20,8 +20,15 @@
 //! The state is per thread, like the rest of agg-gui's UI state: a test that
 //! runs on its own thread gets its own clock. Shells keep reading real time
 //! for their OS wake-ups; they only ever run on the real clock.
+//!
+//! Millisecond timers (`ui_thread::current_timer_ms`) count from one
+//! process-wide [`epoch`]. The epoch is fixed no later than the first virtual
+//! clock starts: a virtual clock standing before the epoch would read 0 there
+//! until frames had advanced it past the epoch, freezing every delay keyed on
+//! the timer for as long as the driver spent before its first timer read.
 
 use std::cell::Cell;
+use std::sync::OnceLock;
 use std::time::Duration;
 use web_time::Instant;
 
@@ -29,6 +36,16 @@ thread_local! {
     /// `Some(t)` while the virtual clock is active: the current virtual time.
     /// `None` selects the real clock.
     static VIRTUAL_NOW: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+/// The process's UI epoch, which millisecond timers count from: the first
+/// [`set_virtual`] time or the first call here, whichever came first.
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+
+/// The process's UI epoch (see [`EPOCH`]); `ui_thread::current_timer_ms` is
+/// the time since it on this thread's clock.
+pub fn epoch() -> Instant {
+    *EPOCH.get_or_init(Instant::now)
 }
 
 /// The current time on this thread's UI clock: the virtual time while the
@@ -52,6 +69,16 @@ pub fn is_virtual() -> bool {
 /// Put this thread on the virtual clock, standing still at `at`. Calling it
 /// again while virtual moves the virtual time to `at` (backwards too).
 pub fn set_virtual(at: Instant) {
+    // A virtual clock started before the epoch is fixed fixes it, no later
+    // than its own start, so its time since the epoch moves from the start.
+    EPOCH.get_or_init(|| {
+        let real = Instant::now();
+        if at < real {
+            at
+        } else {
+            real
+        }
+    });
     VIRTUAL_NOW.with(|c| c.set(Some(at)));
 }
 

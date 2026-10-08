@@ -47,10 +47,8 @@
 mod queue;
 
 use std::cell::{Cell, RefCell};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-use web_time::Instant;
 
 use queue::lock;
 pub use queue::{clear_interval, RunningInterval, UiQueue};
@@ -172,11 +170,10 @@ fn reads_wakeups_of(queue: &UiQueue) -> bool {
 }
 
 /// C# `CurrentTimerMs`: milliseconds on this thread's UI clock since the
-/// process's first use of the queue (zero for a virtual time before that).
+/// process's UI epoch ([`crate::clock::epoch`], which no virtual clock starts
+/// after; zero for a virtual time set back before it).
 pub fn current_timer_ms() -> u64 {
-    static EPOCH: OnceLock<Instant> = OnceLock::new();
-    let epoch = *EPOCH.get_or_init(Instant::now);
-    crate::clock::since(epoch).as_millis() as u64
+    crate::clock::since(crate::clock::epoch()).as_millis() as u64
 }
 
 /// C# `RunOnIdle(action)`: run `action` on the UI thread at the next drain,
