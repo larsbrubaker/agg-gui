@@ -253,8 +253,9 @@ fn text_edit_text_selection_tests() {
 
 #[test]
 fn text_selection_with_shift_click() {
-    // C#'s WindowsKeyBindings scope: agg-gui's Control+Arrow moves by word
-    // on every platform unless the Mac bindings are asked for.
+    // C#'s WindowsKeyBindings scope: Control+Arrow moves by word.
+    let _windows_key_bindings =
+        agg_gui::platform::override_platform_for_thread(agg_gui::platform::Platform::Windows);
     const FULL_TEXT: &str = "This is a text";
     let edit = "editField1";
     let mut container = container_with(

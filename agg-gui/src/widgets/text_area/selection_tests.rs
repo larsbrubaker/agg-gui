@@ -199,6 +199,9 @@ fn place_selection(ta: &TextArea, anchor: usize, cursor: usize) {
 /// put them: at the start of a token, past the spaces after a word.
 #[test]
 fn ctrl_right_and_left_move_by_word() {
+    // Control is the word key under the Windows/Linux bindings.
+    let _windows =
+        crate::platform::override_platform_for_thread(crate::platform::Platform::Windows);
     let mut ta = laid_out("hello world foo", 400.0, 120.0);
     place_cursor(&ta, 0);
     key_mods(&mut ta, Key::ArrowRight, ctrl());
@@ -216,6 +219,9 @@ fn ctrl_right_and_left_move_by_word() {
 
 #[test]
 fn ctrl_shift_right_extends_selection_by_word() {
+    // Control is the word key under the Windows/Linux bindings.
+    let _windows =
+        crate::platform::override_platform_for_thread(crate::platform::Platform::Windows);
     let mut ta = laid_out("hello world", 400.0, 120.0);
     place_cursor(&ta, 0);
     key_mods(&mut ta, Key::ArrowRight, ctrl_shift());
@@ -227,6 +233,9 @@ fn ctrl_shift_right_extends_selection_by_word() {
 
 #[test]
 fn ctrl_backspace_deletes_previous_word() {
+    // Control is the word key under the Windows/Linux bindings.
+    let _windows =
+        crate::platform::override_platform_for_thread(crate::platform::Platform::Windows);
     let mut ta = laid_out("hello world", 400.0, 120.0);
     place_cursor(&ta, 11);
     key_mods(&mut ta, Key::Backspace, ctrl());
@@ -236,6 +245,9 @@ fn ctrl_backspace_deletes_previous_word() {
 
 #[test]
 fn ctrl_delete_deletes_next_word() {
+    // Control is the word key under the Windows/Linux bindings.
+    let _windows =
+        crate::platform::override_platform_for_thread(crate::platform::Platform::Windows);
     let mut ta = laid_out("hello world", 400.0, 120.0);
     place_cursor(&ta, 0);
     key_mods(&mut ta, Key::Delete, ctrl());

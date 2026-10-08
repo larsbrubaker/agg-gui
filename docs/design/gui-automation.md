@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (20 onward) fill agg-gui's gaps test-first, port the 61 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (20 onward) fill agg-gui's gaps test-first, port the 49 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -38,7 +38,8 @@
   - wheel, file drop and modifier calls.
 - Tree lookup: `Widget::id()` (overridden by only a few agg-gui widgets), `find_widget_by_id`, `find_widget_screen_rect`.
 - `path_anchor` tracks widget identity by heap address; `agg_gui::WidgetAnchor` exposes it (a path that follows its widget through reorders and reports it gone), with `widget::walk_path` and `App::focused_path`.
-- Nearly all state is thread-local. Exceptions: `CURRENT_PLATFORM` and the input profile are process-global atomics.
+- Nearly all state is thread-local. Exceptions: the process-wide platform (which a thread can override with `platform::override_platform_for_thread`) and the input profile are process-global atomics.
+- Text editing follows C#'s Mac and Windows key bindings (`platform::use_mac_key_bindings`, `widgets::text_key_bindings`): Option word-wise and Command line- and document-wise on Mac, Control word-wise elsewhere, in both `TextField` and `TextArea`.
 - Widget names (`WidgetBase.name`, `Widget::with_name`, default `id()`, `widgets::Named`), typed downcasts (`Widget::as_any`/`as_any_mut` on the core widgets) and an origin-placing container (`widgets::AbsoluteLayout` over `WidgetBase.origin`) exist.
 - `agg_gui::ui_thread` is the idle queue (`run_on_idle`, `run_on_idle_after`, intervals, `invoke_pending_actions`), one queue per UI thread, delays on `agg_gui::clock`, drained by both shells every loop iteration. Frame-loop wakeups are counted per queue: a post or `signal_async_state_change` wakes the thread that drains that queue (an unbound worker's, the main queue's owner), never another UI thread. Queued work runs under panic containment and reports through `agg_gui::report_unhandled` (`agg_gui::unhandled`, a per-thread handler set with `set_unhandled_handler`; with none, the first panic is re-raised after the rest of the drain).
 - `agg_gui::frame_policy` holds the frame policy both shells use: `LayoutKey` (size, device scale, invalidation epoch), `LayoutTracker` (needs-layout, `layout_if_needed`, and the GPU-free `tick` a headless driver runs), and `wants_frame` (the paint decision). `agg_gui::shell_input::InputForwarder` holds the input bookkeeping both shells feed their OS events through as `ForwarderEvent`s.
@@ -172,7 +173,7 @@ pub fn show_window_and_execute_tests<S, R>(
 ) -> Result<R, AutomationError> where R: Send + 'static
 ```
 - It spawns one fresh named thread per run (named `<<< UI THREAD`).
-- **Isolation:** a fresh thread means fresh thread-locals (focus, modifiers, tooltip, animation and idle queue). That replaces C#'s `[NotInParallel]` plus `ResetForTests`/`Keyboard.Clear`, so tests can run in parallel. The one exception is process-global state (`platform`, input profile); slice 21 adds a thread-local override for it.
+- **Isolation:** a fresh thread means fresh thread-locals (focus, modifiers, tooltip, animation and idle queue). That replaces C#'s `[NotInParallel]` plus `ResetForTests`/`Keyboard.Clear`, so tests can run in parallel. The one exception is process-global state: the platform has a thread-local override (`platform::override_platform_for_thread`); the input profile has none yet.
 - **What runs on the thread:**
   1. `build()` creates the `AutomationWindow` (root widget, logical size, `on_load`; slice 28 adds `on_close_requested`, the veto, and `on_closed`) and the body's state.
   2. The driver comes up and the first paint fires `on_load` (= Load).
@@ -282,7 +283,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | G11 | `Widget::find_named_targets`; ComboBox per-item names and enabled state; menu rows | 24 |
 | G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
 | G13 | `NumberField` (number-only edit, text-parser hook, `=`-expression flag) | 20 |
-| G14 | Mac text-edit key bindings, plus a thread-local `platform` override | 21 |
 | G15 | Paint panic containment in `App::paint` (reported through `report_unhandled` with a new `UnhandledOrigin::Paint`), `DrawCtx` state rebalance | 27 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
 | G18 | wgpu present-failure frame reset | 33 |
@@ -294,7 +294,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 3 to go (StaticDelayExpires…, ZeroSecondWaitsReportWhatIsThereNow, WindowLoadTimeIsNotChargedToTheTestBudget, AutomationRunnerTimeoutTest, GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow, DoubleClickByNameSendsTwoFullClickPairsWithProductionClickCounts and TypeDeliversPunctuationIntoAMultiLineField are ported) |
 | AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
-| MacTextEditKeyBindingTests (12) | `mac_text_edit_key_binding_tests.rs` | `HeadlessWindow` + `app.on_key_down` |
 | MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox |
 | MouseInteractionTests (13) | `mouse_interaction_tests.rs` (+ `mouse_interaction/*.rs`) | all ported |
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
@@ -309,8 +308,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | # | Slice | Tests that land |
 |---|---|---|
 | 20 | G13 NumberField | NumEditHandlesNonNumberChars, NumEditWithTextParserAcceptsLettersAndCommitsTheParsedValue, NumEditRefusesKeysItCannotRead, NumEditTakesLeadingEqualsOnlyWhenExpressionEntryIsAllowed |
-| 21 | G14, part 1 | MacAltArrowsMoveByWord, MacCommandLeftGoesToLineStartNotWordBoundary, MacCommandRightGoesToLineEnd, MacCommandUpAndDownGoToDocumentStartAndEnd, MacAltBackspaceDeletesPreviousWord, MacCommandBackspaceDeletesToLineStart |
-| 22 | G14, part 2 | MacShiftComposesWithWordAndLineMotion, MacUnshiftedCommandArrowsCollapseSelection, UseMacKeyBindingsDefaultsToRunningOs, MacHomeAndEndStillGoToLineStartAndEnd, WindowsControlLeftStillJumpsByWord, WindowsControlHomeStillGoesToDocumentStart |
 | 23 | Image search, `get_current_screen`, simulated-mouse overlay | ImageWaitsSearchTheGivenRegion, ScrollingToEndShowsEnd |
 | 24 | G11 named targets plus ComboBox items | OpenAndCloseMenus |
 | 25 | G12, then Flow, part 1 | TopToBottomContainerAppliesExpectedMargin, SpacingClearedAfterLoadPositionsCorrectly, NestedLayoutTopToBottomTests, ChangingChildVisiblityUpdatesFlow, ChangingChildFlowWidgetVisiblityUpdatesParentFlow, NestedLayoutTopToBottomWithResizeTests, LeftToRightTests, RightToLeftTests |
@@ -326,7 +323,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (61 still to port): AutomationRunnerTests 11 (8 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (8 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (49 still to port): AutomationRunnerTests 11 (8 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (8 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 
@@ -343,7 +340,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 - **Workers that serve a non-main UI thread** must wake it through that thread's queue (`ui_thread::current_queue()` captured on the UI thread, then `UiQueue::run_on_idle` / `UiQueue::signal_async_state_change`); an unbound worker's `animation::signal_async_state_change` wakes only the main queue's owner. MatterCAD's workers (`running_tasks`, `design_scene`, `library_executor`) call the free function, so a headless test on a non-main thread sees their wakeups only through its own pumping (M2 should capture the queue).
 - **Virtual time vs. real worker threads.** Covered by `ClockPolicy::Real` and the `background_busy` hook, so `settle` keeps working.
 - **A timed-out body thread keeps running.** It only touches its own thread-locals, and it unwinds at its next runner call.
-- **Process-global agg-gui state** (`platform`, input profile, tilt, fullscreen). It needs thread-local overrides (slice 21) or `serial_test` for the few tests that touch it.
+- **Process-global agg-gui state** (input profile, tilt, fullscreen). It needs thread-local overrides, as the platform has, or `serial_test` for the few tests that touch it.
 - **Headless software paint can be slow on MatterCAD's tree.** Frames paint only when `wants_draw`, so idle `delay`/`wait_for` frames are cheap.
 - **The `^` → command-modifier choice** differs from C#'s literal Control on macOS. It is deliberate; `rust_only_caret_is_the_platform_command_modifier` pins it per platform.
 

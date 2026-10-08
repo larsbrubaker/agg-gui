@@ -53,8 +53,9 @@ impl TextField {
         key: &Key,
         mods: Modifiers,
     ) -> Option<EventResult> {
-        // C# ends the selection on an unshifted, non-Control navigation key.
-        let ends_selection = !mods.shift && !mods.ctrl;
+        // C# ends the selection on an unshifted, non-Control navigation key,
+        // and on a Mac Command-arrow (a plain caret motion there).
+        let ends_selection = text_key_bindings::motion_ends_selection(mods);
         match key {
             Key::ArrowUp | Key::ArrowDown => {
                 self.flush_pending();
@@ -63,7 +64,7 @@ impl TextField {
                     let st = self.edit.borrow();
                     (st.cursor, st.anchor, st.text.len())
                 };
-                let new_cur = if mods.meta {
+                let new_cur = if text_key_bindings::mac_command_requested(mods) {
                     // Mac: Command+Up / Command+Down = start / end of document.
                     if up {
                         0
@@ -77,7 +78,7 @@ impl TextField {
                 } else {
                     cur
                 };
-                let new_anchor = if mods.shift || (mods.ctrl && !mods.meta) {
+                let new_anchor = if mods.shift || !ends_selection {
                     anchor
                 } else {
                     new_cur
@@ -185,6 +186,7 @@ mod tests {
 
     #[test]
     fn command_up_down_jump_to_start_and_end() {
+        let _mac = crate::platform::override_platform_for_thread(crate::platform::Platform::MacOS);
         let mut f = field("hello");
         select(&mut f, 2, 2);
         let meta = Modifiers {

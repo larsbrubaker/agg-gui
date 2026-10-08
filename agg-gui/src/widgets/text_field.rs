@@ -31,6 +31,7 @@ use super::text_field_core::{
     byte_at_x, next_char_boundary, next_word_boundary, prev_char_boundary, prev_word_boundary,
     word_range_at, TextEditCommand, TextEditState,
 };
+use super::text_key_bindings;
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
@@ -538,10 +539,10 @@ impl TextField {
         // and Linux, `Cmd` (meta) on macOS.  Treating the two as equivalent
         // means the same handler serves both OSes without branching.
         let cmd = mods.ctrl || mods.meta;
-        // Word-navigation modifier: `Ctrl` on Windows/Linux, `Option`
-        // (alt) on macOS.  Used for Ctrl/Alt+Arrow, Ctrl/Alt+Backspace,
-        // Ctrl/Alt+Delete.
-        let word = mods.ctrl || mods.alt;
+        // Word-wise motion and deletion: `Ctrl` on Windows/Linux, `Option`
+        // on macOS; line-wise: Command on macOS (`text_key_bindings`).
+        let word = text_key_bindings::word_jump_requested(mods);
+        let line = text_key_bindings::mac_command_requested(mods);
 
         // Up / Down / PageUp / PageDown and read-only Space (`vertical_keys.rs`).
         if let Some(result) = self.handle_vertical_key(key, mods) {
@@ -613,6 +614,14 @@ impl TextField {
 
             // ── Backspace ─────────────────────────────────────────────────
             Key::Backspace if !self.read_only => {
+                // Mac Command+Backspace deletes back to the start of the
+                // line: select back to it, then delete the selection (C#).
+                if line && !word {
+                    let mut st = self.edit.borrow_mut();
+                    if st.cursor == st.anchor {
+                        st.anchor = 0;
+                    }
+                }
                 self.do_delete(false, word);
                 EventResult::Consumed
             }
@@ -630,7 +639,7 @@ impl TextField {
 
             // ── Arrow Left ────────────────────────────────────────────────
             // Mac: `Cmd+Left` = start of line (Home behaviour).
-            // Win/Mac: `Ctrl+Left` / `Option+Left` = previous word.
+            // Win: `Ctrl+Left`, Mac: `Option+Left` = previous word.
             // Plain: one character back (or collapse selection to left).
             Key::ArrowLeft => {
                 self.flush_pending();
@@ -638,7 +647,7 @@ impl TextField {
                     let st = self.edit.borrow();
                     (st.cursor, st.anchor)
                 };
-                let new_cur = if mods.meta {
+                let new_cur = if line {
                     0 // Mac: Cmd+Left = line start
                 } else if !mods.shift && cur != anchor {
                     cur.min(anchor) // collapse to left
@@ -668,7 +677,7 @@ impl TextField {
                     let st = self.edit.borrow();
                     (st.cursor, st.anchor)
                 };
-                let new_cur = if mods.meta {
+                let new_cur = if line {
                     text_len // Mac: Cmd+Right = line end
                 } else if !mods.shift && cur != anchor {
                     cur.max(anchor) // collapse to right

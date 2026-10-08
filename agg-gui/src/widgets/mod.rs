@@ -72,6 +72,7 @@ pub mod text_caret_navigation;
 pub mod text_context_menu;
 pub mod text_field;
 pub mod text_field_core;
+pub mod text_key_bindings;
 pub mod toggle_switch;
 pub mod tooltip;
 pub mod tree_view;

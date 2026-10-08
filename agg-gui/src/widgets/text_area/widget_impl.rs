@@ -563,13 +563,19 @@ impl Widget for TextArea {
                 }
                 let shift = modifiers.shift;
                 let cmd = modifiers.ctrl || modifiers.meta;
-                // Word-wise navigation/deletion: Ctrl or Alt, matching egui
-                // (`alt || ctrl`) and TextField.
-                let word = modifiers.ctrl || modifiers.alt;
+                // Word-wise motion and deletion (Ctrl on Windows/Linux,
+                // Option on macOS) and the Mac Command chord (line-wise on
+                // Left/Right/Backspace, document-wise on Up/Down); see
+                // `text_key_bindings`.
+                let word = text_key_bindings::word_jump_requested(*modifiers);
+                let line = text_key_bindings::mac_command_requested(*modifiers);
                 match key {
                     Key::ArrowLeft => {
                         if word {
                             self.move_word(-1, shift);
+                        } else if line {
+                            let target = self.visual_line_start_at_cursor();
+                            self.move_cursor_to(target, shift);
                         } else {
                             self.move_char(-1, shift);
                         }
@@ -577,15 +583,29 @@ impl Widget for TextArea {
                     Key::ArrowRight => {
                         if word {
                             self.move_word(1, shift);
+                        } else if line {
+                            let target = self.visual_line_end_at_cursor();
+                            self.move_cursor_to(target, shift);
                         } else {
                             self.move_char(1, shift);
                         }
                     }
                     Key::ArrowUp => {
-                        self.move_line(-1, shift);
+                        if line {
+                            // Command-Up is the Mac spelling of Control+Home
+                            self.move_cursor_to(0, shift);
+                        } else {
+                            self.move_line(-1, shift);
+                        }
                     }
                     Key::ArrowDown => {
-                        self.move_line(1, shift);
+                        if line {
+                            // Command-Down is the Mac spelling of Control+End
+                            let len = self.edit.borrow().text.len();
+                            self.move_cursor_to(len, shift);
+                        } else {
+                            self.move_line(1, shift);
+                        }
                     }
                     Key::Home => {
                         // Ctrl/Cmd+Home → document start; plain Home → start of
@@ -593,9 +613,7 @@ impl Widget for TextArea {
                         let target = if cmd {
                             0
                         } else {
-                            let cur = self.edit.borrow().cursor;
-                            let line = self.line_for_cursor(cur);
-                            self.cached_lines[line].start
+                            self.visual_line_start_at_cursor()
                         };
                         self.move_cursor_to(target, shift);
                     }
@@ -605,9 +623,7 @@ impl Widget for TextArea {
                         let target = if cmd {
                             self.edit.borrow().text.len()
                         } else {
-                            let cur = self.edit.borrow().cursor;
-                            let line = self.line_for_cursor(cur);
-                            self.cached_lines[line].end
+                            self.visual_line_end_at_cursor()
                         };
                         self.move_cursor_to(target, shift);
                     }
@@ -622,6 +638,8 @@ impl Widget for TextArea {
                     Key::Backspace => {
                         if word {
                             self.delete_word(-1);
+                        } else if line {
+                            self.delete_to_line_start();
                         } else {
                             self.delete(-1);
                         }

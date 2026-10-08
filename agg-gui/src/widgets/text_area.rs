@@ -49,6 +49,7 @@ use std::sync::Arc;
 
 use web_time::Instant;
 
+use super::text_key_bindings;
 use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};

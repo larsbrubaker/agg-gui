@@ -31,6 +31,8 @@ fn shift_control() -> Modifiers {
 #[test]
 fn text_editing_special_keys_work() {
     // C#'s WindowsKeyBindings scope: Control+Arrow moves by word.
+    let _windows_key_bindings =
+        agg_gui::platform::override_platform_for_thread(agg_gui::platform::Platform::Windows);
     let edit = "textEdit";
     let start = "some starting text";
     let font = Arc::new(agg_gui::fonts::standard_ui_font());

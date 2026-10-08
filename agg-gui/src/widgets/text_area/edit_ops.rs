@@ -97,6 +97,44 @@ impl TextArea {
         self.notify_change();
     }
 
+    /// The start of the visual (wrapped) line holding the caret: where Home
+    /// and the Mac Command+Left go.
+    pub(super) fn visual_line_start_at_cursor(&self) -> usize {
+        let cur = self.edit.borrow().cursor;
+        if self.cached_lines.is_empty() {
+            return 0;
+        }
+        self.cached_lines[self.line_for_cursor(cur)].start
+    }
+
+    /// The end of the visual (wrapped) line holding the caret: where End and
+    /// the Mac Command+Right go.
+    pub(super) fn visual_line_end_at_cursor(&self) -> usize {
+        let st = self.edit.borrow();
+        if self.cached_lines.is_empty() {
+            return st.text.len();
+        }
+        self.cached_lines[self.line_for_cursor(st.cursor)].end
+    }
+
+    /// Mac Command+Backspace: delete from the start of the caret's visual
+    /// line to the caret. As in C#, deleting is "select back to there, then
+    /// delete the selection", so an active selection is deleted instead.
+    pub(super) fn delete_to_line_start(&mut self) {
+        let start = self.visual_line_start_at_cursor();
+        {
+            let mut st = self.edit.borrow_mut();
+            if st.cursor == st.anchor {
+                if start >= st.cursor {
+                    // already at the line start: nothing lies before it
+                    return;
+                }
+                st.anchor = start;
+            }
+        }
+        self.delete(-1);
+    }
+
     /// Insert one indent (`TAB_WIDTH` spaces) at the start of every logical
     /// line the current selection touches. Selection endpoints ride along so
     /// the same characters stay selected — an endpoint sitting exactly at a
