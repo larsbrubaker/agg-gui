@@ -2,17 +2,21 @@
 //! control-flow ladder, and device-loss recovery.
 //!
 //! [`crate::run`] builds a [`ShellLoop`] and hands it to `EventLoop::run`; all
-//! the per-event state (cursor position, modifiers, held buttons, coalesced
-//! resize, screenshot progress, window bounds) lives here rather than in a
-//! stack of captured locals. Each loop iteration and each painted frame
-//! drains the thread's `agg_gui::ui_thread` queue.
+//! the per-event state (coalesced resize, screenshot progress, window bounds)
+//! lives here rather than in a stack of captured locals. Input becomes
+//! `agg_gui::shell_input::ForwarderEvent`s fed to the loop's
+//! [`InputForwarder`], which owns the cursor position, held buttons and
+//! modifiers. Each loop iteration and each painted frame drains the thread's
+//! `agg_gui::ui_thread` queue.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use agg_gui::{winit_adapter, App, Modifiers};
+use agg_gui::frame_policy::{wants_frame, FrameDemand};
+use agg_gui::shell_input::{ClickCount, ForwarderEvent, InputForwarder};
+use agg_gui::{winit_adapter, App};
 use agg_gui_wgpu::{Gpu, GpuConfig, RetryWake};
 use winit::event::{ElementState, Event, StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -21,7 +25,7 @@ use winit::window::{Fullscreen, Window};
 use crate::bounds::{BoundsAutoSave, SavedBounds, WindowBoundsStore, WindowedSizeTracker};
 use crate::config::{RedrawPolicy, ScreenshotConfig};
 use crate::host::{ExitAction, ShellControl, ShellHost, WindowGeometry};
-use crate::input::{dispatch_touch, shift_held, wheel_delta};
+use crate::input::{shift_held, touch_event, wheel_delta};
 use crate::paint::{schedule_skipped_frame, PaintRequest, Painter};
 use crate::redraw_schedule::{next_control_flow, paint_blocked, LoopState};
 use crate::screenshot::capture_exhausted;
@@ -48,9 +52,9 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     /// that stops a surface which never becomes presentable from spinning
     /// forever.
     pub(crate) screenshot_last_paint: Instant,
-    pub(crate) cursor: (f64, f64),
-    pub(crate) mods: Modifiers,
-    pub(crate) mouse_buttons_down: u32,
+    /// Cursor position, held modifiers and buttons, click counting, and the
+    /// real-input gate (`agg_gui::shell_input`).
+    pub(crate) input: InputForwarder,
     /// Paths of the file drag over the window (winit sends one
     /// `HoveredFile` per file); empty when no file drag is in progress.
     pub(crate) hovered_files: Vec<std::path::PathBuf>,
@@ -144,44 +148,53 @@ impl<H: ShellHost> ShellLoop<H> {
             }
 
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor = (position.x, position.y);
                 self.input_since_frame = true;
                 if !self.hovered_files.is_empty() {
                     // A platform that reports the cursor during a file drag
                     // keeps the drop target's feedback following it.
                     let paths = self.hovered_files.clone();
-                    self.app
-                        .on_file_drag_hover(self.cursor.0, self.cursor.1, paths);
+                    self.forward(ForwarderEvent::FileDragHover {
+                        x: position.x,
+                        y: position.y,
+                        paths,
+                    });
                 }
-                self.app.on_mouse_move(self.cursor.0, self.cursor.1);
+                self.forward(ForwarderEvent::MouseMove {
+                    x: position.x,
+                    y: position.y,
+                    modifiers: None,
+                });
                 winit_adapter::apply_cursor(&self.window, agg_gui::current_cursor_icon());
             }
 
             WindowEvent::CursorLeft { .. } => {
-                self.app.on_mouse_leave();
+                self.forward(ForwarderEvent::MouseLeave);
             }
 
             WindowEvent::ModifiersChanged(state) => {
-                self.mods = winit_adapter::modifiers(state.state());
                 // Deliver modifier-only changes (Shift mid-drag) to the
                 // captured widget, not just to the focused one via KeyDown.
-                self.app.on_modifiers_changed(self.mods);
+                let mods = winit_adapter::modifiers(state.state());
+                self.forward(ForwarderEvent::ModifiersChanged(mods));
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
-                let btn = winit_adapter::mouse_button(button);
+                let button = winit_adapter::mouse_button(button);
                 self.input_since_frame = true;
-                let (x, y) = self.cursor;
-                match state {
-                    ElementState::Pressed => {
-                        self.mouse_buttons_down = self.mouse_buttons_down.saturating_add(1);
-                        self.app.on_mouse_down(x, y, btn, self.mods);
-                    }
-                    ElementState::Released => {
-                        self.mouse_buttons_down = self.mouse_buttons_down.saturating_sub(1);
-                        self.app.on_mouse_up(x, y, btn, self.mods);
-                    }
-                }
+                // At the tracked cursor, with the held modifiers.
+                self.forward(match state {
+                    ElementState::Pressed => ForwarderEvent::MouseDown {
+                        at: None,
+                        button,
+                        modifiers: None,
+                        clicks: ClickCount::Auto,
+                    },
+                    ElementState::Released => ForwarderEvent::MouseUp {
+                        at: None,
+                        button,
+                        modifiers: None,
+                    },
+                });
                 // Press can claim a drag cursor and release re-resolves the
                 // hover cursor at the release point; reflect either now
                 // rather than waiting for the next move.
@@ -190,25 +203,35 @@ impl<H: ShellHost> ShellLoop<H> {
 
             WindowEvent::MouseWheel { delta, .. } => {
                 self.input_since_frame = true;
-                let (dx, dy) = wheel_delta(delta, shift_held(self.mods));
-                let (x, y) = self.cursor;
-                self.app.on_mouse_wheel_xy_mods(x, y, dx, dy, self.mods);
+                let (delta_x, delta_y) = wheel_delta(delta, shift_held(self.input.modifiers()));
+                self.forward(ForwarderEvent::Wheel {
+                    at: None,
+                    delta_x,
+                    delta_y,
+                    modifiers: None,
+                });
             }
 
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
                 self.input_since_frame = true;
-                let Some(key) = winit_adapter::key_event(&key_event, self.mods) else {
+                let Some(key) = winit_adapter::key_event(&key_event, self.input.modifiers()) else {
                     return;
                 };
-                match key_event.state {
-                    ElementState::Pressed => self.app.on_key_down(key, self.mods),
+                self.forward(match key_event.state {
+                    ElementState::Pressed => ForwarderEvent::KeyDown {
+                        key,
+                        modifiers: None,
+                    },
                     // Key-up matters: chord state, drag modifiers and
                     // held-key repeat all end here. A shell that only
                     // dispatches key-down leaves the app with a stuck key.
-                    ElementState::Released => self.app.on_key_up(key, self.mods),
-                }
+                    ElementState::Released => ForwarderEvent::KeyUp {
+                        key,
+                        modifiers: None,
+                    },
+                });
             }
 
             WindowEvent::DroppedFile(path) => {
@@ -219,16 +242,20 @@ impl<H: ShellHost> ShellLoop<H> {
                 // The tracked cursor is STALE here on Windows: the OS owns the
                 // pointer during an OLE drag, winit emits no CursorMoved for
                 // it, and its IDropTarget::Drop discards the drop point — so
-                // `self.cursor` still says wherever the mouse was before the
-                // drag began. Query the live cursor instead; fall back to the
-                // tracked position on other platforms.
-                let (x, y) =
-                    crate::input::live_cursor_in_window(&self.window).unwrap_or(self.cursor);
+                // the tracked cursor still says wherever the mouse was before
+                // the drag began. Query the live cursor instead; fall back to
+                // the tracked position on other platforms.
+                let (x, y) = crate::input::live_cursor_in_window(&self.window)
+                    .unwrap_or(self.input.cursor());
                 // The drop ends the drag: `on_file_dropped` sends
                 // `FileDragLeave` first. winit sends no `HoveredFileCancelled`
                 // after a drop.
                 self.hovered_files.clear();
-                self.app.on_file_dropped(x, y, vec![path]);
+                self.forward(ForwarderEvent::FileDropped {
+                    x,
+                    y,
+                    paths: vec![path],
+                });
             }
 
             WindowEvent::HoveredFile(path) => {
@@ -237,23 +264,23 @@ impl<H: ShellHost> ShellLoop<H> {
                 // hover carries every path seen so far. The cursor is as stale
                 // as for a drop (see above), so query it live.
                 self.hovered_files.push(path);
-                let (x, y) =
-                    crate::input::live_cursor_in_window(&self.window).unwrap_or(self.cursor);
+                let (x, y) = crate::input::live_cursor_in_window(&self.window)
+                    .unwrap_or(self.input.cursor());
                 let paths = self.hovered_files.clone();
-                self.app.on_file_drag_hover(x, y, paths);
+                self.forward(ForwarderEvent::FileDragHover { x, y, paths });
                 self.window.request_redraw();
             }
 
             WindowEvent::HoveredFileCancelled => {
                 self.input_since_frame = true;
                 self.hovered_files.clear();
-                self.app.on_file_drag_leave();
+                self.forward(ForwarderEvent::FileDragLeave);
                 self.window.request_redraw();
             }
 
             WindowEvent::Touch(touch) => {
                 self.input_since_frame = true;
-                dispatch_touch(&mut self.app, touch);
+                self.forward(touch_event(touch));
                 // Touch events arrive outside the mouse arms' redraw
                 // signalling — request a frame so gestures render live.
                 self.window.request_redraw();
@@ -310,7 +337,16 @@ impl<H: ShellHost> ShellLoop<H> {
                     elwt,
                 );
             }
-        } else if continuous || self.app.wants_draw() {
+        } else if wants_frame(&FrameDemand {
+            continuous,
+            // Input and window events request redraws of their own.
+            dirty: false,
+            app_wants_draw: self.app.wants_draw(),
+            // A deadline wakes the loop through `WaitUntil`, whose
+            // `ResumeTimeReached` requests the redraw.
+            next_deadline: None,
+            now: Instant::now(),
+        }) {
             painted = self.paint(elwt);
         }
 
@@ -320,7 +356,7 @@ impl<H: ShellHost> ShellLoop<H> {
                 policy: &mut self.policy,
                 exit: &mut exit,
                 painted,
-                pointer_idle: self.mouse_buttons_down == 0,
+                pointer_idle: self.input.buttons_down() == 0,
             };
             self.host.on_idle(&mut self.app, &mut control);
             self.exit.set(exit);
@@ -354,6 +390,12 @@ impl<H: ShellHost> ShellLoop<H> {
         if self.exit.get().is_some() {
             elwt.exit();
         }
+    }
+
+    /// Hand one OS input event to the forwarder, which updates the input
+    /// bookkeeping and calls the matching `App` entry point.
+    fn forward(&mut self, event: ForwarderEvent) {
+        self.input.platform(&mut self.app, event);
     }
 
     /// Paint one frame, recovering the device first if it was lost. Returns
@@ -512,7 +554,7 @@ impl<H: ShellHost> ShellLoop<H> {
         let bounds = self.current_bounds();
         if self
             .bounds_auto
-            .should_save(self.mouse_buttons_down == 0, bounds)
+            .should_save(self.input.buttons_down() == 0, bounds)
         {
             store.save(bounds);
         }

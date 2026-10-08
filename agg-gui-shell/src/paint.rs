@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use agg_gui::frame_policy::{LayoutKey, LayoutTracker};
 use agg_gui::App;
 use agg_gui_wgpu::{FrameAcquire, Gpu, RetryWake, WgpuGfxCtx};
 use winit::window::Window;
@@ -45,9 +46,10 @@ pub(crate) struct PaintRequest<'a> {
 /// Owns the render context and the per-frame bookkeeping.
 pub(crate) struct Painter {
     ctx: WgpuGfxCtx,
-    /// Surface size + device scale + invalidation epoch of the last laid-out
-    /// frame. Layout is skipped while it is unchanged.
-    layout_key: Option<(u32, u32, u64, u64)>,
+    /// The layout key (surface size, device scale, invalidation epoch) of
+    /// the last laid-out frame — `agg_gui::frame_policy`, shared with the web
+    /// shell and headless drivers. Layout is skipped while it is unchanged.
+    layout: LayoutTracker,
     frames_painted: u64,
     last_duration: Duration,
 }
@@ -56,7 +58,7 @@ impl Painter {
     pub(crate) fn new(gpu: &Gpu) -> Self {
         Self {
             ctx: Self::make_ctx(gpu),
-            layout_key: None,
+            layout: LayoutTracker::new(),
             frames_painted: 0,
             last_duration: Duration::ZERO,
         }
@@ -78,7 +80,7 @@ impl Painter {
     /// the next frame lays out from scratch.
     pub(crate) fn rebuild(&mut self, gpu: &Gpu) {
         self.ctx = Self::make_ctx(gpu);
-        self.layout_key = None;
+        self.layout.reset();
     }
 
     /// Paint one frame.
@@ -136,12 +138,7 @@ impl Painter {
 
         // Skip layout when nothing that feeds it changed (same surface size,
         // same DPI, same invalidation epoch) and no widget asked for one.
-        let next_layout_key = (
-            win_w,
-            win_h,
-            agg_gui::device_scale().to_bits(),
-            agg_gui::animation::invalidation_epoch(),
-        );
+        let next_layout_key = LayoutKey::for_surface(win_w, win_h);
         self.frames_painted += 1;
         let frame = Frame {
             width: win_w,
@@ -149,7 +146,7 @@ impl Painter {
             device_scale: agg_gui::device_scale(),
             duration: self.last_duration,
             index: self.frames_painted,
-            needs_layout: frame_needs_layout(self.layout_key, next_layout_key),
+            needs_layout: self.layout.needs_layout(next_layout_key),
             input_since_last_frame,
         };
 
@@ -158,7 +155,7 @@ impl Painter {
         self.ctx.set_surface_texture(surface_frame.texture.clone());
         self.ctx.begin_frame(view);
         host.paint(app, &mut self.ctx, &frame);
-        self.layout_key = Some(next_layout_key);
+        self.layout.record(next_layout_key);
         self.ctx.end_frame();
 
         // After the render is submitted, before the surface texture goes back
@@ -191,14 +188,6 @@ impl Painter {
             retry_at: None,
         })
     }
-}
-
-/// Whether a frame keyed `next` must lay out after a frame keyed `last`: the
-/// key changed, or a widget called [`agg_gui::animation::request_layout`]
-/// (which survives `App::paint`'s draw-request clear and is consumed only by
-/// `App::layout`).
-fn frame_needs_layout(last: Option<(u32, u32, u64, u64)>, next: (u32, u32, u64, u64)) -> bool {
-    last != Some(next) || agg_gui::animation::layout_requested()
 }
 
 /// Arrange the retry for a frame the surface refused, then drop the
@@ -238,7 +227,7 @@ pub(crate) fn retry_deadline(wake: RetryWake, now: Instant) -> Option<Instant> {
 
 #[cfg(test)]
 mod tests {
-    use super::{frame_needs_layout, retry_deadline, schedule_skipped_frame};
+    use super::{retry_deadline, schedule_skipped_frame};
     use agg_gui::animation;
     use agg_gui_wgpu::RetryWake;
     use std::cell::Cell;
@@ -308,20 +297,5 @@ mod tests {
         let deadline = animation::peek_next_draw_deadline();
         schedule_skipped_frame(RetryWake::OnEvent, || {});
         assert_eq!(animation::peek_next_draw_deadline(), deadline);
-    }
-
-    /// A pending `request_layout` forces layout even when the skip key is
-    /// unchanged; without one an unchanged key still skips.
-    #[test]
-    fn layout_request_forces_layout_with_unchanged_key() {
-        animation::take_layout_request();
-        let key = (10, 10, 0, 0);
-        assert!(!frame_needs_layout(Some(key), key));
-        assert!(frame_needs_layout(None, key));
-        animation::request_layout();
-        assert!(frame_needs_layout(Some(key), key));
-        animation::take_layout_request();
-        animation::clear_draw_request();
-        assert!(!frame_needs_layout(Some(key), key));
     }
 }

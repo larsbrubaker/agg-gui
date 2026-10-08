@@ -15,9 +15,14 @@ use web_time::Instant;
 /// multi-click sequence. Matches the Scene's `DBL_CLICK_MS`.
 const MULTI_CLICK_MS: u128 = 400;
 
+/// [`MULTI_CLICK_MS`] as a `Duration` — the default double-click time of
+/// `shell_input::ClickPolicy`, so window-level and editor click counting agree.
+pub(crate) const MULTI_CLICK_TIME: std::time::Duration =
+    std::time::Duration::from_millis(MULTI_CLICK_MS as u64);
+
 /// Maximum pointer travel (px) between presses that still counts as the same
 /// multi-click sequence. Matches the Scene's `MAX_CLICK_DIST`.
-const MULTI_CLICK_DIST: f64 = 6.0;
+pub(crate) const MULTI_CLICK_DIST: f64 = 6.0;
 
 /// Granularity of an in-progress selection drag, decided by the click that
 /// began it. A double-click starts a `Word` drag (extends by whole words), a

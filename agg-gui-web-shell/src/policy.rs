@@ -1,6 +1,7 @@
 //! Per-tick paint decisions: the first-paint guarantee, the reactive /
-//! continuous predicate, the layout-skip key, the run-mode merge after
-//! `on_idle`, and when the host hears about canvas geometry.
+//! continuous predicate (over `agg_gui::frame_policy::wants_frame`, which
+//! also owns the layout-skip key shared with the native shell), the run-mode
+//! merge after `on_idle`, and when the host hears about canvas geometry.
 //!
 //! Platform-neutral on purpose — the rAF loop in the crate's `web` module is wasm-only
 //! and cannot be unit tested natively, so every *decision* it makes lives here
@@ -82,33 +83,13 @@ pub(crate) fn wants_paint(
     next_deadline: Option<web_time::Instant>,
     now: web_time::Instant,
 ) -> bool {
-    policy == RedrawPolicy::Continuous
-        || dirty
-        || app_wants_draw
-        || next_deadline.is_some_and(|d| now >= d)
-}
-
-/// Everything that feeds layout: surface size, device scale bits, and the
-/// agg-gui invalidation epoch. Layout is skipped while it is unchanged.
-pub(crate) type LayoutKey = (u32, u32, u64, u64);
-
-/// The layout key for a `width × height` frame at the current device scale
-/// and invalidation epoch.
-pub(crate) fn layout_key(width: u32, height: u32) -> LayoutKey {
-    (
-        width,
-        height,
-        agg_gui::device_scale().to_bits(),
-        agg_gui::animation::invalidation_epoch(),
-    )
-}
-
-/// Whether a frame keyed `next` must lay out after a frame keyed `last`: the
-/// key changed, or a widget called [`agg_gui::animation::request_layout`]
-/// (which survives `App::paint`'s draw-request clear and is consumed only by
-/// `App::layout`).
-pub(crate) fn frame_needs_layout(last: Option<LayoutKey>, next: LayoutKey) -> bool {
-    last != Some(next) || agg_gui::animation::layout_requested()
+    agg_gui::frame_policy::wants_frame(&agg_gui::frame_policy::FrameDemand {
+        continuous: policy == RedrawPolicy::Continuous,
+        dirty,
+        app_wants_draw,
+        next_deadline,
+        now,
+    })
 }
 
 /// The redraw policy after a host's `on_idle`.
@@ -249,25 +230,6 @@ mod tests {
             Some(now),
             later
         ));
-    }
-
-    #[test]
-    fn layout_request_forces_layout_with_unchanged_key() {
-        agg_gui::animation::take_layout_request();
-        let key = layout_key(10, 10);
-        assert!(!frame_needs_layout(Some(key), key));
-        assert!(frame_needs_layout(None, key));
-        agg_gui::animation::request_layout();
-        assert!(frame_needs_layout(Some(key), key));
-        agg_gui::animation::take_layout_request();
-        agg_gui::animation::clear_draw_request();
-        assert!(!frame_needs_layout(Some(key), key));
-    }
-
-    #[test]
-    fn layout_key_tracks_size() {
-        assert_ne!(layout_key(100, 100), layout_key(101, 100));
-        assert_eq!(layout_key(100, 100), layout_key(100, 100));
     }
 
     #[test]

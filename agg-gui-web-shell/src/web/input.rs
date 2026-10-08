@@ -1,18 +1,22 @@
 //! DOM input → [`agg_gui::App`]: canvas pointer (mouse / pen / multi-touch),
 //! wheel, pointer-leave and context-menu listeners, plus the window-level
-//! keyboard + clipboard bridge from `agg_gui::web_adapter`.
+//! keyboard + clipboard bridge from `agg_gui::web_adapter`. Each DOM event
+//! becomes an `agg_gui::shell_input::ForwarderEvent` carrying its own
+//! position and modifiers, handed to the shell's forwarder ([`forward`]).
 //!
 //! Extracted from `demo-wgpu`'s `web_shell` (pointer events, touch pipeline,
 //! wheel normaliser, cursor icon) with AtomArtist's additions (pointer-leave
 //! clears hover, `buttons` resync for the idle guard). The numeric mapping is
 //! in [`crate::dom_math`], unit tested natively.
 
+use agg_gui::shell_input::{ClickCount, ForwarderEvent};
 use agg_gui::wheel::{WheelDeltaMode, WheelNormalizer};
+use agg_gui::TouchPhase;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
+use super::{forward, sensors};
 use super::{frame::input_scale, lifecycle, note_input, note_input_without_repaint};
-use super::{sensors, with_app};
 use crate::dom_math::{
     client_to_physical, modifiers, mouse_button_from_dom, pressed_button_count, PointerKind,
 };
@@ -27,12 +31,11 @@ const TOUCH_DEVICE: agg_gui::TouchDeviceId = agg_gui::TouchDeviceId(0);
 /// while a real DOM editor has focus, which the adapter leaves alone.
 pub(super) fn install_keyboard() {
     agg_gui::web_adapter::install_keyboard_listeners(|key, mods, pressed| {
-        with_app(|app| {
-            if pressed {
-                app.on_key_down(key, mods);
-            } else {
-                app.on_key_up(key, mods);
-            }
+        let modifiers = Some(mods);
+        forward(if pressed {
+            ForwarderEvent::KeyDown { key, modifiers }
+        } else {
+            ForwarderEvent::KeyUp { key, modifiers }
         });
         note_input();
     });
@@ -76,6 +79,19 @@ fn touch_id(e: &web_sys::PointerEvent) -> agg_gui::TouchId {
     agg_gui::TouchId(e.pointer_id() as u64)
 }
 
+/// A touch pointer event at canvas position `(x, y)`. The pressure rides
+/// along on start and move; end and cancel ignore it.
+fn touch(phase: TouchPhase, e: &web_sys::PointerEvent, x: f64, y: f64) -> ForwarderEvent {
+    ForwarderEvent::Touch {
+        phase,
+        device: TOUCH_DEVICE,
+        id: touch_id(e),
+        x,
+        y,
+        force: Some(e.pressure()),
+    }
+}
+
 pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
     // Touch pointers feed the App's raw-touch entry points (gesture
     // recogniser, per-finger registry, primary-finger mouse emulation); only
@@ -91,9 +107,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             let kind = PointerKind::from_dom(&e.pointer_type());
             if kind == PointerKind::Touch {
-                with_app(|app| {
-                    app.on_touch_move(TOUCH_DEVICE, touch_id(&e), x, y, Some(e.pressure()))
-                });
+                forward(touch(TouchPhase::Move, &e, x, y));
             } else {
                 // Self-healing idle guard: re-derive held buttons from the event.
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
@@ -101,7 +115,11 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
                 // `current_modifiers()` exact during drags and delivers a
                 // mid-drag Shift change to the captured widget.
                 let mods = event_mods(&e);
-                with_app(|app| app.on_mouse_move_mods(x, y, mods));
+                forward(ForwarderEvent::MouseMove {
+                    x,
+                    y,
+                    modifiers: Some(mods),
+                });
                 // Reflect the hovered widget's preferred cursor on the canvas.
                 let icon = agg_gui::current_cursor_icon();
                 let _ = c.style().set_property("cursor", icon.to_css());
@@ -125,14 +143,17 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
             if PointerKind::from_dom(&e.pointer_type()) == PointerKind::Touch {
                 e.prevent_default();
                 lifecycle::touch_down(e.pointer_id());
-                with_app(|app| {
-                    app.on_touch_start(TOUCH_DEVICE, touch_id(&e), x, y, Some(e.pressure()))
-                });
+                forward(touch(TouchPhase::Start, &e, x, y));
             } else {
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
                 let button = mouse_button_from_dom(e.button());
                 let mods = event_mods(&e);
-                with_app(|app| app.on_mouse_down(x, y, button, mods));
+                forward(ForwarderEvent::MouseDown {
+                    at: Some((x, y)),
+                    button,
+                    modifiers: Some(mods),
+                    clicks: ClickCount::Auto,
+                });
                 // A press can claim a drag cursor before any move arrives.
                 let icon = agg_gui::current_cursor_icon();
                 let _ = c.style().set_property("cursor", icon.to_css());
@@ -145,20 +166,22 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
         add_listener(target, event, move |e: web_sys::PointerEvent| {
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             if PointerKind::from_dom(&e.pointer_type()) == PointerKind::Touch {
-                let id = touch_id(&e);
                 lifecycle::touch_up(e.pointer_id());
-                with_app(|app| {
-                    if cancel {
-                        app.on_touch_cancel(TOUCH_DEVICE, id);
-                    } else {
-                        app.on_touch_end(TOUCH_DEVICE, id);
-                    }
-                });
+                let phase = if cancel {
+                    TouchPhase::Cancel
+                } else {
+                    TouchPhase::End
+                };
+                forward(touch(phase, &e, x, y));
             } else {
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
                 let button = mouse_button_from_dom(e.button());
                 let mods = event_mods(&e);
-                with_app(|app| app.on_mouse_up(x, y, button, mods));
+                forward(ForwarderEvent::MouseUp {
+                    at: Some((x, y)),
+                    button,
+                    modifiers: Some(mods),
+                });
                 // Release re-resolves hover at the release point, so a drag
                 // cursor (splitter arrows) drops without waiting for a move.
                 let icon = agg_gui::current_cursor_icon();
@@ -172,7 +195,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
         // (and its tooltip) would outlive a fast flick off the canvas.
         // Touch pointers "leave" on every lift — nothing to clear there.
         if PointerKind::from_dom(&e.pointer_type()) != PointerKind::Touch {
-            with_app(|app| app.on_mouse_leave());
+            forward(ForwarderEvent::MouseLeave);
             note_input();
         }
     });
@@ -194,7 +217,12 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
                 return;
             }
             let mods = event_mods(&e);
-            with_app(|app| app.on_mouse_wheel_xy_mods(x, y, dx, dy, mods));
+            forward(ForwarderEvent::Wheel {
+                at: Some((x, y)),
+                delta_x: dx,
+                delta_y: dy,
+                modifiers: Some(mods),
+            });
             note_input();
         });
     }

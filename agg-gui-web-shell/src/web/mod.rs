@@ -20,6 +20,7 @@
 
 use std::cell::{Cell, RefCell};
 
+use agg_gui::shell_input::{ForwarderEvent, InputForwarder};
 use agg_gui::App;
 use wasm_bindgen::JsValue;
 
@@ -52,6 +53,10 @@ thread_local! {
     /// Mouse buttons and touch contacts held — see [`lifecycle`] for the
     /// paths that keep it honest.
     static POINTERS: RefCell<PointerTracker> = const { RefCell::new(PointerTracker::new()) };
+    /// Cursor, modifiers, click counting and the real-input gate between DOM
+    /// events and the app (`agg_gui::shell_input`). The idle guard stays on
+    /// [`POINTERS`], which resyncs from the DOM `buttons` bitmask.
+    static INPUT: RefCell<InputForwarder> = RefCell::new(InputForwarder::new());
     static FIRST_PAINT: FirstPaintGate = const { FirstPaintGate::new() };
     /// Latched once any frame has been presented since boot (unlike the
     /// gate, a GPU rebuild does not reopen it).
@@ -95,6 +100,13 @@ pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
         let mut borrow = cell.try_borrow_mut().ok()?;
         borrow.as_mut().map(f)
     })
+}
+
+/// Hand one DOM input event to the shell's [`InputForwarder`], which calls
+/// the matching `App` entry point. Dropped, as before, while the app is not
+/// built yet (or is borrowed).
+pub(crate) fn forward(event: ForwarderEvent) {
+    with_app(|app| INPUT.with(|f| f.borrow_mut().platform(app, event)));
 }
 
 /// Run `f` with the shell's canvas element. `None` before [`start`]. Safe

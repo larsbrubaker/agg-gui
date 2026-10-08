@@ -3,10 +3,12 @@
 //! The mapping of button/key/modifier *types* lives in
 //! `agg_gui::winit_adapter`; what lives here is the behaviour the adapter
 //! can't know about: wheel-delta conversion and the shift→horizontal remap,
-//! and raw touch forwarding. Both are pure enough to test without a window.
+//! and raw touch translation into `agg_gui::shell_input::ForwarderEvent`s.
+//! Both are pure enough to test without a window.
 
+use agg_gui::shell_input::ForwarderEvent;
 use agg_gui::wheel::{to_notches, WheelDeltaMode};
-use agg_gui::{App, Modifiers};
+use agg_gui::Modifiers;
 use winit::event::{MouseScrollDelta, Touch, TouchPhase};
 
 /// Convert a winit wheel delta into agg-gui `(dx, dy)` wheel lines.
@@ -43,7 +45,7 @@ pub(crate) fn wheel_delta(delta: MouseScrollDelta, shift: bool) -> (f64, f64) {
     (dx, dy)
 }
 
-/// Forward a raw touch to the app.
+/// A raw touch as the forwarder event the shell hands its `InputForwarder`.
 ///
 /// Raw touches only: agg-gui core aggregates multi-finger gestures AND replays
 /// the primary finger as mouse events (`touch_emulation.rs`), mirroring the
@@ -52,16 +54,19 @@ pub(crate) fn wheel_delta(delta: MouseScrollDelta, shift: bool) -> (f64, f64) {
 /// `location` is already in the same physical-pixel space as `CursorMoved`.
 /// Device id is pinned to 0: winit's `DeviceId` is opaque, and telling two
 /// touchscreens apart isn't worth a lossy hash of it.
-pub(crate) fn dispatch_touch(app: &mut App, touch: Touch) {
-    let dev = agg_gui::TouchDeviceId(0);
-    let tid = agg_gui::TouchId(touch.id);
-    let (x, y) = (touch.location.x, touch.location.y);
-    let force = touch.force.map(|f| f.normalized() as f32);
-    match touch.phase {
-        TouchPhase::Started => app.on_touch_start(dev, tid, x, y, force),
-        TouchPhase::Moved => app.on_touch_move(dev, tid, x, y, force),
-        TouchPhase::Ended => app.on_touch_end(dev, tid),
-        TouchPhase::Cancelled => app.on_touch_cancel(dev, tid),
+pub(crate) fn touch_event(touch: Touch) -> ForwarderEvent {
+    ForwarderEvent::Touch {
+        phase: match touch.phase {
+            TouchPhase::Started => agg_gui::TouchPhase::Start,
+            TouchPhase::Moved => agg_gui::TouchPhase::Move,
+            TouchPhase::Ended => agg_gui::TouchPhase::End,
+            TouchPhase::Cancelled => agg_gui::TouchPhase::Cancel,
+        },
+        device: agg_gui::TouchDeviceId(0),
+        id: agg_gui::TouchId(touch.id),
+        x: touch.location.x,
+        y: touch.location.y,
+        force: touch.force.map(|f| f.normalized() as f32),
     }
 }
 

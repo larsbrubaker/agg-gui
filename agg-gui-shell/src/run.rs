@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use agg_gui::{App, Modifiers};
+use agg_gui::App;
 use agg_gui_wgpu::{CopySrc, Gpu, GpuConfig};
 use winit::event_loop::EventLoop;
 use winit::window::{Icon, Window, WindowAttributes};
@@ -129,9 +129,7 @@ where
         screenshot: config.screenshot.clone(),
         screenshot_done: false,
         screenshot_last_paint: Instant::now(),
-        cursor: (0.0, 0.0),
-        mods: Modifiers::default(),
-        mouse_buttons_down: 0,
+        input: agg_gui::shell_input::InputForwarder::new(),
         hovered_files: Vec::new(),
         input_since_frame: false,
         pending_resize: None,

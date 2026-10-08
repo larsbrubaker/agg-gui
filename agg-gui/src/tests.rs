@@ -80,6 +80,7 @@ mod retained_layers;
 mod rich_toolbar_color_overlay;
 mod scene_focus;
 mod scroll_view;
+mod shell_input;
 mod stack_aligned;
 mod text_defaults;
 mod text_field_select_all;

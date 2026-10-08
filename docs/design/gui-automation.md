@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (5 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (6 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -41,10 +41,11 @@
 - Nearly all state is thread-local. Exceptions: `CURRENT_PLATFORM` and the input profile are process-global atomics.
 - Widget names (`WidgetBase.name`, `Widget::with_name`, default `id()`, `widgets::Named`), typed downcasts (`Widget::as_any`/`as_any_mut` on the core widgets) and an origin-placing container (`widgets::AbsoluteLayout` over `WidgetBase.origin`) exist.
 - `agg_gui::ui_thread` is the idle queue (`run_on_idle`, `run_on_idle_after`, intervals, `invoke_pending_actions`), one queue per UI thread, delays on `agg_gui::clock`, drained by both shells every loop iteration. Queued work runs under panic containment and reports through `agg_gui::report_unhandled` (`agg_gui::unhandled`, a per-thread handler set with `set_unhandled_handler`; with none, the first panic is re-raised after the rest of the drain).
-- **Missing pieces:** `is_enabled`, click counts in mouse events, and paint-panic containment.
+- `agg_gui::frame_policy` holds the frame policy both shells use: `LayoutKey` (size, device scale, invalidation epoch), `LayoutTracker` (needs-layout, `layout_if_needed`, and the GPU-free `tick` a headless driver runs), and `wants_frame` (the paint decision). `agg_gui::shell_input::InputForwarder` holds the input bookkeeping both shells feed their OS events through as `ForwarderEvent`s.
+- **Missing pieces:** `is_enabled`, click counts in mouse events (the forwarder counts them; `App` does not take them yet, G9), and paint-panic containment.
 
 **`mattercad-app-test`**
-- `TestHarness` builds the real tree headless, sends input straight to `App::on_*`, and copies the shells' frame policy (`input_frame`/`shell_frame`/layout key).
+- `TestHarness` builds the real tree headless, sends input straight to `App::on_*`, and keeps its own copy of the shells' frame policy (`input_frame`/`shell_frame`/layout key) instead of `agg_gui::frame_policy` (M2 replaces it).
 - Clicks teleport the pointer: there is no stepped move.
 - Waits count frames (`MAX_WAIT_FRAMES = 120`) instead of seconds.
 - Typing is ad hoc: `type_keys` handles only 4 `{}` tokens and a leading `^`.
@@ -185,12 +186,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 
 **Rule:** the runner never calls widget `on_event` directly. Everything goes through the code shells use, so nothing that hover, capture, focus, modals, tooltips or the on-screen keyboard do can be bypassed.
 
-1. **New in agg-gui: `agg_gui::shell_input::InputForwarder`.** Shell-neutral bookkeeping that is currently duplicated in `agg-gui-shell/src/shell_loop.rs`, the web shell and `TestHarness`:
-   - cursor position, held buttons and modifiers
-   - click counting from the OS double-click time and travel tolerance, or an explicit count
-   - the real-input gate.
-
-   It calls `App::on_mouse_move/down/up`, `on_key_down/up`, `on_modifiers_changed`, wheel and file drop. agg-gui-shell and the web shell turn OS events into `ForwarderEvent`s. `SimulatedInput` produces the same `ForwarderEvent`s, so headless and live clicks run identical code.
+1. **`agg_gui::shell_input::InputForwarder`** owns the shell-neutral bookkeeping (cursor, held buttons and modifiers, click counting by `ClickPolicy` or `ClickCount::Explicit`, the real-input gate via `InputSource::Platform`/`Simulated`) and calls the `App::on_*` entry points; agg-gui-shell and the web shell feed it `ForwarderEvent`s. `SimulatedInput` produces the same `ForwarderEvent`s (`forwarder.simulated(...)`), so headless and live clicks run identical code. Once G9 lands, the forwarder passes its click count to `App::on_mouse_down_clicks`.
 2. **Headless:** `HeadlessDriver` owns the `App` and a forwarder. Input is delivered immediately, then the runner pumps a frame where the operation calls for one (see section 5).
 3. **Live:** `LiveDriver` holds an `agg_gui_shell::ShellSession` (new; see section 7) and feeds the same forwarder that its winit handler uses. Real winit input is dropped while `set_platform_input_enabled(false)` is in effect; that is the `RealInputIgnored` equivalent. `DesktopDeactivationIgnored` maps to `set_platform_deactivation_enabled(false)`.
 4. **Order of events:** C# queues simulated input on RunOnIdle, so it runs FIFO with other idle actions. The Rust shells dispatch OS input before the frame's idle drain, and the runner follows the shells (the product path), not that C# simulation artifact. This ordering is pinned by a runner test.
@@ -241,7 +237,7 @@ pub fn show_window_and_execute_tests<S, R>(
 2. advance the clock
 3. if `app.wants_draw()` or a draw is forced: lay out when the layout key (size, scale, invalidation epoch) changed or layout was requested, then paint.
 
-Headless paints into a software `Framebuffer`, so paint is exercised and `get_current_screen` works. That shell policy moves into agg-gui as `agg_gui::frame_policy` so the native shell, web shell and headless driver share one copy instead of three.
+Headless paints into a software `Framebuffer`, so paint is exercised and `get_current_screen` works. The policy is `agg_gui::frame_policy` (`LayoutKey`, `LayoutTracker::tick` with `TickMode::Reactive`/`Forced`, `wants_frame`), which the native and web shells already use; the headless driver uses it too.
 
 **Clocks**
 - **`agg_gui::clock`** is a thread-local UI clock, real by default or virtual (`scoped_virtual`/`set_virtual`, `advance`), behind every behavioural time read in agg-gui and the node editor. Still to move onto it: MatterCAD's `click_clock` (M1).
@@ -341,8 +337,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Gap | Slice |
 |---|---|---|
-| G6 | `agg_gui::frame_policy` (layout key and needs-layout), shared by all shells | 5 |
-| G7 | `agg_gui::shell_input::InputForwarder`, adopted by agg-gui-shell and the web shell | 5 |
 | G8 | Public `WidgetAnchor`/handle resolve, `App::focused_path`, hovered chain query, `Widget::is_enabled` | 6, 8 |
 | G9 | Explicit click counts: `App::on_mouse_down_clicks`, `event::current_click_count()`, `is_double_click` that remembers the down, `MultiClickTracker` honouring the given count | 11 |
 | G10 | "First under mouse" events (`MouseOver`/`MouseOut`) plus an `UnderMouseState` query, next to the existing bounds Enter/Leave | 13 |
@@ -377,7 +371,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 5 | G6 + G7; agg-gui-shell and web shell adopt the forwarder | (unit; shells still build) |
 | 6 | `HeadlessDriver`, `HeadlessWindow`, `ProbeWidget`, `tree_query` (handles, rects, clipping, visibility), G8 handles | MouseInteraction: ExtensionMethodsTests |
 | 7 | `execute.rs`: thread per run, Loaded/bring-up, wall budget plus `cancel`, `catch_unwind`, MarkTestComplete, `on_load` | AutomationRunnerTimeoutTest, WindowLoadTimeIsNotChargedToTheTestBudget |
 | 8 | Name lookup and waits (`named.rs`, `waits.rs`, PointerReach), G8 `is_enabled` | ZeroSecondWaitsReportWhatIsThereNow |

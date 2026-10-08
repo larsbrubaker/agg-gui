@@ -25,10 +25,9 @@ use super::{platform, sensors, APP, CANVAS, CONFIG, DIRTY, FIRST_PAINT, HOST};
 use crate::dom_math::{fit_backing, sanitize_dpr};
 use crate::error::WebShellError;
 use crate::host::{CanvasGeometry, Frame, WebShellControl, WebShellHost};
-use crate::policy::{
-    frame_needs_layout, layout_key, policy_after_idle, wants_paint, GeometryTracker, LayoutKey,
-};
+use crate::policy::{policy_after_idle, wants_paint, GeometryTracker};
 use crate::recovery::{RebuildBackoff, RebuildVerdict};
+use agg_gui::frame_policy::{LayoutKey, LayoutTracker};
 
 /// GPU-side per-canvas state.
 struct Painter {
@@ -36,7 +35,9 @@ struct Painter {
     ctx: WgpuGfxCtx,
     /// Offscreen scene target when `WebShellConfig::offscreen_scene` is on.
     scene: Option<SsaaFramebuffer>,
-    layout_key: Option<LayoutKey>,
+    /// Layout-skip memory (`agg_gui::frame_policy`, shared with the native
+    /// shell and headless drivers).
+    layout: LayoutTracker,
     frames: u64,
     last_duration: Duration,
 }
@@ -81,7 +82,7 @@ pub(super) fn install_gpu(gpu: WebGpu) {
             gpu,
             ctx,
             scene: None,
-            layout_key: None,
+            layout: LayoutTracker::new(),
             frames: 0,
             last_duration: Duration::ZERO,
         }))
@@ -326,7 +327,7 @@ fn paint(w: u32, h: u32) -> bool {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let next_key = layout_key(w, h);
+        let next_key = LayoutKey::for_surface(w, h);
         p.frames += 1;
         let frame = Frame {
             width: w,
@@ -334,7 +335,7 @@ fn paint(w: u32, h: u32) -> bool {
             device_scale: agg_gui::device_scale(),
             duration: p.last_duration,
             index: p.frames,
-            needs_layout: frame_needs_layout(p.layout_key, next_key),
+            needs_layout: p.layout.needs_layout(next_key),
             input_since_last_frame: INPUT_SINCE_FRAME.with(|c| c.replace(false)),
         };
         DIRTY.with(|d| d.set(false));
@@ -372,7 +373,7 @@ fn paint(w: u32, h: u32) -> bool {
             p.ctx.end_frame();
             host.after_paint(&mut p.ctx, &frame);
         });
-        p.layout_key = Some(next_key);
+        p.layout.record(next_key);
 
         if let (true, Some(fb)) = (offscreen, p.scene.as_ref()) {
             let mut encoder =

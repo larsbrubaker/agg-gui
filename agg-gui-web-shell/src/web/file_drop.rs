@@ -12,7 +12,9 @@
 use wasm_bindgen_futures::JsFuture;
 
 use super::input::{add_listener, pos};
-use super::{note_input, with_app};
+use agg_gui::shell_input::ForwarderEvent;
+
+use super::{forward, note_input};
 
 /// Whether the drag carries files (`dataTransfer.types` contains `"Files"`).
 fn carries_files(e: &web_sys::DragEvent) -> bool {
@@ -40,7 +42,11 @@ pub(super) fn install_file_drop_listeners(canvas: &web_sys::HtmlCanvasElement) {
                 dt.set_drop_effect("copy");
             }
             let (x, y) = pos(&c, e.client_x(), e.client_y());
-            with_app(|app| app.on_file_drag_hover(x, y, Vec::new()));
+            forward(ForwarderEvent::FileDragHover {
+                x,
+                y,
+                paths: Vec::new(),
+            });
             note_input();
         });
     }
@@ -48,7 +54,7 @@ pub(super) fn install_file_drop_listeners(canvas: &web_sys::HtmlCanvasElement) {
         if !carries_files(&e) {
             return;
         }
-        with_app(|app| app.on_file_drag_leave());
+        forward(ForwarderEvent::FileDragLeave);
         note_input();
     });
     {
@@ -64,7 +70,7 @@ pub(super) fn install_file_drop_listeners(canvas: &web_sys::HtmlCanvasElement) {
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             // The drag is over now; reading the files is asynchronous, so end
             // the hover feedback without waiting for it.
-            with_app(|app| app.on_file_drag_leave());
+            forward(ForwarderEvent::FileDragLeave);
             note_input();
             let files: Vec<web_sys::File> =
                 (0..list.length()).filter_map(|i| list.get(i)).collect();
@@ -92,6 +98,6 @@ async fn read_and_deliver(files: Vec<web_sys::File>, x: f64, y: f64) {
             ),
         }
     }
-    with_app(|app| app.on_file_data_dropped(x, y, read));
+    forward(ForwarderEvent::FileDataDropped { x, y, files: read });
     note_input();
 }

@@ -35,6 +35,10 @@
 //! - [`ui_thread`] — work queued for the UI thread (`run_on_idle`, delays,
 //!   intervals), drained by the shells each frame; failures in it reach
 //!   [`unhandled`]'s per-thread handler ([`report_unhandled`]).
+//! - [`frame_policy`] / [`shell_input`] — what every shell (native, web,
+//!   headless test driver) decides around a frame (layout key, needs-layout,
+//!   whether to paint) and the input bookkeeping between OS events and the
+//!   [`App`] entry points ([`shell_input::InputForwarder`]).
 //! - [`theme`] — dark / light / system visuals read via `ctx.visuals()`.
 //! - [`overlay_insets`] + [`widgets::ReserveInset`] + [`card`] — safe-area
 //!   overlay placement: reserved screen edges (the on-screen keyboard
@@ -63,6 +67,7 @@ pub mod event;
 pub mod focus;
 pub mod font_settings;
 pub mod fonts;
+pub mod frame_policy;
 pub mod framebuffer;
 pub mod fullscreen;
 pub mod gamepad;
@@ -81,6 +86,7 @@ pub mod persistence;
 pub mod pixel_bounds;
 pub mod platform;
 pub mod screenshot;
+pub mod shell_input;
 pub mod snap;
 pub mod svg;
 pub mod text;
