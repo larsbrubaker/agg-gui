@@ -9,7 +9,9 @@ pub use path_anchor::WidgetAnchor;
 mod pointer;
 mod touch;
 mod tree_paths;
+mod under_mouse;
 use tree_paths::{collect_focusable, widget_at_path, widget_at_path_ref};
+pub use under_mouse::{under_mouse_state_of, UnderMouseState, WidgetId};
 
 // ---------------------------------------------------------------------------
 // App — top-level owner of the widget tree
@@ -29,6 +31,9 @@ pub struct App {
     /// Hovered chain last announced with `MouseEnter`/`MouseLeave`; equals
     /// `hovered` except while pointer capture holds. See [`hover_chain`].
     hover_chain: Option<Vec<usize>>,
+    /// Whether the deepest widget of `hover_chain` is first under the mouse
+    /// (see `under_mouse.rs`).
+    hover_first: bool,
     /// Mouse-captured widget path. Set when a widget consumes `MouseDown`;
     /// cleared on `MouseUp`. While set, `MouseMove` events go to the captured
     /// widget regardless of cursor position — enabling slider drag-outside-bounds.
@@ -89,6 +94,7 @@ impl App {
             focus: None,
             hovered: None,
             hover_chain: None,
+            hover_first: false,
             captured: None,
             gesture_captured: None,
             anchors: path_anchor::TrackedAnchors::default(),

@@ -1,6 +1,7 @@
-//! Rust-only tests of the runner's pointer gestures (`runner/pointer.rs`)
-//! and `SimulatedInput` (`input.rs`): the eased step positions and their
-//! pacing, the click counts a press reports, where presses land, and C#'s
+//! Rust-only tests of the runner's pointer gestures (`runner/pointer.rs`,
+//! `runner/drag.rs`) and `SimulatedInput` (`input.rs`): the eased step
+//! positions and their pacing, the click counts a press reports, where
+//! presses and drags land, and C#'s
 //! rule that a press or release outside the window is not delivered while a
 //! move always is. The C# tests that click by name are in
 //! `automation_runner_tests.rs`.
@@ -279,4 +280,57 @@ fn rust_only_presses_outside_the_window_are_not_delivered_but_moves_are() {
         .borrow()
         .iter()
         .any(|event| matches!(event, Event::MouseDown { .. })));
+}
+
+#[test]
+fn rust_only_drag_widget_presses_on_its_center_and_travels_in_screen_space() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        window_with_target,
+        |test_runner, log| {
+            let target = test_runner
+                .get_widget_by_name("target", &Default::default())
+                .expect("target");
+            let start_pointer = test_runner.window_to_pointer(Point2D::new(90, 50));
+            test_runner.drag_widget(&target, Point2D::new(30, 20), MouseButton::Left);
+
+            // The press landed on the center (40, 10 in the probe), and the
+            // travel was added Y-down: 30 right, 20 down.
+            assert_eq!(presses(log), [(Point::new(40.0, 10.0), MouseButton::Left)]);
+            assert!(releases(log).is_empty());
+            let end = test_runner.current_mouse_position();
+            assert_eq!(
+                end,
+                Point2D::new(start_pointer.x + 30, start_pointer.y + 20)
+            );
+
+            // Drop releases where the pointer is; the captured probe takes it.
+            test_runner.drop(MouseButton::Left);
+            assert_eq!(
+                releases(log),
+                [(Point::new(70.0, -10.0), MouseButton::Left)]
+            );
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("drag_widget presses, travels and drop releases");
+}
+
+#[test]
+fn rust_only_drop_by_name_releases_on_the_named_widget() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        window_with_target,
+        |test_runner, log| {
+            test_runner.set_mouse_cursor_position_in_window(10, 10);
+            test_runner.drag_to_position(60, 45);
+            test_runner.drop_by_name("target", &Default::default());
+            // The press at (10, 10) missed the target; the release on its
+            // center is the target's.
+            assert!(presses(log).is_empty());
+            assert_eq!(releases(log), [(Point::new(40.0, 10.0), MouseButton::Left)]);
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("drop_by_name releases on the named widget");
 }

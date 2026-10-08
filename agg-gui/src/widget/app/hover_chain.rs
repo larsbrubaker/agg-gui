@@ -22,6 +22,17 @@
 //! re-resolves hover (`App::refresh_hover_after_release`) and the chain
 //! catches up in one diff.
 //!
+//! The chain's deepest widget is also the *first under the mouse* (except
+//! while capture holds and the pointer is off the captured widget); a widget
+//! that gains or loses that gets [`Event::MouseOver`] / [`Event::MouseOut`]
+//! (agg-sharp's `MouseEnter` / `MouseLeave`): out before the leaves, over
+//! after the enters, matching agg-sharp's per-widget order. The new chain is
+//! published (`under_mouse.rs`) before any of these is delivered, so every
+//! handler reads the settled state of every widget.
+//!
+//! A press updates the chain too (agg-sharp's `OnMouseDown` sets
+//! `UnderMouseState`), so a press without a preceding move is announced.
+//!
 //! The announced chain is stored as an anchored path (see `path_anchor.rs`)
 //! so it follows reordered children; a widget that was dropped from the tree
 //! since it entered gets no leave, and its index is never mistaken for the
@@ -79,7 +90,24 @@ impl App {
             _ => 0,
         };
 
+        // The first-under-mouse widget is the chain's deepest unless capture
+        // holds and the pointer is off the captured widget.
+        let new_first = new.is_some() && (self.captured.is_none() || self.captured == new);
+        let old_first = std::mem::replace(&mut self.hover_first, new_first);
+        // The old first widget stays first only when the whole old chain is
+        // kept and is the whole new chain.
+        let first_kept = old_first
+            && new_first
+            && matches!((&old, &new), (Some(o), Some(n)) if o.len() == n.len() && shared == o.len() + 1);
+        self.publish_under_mouse(new.as_deref(), new_first);
+
         if let Some(old) = &old {
+            // The old first widget loses that first (agg-sharp raises
+            // `MouseLeave` before `MouseLeaveBounds`), if it is still the
+            // widget that entered.
+            if old_first && !first_kept && old_valid >= old.len() {
+                deliver_exact(self.root.as_mut(), old, &Event::MouseOut);
+            }
             // Levels `shared..=old.len()` leave, deepest first; only levels
             // whose widget is still the one that entered are reachable.
             let deepest = old.len().min(old_valid);
@@ -90,6 +118,9 @@ impl App {
         if let Some(new) = &new {
             for level in shared..=new.len() {
                 deliver_exact(self.root.as_mut(), &new[..level], &Event::MouseEnter);
+            }
+            if new_first && !first_kept {
+                deliver_exact(self.root.as_mut(), new, &Event::MouseOver);
             }
         }
 

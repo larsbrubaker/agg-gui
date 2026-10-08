@@ -16,7 +16,9 @@
 //! its own surface (not over one of its visible, enabled children), which
 //! captures the pointer, and clicks when that press is released inside its
 //! bounds and again not over a child. A press or a release over a child is
-//! the child's, so neither widget clicks.
+//! the child's, so neither widget clicks. [`ProbeWidget::capturing_presses`]
+//! gives a probe the same press capture without a click handler — C#'s bare
+//! `GuiWidget`, which captures every press on its own surface.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -46,6 +48,8 @@ pub struct ProbeWidget {
     log: ProbeLog,
     handler: Option<EventHandler>,
     click: Option<ClickHandler>,
+    /// Take presses on the probe's own surface even with no click handler.
+    captures_presses: bool,
     /// C# `MouseDownOnWidget`: a press landed on this probe's own surface
     /// and has not been released yet.
     mouse_down_on_widget: bool,
@@ -66,6 +70,7 @@ impl ProbeWidget {
             log: Rc::default(),
             handler: None,
             click: None,
+            captures_presses: false,
             mouse_down_on_widget: false,
         }
     }
@@ -108,6 +113,21 @@ impl ProbeWidget {
         self
     }
 
+    /// [`on_event_with`](Self::on_event_with) for a probe already built —
+    /// once it is boxed, so the handler can name the probe's own
+    /// [`agg_gui::WidgetId`].
+    pub fn set_event_handler(&mut self, handler: impl FnMut(&Event) -> EventResult + 'static) {
+        self.handler = Some(Box::new(handler));
+    }
+
+    /// Capture presses on the probe's own surface (not over a visible,
+    /// enabled child) and take their releases, as every C# `GuiWidget`
+    /// does; a probe with a click handler already does.
+    pub fn capturing_presses(mut self) -> Self {
+        self.captures_presses = true;
+        self
+    }
+
     /// C# `Click += ...`: call `handler` with the release of every click on
     /// this probe (see the module docs for when a press and release make
     /// one). Any button clicks, as in C#.
@@ -131,7 +151,7 @@ impl ProbeWidget {
     /// press it takes (so the `App` captures the pointer for the probe) and
     /// the release that ends it.
     fn track_click(&mut self, event: &Event) -> EventResult {
-        if self.click.is_none() {
+        if self.click.is_none() && !self.captures_presses {
             return EventResult::Ignored;
         }
         match event {

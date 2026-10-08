@@ -35,7 +35,7 @@ pub(crate) mod paint_timing;
 mod tree;
 mod tree_inspector;
 
-pub use app::{App, WidgetAnchor};
+pub use app::{under_mouse_state_of, App, UnderMouseState, WidgetAnchor, WidgetId};
 pub(crate) use backbuffer::next_content_version;
 pub use backbuffer::{
     BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,

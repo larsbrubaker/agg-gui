@@ -215,6 +215,24 @@ pub enum Event {
     /// hovered chain). agg-sharp's `MouseLeaveBounds`. Sent deepest first,
     /// before the `MouseMove` that caused it; see [`Event::MouseEnter`].
     MouseLeave,
+    /// This widget became the *first* widget under the pointer: the deepest
+    /// widget on the hovered chain, so the pointer is over its own surface
+    /// and not over one of its children. agg-sharp's `MouseEnter` (as
+    /// opposed to `MouseEnterBounds`, which is [`Event::MouseEnter`] here).
+    ///
+    /// Sent by [`crate::widget::App`] after the chain's `MouseEnter`s, before
+    /// the move or press that caused it is dispatched; delivered straight to
+    /// the widget (it does not bubble). While a widget holds pointer capture
+    /// only the captured widget can be first, and only while the pointer is
+    /// over it. [`crate::under_mouse_state_of`] already reports the new state
+    /// while this is handled.
+    MouseOver,
+    /// This widget stopped being the first widget under the pointer — the
+    /// pointer left it or moved onto one of its children. agg-sharp's
+    /// `MouseLeave` (as opposed to `MouseLeaveBounds`, which is
+    /// [`Event::MouseLeave`] here). Sent before the chain's `MouseLeave`s;
+    /// see [`Event::MouseOver`].
+    MouseOut,
 }
 
 /// One file of an [`Event::FileDataDropped`]: its name (no directory — the

@@ -2,7 +2,8 @@
 //! `GuiAutomation/AutomationRunner.cs`. This file holds its configuration and
 //! run control; `waits.rs` the frame-pumping waits (`delay`, `wait_for`,
 //! `assert`, ...) and `named.rs` the name lookups and the waits that poll
-//! them, and `pointer.rs` the pointer gestures (stepped moves, clicks). The
+//! them, `pointer.rs` the pointer gestures (stepped moves, clicks) and
+//! `drag.rs` the drags and drops built on them. The
 //! keyboard members arrive in a later slice of
 //! `docs/design/gui-automation.md`.
 //!
@@ -16,15 +17,18 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use agg_gui::App;
+use agg_gui::{App, UnderMouseState};
 
 use crate::driver::{HeadlessDriver, UiDriver};
 use crate::input::{InputMethod, SimulatedInput};
+use crate::tree_query::WidgetHandle;
 
+mod drag;
 mod named;
 mod pointer;
 mod waits;
 
+pub use drag::{DragDropOpts, DragOpts};
 pub use named::{WaitOpts, WidgetPredicate, DEFAULT_WIDGET_WAIT_SECONDS};
 pub use pointer::{cubic_out, mouse_move_steps, ClickOpts, ClickOrigin};
 pub use waits::{
@@ -150,5 +154,11 @@ impl AutomationRunner {
     pub fn app_mut(&mut self) -> &mut App {
         self.check_not_timed_out();
         self.driver.app_mut()
+    }
+
+    /// C# `widget.UnderMouseState` for a found widget (see
+    /// [`crate::pointer_state`]).
+    pub fn under_mouse_state(&self, widget: &WidgetHandle) -> UnderMouseState {
+        crate::pointer_state::under_mouse_state(self.app(), widget)
     }
 }

@@ -179,9 +179,9 @@ pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
     debug_draw_report, event_rect_to_root, event_root_transform, find_widget_by_id,
-    find_widget_by_id_mut, find_widget_by_type, find_widget_screen_rect, App, BackbufferKind,
-    BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay, Widget, WidgetAnchor,
-    WidgetBaseEdit, WidgetBaseField,
+    find_widget_by_id_mut, find_widget_by_type, find_widget_screen_rect, under_mouse_state_of, App,
+    BackbufferKind, BackbufferSpec, BackbufferState, InspectorNode, InspectorOverlay,
+    UnderMouseState, Widget, WidgetAnchor, WidgetBaseEdit, WidgetBaseField, WidgetId,
 };
 pub use widgets::{
     color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, current_scroll_style,

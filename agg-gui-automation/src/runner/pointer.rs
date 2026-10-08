@@ -19,7 +19,8 @@
 //! Widget offsets ([`ClickOpts::offset`]) are logical units, Y-up from the
 //! widget's lower-left corner, as in C#; the pointer itself is physical
 //! pixels, Y-down ([`input`](crate::input) module docs). The name lookups
-//! these gestures start from are `named.rs`'s.
+//! these gestures start from are `named.rs`'s; the drags built on these
+//! moves are `drag.rs`'s.
 //!
 //! [`AutomationConfig::mouse_move_steps`]: super::AutomationConfig::mouse_move_steps
 //! [`AutomationConfig::time_to_move_mouse`]: super::AutomationConfig::time_to_move_mouse
@@ -73,7 +74,7 @@ impl Default for ClickOpts<'_> {
 }
 
 impl<'a> ClickOpts<'a> {
-    fn wait_opts(&self) -> WaitOpts<'a> {
+    pub(super) fn wait_opts(&self) -> WaitOpts<'a> {
         WaitOpts {
             secs_to_wait: self.secs_to_wait,
             search_region: self.search_region,
@@ -169,11 +170,11 @@ impl AutomationRunner {
         self.wait_for_pending_ui_work((self.config.up_delay * 1000.0) as i32);
     }
 
-    fn move_pointer(&mut self, x: i32, y: i32) {
+    pub(super) fn move_pointer(&mut self, x: i32, y: i32) {
         self.input.set_cursor_position(&mut self.driver, x, y);
     }
 
-    fn send_mouse(&mut self, action: MouseAction, at: Point2D, clicks: u32) {
+    pub(super) fn send_mouse(&mut self, action: MouseAction, at: Point2D, clicks: u32) {
         self.input
             .mouse_event(&mut self.driver, action, at.x, at.y, clicks);
     }
@@ -206,7 +207,11 @@ impl AutomationRunner {
     /// Where the pointer goes on `widget`: its window rectangle's lower-left
     /// corner plus `offset`, as a pointer position. `None` once the widget
     /// has left the tree.
-    fn widget_pointer_position(&self, widget: &WidgetHandle, offset: Point2D) -> Option<Point2D> {
+    pub(super) fn widget_pointer_position(
+        &self,
+        widget: &WidgetHandle,
+        offset: Point2D,
+    ) -> Option<Point2D> {
         let child_bounds = tree_query::screen_rect(self.driver.root(), widget)?;
         let on_window = Point2D::from_f64(
             child_bounds.left() + f64::from(offset.x),
@@ -252,7 +257,7 @@ impl AutomationRunner {
 
     /// The offset hint of a widget clicked by handle: the center of its
     /// local bounds (C# `widget.LocalBounds.Center`).
-    fn center_hint(&self, widget: &WidgetHandle) -> Point2D {
+    pub(super) fn center_hint(&self, widget: &WidgetHandle) -> Point2D {
         let b = widget
             .widget(self.driver.root())
             .map(|w| w.bounds())

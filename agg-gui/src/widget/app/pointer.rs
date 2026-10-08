@@ -156,6 +156,7 @@ impl App {
             // click, with the same click-to-focus rule as the normal path
             // (text fields in dialogs need focus to type).
             let path = self.extend_modal_path(&path, pos);
+            self.update_hover_chain(Some(&path));
             if takes_click_focus(widget_at_path(&mut self.root, &path)) {
                 self.set_focus(Some(path.clone()));
             } else {
@@ -167,6 +168,10 @@ impl App {
             return;
         }
         let hit = self.compute_hit(pos);
+        // The press announces where it landed (agg-sharp's `OnMouseDown`
+        // updates `UnderMouseState`), so a press with no move before it
+        // still enters and leaves the widgets it lands on and leaves.
+        self.update_hover_chain(hit.as_deref());
 
         // Click-to-focus: if the hit widget is focusable (and accepts focus
         // from a click), give it focus.
