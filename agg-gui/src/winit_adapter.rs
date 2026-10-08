@@ -20,14 +20,18 @@ use crate::cursor::CursorIcon;
 use crate::event::{Key, Modifiers, MouseButton};
 
 /// Map a winit [`MouseButton`](WinitMouseButton) to this crate's
-/// [`MouseButton`].  Unrecognised variants return `Other(255)`.
+/// [`MouseButton`].  Back and Forward map to `Other(3)` and `Other(4)`,
+/// the DOM `MouseEvent.button` numbers the web shell forwards for the same
+/// buttons, so apps see one value on every platform.  Other platform button
+/// numbers pass through as `Other(n)`.
 pub fn mouse_button(b: WinitMouseButton) -> MouseButton {
     match b {
         WinitMouseButton::Left => MouseButton::Left,
         WinitMouseButton::Right => MouseButton::Right,
         WinitMouseButton::Middle => MouseButton::Middle,
+        WinitMouseButton::Back => MouseButton::Other(3),
+        WinitMouseButton::Forward => MouseButton::Other(4),
         WinitMouseButton::Other(n) => MouseButton::Other(n as u8),
-        _ => MouseButton::Other(255),
     }
 }
 
@@ -178,6 +182,16 @@ pub fn apply_cursor(window: &WinitWindow, icon: CursorIcon) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn back_and_forward_buttons_match_dom_button_numbers() {
+        assert_eq!(mouse_button(WinitMouseButton::Back), MouseButton::Other(3));
+        assert_eq!(
+            mouse_button(WinitMouseButton::Forward),
+            MouseButton::Other(4)
+        );
+        assert_eq!(mouse_button(WinitMouseButton::Middle), MouseButton::Middle);
+    }
 
     fn shortcut_key(logical_key: WinitKey, modifierless_key: WinitKey, mods: Modifiers) -> Key {
         key(&shortcut_logical_key_from_keys(

@@ -54,6 +54,7 @@ mod ellipse_path;
 mod flex_gap;
 mod focus;
 mod focus_blur;
+mod focus_replaced_subtree;
 mod hover_enter_leave;
 mod image_icons;
 mod inspector_hover;

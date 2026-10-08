@@ -651,12 +651,20 @@ impl App {
     }
 
     /// Set focus to `new_path`, sending `FocusLost` / `FocusGained` as needed.
+    ///
+    /// When the app replaced the focused widget with a same-shaped one, the
+    /// stored path names the replacement, which never had focus: focusing that
+    /// same path again sends it `FocusGained`, and no `FocusLost` goes to it
+    /// when focus moves on (see `App::focus_is_anchored`).
     fn set_focus(&mut self, new_path: Option<Vec<usize>>) {
-        if self.focus == new_path {
+        let focused_widget_present = self.focus_is_anchored();
+        if self.focus == new_path && (new_path.is_none() || focused_widget_present) {
             return;
         }
         if let Some(old) = self.focus.take() {
-            dispatch_event(&mut self.root, &old, &Event::FocusLost, Point::ORIGIN);
+            if focused_widget_present {
+                dispatch_event(&mut self.root, &old, &Event::FocusLost, Point::ORIGIN);
+            }
         }
         self.store_focus(new_path.clone());
         if let Some(new) = new_path.clone() {

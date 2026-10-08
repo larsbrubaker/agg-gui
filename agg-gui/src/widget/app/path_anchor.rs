@@ -21,6 +21,11 @@
 //! `tree::dispatch_event`). The current index is checked first, so a path whose
 //! widgets did not move resolves in O(depth) without searching.
 //!
+//! A path whose widget was *replaced* by a same-shaped one resolves to the
+//! replacement, which never received `FocusGained`;
+//! `App::focus_is_anchored` detects that so `App::set_focus` can treat
+//! focusing the replacement as a real focus change.
+//!
 //! `maybe_bring_to_front` (in `app.rs`) still shifts the paths itself when it
 //! raises a window; the anchors stay valid across that because identities do
 //! not change.
@@ -110,6 +115,19 @@ impl App {
                 resolve(root, path, anchor);
             }
         }
+    }
+
+    /// Whether the stored focus path still names the widgets that were
+    /// focused, i.e. the focused widget was not replaced. When an app swaps
+    /// the focused subtree for a freshly built one of the same shape, the
+    /// path resolves to the new widget, which never received `FocusGained`;
+    /// `App::set_focus` uses this to focus it properly on the next click and
+    /// to skip `FocusLost` for a widget that never had focus. Call after
+    /// [`resolve_tracked_paths`](Self::resolve_tracked_paths).
+    pub(super) fn focus_is_anchored(&self) -> bool {
+        self.focus
+            .as_deref()
+            .is_some_and(|p| anchor_of(self.root.as_ref(), Some(p)) == self.anchors.focus)
     }
 
     /// Store the focus path and anchor it to the widgets it names now.
