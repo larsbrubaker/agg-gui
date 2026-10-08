@@ -32,6 +32,9 @@
 //!   through; [`gfx_ctx`] is the software AGG implementation.
 //! - [`clock`] — the UI clock (real, or virtual for tests) behind every
 //!   behavioural time read: animation deadlines, click and tooltip timing.
+//! - [`ui_thread`] — work queued for the UI thread (`run_on_idle`, delays,
+//!   intervals), drained by the shells each frame; failures in it reach
+//!   [`unhandled`]'s per-thread handler ([`report_unhandled`]).
 //! - [`theme`] — dark / light / system visuals read via `ctx.visuals()`.
 //! - [`overlay_insets`] + [`widgets::ReserveInset`] + [`card`] — safe-area
 //!   overlay placement: reserved screen edges (the on-screen keyboard
@@ -87,7 +90,9 @@ pub mod timestep;
 pub mod touch_emulation;
 pub mod touch_points;
 pub mod touch_state;
+pub mod ui_thread;
 pub mod undo;
+pub mod unhandled;
 pub mod ux_scale;
 pub mod vector_icon;
 #[cfg(target_arch = "wasm32")]
@@ -162,6 +167,7 @@ pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMUL
 pub use touch_emulation::{EmuCmd, TouchMouseEmu, TOUCH_SCROLL_THRESHOLD};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use undo::{DoUndoActions, Settings as UndoerSettings, UndoBuffer, UndoRedoCommand, Undoer};
+pub use unhandled::report_unhandled;
 #[cfg(feature = "reflect")]
 pub use widget::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use widget::{

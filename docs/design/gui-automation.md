@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (4 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (5 onward) fill agg-gui's gaps test-first, port the 102 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -40,7 +40,8 @@
 - `path_anchor` tracks widget identity by heap address.
 - Nearly all state is thread-local. Exceptions: `CURRENT_PLATFORM` and the input profile are process-global atomics.
 - Widget names (`WidgetBase.name`, `Widget::with_name`, default `id()`, `widgets::Named`), typed downcasts (`Widget::as_any`/`as_any_mut` on the core widgets) and an origin-placing container (`widgets::AbsoluteLayout` over `WidgetBase.origin`) exist.
-- **Missing pieces:** an idle queue (MatterCAD has its own `ui_thread.rs`), `is_enabled`, click counts in mouse events, and paint-panic containment.
+- `agg_gui::ui_thread` is the idle queue (`run_on_idle`, `run_on_idle_after`, intervals, `invoke_pending_actions`), one queue per UI thread, delays on `agg_gui::clock`, drained by both shells every loop iteration. Queued work runs under panic containment and reports through `agg_gui::report_unhandled` (`agg_gui::unhandled`, a per-thread handler set with `set_unhandled_handler`; with none, the first panic is re-raised after the rest of the drain).
+- **Missing pieces:** `is_enabled`, click counts in mouse events, and paint-panic containment.
 
 **`mattercad-app-test`**
 - `TestHarness` builds the real tree headless, sends input straight to `App::on_*`, and copies the shells' frame policy (`input_frame`/`shell_frame`/layout key).
@@ -229,7 +230,7 @@ pub fn show_window_and_execute_tests<S, R>(
   - After the budget it force-closes (drops the tree), dumps stacks, and the run fails with `AutomationError::CloseTimeout`, wording as in C#.
   - Errors are ranked as C# ranks them: Timeout, then UI panic, then body panic, then CloseTimeout, then missing MarkTestComplete.
 - **UI-thread exceptions** (`UiThread.UnhandledException`):
-  - idle actions run under `catch_unwind` (in the promoted `ui_thread`)
+  - idle actions run under `catch_unwind` (`agg_gui::ui_thread`)
   - paint panics are contained per subtree (slice 27)
   - both are reported through `agg_gui::report_unhandled`.
 
@@ -243,7 +244,7 @@ pub fn show_window_and_execute_tests<S, R>(
 Headless paints into a software `Framebuffer`, so paint is exercised and `get_current_screen` works. That shell policy moves into agg-gui as `agg_gui::frame_policy` so the native shell, web shell and headless driver share one copy instead of three.
 
 **Clocks**
-- **`agg_gui::clock`** is a thread-local UI clock, real by default or virtual (`scoped_virtual`/`set_virtual`, `advance`), behind every behavioural time read in agg-gui and the node editor. Still to move onto it: `ui_thread` delays (slice 4) and MatterCAD's `click_clock` (M1).
+- **`agg_gui::clock`** is a thread-local UI clock, real by default or virtual (`scoped_virtual`/`set_virtual`, `advance`), behind every behavioural time read in agg-gui and the node editor. Still to move onto it: MatterCAD's `click_clock` (M1).
 - **Headless default (`ClockPolicy::Virtual`):** each pumped frame advances `frame_interval` = 10 ms, the RunOnIdle tick C# cites. `ClockPolicy::Real` is available for tests whose background workers run in real time (MatterCAD's `with_compute_workers`).
 - **Live:** the real clock always.
 
@@ -340,7 +341,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Gap | Slice |
 |---|---|---|
-| G5 | `agg_gui::ui_thread`, promoted from mattercad-app: `run_on_idle`, `_after`, intervals, `invoke_pending_actions`, panic containment and reporting, one queue per UI thread; shells drain it | 4 |
 | G6 | `agg_gui::frame_policy` (layout key and needs-layout), shared by all shells | 5 |
 | G7 | `agg_gui::shell_input::InputForwarder`, adopted by agg-gui-shell and the web shell | 5 |
 | G8 | Public `WidgetAnchor`/handle resolve, `App::focused_path`, hovered chain query, `Widget::is_enabled` | 6, 8 |
@@ -350,7 +350,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
 | G13 | `NumberField` (number-only edit, text-parser hook, `=`-expression flag) | 20 |
 | G14 | Mac text-edit key bindings, plus a thread-local `platform` override | 21 |
-| G15 | Paint panic containment in `App::paint`, `DrawCtx` state rebalance, `report_unhandled` | 27 |
+| G15 | Paint panic containment in `App::paint` (reported through `report_unhandled` with a new `UnhandledOrigin::Paint`), `DrawCtx` state rebalance | 27 |
 | G16 | `Widget::scroll_rect_into_view` on ScrollView/TextArea | 17 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
 | G18 | wgpu present-failure frame reset | 33 |
@@ -377,7 +377,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 4 | G5 `ui_thread` in agg-gui (port MatterCAD's file and its tests), per-thread queues | (unit) |
 | 5 | G6 + G7; agg-gui-shell and web shell adopt the forwarder | (unit; shells still build) |
 | 6 | `HeadlessDriver`, `HeadlessWindow`, `ProbeWidget`, `tree_query` (handles, rects, clipping, visibility), G8 handles | MouseInteraction: ExtensionMethodsTests |
 | 7 | `execute.rs`: thread per run, Loaded/bring-up, wall budget plus `cancel`, `catch_unwind`, MarkTestComplete, `on_load` | AutomationRunnerTimeoutTest, WindowLoadTimeIsNotChargedToTheTestBudget |
@@ -417,7 +416,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Notes |
 |---|---|---|
-| M1 | Remove mattercad-app's own clock and idle queue | `mattercad_app::ui_thread` re-exports `agg_gui::ui_thread`; `mattercad_renderer::click_clock` delegates to `agg_gui::clock`; shells stop draining it themselves. The 14 existing tests stay green. |
+| M1 | Remove mattercad-app's own clock and idle queue | `mattercad_app::ui_thread` becomes `pub use agg_gui::ui_thread::*;` and its tests go (agg-gui has them). Its two per-drain pumps (`running_tasks::pump_this_thread`, `library_executor::pump`) are registered with `ui_thread::add_drain_hook` (in `build_app` and the test harness). `mattercad-native` and `mattercad-web` stop calling `invoke_pending_actions`/`mark_current_thread_as_ui_thread` (the shells do). `TestHarness::new` calls `mark_current_thread_as_ui_thread()` before building, so each test's thread owns its queue. Worker posts (`update_download`'s progress callback, `reload_all` off the window thread) reach the app's UI thread through the main queue; a test that needs a worker's posts on its own thread captures `ui_thread::current_queue()` for it. `mattercad_renderer::click_clock` delegates to `agg_gui::clock`. The 14 existing tests stay green. |
 | M2 | Back `TestHarness` with the runner | `TestHarness` owns a `HeadlessDriver` (settings isolation, sample part, compute workers move to a `MatterCadAppWindow` builder) and exposes `runner()`. `frame`/`settle`/`pump_until_idle` use the driver's frame and `ClockPolicy::Real` when workers are on. Existing helpers delegate. |
 | M3 | Delete the name hacks | mattercad-app's View3D and design page implement `find_named_targets` (Object3D controls by C# name, scene children); `CONTROL_KEYS` and `scene_objects`/`controls` string parsing go. `menu_automation` uses menu-row named targets. |
 | M4 | `run_test` and `new_part_tab_test` | Equivalents of C# `MatterCADUtilities.RunTest`/`NewPartTabTest` over `show_window_and_execute_tests`, with automatic `mark_test_complete`, C#'s 1280×720 default, and `AutomationFileService` (dialog provider) installed. `complete_dialog`, `add_item_to_bed`, `navigate_to_folder` and friends become extension traits on `AutomationRunner`. |
@@ -438,4 +437,3 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 - /Users/larsbrubaker/Development/rust-apps/agg-gui/agg-gui/src/widget/tree_inspector.rs (`find_widget_by_id`, `find_widget_screen_rect`)
 - /Users/larsbrubaker/Development/rust-apps/agg-gui/agg-gui-shell/src/shell_loop.rs (input forwarding, close veto, the pump refactor)
 - /Users/larsbrubaker/Development/rust-apps/mattercad-rust/crates/mattercad-app-test/src/lib.rs and src/automation.rs (frame policy and helpers to migrate)
-- /Users/larsbrubaker/Development/rust-apps/mattercad-rust/crates/mattercad-app/src/ui_thread.rs (to promote into agg-gui)

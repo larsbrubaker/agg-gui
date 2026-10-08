@@ -59,6 +59,10 @@ where
     H: ShellHost + 'static,
     B: FnOnce(&ShellInit<'_>) -> Result<(App, H), ShellError>,
 {
+    // This thread runs the loop, so its `ui_thread` queue is the one the
+    // loop drains: bind it before `build`, so work the app queues while it
+    // builds lands there.
+    agg_gui::ui_thread::mark_current_thread_as_ui_thread();
     let event_loop = EventLoop::new().map_err(ShellError::EventLoop)?;
 
     let restored_bounds = config.bounds_store.as_ref().and_then(|s| s.load());

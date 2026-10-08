@@ -4,7 +4,8 @@
 //! [`crate::run`] builds a [`ShellLoop`] and hands it to `EventLoop::run`; all
 //! the per-event state (cursor position, modifiers, held buttons, coalesced
 //! resize, screenshot progress, window bounds) lives here rather than in a
-//! stack of captured locals.
+//! stack of captured locals. Each loop iteration and each painted frame
+//! drains the thread's `agg_gui::ui_thread` queue.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -276,6 +277,12 @@ impl<H: ShellHost> ShellLoop<H> {
     }
 
     fn about_to_wait(&mut self, elwt: &ActiveEventLoop) {
+        // Queued UI work first (`agg_gui::ui_thread`), so what it changes is
+        // seen by the paint decision below; this also runs it on iterations
+        // that paint nothing. Its timed work re-arms the wake through
+        // `next_draw_deadline`.
+        agg_gui::ui_thread::invoke_pending_actions();
+
         // App-requested fullscreen toggles (`agg_gui::fullscreen`).
         if agg_gui::fullscreen::take_request() {
             let now_fullscreen = self.window.fullscreen().is_none();
@@ -352,6 +359,10 @@ impl<H: ShellHost> ShellLoop<H> {
     /// Paint one frame, recovering the device first if it was lost. Returns
     /// whether a frame actually reached the compositor.
     pub(crate) fn paint(&mut self, elwt: &ActiveEventLoop) -> bool {
+        // Every painted frame drains `agg_gui::ui_thread` first (a
+        // `RedrawRequested` paint does not pass through `about_to_wait`), so
+        // what queued work changes shows in this frame.
+        agg_gui::ui_thread::invoke_pending_actions();
         // Minimized with a configure-failure run in progress: every retry
         // against the minimized window would fail and spend the surface
         // retry budget. Restore delivers a nonzero `Resized`, whose arm

@@ -115,7 +115,8 @@ impl<'a> WebShellControl<'a> {
 ///   freely.
 pub trait WebShellHost {
     /// Runs on **every** `requestAnimationFrame` tick, before the shell
-    /// decides whether to paint. The hook for polling app state that has no
+    /// drains `agg_gui::ui_thread`'s queued work and decides whether to
+    /// paint. The hook for polling app state that has no
     /// event (a storage job pump, a wall clock); call [`crate::mark_dirty`]
     /// (or `animation::request_draw`) to make the tick paint.
     fn on_tick(&mut self, _app: &mut App) {}

@@ -124,7 +124,8 @@ impl ShellControl<'_> {
 /// persistence handles, diagnostic state, GPU-readback plumbing — and the
 /// shell calls into it around each frame and each idle iteration.
 pub trait ShellHost {
-    /// Runs at the start of every painted frame, before layout and paint.
+    /// Runs at the start of every painted frame, before layout and paint,
+    /// after the shell has drained `agg_gui::ui_thread`'s queued work.
     /// The hook for per-frame app state: advancing a wall-clock cell, pushing
     /// `frame.duration` into a history buffer, feeding a runaway detector.
     fn on_frame(&mut self, _app: &mut App, _frame: &Frame) {}

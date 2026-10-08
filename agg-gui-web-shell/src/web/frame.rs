@@ -4,9 +4,9 @@
 //!
 //! Owns the GPU-side state ([`Painter`]) in its own thread-local; the app and
 //! host live in [`super`]'s cells. Order per tick mirrors the native shell's
-//! loop: size → sensors/fullscreen → `on_tick` → decide → (`on_frame` →
-//! `paint` → `end_frame` → `after_paint` → present → `after_present`) →
-//! `on_idle`. Every decision is delegated to a platform-neutral module
+//! loop: size → sensors/fullscreen → `on_tick` → drain `agg_gui::ui_thread`
+//! → decide → (`on_frame` → `paint` → `end_frame` → `after_paint` → present →
+//! `after_present`) → `on_idle`. Every decision is delegated to a platform-neutral module
 //! (`dom_math::fit_backing`, `policy`, `recovery`) that is unit tested.
 
 use std::cell::RefCell;
@@ -169,6 +169,10 @@ fn tick() {
     report_geometry(w, h, dpr, fullscreen);
 
     with_app_host(|app, host| host.on_tick(app));
+    // Queued UI work (`agg_gui::ui_thread`) before the paint decision, so
+    // what it changes shows this tick; it runs even while the GPU is not
+    // ready to paint.
+    agg_gui::ui_thread::invoke_pending_actions();
 
     if !service_device_loss() {
         return;

@@ -187,6 +187,9 @@ where
     if config.detect_platform {
         platform::apply_client_platform();
     }
+    // The page's thread runs the frame loop, so its `ui_thread` queue is the
+    // one each tick drains.
+    agg_gui::ui_thread::mark_current_thread_as_ui_thread();
     let (_, scale, _) = frame::size_backing_store(&canvas);
     agg_gui::set_device_scale(scale);
     POLICY.with(|p| p.set(config.redraw_policy));
