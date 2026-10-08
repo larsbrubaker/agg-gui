@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (17 onward) fill agg-gui's gaps test-first, port the 76 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (20 onward) fill agg-gui's gaps test-first, port the 61 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -46,6 +46,8 @@
 - Click counts: `App::on_mouse_down_clicks` takes a stated count, the forwarder passes every press's count, and widgets read `event::current_click_count()` / `event::is_double_click()` (C#'s `Clicks` / `IsDoubleClick`); `MultiClickTracker` honours only a stated count.
 - Under the mouse: the hovered chain and the widgets it covers (under a sibling drawn above them, `UnderMouseNotFirst`) send bounds `MouseEnter`/`MouseLeave`, the chain's deepest widget gets first-under-mouse `MouseOver`/`MouseOut` (C#'s `MouseEnter`/`MouseLeave`), a press updates them as a move does, capture follows the captured widget's own area and freezes everything else, a release over the capture holder sends no hover-refresh move, and `App::hovered_chain`/`first_under_mouse`/`under_mouse_state`/`captured_path` plus the thread snapshot `agg_gui::under_mouse_state_of(WidgetId)` answer C#'s `UnderMouseState`, `MouseCaptured` and `ChildHasMouseCaptured`.
 - `agg_gui::observe_events(WidgetId, callback)` watches the events one widget receives (C#'s per-widget `MouseMove +=` and friends) without wrapping it.
+- `Widget::scroll_rect_into_view` (C#'s `ScrollableWidget.ScrollIntoView`, minimum scroll) is implemented by `ScrollView` and `TextArea`. `TextArea` carries C#'s `InternalTextEditWidget` caret API (`with_line_spacing`, `content_height`, `insert_bar_position`, the clamping `set_char_index_to_insert_before`/`set_selection_index_to_start_before`, `copy_selection`).
+- The central tooltip controller (`widgets::tooltip::controller`) is C#'s `ToolTipManager`: `current_text`, `clear`, `observe_tooltips` (`TooltipEvent::Shown`/`Popped`), and C#'s reshow rule (`timings::hover_delay`).
 - `widgets::RadioButton` is C#'s standalone `RadioButton`: a widget per option, exclusive with the radio buttons in its parent (settled by the dispatch walk before its callbacks run), individually disableable, with `on_checked_state_changed`/`on_click` and `check_radio_child` for a programmatic check.
 - **Missing piece:** paint-panic containment.
 
@@ -58,7 +60,7 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs` and the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs`); the other modules and members below are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs` and the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs`); the other modules and members below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
 - Features, each added with the slice whose code uses it (none exist yet; headless is the default):
@@ -70,7 +72,8 @@ Modules (each under 800 lines, each opening with a purpose comment):
 ```
 src/lib.rs                 crate docs, re-exports
 src/runner/mod.rs          (exists) AutomationRunner, AutomationConfig, MarkTestComplete
-src/runner/named.rs        (exists) Get*/Wait*/NameExists/NamedWidgetExists/ChildExists/GetRegionByName; GetObjectByName, ScrollIntoView to come
+src/runner/named.rs        (exists) Get*/Wait*/NameExists/NamedWidgetExists/ChildExists/GetRegionByName; GetObjectByName to come
+src/runner/scroll.rs       (exists) ScrollIntoView
 src/runner/pointer.rs      (exists) stepped moves, ClickOrigin/ClickOpts, Click*/DoubleClickByName/RightClick*/MoveToByName/SetMouseCursorPosition
 src/runner/drag.rs         (exists) DragOpts/DragDropOpts, Drag*/Drop*
 src/runner/keyboard.rs     (exists) Type, ModifierKeys, Press/ReleaseModifierKeys, SelectAll/None
@@ -124,7 +127,6 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `GetByNameResults.NamedObject` | `NamedHit` gains `target: Option<NamedTarget>` with G11 |
 | `GetObjectByName` | `get_object_by_name(...) -> Option<NamedHit>`: the non-widget `NamedTarget` |
 | `SetTarget` (`DebugShowBounds`) | agg-gui has no bounds overlay; `get_widget_by_name` flashes nothing until one exists |
-| `ScrollIntoView(name, amount)` | `scroll_into_view(name)`: calls `Widget::scroll_rect_into_view` on the nearest scrollable ancestor, falling back to wheel notches |
 | `WidgetNotFoundMessage` | `widget_not_found_message(op, name)` exists; it appends `StartupFailureLog` once that lands (slice 29) |
 
 **Images**
@@ -282,7 +284,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | G13 | `NumberField` (number-only edit, text-parser hook, `=`-expression flag) | 20 |
 | G14 | Mac text-edit key bindings, plus a thread-local `platform` override | 21 |
 | G15 | Paint panic containment in `App::paint` (reported through `report_unhandled` with a new `UnhandledOrigin::Paint`), `DrawCtx` state rebalance | 27 |
-| G16 | `Widget::scroll_rect_into_view` on ScrollView/TextArea | 17 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
 | G18 | wgpu present-failure frame reset | 33 |
 
@@ -299,21 +300,18 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
 | PresentFailureContainmentTests (1) | `live/present_failure_containment_tests.rs` | skipped on a CPU host, as in C# |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | all ported |
-| TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberField; 7 ported |
+| TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberField; 8 ported (ScrollingToEndShowsEnd waits for slice 23's image match) |
 | ThreadStackDumpTests (10) | `thread_stack_dump_tests.rs` | `stack-dump` feature |
-| ToolTipTests (7) | `tool_tip_tests.rs` | `Thread.Sleep` → `delay`/virtual clock advance |
+| ToolTipTests (7) | `tool_tip_tests.rs` (+ `tool_tip/*.rs`) | all ported |
 
 ## 9. Slice plan (about 25 minutes each, one agent; each ends with `cargo test` green)
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 17 | TextEdit, part 2 (+ G16, and the image match of slice 23) | MultiLineTests, ScrollingToEndShowsEnd |
-| 18 | ToolTips, part 1 | ToolTipInitialOpenTests, ToolTipsShow, ToolTipCloseOnLeave, MoveFromToolTipToToolTip |
-| 19 | ToolTips, part 2 | MoveFastFromToolTipToToolTip, MoveFromToolTipToOverlappingWidgetWithNoToolTip, ClearAlsoDropsAToolTipThatIsArmedButNotYetShown |
 | 20 | G13 NumberField | NumEditHandlesNonNumberChars, NumEditWithTextParserAcceptsLettersAndCommitsTheParsedValue, NumEditRefusesKeysItCannotRead, NumEditTakesLeadingEqualsOnlyWhenExpressionEntryIsAllowed |
 | 21 | G14, part 1 | MacAltArrowsMoveByWord, MacCommandLeftGoesToLineStartNotWordBoundary, MacCommandRightGoesToLineEnd, MacCommandUpAndDownGoToDocumentStartAndEnd, MacAltBackspaceDeletesPreviousWord, MacCommandBackspaceDeletesToLineStart |
 | 22 | G14, part 2 | MacShiftComposesWithWordAndLineMotion, MacUnshiftedCommandArrowsCollapseSelection, UseMacKeyBindingsDefaultsToRunningOs, MacHomeAndEndStillGoToLineStartAndEnd, WindowsControlLeftStillJumpsByWord, WindowsControlHomeStillGoesToDocumentStart |
-| 23 | Image search, `get_current_screen`, simulated-mouse overlay | ImageWaitsSearchTheGivenRegion |
+| 23 | Image search, `get_current_screen`, simulated-mouse overlay | ImageWaitsSearchTheGivenRegion, ScrollingToEndShowsEnd |
 | 24 | G11 named targets plus ComboBox items | OpenAndCloseMenus |
 | 25 | G12, then Flow, part 1 | TopToBottomContainerAppliesExpectedMargin, SpacingClearedAfterLoadPositionsCorrectly, NestedLayoutTopToBottomTests, ChangingChildVisiblityUpdatesFlow, ChangingChildFlowWidgetVisiblityUpdatesParentFlow, NestedLayoutTopToBottomWithResizeTests, LeftToRightTests, RightToLeftTests |
 | 26 | Flow, part 2 | NestedMaxFitOrStretchToChildrenParentWidth, NestedMinFitOrStretchToChildrenParentWidth, LeftToRightAnchorLeftBottomTests, AnchorLeftRightTests, NestedFlowWidgetsTopToBottomTests, NestedFlowWidgetsRightToLeftTests, NestedFlowWidgetsLeftToRightTests, FlowWithMaxSizeChildAllocatesToOthers |
@@ -328,7 +326,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (69 still to port): AutomationRunnerTests 11 (8 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (7 ported), ThreadStackDump 10, ToolTip 7, WidgetClick 3 (3 ported): **103**.
+**Tally** (61 still to port): AutomationRunnerTests 11 (8 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (8 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 

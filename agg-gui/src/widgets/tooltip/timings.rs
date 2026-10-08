@@ -105,6 +105,25 @@ pub(super) fn last_tooltip_visible_at() -> Option<Instant> {
     LAST_VISIBLE_AT.with(|c| c.get())
 }
 
+/// Delay for a hover starting now: the shorter reshow delay when the
+/// subsystem will still be warm once that delay has run — a tip was visible
+/// less than [`TooltipTimings::reshow_window`] before then — otherwise the full
+/// initial delay. This is C#'s `ToolTipManager`, which applies `ReshowDelay`
+/// only while the time since the last tip closed is still under
+/// `InitialDelay` when the shorter delay is up: a pointer that rests a while
+/// on empty space before the next control waits the full delay.
+pub(super) fn hover_delay() -> Duration {
+    let t = tooltip_timings();
+    let warm_when_due = last_tooltip_visible_at().is_some_and(|at| {
+        (tooltip_now() + t.reshow_delay).saturating_duration_since(at) < t.reshow_window()
+    });
+    if warm_when_due {
+        t.reshow_delay
+    } else {
+        t.initial_delay
+    }
+}
+
 // --- Test hooks ---------------------------------------------------------------
 
 /// Put this thread on the virtual UI clock at `now`, or back on the real clock

@@ -34,6 +34,9 @@
 //!     used by the demo for the Ctrl/Cmd+Y "toggle case of selection" shortcut.
 //!   * change and edit-complete callbacks ([`on_change`](TextArea::on_change) /
 //!     [`on_edit_complete`](TextArea::on_edit_complete)), mirroring `TextField`.
+//!   * agg-sharp `InternalTextEditWidget`'s caret API (`caret_api.rs`): line
+//!     spacing, `insert_bar_position`, clamping caret/selection index setters,
+//!     `copy_selection`; and `Widget::scroll_rect_into_view` (`scroll.rs`).
 //!
 //! Deferred (known gaps, filed for later polish):
 //!   * undo / redo;
@@ -94,6 +97,10 @@ pub type KeyIntercept = dyn FnMut(&Key, &Modifiers) -> bool;
 /// egui's Code Editor demo.
 pub type LineHighlighter = dyn Fn(&str) -> Vec<(usize, usize, crate::color::Color)>;
 
+/// agg-gui's default line pitch: a little slacker than one em so descenders
+/// from line N don't kiss ascenders from N+1.
+const DEFAULT_LINE_SPACING: f64 = 1.35;
+
 fn clipboard_get() -> Option<String> {
     crate::clipboard::get_text()
 }
@@ -151,6 +158,10 @@ pub struct TextArea {
 
     font: Arc<Font>,
     font_size: f64,
+    /// Line advance as a multiple of `font_size` set with
+    /// [`with_line_spacing`](TextArea::with_line_spacing); `None` is agg-gui's
+    /// default pitch.
+    line_spacing: Option<f64>,
     padding: f64,
 
     /// Placeholder shown (dimmed) while the buffer is empty. Mirrors egui's
@@ -295,6 +306,7 @@ impl TextArea {
             base: WidgetBase::new(),
             font,
             font_size: crate::font_settings::default_font_size_or(13.0),
+            line_spacing: None,
             padding: 8.0,
             hint: "Type here…".to_string(),
             content_h_align: TextHAlign::Left,
@@ -549,7 +561,7 @@ impl TextArea {
         self.cached_epoch = st.epoch;
         // Line height — a little slacker than tight metrics so
         // descenders from line N don't kiss ascenders from N+1.
-        self.cached_line_h = self.font_size * 1.35;
+        self.cached_line_h = self.line_advance();
         // The wrap just changed, so the source-line-to-row map a sibling gutter
         // relies on is stale — republish it here (the sole re-wrap choke point,
         // reached only past the early return above, so scroll-only frames skip it).
@@ -638,6 +650,7 @@ pub use scroll::TextAreaScrollInfo;
 
 mod band;
 mod callbacks;
+mod caret_api;
 mod context_menu;
 mod edit_ops;
 mod geometry;
@@ -650,6 +663,8 @@ use wrap::{wrap_text_indexed, WrappedLine};
 
 #[cfg(test)]
 mod band_tests;
+#[cfg(test)]
+mod caret_api_tests;
 #[cfg(test)]
 mod edit_complete_tests;
 #[cfg(test)]

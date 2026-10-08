@@ -64,8 +64,9 @@ impl TextArea {
         (self.bounds.height - self.padding * 2.0).max(0.0)
     }
 
-    /// Total wrapped-content height at the current line count.
-    pub(crate) fn content_height(&self) -> f64 {
+    /// Total wrapped-content height at the last layout: lines × line
+    /// advance, without padding (C#'s auto-sized edit widget's height).
+    pub fn content_height(&self) -> f64 {
         self.cached_lines.len() as f64 * self.cached_line_h
     }
 
@@ -205,7 +206,7 @@ impl TextArea {
         let line_h = if self.cached_line_h > 0.0 {
             self.cached_line_h
         } else {
-            self.font_size * 1.35
+            self.line_advance()
         };
         let moved = self
             .vbar
@@ -263,5 +264,21 @@ impl TextArea {
     /// widget keeps requesting frames until it settles.
     pub(crate) fn scrollbar_animating(&self) -> bool {
         self.vbar.animation_active()
+    }
+
+    /// [`Widget::scroll_rect_into_view`] for the text: the visible band is
+    /// the padded inner rect, and raising `vbar.offset` raises the lines.
+    pub(crate) fn scroll_local_rect_into_view(&mut self, rect: Rect) -> bool {
+        let top = self.bounds.height - self.padding;
+        let bottom = self.padding;
+        let offset =
+            crate::widgets::scrollbar::minimum_scroll_to_show(self.vbar.offset, bottom, top, rect);
+        let target = offset.clamp(0.0, self.max_scroll_y());
+        if target != self.vbar.offset {
+            self.vbar.offset = target;
+            self.publish_scroll_offset();
+            crate::animation::request_draw();
+        }
+        true
     }
 }

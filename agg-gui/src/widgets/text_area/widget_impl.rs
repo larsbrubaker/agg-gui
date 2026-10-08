@@ -114,8 +114,12 @@ impl Widget for TextArea {
             self.font_size,
             inner_w,
         );
-        let line_h = self.font_size * 1.35;
+        let line_h = self.line_advance();
         (lines.len().max(1) as f64) * line_h + self.padding * 2.0
+    }
+
+    fn scroll_rect_into_view(&mut self, rect: Rect) -> bool {
+        self.scroll_local_rect_into_view(rect)
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -126,7 +130,7 @@ impl Widget for TextArea {
         let w = available.width.max(self.padding * 2.0 + 20.0);
         let h = available
             .height
-            .max(self.padding * 2.0 + self.font_size * 1.6);
+            .max(self.padding * 2.0 + self.min_text_height());
         self.bounds = Rect::new(0.0, 0.0, w, h);
         let inner_w = (w - self.padding * 2.0).max(1.0);
         // Reset the wrap-change range for this pass; `refresh_wrap` records the

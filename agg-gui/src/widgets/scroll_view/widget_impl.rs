@@ -54,6 +54,25 @@ impl Widget for ScrollView {
         applied
     }
 
+    /// The vertical viewport is the top `vh` of the widget (a Solid
+    /// horizontal bar takes the bottom); raising `v.offset` raises the content.
+    fn scroll_rect_into_view(&mut self, rect: Rect) -> bool {
+        if !self.v.enabled {
+            return false;
+        }
+        let (_, vh) = self.viewport();
+        let top = self.bounds.height;
+        let offset =
+            crate::widgets::scrollbar::minimum_scroll_to_show(self.v.offset, top - vh, top, rect);
+        let target = offset.clamp(0.0, self.v.max_scroll(vh));
+        if target != self.v.offset {
+            self.v.offset = target;
+            self.publish_offsets();
+            crate::animation::request_draw();
+        }
+        true
+    }
+
     fn margin(&self) -> Insets {
         self.base.margin
     }

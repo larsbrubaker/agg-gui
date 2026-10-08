@@ -51,10 +51,11 @@ use web_time::Instant;
 use crate::geometry::{Point, Rect};
 use crate::text::measure_advance;
 
+use super::events::{dispatch_pending, queue, TooltipEvent};
 use super::render::{
     current_tooltip_viewport, panel_size, place_panel, submit_tooltip, TooltipRequest,
 };
-use super::timings::{last_tooltip_visible_at, note_tooltip_visible, tooltip_now, tooltip_timings};
+use super::timings::{note_tooltip_visible, tooltip_now, tooltip_timings};
 use super::{TooltipLine, TooltipLineKind, TOOLTIP_FONT_SIZE};
 
 /// The single app-wide tip state machine. See the module docs.
@@ -95,13 +96,7 @@ impl Controller {
     /// Delay for a hover starting now: the shorter reshow delay when a tip was
     /// visible within the reshow window, otherwise the full initial delay.
     fn effective_delay(&self) -> Duration {
-        let t = tooltip_timings();
-        match last_tooltip_visible_at() {
-            Some(at) if tooltip_now().saturating_duration_since(at) <= t.reshow_window() => {
-                t.reshow_delay
-            }
-            _ => t.initial_delay,
-        }
+        super::timings::hover_delay()
     }
 
     /// Adopt `target` as the hovered tipped widget for this frame (or clear it),
@@ -159,6 +154,7 @@ impl Controller {
 
     fn hide(&mut self) {
         if self.visible {
+            queue(TooltipEvent::Popped);
             crate::animation::request_draw_tagged("tooltip.controller.hide");
         }
         self.visible = false;
@@ -188,6 +184,7 @@ impl Controller {
             if !self.visible {
                 self.visible = true;
                 self.tip_shown_at = Some(tooltip_now());
+                queue(TooltipEvent::Shown(self.text.clone()));
                 crate::animation::request_draw_tagged("tooltip.controller.show");
                 crate::animation::request_draw_after_tagged(
                     tooltip_timings().autopop,
@@ -255,6 +252,7 @@ pub(crate) fn drive(target: Option<(Vec<usize>, String)>, anchor: Option<Point>)
             c.submit();
         }
     });
+    dispatch_pending();
 }
 
 // --- Per-frame resolution: widget tips + overlay (popup-row) tips ----------------
@@ -333,6 +331,26 @@ pub(crate) fn on_pointer_down() {
         c.suppressed = true;
         c.hide();
     });
+    dispatch_pending();
+}
+
+/// C# `ToolTipManager.Clear`: take down the tip, whether showing or merely
+/// armed by the hover delay, and keep it down until the pointer moves onto
+/// another tipped widget. For whatever opens over the window (menus,
+/// popups): an armed tip would otherwise pop over it a moment later.
+pub fn clear() {
+    CONTROLLER.with(|c| {
+        let mut c = c.borrow_mut();
+        c.suppressed = true;
+        c.hide();
+    });
+    dispatch_pending();
+}
+
+/// C# `ToolTipManager.CurrentText`: the visible tip's text, empty when no
+/// tip shows.
+pub fn current_text() -> String {
+    visible_text().unwrap_or_default()
 }
 
 /// Release clears the held-button flag (re-showing still waits on re-entry
@@ -369,6 +387,7 @@ pub fn visible_rect() -> Option<Rect> {
 #[doc(hidden)]
 pub fn reset() {
     CONTROLLER.with(|c| *c.borrow_mut() = Controller::default());
+    dispatch_pending();
     FRAME.with(|f| *f.borrow_mut() = FrameInputs::default());
 }
 

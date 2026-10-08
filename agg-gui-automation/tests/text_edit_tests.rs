@@ -31,6 +31,8 @@ use agg_gui::widgets::{TextArea, TextField};
 use agg_gui::{observe_events, MouseButton, Rect, Size, Widget, WidgetId};
 use agg_gui_automation::{HeadlessWindow, UiDriver, WidgetHandle};
 
+#[path = "text_edit/multi_line.rs"]
+mod multi_line;
 #[path = "text_edit/special_keys.rs"]
 mod special_keys;
 

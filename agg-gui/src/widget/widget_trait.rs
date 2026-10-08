@@ -312,6 +312,18 @@ pub trait Widget {
         0.0
     }
 
+    /// Scroll the least amount that brings `rect` — in this widget's local
+    /// Y-up coordinates — into view (C# `ScrollableWidget.ScrollIntoView`
+    /// with `ScrollAmount.Minimum`): content clipped at the top is lowered
+    /// until its top shows, content clipped at the bottom is raised until its
+    /// bottom shows, and content already fully in view stays put. Returns
+    /// `true` when this widget scrolls (it took the request, whether or not
+    /// it moved); the default, for widgets that do not scroll, returns
+    /// `false` so a caller walking up from a descendant moves on.
+    fn scroll_rect_into_view(&mut self, _rect: Rect) -> bool {
+        false
+    }
+
     /// If this widget is text-bearing (e.g. `Label`), update its foreground
     /// colour.  Default is a no-op.  Composite widgets call this on their
     /// children to retint labels without rebuilding them — used by `Button`

@@ -25,16 +25,18 @@
 //! ```
 
 pub mod controller;
+mod events;
 mod interactive;
 mod render;
 mod timings;
 
+pub use events::{observe_tooltips, TooltipEvent, TooltipObserver};
 pub(crate) use render::{begin_tooltip_frame, paint_global_tooltips};
 #[doc(hidden)]
 pub use timings::{advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock};
 pub use timings::{set_tooltip_timings, tooltip_timings, TooltipTimings};
 
-use timings::{last_tooltip_visible_at, note_tooltip_visible, tooltip_now};
+use timings::{note_tooltip_visible, tooltip_now};
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -257,13 +259,7 @@ impl Tooltip {
     /// tip was visible within the reshow window, otherwise the full initial
     /// delay. Captured at pointer-enter into [`Self::pending_delay`].
     fn effective_delay(&self) -> Duration {
-        let t = tooltip_timings();
-        match last_tooltip_visible_at() {
-            Some(at) if tooltip_now().saturating_duration_since(at) <= t.reshow_window() => {
-                t.reshow_delay
-            }
-            _ => t.initial_delay,
-        }
+        timings::hover_delay()
     }
 
     /// Whether the tip should be visible right now, ignoring autopop (handled

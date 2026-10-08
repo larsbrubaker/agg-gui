@@ -381,3 +381,19 @@ pub fn paint_prepared_scrollbar(ctx: &mut dyn DrawCtx, bar: PreparedScrollbar) {
 fn scale_alpha(c: Color, a: f64) -> Color {
     Color::rgba(c.r, c.g, c.b, c.a * (a as f32).clamp(0.0, 1.0))
 }
+
+/// C# `ScrollableWidget.ScrollIntoView`'s minimum scroll, for a vertical
+/// scroller whose content rises as its offset grows: the offset that shows
+/// `rect` (local, Y-up) within the visible band `[bottom, top]`. Content
+/// clipped at the top is lowered until its top shows; otherwise content
+/// clipped at the bottom is raised until its bottom shows; content already
+/// fully in view keeps `offset`. The caller clamps to its scroll range.
+pub(crate) fn minimum_scroll_to_show(offset: f64, bottom: f64, top: f64, rect: Rect) -> f64 {
+    if rect.bottom() >= bottom && rect.top() <= top {
+        offset
+    } else if rect.top() >= top {
+        offset - (rect.top() - top)
+    } else {
+        offset + (bottom - rect.bottom())
+    }
+}

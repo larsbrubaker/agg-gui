@@ -26,6 +26,7 @@ mod drag;
 mod keyboard;
 mod named;
 mod pointer;
+mod scroll;
 mod waits;
 
 pub use drag::{DragDropOpts, DragOpts};
