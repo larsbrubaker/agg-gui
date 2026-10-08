@@ -1,9 +1,10 @@
 //! `Container` — a rectangular box with optional background, border, and
 //! padding that holds zero or more child widgets.
 //!
-//! Phase 4 child layout is a simple top-down vertical stack (bottom-most child
-//! at `y = padding`, each subsequent child placed above the previous). Flex
-//! layout arrives in Phase 5.
+//! Child layout is a simple top-down vertical stack: the first child sits at
+//! the top of the padding area, each later one below the previous. Each child
+//! is measured against the room left, then laid out again at the box it
+//! actually gets when that differs.
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
@@ -215,15 +216,19 @@ impl Widget for Container {
                 let avail_w = (inner_w - m.left - m.right).max(0.0);
                 let avail_h = (cursor_y - pad_b - m.top - m.bottom).max(0.0);
                 let desired = child.layout(Size::new(avail_w, avail_h));
+                let final_w = desired.width.min(avail_w);
+                // The child arranged its own children against the measuring
+                // box; re-lay it at the box it actually occupies (as
+                // `AbsoluteLayout` and `FlexRow` do), or a fitted child — a
+                // `FlexColumn` that stacks its rows from the top of the taller
+                // measuring box — leaves them above its bounds, clipped away.
+                if (final_w - avail_w).abs() > 0.5 || (desired.height - avail_h).abs() > 0.5 {
+                    child.layout(Size::new(final_w, desired.height));
+                }
 
                 cursor_y -= m.top;
                 let child_y = cursor_y - desired.height;
-                child.set_bounds(Rect::new(
-                    pad_l + m.left,
-                    child_y,
-                    desired.width.min(avail_w),
-                    desired.height,
-                ));
+                child.set_bounds(Rect::new(pad_l + m.left, child_y, final_w, desired.height));
                 cursor_y = child_y - m.bottom;
             }
 

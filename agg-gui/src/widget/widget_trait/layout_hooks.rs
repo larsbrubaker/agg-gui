@@ -66,6 +66,21 @@ macro_rules! widget_layout_hooks {
             Size::MAX
         }
 
+        /// How narrow a crowded row may squeeze this widget, or `None` when it
+        /// can't be squeezed below the width it measured.
+        ///
+        /// A [`FlexRow`](crate::widgets::FlexRow) whose fixed children together
+        /// are wider than the row takes the difference out of the children that
+        /// answer `Some(min)` here (never below `min`), then lays them out at the
+        /// narrower width — so siblings never overlap and nothing runs past the
+        /// row. A [`Label`](crate::widgets::Label) with
+        /// [`with_ellipsis_if_clipped`](crate::widgets::Label::with_ellipsis_if_clipped)
+        /// answers `Some(min_size().width)`: it ends its line in "..." instead.
+        /// Default: `None`.
+        fn shrink_min_width(&self) -> Option<f64> {
+            None
+        }
+
         /// Direct read access to the widget's embedded [`WidgetBase`].
         ///
         /// Returns `Some` for every widget that embeds `WidgetBase` — effectively

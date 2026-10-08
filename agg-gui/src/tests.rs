@@ -84,6 +84,7 @@ mod rasterizer_clip;
 mod reflect_roundtrip;
 mod reserve_inset;
 mod retained_layers;
+mod row_overflow;
 mod rich_toolbar_color_overlay;
 mod scene_focus;
 mod scroll_view;

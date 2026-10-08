@@ -178,16 +178,7 @@ fn paint_subtree_direct_inner(
         .unwrap_or((0.0, 0.0, b.width, b.height));
     ctx.save();
     ctx.clip_rect(cx, cy, cw, ch);
-    let clip = root_rect_from_local(ctx, cx, cy, cw, ch);
-    PAINT_CLIP_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        let clipped = if let Some(prev) = stack.last().copied() {
-            intersect_rects(prev, clip).unwrap_or_else(|| Rect::new(0.0, 0.0, 0.0, 0.0))
-        } else {
-            clip
-        };
-        stack.push(clipped);
-    });
+    push_paint_clip(root_rect_from_local(ctx, cx, cy, cw, ch));
 
     // Apply the widget's optional child transform (pan/zoom for a Scene) to
     // the whole child group.  It goes on AFTER the children clip — the clip
@@ -206,6 +197,13 @@ fn paint_subtree_direct_inner(
         let child_bounds = widget.children()[i].bounds();
         let snap_to_pixel = widget.children()[i].enforce_integer_bounds();
         ctx.save();
+        // A per-child clip (a `FlexRow` slot) applies before the child's own
+        // translation, in the space its bounds live in.
+        let slot_clip = widget.child_paint_clip(i);
+        if let Some(r) = slot_clip {
+            ctx.clip_rect(r.x, r.y, r.width, r.height);
+            push_paint_clip(root_rect_from_local(ctx, r.x, r.y, r.width, r.height));
+        }
         if snap_to_pixel {
             ctx.translate(child_bounds.x.round(), child_bounds.y.round());
         } else {
@@ -213,6 +211,11 @@ fn paint_subtree_direct_inner(
         }
         let child = &mut widget.children_mut()[i];
         paint_subtree(child.as_mut(), ctx);
+        if slot_clip.is_some() {
+            PAINT_CLIP_STACK.with(|stack| {
+                stack.borrow_mut().pop();
+            });
+        }
         ctx.restore();
     }
 
@@ -228,6 +231,20 @@ fn paint_subtree_direct_inner(
     if snap_this {
         ctx.restore();
     }
+}
+
+/// Push `clip` (root coordinates), intersected with the clip in effect, onto
+/// the stack [`current_paint_clip`] reads.
+fn push_paint_clip(clip: Rect) {
+    PAINT_CLIP_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        let clipped = if let Some(prev) = stack.last().copied() {
+            intersect_rects(prev, clip).unwrap_or_else(|| Rect::new(0.0, 0.0, 0.0, 0.0))
+        } else {
+            clip
+        };
+        stack.push(clipped);
+    });
 }
 
 fn root_rect_from_local(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) -> Rect {

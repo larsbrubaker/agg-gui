@@ -222,6 +222,18 @@ macro_rules! widget_paint_hooks {
             Some((0.0, 0.0, b.width, b.height))
         }
 
+        /// An extra clip (in the space the children's `bounds()` live in) around
+        /// the paint of child `index` — its body, descendants and overlay — on
+        /// top of [`clip_children_rect`](Self::clip_children_rect).
+        ///
+        /// [`FlexRow`](crate::widgets::FlexRow) answers each child's own column
+        /// of the row, as agg-sharp clips every widget to its bounds, so a child
+        /// that paints past its box can't draw over the sibling beside it.
+        /// Default: `None` (children share the parent's clip).
+        fn child_paint_clip(&self, _index: usize) -> Option<Rect> {
+            None
+        }
+
         /// Affine transform applied between this widget and its children during
         /// inspector traversal.  Mirrors what `paint()` does — e.g. a widget
         /// that pushes pan/zoom in `paint()` and pops it in `finish_paint()`

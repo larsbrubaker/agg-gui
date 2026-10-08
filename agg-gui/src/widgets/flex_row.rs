@@ -6,6 +6,13 @@
 //!
 //! `FlexRow` reads each child's `v_anchor()` to place it vertically within
 //! the row's inner height (see [`place_cross_v`]).
+//!
+//! Siblings never overlap and nothing runs past the row: when the fixed
+//! children together are wider than the row, the shrink pass
+//! ([`shrink_to_fit`]) narrows the children that can shrink
+//! ([`Widget::shrink_min_width`], e.g. an ellipsizing `Label`), and each child
+//! paints clipped to its own column ([`Widget::child_paint_clip`]), as
+//! agg-sharp clips every widget to its bounds.
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
@@ -61,6 +68,27 @@ fn place_cross_v(
     (y, actual_h)
 }
 
+/// Take `overflow` out of the widths of the children that can shrink (`floors[i]`
+/// is `Some(min)`), each in proportion to how far it can go (`width - min`),
+/// and none below its `min`. Returns the width actually taken; less than
+/// `overflow` when the shrinkable children all reach their floors.
+fn shrink_to_fit(widths: &mut [f64], floors: &[Option<f64>], overflow: f64) -> f64 {
+    let room: Vec<f64> = widths
+        .iter()
+        .zip(floors)
+        .map(|(w, f)| f.map_or(0.0, |min| (w - min).max(0.0)))
+        .collect();
+    let total_room: f64 = room.iter().sum();
+    if total_room <= 0.0 {
+        return 0.0;
+    }
+    let take = overflow.min(total_room);
+    for (w, r) in widths.iter_mut().zip(&room) {
+        *w -= take * r / total_room;
+    }
+    take
+}
+
 /// Arranges children left-to-right (first child = leftmost).
 pub struct FlexRow {
     bounds: Rect,
@@ -78,6 +106,10 @@ pub struct FlexRow {
     /// content rather than span the whole stack. Off by default for
     /// backward compatibility.
     pub fit_width: bool,
+    /// Clip each child's paint to its own column of the row (default
+    /// `true`), so a child that draws past its box can't paint over the
+    /// sibling beside it. See [`Widget::child_paint_clip`].
+    pub clip_children_to_slots: bool,
 }
 
 impl FlexRow {
@@ -91,7 +123,16 @@ impl FlexRow {
             inner_padding: Insets::ZERO,
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
             fit_width: false,
+            clip_children_to_slots: true,
         }
+    }
+
+    /// Opt out of clipping each child to its own column (see
+    /// [`FlexRow::clip_children_to_slots`]) for a row whose children
+    /// deliberately overhang one another.
+    pub fn with_clip_children_to_slots(mut self, clip: bool) -> Self {
+        self.clip_children_to_slots = clip;
+        self
     }
 
     pub fn with_gap(mut self, gap: f64) -> Self {
@@ -270,6 +311,24 @@ impl Widget for FlexRow {
         }
 
         // -------------------------------------------------------------------
+        // Step 1b: shrink pass — fixed children wider than the row give up
+        // width from those that can shrink, so the row's content fits.
+        // -------------------------------------------------------------------
+        let overflow = total_fixed_with_margins + total_gap + total_flex_margin_h - inner_w;
+        if overflow > 0.0 {
+            let floors: Vec<Option<f64>> = (0..n)
+                .map(|i| {
+                    if visible[i] && self.flex_factors[i] == 0.0 {
+                        self.children[i].shrink_min_width()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            total_fixed_with_margins -= shrink_to_fit(&mut content_widths, &floors, overflow);
+        }
+
+        // -------------------------------------------------------------------
         // Step 2: distribute remaining space to flex children.
         // -------------------------------------------------------------------
         let remaining =
@@ -357,6 +416,16 @@ impl Widget for FlexRow {
             available.width
         };
         Size::new(reported_w, natural_h)
+    }
+
+    fn child_paint_clip(&self, index: usize) -> Option<Rect> {
+        if !self.clip_children_to_slots {
+            return None;
+        }
+        // The child's own column, the row's full height: a child may still
+        // overhang its box vertically within the row (the row clips that).
+        let b = self.children.get(index)?.bounds();
+        Some(Rect::new(b.x, 0.0, b.width, self.bounds.height))
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {

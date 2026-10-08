@@ -8,6 +8,7 @@ mod path_anchor;
 mod pinch;
 pub use path_anchor::WidgetAnchor;
 mod pointer;
+mod tooltip_target;
 mod touch;
 mod tree_paths;
 mod under_mouse;
@@ -625,10 +626,9 @@ impl App {
     /// `Some` supplies the widget tip (its index-path identity + text),
     /// anchored at the pointer.
     fn begin_tooltip_controller_frame(&self) {
-        let target = self
-            .hovered
-            .as_deref()
-            .and_then(|path| deepest_tipped(self.root.as_ref(), path));
+        let target = self.hovered.as_deref().and_then(|path| {
+            tooltip_target::deepest_tipped(self.root.as_ref(), path, current_mouse_world())
+        });
         crate::widgets::tooltip::controller::begin_frame(target, current_mouse_world());
     }
 
@@ -759,27 +759,4 @@ impl App {
         let next_path = all[next_idx].clone();
         self.set_focus(Some(next_path));
     }
-}
-
-/// Walk the hover `path` from `root` and return the **deepest** widget along it
-/// whose [`Widget::tooltip_text`] is `Some`, as `(identity_path, text)`. The
-/// identity is the path prefix down to that widget, which the controller uses
-/// to detect target changes (moving to a different tipped control ⇒ reshow).
-/// A shallower tipped ancestor is used only when no deeper descendant has a tip.
-fn deepest_tipped(root: &dyn Widget, path: &[usize]) -> Option<(Vec<usize>, String)> {
-    let mut widget: &dyn Widget = root;
-    let mut best: Option<(usize, String)> = None;
-    if let Some(t) = widget.tooltip_text() {
-        best = Some((0, t.to_string()));
-    }
-    for (i, &idx) in path.iter().enumerate() {
-        let Some(child) = widget.children().get(idx) else {
-            break;
-        };
-        widget = child.as_ref();
-        if let Some(t) = widget.tooltip_text() {
-            best = Some((i + 1, t.to_string()));
-        }
-    }
-    best.map(|(depth, text)| (path[..depth].to_vec(), text))
 }

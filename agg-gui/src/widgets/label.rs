@@ -721,6 +721,22 @@ impl Widget for Label {
         self.base.max_size
     }
 
+    /// An ellipsizing single-line label gives way in a crowded row: it ends
+    /// its line in "..." instead of pushing its neighbours out.
+    fn shrink_min_width(&self) -> Option<f64> {
+        (self.ellipsis_if_clipped && !self.wrap).then_some(self.base.min_size.width)
+    }
+
+    /// agg-sharp `TextWidget.ToolTipText`: with no tip of its own, a label cut
+    /// back to "..." shows its full text as its tooltip.
+    fn tooltip_text(&self) -> Option<&str> {
+        match self.base.tooltip.as_deref() {
+            Some(tip) if !tip.is_empty() => Some(tip),
+            _ if self.ellipsis_active() => Some(self.text.as_str()),
+            tip => tip,
+        }
+    }
+
     fn measure_min_height(&self, available_w: f64) -> f64 {
         // Wrapped: count lines at the supplied width.  Non-wrapped:
         // a single line tall.  Used by ancestor `Window::tight_content_fit`

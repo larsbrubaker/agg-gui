@@ -138,6 +138,9 @@ pub struct ComboBox {
     has_selection: bool,
     /// Text the closed box shows while nothing is selected.
     placeholder: String,
+    /// Report the widest option's width instead of the whole offered width —
+    /// see [`ComboBox::with_fit_width`] (`combo_box/fit.rs`).
+    fit_width: bool,
 }
 
 impl ComboBox {
@@ -192,6 +195,7 @@ impl ComboBox {
             focused: false,
             has_selection: true,
             placeholder: String::new(),
+            fit_width: false,
         }
     }
 
@@ -361,6 +365,7 @@ impl ComboBox {
     }
 }
 
+mod fit;
 mod geometry;
 mod selection;
 mod style;
@@ -445,8 +450,13 @@ impl Widget for ComboBox {
         }
 
         let closed_h = self.closed_h();
-        self.bounds = Rect::new(0.0, 0.0, available.width, closed_h);
-        let inner_w = (available.width - PAD_X * 2.0 - ARROW_W).max(0.0);
+        let width = if self.fit_width {
+            self.fit_content_width().min(available.width)
+        } else {
+            available.width
+        };
+        self.bounds = Rect::new(0.0, 0.0, width, closed_h);
+        let inner_w = (width - PAD_X * 2.0 - ARROW_W).max(0.0);
 
         // Layout selected label.
         let sl = self.selected_label.layout(Size::new(inner_w, closed_h));
@@ -465,7 +475,7 @@ impl Widget for ComboBox {
         }
         drop(labels);
 
-        Size::new(available.width, closed_h)
+        Size::new(width, closed_h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {

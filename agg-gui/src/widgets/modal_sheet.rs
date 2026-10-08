@@ -65,6 +65,9 @@ pub struct ModalSheet {
     visible: Rc<Cell<bool>>,
     /// Desired panel size; clamped to the available bounds at layout.
     panel_size: Size,
+    /// The panel never shrinks below this, even when the host is smaller
+    /// (the panel then overhangs the host, centred, and is clipped by it).
+    min_panel_size: Size,
     /// Panel rect in local coordinates, computed each layout.
     panel: Rect,
     /// Dismiss on `Escape` (default true; SwiftUI's `.cancelAction`).
@@ -94,6 +97,7 @@ impl ModalSheet {
             base: WidgetBase::new(),
             visible,
             panel_size: Size::new(480.0, 360.0),
+            min_panel_size: Size::ZERO,
             panel: Rect::default(),
             escape_closes: true,
             key_passthrough: false,
@@ -116,6 +120,24 @@ impl ModalSheet {
     pub fn with_panel_size(mut self, size: Size) -> Self {
         self.panel_size = size;
         self
+    }
+
+    /// Smallest panel size: the clamp to the host bounds stops here, as a
+    /// desktop window's minimum size does (agg-sharp `DialogWindow.MinimumSize`).
+    pub fn with_min_panel_size(mut self, size: Size) -> Self {
+        self.min_panel_size = size;
+        self
+    }
+
+    /// Object-safe counterpart of [`with_min_panel_size`](Self::with_min_panel_size)
+    /// for a host that learns the minimum after building the sheet.
+    pub fn set_min_panel_size(&mut self, size: Size) {
+        self.min_panel_size = size;
+    }
+
+    /// The smallest panel size (see [`with_min_panel_size`](Self::with_min_panel_size)).
+    pub fn min_panel_size(&self) -> Size {
+        self.min_panel_size
     }
 
     /// Disable the default Escape-to-close behaviour.
@@ -258,11 +280,13 @@ impl Widget for ModalSheet {
             .panel_size
             .width
             .min(available.width - 2.0 * EDGE_MARGIN)
+            .max(self.min_panel_size.width)
             .max(0.0);
         let h = self
             .panel_size
             .height
             .min(available.height - 2.0 * EDGE_MARGIN)
+            .max(self.min_panel_size.height)
             .max(0.0);
         // Centered, snapped to whole pixels for crisp chrome.
         let x = ((available.width - w) / 2.0).round();

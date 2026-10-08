@@ -8,10 +8,10 @@
 //! keep their offered-size positions and draw above/right of the column's
 //! box — where its clip cuts them away.  These cover the two parents that
 //! size a child differently from what they measured it with:
-//! `AbsoluteLayout`, and `FlexColumn`'s own cross axis.
+//! `AbsoluteLayout`, `Container`, and `FlexColumn`'s own cross axis.
 
 use crate::widgets::AbsoluteLayout;
-use crate::{FlexColumn, HAnchor, Rect, Size, SizedBox, VAnchor, Widget};
+use crate::{Container, FlexColumn, HAnchor, Rect, Size, SizedBox, VAnchor, Widget};
 
 fn sized(w: f64, h: f64) -> SizedBox {
     SizedBox::new().with_width(w).with_height(h)
@@ -105,4 +105,35 @@ fn a_stretched_column_in_an_absolute_layout_places_rows_in_its_full_box() {
         column.children()[0].bounds(),
         Rect::new(130.0, 380.0, 40.0, 20.0)
     );
+}
+
+#[test]
+fn a_fitted_column_in_a_container_keeps_its_rows_inside() {
+    let mut container = Container::new().add(Box::new(fitted_column()));
+    container.layout(Size::new(300.0, 400.0));
+    let column = &container.children()[0];
+    // The column sits at the top of the container, at the size it reported.
+    assert_eq!(column.bounds(), Rect::new(0.0, 360.0, 100.0, 40.0));
+    assert_children_inside(column.as_ref());
+    assert_eq!(
+        column.children()[0].bounds(),
+        Rect::new(30.0, 20.0, 40.0, 20.0)
+    );
+    assert_eq!(
+        column.children()[1].bounds(),
+        Rect::new(0.0, 0.0, 100.0, 20.0)
+    );
+}
+
+#[test]
+fn a_fit_height_container_keeps_a_fitted_column_inside() {
+    let mut container = Container::new()
+        .with_fit_height(true)
+        .with_padding(5.0)
+        .add(Box::new(fitted_column()));
+    let size = container.layout(Size::new(300.0, 400.0));
+    assert_eq!(size, Size::new(300.0, 50.0));
+    let column = &container.children()[0];
+    assert_eq!(column.bounds(), Rect::new(5.0, 5.0, 100.0, 40.0));
+    assert_children_inside(column.as_ref());
 }
