@@ -5,7 +5,7 @@
 //! shells use, find widgets by name, and wait on conditions.  This crate is
 //! test-only: consumers take it as a dev-dependency so watchdogs and image
 //! matching stay out of product builds.  The design, including the slices
-//! still to land (the runner, input simulation, the live driver), is
+//! still to land (the runner's waits, input and lookups, the live driver), is
 //! `docs/design/gui-automation.md`.
 //!
 //! Modules:
@@ -18,21 +18,30 @@
 //!   virtual clock) and `HeadlessWindow` (C#'s `SystemWindow` for runner-less
 //!   tests).
 //! - [`probe`] — `ProbeWidget`, the stand-in for a plain C# `GuiWidget`.
+//! - [`execute`] — `show_window_and_execute_tests`: one run on its own UI
+//!   thread, with the bring-up and test budgets, `AutomationWindow`, and
+//!   `AutomationError`.
+//! - [`runner`] — `AutomationRunner`, what a test body drives, and
+//!   `AutomationConfig` with C#'s defaults.
 //! - [`tree_query`] — `WidgetHandle`, lookup by name, screen and clipped
 //!   rectangles, `ActuallyVisibleOnScreen`, `Parents<T>`/`Children<T>`.
 
 pub mod driver;
+pub mod execute;
 mod key_mapping;
 pub mod keys;
 pub mod probe;
+pub mod runner;
 pub mod search_region;
 pub mod tree_query;
 pub mod typed_key_parser;
 pub mod waits;
 
 pub use driver::{ClockPolicy, FrameKind, HeadlessDriver, HeadlessWindow, UiDriver};
+pub use execute::{show_window_and_execute_tests, AutomationError, AutomationWindow, RunOptions};
 pub use keys::Keys;
 pub use probe::{ProbeLog, ProbeWidget};
+pub use runner::{AutomationConfig, AutomationRunner};
 pub use search_region::{ScreenRectangle, SearchRegion};
 pub use tree_query::WidgetHandle;
 pub use typed_key_parser::{ParseError, TypedKey, TypedKeyParser};

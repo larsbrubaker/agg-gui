@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (7 onward) fill agg-gui's gaps test-first, port the 101 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices (8 onward) fill agg-gui's gaps test-first, port the 99 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -53,7 +53,7 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms); the other modules below are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`) and `runner` (`AutomationRunner` with `AutomationConfig`, `mark_test_complete` and driver access); the other modules and members below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
 - Features, each added with the slice whose code uses it (none exist yet; headless is the default):
@@ -64,7 +64,7 @@ Modules (each under 800 lines, each opening with a purpose comment):
 
 ```
 src/lib.rs                 crate docs, re-exports
-src/runner/mod.rs          AutomationRunner, AutomationConfig, ClickOrigin, ModifierKeys, MarkTestComplete
+src/runner/mod.rs          (exists) AutomationRunner, AutomationConfig, MarkTestComplete; ClickOrigin, ModifierKeys to come
 src/runner/named.rs        Get*/Wait*/NameExists/NamedWidgetExists/ChildExists/GetRegionByName/ScrollIntoView
 src/runner/pointer.rs      stepped moves, Click*/RightClick*/DoubleClick*/Drag*/Drop*/MoveToByName/SetMouseCursorPosition
 src/runner/keyboard.rs     Type, Press/ReleaseModifierKeys, SelectAll/None
@@ -78,7 +78,7 @@ src/driver/mod.rs          (exists) UiDriver trait, FrameKind, ClockPolicy
 src/driver/headless.rs     (exists) HeadlessDriver
 src/driver/window.rs       (exists) HeadlessWindow (the "SystemWindow" for tests that use no runner)
 src/driver/live.rs         (feature live) LiveDriver over agg_gui_shell::ShellSession
-src/execute.rs             show_window_and_execute_tests, RunOptions, AutomationError, watchdogs
+src/execute/              (exists) show_window_and_execute_tests, RunOptions, AutomationWindow, AutomationError, load watchdog; close watchdog to come
 src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks)
 src/overlay.rs             RenderMouse (simulated pointer drawing)
 src/dialog_provider.rs     AutomationFileDialog (AutomationDialogProvider)
@@ -171,7 +171,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 
 | C# | Rust |
 |---|---|
-| `ShowWindowAndExecuteTests(window, test, secs = 30, images, closeWindow, timeoutIsTheExpectedOutcome)` | `show_window_and_execute_tests(build, body, RunOptions) -> Result<R, AutomationError>` (section 5) |
+| `ShowWindowAndExecuteTests(window, test, secs = 30, images, closeWindow, timeoutIsTheExpectedOutcome)` | `show_window_and_execute_tests(RunOptions, build, body) -> Result<R, AutomationError>` (section 5) |
 
 **Supporting types**
 - `SearchRegion::image(capture)` takes the runner's `get_current_screen` as its capture function.
@@ -211,14 +211,14 @@ pub fn show_window_and_execute_tests<S, R>(
 - It spawns one fresh named thread per run (named `<<< UI THREAD`).
 - **Isolation:** a fresh thread means fresh thread-locals (focus, modifiers, tooltip, animation and idle queue). That replaces C#'s `[NotInParallel]` plus `ResetForTests`/`Keyboard.Clear`, so tests can run in parallel. The one exception is process-global state (`platform`, input profile); slice 21 adds a thread-local override for it.
 - **What runs on the thread:**
-  1. `build()` creates the `AutomationWindow`: root widget, logical size, `on_load`, `on_close_requested` (the veto), `on_closed`.
+  1. `build()` creates the `AutomationWindow` (root widget, logical size, `on_load`; slice 28 adds `on_close_requested`, the veto, and `on_closed`) and the body's state.
   2. The driver comes up and the first paint fires `on_load` (= Load).
   3. A Loaded message is sent and `body` runs inside `catch_unwind`.
   4. If `require_test_completion` is set and `mark_test_complete()` was not called, the run fails with C#'s message.
-  5. The close phase runs (below), then the result is sent.
+  5. The body's outcome is sent (that stops the test clock), then the close phase runs (below) and reports Closed. Today the close phase drops the tree on its thread; slice 28 brings the protocol below.
 - **The calling thread is the watchdog:**
-  - `recv_timeout(max(budget, 30 s))` waits for Loaded. This is the bring-up budget. Its load watchdog dumps stacks 2 s before the end unless `timeout_is_the_expected_outcome`.
-  - It then waits `secs_to_test_failure` (wall clock, starting at Loaded) for Done.
+  - `recv_timeout(max(budget, 30 s))` waits for Loaded. This is the bring-up budget. Its load watchdog reports on stderr 2 s before the end unless `timeout_is_the_expected_outcome` (slice 30c adds the stack dump).
+  - It then waits `secs_to_test_failure` (wall clock, starting at Loaded) for the body's outcome.
   - On timeout it sets the run's `cancel: Arc<AtomicBool>`; the next runner call on the stuck thread panics with "test timed out". It returns `AutomationError::Timeout` and lets the thread finish detached, because Rust cannot kill a thread. This reproduces `AutomationRunnerTimeoutTest`: a body that sleeps 10 s still returns Timeout at about 1 s.
 - **Close phase:**
   - It calls `opts.close_window` (the `closeWindow` callback) or asks the window to close.
@@ -354,7 +354,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | C# class (count) | Rust file | Notes |
 |---|---|---|
-| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 10 to go (StaticDelayExpires… is ported) |
+| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 8 to go (StaticDelayExpires…, WindowLoadTimeIsNotChargedToTheTestBudget and AutomationRunnerTimeoutTest are ported) |
 | AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
 | MacTextEditKeyBindingTests (12) | `mac_text_edit_key_binding_tests.rs` | `HeadlessWindow` + `app.on_key_down` |
@@ -372,7 +372,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 7 | `execute.rs`: thread per run, Loaded/bring-up, wall budget plus `cancel`, `catch_unwind`, MarkTestComplete, `on_load` | AutomationRunnerTimeoutTest, WindowLoadTimeIsNotChargedToTheTestBudget |
 | 8 | Name lookup and waits (`named.rs`, `waits.rs`, PointerReach), G8 `is_enabled` | ZeroSecondWaitsReportWhatIsThereNow |
 | 9 | `SimulatedInput` plus stepped moves and pacing, Click*/RightClick*/MoveToByName/SetMouseCursorPosition | GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow |
 | 10 | Click semantics on probe widgets and Button | WidgetClick: ClickFiresOnCorrectWidgets, ClickSuppressedOnExternalMouseUp, ClickSuppressedOnMouseUpWithinChild2 |
@@ -403,7 +402,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (101 still to port): AutomationRunnerTests 11 (1 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (1 ported), Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3: **103**.
+**Tally** (99 still to port): AutomationRunnerTests 11 (3 ported), Winforms 3, Flow 24, Mac 12, Menu 1, Mouse 13 (1 ported), Paint 2, Present 1, TextEditFocus 3, TextEdit 13, ThreadStackDump 10, ToolTip 7, WidgetClick 3: **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 
