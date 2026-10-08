@@ -55,4 +55,9 @@ pub trait UiDriver {
     fn logical_size(&self) -> agg_gui::Size;
     /// The last painted frame.
     fn current_screen(&self) -> &agg_gui::Framebuffer;
+    /// The window's size in physical pixels (the pointer space's extent).
+    fn size_px(&self) -> (u32, u32);
+    /// Deliver a simulated input event (physical pixels, Y-down) through the
+    /// window's input forwarder.
+    fn send(&mut self, event: agg_gui::shell_input::ForwarderEvent);
 }

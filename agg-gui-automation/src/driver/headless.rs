@@ -169,4 +169,12 @@ impl UiDriver for HeadlessDriver {
     fn current_screen(&self) -> &Framebuffer {
         &self.framebuffer
     }
+
+    fn size_px(&self) -> (u32, u32) {
+        HeadlessDriver::size_px(self)
+    }
+
+    fn send(&mut self, event: ForwarderEvent) {
+        HeadlessDriver::send(self, event);
+    }
 }

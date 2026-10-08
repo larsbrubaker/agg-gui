@@ -2,7 +2,8 @@
 //! `GuiAutomation/AutomationRunner.cs`. This file holds its configuration and
 //! run control; `waits.rs` the frame-pumping waits (`delay`, `wait_for`,
 //! `assert`, ...) and `named.rs` the name lookups and the waits that poll
-//! them. The pointer and keyboard members arrive in the later slices of
+//! them, and `pointer.rs` the pointer gestures (stepped moves, clicks). The
+//! keyboard members arrive in a later slice of
 //! `docs/design/gui-automation.md`.
 //!
 //! A runner is created by [`crate::execute::show_window_and_execute_tests`]
@@ -18,11 +19,14 @@ use std::sync::Arc;
 use agg_gui::App;
 
 use crate::driver::{HeadlessDriver, UiDriver};
+use crate::input::{InputMethod, SimulatedInput};
 
 mod named;
+mod pointer;
 mod waits;
 
 pub use named::{WaitOpts, WidgetPredicate, DEFAULT_WIDGET_WAIT_SECONDS};
+pub use pointer::{cubic_out, mouse_move_steps, ClickOpts, ClickOrigin};
 pub use waits::{
     DEFAULT_CHECK_INTERVAL_MILLISECONDS, DEFAULT_CONDITION_WAIT_SECONDS, DEFAULT_DELAY_SECONDS,
     DEFAULT_UI_WORK_WAIT_MILLISECONDS,
@@ -76,6 +80,9 @@ pub struct AutomationRunner {
     /// `testRunner.RequireTestCompletion = false` the same way).
     pub config: AutomationConfig,
     driver: HeadlessDriver,
+    /// Where pointer input goes (C# `inputSystem`): the forwarder, unless a
+    /// test replaced it.
+    input: Box<dyn InputMethod>,
     test_was_completed: bool,
     cancel: Arc<AtomicBool>,
 }
@@ -91,6 +98,7 @@ impl AutomationRunner {
         Self {
             config,
             driver,
+            input: Box::new(SimulatedInput::new()),
             test_was_completed: false,
             cancel,
         }

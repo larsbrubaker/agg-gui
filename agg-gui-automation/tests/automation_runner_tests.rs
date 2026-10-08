@@ -1,12 +1,15 @@
 //! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`.
 //!
 //! Only the tests whose subjects have landed are here; the rest of the class
-//! (clicks, typing, image waits) arrives with the runner slices listed
+//! (double clicks, typing, image waits) arrives with the runner slices listed
 //! in `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
 //! [`AutomationWindow`], built on the run's own UI thread; C#'s captured
-//! locals that the body sets are shared atomics, as the body runs on that
-//! thread.
+//! locals are shared atomics when the calling thread sets them, and state
+//! `build` returns beside the window (a click counter) when the widgets do,
+//! as both the widgets and the body run on that thread.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -15,9 +18,37 @@ use std::time::{Duration, Instant};
 use agg_gui::widgets::Button;
 use agg_gui::{Font, Rect, Size, Widget};
 use agg_gui_automation::runner::DEFAULT_WIDGET_WAIT_SECONDS;
+use agg_gui_automation::WaitOpts;
 use agg_gui_automation::{
     show_window_and_execute_tests, static_delay, AutomationError, AutomationWindow, RunOptions,
 };
+
+#[test]
+fn get_widget_by_name_test_no_region_single_window() {
+    // single system window
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        || {
+            let left_click_count = Rc::new(Cell::new(0));
+
+            let mut button_container = AutomationWindow::new(300.0, 200.0);
+
+            let font = Arc::new(agg_gui::fonts::standard_ui_font());
+            let clicks = Rc::clone(&left_click_count);
+            let left_button = left_button(font).on_click(move || clicks.set(clicks.get() + 1));
+            button_container.add_child(Box::new(left_button));
+            (button_container, left_click_count)
+        },
+        |test_runner, left_click_count| {
+            test_runner.click_by_name("left");
+            test_runner.delay(0.5);
+
+            assert!(left_click_count.get() == 1);
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("clicking a button by name clicks it once");
+}
 
 #[test]
 fn static_delay_expires_on_total_elapsed_time_not_the_seconds_component() {
@@ -144,6 +175,50 @@ fn automation_runner_timeout_test() {
 
     // Should have returned a timeout
     assert_eq!(result.err(), Some(AutomationError::Timeout));
+}
+
+#[test]
+fn get_widget_by_name_test_region_single_window() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        || {
+            let left_click_count = Rc::new(Cell::new(0));
+
+            let mut button_container = AutomationWindow::new(300.0, 200.0);
+
+            let font = Arc::new(agg_gui::fonts::standard_ui_font());
+            let clicks = Rc::clone(&left_click_count);
+            let left_button =
+                left_button(Arc::clone(&font)).on_click(move || clicks.set(clicks.get() + 1));
+            button_container.add_child(Box::new(left_button));
+
+            let right_button = placed_button("right", 110.0, 40.0, font);
+            button_container.add_child(Box::new(right_button));
+            (button_container, left_click_count)
+        },
+        |test_runner, left_click_count| {
+            test_runner.click_by_name("left");
+            test_runner.delay(0.5);
+            assert_eq!(left_click_count.get(), 1);
+
+            assert!(test_runner.name_exists("left", DEFAULT_WIDGET_WAIT_SECONDS, true));
+
+            let right_region = test_runner
+                .get_region_by_name("right", &WaitOpts::default())
+                .expect("the right button has a region");
+            let widget = test_runner.get_widget_by_name(
+                "left",
+                &WaitOpts {
+                    secs_to_wait: 5.0,
+                    ..WaitOpts::in_region(&right_region)
+                },
+            );
+
+            assert!(widget.is_none());
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("a name lookup limited to another widget's region finds nothing");
 }
 
 /// C# `new Button("left", 10, 40) { Name = "left" }`: a button at (10, 40)
