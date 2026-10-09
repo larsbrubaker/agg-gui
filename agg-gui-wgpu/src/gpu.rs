@@ -289,7 +289,25 @@ fn request_device(
     }))
     .map_err(|_| GpuInitError::RequestAdapter)?;
 
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(
+        label,
+        optional_features,
+        &adapter,
+    )))
+    .map_err(|_| GpuInitError::RequestDevice)?;
+    Ok((surface, adapter, device, queue))
+}
+
+/// The device request every agg-gui-wgpu device is made with: a window's
+/// ([`Gpu::new`]) and the offscreen one ([`crate::headless::HeadlessGpu`]),
+/// so a frame painted headlessly runs under the same features and limits as
+/// the app's.
+pub(crate) fn device_descriptor<'a>(
+    label: &'a str,
+    optional_features: wgpu::Features,
+    adapter: &wgpu::Adapter,
+) -> wgpu::DeviceDescriptor<'a> {
+    wgpu::DeviceDescriptor {
         label: Some(label),
         // Optional features are masked against what the adapter actually
         // offers, so asking for an absent one degrades instead of failing
@@ -303,9 +321,7 @@ fn request_device(
         memory_hints: wgpu::MemoryHints::Performance,
         experimental_features: wgpu::ExperimentalFeatures::default(),
         trace: wgpu::Trace::Off,
-    }))
-    .map_err(|_| GpuInitError::RequestDevice)?;
-    Ok((surface, adapter, device, queue))
+    }
 }
 
 /// wgpu device + surface bundle for one OS window.

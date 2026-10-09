@@ -23,7 +23,7 @@ use agg_gui::draw_ctx::DrawCtx;
 
 // The one shared test device (see its doc for why tests must not each create
 // their own instance + device).
-use crate::layer_text_readback_tests::try_device;
+use crate::layer_text_readback_tests::{try_device, Target};
 use crate::text_render::{lcd_cache_decide, LcdCacheAction, LcdEntryMeta};
 use crate::WgpuGfxCtx;
 
@@ -257,95 +257,6 @@ fn gpu_mask_same_arc_reuses_texture() {
 // ---------------------------------------------------------------------------
 // End-to-end correctness: rendered content must change after an in-place edit
 // ---------------------------------------------------------------------------
-
-/// Minimal offscreen render target + CPU readback (top-row-first RGBA8).
-struct Target {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    w: u32,
-    h: u32,
-}
-
-impl Target {
-    fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, w: u32, h: u32) -> Self {
-        assert_eq!(
-            (w * 4) % 256,
-            0,
-            "width must keep bytes_per_row 256-aligned"
-        );
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("lcd-cache-readback"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self {
-            device,
-            queue,
-            texture,
-            view,
-            w,
-            h,
-        }
-    }
-
-    fn read(&self) -> Vec<u8> {
-        let bpr = self.w * 4;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("lcd-cache-readback-buf"),
-            size: (bpr * self.h) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut enc = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bpr),
-                    rows_per_image: Some(self.h),
-                },
-            },
-            wgpu::Extent3d {
-                width: self.w,
-                height: self.h,
-                depth_or_array_layers: 1,
-            },
-        );
-        self.queue.submit(std::iter::once(enc.finish()));
-
-        let slice = buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range().to_vec();
-        buffer.unmap();
-        data
-    }
-}
 
 fn center_luma(data: &[u8], w: u32, h: u32) -> u32 {
     let x = w / 2;

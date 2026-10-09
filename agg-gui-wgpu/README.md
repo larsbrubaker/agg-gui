@@ -31,6 +31,11 @@ instead.
 - **`gpu::Gpu`** — the device + surface bundle a native shell builds its swap
   chain on, including the surface-acquire recovery policy and the
   max-texture-dimension clamp.
+- **`headless`** (native) — rendering with no window, for test harnesses:
+  `HeadlessGpu::shared()` (one device per process, requested as `Gpu::new`
+  requests a window's), `HeadlessTarget` (an offscreen texture in the shells'
+  frame format with RGBA read-back), and `HeadlessFrame`, which runs a shell's
+  frame around a paint closure or an `App` — custom render passes included.
 
 ## Usage
 
@@ -48,6 +53,16 @@ ctx.present(surface_texture); // releases the ctx's frame handles, then presents
 Always present via `ctx.present(...)` rather than `surface_texture.present()`:
 the ctx may hold a clone of the back buffer for screenshots, and on DX12 a
 clone that outlives present makes the next swap-chain resize fail.
+
+Headless, in a test:
+
+```rust,ignore
+let gpu = HeadlessGpu::shared()?;            // Err(NoAdapter) on a GPU-less machine
+let mut frame = HeadlessFrame::new(gpu, 1280, 800);
+app.layout(Size::new(1280.0, 800.0));
+frame.render_app(Color::white(), &mut app);
+let rgba = frame.read_rgba()?;               // top row first, width * 4 bytes per row
+```
 
 Turn-key platform shells (winit event loop, browser canvas + rAF loop) live in
 the agg-gui repo's `demo-wgpu` crate.

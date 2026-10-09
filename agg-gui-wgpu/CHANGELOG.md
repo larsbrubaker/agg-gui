@@ -10,6 +10,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `headless` (native only): paint a whole widget tree on the GPU with no
+  window and read it back. `HeadlessGpu::shared()` returns one device and
+  queue for the process, requested with `Gpu::new`'s backends, features,
+  limits and start-up budget, or a `HeadlessError` saying why there is none
+  (`NoAdapter` on a machine without a GPU). `HeadlessTarget` is an offscreen
+  texture in `HEADLESS_FORMAT` (`Bgra8Unorm`, the shells' frame format) or any
+  8-bit RGBA/BGRA format, with `read_rgba` (RGBA8, top row first, no row
+  padding) and `read_framebuffer` (an `agg_gui::Framebuffer`, bottom row
+  first). `HeadlessFrame` pairs a `WgpuGfxCtx` with a target and runs a
+  shell's frame around a paint closure (`render`) or an `App`
+  (`render_app`), so blend modes, retained layers and `WgpuCustomRender`
+  passes behave as on a window. The crate's own GPU tests now run on this
+  device and target.
+
 - `DrawCtx::set_blend_mode` works on the GPU: solid fills, solid strokes and
   grayscale text draw through every SVG compositing operator (`CompOp`) and
   match the software `GfxCtx` pixel for pixel at the same cover (within 2 per

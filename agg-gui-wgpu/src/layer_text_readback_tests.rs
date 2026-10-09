@@ -18,13 +18,18 @@
 //! The tests are skipped (pass trivially) when no GPU adapter is available so
 //! CI on a headless-without-GPU box does not spuriously fail; on a machine with
 //! a working adapter they run for real.
+//!
+//! This file also hosts the crate's shared GPU test helpers (`try_device`,
+//! `Target`, `px`), thin wrappers over the public [`crate::headless`] device
+//! and target.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::text::Font;
 
+use crate::headless::{HeadlessGpu, HeadlessTarget};
 use crate::WgpuGfxCtx;
 
 /// In-crate test font so the published tarball's tests still compile — the
@@ -33,147 +38,36 @@ use crate::WgpuGfxCtx;
 const TEST_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 
 /// The headless device + queue shared by every GPU test in this crate, or
-/// `None` when no adapter is present.  Used by all the `*_tests.rs` modules.
+/// `None` when no adapter is present (the test then skips).  Used by all the
+/// `*_tests.rs` modules.
 ///
-/// One device for the whole test binary, created on first use, never dropped.
-/// A fresh instance + device per test broke in two ways on Windows/NVIDIA, both
-/// seen in thread stacks captured from the hung/crashed test binary:
-///
-/// - **Deadlock under the parallel runner** with `Backends::all()`: each
-///   instance's GL backend spawns a "wgpu-hal WGL Instance Thread".  When that
-///   thread exits, `nvoglv64!DllMain` (thread-detach, run under the OS loader
-///   lock) blocks on a driver-internal lock, while other test threads inside
-///   Vulkan calls — served by the same `nvoglv64.dll` — block too; no thread
-///   made progress again.
-/// - **Access violation in `vulkan-1.dll`** (Vulkan loader 1.3.280), inside
-///   `vkSetDebugUtilsObjectNameEXT` called from
-///   `wgpu_hal::vulkan::DeviceShared::set_object_name` while building
-///   `WgpuPipelines`, after earlier tests had created and destroyed their own
-///   instances/devices — even with `--test-threads=1`.
-///
-/// Sharing one device avoids repeated instance/device create/destroy
-/// altogether (it is also far cheaper per test).  `Backends::PRIMARY` matches
-/// production `Gpu::new` and keeps the GL/WGL path out of the tests.  Sharing
-/// is safe here because every test builds its own `WgpuGfxCtx`, textures, and
-/// readback buffers; the only device-wide effect is that a blocking
-/// `device.poll` may also wait for other tests' submissions.
+/// This is [`HeadlessGpu::shared`] — one device for the whole test binary;
+/// see its doc for why tests must not each create their own instance and
+/// device.
 pub(crate) fn try_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
-    type Shared = Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>;
-    static SHARED: OnceLock<Shared> = OnceLock::new();
-    SHARED.get_or_init(create_device).clone()
+    let gpu = HeadlessGpu::shared().ok()?;
+    Some((Arc::clone(gpu.device()), Arc::clone(gpu.queue())))
 }
 
-/// Build the one shared test device — see [`try_device`].
-fn create_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
-    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-    desc.backends = wgpu::Backends::PRIMARY;
-    let instance = wgpu::Instance::new(desc);
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    }))
-    .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("readback-test"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        memory_hints: wgpu::MemoryHints::Performance,
-        experimental_features: wgpu::ExperimentalFeatures::default(),
-        trace: wgpu::Trace::Off,
-    }))
-    .ok()?;
-    Some((Arc::new(device), Arc::new(queue)))
-}
-
-/// Offscreen render target + CPU readback.  Width is chosen a multiple of 64 so
-/// `bytes_per_row = w*4` is already 256-aligned (no padding math needed).
+/// Offscreen `Rgba8Unorm` render target + CPU readback — a
+/// [`HeadlessTarget`] in the format these tests build their `WgpuGfxCtx` for,
+/// with its view exposed for `flush_to_surface`.
 pub(crate) struct Target {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    texture: wgpu::Texture,
+    inner: HeadlessTarget,
     pub(crate) view: wgpu::TextureView,
-    w: u32,
-    h: u32,
 }
 
 impl Target {
     pub(crate) fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, w: u32, h: u32) -> Self {
-        assert_eq!(
-            (w * 4) % 256,
-            0,
-            "width must keep bytes_per_row 256-aligned"
-        );
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("readback-target"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self {
-            device,
-            queue,
-            texture,
-            view,
-            w,
-            h,
-        }
+        let inner =
+            HeadlessTarget::with_format(device, queue, wgpu::TextureFormat::Rgba8Unorm, w, h);
+        let view = inner.view().clone();
+        Self { inner, view }
     }
 
     /// Copy the rendered target back to a top-row-first RGBA8 `Vec`.
     pub(crate) fn read(&self) -> Vec<u8> {
-        let bpr = self.w * 4;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback-buf"),
-            size: (bpr * self.h) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut enc = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bpr),
-                    rows_per_image: Some(self.h),
-                },
-            },
-            wgpu::Extent3d {
-                width: self.w,
-                height: self.h,
-                depth_or_array_layers: 1,
-            },
-        );
-        self.queue.submit(std::iter::once(enc.finish()));
-
-        let slice = buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range().to_vec();
-        buffer.unmap();
-        data
+        self.inner.read_rgba().expect("read back the test target")
     }
 }
 

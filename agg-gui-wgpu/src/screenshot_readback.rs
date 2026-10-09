@@ -7,6 +7,9 @@
 //! `end_frame` the capture closure copies it into a top-down RGBA8
 //! buffer via a padded staging buffer.
 //!
+//! The copy itself ([`read_texture_rgba`]) is shared with the offscreen
+//! targets of `crate::headless`.
+//!
 //! Also owns the release half of that stash: [`WgpuGfxCtx::present`] /
 //! [`WgpuGfxCtx::release_frame_texture`] drop the ctx's frame handles before
 //! the swap chain gets the frame back (required on DX12 — see `present`).
@@ -100,100 +103,116 @@ impl WgpuGfxCtx {
             return (Vec::new(), 0, 0);
         };
         let size = texture.size();
-        let w = size.width;
-        let h = size.height;
+        let (w, h) = (size.width, size.height);
         if w == 0 || h == 0 {
             return (Vec::new(), 0, 0);
         }
-
-        // wgpu requires `bytes_per_row` to be a multiple of
-        // COPY_BYTES_PER_ROW_ALIGNMENT (256).  We allocate a padded buffer
-        // for the copy and strip the padding row-by-row when assembling the
-        // returned `Vec<u8>`.
-        const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let unpadded_bpr = w * 4;
-        let padded_bpr = unpadded_bpr.div_ceil(ALIGN) * ALIGN;
-        let buffer_size = (padded_bpr as u64) * (h as u64);
-
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("screenshot_staging"),
-            size: buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("screenshot_copy"),
-            });
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &staging,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bpr),
-                    rows_per_image: Some(h),
-                },
-            },
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        // Map the staging buffer.  `map_async` is async via callback; we
-        // poll the device until the map completes.  On native this is fine
-        // (synchronous from the caller's POV); on WASM the wgpu webgl
-        // backend resolves the future on the JS event-loop tick that the
-        // surrounding render loop is running on, so this still works
-        // because the JS harness drives `render()` from a microtask.
-        let slice = staging.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = sender.send(res);
-        });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        let map_result = receiver
-            .recv()
-            .expect("map_async sender dropped before resolving");
-        if map_result.is_err() {
-            return (Vec::new(), 0, 0);
+        match read_texture_rgba(&self.device, &self.queue, texture, self.surface_format) {
+            Ok(pixels) => (pixels, w, h),
+            Err(_) => (Vec::new(), 0, 0),
         }
+    }
+}
 
-        // Surface format may be Bgra8Unorm; PNG / JS expects RGBA so swap
-        // R↔B per pixel as we copy.  Surface textures are Y-down, which
-        // matches the screenshot module's "TOP row first" convention, so
-        // no row flip needed.
-        let bgra = matches!(
-            self.surface_format,
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
-        );
-        let mut out = Vec::with_capacity((w as usize) * (h as usize) * 4);
-        {
-            let view = slice.get_mapped_range();
-            for row in 0..h as usize {
-                let start = row * padded_bpr as usize;
-                let end = start + unpadded_bpr as usize;
-                let src = &view[start..end];
-                if bgra {
-                    for px in src.chunks_exact(4) {
-                        out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
-                    }
-                } else {
-                    out.extend_from_slice(src);
+/// Copy mip 0 of `texture` back to CPU memory as tightly packed RGBA8, top
+/// row first (Y-down image order, as surface textures are laid out).
+///
+/// `format` says how the texels are stored: a `Bgra8*` texture has R and B
+/// swapped on the way out, so callers always get RGBA order; any other format
+/// is copied as is, so it must be 4 bytes per texel. Blocks on the device
+/// until the copy is mapped. Shared by [`WgpuGfxCtx::read_screenshot`] and
+/// [`crate::headless::HeadlessTarget::read_rgba`].
+pub(crate) fn read_texture_rgba(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    format: wgpu::TextureFormat,
+) -> Result<Vec<u8>, wgpu::BufferAsyncError> {
+    let size = texture.size();
+    let (w, h) = (size.width, size.height);
+
+    // wgpu requires `bytes_per_row` to be a multiple of
+    // COPY_BYTES_PER_ROW_ALIGNMENT (256).  We allocate a padded buffer
+    // for the copy and strip the padding row-by-row when assembling the
+    // returned `Vec<u8>`.
+    const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let unpadded_bpr = w * 4;
+    let padded_bpr = unpadded_bpr.div_ceil(ALIGN) * ALIGN;
+    let buffer_size = (padded_bpr as u64) * (h as u64);
+
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("screenshot_staging"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("screenshot_copy"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bpr),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(std::iter::once(encoder.finish()));
+
+    // Map the staging buffer.  `map_async` is async via callback; we
+    // poll the device until the map completes.  On native this is fine
+    // (synchronous from the caller's POV); on WASM the wgpu webgl
+    // backend resolves the future on the JS event-loop tick that the
+    // surrounding render loop is running on, so this still works
+    // because the JS harness drives `render()` from a microtask.
+    let slice = staging.slice(..);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |res| {
+        let _ = sender.send(res);
+    });
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    receiver
+        .recv()
+        .expect("map_async sender dropped before resolving")?;
+
+    // Surface format may be Bgra8Unorm; PNG / JS expects RGBA so swap
+    // R↔B per pixel as we copy.  Surface textures are Y-down, which
+    // matches the screenshot module's "TOP row first" convention, so
+    // no row flip needed.
+    let bgra = matches!(
+        format,
+        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+    );
+    let mut out = Vec::with_capacity((w as usize) * (h as usize) * 4);
+    {
+        let view = slice.get_mapped_range();
+        for row in 0..h as usize {
+            let start = row * padded_bpr as usize;
+            let end = start + unpadded_bpr as usize;
+            let src = &view[start..end];
+            if bgra {
+                for px in src.chunks_exact(4) {
+                    out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
                 }
+            } else {
+                out.extend_from_slice(src);
             }
         }
-        staging.unmap();
-        (out, w, h)
     }
+    staging.unmap();
+    Ok(out)
 }

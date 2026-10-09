@@ -16,9 +16,10 @@
 //! [`DrawCtx`](agg_gui::draw_ctx::DrawCtx)
 //! implementation, its pipelines and shaders, offscreen framebuffers,
 //! screenshot capture, the [`custom_render`] hook for widgets that want their
-//! own GPU passes, and the [`Gpu`] surface bundle that platform shells build
-//! their swap-chain on.  It contains no widgets, no event loop, and no demo
-//! content, so any app can depend on it directly.
+//! own GPU passes, the [`Gpu`] surface bundle that platform shells build
+//! their swap-chain on, and the windowless [`headless`] frame a test harness
+//! paints a widget tree into and reads back.  It contains no widgets, no event
+//! loop, and no demo content, so any app can depend on it directly.
 //!
 //! Platform shells (winit event loop, browser canvas + rAF loop) live in
 //! `demo-wgpu`, which re-exports this crate for backwards compatibility.
@@ -77,6 +78,14 @@ pub use gpu_budget::{
 
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
+
+/// Offscreen rendering with no window: a shared device, a target in the
+/// shells' frame format, a frame driver and RGBA read-back — for test
+/// harnesses that paint a whole widget tree on the GPU.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod headless;
+#[cfg(not(target_arch = "wasm32"))]
+pub use headless::{HeadlessError, HeadlessFrame, HeadlessGpu, HeadlessTarget, HEADLESS_FORMAT};
 
 pub mod ssaa;
 pub mod tumble_cube;
@@ -147,6 +156,8 @@ mod clip_path_readback_tests;
 mod frame_release_tests;
 #[cfg(test)]
 mod gpu_comp_op_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod headless_tests;
 #[cfg(test)]
 mod image_blit_readback_tests;
 #[cfg(test)]
@@ -645,9 +656,16 @@ impl WgpuGfxCtx {
     /// method only pushes the current theme's background colour onto the
     /// command list so the frame starts from a clean framebuffer.
     pub fn begin_frame(&mut self, view: wgpu::TextureView) {
-        self.surface_view = Some(view);
         let bg = agg_gui::current_visuals().bg_color;
-        self.commands.push(DrawCommand::Clear(bg));
+        self.begin_frame_cleared(view, bg);
+    }
+
+    /// [`Self::begin_frame`] with the clear colour stated instead of taken
+    /// from the theme — an offscreen frame ([`headless::HeadlessFrame`])
+    /// whose starting pixels a test pins.
+    pub(crate) fn begin_frame_cleared(&mut self, view: wgpu::TextureView, clear: Color) {
+        self.surface_view = Some(view);
+        self.commands.push(DrawCommand::Clear(clear));
         // Sync the per-ctx LCD flag from the global typography setting so
         // any subsequent `fill_text` routes through the cached subpixel mask
         // path when LCD is enabled (default at scale ≤ 1.25).  Without this
