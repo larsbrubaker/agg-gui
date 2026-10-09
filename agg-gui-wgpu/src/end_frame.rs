@@ -173,6 +173,20 @@ pub(crate) enum Prepared {
         bg1: wgpu::BindGroup,
         parent_clip: Option<[i32; 4]>,
     },
+    /// Begin a blend-mode draw's coverage layer (see `crate::comp_op`).
+    CompOpBegin {
+        _texture: Arc<wgpu::Texture>,
+        view: wgpu::TextureView,
+        size: (u32, u32),
+    },
+    /// Composite a blend-mode draw onto the parent: copy the parent into
+    /// `dest` within `clip`, then run the composite pass reading it.
+    CompOpEnd {
+        _layer: Arc<wgpu::Texture>,
+        dest: wgpu::Texture,
+        bg: wgpu::BindGroup,
+        clip: Option<[i32; 4]>,
+    },
     /// Generic custom render hook (see `crate::custom_render`).  Treated as a
     /// pass break (current pass ends, the renderer records its own pass on the
     /// same encoder, parent pass reopens with `LoadOp::Load`) so a custom
@@ -214,6 +228,8 @@ impl WgpuGfxCtx {
             &commands,
             self.viewport,
             &self.aa_step_bg1,
+            &self.comp_op,
+            self.surface_format,
         );
         let prepare_us = t_prepare.elapsed().as_micros().min(u32::MAX as u128) as u32;
 
@@ -223,17 +239,44 @@ impl WgpuGfxCtx {
                 label: Some("frame"),
             });
 
+        // A blend-mode composite reads its target back.  Where the surface
+        // can't be copied, the frame renders into a proxy that can, blitted
+        // onto the surface at the end (see `crate::comp_op`).
+        let reads_target = prepared
+            .iter()
+            .any(|p| matches!(p, Prepared::CompOpEnd { .. }));
+        let readable_root = self
+            .surface_texture
+            .as_ref()
+            .filter(|t| crate::comp_op::root_is_readable(t, self.viewport, self.surface_format));
+        let proxy = (reads_target && readable_root.is_none())
+            .then(|| crate::comp_op::alloc_proxy(&self.device, self.viewport, self.surface_format));
+        let root = match &proxy {
+            Some((texture, view)) => (view, Some(texture)),
+            None => (surface_view, readable_root),
+        };
+
         let t_execute = web_time::Instant::now();
         execute_prepared(
             &self.device,
             &self.queue,
             self.surface_format,
             &mut encoder,
-            surface_view,
+            root,
             &self.pipelines,
+            &self.comp_op,
             &prepared,
             self.viewport,
         );
+        if let Some((_, view)) = &proxy {
+            crate::comp_op::blit_proxy(
+                &self.device,
+                &mut encoder,
+                &self.comp_op,
+                view,
+                surface_view,
+            );
+        }
         let execute_us = t_execute.elapsed().as_micros().min(u32::MAX as u128) as u32;
 
         let t_submit = web_time::Instant::now();
@@ -252,13 +295,15 @@ impl WgpuGfxCtx {
 // Phase 2 — execute in render passes
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn execute_prepared<'a>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     surface_format: wgpu::TextureFormat,
     encoder: &mut wgpu::CommandEncoder,
-    surface_view: &'a wgpu::TextureView,
+    root: (&'a wgpu::TextureView, Option<&'a wgpu::Texture>),
     pipelines: &WgpuPipelines,
+    comp_op: &crate::comp_op::CompOpGpu,
     prepared: &'a [Prepared],
     surface_viewport: (f32, f32),
 ) {
@@ -269,10 +314,11 @@ fn execute_prepared<'a>(
         _ => None,
     };
 
-    // Stack of `(target_view, viewport_size)`.  Borrowed from `surface_view` (root)
-    // or `Prepared::PushLayer.view` for active layers.
-    let mut target_stack: Vec<(&'a wgpu::TextureView, (f32, f32))> =
-        vec![(surface_view, surface_viewport)];
+    // Stack of `(target_view, viewport_size, texture)`.  Borrowed from `root`
+    // or `Prepared::PushLayer.view` for active layers.  The texture is what a
+    // blend-mode composite copies its destination from.
+    type Target<'t> = (&'t wgpu::TextureView, (f32, f32), Option<&'t wgpu::Texture>);
+    let mut target_stack: Vec<Target<'a>> = vec![(root.0, surface_viewport, root.1)];
 
     let mut load_op: wgpu::LoadOp<wgpu::Color> = match init_clear {
         Some(c) => wgpu::LoadOp::Clear(c),
@@ -292,17 +338,23 @@ fn execute_prepared<'a>(
         Option<[i32; 4]>,
     );
     let mut pending_composite: Option<PendingComposite<'a>> = None;
+    // A blend-mode composite, run first in the parent's resumed pass.
+    type PendingCompOp<'p> = (&'p wgpu::BindGroup, (u32, u32, u32, u32));
+    let mut pending_comp_op: Option<PendingCompOp<'a>> = None;
 
     let mut i = 0usize;
 
     // Each iteration of the outer loop runs exactly one render pass.  The inner
     // block scopes the pass so the encoder borrow ends when we exit it.
-    while i < prepared.len() || pending_composite.is_some() {
-        let &(target_view, target_vp) = target_stack.last().unwrap();
+    while i < prepared.len() || pending_composite.is_some() || pending_comp_op.is_some() {
+        let &(target_view, target_vp, _) = target_stack.last().unwrap();
 
         {
             let mut pass = begin_pass(encoder, target_view, load_op);
             pass.set_viewport(0.0, 0.0, target_vp.0, target_vp.1, 0.0, 1.0);
+            if let Some((bg, rect)) = pending_comp_op.take() {
+                crate::comp_op::draw_composite(&mut pass, comp_op, bg, rect);
+            }
 
             // First, if a PopLayer is pending, emit its composite quad at the
             // start of this resumed parent pass — clipped to the scissor that
@@ -340,6 +392,8 @@ fn execute_prepared<'a>(
                     Prepared::PushLayer { .. }
                     | Prepared::PopLayer { .. }
                     | Prepared::PopLayerMasked { .. }
+                    | Prepared::CompOpBegin { .. }
+                    | Prepared::CompOpEnd { .. }
                     | Prepared::Custom { .. } => break,
                     other => {
                         execute_one(&mut pass, pipelines, other, target_vp);
@@ -356,9 +410,29 @@ fn execute_prepared<'a>(
         // Process the boundary command (if any) to set up the next pass's state.
         if i < prepared.len() {
             match &prepared[i] {
-                Prepared::PushLayer { view, size, .. } => {
-                    target_stack.push((view, (size.0 as f32, size.1 as f32)));
+                Prepared::PushLayer {
+                    _texture: texture,
+                    view,
+                    size,
+                }
+                | Prepared::CompOpBegin {
+                    _texture: texture,
+                    view,
+                    size,
+                } => {
+                    let size = (size.0 as f32, size.1 as f32);
+                    target_stack.push((view, size, Some(&**texture)));
                     load_op = wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT);
+                    i += 1;
+                }
+                Prepared::CompOpEnd { dest, bg, clip, .. } => {
+                    target_stack.pop();
+                    let &(_, parent_vp, parent_texture) = target_stack.last().unwrap();
+                    let rect = crate::comp_op::device_rect(*clip, parent_vp);
+                    if let (Some(rect), Some(texture)) = (rect, parent_texture) {
+                        crate::comp_op::copy_destination(encoder, texture, dest, rect);
+                        pending_comp_op = Some((bg, rect));
+                    }
                     i += 1;
                 }
                 Prepared::PopLayer {
@@ -594,6 +668,8 @@ fn execute_one(
         Prepared::PushLayer { .. }
         | Prepared::PopLayer { .. }
         | Prepared::PopLayerMasked { .. }
+        | Prepared::CompOpBegin { .. }
+        | Prepared::CompOpEnd { .. }
         | Prepared::Custom { .. } => {}
     }
 }
@@ -656,70 +732,6 @@ fn apply_clip(pass: &mut wgpu::RenderPass, clip: Option<[i32; 4]>, vp: (f32, f32
     }
 }
 
-/// Pure-function shadow of the [`apply_clip`] decision used by tests —
-/// returns whether a clip rect would let any fragments through.  Mirrors
-/// the same intersection math (Y-up → Y-down + viewport clamp + zero-area
-/// reject) without needing a live `wgpu::RenderPass`.
 #[cfg(test)]
-pub(crate) fn clip_yields_visible_pixels(clip: Option<[i32; 4]>, vp: (f32, f32)) -> bool {
-    let vp_w = vp.0 as u32;
-    let vp_h = vp.1 as u32;
-    match clip {
-        None => vp_w > 0 && vp_h > 0,
-        Some(scissor) => {
-            let (x, y, w, h) = WgpuGfxCtx::yup_to_ydown_scissor(scissor, vp_h);
-            let w = w.min(vp_w.saturating_sub(x));
-            let h = h.min(vp_h.saturating_sub(y));
-            w > 0 && h > 0
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::clip_yields_visible_pixels;
-
-    #[test]
-    fn zero_height_clip_skips_draw() {
-        // The collapsed-Window path passes `(x, y, w, 0)` as the children
-        // clip rect — a zero-height area.  Without skipping the draw,
-        // wgpu's sticky scissor state lets children paint over the title
-        // bar.  Regression test for that bug: ensure the clip is rejected.
-        assert!(!clip_yields_visible_pixels(
-            Some([0, 0, 200, 0]),
-            (400.0, 300.0)
-        ));
-    }
-
-    #[test]
-    fn zero_width_clip_skips_draw() {
-        // Mirror case — a vertical zero-width clip should also be rejected.
-        assert!(!clip_yields_visible_pixels(
-            Some([0, 0, 0, 100]),
-            (400.0, 300.0)
-        ));
-    }
-
-    #[test]
-    fn ordinary_clip_passes() {
-        assert!(clip_yields_visible_pixels(
-            Some([10, 10, 100, 50]),
-            (400.0, 300.0)
-        ));
-    }
-
-    #[test]
-    fn no_clip_passes_when_viewport_is_non_empty() {
-        assert!(clip_yields_visible_pixels(None, (400.0, 300.0)));
-    }
-
-    #[test]
-    fn clip_entirely_outside_viewport_is_rejected() {
-        // A scissor placed past the viewport's right edge has zero
-        // intersection — should be rejected so the draw is skipped.
-        assert!(!clip_yields_visible_pixels(
-            Some([400, 0, 50, 50]),
-            (400.0, 300.0)
-        ));
-    }
-}
+#[path = "end_frame_tests.rs"]
+mod tests;

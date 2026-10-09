@@ -10,6 +10,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `Color::to_rgba8` is public: the 8-bit conversion the software renderer
+  blends with, so a GPU backend can quantise a colour the same way.
+
 - `text::VerticalMetrics` and `Font::with_vertical_metrics`: an opt-in,
   per-font override of the ascent, descent, line gap and cap height (font
   units) a face reports. Everything that centres or baselines text with that

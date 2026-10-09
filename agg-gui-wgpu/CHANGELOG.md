@@ -10,6 +10,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `DrawCtx::set_blend_mode` works on the GPU: solid fills, solid strokes and
+  grayscale text draw through every SVG compositing operator (`CompOp`) and
+  match the software `GfxCtx` pixel for pixel at the same cover (within 2 per
+  channel), as agg-sharp's `GpuCompOp` does for `Graphics2DGpu`. Each draw
+  renders its cover into a transparent layer, then a composite pass reads a
+  copy of the destination and applies `agg_rust::comp_op`'s formulas once per
+  pixel; `Dst` draws nothing. Gradient fills, images and LCD text ignore the
+  mode, as they do in software. The destination copy needs `COPY_SRC`:
+  layers now have it, and when the surface handed over with
+  `set_surface_texture` lacks it (or none was handed over), a frame that uses a
+  blend mode renders into a readable proxy texture and blits it onto the
+  surface. The mode is saved and restored with `save`/`restore` and carries
+  into layers.
+
 - `gpu_budget` (agg-sharp `GpuStartup` / `GpuTeardown`):
   `create_within_budget` and `drain_within_budget` run a device build or a GPU
   drain on their own thread within a wall-clock budget, with

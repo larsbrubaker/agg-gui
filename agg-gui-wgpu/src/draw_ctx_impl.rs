@@ -5,6 +5,8 @@
 //! etc.) push [`DrawCommand`] entries into `self.commands` and are flushed by
 //! [`WgpuGfxCtx::end_frame`] (implemented in Phase 4).
 //!
+//! `set_blend_mode` is honoured per draw by `comp_op.rs`.
+//!
 //! The screenshot-capture methods delegate to `screenshot_capture.rs`, which
 //! owns the capture texture, its textured re-draw, and both readback paths.
 
@@ -94,9 +96,9 @@ impl DrawCtx for WgpuGfxCtx {
         self.dash_offset = offset;
     }
 
-    fn set_blend_mode(&mut self, _mode: CompOp) {
-        // wgpu blend state is baked into pipeline objects at creation time.
-        // Dynamic blend-mode changes are not supported in the initial port.
+    fn set_blend_mode(&mut self, mode: CompOp) {
+        // Applied per draw by `draw_with_blend_mode` (comp_op.rs).
+        self.blend_mode = mode;
     }
 
     fn set_global_alpha(&mut self, a: f64) {
@@ -389,6 +391,7 @@ impl DrawCtx for WgpuGfxCtx {
     fn save(&mut self) {
         let top = *self.state_stack.last().unwrap();
         self.state_stack.push(top);
+        self.blend_mode_stack.push(self.blend_mode);
     }
 
     fn restore(&mut self) {
@@ -405,6 +408,9 @@ impl DrawCtx for WgpuGfxCtx {
         }
         if self.state_stack.len() > 1 {
             self.state_stack.pop();
+            if let Some(mode) = self.blend_mode_stack.pop() {
+                self.blend_mode = mode;
+            }
             // Scissor is deferred; no GPU state to restore immediately.
             self.apply_scissor();
         }

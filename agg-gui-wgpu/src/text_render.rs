@@ -61,23 +61,34 @@ impl WgpuGfxCtx {
             // instead — it composites via the flattened, alpha-writing
             // path without chroma fringing or wash-out.
             let use_lcd = self.lcd_mode && self.text_dst_is_opaque();
-            let cached = if use_lcd {
-                agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size)
-            } else {
-                agg_gui::lcd_coverage::rasterize_text_gray_cached(&font, text, phys_size)
+            let draw_mask = |ctx: &mut Self, color: Color, lcd: bool| {
+                let cached = if lcd {
+                    agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size)
+                } else {
+                    agg_gui::lcd_coverage::rasterize_text_gray_cached(&font, text, phys_size)
+                };
+                let mut col = color;
+                col.a *= ctx.global_alpha as f32;
+                let dst_x = x - cached.baseline_x_in_mask / ctm_scale;
+                let dst_y = y - cached.baseline_y_in_mask / ctm_scale;
+                ctx.draw_lcd_mask_arc_impl(
+                    &cached.pixels,
+                    cached.width,
+                    cached.height,
+                    col,
+                    dst_x,
+                    dst_y,
+                );
             };
-            let mut col = self.fill_color;
-            col.a *= self.global_alpha as f32;
-            let dst_x = x - cached.baseline_x_in_mask / ctm_scale;
-            let dst_y = y - cached.baseline_y_in_mask / ctm_scale;
-            self.draw_lcd_mask_arc_impl(
-                &cached.pixels,
-                cached.width,
-                cached.height,
-                col,
-                dst_x,
-                dst_y,
-            );
+            if use_lcd {
+                // LCD text ignores the blend mode, as in the software renderer.
+                draw_mask(self, self.fill_color, true);
+            } else {
+                // Grayscale text honours it (comp_op.rs).
+                self.draw_with_blend_mode(self.fill_color, |ctx, color| {
+                    draw_mask(ctx, color, false)
+                });
+            }
             return;
         }
 

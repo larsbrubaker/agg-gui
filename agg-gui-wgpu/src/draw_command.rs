@@ -158,6 +158,24 @@ pub(crate) enum DrawCommand {
         /// Scissor active on the target when the composite is requested.
         parent_clip: Option<[i32; 4]>,
     },
+    /// Begin a draw under a blend mode (see `comp_op.rs`): the following
+    /// command(s) draw the shape's cover in white into `texture`, a
+    /// transparent layer the size of the current target.
+    CompOpBegin {
+        texture: Arc<wgpu::Texture>,
+        view: wgpu::TextureView,
+        width: u32,
+        height: u32,
+    },
+    /// End a blend-mode draw: composite `source` (premultiplied bytes)
+    /// through `op` at the cover held in `texture`, within `clip`.
+    CompOpEnd {
+        texture: Arc<wgpu::Texture>,
+        view: wgpu::TextureView,
+        op: agg_gui::CompOp,
+        source: [u8; 4],
+        clip: Option<[i32; 4]>,
+    },
     /// Generic custom-render hook — dispatches to user code implementing
     /// [`WgpuCustomRender`].  The executor ends the active 2-D pass, lets the
     /// renderer record its own pass(es) onto the active layer or surface, then

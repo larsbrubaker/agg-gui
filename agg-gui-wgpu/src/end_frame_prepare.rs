@@ -22,6 +22,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::buffer_arena::FrameArenas;
+use crate::comp_op::{self, CompOpGpu};
 use crate::end_frame::{Prepared, PreparedSlice};
 use crate::pipelines::{
     AaTexUniforms, LayerUniforms, LcbUniforms, LcdUniforms, SolidUniforms, TexUniforms,
@@ -41,6 +42,7 @@ fn aa_tex_verts_as_bytes(verts: &[agg_gui::gl_renderer::AaTexVertex]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(ptr, len) }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_all(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -49,6 +51,8 @@ pub(crate) fn prepare_all(
     commands: &[DrawCommand],
     viewport: (f32, f32),
     aa_step_bg1: &Arc<wgpu::BindGroup>,
+    comp_op: &CompOpGpu,
+    format: wgpu::TextureFormat,
 ) -> Vec<Prepared> {
     let mut size_stack: Vec<(f32, f32)> = vec![viewport];
     let mut out: Vec<Prepared> = Vec::with_capacity(commands.len());
@@ -574,6 +578,43 @@ pub(crate) fn prepare_all(
                     bg1,
                     parent_clip: *parent_clip,
                 });
+            }
+
+            DrawCommand::CompOpBegin {
+                texture,
+                view,
+                width,
+                height,
+            } => {
+                size_stack.push((*width as f32, *height as f32));
+                out.push(Prepared::CompOpBegin {
+                    _texture: Arc::clone(texture),
+                    view: view.clone(),
+                    size: (*width, *height),
+                });
+            }
+
+            DrawCommand::CompOpEnd {
+                texture,
+                view,
+                op,
+                source,
+                clip,
+            } => {
+                size_stack.pop();
+                let parent_vp = *size_stack.last().unwrap_or(&viewport);
+                let uniforms = comp_op::composite_uniforms(*op, *source, format);
+                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&uniforms));
+                out.push(comp_op::prepare_end(
+                    device,
+                    comp_op,
+                    format,
+                    texture,
+                    view,
+                    (parent_vp.0 as u32, parent_vp.1 as u32),
+                    &ub,
+                    *clip,
+                ));
             }
 
             DrawCommand::Custom {

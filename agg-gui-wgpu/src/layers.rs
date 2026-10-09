@@ -1,7 +1,8 @@
 //! Compositing layer support for the wgpu backend.
 //!
 //! Mirrors `demo-gl/src/ctx_core/layers.rs`.  Each `push_layer` allocates a
-//! `wgpu::Texture` (with `RENDER_ATTACHMENT | TEXTURE_BINDING`) that becomes
+//! `wgpu::Texture` (with `RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC` —
+//! the copy is what lets a blend-mode draw read it, see `comp_op.rs`) that becomes
 //! the active draw target until the matching `pop_layer`.  On pop the layer
 //! is composited back into its parent via the `LayerPipeline` (textured quad
 //! + optional SDF rounded-corner mask in the fragment shader).
@@ -96,6 +97,8 @@ impl WgpuGfxCtx {
             line_dash: self.line_dash.clone(),
             dash_offset: self.dash_offset,
             global_alpha: self.global_alpha,
+            blend_mode: self.blend_mode,
+            blend_mode_stack: self.blend_mode_stack.clone(),
             state_stack: self.state_stack.clone(),
             font: self.font.clone(),
             font_size: self.font_size,
@@ -119,6 +122,8 @@ impl WgpuGfxCtx {
         self.line_dash = s.line_dash;
         self.dash_offset = s.dash_offset;
         self.global_alpha = s.global_alpha;
+        self.blend_mode = s.blend_mode;
+        self.blend_mode_stack = s.blend_mode_stack;
         self.state_stack = s.state_stack;
         self.font = s.font;
         self.font_size = s.font_size;
@@ -150,7 +155,9 @@ impl WgpuGfxCtx {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.surface_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -178,6 +185,10 @@ impl WgpuGfxCtx {
     /// transparent ancestor fades the whole composite uniformly, which
     /// preserves the subpixel ratios within the glyph.
     pub(crate) fn text_dst_is_opaque(&self) -> bool {
+        // A blend-mode draw's coverage layer starts transparent.
+        if self.coverage_pass {
+            return false;
+        }
         match self.layer_stack.last() {
             None => true,
             Some(layer) => layer.opaque_backdrop,
@@ -256,6 +267,9 @@ impl WgpuGfxCtx {
         // Reset draw state for the layer's local coordinate system.
         self.viewport = (w as f32, h as f32);
         self.state_stack = vec![(TransAffine::new_scaling(scale_x, scale_y), None)];
+        // The blend mode carries into the layer (as in the software
+        // `GfxCtx`); its save/restore stack starts afresh with `state_stack`.
+        self.blend_mode_stack.clear();
         self.path = PathStorage::new();
 
         self.commands.push(DrawCommand::PushLayer {

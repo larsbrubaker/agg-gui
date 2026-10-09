@@ -118,6 +118,8 @@ pub struct WgpuPaintContext {
 
 mod aa_step;
 mod buffer_arena;
+/// Blend modes on the GPU — see `comp_op.rs`.
+mod comp_op;
 mod ctx_core;
 /// The deferred draw-command enum — see [`DrawCommand`].
 mod draw_command;
@@ -144,6 +146,8 @@ mod clip_path_readback_tests;
 #[cfg(test)]
 mod frame_release_tests;
 #[cfg(test)]
+mod gpu_comp_op_tests;
+#[cfg(test)]
 mod image_blit_readback_tests;
 #[cfg(test)]
 mod layer_text_readback_tests;
@@ -162,7 +166,7 @@ use agg_gui::draw_ctx::{FillRule, LinearGradientPaint, RadialGradientPaint};
 use agg_gui::gl_renderer::GlyphCache;
 use agg_gui::text::Font;
 use agg_gui::TransAffine;
-use agg_gui::{LineCap, LineJoin};
+use agg_gui::{CompOp, LineCap, LineJoin};
 use agg_rust::path_storage::PathStorage;
 
 use pipelines::WgpuPipelines;
@@ -232,6 +236,8 @@ pub(crate) struct SavedWgpuDrawState {
     pub(crate) line_dash: Vec<f64>,
     pub(crate) dash_offset: f64,
     pub(crate) global_alpha: f64,
+    pub(crate) blend_mode: CompOp,
+    pub(crate) blend_mode_stack: Vec<CompOp>,
     pub(crate) state_stack: Vec<(TransAffine, Option<[i32; 4]>)>,
     pub(crate) font: Option<Arc<Font>>,
     pub(crate) font_size: f64,
@@ -367,6 +373,15 @@ pub struct WgpuGfxCtx {
     pub(crate) line_dash: Vec<f64>,
     pub(crate) dash_offset: f64,
     pub(crate) global_alpha: f64,
+    /// The `DrawCtx::set_blend_mode` operator for solid fills, strokes and
+    /// grayscale text — see `comp_op.rs`.
+    pub(crate) blend_mode: CompOp,
+    /// `blend_mode` as each `save()` left it, popped by `restore()` — the
+    /// software `GfxCtx` saves the mode with the rest of its state.
+    pub(crate) blend_mode_stack: Vec<CompOp>,
+    /// True while a blend-mode draw renders its cover into a coverage layer:
+    /// text then takes the alpha-writing grayscale path.
+    pub(crate) coverage_pass: bool,
     /// Each entry is `(transform, scissor_yup)` — scissor stored in Y-up screen
     /// coordinates; converted to Y-down at `end_frame` time.
     pub(crate) state_stack: Vec<(TransAffine, Option<[i32; 4]>)>,
@@ -450,6 +465,9 @@ pub struct WgpuGfxCtx {
     pub(crate) aa_step_view: wgpu::TextureView,
     pub(crate) aa_step_bg1: Arc<wgpu::BindGroup>,
 
+    /// The blend-mode composite pipeline (`comp_op.rs`).
+    pub(crate) comp_op: comp_op::CompOpGpu,
+
     /// Per-phase wall-clock timings from the most recent `end_frame`. Populated
     /// inside `flush_to_surface` so platform shells (atomartist, marbles) can
     /// surface a true breakdown of where wgpu-side time goes without needing
@@ -518,6 +536,7 @@ impl WgpuGfxCtx {
             ],
         }));
         let aa_step_texture = Arc::new(aa_step_texture);
+        let comp_op = comp_op::CompOpGpu::new(&device, surface_format);
 
         Self {
             device,
@@ -546,6 +565,9 @@ impl WgpuGfxCtx {
             line_dash: Vec::new(),
             dash_offset: 0.0,
             global_alpha: 1.0,
+            blend_mode: CompOp::SrcOver,
+            blend_mode_stack: Vec::new(),
+            coverage_pass: false,
             state_stack: vec![(TransAffine::new(), None)],
             path: PathStorage::new(),
             font: None,
@@ -564,6 +586,7 @@ impl WgpuGfxCtx {
             aa_step_texture,
             aa_step_view,
             aa_step_bg1,
+            comp_op,
             last_end_frame_stats: LastEndFrameStats::default(),
         }
     }
@@ -591,6 +614,9 @@ impl WgpuGfxCtx {
         self.line_dash.clear();
         self.dash_offset = 0.0;
         self.global_alpha = 1.0;
+        self.blend_mode = CompOp::SrcOver;
+        self.blend_mode_stack.clear();
+        self.coverage_pass = false;
         self.state_stack = vec![(TransAffine::new(), None)];
         self.path = PathStorage::new();
         self.font = None;

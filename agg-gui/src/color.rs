@@ -78,7 +78,9 @@ impl Color {
     }
 
     /// Convert to AGG's 8-bit RGBA format (used at the rasterizer boundary).
-    pub(crate) fn to_rgba8(self) -> Rgba8 {
+    /// Each channel truncates (`as u32`), as the software renderer quantises
+    /// a colour — GPU backends that must match it pixel for pixel use this.
+    pub fn to_rgba8(self) -> Rgba8 {
         Rgba8::new(
             (self.r * 255.0).clamp(0.0, 255.0) as u32,
             (self.g * 255.0).clamp(0.0, 255.0) as u32,

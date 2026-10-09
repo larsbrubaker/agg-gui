@@ -4,6 +4,9 @@
 //! path into AA-tessellated triangle meshes, then pushes the appropriate
 //! `DrawCommand` variant (`AaSolid` or `Gradient`) onto `self.commands`.
 //!
+//! Solid fills and strokes honour the blend mode through
+//! `draw_with_blend_mode` (`comp_op.rs`).
+//!
 //! `do_fill` and `do_stroke` are called by `fill()`, `stroke()`, and
 //! `fill_and_stroke()` in `draw_ctx_impl.rs`.
 
@@ -56,14 +59,27 @@ impl WgpuGfxCtx {
             tessellate_path_aa_texture(&mut transformed, fill_rule)
         };
         if let Some((verts, indices)) = tess {
-            self.commands.push(DrawCommand::AaTexture {
+            self.push_aa_texture(verts, indices, self.fill_color);
+        }
+    }
+
+    /// Push a solid texture-AA shape under the current blend mode (gradients
+    /// keep source-over, as in the software renderer — see `comp_op.rs`).
+    fn push_aa_texture(
+        &mut self,
+        verts: Vec<agg_gui::gl_renderer::AaTexVertex>,
+        indices: Vec<u32>,
+        color: Color,
+    ) {
+        self.draw_with_blend_mode(color, |ctx, color| {
+            ctx.commands.push(DrawCommand::AaTexture {
                 verts,
                 indices,
-                color: self.fill_color,
-                global_alpha: self.global_alpha as f32,
-                clip: self.current_clip(),
+                color,
+                global_alpha: ctx.global_alpha as f32,
+                clip: ctx.current_clip(),
             });
-        }
+        });
     }
 
     /// Tessellate the current path as a stroke and push the correct DrawCommand.
@@ -134,13 +150,7 @@ impl WgpuGfxCtx {
         };
 
         if let Some((verts, indices)) = tess {
-            self.commands.push(DrawCommand::AaTexture {
-                verts,
-                indices,
-                color: self.stroke_color,
-                global_alpha: self.global_alpha as f32,
-                clip: self.current_clip(),
-            });
+            self.push_aa_texture(verts, indices, self.stroke_color);
         }
     }
 
