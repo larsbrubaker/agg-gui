@@ -421,38 +421,40 @@ impl PopupMenuState {
             }
             Key::ArrowRight => {
                 if let Some(path) = self.hover_path.clone() {
-                    if item_at_path(items, &path).is_some_and(|item| item.has_submenu()) {
-                        self.open_path = path;
-                        crate::animation::request_draw();
-                    }
+                    self.enter_submenu(items, path);
                 }
                 (EventResult::Consumed, MenuResponse::None)
             }
             Key::ArrowLeft => {
-                self.open_path.pop();
-                self.hover_path = self.open_path.last().map(|_| self.open_path.clone());
-                crate::animation::request_draw();
+                // agg-sharp `PopupMenu.OnKeyDown`: Left closes the deepest
+                // open submenu and highlights the row that opened it.  In a
+                // top-level menu there is nothing to back out of, so the
+                // highlight stays put (a menu bar walks its menus instead).
+                if !self.open_path.is_empty() {
+                    self.hover_path = Some(self.open_path.clone());
+                    self.open_path.pop();
+                    crate::animation::request_draw();
+                }
                 (EventResult::Consumed, MenuResponse::None)
             }
             Key::Enter | Key::Char(' ') => {
                 if let Some(path) = self.hover_path.clone() {
-                    if let Some(item) = item_at_path(items, &path) {
-                        let enabled = item.enabled;
-                        let has_submenu = item.has_submenu();
+                    // On a submenu row Enter / Space open it like Right
+                    // (agg-sharp: the row's click is what opens it).
+                    if self.enter_submenu(items, path.clone()) {
+                        return (EventResult::Consumed, MenuResponse::None);
+                    }
+                    if let Some(item) = item_at_path(items, &path).filter(|item| item.enabled) {
                         let action = item.action.clone();
                         let close_on_activate = item.close_on_activate;
-                        if enabled && has_submenu {
-                            self.open_path = path;
-                        } else if enabled {
-                            if let Some(action) = action {
-                                return self.activate_action(
-                                    items,
-                                    &path,
-                                    action,
-                                    close_on_activate,
-                                    false,
-                                );
-                            }
+                        if let Some(action) = action {
+                            return self.activate_action(
+                                items,
+                                &path,
+                                action,
+                                close_on_activate,
+                                false,
+                            );
                         }
                     }
                 }
@@ -460,6 +462,23 @@ impl PopupMenuState {
             }
             _ => (EventResult::Ignored, MenuResponse::None),
         }
+    }
+
+    /// Open the submenu of the enabled item at `path`, as agg-sharp's
+    /// `SubMenuItemButton.OpenSubMenu` does: showing the submenu focuses the
+    /// submenu panel rather than a row, so no row is highlighted (the opener
+    /// keeps its open fill through `open_path`) and the next Up / Down steps
+    /// from nothing inside it.  Returns `false`, and changes nothing, when
+    /// `path` is not an enabled item with a submenu.  Shared by Right and
+    /// Enter / Space.
+    fn enter_submenu(&mut self, items: &[MenuEntry], path: Vec<usize>) -> bool {
+        if !item_at_path(items, &path).is_some_and(|item| item.enabled && item.has_submenu()) {
+            return false;
+        }
+        self.open_path = path;
+        self.hover_path = None;
+        crate::animation::request_draw();
+        true
     }
 
     fn step_hover(&mut self, items: &[MenuEntry], delta: isize) {
@@ -475,11 +494,16 @@ impl PopupMenuState {
         if enabled.is_empty() {
             return;
         }
+        // Only a highlighted row of the stepped level counts as "current".
+        // A hover-opened submenu leaves the highlight on its opener one level
+        // up; agg-sharp has focused the shown submenu panel by then, so the
+        // step starts from nothing inside it (`PopupMenu.MoveHighlight`).
         let current = self
             .hover_path
             .as_ref()
-            .and_then(|path| path.last().copied())
-            .and_then(|idx| enabled.iter().position(|candidate| *candidate == idx));
+            .and_then(|path| path.split_last())
+            .filter(|(_, parent)| *parent == self.open_path.as_slice())
+            .and_then(|(idx, _)| enabled.iter().position(|candidate| candidate == idx));
         let base = current
             .map(|idx| idx as isize)
             .unwrap_or(if delta > 0 { -1 } else { 0 });
@@ -585,3 +609,7 @@ fn shortcut_path(items: &[MenuEntry], key: &Key, modifiers: Modifiers) -> Option
     }
     None
 }
+
+#[cfg(test)]
+#[path = "state_keyboard_tests.rs"]
+mod keyboard_tests;

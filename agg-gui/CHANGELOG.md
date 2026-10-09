@@ -162,6 +162,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- Popup menu keyboard navigation follows agg-sharp's `PopupMenu.OnKeyDown`:
+  Right, Enter or Space on a submenu row opens it with no row highlighted, so
+  the next Up / Down starts inside it (also after a hover opened it); Left
+  closes only the deepest submenu and highlights its opener, and in a top-level
+  menu leaves the highlight where it is.
+
 - `DragValue::on_change` fires only when the value actually changes, as
   agg-sharp's `DragValue.Value` setter raises `ValueChanged`: a drag step that
   snaps back to the same value, or committing an edit whose text is unchanged
