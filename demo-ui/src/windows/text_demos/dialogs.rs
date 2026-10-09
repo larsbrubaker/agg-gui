@@ -107,12 +107,37 @@ impl ModalOverlay {
             ModalLayer::Save => (220.0, 112.0),
             ModalLayer::Progress => (120.0, 82.0),
         };
+        let area = Self::reachable_area(self.bounds);
+        let w = dw.min(area.width - 24.0).max(80.0);
+        let h = dh.min(area.height - 24.0).max(64.0);
+        // Centred in the unobstructed on-screen part of root space, so the
+        // dialog stays reachable while the on-screen keyboard lifts the tree.
+        Rect::new(
+            area.x + (area.width - w) * 0.5,
+            area.y + (area.height - h) * 0.5,
+            w,
+            h,
+        )
+    }
+
+    /// The part of root logical space a dialog can be seen and clicked in:
+    /// the on-screen part ([`agg_gui::widget::visible_root_rect`], shifted by
+    /// the on-screen keyboard's lift) less this frame's reserved edge strips
+    /// ([`agg_gui::overlay_insets`], which include the keyboard panel while it
+    /// is up). Both read the same state at paint and at event time.
+    fn reachable_area(bounds: Rect) -> Rect {
         let viewport = agg_gui::current_viewport();
-        let area_w = viewport.width.max(self.bounds.width);
-        let area_h = viewport.height.max(self.bounds.height);
-        let w = dw.min(area_w - 24.0).max(80.0);
-        let h = dh.min(area_h - 24.0).max(64.0);
-        Rect::new((area_w - w) * 0.5, (area_h - h) * 0.5, w, h)
+        let vis = agg_gui::widget::visible_root_rect(Size::new(
+            viewport.width.max(bounds.width),
+            viewport.height.max(bounds.height),
+        ));
+        let ins = agg_gui::overlay_insets::current();
+        Rect::new(
+            vis.x + ins.left,
+            vis.y + ins.bottom,
+            (vis.width - ins.left - ins.right).max(0.0),
+            (vis.height - ins.bottom - ins.top).max(0.0),
+        )
     }
 
     fn button_rects(&self, layer: ModalLayer) -> Vec<(&'static str, Rect)> {
@@ -295,11 +320,13 @@ impl ModalOverlay {
     /// point maps root → local → device). This keeps the effective scale
     /// (device × UX) App applies above the tree; the `reset_transform()` it
     /// replaces painted raw device pixels, so at any scale ≠ 1 the dialog
-    /// drew away from where it hit-tests. Caveat: `logical_root_transform`
-    /// includes the soft-keyboard lift, so composing its inverse strips the
-    /// lift too, while `current_mouse_world()` subtracts it from the pointer;
-    /// paint and hit-test therefore still disagree by the lift while the
-    /// on-screen keyboard lifts the tree.
+    /// drew away from where it hit-tests. `logical_root_transform` takes out
+    /// both the effective scale and the on-screen keyboard's lift, so root
+    /// points land on screen exactly where App shows the tree, and where
+    /// `current_mouse_world()` hit-tests, while the keyboard lifts it too.
+    /// The identity CTM ∘ L⁻¹ = scale · translate(0, lift) assumes this runs
+    /// on App's own ctx with no compositing layer in between, as it does in
+    /// the global-overlay pass.
     fn enter_root_logical_space(ctx: &mut dyn DrawCtx) {
         let mut root_to_local = agg_gui::widget::logical_root_transform(ctx);
         root_to_local.invert();
@@ -354,9 +381,12 @@ impl Widget for ModalOverlay {
         ctx.reset_clip();
         // Backdrop and dialog geometry are root logical (see `modal_rect`).
         Self::enter_root_logical_space(ctx);
+        // The backdrop covers the whole screen: while the on-screen keyboard
+        // lifts the tree, that is `visible_root_rect`, not (0, 0, w, h).
+        let screen = agg_gui::widget::visible_root_rect(Size::new(w, h));
         ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.35));
         ctx.begin_path();
-        ctx.rect(0.0, 0.0, w, h);
+        ctx.rect(screen.x, screen.y, screen.width, screen.height);
         ctx.fill();
 
         if self.state.user_open.get() {

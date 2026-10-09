@@ -355,3 +355,247 @@ fn modal_paints_where_it_hit_tests_at_effective_scale() {
         state.save_progress.get()
     );
 }
+
+/// An App whose tree the on-screen keyboard lifts for real (public API only:
+/// keyboard enabled, a bottom text field focused, the virtual clock run past
+/// the slide). On drop it blurs the field and lets the keyboard and the lift
+/// slide back to 0, then restores the keyboard flag and the clock — skipped
+/// while unwinding from a failed assert, so a panic can't turn into an abort.
+struct LiftedApp {
+    app: agg_gui::App,
+    viewport: Size,
+    /// The lift measured by `open` (asserted to clear the keyboard panel).
+    lift: f64,
+    /// The keyboard panel's height (its on-screen top edge).
+    panel_h: f64,
+    prev_keyboard_enabled: bool,
+    _clock: agg_gui::clock::ClockGuard,
+}
+
+impl LiftedApp {
+    /// A `ModalOverlay` over `state` at the top of a column and a text field
+    /// hugging its bottom (root y = 0), in a `viewport` at scale 1. Focusing
+    /// the field raises the keyboard, and App lifts the tree by
+    /// `panel_h + 8` (the keyboard's safety margin). Before this returns the
+    /// tweens are settled and ticked by a paint, and one more frame (layout +
+    /// paint) runs with the keyboard up, so its strip is reserved in
+    /// `overlay_insets` as in a running app.
+    fn open(state: &Rc<ModalState>, viewport: Size) -> Self {
+        const FIELD: agg_gui::focus::FocusId = 0x0d1a_1065;
+        let font = test_font();
+        let mut root = FlexColumn::new();
+        root.push(
+            Box::new(ModalOverlay::new(Arc::clone(&font), Rc::clone(state))),
+            0.0,
+        );
+        root.push(Box::new(SizedBox::new()), 1.0);
+        root.push(
+            Box::new(TextField::new(Arc::clone(&font)).with_focus_id(FIELD)),
+            0.0,
+        );
+
+        let prev_keyboard_enabled = agg_gui::widgets::on_screen_keyboard::is_enabled();
+        let clock = agg_gui::clock::scoped_virtual(None);
+        agg_gui::widgets::on_screen_keyboard::set_enabled(true);
+        let mut lifted = LiftedApp {
+            app: agg_gui::App::new(Box::new(root)),
+            viewport,
+            lift: 0.0,
+            panel_h: 0.0,
+            prev_keyboard_enabled,
+            _clock: clock,
+        };
+        lifted.app.layout(viewport);
+        agg_gui::focus::request_focus(FIELD);
+        lifted.app.layout(viewport);
+        assert_eq!(
+            lifted.app.focused_widget_type_name(),
+            Some("TextField"),
+            "precondition: the bottom text field took focus"
+        );
+        // Let the keyboard slide and the lift tween settle; the paint ticks
+        // them, which is also when events start seeing the lift.
+        agg_gui::clock::advance(std::time::Duration::from_secs(1));
+        let _ = lifted.paint();
+        // The next frame: its layout sees the keyboard up and reserves it.
+        lifted.app.layout(viewport);
+        let _ = lifted.paint();
+
+        // Every lifted test relies on a real lift (and on the keyboard strip
+        // being reserved): with neither, they would pass vacuously.
+        lifted.lift = lifted.measure_lift();
+        lifted.panel_h = agg_gui::widgets::on_screen_keyboard::target_panel_height(viewport.width);
+        let (lift, panel_h) = (lifted.lift, lifted.panel_h);
+        assert!(
+            panel_h > 0.0 && lift > panel_h + 2.0,
+            "precondition: the on-screen keyboard must be up (panel height {panel_h}) \
+             and must lift the tree past it (measured lift {lift}), leaving an \
+             on-screen strip between them; without a real lift the lifted tests \
+             would pass vacuously"
+        );
+        let reserved = agg_gui::overlay_insets::current().bottom;
+        assert!(
+            (reserved - panel_h).abs() < 0.5,
+            "precondition: App must reserve the keyboard panel's strip in \
+             overlay_insets (bottom {reserved}, panel height {panel_h})"
+        );
+        lifted
+    }
+
+    fn paint(&mut self) -> agg_gui::Framebuffer {
+        let (w, h) = (self.viewport.width as u32, self.viewport.height as u32);
+        let mut fb = agg_gui::Framebuffer::new(w, h);
+        {
+            let mut ctx = agg_gui::GfxCtx::new(&mut fb);
+            self.app.paint(&mut ctx);
+        }
+        fb
+    }
+
+    /// The lift, measured through the public pointer path: an on-screen
+    /// point near the top lands at root y = screen y − lift.
+    fn measure_lift(&mut self) -> f64 {
+        let probe_y = self.viewport.height - 10.0;
+        self.app
+            .on_mouse_move(200.0, self.viewport.height - probe_y);
+        let world = agg_gui::current_mouse_world().expect("the pointer was seen");
+        probe_y - world.y
+    }
+
+    /// Press and release the left button at ON-SCREEN logical point `p`.
+    fn click(&mut self, p: Point) {
+        let (x, y) = (p.x, self.viewport.height - p.y);
+        let mods = agg_gui::Modifiers::default();
+        self.app.on_mouse_down(x, y, MouseButton::Left, mods);
+        self.app.on_mouse_up(x, y, MouseButton::Left, mods);
+    }
+}
+
+impl Drop for LiftedApp {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            agg_gui::focus::request_blur();
+            self.app.layout(self.viewport);
+            agg_gui::clock::advance(std::time::Duration::from_secs(1));
+            let _ = self.paint();
+        }
+        agg_gui::widgets::on_screen_keyboard::set_enabled(self.prev_keyboard_enabled);
+    }
+}
+
+/// While the on-screen keyboard lifts the tree by `lift`, the on-screen part
+/// of root logical space is `(0, −lift, w, h)`. The modal backdrop must darken
+/// all of it: a backdrop drawn at root `(0, 0, w, h)` shows on screen at
+/// `[lift, h + lift]`, leaving the bottom `lift` of the screen uncovered. The
+/// keyboard panel paints over `[0, panel_h]`; a text field at root y = 0 is
+/// lifted by `panel_h + 8` (the keyboard's safety margin), so the strip
+/// between the panel's top border and the lifted tree stays visible — and
+/// must be darkened.
+#[test]
+fn modal_backdrop_covers_the_screen_while_the_keyboard_lifts_the_tree() {
+    let state = Rc::new(ModalState::default());
+    state.save_open.set(true);
+    let viewport = Size::new(400.0, 600.0);
+    // `open` asserts the panel is up and the tree is lifted past it.
+    let mut lifted = LiftedApp::open(&state, viewport);
+    let fb = lifted.paint();
+    let (lift, panel_h) = (lifted.lift, lifted.panel_h);
+
+    // Midway between the panel's 1 px top border and the lifted tree.
+    let strip_y = (panel_h + 1.0 + lift) * 0.5;
+    let alpha = fb.pixels()[((strip_y as usize) * viewport.width as usize + 200) * 4 + 3];
+    assert!(
+        alpha > 60,
+        "while the keyboard lifts the tree by {lift}, the modal backdrop must darken \
+         the whole screen, including the strip above the keyboard panel (top at \
+         {panel_h}) at on-screen y = {strip_y:.1}; that pixel's alpha is {alpha} \
+         (the backdrop is 35 % black, ≈ 89)"
+    );
+}
+
+/// Viewport for the dialog-reachability cases: 400 wide (keyboard panel 282
+/// tall, so the tree lifts by 290) and short enough that a dialog centred in
+/// layout space is pushed entirely off the top of the screen — the User
+/// dialog (142 tall) to on-screen y ∈ [449, 591] — while the screen above the
+/// keyboard panel (y ∈ [282, 460]) still has room for it.
+const REACH_VIEWPORT: Size = Size {
+    width: 400.0,
+    height: 460.0,
+};
+
+/// A probe overlay for the production `modal_rect` / `button_rects` geometry
+/// (root logical), sized like the real one (its bounds never exceed the
+/// viewport, so `modal_rect` reads the same area).
+fn probe(state: &Rc<ModalState>) -> ModalOverlay {
+    ModalOverlay::new(test_font(), Rc::clone(state))
+}
+
+/// `r` (root logical) on screen under `lift`.
+fn on_screen(r: Rect, lift: f64) -> Rect {
+    Rect::new(r.x, r.y + lift, r.width, r.height)
+}
+
+fn fully_on_screen(r: Rect, viewport: Size) -> bool {
+    r.x >= 0.0 && r.y >= 0.0 && r.x + r.width <= viewport.width && r.y + r.height <= viewport.height
+}
+
+/// Under a real lift the modal's dialogs must stay reachable: the modal is
+/// not what raised the keyboard (its Name field is internal), so the lift
+/// comes from a field elsewhere and can be large. Both the User and the Save
+/// dialog must lie fully inside the on-screen viewport.
+#[test]
+fn lifted_modal_dialogs_lie_fully_on_screen() {
+    let state = Rc::new(ModalState::default());
+    state.user_open.set(true);
+    let lifted = LiftedApp::open(&state, REACH_VIEWPORT);
+    let lift = lifted.lift;
+    let probe = probe(&state);
+    for layer in [ModalLayer::User, ModalLayer::Save] {
+        let r = on_screen(probe.modal_rect(layer), lift);
+        assert!(
+            fully_on_screen(r, REACH_VIEWPORT),
+            "under a lift of {lift} the {layer:?} dialog must lie fully inside the \
+             on-screen viewport (0, 0, {}, {}); it sits on screen at {r:?}",
+            REACH_VIEWPORT.width,
+            REACH_VIEWPORT.height
+        );
+    }
+}
+
+/// Under a real lift a click at the User dialog's Save button's ON-SCREEN
+/// position must activate it (open the Save dialog): the button must be on
+/// screen, and not under the keyboard panel, which takes every press inside
+/// it.
+#[test]
+fn lifted_modal_button_click_at_its_on_screen_position_works() {
+    let state = Rc::new(ModalState::default());
+    state.user_open.set(true);
+    let mut lifted = LiftedApp::open(&state, REACH_VIEWPORT);
+    let (lift, panel_h) = (lifted.lift, lifted.panel_h);
+    let probe = probe(&state);
+    let dialog = on_screen(probe.modal_rect(ModalLayer::User), lift);
+    let (_, button) = probe
+        .button_rects(ModalLayer::User)
+        .into_iter()
+        .find(|(label, _)| *label == "Save")
+        .expect("the User dialog has a Save button");
+    let target = Point::new(
+        dialog.x + button.x + button.width * 0.5,
+        dialog.y + button.y + button.height * 0.5,
+    );
+    assert!(
+        target.x >= 0.0
+            && target.x <= REACH_VIEWPORT.width
+            && target.y >= 0.0
+            && target.y <= REACH_VIEWPORT.height,
+        "under a lift of {lift} the User dialog's Save button must be on screen to \
+         be clicked; its centre sits on screen at {target:?} (dialog at {dialog:?})"
+    );
+    lifted.click(target);
+    assert!(
+        state.save_open.get(),
+        "under a lift of {lift} a click at the Save button's on-screen centre \
+         {target:?} must open the Save dialog (the keyboard panel covers on-screen \
+         y ∈ [0, {panel_h}] and takes presses there; dialog at {dialog:?})"
+    );
+}
