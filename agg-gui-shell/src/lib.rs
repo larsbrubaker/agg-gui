@@ -46,6 +46,10 @@
 //!   [`ShellError::Gpu`]`(`[`agg_gui_wgpu::GpuInitError::StartupTimedOut`]`)`,
 //!   whose text is the message to show the user; closing waits at most
 //!   [`agg_gui_wgpu::GPU_TEARDOWN_BUDGET`] for the GPU to drain.
+//! - The OS reader for LCD subpixel detection,
+//!   [`WindowsLcdDisplayEnvironmentProvider`] (Windows' ClearType settings;
+//!   "cannot say" elsewhere), for an app to feed
+//!   [`agg_gui::lcd_display_detection`] at startup.
 //!
 //! # What the app owns
 //!
@@ -70,6 +74,7 @@ mod bounds;
 mod config;
 mod host;
 mod input;
+mod lcd_display;
 pub mod menu_bar;
 mod paint;
 mod redraw_schedule;
@@ -82,6 +87,7 @@ mod waker;
 pub use bounds::{sanitize_restored_window_size, SavedBounds, WindowBoundsStore};
 pub use config::{RedrawPolicy, ScreenshotConfig, ShellConfig, WindowIcon, WindowSize};
 pub use host::{default_paint, Frame, NoHost, ShellControl, ShellHost, WindowGeometry};
+pub use lcd_display::WindowsLcdDisplayEnvironmentProvider;
 pub use run::run;
 pub use shell_loop::ShellInit;
 

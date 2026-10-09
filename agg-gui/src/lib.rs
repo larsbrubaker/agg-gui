@@ -80,6 +80,7 @@ pub mod icon_image;
 pub mod input_profile;
 pub mod layout_props;
 pub mod lcd_coverage;
+pub mod lcd_display_detection;
 pub mod lcd_gfx_ctx;
 pub mod overlay_insets;
 pub mod paints;

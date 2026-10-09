@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `lcd_display_detection`: agg-sharp's `LcdDisplayDetection`, the policy that
+  picks a default for LCD subpixel text from what the OS reports about the
+  display (`LcdDisplayEnvironment`: font smoothing on, ClearType style, RGB
+  stripes, local session, upright display). `is_subpixel_appropriate` decides
+  from the facts; `is_subpixel_appropriate_for` asks an
+  `LcdDisplayEnvironmentProvider`, and no provider or one that cannot read the
+  display means grayscale. agg-sharp's 9 `LcdDisplayDetectionTests` are ported.
+
 - Popup menu styling: `MenuStyle` gains `row_h` (item row height,
   touch-floored), `shadow` (drop shadow on/off), `background` /
   `border_color` (panel fill and outline, `None` = theme colours),

@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WindowsLcdDisplayEnvironmentProvider`: agg-sharp's Windows reader for LCD
+  subpixel detection (`SPI_GETFONTSMOOTHING`, `SPI_GETFONTSMOOTHINGTYPE`,
+  `SPI_GETFONTSMOOTHINGORIENTATION`, `SM_REMOTESESSION` and the primary
+  display's rotation), feeding `agg_gui::lcd_display_detection`. Off Windows it
+  answers "cannot say". The `windows-sys` dependency gains `Win32_Graphics_Gdi`.
+
 - The device is built within agg-sharp's 15 s start-up budget (`run` ends with
   `ShellError::Gpu(GpuInitError::StartupTimedOut)` instead of hanging), and
   the close releases it within the 5 s teardown budget

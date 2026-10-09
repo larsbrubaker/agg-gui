@@ -40,10 +40,14 @@ log = "0.4"
 # second copy is linked. `Win32_UI_WindowsAndMessaging` carries
 # SystemParametersInfoW(SPI_GETMOUSEHOVERTIME) for OS tooltip hover timing and
 # GetCursorPos for the file-drop position workaround (winit's OLE drop path
-# discards the drop point); `Win32_Foundation` is POINT for the latter.
+# discards the drop point); `Win32_Foundation` is POINT for the latter. The
+# LCD display reader (`lcd_display.rs`) reads the font smoothing settings and
+# SM_REMOTESESSION from `Win32_UI_WindowsAndMessaging` and the primary display's
+# rotation through `Win32_Graphics_Gdi`'s EnumDisplaySettingsW.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
