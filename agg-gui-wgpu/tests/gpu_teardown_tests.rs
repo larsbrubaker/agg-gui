@@ -115,9 +115,9 @@ fn an_exception_from_the_drain_reaches_the_caller() {
 /// can escape a thread, so the drain panics here.
 ///
 /// CONVERTED: C# also asserts the report carries the exception's stack (it
-/// contains the test class name). A Rust panic payload carries no stack; the
-/// report carries the failure text and names the device, which is what makes
-/// it actionable here.
+/// contains the test class name). A Rust panic carries no stack, so that
+/// assertion has no Rust counterpart; the report's own text — the device's
+/// name and the failure — is what is asserted.
 #[test]
 fn a_drain_that_fails_after_being_abandoned_is_reported_and_survived() {
     let (fail_the_drain, wait_fail) = mpsc::channel::<()>();
@@ -126,7 +126,7 @@ fn a_drain_that_fails_after_being_abandoned_is_reported_and_survived() {
     let finished = drain_within_budget(
         move || -> Result<(), String> {
             let _ = wait_fail.recv();
-            panic!("late drain failure in gpu_teardown_tests");
+            panic!("late drain failure");
         },
         "late failure",
         Duration::from_millis(200),
@@ -150,7 +150,7 @@ fn a_drain_that_fails_after_being_abandoned_is_reported_and_survived() {
     // The report has to name the device it belongs to.
     assert!(failure_report.contains("late failure"), "{failure_report}");
     assert!(
-        failure_report.contains("gpu_teardown_tests"),
+        failure_report.contains("the abandoned drain of 'late failure' then failed"),
         "{failure_report}"
     );
 }
@@ -183,4 +183,54 @@ fn with_no_background_thread_the_drain_runs_inline() {
 #[test]
 fn rust_only_teardown_budget_matches_mattercad() {
     assert_eq!(GPU_TEARDOWN_BUDGET, Duration::from_secs(5));
+}
+
+/// A drain that panics inside its budget resumes the panic on the caller, the
+/// same place it would surface without a budget.
+#[test]
+fn rust_only_a_panic_inside_the_budget_resumes_on_the_caller() {
+    let resumed = std::panic::catch_unwind(|| {
+        drain_within_budget(
+            || -> Result<(), String> { panic!("drain panicked") },
+            "panicking",
+            Duration::from_secs(30),
+            true,
+            None,
+        )
+    });
+    let payload = resumed.expect_err("the panic reaches the caller");
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"drain panicked"));
+}
+
+/// A drain that returns an error after it was abandoned is reported, naming
+/// the device, like one that panics.
+#[test]
+fn rust_only_a_late_error_from_an_abandoned_drain_is_reported() {
+    let (fail_the_drain, wait_fail) = mpsc::channel::<()>();
+    let (reports, report) = collector();
+
+    let finished = drain_within_budget(
+        move || {
+            let _ = wait_fail.recv();
+            Err::<(), _>("late drain error".to_string())
+        },
+        "late error",
+        Duration::from_millis(200),
+        true,
+        Some(report),
+    );
+    assert_eq!(finished, Ok(false));
+    let _ = fail_the_drain.send(());
+
+    let deadline = Instant::now();
+    while find(&reports, "late drain error").is_none()
+        && deadline.elapsed() < Duration::from_secs(10)
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let failure_report = find(&reports, "late drain error").expect("the failure is reported");
+    assert!(
+        failure_report.contains("the abandoned drain of 'late error' then failed"),
+        "{failure_report}"
+    );
 }

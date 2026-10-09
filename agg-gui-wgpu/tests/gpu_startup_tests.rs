@@ -162,3 +162,57 @@ fn rust_only_startup_budget_and_timeout_message_match_mattercad() {
         GPU_STARTUP_BUDGET
     );
 }
+
+/// A build that panics inside its budget resumes the panic on the caller.
+#[test]
+fn rust_only_a_panic_inside_the_build_resumes_on_the_caller() {
+    let resumed = std::panic::catch_unwind(|| {
+        create_within_budget(
+            || -> Result<FakeDevice, String> { panic!("build panicked") },
+            "panicking",
+            Duration::from_secs(30),
+            true,
+            None,
+        )
+    });
+    let payload = resumed.expect_err("the panic reaches the caller");
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"build panicked"));
+}
+
+/// A build that fails — by error or by panic — after the window gave up on it
+/// is reported, naming the device, rather than lost.
+#[test]
+fn rust_only_a_late_failure_from_an_abandoned_build_is_reported() {
+    for (label, panics) in [("late error", false), ("late panic", true)] {
+        let (fail_the_build, wait_fail) = mpsc::channel::<()>();
+        let (reports, report) = collector();
+
+        let built = create_within_budget(
+            move || {
+                let _ = wait_fail.recv();
+                if panics {
+                    panic!("late build failure");
+                }
+                Err::<FakeDevice, _>("late build failure".to_string())
+            },
+            label,
+            Duration::from_millis(200),
+            true,
+            Some(report),
+        );
+        assert_eq!(built, Ok(None));
+        let _ = fail_the_build.send(());
+
+        let expected =
+            format!("GpuStartup: '{label}' failed after it was abandoned: late build failure");
+        let deadline = Instant::now();
+        while !any_contains(&reports, &expected) && deadline.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            any_contains(&reports, &expected),
+            "{:?}",
+            reports.lock().unwrap()
+        );
+    }
+}

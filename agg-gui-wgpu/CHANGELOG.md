@@ -17,7 +17,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   its adapter and device requests within `GpuConfig::startup_budget` and
   returns the new `GpuInitError::StartupTimedOut` when it expires;
   `Gpu::release_within_budget` drains before releasing and leaks the device
-  rather than wait past the budget.
+  rather than wait past the budget. A device already lost, or one whose drain
+  fails (wgpu 29 panics when it polls a lost device; the panic is caught), is
+  released without waiting. When the OS refuses a thread, the budgeted work
+  runs inline.
+
+### Changed
+
+- `Gpu::new` builds its adapter and device on a separate thread and can now
+  return `GpuInitError::StartupTimedOut` (new variant) when
+  `GpuConfig::startup_budget` (new field) expires. `GpuInitError` and
+  `GpuConfig` are `#[non_exhaustive]`, so the new variant and field compile
+  against existing code (no exhaustive match or struct literal is possible);
+  the behaviour change is that a driver that never answers is now an error
+  instead of a hang.
 
 ## [0.5.3] - 2026-09-28
 

@@ -25,9 +25,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::gpu_budget::{
-    create_within_budget, drain_within_budget, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET,
-};
+use crate::gpu_budget::{create_within_budget, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET};
 use crate::surface_retry::{ConfigureRetry, DEFAULT_RETRY_BUDGET};
 
 #[path = "gpu_acquire.rs"]
@@ -493,31 +491,26 @@ impl Gpu {
     /// queue (`WgpuGfxCtx`, an app renderer) can drop theirs afterwards
     /// without waiting: this bundle's references keep both alive.
     ///
+    /// A device already lost is released without a drain (wgpu 29 panics
+    /// when a lost device is polled), and a drain that fails — including a
+    /// loss found while polling, whose panic is caught inside the drain — is
+    /// followed by the release too; both return `true`. See
+    /// `gpu_budget::release_after_drain` for the whole decision.
+    ///
     /// Device-loss recovery should simply drop the old `Gpu` instead: it is
     /// not on a deadline and wants the old device really gone.
     pub fn release_within_budget(self, budget: Duration) -> bool {
         let device = Arc::clone(&self.device);
-        let drained = drain_within_budget(
+        let already_lost = self.device_lost();
+        crate::gpu_budget::release_after_drain(
+            self,
+            already_lost,
             move || device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ()),
             "agg-gui-wgpu device",
             budget,
             BACKGROUND_THREAD_AVAILABLE,
             None,
-        );
-        match drained {
-            Ok(true) => true,
-            Ok(false) => {
-                // Deliberate leak; see the doc comment.
-                std::mem::forget(self);
-                false
-            }
-            Err(error) => {
-                // The drain itself failed (a lost device): there is nothing
-                // left to wait for, so the release cannot block.
-                log::warn!("agg-gui-wgpu: the GPU drain at close failed: {error}");
-                true
-            }
-        }
+        )
     }
 
     /// Reconfigure the swap chain for a new physical size. A zero-sized
