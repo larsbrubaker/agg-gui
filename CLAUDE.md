@@ -80,3 +80,10 @@ write or edit code directly. All implementation is delegated to the `implementer
 subagent, one scoped step at a time. All post-change review is delegated to the
 `reviewer` subagent. The main session handles only planning, architecture decisions,
 and synthesizing subagent results.
+## Branches and worktrees
+
+When a task is complete, commit it, land it on `main` and push, then delete its branch and
+remove its worktree — including any `worktree-agent-*` worktrees its sub-agents made (Lars,
+2026-10-09). Only work still in progress keeps a branch. A worktree's git config inherits the
+submodule's `core.worktree`, so git commands inside `.claude/worktrees/*` or `../agg-gui-wt-*`
+need `--work-tree=<that path>`.
