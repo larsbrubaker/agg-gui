@@ -87,11 +87,11 @@ pub use shell_loop::ShellInit;
 
 // Re-exported so a consumer can build a `ShellHost` without naming the
 // renderer crate, and so the versions can never disagree.
-pub use agg_gui_wgpu::{CopySrc, Gpu, GpuInitError, WgpuGfxCtx};
 /// The start-up and close time limits ([`agg_gui_wgpu::GPU_STARTUP_BUDGET`],
 /// [`agg_gui_wgpu::GPU_TEARDOWN_BUDGET`]) and the seconds formatting their
 /// messages use, for an app that words its own start-up failure.
 pub use agg_gui_wgpu::gpu_budget;
+pub use agg_gui_wgpu::{CopySrc, Gpu, GpuInitError, WgpuGfxCtx};
 
 /// The `wgpu` this shell was built against.
 ///
