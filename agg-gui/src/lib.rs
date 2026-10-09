@@ -63,6 +63,7 @@ pub mod cursor;
 pub mod device_scale;
 pub mod draw_cell;
 pub mod draw_ctx;
+pub mod draw_trace_log;
 pub mod event;
 pub mod focus;
 pub mod font_settings;

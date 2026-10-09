@@ -105,12 +105,14 @@ pub fn drain_draw_trace() -> Vec<&'static str> {
 /// this from library call sites so the quiescence guard can attribute wakeups.
 pub fn request_draw_tagged(reason: &'static str) {
     record_draw_trace(reason);
-    request_draw();
+    crate::draw_trace_log::record(reason);
+    set_draw_request();
 }
 
 /// [`request_draw_after`] with a provenance tag — see the trace module docs.
 pub fn request_draw_after_tagged(delay: Duration, reason: &'static str) {
     record_draw_trace(reason);
+    crate::draw_trace_log::record(reason);
     request_draw_after(delay);
 }
 
@@ -299,6 +301,13 @@ pub(crate) fn wake_host() {
 /// no retained widget's *content* changed — overlays, position-only
 /// translations, and similar.  When in doubt, use `request_draw`.
 pub fn request_draw() {
+    crate::draw_trace_log::record(crate::draw_trace_log::UNTAGGED_DRAW_REQUEST);
+    set_draw_request();
+}
+
+/// The body of [`request_draw`] without logging it (the tagged variant logs
+/// its own tag instead).
+fn set_draw_request() {
     NEEDS_DRAW.with(|c| c.set(true));
     INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
 }
@@ -324,6 +333,7 @@ pub fn request_draw() {
 /// `MenuBar` hover regression in `widgets/menu/widget/tests_2.rs` exists
 /// precisely because this distinction was missed once already.
 pub fn request_draw_without_invalidation() {
+    crate::draw_trace_log::record(crate::draw_trace_log::UNTAGGED_DRAW_REQUEST);
     NEEDS_DRAW.with(|c| c.set(true));
 }
 
