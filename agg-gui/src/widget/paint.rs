@@ -140,8 +140,12 @@ pub(crate) fn paint_subtree_forced(widget: &mut dyn Widget, ctx: &mut dyn DrawCt
 /// Paint app-level overlays after the whole tree has rendered.
 ///
 /// Traverses in paint order while preserving each widget's normal local
-/// transform. Implementors can use `ctx.root_transform()` to submit app-level
-/// overlay geometry without forcing retained parents to repaint.
+/// transform. Implementors can map their geometry through
+/// [`logical_root_transform`] to submit app-level overlays without forcing
+/// retained parents to repaint: every overlay / popup request queue is in the
+/// App root's **logical** units. [`DrawCtx::root_transform`] lands in root
+/// device pixels (the effective scale applied); use it only for device-pixel
+/// needs.
 pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if !widget.is_visible() {
         return;
