@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- The device is built within agg-sharp's 15 s start-up budget (`run` ends with
+  `ShellError::Gpu(GpuInitError::StartupTimedOut)` instead of hanging), and
+  the close releases it within the 5 s teardown budget
+  (`Gpu::release_within_budget`). `GpuInitError` and `gpu_budget` are
+  re-exported.
+
 - winit `HoveredFile` / `HoveredFileCancelled` are forwarded to
   `App::on_file_drag_hover` / `App::on_file_drag_leave`: each hover carries
   every path of the drag seen so far, at the live cursor position, and a

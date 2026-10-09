@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Added
+
+- `gpu_budget` (agg-sharp `GpuStartup` / `GpuTeardown`):
+  `create_within_budget` and `drain_within_budget` run a device build or a GPU
+  drain on their own thread within a wall-clock budget, with
+  `GPU_STARTUP_BUDGET` (15 s) and `GPU_TEARDOWN_BUDGET` (5 s). `Gpu::new` runs
+  its adapter and device requests within `GpuConfig::startup_budget` and
+  returns the new `GpuInitError::StartupTimedOut` when it expires;
+  `Gpu::release_within_budget` drains before releasing and leaks the device
+  rather than wait past the budget.
+
 ## [0.5.3] - 2026-09-28
 
 ### Added
