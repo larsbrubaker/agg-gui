@@ -162,6 +162,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- The `PerformanceView` sparkline plots longer frames higher, so spikes read
+  as peaks (it mapped samples Y-down in the Y-up context), and its 16.7 ms
+  budget line sits at the top of the strip while every frame is under budget.
+
 - Popup menu keyboard navigation follows agg-sharp's `PopupMenu.OnKeyDown`:
   Right, Enter or Space on a submenu row opens it with no row highlighted, so
   the next Up / Down starts inside it (also after a hover opened it); Left

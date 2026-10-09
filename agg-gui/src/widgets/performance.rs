@@ -143,7 +143,8 @@ pub fn shared_frame_history() -> SharedFrameHistory {
 /// ```
 ///
 /// The horizontal orange line on the sparkline marks the 16.7 ms / 60 fps
-/// reference budget — same convention as the egui reference panel.
+/// reference budget — an intentional addition; egui's frame-history graph
+/// has no budget line (see [`paint_sparkline`]).
 pub struct PerformanceView {
     bounds: Rect,
     /// Children stored so the framework's tree walk recurses into them
@@ -494,6 +495,10 @@ impl Widget for PerformanceView {
 
 // ── Sparkline painting (free function, shared by hosts that want it) ──────────
 
+/// The 60 fps frame budget in milliseconds: the sparkline's Y-axis floor
+/// and the height of its orange reference line.
+const BUDGET_MS: f32 = 16.7;
+
 /// Paint a frame-time sparkline at `(x, y, w, h)` in the active
 /// `DrawCtx`'s coordinate space.  Reads from `history` for samples and
 /// draws an orange 16.7 ms (60 fps) reference line.  Exposed in case a
@@ -519,18 +524,24 @@ pub fn paint_sparkline(
         return;
     }
     let samples: Vec<f32> = hist.samples().collect();
-    // 60 fps reference (16.7 ms) is the floor for the Y axis range so a
-    // run of fast frames doesn't auto-zoom and exaggerate noise.
-    let max_ms = samples.iter().cloned().fold(0.1_f32, f32::max).max(16.7);
+    // The 60 fps budget is the floor for the Y axis range so a run of
+    // fast frames doesn't auto-zoom and exaggerate noise.
+    let max_ms = samples
+        .iter()
+        .cloned()
+        .fold(0.1_f32, f32::max)
+        .max(BUDGET_MS);
 
-    // Line chart.  Mapping: smaller ms -> higher y (Y-up: top of strip).
+    // Line chart.  Mapping (Y-up): 0 ms sits 2 px above the strip's
+    // bottom edge and `max_ms` 2 px below its top, so longer frames plot
+    // higher and spikes read as peaks.
     ctx.set_stroke_color(v.accent);
     ctx.set_line_width(1.5);
     ctx.begin_path();
     let n = samples.len();
     for (i, &ms) in samples.iter().enumerate() {
         let px = x + i as f64 / (n - 1) as f64 * w;
-        let py = y + (1.0 - ms as f64 / max_ms as f64) * (h - 4.0) + 2.0;
+        let py = y + 2.0 + (ms as f64 / max_ms as f64) * (h - 4.0);
         if i == 0 {
             ctx.move_to(px, py);
         } else {
@@ -539,16 +550,24 @@ pub fn paint_sparkline(
     }
     ctx.stroke();
 
-    // 60 fps reference line.
-    let ref_y = y + (1.0 - 16.7 / max_ms as f64) * (h - 4.0) + 2.0;
-    if ref_y >= y + 2.0 && ref_y <= y + h - 2.0 {
-        ctx.set_stroke_color(Color::rgba(1.0, 0.6, 0.0, 0.7));
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.move_to(x, ref_y);
-        ctx.line_to(x + w, ref_y);
-        ctx.stroke();
-    }
+    // Intentional deviation from egui's frame-history graph, which has no
+    // budget line: it fixes its top at 10 ms and marks each frame with a
+    // vertical bar (plus a dot when under the top).  Ours is a line chart
+    // whose Y range floors at the budget, with the budget line drawn in.
+    //
+    // 60 fps reference line, same Y-up mapping.  `max_ms` is floored at
+    // the same f32 `BUDGET_MS`, so the ratio is in (0, 1] and the line
+    // always lies inside the plotting range: exactly at its top edge while
+    // every frame is under budget, lower once a frame exceeds it.  The
+    // `min` only guards against float drift; no range check is needed.
+    let ref_frac = (BUDGET_MS as f64 / max_ms as f64).min(1.0);
+    let ref_y = y + 2.0 + ref_frac * (h - 4.0);
+    ctx.set_stroke_color(Color::rgba(1.0, 0.6, 0.0, 0.7));
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.move_to(x, ref_y);
+    ctx.line_to(x + w, ref_y);
+    ctx.stroke();
 }
 
 #[cfg(test)]
@@ -607,5 +626,100 @@ mod tests {
         h.push(3.0);
         let collected: Vec<f32> = h.samples().collect();
         assert_eq!(collected, vec![1.0, 2.0, 3.0]);
+    }
+
+    // ── Sparkline orientation (rendered through the real GfxCtx) ────────────
+
+    /// Sparkline strip size used by the render tests.  The height gives
+    /// `h - 4 = 100` px of plotting range, from y = 2 (0 ms) up to
+    /// y = 102 (`max_ms`).
+    const STRIP_W: u32 = 64;
+    const STRIP_H: u32 = 104;
+
+    /// Paint the real [`paint_sparkline`] over `samples` into a software
+    /// framebuffer that the strip exactly fills.
+    fn render_sparkline(samples: &[f32]) -> crate::framebuffer::Framebuffer {
+        let history = shared_frame_history();
+        for &ms in samples {
+            history.borrow_mut().push(ms);
+        }
+        let mut fb = crate::framebuffer::Framebuffer::new(STRIP_W, STRIP_H);
+        {
+            let mut ctx = crate::gfx_ctx::GfxCtx::new(&mut fb);
+            paint_sparkline(&mut ctx, &history, 0.0, 0.0, STRIP_W as f64, STRIP_H as f64);
+        }
+        fb
+    }
+
+    /// Row (Y-up: row 0 is the bottom) in column `x` whose pixel is closest
+    /// in RGB to `target` — i.e. where a stroke of that colour crosses `x`.
+    fn row_nearest(fb: &crate::framebuffer::Framebuffer, x: u32, target: Color) -> u32 {
+        let px = fb.pixels();
+        let t = [target.r * 255.0, target.g * 255.0, target.b * 255.0];
+        (0..fb.height())
+            .min_by(|&a, &b| {
+                let dist = |row: u32| {
+                    let i = ((row * fb.width() + x) * 4) as usize;
+                    (0..3)
+                        .map(|c| (px[i + c] as f32 - t[c]).powi(2))
+                        .sum::<f32>()
+                };
+                dist(a).total_cmp(&dist(b))
+            })
+            .expect("row_nearest needs a non-empty framebuffer column (height > 0)")
+    }
+
+    /// 30 fast frames followed by 30 slow ones; `max_ms` floors at
+    /// [`BUDGET_MS`].
+    fn fast_then_slow() -> Vec<f32> {
+        let mut samples = vec![2.0_f32; 30];
+        samples.extend([14.0_f32; 30]);
+        samples
+    }
+
+    /// Regression: the sparkline mapped samples with a Y-down formula in
+    /// the Y-up `DrawCtx`, so a steady fast frame time sat near the TOP of
+    /// the strip and frame-time spikes showed as dips.  A longer frame
+    /// must plot higher, at a height proportional to its ms.
+    #[test]
+    fn sparkline_plots_longer_frames_higher() {
+        let fb = render_sparkline(&fast_then_slow());
+        let accent = crate::theme::current_visuals().accent;
+        // Column 10 lies in the 2 ms run, column 54 in the 14 ms run.
+        let fast_row = row_nearest(&fb, 10, accent);
+        let slow_row = row_nearest(&fb, 54, accent);
+        assert!(
+            slow_row > fast_row,
+            "14 ms frames (row {slow_row}) must plot above 2 ms frames (row {fast_row})"
+        );
+        // Expected stroke centres: y = 2 + ms / BUDGET_MS * 100.
+        let budget = BUDGET_MS as f64;
+        let fast_y = 2.0 + 2.0 / budget * 100.0;
+        let slow_y = 2.0 + 14.0 / budget * 100.0;
+        assert!(
+            (fast_row as f64 + 0.5 - fast_y).abs() <= 1.5,
+            "2 ms line at row {fast_row}, expected near y = {fast_y:.1}"
+        );
+        assert!(
+            (slow_row as f64 + 0.5 - slow_y).abs() <= 1.5,
+            "14 ms line at row {slow_row}, expected near y = {slow_y:.1}"
+        );
+    }
+
+    /// Regression: the 16.7 ms budget line used the same inverted mapping,
+    /// so with every frame under budget it sank to the bottom of the
+    /// strip.  When `max_ms` is the 16.7 ms floor it belongs exactly at the
+    /// top of the plotting range (y = h - 2).
+    #[test]
+    fn sparkline_budget_line_sits_at_top_when_under_budget() {
+        let fb = render_sparkline(&fast_then_slow());
+        let budget_row = row_nearest(&fb, 10, Color::rgb(1.0, 0.6, 0.0));
+        let top_y = STRIP_H as f64 - 2.0;
+        // The 1 px line centred on the y = 102 pixel boundary straddles
+        // rows 101 and 102 only.
+        assert!(
+            (budget_row as f64 + 0.5 - top_y).abs() <= 0.5,
+            "16.7 ms line at row {budget_row}, expected at the top (y = {top_y})"
+        );
     }
 }
