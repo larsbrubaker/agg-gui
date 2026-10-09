@@ -46,3 +46,22 @@ windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# The native menu bar (`menu_bar/macos.rs`) talks to AppKit through objc2, the
+# same binding winit and wgpu already use on the mac. objc2 and objc2-foundation:
+# MIT; objc2-app-kit: Zlib OR Apache-2.0 OR MIT.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSCell",
+    "NSEvent",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+] }

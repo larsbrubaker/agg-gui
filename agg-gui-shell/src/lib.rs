@@ -69,6 +69,7 @@ mod screenshot;
 mod shell_loop;
 mod tooltip;
 mod waker;
+pub mod menu_bar;
 
 pub use bounds::{sanitize_restored_window_size, SavedBounds, WindowBoundsStore};
 pub use config::{RedrawPolicy, ScreenshotConfig, ShellConfig, WindowIcon, WindowSize};

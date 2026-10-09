@@ -335,6 +335,11 @@ impl<H: ShellHost> ShellLoop<H> {
         // that paint nothing. Its timed work re-arms the wake through
         // `next_draw_deadline`.
         agg_gui::ui_thread::invoke_pending_actions();
+        // Items picked in the native menu bar (`menu_bar`), queued during
+        // AppKit's menu tracking and run here on a clean stack.
+        if crate::menu_bar::run_pending_activations() {
+            self.window.request_redraw();
+        }
 
         // App-requested fullscreen toggles (`agg_gui::fullscreen`).
         if agg_gui::fullscreen::take_request() {
