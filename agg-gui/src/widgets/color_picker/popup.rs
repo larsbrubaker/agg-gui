@@ -19,7 +19,10 @@
 //! edge.  The placement is computed when the popup opens, from the pointer's
 //! root-space position, so hit regions match the painted panel from the
 //! first frame; each overlay paint re-checks it from the root transform in
-//! case the swatch moved.
+//! case the swatch moved.  Both measure the swatch's root logical (unlifted)
+//! origin against the on-screen part of root space
+//! ([`visible_root_rect`](crate::widget::visible_root_rect)), so they agree
+//! while the on-screen keyboard lifts the tree.
 
 use super::widget_impl::contains;
 use super::*;
@@ -100,11 +103,21 @@ impl ColorPicker {
     }
 
     /// Place the popup for a swatch whose bottom-left is at `origin`
-    /// (logical root space), re-laying out the panel's buttons if it moved.
+    /// (root logical, unlifted space), re-laying out the panel's buttons if
+    /// it moved.
     fn place_popup_from_origin(&mut self, origin: Point) {
         let d = self.popup_swatch.unwrap_or(0.0);
         let panel = Size::new(PANEL_W, panel_body_h(self.allow_none));
-        let viewport = crate::widgets::combo_box::current_combo_viewport();
+        // Decide against the on-screen part of root space: measure `origin`
+        // from its bottom-left corner (`dx` is relative, so unaffected).
+        let (origin, viewport) = match crate::widgets::combo_box::current_combo_viewport() {
+            Some(vp) => {
+                let vis = crate::widget::visible_root_rect(vp);
+                let on_screen = Point::new(origin.x - vis.x, origin.y - vis.y);
+                (on_screen, Some(Size::new(vis.width, vis.height)))
+            }
+            None => (origin, None),
+        };
         let (dx, up) = place_popup(origin, d, panel, viewport);
         if dx != self.popup_dx || up != self.popup_opens_up {
             self.popup_dx = dx;
@@ -167,8 +180,8 @@ impl ColorPicker {
     /// Paint the open popup in the global overlay pass: re-check the
     /// placement, then the panel background, border and rows.
     pub(super) fn paint_popup(&mut self, ctx: &mut dyn DrawCtx) {
-        // The widget's origin in logical root space (Y-up), with the app's
-        // effective (device × UX) scale divided out of the root transform.
+        // The widget's origin in root logical space (Y-up, unlifted), with
+        // the app's effective scale and keyboard lift taken out.
         let (mut x, mut y) = (0.0, 0.0);
         crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
         self.place_popup_from_origin(Point::new(x, y));

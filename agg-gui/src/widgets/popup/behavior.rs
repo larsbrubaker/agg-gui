@@ -12,11 +12,13 @@
 //! nested-menu content, host it with a [`PopupMenu`](super::super::menu::PopupMenu),
 //! which reuses the whole menu machinery. `Popup` adds the one thing the menu
 //! system can't express on its own: arbitrary [`RectAlign`] placement plus a
-//! selectable close behavior.
+//! selectable close behavior. Like the menu system it flips and clamps against
+//! [`visible_root_rect`](crate::widget::visible_root_rect), so it stays on
+//! screen while the on-screen keyboard lifts the tree.
 
 use crate::geometry::{Point, Rect, Size};
 
-use super::align::{clamp_rect, RectAlign};
+use super::align::{clamp_rect_in, RectAlign};
 
 /// When a popup should dismiss itself in response to clicks. Mirrors egui's
 /// `PopupCloseBehavior`.
@@ -133,7 +135,9 @@ impl Popup {
     }
 
     /// Record the anchor rect (the opener widget's bounds, in the coordinate
-    /// space the popup is placed and hit-tested in).
+    /// space the popup is placed and hit-tested in). Placement clamps against
+    /// the on-screen part of the viewport in root logical (unlifted) space, so
+    /// it is exact when that space is root space, as for the menu system.
     pub fn set_anchor(&mut self, anchor: Rect) {
         self.anchor = anchor;
     }
@@ -152,8 +156,13 @@ impl Popup {
     /// [`RectAlign::symmetries`] (then [`RectAlign::MENU_ALIGNS`]) that does —
     /// egui's overflow-flip (`Popup::get_best_align` in
     /// egui/src/containers/popup.rs).
+    ///
+    /// "On-screen" is [`visible_root_rect`](crate::widget::visible_root_rect)
+    /// for `viewport` — the same rect the menu system clamps against — so a
+    /// popup placed in root logical (unlifted) space stays on screen while the
+    /// on-screen keyboard lifts the tree.
     pub fn effective_align(&self, viewport: Size) -> RectAlign {
-        let content = Rect::new(0.0, 0.0, viewport.width, viewport.height);
+        let content = crate::widget::visible_root_rect(viewport);
         RectAlign::find_best_align(
             std::iter::once(self.align)
                 .chain(self.align.symmetries())
@@ -167,13 +176,14 @@ impl Popup {
     }
 
     /// The placed popup rect: best-fit alignment first (overflow flip), then
-    /// clamped to the viewport as the final fallback when even the best
-    /// candidate overflows.
+    /// clamped into the on-screen part of the viewport
+    /// ([`visible_root_rect`](crate::widget::visible_root_rect)) as the final
+    /// fallback when even the best candidate overflows.
     pub fn rect(&self, viewport: Size) -> Rect {
         let align = self.effective_align(viewport);
-        clamp_rect(
+        clamp_rect_in(
             align.place_child(self.anchor, self.size, self.gap),
-            viewport,
+            crate::widget::visible_root_rect(viewport),
         )
     }
 

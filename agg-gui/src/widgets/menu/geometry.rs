@@ -1,7 +1,12 @@
 //! Y-up menu geometry and hit testing.
 //!
 //! Popup menus are global overlays, so geometry is expressed in the owning
-//! widget's local coordinate space but clamped against the current viewport.
+//! widget's local coordinate space but clamped against the on-screen part of
+//! the viewport, [`visible_root_rect`](crate::widget::visible_root_rect) —
+//! `(0, −lift, w, h)` while the on-screen keyboard lifts the tree. The clamp
+//! is exact for menus kept in root logical (unlifted) coordinates: a
+//! [`PopupMenu`](super::PopupMenu) hosted through its root origin
+//! (`widget/popup_local.rs`), or a host sitting at the root origin.
 //! Popup widths come from [`stack_layout_with_width`]'s width callback;
 //! [`stack_layout`] uses the fixed (touch-grown) `menu_w`.
 
@@ -197,13 +202,14 @@ pub fn stack_layout_with_metrics(
     // hit-test both flow through here, so they can never diverge.
     let mut layouts = Vec::new();
     let mut items = root_items;
+    let vis = crate::widget::visible_root_rect(viewport);
     let mut x = anchor.x;
     let mut y_top = anchor.y;
     let mut prefix = Vec::new();
 
     loop {
         let w = width(items, &m);
-        let rect = popup_rect(items, Point::new(x, y_top), anchor_kind, viewport, w, &m);
+        let rect = popup_rect(items, Point::new(x, y_top), anchor_kind, vis, w, &m);
         let rows = row_layouts(items, rect, &m);
         layouts.push(PopupLayout {
             rect,
@@ -232,7 +238,7 @@ pub fn stack_layout_with_metrics(
         prefix.push(next_idx);
         items = &item.submenu;
         let sub_w = width(items, &m);
-        x = (rect.x + rect.width - 2.0).min(viewport.width - sub_w - MARGIN);
+        x = (rect.x + rect.width - 2.0).min(vis.x + vis.width - sub_w - MARGIN);
         // For top/context popups (open downward) the cascade
         // anchors at the row's TOP so the submenu's top edge
         // aligns with the parent row's top. For BottomBar popups
@@ -309,30 +315,33 @@ pub fn contains(rect: Rect, pos: Point) -> bool {
         && pos.y <= rect.y + rect.height
 }
 
+/// One popup panel's rect for `anchor`, kept inside `vis` — the on-screen
+/// part of root space ([`visible_root_rect`](crate::widget::visible_root_rect)).
 fn popup_rect(
     items: &[MenuEntry],
     anchor: Point,
     anchor_kind: MenuAnchorKind,
-    viewport: Size,
+    vis: Rect,
     w: f64,
     m: &MenuMetrics,
 ) -> Rect {
     let h = popup_height(items, m);
+    let left = vis.x + MARGIN;
     let x = anchor
         .x
-        .clamp(MARGIN, (viewport.width - w - MARGIN).max(MARGIN));
+        .clamp(left, (vis.x + vis.width - w - MARGIN).max(left));
     let (min_y, raw_y) = match anchor_kind {
         // Top bar — popup hangs below the anchor (extends toward
         // smaller y in Y-up). `Bar` allows negative-y clamp so a
         // bar pushed flush against the viewport edge still places
         // a popup correctly.
-        MenuAnchorKind::Bar => (-viewport.height, anchor.y - h),
+        MenuAnchorKind::Bar => (vis.y - vis.height, anchor.y - h),
         // Bottom bar — popup rises ABOVE the anchor (extends
         // toward larger y in Y-up). Popup rect's bottom = anchor.y.
-        MenuAnchorKind::BottomBar => (MARGIN, anchor.y),
-        MenuAnchorKind::Context => (MARGIN, anchor.y - h),
+        MenuAnchorKind::BottomBar => (vis.y + MARGIN, anchor.y),
+        MenuAnchorKind::Context => (vis.y + MARGIN, anchor.y - h),
     };
-    let y = raw_y.clamp(min_y, (viewport.height - h - MARGIN).max(min_y));
+    let y = raw_y.clamp(min_y, (vis.y + vis.height - h - MARGIN).max(min_y));
     Rect::new(x, y, w, h)
 }
 

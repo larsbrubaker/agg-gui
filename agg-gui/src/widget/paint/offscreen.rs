@@ -20,13 +20,17 @@
 //! Cache bookkeeping (dirty flags, size/epoch invalidation, content versions)
 //! lives in `widget/backbuffer.rs`; this module only decides when to re-raster
 //! and how to composite the result. Coordinate conventions are the same
-//! logical Y-up ones documented in [`super`].
+//! logical Y-up ones documented in [`super`]. CPU rasters into a fresh sub
+//! ctx run under `with_paint_lift_cleared`: that ctx never carries App's
+//! keyboard-lift translate, so `logical_root_transform` must not remove it;
+//! layers pushed onto App's own ctx keep it.
 
 use std::sync::Arc;
 
 use crate::framebuffer::Framebuffer;
 use crate::gfx_ctx::GfxCtx;
 use crate::lcd_coverage::LcdBuffer;
+use crate::widget::keyboard_scroll::with_paint_lift_cleared;
 
 use super::*;
 
@@ -367,7 +371,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                 }
                 tm.lcd_ctx_setup_ms += pt::ms(&t_setup);
                 let t_paint = pt::start();
-                paint_subtree_direct_no_overlay(widget, &mut sub);
+                with_paint_lift_cleared(|| paint_subtree_direct_no_overlay(widget, &mut sub));
                 tm.widget_paint_ms += pt::ms(&t_paint);
             }
             // Map the widget-local Y-up logical strip (lo, hi) to top-down
@@ -430,7 +434,9 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                         if over_bottom_logical != 0.0 {
                             sub.translate(0.0, over_bottom_logical);
                         }
-                        paint_subtree_direct_no_overlay(widget, &mut sub);
+                        with_paint_lift_cleared(|| {
+                            paint_subtree_direct_no_overlay(widget, &mut sub)
+                        });
                     }
                     // Two conversions to make the bitmap directly blittable:
                     //   1. Row order — Framebuffer is Y-up, blit lane is top-down.
@@ -479,7 +485,9 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                         }
                         tm.lcd_ctx_setup_ms += pt::ms(&t_setup);
                         let t_paint = pt::start();
-                        paint_subtree_direct_no_overlay(widget, &mut sub);
+                        with_paint_lift_cleared(|| {
+                            paint_subtree_direct_no_overlay(widget, &mut sub)
+                        });
                         tm.widget_paint_ms += pt::ms(&t_paint);
                     }
                     let t_plane = pt::start();

@@ -284,8 +284,10 @@ pub trait DrawCtx {
     /// The result applies the current in-layer CTM first, then adds every
     /// enclosing layer's origin (each recorded in its parent's device
     /// pixels), so it includes the App's effective scale (device × UX, see
-    /// [`crate::ux_scale::effective_scale`]) and every layer offset. Callers
-    /// that want logical root coordinates use
+    /// [`crate::ux_scale::effective_scale`]), the on-screen keyboard's lift
+    /// translate and every layer offset — it is the ON-SCREEN position.
+    /// Callers that want root logical coordinates (the unlifted layout space
+    /// of events and the overlay queues) use
     /// [`crate::widget::logical_root_transform`] rather than dividing by hand
     /// (dividing by the device scale alone breaks whenever UX scale ≠ 1).
     /// Global overlays and the paint clip stack

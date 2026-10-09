@@ -5,9 +5,12 @@
 //! after the regular tree walk and after `paint_global_overlays`, so popups
 //! always paint on top of the rest of the UI (including modals).
 //!
-//! Coordinates in the request are LOGICAL root-space — the drain pass runs
-//! while the outer device-scale CTM is still active, so logical x/y multiply
-//! up to physical pixels naturally and we avoid double-scaling on HiDPI.
+//! Coordinates in the request are root LOGICAL space (unlifted layout
+//! space) — the drain pass runs while App's effective-scale CTM and the
+//! on-screen keyboard's lift translate are still active, so logical x/y map
+//! to on-screen physical pixels naturally (no double-scaling on HiDPI, no
+//! double lift). On-screen clamps use
+//! [`visible_root_rect`](crate::widget::visible_root_rect).
 
 use super::{
     submit_combo_popup_internal, ComboPopupRequest, COMBO_POPUP_QUEUE, CORNER_R,
@@ -171,12 +174,15 @@ fn paint_item_hover_tooltip(ctx: &mut dyn DrawCtx, request: &ComboPopupRequest, 
     let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
     let mut px = request.x + request.width + GAP;
     let mut py = item_y + (ITEM_H - panel_h) * 0.5;
-    // Keep on-screen: fall back to the popup's left side, clamp vertically.
+    // Keep on-screen (the visible part of root space, which the keyboard
+    // lift shifts): fall back to the popup's left side, clamp vertically.
     if let Some(viewport) = current_combo_viewport() {
-        if px + panel_w > viewport.width - 4.0 {
-            px = (request.x - GAP - panel_w).max(4.0);
+        let vis = crate::widget::visible_root_rect(viewport);
+        let (left, bottom) = (vis.x + 4.0, vis.y + 4.0);
+        if px + panel_w > vis.x + vis.width - 4.0 {
+            px = (request.x - GAP - panel_w).max(left);
         }
-        py = py.clamp(4.0, (viewport.height - panel_h - 4.0).max(4.0));
+        py = py.clamp(bottom, (vis.y + vis.height - panel_h - 4.0).max(bottom));
     }
 
     ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.20));

@@ -215,9 +215,12 @@ pub(super) fn paint_overlay(window: &mut Window, ctx: &mut dyn DrawCtx) {
 /// `bounds` so the next frame's input routing (which reads `bounds` in the same
 /// parent-local space) stays in lockstep.
 ///
-/// Coordinates are logical Y-up with the origin at the viewport's bottom-left —
-/// the window's local `(0, 0)` is its own bottom-left corner, so a fit requires
-/// `0 ≤ root_y` and `root_y + height ≤ viewport.height`.
+/// Coordinates are root logical Y-up (the unlifted layout space) — the
+/// window's local `(0, 0)` is its own bottom-left corner. The fit is against
+/// the on-screen part of root space,
+/// [`visible_root_rect`](crate::widget::visible_root_rect): `(0, −lift, w, h)`
+/// while the on-screen keyboard lifts the tree, so the dialog stays fully on
+/// SCREEN — `vis.y ≤ root_y` and `root_y + height ≤ vis.y + vis.height`.
 ///
 /// Note: this folds the clamp correction into `bounds`. A modal window paired
 /// with `with_position_cell` would therefore persist the clamp shift to disk;
@@ -228,9 +231,9 @@ pub(super) fn clamp_modal_into_viewport(window: &mut Window, ctx: &dyn DrawCtx) 
     if vp.width <= 1.0 || vp.height <= 1.0 {
         return (0.0, 0.0);
     }
-    // Window-local origin in logical (device-independent) root coordinates
-    // that match `current_viewport()`: `logical_root_transform` divides out
-    // the combined device × UX zoom `App::paint` scales the ctx by.
+    // Window-local origin in root logical (device-independent, unlifted)
+    // coordinates: `logical_root_transform` divides out the combined
+    // device × UX zoom `App::paint` scales the ctx by, and its keyboard lift.
     let (mut root_x, mut root_y) = (0.0, 0.0);
     crate::widget::logical_root_transform(ctx).transform(&mut root_x, &mut root_y);
     // Cache the slot's canvas-absolute origin offset for the snap path, which
@@ -238,14 +241,15 @@ pub(super) fn clamp_modal_into_viewport(window: &mut Window, ctx: &dyn DrawCtx) 
     // (0,0) in canvas space; subtracting the slot-local `bounds.origin` yields
     // the ancestor (slot) offset — zero for a top-level window. Captured BEFORE
     // the clamp shifts `bounds` below so both terms are in the same (pre-clamp)
-    // frame. See `Window::world_offset`.
+    // frame. Unlifted, like the snap registry. See `Window::world_offset`.
     window
         .world_offset
         .set((root_x - window.bounds.x, root_y - window.bounds.y));
-    let max_x = (vp.width - window.bounds.width).max(0.0);
-    let max_y = (vp.height - window.bounds.height).max(0.0);
-    let dx = root_x.clamp(0.0, max_x) - root_x;
-    let dy = root_y.clamp(0.0, max_y) - root_y;
+    let vis = crate::widget::visible_root_rect(vp);
+    let max_x = (vis.x + vis.width - window.bounds.width).max(vis.x);
+    let max_y = (vis.y + vis.height - window.bounds.height).max(vis.y);
+    let dx = root_x.clamp(vis.x, max_x) - root_x;
+    let dy = root_y.clamp(vis.y, max_y) - root_y;
     window.bounds.x += dx;
     window.bounds.y += dy;
     (dx, dy)

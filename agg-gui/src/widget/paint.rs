@@ -56,28 +56,62 @@ pub fn is_local_rect_in_paint_clip(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h:
 }
 
 /// Map from `ctx`'s current local space to the App root's **logical** Y-up
-/// paint space: the units of [`current_viewport`](crate::widget::current_viewport),
-/// layout bounds and the overlay / popup request queues.
+/// space: the unlifted layout space of layout bounds,
+/// [`current_viewport`](crate::widget::current_viewport),
+/// [`current_mouse_world`](crate::widget::current_mouse_world) and the
+/// overlay / popup request queues (combo popups, tooltips, popup menus),
+/// which App drains under the same transform as the tree.
 ///
-/// [`DrawCtx::root_transform`] lands in root *device pixels*, which carry the
-/// effective scale `App::paint` applies (device × UX, see
-/// [`crate::ux_scale::effective_scale`]); this divides that whole product back
-/// out. Dividing by [`crate::device_scale::device_scale`] alone is only right
-/// while the UX scale is 1 — mobile shells auto-set it to ≈ 1.7.
+/// `App::paint` paints the tree under `P = scale(s) · translate(0, lift)`: the
+/// effective scale `s` (device × UX, see [`crate::ux_scale::effective_scale`])
+/// and the on-screen keyboard's lift (see `widget::keyboard_scroll`). This
+/// returns `P⁻¹ · root_transform`, taking both back out, so inside App's tree
+/// it is the exact paint-time twin of
+/// [`event_root_transform`](crate::widget::event_root_transform). Dividing by
+/// [`crate::device_scale::device_scale`] alone is only right while the UX
+/// scale is 1 — mobile shells auto-set it to ≈ 1.7.
 ///
-/// It is the paint-time counterpart of
-/// [`event_root_transform`](crate::widget::event_root_transform), but not
-/// always equal to it: App paints the tree under the on-screen keyboard's lift
-/// translate, so while the keyboard lifts the tree this includes the lift (the
-/// on-screen position) and the event-time transform does not. It also
-/// inherits `root_transform`'s caveats inside CPU backbuffers and LCD layers.
+/// For on-screen device pixels use [`DrawCtx::root_transform`]; to clamp a
+/// root-space rect into the visible part of the viewport use
+/// [`visible_root_rect`]. Inside a CPU backbuffer (a fresh `GfxCtx` /
+/// `LcdGfxCtx` sub ctx) `root_transform` is relative to the bitmap, so this is
+/// root space only when the backbuffered widget sits at the root origin — and
+/// for a banded / ink-outset (over-scan) backbuffer not even then, since the
+/// sub ctx adds a `translate(0, over_bottom)` that leaves the result that much
+/// too high; the keyboard lift is never subtracted there (the sub ctx never
+/// had it). Inside an `LcdGfxCtx` layer the effective scale is not included
+/// either.
 pub fn logical_root_transform(ctx: &dyn DrawCtx) -> crate::TransAffine {
     let s = crate::ux_scale::effective_scale().max(1e-6);
     let t = ctx.root_transform();
+    let lift = super::keyboard_scroll::paint_lift();
     // Post-multiplying by a uniform 1/s scale, written as a divide of every
     // coefficient so the local origin maps exactly as dividing the mapped
-    // point by `s` does (no extra 1/s rounding).
-    crate::TransAffine::new_custom(t.sx / s, t.shy / s, t.shx / s, t.sy / s, t.tx / s, t.ty / s)
+    // point by `s` does (no extra 1/s rounding); then undo the lift
+    // translate App paints the tree under.
+    crate::TransAffine::new_custom(
+        t.sx / s,
+        t.shy / s,
+        t.shx / s,
+        t.sy / s,
+        t.tx / s,
+        t.ty / s - lift,
+    )
+}
+
+/// The part of root logical space that is on screen, for a logical
+/// `viewport` (normally [`current_viewport`](crate::widget::current_viewport)):
+/// `(0, −lift, w, h)` while the on-screen keyboard lifts the tree by `lift`,
+/// `(0, 0, w, h)` otherwise.
+///
+/// Root space is the unlifted layout space and App shows root `(x, y)` at
+/// on-screen `(x, y + lift)`, so a popup / tooltip / dialog positioned in root
+/// space stays on screen iff it stays inside this rect. Clamp and flip against
+/// it exactly as against `(0, 0, w, h)` with no lift. Valid at event time and
+/// at paint time (it reads the lift App paints and routes events with).
+pub fn visible_root_rect(viewport: Size) -> Rect {
+    let lift = super::keyboard_scroll::current_lift();
+    Rect::new(0.0, -lift, viewport.width, viewport.height)
 }
 
 // ---------------------------------------------------------------------------
@@ -143,9 +177,11 @@ pub(crate) fn paint_subtree_forced(widget: &mut dyn Widget, ctx: &mut dyn DrawCt
 /// transform. Implementors can map their geometry through
 /// [`logical_root_transform`] to submit app-level overlays without forcing
 /// retained parents to repaint: every overlay / popup request queue is in the
-/// App root's **logical** units. [`DrawCtx::root_transform`] lands in root
-/// device pixels (the effective scale applied); use it only for device-pixel
-/// needs.
+/// App root's **logical** space (unlifted; App drains the queues under the
+/// keyboard lift itself), and viewport clamps there use
+/// [`visible_root_rect`]. [`DrawCtx::root_transform`] lands in on-screen root
+/// device pixels (effective scale and lift applied); use it only for
+/// device-pixel needs.
 pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if !widget.is_visible() {
         return;

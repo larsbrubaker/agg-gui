@@ -29,12 +29,13 @@ impl NodeEditor {
         let visuals = ctx.visuals();
         self.palette = CanvasPalette::from_visuals(&visuals);
 
-        // Capture our app-absolute origin in logical units
-        // (`logical_root_transform` divides out the device × UX zoom the App
-        // baked in). An inline editor handed to a screen-level `overlay_sink`
-        // uses this to convert its pill rect from editor-local to
-        // app-absolute so the host places it exactly over the pill rather
-        // than at the pane-relative offset.
+        // Capture our app-absolute origin in root logical units
+        // (`logical_root_transform` divides out the device × UX zoom and the
+        // on-screen keyboard lift the App baked in — the unlifted space a
+        // root-level overlay host lays its children out in). An inline
+        // editor handed to a screen-level `overlay_sink` uses this to convert
+        // its pill rect from editor-local to app-absolute so the host places
+        // it exactly over the pill rather than at the pane-relative offset.
         {
             let (mut ox, mut oy) = (0.0, 0.0);
             logical_root_transform(ctx).transform(&mut ox, &mut oy);

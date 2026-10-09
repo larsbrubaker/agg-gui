@@ -47,7 +47,7 @@ pub use event_root::{event_pointer_local, event_rect_to_root, event_root_transfo
 pub(crate) use paint::paint_subtree_forced;
 pub use paint::{
     current_paint_clip, is_local_rect_in_paint_clip, logical_root_transform, paint_global_overlays,
-    paint_subtree,
+    paint_subtree, visible_root_rect,
 };
 pub use tree::{
     activate_action_at, active_modal_path, cancel_action_path, default_action_path, dispatch_event,

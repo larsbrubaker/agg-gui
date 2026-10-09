@@ -142,6 +142,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   interaction state). `None` fields keep the current appearance.
   `Slider::style()` reads it back.
 
+- `widget::visible_root_rect(viewport)` (also re-exported at the crate root):
+  the on-screen part of root logical space — `(0, −lift, w, h)` while the
+  on-screen keyboard lifts the tree, `(0, 0, w, h)` otherwise. Clamp or flip
+  a root-space rect against it to keep it on screen. Also
+  `widgets::popup::clamp_rect_in(rect, bounds)`, `clamp_rect` for arbitrary
+  bounds (`clamp_rect` itself is unchanged).
+
 ### Changed
 
 - A press outside an open popup menu closes it and goes no further, as native
@@ -159,6 +166,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   by `menu/widget/tests_conformance.rs` (agg-sharp
   `PopupMenuConformanceTests`, with
   `AnOutsidePressBothDismissesTheMenuAndReachesTheWidgetBeneath` converted).
+
+- `logical_root_transform(ctx)` now also takes out the on-screen keyboard's
+  lift, so it is the paint-time twin of `event_root_transform`. Layout,
+  `current_mouse_world`, `PopupMenu` root coordinates and the overlay / popup
+  request queues all share this unlifted root logical space, and `App`
+  applies the lift once, at paint (to the tree and the queue drains alike).
+  Root-space viewport clamps — tooltips, the `ComboBox` popup, the
+  `ColorPicker` popup, modal `Window`s, `PopupMenu` and `Popup` — clamp
+  against `visible_root_rect`, so they keep things on screen. At lift 0
+  nothing changes.
 
 ### Fixed
 
@@ -231,6 +248,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   frame. Paths inside the clip render bit-for-bit as
   before; edges that cross it can differ by one unit in a channel, since
   AGG restarts them at the clip boundary on its 1/256-pixel grid.
+
+- While the on-screen keyboard lifts the tree: the open `ComboBox` popup and
+  widget-anchored tooltips no longer paint one lift too high; the
+  `InspectorPanel` hover highlight lands on its widget; a nested modal
+  `Window` snaps (and registers its snap target) without carrying the lift;
+  `PopupMenu` row tooltips show for the hovered row; the `ColorPicker` popup
+  places itself the same way when it opens as when it paints; and tooltips
+  flip and clamp against the on-screen viewport rather than root space.
 
 ## [0.5.1] - 2026-09-28
 

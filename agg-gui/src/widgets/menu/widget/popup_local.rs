@@ -2,7 +2,12 @@
 //! widget rows.
 //!
 //! Menu geometry is clamped against the viewport, so [`PopupMenu`] works in
-//! root (screen) coordinates.  A widget that owns a menu (a dropdown button,
+//! root logical coordinates — the unlifted layout space of pointer events
+//! and [`logical_root_transform`](crate::widget::logical_root_transform).
+//! The clamps measure against
+//! [`visible_root_rect`](crate::widget::visible_root_rect), so a menu stays
+//! on screen while the on-screen keyboard lifts the tree (App paints the
+//! menu under that lift).  A widget that owns a menu (a dropdown button,
 //! a split button) only knows its own local space; these helpers keep the
 //! local → root offset (the host's *root origin*) on the menu so the host
 //! never converts by hand:
@@ -71,7 +76,8 @@ impl PopupMenu {
         self.row_widgets.with(id, f)
     }
 
-    /// The host widget's (0, 0) in root coordinates, as last synced.
+    /// The host widget's (0, 0) in root logical (unlifted) coordinates, as
+    /// last synced.
     pub fn root_origin(&self) -> Point {
         self.root_origin
     }
@@ -91,8 +97,8 @@ impl PopupMenu {
     /// Record the host's root origin from its paint context: call from the
     /// host's `paint` with the ctx positioned at the host's (0, 0).
     pub fn sync_root_origin(&mut self, ctx: &dyn DrawCtx) {
-        // Menu geometry is logical: map through the transform that divides
-        // out App's device × UX scale.
+        // Menu geometry is root logical: map through the transform that
+        // divides out App's device × UX scale and keyboard lift.
         let (mut x, mut y) = (0.0, 0.0);
         crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
         self.set_root_origin(Point::new(x, y));

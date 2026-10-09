@@ -5,6 +5,10 @@
 //! drains this thread-local queue once the whole widget tree has painted
 //! ([`paint_global_tooltips`]), so the panels float above scroll clips and
 //! window content clips. This module owns that queue and its text painter.
+//! Requests carry root logical (unlifted) anchors: the drain runs under App's
+//! keyboard-lift translate, and placement clamps against
+//! [`visible_root_rect`](crate::widget::visible_root_rect) so a tip stays on
+//! screen while the on-screen keyboard lifts the tree.
 //!
 //! Interactive tooltips (see [`super::interactive`]) do **not** use this
 //! queue for their own surface — they paint a real child widget tree in
@@ -43,17 +47,25 @@ pub(super) fn panel_size(max_text_w: f64, line_count: usize) -> crate::geometry:
 
 /// Edge-aware placement for a tooltip panel of `panel` size anchored at
 /// `anchor`: prefer below (and, for pointer tips, below-right of the cursor),
-/// flip above when the bottom lacks room, then clamp fully inside the viewport
-/// safe area. Pure so both the queue painter and the controller share one
-/// clamp policy — and so the controller can expose the resulting rect to tests.
+/// flip above when the bottom lacks room, then clamp fully inside `visible`
+/// less the safe-area margin. Pure so both the queue painter and the
+/// controller share one clamp policy — and so the controller can expose the
+/// resulting rect to tests.
+///
+/// `anchor` and the result are root logical (unlifted) coordinates; `visible`
+/// is the on-screen part of root space,
+/// [`visible_root_rect`](crate::widget::visible_root_rect) — `(0, 0, w, h)`
+/// unless the on-screen keyboard lifts the tree.
 pub(super) fn place_panel(
     anchor: Point,
     panel: crate::geometry::Size,
-    viewport: Size,
+    visible: Rect,
     at_pointer: bool,
 ) -> Rect {
     let panel_w = panel.width;
     let panel_h = panel.height;
+    let (left, bottom) = (visible.x, visible.y);
+    let (right, top) = (visible.x + visible.width, visible.y + visible.height);
     let mut panel_x = if at_pointer {
         anchor.x
     } else {
@@ -63,24 +75,29 @@ pub(super) fn place_panel(
     if at_pointer {
         panel_y -= POINTER_TOOLTIP_EXTRA_DROP;
     }
-    if panel_x + panel_w > viewport.width - SCREEN_MARGIN {
-        panel_x = viewport.width - panel_w - SCREEN_MARGIN;
+    if panel_x + panel_w > right - SCREEN_MARGIN {
+        panel_x = right - panel_w - SCREEN_MARGIN;
     }
-    if panel_y < SCREEN_MARGIN {
+    if panel_y < bottom + SCREEN_MARGIN {
         // Not enough room below: fall back above the cursor / widget.
         panel_y = anchor.y + TOOLTIP_GAP;
     }
     panel_x = panel_x.clamp(
-        SCREEN_MARGIN,
-        (viewport.width - panel_w - SCREEN_MARGIN).max(SCREEN_MARGIN),
+        left + SCREEN_MARGIN,
+        (right - panel_w - SCREEN_MARGIN).max(left + SCREEN_MARGIN),
     );
     panel_y = panel_y.clamp(
-        SCREEN_MARGIN,
-        (viewport.height - panel_h - SCREEN_MARGIN).max(SCREEN_MARGIN),
+        bottom + SCREEN_MARGIN,
+        (top - panel_h - SCREEN_MARGIN).max(bottom + SCREEN_MARGIN),
     );
     Rect::new(panel_x, panel_y, panel_w, panel_h)
 }
 
+/// One queued lightweight tip. `anchor` is in root logical space — the
+/// unlifted layout space of `current_mouse_world` and
+/// [`logical_root_transform`](crate::widget::logical_root_transform); the
+/// queue is drained under App's keyboard-lift translate, never fed on-screen
+/// coordinates.
 pub(super) struct TooltipRequest {
     pub font: Arc<Font>,
     pub lines: Vec<TooltipLine>,
@@ -89,6 +106,7 @@ pub(super) struct TooltipRequest {
 }
 
 thread_local! {
+    /// Tips submitted this frame (root logical anchors, see [`TooltipRequest`]).
     static TOOLTIP_QUEUE: RefCell<Vec<TooltipRequest>> = const { RefCell::new(Vec::new()) };
     /// Viewport published at the start of each paint so interactive
     /// tooltips (which paint in `paint_global_overlay`, before the queue
@@ -96,6 +114,8 @@ thread_local! {
     static TOOLTIP_VIEWPORT: RefCell<Size> = const { RefCell::new(Size { width: 0.0, height: 0.0 }) };
 }
 
+/// Queue a lightweight tip for this frame's drain; its anchor is root
+/// logical (unlifted) — see [`TooltipRequest`].
 pub(super) fn submit_tooltip(request: TooltipRequest) {
     TOOLTIP_QUEUE.with(|q| q.borrow_mut().push(request));
 }
@@ -146,7 +166,7 @@ fn paint_request(ctx: &mut dyn DrawCtx, viewport: Size, request: TooltipRequest)
     let panel = place_panel(
         request.anchor,
         panel_size(max_w, request.lines.len()),
-        viewport,
+        crate::widget::visible_root_rect(viewport),
         request.at_pointer,
     );
     let (panel_x, panel_y, panel_w, panel_h) = (panel.x, panel.y, panel.width, panel.height);

@@ -22,5 +22,5 @@
 pub mod align;
 pub mod behavior;
 
-pub use align::{clamp_rect, Align, Align2, RectAlign};
+pub use align::{clamp_rect, clamp_rect_in, Align, Align2, RectAlign};
 pub use behavior::{Popup, PopupClickOutcome, PopupCloseBehavior};

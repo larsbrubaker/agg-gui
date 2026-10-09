@@ -254,10 +254,11 @@ impl Widget for InspectorPanel {
     /// AFTER the whole tree has painted, so it sits above any window/panel
     /// the hovered widget lives inside.
     ///
-    /// `hovered_bounds` is in logical root-space coordinates (Y-up); the
-    /// CTM at this point is local to the InspectorPanel, so we map the
-    /// local origin to logical root coords (dividing out App's device × UX
-    /// scale) and offset the draw rect by the inverse.
+    /// `hovered_bounds` is in root logical coordinates (Y-up, the unlifted
+    /// layout space); the CTM at this point is local to the InspectorPanel,
+    /// so we map the local origin to root logical coords (taking out App's
+    /// device × UX scale and keyboard lift) and offset the draw rect by the
+    /// inverse.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let Some(overlay) = *self.hovered_bounds.borrow() else {
             return;

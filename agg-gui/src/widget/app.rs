@@ -601,12 +601,11 @@ impl App {
     }
 
     #[inline]
-    /// Convert a platform-supplied physical Y-down coordinate into the
-    /// logical Y-up SCREEN space (unlifted).  Global overlays such as
-    /// the on-screen keyboard panel test against this; widget-tree
-    /// dispatch then calls
+    /// Convert a platform-supplied physical Y-down coordinate into
+    /// ON-SCREEN logical Y-up space.  The on-screen keyboard panel tests
+    /// against this; widget-tree dispatch then calls
     /// [`keyboard_scroll::lift_to_world`](super::keyboard_scroll::lift_to_world)
-    /// to drop into the lifted frame.
+    /// to map it into root logical space (unlifted layout space).
     fn flip_y(&self, x: f64, y_down: f64) -> Point {
         // Same effective scale used for layout / paint so event coords
         // arrive in the same logical space the widget tree was laid out in.

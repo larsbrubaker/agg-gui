@@ -368,8 +368,10 @@ impl RectAlign {
     }
 
     /// [`place_child`](Self::place_child) then clamp the result fully inside
-    /// `viewport`, leaving a small margin — so a popup near an edge stays
-    /// on-screen, matching how the menu system clamps its panels.
+    /// `(0, 0, viewport)`, leaving a small margin. Pure: it does not know about
+    /// the on-screen keyboard's lift, so it keeps a popup on screen only while
+    /// the tree is not lifted. For placement that stays on screen under the
+    /// lift (as the menu system's does), use [`Popup::rect`](super::Popup::rect).
     pub fn place_child_clamped(self, parent: Rect, size: Size, gap: f64, viewport: Size) -> Rect {
         clamp_rect(self.place_child(parent, size, gap), viewport)
     }
@@ -383,15 +385,25 @@ fn contains_rect(outer: Rect, inner: Rect) -> bool {
         && inner.y + inner.height <= outer.y + outer.height
 }
 
-/// Clamp `rect` inside `viewport` with a [`MARGIN`] gutter. If the rect is
-/// larger than the viewport it is pinned to the low edge rather than pushed
-/// off the high one.
+/// Clamp `rect` inside `(0, 0, viewport)` with a [`MARGIN`] gutter. If the
+/// rect is larger than the viewport it is pinned to the low edge rather than
+/// pushed off the high one. See [`clamp_rect_in`] for arbitrary bounds.
 pub fn clamp_rect(rect: Rect, viewport: Size) -> Rect {
-    let max_x = (viewport.width - rect.width - MARGIN).max(MARGIN);
-    let max_y = (viewport.height - rect.height - MARGIN).max(MARGIN);
+    clamp_rect_in(rect, Rect::new(0.0, 0.0, viewport.width, viewport.height))
+}
+
+/// Clamp `rect` inside `bounds` with a [`MARGIN`] gutter, pinning an
+/// oversized rect to the low edges. [`Popup::rect`](super::Popup::rect)
+/// passes [`visible_root_rect`](crate::widget::visible_root_rect), the
+/// on-screen part of root space, so popups stay on screen under the on-screen
+/// keyboard's lift.
+pub fn clamp_rect_in(rect: Rect, bounds: Rect) -> Rect {
+    let (min_x, min_y) = (bounds.x + MARGIN, bounds.y + MARGIN);
+    let max_x = (bounds.x + bounds.width - rect.width - MARGIN).max(min_x);
+    let max_y = (bounds.y + bounds.height - rect.height - MARGIN).max(min_y);
     Rect::new(
-        rect.x.clamp(MARGIN, max_x),
-        rect.y.clamp(MARGIN, max_y),
+        rect.x.clamp(min_x, max_x),
+        rect.y.clamp(min_y, max_y),
         rect.width,
         rect.height,
     )

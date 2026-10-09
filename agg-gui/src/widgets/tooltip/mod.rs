@@ -472,10 +472,11 @@ impl Widget for Tooltip {
             // hovered widget by default (MatterCAD-style). In
             // agg-gui's Y-up coords, the bottom edge is y=0; the
             // global paint step will offset the panel by
-            // `TOOLTIP_GAP` from this anchor. The queue is drained
-            // in logical root units (like `current_mouse_world` in
-            // the pointer branch), so map through the logical root
-            // transform, not the device-pixel `root_transform`.
+            // `TOOLTIP_GAP` from this anchor. The queue takes root
+            // logical (unlifted) coords, like `current_mouse_world` in
+            // the pointer branch, and App drains it under the keyboard
+            // lift itself — so map through the logical root transform,
+            // not the on-screen device-pixel `root_transform`.
             let mut y = 0.0;
             crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
             Point::new(x, y)

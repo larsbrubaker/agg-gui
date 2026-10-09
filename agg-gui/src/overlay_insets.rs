@@ -20,7 +20,12 @@
 //!    [`crate::card::anchored_rect`] — and keeps floating content inside
 //!    the remaining safe area.
 //!
-//! All values are **logical units**, matching layout coordinates.
+//! All values are **logical units**, measured from the viewport edges.
+//! [`for_paint_ctx`] treats them as ON-SCREEN strips: right for the
+//! screen-glued keyboard panel, which stays put while the on-screen
+//! keyboard's lift moves the tree. Strips reserved by `ReserveInset` chrome
+//! come from layout bounds and move with the tree, so under the lift they are
+//! off by the lift — an existing limitation this module does not handle.
 //! `current()` is complete only after the whole tree has laid out, so
 //! consume it at paint time (which is when anchored overlays are placed).
 
@@ -96,15 +101,32 @@ pub fn clip_to(container: Rect, insets: Insets, viewport: Size) -> Insets {
 /// paint-time overlay placement ([`crate::card`]) should feed into
 /// `anchored_rect_with_insets` when the painting widget doesn't fill the
 /// viewport.
+///
+/// The reserved strips are glued to the SCREEN edges (the on-screen keyboard
+/// panel does not move with the keyboard lift), while
+/// [`logical_root_transform`](crate::widget::logical_root_transform) yields
+/// root logical (unlifted) coordinates. So the widget's root rect is first
+/// moved into on-screen logical space — by the corner of
+/// [`visible_root_rect`](crate::widget::visible_root_rect) — before it is
+/// compared with the strips.
 pub fn for_paint_ctx(ctx: &dyn DrawCtx, local_size: Size) -> Insets {
-    // Local → logical viewport space (App's device × UX scale divided out).
+    // Local → root logical space (App's device × UX scale and keyboard lift
+    // taken out).
     let t = crate::widget::logical_root_transform(ctx);
     let (mut x0, mut y0) = (0.0, 0.0);
     let (mut x1, mut y1) = (local_size.width, local_size.height);
     t.transform(&mut x0, &mut y0);
     t.transform(&mut x1, &mut y1);
-    let abs = Rect::new(x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs());
-    clip_to(abs, current(), crate::widget::current_viewport())
+    // Root → on-screen logical: root (x, y) shows at (x − vis.x, y − vis.y).
+    let viewport = crate::widget::current_viewport();
+    let vis = crate::widget::visible_root_rect(viewport);
+    let abs = Rect::new(
+        x0.min(x1) - vis.x,
+        y0.min(y1) - vis.y,
+        (x1 - x0).abs(),
+        (y1 - y0).abs(),
+    );
+    clip_to(abs, current(), viewport)
 }
 
 #[cfg(test)]

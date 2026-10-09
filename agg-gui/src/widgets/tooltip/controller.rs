@@ -66,7 +66,8 @@ struct Controller {
     target: Option<Vec<usize>>,
     /// Tip text for the current target.
     text: String,
-    /// Latest pointer position in world coords (the tip anchor).
+    /// Latest pointer position in root logical (unlifted) coords — the tip
+    /// anchor, from `current_mouse_world`.
     anchor: Point,
     /// When the pointer entered the current target.
     hover_started_at: Option<Instant>,
@@ -82,8 +83,9 @@ struct Controller {
     suppressed: bool,
     /// Whether a mouse button is currently held (tips never show while pressed).
     pointer_down: bool,
-    /// Panel rect from the last visible frame, in world coords — exposed to
-    /// tests to assert edge clamping without paint introspection.
+    /// Panel rect from the last visible frame, in root logical (unlifted)
+    /// coords — exposed to tests to assert edge clamping without paint
+    /// introspection. On screen it sits `keyboard lift` higher.
     last_rect: Option<Rect>,
 }
 
@@ -226,7 +228,8 @@ impl Controller {
         let size = panel_size(text_w, 1);
         let viewport = current_tooltip_viewport();
         if viewport.width > 0.0 && viewport.height > 0.0 {
-            self.last_rect = Some(place_panel(self.anchor, size, viewport, true));
+            let visible = crate::widget::visible_root_rect(viewport);
+            self.last_rect = Some(place_panel(self.anchor, size, visible, true));
         }
         submit_tooltip(TooltipRequest {
             font,
@@ -242,8 +245,8 @@ impl Controller {
 
 /// Per-frame entry point called by the App's tooltip pass. `target` is the
 /// deepest hovered widget carrying a tip (its index-path identity + text), or
-/// `None` when nothing tipped is hovered. `anchor` is the pointer world
-/// position. Runs the state machine and, if a tip is visible, submits it.
+/// `None` when nothing tipped is hovered. `anchor` is the pointer position
+/// in root logical (unlifted) coords. Runs the state machine and, if a tip is visible, submits it.
 pub(crate) fn drive(target: Option<(Vec<usize>, String)>, anchor: Option<Point>) {
     CONTROLLER.with(|c| {
         let mut c = c.borrow_mut();
@@ -376,7 +379,8 @@ pub fn visible_text() -> Option<String> {
     })
 }
 
-/// The visible tip's placed panel rect (world coords), or `None`.
+/// The visible tip's placed panel rect (root logical, unlifted coords), or
+/// `None`.
 #[doc(hidden)]
 pub fn visible_rect() -> Option<Rect> {
     CONTROLLER.with(|c| c.borrow().last_rect)

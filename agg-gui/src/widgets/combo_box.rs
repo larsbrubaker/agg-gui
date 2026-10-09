@@ -38,6 +38,8 @@ const MIN_VISIBLE_ITEMS: usize = 3;
 const DEFAULT_VISIBLE_ITEMS: usize = 8;
 const SCROLLBAR_W: f64 = 6.0;
 
+/// One open dropdown queued for the popup drain. `x` / `y` (the closed box's
+/// origin) are root logical, unlifted — App drains under the keyboard lift.
 pub(super) struct ComboPopupRequest {
     pub(super) x: f64,
     pub(super) y: f64,
@@ -69,6 +71,7 @@ pub(super) struct ComboPopupRequest {
 }
 
 thread_local! {
+    /// Popups to paint this frame, in root logical (unlifted) coordinates.
     static COMBO_POPUP_QUEUE: RefCell<Vec<ComboPopupRequest>> = const { RefCell::new(Vec::new()) };
     static CURRENT_COMBO_VIEWPORT: Cell<Option<Size>> = const { Cell::new(None) };
 }
@@ -506,17 +509,17 @@ impl Widget for ComboBox {
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if self.open {
             // The popup queue is drained while App's effective (device × UX)
-            // scale is still active on the ctx, and `viewport_h` (and the rest
-            // of the popup geometry) are logical, so the request coords must
-            // be in logical root space. Otherwise on HiDPI / UX-zoomed mobile
-            // the popup paints at a scale²-magnified position while
-            // hit-testing (purely logical) stays on the closed button.
+            // scale and keyboard lift are still active on the ctx, so the
+            // request coords must be root logical (unlifted). Otherwise on
+            // HiDPI / UX-zoomed mobile the popup paints at a scale²-magnified
+            // position while hit-testing (purely logical) stays on the box.
             let (mut x, mut y) = (0.0, 0.0);
             crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
-            let viewport_h = crate::widgets::combo_box::current_combo_viewport()
-                .map(|s| s.height)
-                .unwrap_or(f64::MAX / 4.0);
-            self.configure_popup_geometry(y, viewport_h);
+            // Open up or down by the room ON SCREEN (`y` is unlifted).
+            let vis = crate::widgets::combo_box::current_combo_viewport()
+                .map(crate::widget::visible_root_rect)
+                .unwrap_or(Rect::new(0.0, 0.0, 0.0, f64::MAX / 4.0));
+            self.configure_popup_geometry(y - vis.y, vis.height);
             let style = self.popup_scroll_style();
             let visibility = current_scroll_visibility();
             let viewport = self.popup_scroll_viewport();

@@ -13,12 +13,13 @@
 //! # Coordinate system
 //!
 //! Root coordinates are the App root's **logical Y-up** space — the same
-//! space the App passes as `pos_in_root` — not device pixels (contrast with
+//! unlifted layout space the App passes as `pos_in_root` — not device pixels
+//! (contrast with
 //! [`DrawCtx::root_transform`](crate::draw_ctx::DrawCtx::root_transform),
-//! which carries the effective device × UX scale; its paint-time logical
-//! counterpart is
-//! [`logical_root_transform`](crate::widget::logical_root_transform)). Each
-//! level composes the child's `bounds()` offset and its parent's
+//! which carries the effective device × UX scale and the on-screen keyboard
+//! lift; its paint-time logical counterpart, the exact twin inside App's
+//! tree, is [`logical_root_transform`](crate::widget::logical_root_transform)).
+//! Each level composes the child's `bounds()` offset and its parent's
 //! [`Widget::child_transform`](super::Widget::child_transform), exactly as
 //! hit-testing maps positions down.
 //!

@@ -28,7 +28,8 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key};
 use crate::geometry::{Point, Rect, Size};
 use crate::widget::{
-    dispatch_event_dyn, hit_test_subtree, logical_root_transform, paint_subtree, Widget,
+    dispatch_event_dyn, hit_test_subtree, logical_root_transform, paint_subtree, visible_root_rect,
+    Widget,
 };
 
 use super::render::current_tooltip_viewport;
@@ -133,9 +134,10 @@ impl Tooltip {
     /// Paint the interactive tip surface (panel + content) when open.
     ///
     /// The ctx CTM is at this widget's local origin (the anchor's bottom-left
-    /// in world space). Geometry is computed in local coords; viewport-edge
-    /// clamping converts through the logical root origin from
-    /// [`logical_root_transform`].
+    /// in root space). Geometry is computed in local coords; viewport-edge
+    /// clamping converts through the root logical (unlifted) origin from
+    /// [`logical_root_transform`] and tests against [`visible_root_rect`], the
+    /// on-screen part of root space while the keyboard lifts the tree.
     pub(super) fn paint_interactive_tip(&mut self, ctx: &mut dyn DrawCtx) {
         self.update_interactive_state();
         if !self.tip_open || self.content.is_none() {
@@ -151,23 +153,24 @@ impl Tooltip {
         let mut panel_x = 0.0_f64;
         let mut panel_bottom = -TOOLTIP_GAP - panel_h;
 
-        // Viewport-edge avoidance in logical root coords, the units of the
-        // published tooltip viewport.
+        // Viewport-edge avoidance in root logical (unlifted) coords, against
+        // the on-screen part of root space.
         let (mut ox, mut oy) = (0.0, 0.0);
         logical_root_transform(ctx).transform(&mut ox, &mut oy);
         let viewport = current_tooltip_viewport();
         if viewport.width > 0.0 && viewport.height > 0.0 {
+            let vis = visible_root_rect(viewport);
             // Flip above the anchor when there is no room below.
-            if oy + panel_bottom < SCREEN_MARGIN {
+            if oy + panel_bottom < vis.y + SCREEN_MARGIN {
                 panel_bottom = self.bounds.height + TOOLTIP_GAP;
             }
             // Shift left so the right edge stays on-screen.
-            let overflow = (ox + panel_x + panel_w) - (viewport.width - SCREEN_MARGIN);
+            let overflow = (ox + panel_x + panel_w) - (vis.x + vis.width - SCREEN_MARGIN);
             if overflow > 0.0 {
                 panel_x -= overflow;
             }
             // Never let the left edge cross the margin.
-            let underflow = SCREEN_MARGIN - (ox + panel_x);
+            let underflow = vis.x + SCREEN_MARGIN - (ox + panel_x);
             if underflow > 0.0 {
                 panel_x += underflow;
             }

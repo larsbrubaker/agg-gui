@@ -42,8 +42,28 @@
 //!    [`ScrollView`](crate::widgets::ScrollView) absorbs as much as
 //!    it can; if it caps out (max-scroll reached), the next
 //!    `ScrollView` outward picks up the remainder.
+//!
+//! ## The global lift and root logical space
+//!
+//! Whatever the scroll chain can't absorb becomes the *global lift* `L`:
+//! the whole tree shifts up by `L` on screen. The contract:
+//!
+//! * **Root logical space is the UNLIFTED layout space.** Layout bounds,
+//!   pointer positions ([`lift_to_world`] subtracts `L` from every event),
+//!   [`current_mouse_world`](crate::widget::current_mouse_world),
+//!   [`event_root_transform`](crate::widget::event_root_transform),
+//!   [`logical_root_transform`](crate::widget::logical_root_transform) and
+//!   every overlay / popup request queue (combo popups, tooltips, the
+//!   tooltip controller) all live in it.
+//! * The App applies the lift exactly **once**, at paint:
+//!   [`paint_lifted_tree`] paints the tree AND drains the queues under
+//!   `translate(0, L)`, so root `(x, y)` shows on screen at `(x, y + L)`.
+//!   Producers never add or subtract the lift themselves.
+//! * While lifted, the on-screen part of root space is
+//!   [`visible_root_rect`](crate::widget::visible_root_rect)
+//!   `= (0, −L, w, h)`; viewport clamps and flips done in root space use it.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crate::animation::Tween;
 use crate::geometry::Rect;
@@ -67,6 +87,49 @@ thread_local! {
     /// slide rather than a snap.  Updated by [`request_lift`] when
     /// focus changes and ticked by `App::paint`.
     static LIFT: RefCell<Tween> = RefCell::new(Tween::new(0.0, LIFT_DURATION_SECS));
+
+    /// The lift translate [`paint_lifted_tree`] has applied to the paint
+    /// ctx right now — 0 outside it. Lets
+    /// [`logical_root_transform`](crate::widget::logical_root_transform)
+    /// take it back out, so paint-time root coordinates are unlifted.
+    static PAINT_LIFT: Cell<f64> = const { Cell::new(0.0) };
+}
+
+/// The keyboard lift translate currently applied to the paint ctx by
+/// [`paint_lifted_tree`]; 0 outside it (event time, direct test paints).
+pub(crate) fn paint_lift() -> f64 {
+    PAINT_LIFT.with(|c| c.get())
+}
+
+/// Sets [`PAINT_LIFT`] for the duration of a lifted paint and restores the
+/// previous value on drop, so a panicking paint can't leak it.
+struct PaintLiftGuard {
+    prev: f64,
+}
+
+impl PaintLiftGuard {
+    fn set(lift: f64) -> Self {
+        PaintLiftGuard {
+            prev: PAINT_LIFT.with(|c| c.replace(lift)),
+        }
+    }
+}
+
+impl Drop for PaintLiftGuard {
+    fn drop(&mut self) {
+        PAINT_LIFT.with(|c| c.set(self.prev));
+    }
+}
+
+/// Run `f` — a raster into a FRESH offscreen ctx (CPU backbuffer
+/// `GfxCtx` / `LcdGfxCtx`) — with [`paint_lift`] reading 0, restoring it
+/// afterwards (even on panic). The paint lift describes the translate on
+/// App's own ctx; a fresh sub ctx's `root_transform` is bitmap-relative and
+/// never carried it. Compositing layers pushed onto App's ctx must NOT use
+/// this: their `root_transform` includes the lift through the layer origins.
+pub(crate) fn with_paint_lift_cleared<R>(f: impl FnOnce() -> R) -> R {
+    let _cleared = PaintLiftGuard::set(0.0);
+    f()
 }
 
 /// Set the lift target.  No-op when the new target matches the
@@ -80,9 +143,11 @@ pub fn request_lift(target: f64) {
 }
 
 /// Current interpolated lift in Y-up pixels, without advancing the
-/// tween.  Mouse handlers call this to translate screen pixels into
-/// widget-tree world coordinates; the keyboard panel itself sits in
-/// screen space so its hit-tests use the un-lifted position.
+/// tween.  Mouse handlers call this to translate on-screen positions into
+/// root logical (unlifted layout) coordinates; the keyboard panel itself
+/// sits in screen space so its hit-tests use the on-screen position.
+/// During `App::paint` it equals the lift the tree is painted under (the
+/// paint ticks the tween first), so it is valid at event and paint time.
 pub fn current_lift() -> f64 {
     LIFT.with(|c| c.borrow().value())
 }
@@ -107,6 +172,15 @@ pub fn reset_lift_for_test() {
     LIFT.with(|c| *c.borrow_mut() = Tween::new(0.0, LIFT_DURATION_SECS));
 }
 
+/// Pin the lift at a settled `v` (no animation in flight), so
+/// [`current_lift`] and [`tick_lift`] both read exactly `v` — for tests
+/// that check where things land while the tree is lifted. Pair with
+/// [`reset_lift_for_test`] (the thread-local outlives the test).
+#[cfg(test)]
+pub fn set_lift_for_test(v: f64) {
+    LIFT.with(|c| *c.borrow_mut() = Tween::new(v, LIFT_DURATION_SECS));
+}
+
 /// Where the lift tween is travelling toward (last value passed to
 /// `request_lift`).  Useful for asserting that focus loss did in fact
 /// retarget the lift back to 0 without waiting on the animation.
@@ -115,11 +189,11 @@ pub fn lift_target_for_test() -> f64 {
     LIFT.with(|c| c.borrow().target())
 }
 
-/// Drop a screen-space position into the lifted widget-tree frame
-/// (subtract the active keyboard-driven lift).  Cheap no-op when the
-/// keyboard isn't lifting anything.  Mouse handlers call this AFTER
-/// the on-screen-keyboard panel hit-test so the panel itself still
-/// sits in unlifted screen space.
+/// Map an on-screen logical position into root logical space — the
+/// unlifted layout space the tree lives in — by subtracting the active
+/// keyboard-driven lift.  Cheap no-op when the keyboard isn't lifting
+/// anything.  Mouse handlers call this AFTER the on-screen-keyboard panel
+/// hit-test so the panel itself still sits in screen space.
 #[inline]
 pub fn lift_to_world(screen_pos: crate::geometry::Point) -> crate::geometry::Point {
     let lift = current_lift();
@@ -135,6 +209,13 @@ pub fn lift_to_world(screen_pos: crate::geometry::Point) -> crate::geometry::Poi
 /// lift translate applied.  The keyboard panel itself paints OUTSIDE
 /// this lift (in `App::paint` after this returns) so it stays glued
 /// to the viewport bottom regardless of how much the tree shifts up.
+///
+/// This is the ONE place the lift is applied: the overlay queues are
+/// drained under the same translate as the tree, so they must be fed root
+/// logical (unlifted) coordinates — exactly what
+/// [`logical_root_transform`](crate::widget::logical_root_transform) and
+/// `current_mouse_world` give. [`paint_lift`] reports the translate while
+/// this runs.
 pub(crate) fn paint_lifted_tree(
     root: &mut dyn Widget,
     ctx: &mut dyn crate::draw_ctx::DrawCtx,
@@ -147,6 +228,8 @@ pub(crate) fn paint_lifted_tree(
         ctx.save();
         ctx.translate(0.0, lift);
     }
+    // The translate actually applied to the ctx (none below the threshold).
+    let _paint_lift = PaintLiftGuard::set(if lifted { lift } else { 0.0 });
     paint_subtree(root, ctx);
     crate::widgets::combo_box::paint_global_combo_popups(ctx);
     crate::widgets::tooltip::paint_global_tooltips(ctx, viewport);
@@ -264,10 +347,13 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
     if panel_h <= 0.0 {
         return;
     }
-    // In Y-up the panel occupies [0, panel_h].  The field's bottom
-    // edge is `rect.y` (Rect::y is the lowest Y in Y-up).  We want
-    // `rect.y >= panel_h + SAFETY_MARGIN`.  Anything less is the
-    // deficit we ask scroll containers to absorb.
+    // In Y-up the panel occupies on-screen [0, panel_h].  `rect` is in
+    // root logical (unlifted) space, i.e. where the field sits on screen
+    // at lift 0, and its bottom edge is `rect.y` (Rect::y is the lowest Y
+    // in Y-up).  We want `rect.y >= panel_h + SAFETY_MARGIN`.  Anything
+    // less is the deficit we ask scroll containers to absorb; what they
+    // can't is the TOTAL lift to request (not an increment on top of the
+    // current one).
     let required = panel_h + SAFETY_MARGIN;
     if rect.y >= required {
         // Field already clears the panel — slide any leftover lift
@@ -291,8 +377,9 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
 /// Walk from `root` down `path` and compose each visited widget's
 /// `bounds().origin()` offset **and** its optional
 /// [`child_transform`](crate::widget::Widget::child_transform) into a single
-/// affine, then return the focused widget's screen-space rect in Y-up
-/// coordinates.
+/// affine, then return the focused widget's rect in root logical Y-up
+/// coordinates — the unlifted layout space, which coincides with the screen
+/// only at lift 0 (the caller compares it against the panel as if unlifted).
 ///
 /// Honouring `child_transform` matters because a focusable widget can live
 /// inside a pan/zoom container (a [`Scene`](crate::widgets::Scene)) — the demo
