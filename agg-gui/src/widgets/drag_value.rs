@@ -7,7 +7,9 @@
 //!
 //! A plain click (no significant drag) enters an inline edit mode: the widget
 //! shows a cursor and accepts keyboard input.  Pressing Enter or losing focus
-//! commits the edit; Escape cancels it.
+//! commits the edit; Escape cancels it.  If the bound value cell is changed by
+//! something else mid-edit, the edit text is replaced by the new value rather
+//! than written back over it (egui #8403).
 //!
 //! Typical use-case: property panels, inspector rows, compact parameter editors.
 
@@ -198,7 +200,8 @@ impl DragValue {
         self
     }
 
-    /// Register a callback invoked with the new value on every drag update.
+    /// Register a callback invoked with the new value whenever a drag or a
+    /// committed inline edit actually changes it.
     pub fn on_change(mut self, cb: impl FnMut(f64) + 'static) -> Self {
         self.on_change = Some(Box::new(cb));
         self
@@ -302,12 +305,17 @@ impl DragValue {
     fn update_from_drag(&mut self, current_x: f64) {
         let delta = (current_x - self.drag_start_x) * self.speed;
         let raw = self.drag_start_value + delta;
+        let old = self.value;
         self.value = self.apply_step_and_clamp(raw);
         self.sync_label();
         self.write_back();
-        let v = self.value;
-        if let Some(cb) = self.on_change.as_mut() {
-            cb(v);
+        // Report a change only when the snapped value moved (agg-sharp's
+        // `DragValue.Value` setter, egui #8627).
+        if self.value != old {
+            let v = self.value;
+            if let Some(cb) = self.on_change.as_mut() {
+                cb(v);
+            }
         }
     }
 
@@ -317,17 +325,48 @@ impl DragValue {
         self.edit_cursor = self.edit_text.chars().count();
     }
 
+    /// The bound cell's value (clamped) when it differs from `self.value`,
+    /// i.e. when something other than this widget has changed it since we
+    /// last read it. `None` when unbound, unchanged, or NaN.
+    fn external_cell_value(&self) -> Option<f64> {
+        let raw = self.value_cell.as_ref()?.get();
+        if raw.is_nan() {
+            return None;
+        }
+        let clamped = raw.clamp(self.min, self.max);
+        (clamped != self.value).then_some(clamped)
+    }
+
+    /// Leave edit mode, taking the typed number (stepped and clamped) when it
+    /// parses; `on_change` fires only if the value actually changed, as
+    /// agg-sharp's `DragValue.CommitEdit` / `Value` setter do.
+    /// Committing an unchanged value writes nothing back, so it doesn't
+    /// re-normalise an out-of-range value sitting in the bound cell.
     fn commit_edit(&mut self) {
         self.editing = false;
+        // egui #8403: `self.value` is the value the edit text belongs to. If
+        // the bound value was changed by something else since then, the text
+        // is stale — adopt the new value instead of writing the text back over
+        // it. Not our change, so no `on_change` (same as the `layout` re-read).
+        if let Some(external) = self.external_cell_value() {
+            self.value = external;
+            self.sync_label();
+            return;
+        }
+        let old = self.value;
         if let Ok(raw) = self.edit_text.trim().parse::<f64>() {
             self.value = self.apply_step_and_clamp(raw);
         }
         // Always sync label back to actual value (parse success or failure).
         self.sync_label();
-        self.write_back();
-        let v = self.value;
-        if let Some(cb) = self.on_change.as_mut() {
-            cb(v);
+        // Report a change only when the value actually changed (agg-sharp's
+        // `DragValue.Value` setter, egui #8627).
+        if self.value != old {
+            self.write_back();
+            let v = self.value;
+            if let Some(cb) = self.on_change.as_mut() {
+                cb(v);
+            }
         }
     }
 
@@ -421,24 +460,25 @@ impl Widget for DragValue {
     fn layout(&mut self, available: Size) -> Size {
         // Re-read the external cell every frame so a sibling widget (the gallery
         // Slider) that writes the same cell drives this DragValue live.  Skip
-        // while the user is actively dragging or editing here, so their in-flight
-        // interaction isn't fought back by the value they're producing.
-        if !self.dragging && !self.editing {
-            if let Some(cell) = &self.value_cell {
-                let raw = cell.get();
-                if !raw.is_nan() {
-                    let clamped = raw.clamp(self.min, self.max);
-                    if clamped != self.value {
-                        self.value = clamped;
-                        let text = self.display_text();
-                        // Only invalidate the Label cache when the shown value
-                        // actually changed, then request a repaint so the new
-                        // number lands on screen.
-                        if text != self.last_value_text {
-                            self.sync_label();
-                            crate::animation::request_draw();
-                        }
-                    }
+        // while the user is actively dragging here, so their in-flight drag
+        // isn't fought back by the value they're producing.  Editing doesn't
+        // write the cell until commit, so a change seen while editing is
+        // external.
+        if !self.dragging {
+            if let Some(external) = self.external_cell_value() {
+                self.value = external;
+                if self.editing {
+                    // egui #8403: the edit text belongs to the old value and
+                    // is now stale — discard it and keep editing the new one.
+                    self.edit_text = self.format_value();
+                    self.edit_cursor = self.edit_text.chars().count();
+                    crate::animation::request_draw();
+                } else if self.display_text() != self.last_value_text {
+                    // Only invalidate the Label cache when the shown value
+                    // actually changed, then request a repaint so the new
+                    // number lands on screen.
+                    self.sync_label();
+                    crate::animation::request_draw();
                 }
             }
         }

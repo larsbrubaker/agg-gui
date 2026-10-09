@@ -162,6 +162,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- `DragValue::on_change` fires only when the value actually changes, as
+  agg-sharp's `DragValue.Value` setter raises `ValueChanged`: a drag step that
+  snaps back to the same value, or committing an edit whose text is unchanged
+  or does not parse, reports nothing. A bound value cell changed by something
+  else while the field is being edited replaces the stale edit text, and
+  committing no longer writes the old text back over it (egui #8403).
+
 - A content-fitted child (a `FlexColumn` with `fit_width` or no flex rows)
   keeps its rows inside its own box. `AbsoluteLayout` lays a child out again
   whenever its final box differs from the space it was measured in (it used

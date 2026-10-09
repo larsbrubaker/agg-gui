@@ -1,6 +1,8 @@
 //! Unit tests for [`DragValue`](super::DragValue): value formatting / suffix
-//! handling, the intrinsic minimum width that keeps numbers from clipping, and
-//! the shared value-cell binding used by the Widget Gallery. Split out of
+//! handling, the intrinsic minimum width that keeps numbers from clipping,
+//! the shared value-cell binding used by the Widget Gallery, and how an inline
+//! edit commits (external changes survive it; `on_change` only on a real
+//! change). Split out of
 //! `drag_value.rs` to keep that file under the project's 800-line cap.
 
 use super::*;
@@ -186,4 +188,191 @@ fn drag_value_cursor_hover_drag_and_edit() {
 
     dv.enter_edit_mode();
     assert_eq!(moved(&mut dv, cx, cy), CursorIcon::Text, "editing inline");
+}
+
+/// Type `text` into a DragValue that is in inline edit mode, one key at a time.
+fn type_keys(dv: &mut DragValue, text: &str) {
+    use crate::event::Modifiers;
+    for c in text.chars() {
+        dv.on_event(&Event::KeyDown {
+            key: Key::Char(c),
+            modifiers: Modifiers::default(),
+        });
+    }
+}
+
+/// Press Enter in a DragValue that is in inline edit mode.
+fn press_enter(dv: &mut DragValue) {
+    dv.on_event(&Event::KeyDown {
+        key: Key::Enter,
+        modifiers: crate::event::Modifiers::default(),
+    });
+}
+
+/// egui #8403: while a DragValue is being edited, something else (a sibling
+/// widget, app code) changes the bound value. The next frame discards the
+/// now-stale edit text and shows the new value, and losing focus must not
+/// write the old text back over it.
+#[test]
+fn edit_does_not_revert_external_change_after_layout() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let cell = Rc::new(Cell::new(10.0_f64));
+    let mut dv = DragValue::new(cell.get(), 0.0, 360.0, test_font())
+        .with_decimals(0)
+        .with_value_cell(Rc::clone(&cell));
+
+    dv.enter_edit_mode();
+    type_keys(&mut dv, "5");
+    assert_eq!(dv.edit_text, "105");
+
+    // Something else changes the value while the field is being edited.
+    cell.set(42.0);
+    let _ = dv.layout(Size::new(120.0, 24.0));
+    assert_eq!(dv.edit_text, "42", "stale edit text must be refreshed");
+
+    // Losing focus commits — and must keep the external value.
+    dv.on_event(&Event::FocusLost);
+    assert_eq!(cell.get(), 42.0, "external change must survive the commit");
+    assert_eq!(dv.value(), 42.0);
+}
+
+/// egui #8403 guard: with no external change, layout passes mid-edit must
+/// keep the half-typed text (`"7."` would format back as `"7"`).
+#[test]
+fn layout_while_editing_keeps_typed_text() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let cell = Rc::new(Cell::new(7.0_f64));
+    let mut dv = DragValue::new(cell.get(), 0.0, 100.0, test_font())
+        .with_decimals(0)
+        .with_value_cell(Rc::clone(&cell));
+
+    dv.enter_edit_mode();
+    type_keys(&mut dv, ".");
+    let _ = dv.layout(Size::new(120.0, 24.0));
+    type_keys(&mut dv, "5");
+    let _ = dv.layout(Size::new(120.0, 24.0));
+    assert_eq!(dv.edit_text, "7.5");
+
+    press_enter(&mut dv);
+    assert_eq!(cell.get(), 7.5);
+}
+
+/// egui #8403, commit-time check: the external change lands after the last
+/// layout pass but before the commit (same frame). The edit text belongs to
+/// the old value, so committing it must not overwrite the new one.
+#[test]
+fn commit_does_not_revert_external_change_made_since_layout() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let cell = Rc::new(Cell::new(10.0_f64));
+    let mut dv = DragValue::new(cell.get(), 0.0, 360.0, test_font())
+        .with_decimals(0)
+        .with_value_cell(Rc::clone(&cell));
+
+    dv.enter_edit_mode();
+    type_keys(&mut dv, "5");
+    cell.set(42.0);
+    press_enter(&mut dv);
+
+    assert_eq!(cell.get(), 42.0, "external change must survive the commit");
+    assert_eq!(dv.value(), 42.0);
+    assert_eq!(dv.value_label.text_str(), "42");
+}
+
+/// `on_change` means "the value changed" (agg-sharp `DragValueTests.
+/// TypedTextIsParsedClampedAndCommitted` and `ConstructionClampsAnd
+/// ProgrammaticSetsRaiseOnlyOnChange`; egui #8627). Committing an edit whose
+/// text parses back to the current value, or doesn't parse, must not report
+/// a change; committing a different value reports exactly one.
+#[test]
+fn commit_with_unchanged_text_does_not_fire_on_change() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let changes = Rc::new(Cell::new(0_u32));
+    let changes_cb = Rc::clone(&changes);
+    let mut dv = DragValue::new(7.0, 0.0, 100.0, test_font())
+        .with_decimals(0)
+        .on_change(move |_| changes_cb.set(changes_cb.get() + 1));
+
+    dv.enter_edit_mode();
+    press_enter(&mut dv);
+    assert_eq!(
+        changes.get(),
+        0,
+        "Enter with unchanged text is not a change"
+    );
+
+    dv.enter_edit_mode();
+    dv.on_event(&Event::FocusLost);
+    assert_eq!(changes.get(), 0, "blur with unchanged text is not a change");
+
+    dv.enter_edit_mode();
+    type_keys(&mut dv, "1");
+    press_enter(&mut dv);
+    assert_eq!(dv.value(), 71.0);
+    assert_eq!(changes.get(), 1, "a real change is reported once");
+
+    // Unparsable text (here, everything deleted) leaves the value alone.
+    dv.enter_edit_mode();
+    for _ in 0..2 {
+        dv.on_event(&Event::KeyDown {
+            key: Key::Backspace,
+            modifiers: crate::event::Modifiers::default(),
+        });
+    }
+    assert_eq!(dv.edit_text, "");
+    press_enter(&mut dv);
+    assert_eq!(dv.value(), 71.0);
+    assert_eq!(changes.get(), 1, "unparsable text is not a change");
+}
+
+/// A drag step that step-snapping rounds back to the current value is not a
+/// change, so `on_change` stays quiet until the snapped value actually moves
+/// (agg-sharp's drag sets `DragValue.Value`, which raises only on a change:
+/// `DragMovesTheValueBySpeedPerDesignUnit`; egui #8627).
+#[test]
+fn drag_within_one_snap_step_does_not_fire_on_change() {
+    use crate::event::Modifiers;
+    use crate::geometry::Point;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let changes = Rc::new(RefCell::new(Vec::new()));
+    let changes_cb = Rc::clone(&changes);
+    let mut dv = DragValue::new(5.0, 0.0, 100.0, test_font())
+        .with_decimals(0)
+        .with_step(1.0)
+        .with_speed(0.1)
+        .on_change(move |v| changes_cb.borrow_mut().push(v));
+    let size = dv.layout(Size::new(120.0, 30.0));
+    dv.set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
+    let (cx, cy) = (size.width * 0.5, size.height * 0.5);
+
+    dv.on_event(&Event::MouseDown {
+        pos: Point::new(cx, cy),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    // Past the drag threshold, but 4 px * 0.1 = 0.4 snaps back to 5.
+    dv.on_event(&Event::MouseMove {
+        pos: Point::new(cx + 4.0, cy),
+    });
+    assert!(dv.dragging, "the drag is under way");
+    assert_eq!(dv.value(), 5.0);
+    assert!(
+        changes.borrow().is_empty(),
+        "a drag step that snaps back to the same value is not a change"
+    );
+
+    // 10 px * 0.1 = 1.0 snaps to 6: one real change.
+    dv.on_event(&Event::MouseMove {
+        pos: Point::new(cx + 10.0, cy),
+    });
+    assert_eq!(changes.borrow().as_slice(), [6.0]);
 }
