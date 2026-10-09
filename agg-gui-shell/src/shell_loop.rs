@@ -88,6 +88,11 @@ impl<H: ShellHost> ShellLoop<H> {
             // (`peek_next_draw_deadline`) and a due deadline surfaces through
             // `wants_draw()` on the next `AboutToWait`, so correctness does not
             // depend on catching this event — it only trims latency.
+            // The platform finished launching (on macOS, after winit set its
+            // default menu): a native menu bar the app installed while it was
+            // being built can go up now (`menu_bar::install`).
+            Event::NewEvents(StartCause::Init) => crate::menu_bar::finish_launching(),
+
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
                 self.window.request_redraw();
             }

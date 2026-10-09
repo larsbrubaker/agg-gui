@@ -38,6 +38,9 @@
 //!   session change) — see [`ShellHost::on_gpu_rebuilt`].
 //! - Optional deterministic screenshot capture, and fullscreen toggles
 //!   requested through `agg_gui::fullscreen`.
+//! - A native application menu bar built from a [`menu_bar::MenuBarModel`]
+//!   (macOS; a no-op elsewhere), its picked items run on the UI thread at
+//!   the loop's next idle pass — see [`menu_bar`].
 //!
 //! # What the app owns
 //!
@@ -62,6 +65,7 @@ mod bounds;
 mod config;
 mod host;
 mod input;
+pub mod menu_bar;
 mod paint;
 mod redraw_schedule;
 mod run;
@@ -69,7 +73,6 @@ mod screenshot;
 mod shell_loop;
 mod tooltip;
 mod waker;
-pub mod menu_bar;
 
 pub use bounds::{sanitize_restored_window_size, SavedBounds, WindowBoundsStore};
 pub use config::{RedrawPolicy, ScreenshotConfig, ShellConfig, WindowIcon, WindowSize};

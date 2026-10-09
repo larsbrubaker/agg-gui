@@ -17,19 +17,37 @@
 //! The application menu also carries the standard Hide, Hide Others and Show
 //! All group above Quit, answered by `NSApplication` itself, as every mac
 //! application's menu does.
+//!
+//! **When the bar goes up.** winit sets its default menu in
+//! `applicationDidFinishLaunching:` and then sends `NewEvents(Init)`; a bar
+//! set before that would be replaced. So [`install`] only records the model
+//! until the shell calls [`finish_launching`] at `NewEvents(Init)`, and builds
+//! it at once when launch has already finished.
+//!
+//! **Shortcut order differs from MatterCAD C#.** C#'s `MacSystemWindow` takes
+//! every key event before `-[NSApplication sendEvent:]` sees it, lets the
+//! window handle it first, and offers only the Command chords the window left
+//! unhandled to the menu bar. winit lets `sendEvent:` run, and AppKit offers a
+//! Command key-down to the main menu's key equivalents before the window's
+//! `keyDown:`: a chord the bar claims (Cmd-O, Cmd-comma, Cmd-Q, Cmd-H,
+//! Option-Cmd-H) runs the menu item and never reaches the app's own key
+//! handling. Every other chord, and every chord whose item is hidden or
+//! disabled, falls through to the window as before.
+//!
+//! Tooltips are not set on native items, as in agg-sharp `MacMenuBar`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-
-use objc2::rc::Retained;
 use std::ffi::c_void;
 
+use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, NSObject, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSEvent, NSEventModifierFlags, NSMenu, NSMenuDelegate, NSMenuItem,
+    NSRunningApplication,
 };
-use objc2_foundation::NSString;
+use objc2_foundation::{NSProcessInfo, NSString};
 
 use super::{
     children_of, is_enabled, key_equivalent_for, match_key_equivalent, modifier_flags,
@@ -56,6 +74,11 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+    /// A model installed before AppKit finished launching, waiting for
+    /// [`finish_launching`].
+    static PENDING_MODEL: RefCell<Option<MenuBarModel>> = const { RefCell::new(None) };
+    /// Whether the shell has seen `NewEvents(Init)`.
+    static LAUNCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 define_class!(
@@ -66,12 +89,18 @@ define_class!(
     #[name = "AggGuiShellMenuController"]
     struct MenuController;
 
+    // SAFETY: NSObjectProtocol has no requirements beyond being an NSObject
+    // subclass, which the superclass above guarantees.
     unsafe impl NSObjectProtocol for MenuController {}
 
+    // SAFETY: the one protocol method implemented below has the signature
+    // NSMenuDelegate declares for it (objc2-app-kit's `menuNeedsUpdate:`).
     unsafe impl NSMenuDelegate for MenuController {
         /// AppKit is about to show `menu`: throw its contents away and build
         /// them again from the model. A menu built from no container (the
         /// main menu, or one from a replaced bar) is left exactly as it is.
+        // SAFETY: `-(void)menuNeedsUpdate:(NSMenu *)menu`; AppKit passes a
+        // non-null menu.
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, menu: &NSMenu) {
             let owner = STATE.with(|state| {
@@ -90,15 +119,21 @@ define_class!(
             // is nothing left to read a submenu off.
             forget_contents(menu);
             menu.removeAllItems();
-            if let Some(mtm) = MainThreadMarker::new() {
-                populate_menu(mtm, menu, &container, top);
-            }
+            populate_menu(MainThreadMarker::from(self), menu, &container, top);
         }
     }
 
     impl MenuController {
+        /// Every model item's action: queues the item the sender was built
+        /// from.
+        // SAFETY: `-(void)menuItemSelected:(id)sender`, an action method; the
+        // sender is nullable, and is an NSMenuItem whenever this class's items
+        // send it (the only items targeting it with this selector).
         #[unsafe(method(menuItemSelected:))]
-        fn menu_item_selected(&self, sender: &NSMenuItem) {
+        fn menu_item_selected(&self, sender: Option<&NSMenuItem>) {
+            let Some(sender) = sender else {
+                return;
+            };
             let tag = sender.tag();
             let model = STATE.with(|state| {
                 state
@@ -114,6 +149,12 @@ define_class!(
         /// AppKit is looking for the item a key equivalent belongs to: answer
         /// from the whole installed model, whichever menu is asking, so the
         /// first menu asked gives the final answer.
+        // SAFETY: `-(BOOL)menuHasKeyEquivalent:(NSMenu *)menu
+        // forEvent:(NSEvent *)event target:(id *)target action:(SEL *)action`
+        // (NSMenuDelegate, not in objc2-app-kit's generated trait): the menu
+        // and event are non-null objects, `target` an `id *` and `action` a
+        // `SEL *` (taken as an untyped pointer, since `Sel` has no reference
+        // encoding), both nullable and checked before use; BOOL as `Bool`.
         #[unsafe(method(menuHasKeyEquivalent:forEvent:target:action:))]
         fn menu_has_key_equivalent(
             &self,
@@ -143,11 +184,15 @@ define_class!(
                 }
                 return Bool::YES;
             }
-            let matched = STATE.with(|state| {
-                let state = state.borrow();
-                let state = state.as_ref()?;
-                match_key_equivalent(state.installed.as_ref(), &characters, flags)
+            // Cloned out first: matching runs the app's gates and providers,
+            // which must not run while STATE is borrowed.
+            let installed = STATE.with(|state| {
+                state
+                    .borrow()
+                    .as_ref()
+                    .and_then(|state| state.installed.clone())
             });
+            let matched = match_key_equivalent(installed.as_ref(), &characters, flags);
             let Some(matched) = matched else {
                 return Bool::NO;
             };
@@ -156,8 +201,10 @@ define_class!(
                     state.pending_key_equivalent = Some(matched);
                 }
             });
-            // SAFETY: as above; the controller outlives the dispatch (it is
-            // kept in STATE for the life of the process).
+            // SAFETY: as above. The target is this controller, kept in STATE
+            // for the life of the process, which implements the action written
+            // here (`menuKeyEquivalentFired:`, below) with an action method's
+            // signature.
             unsafe {
                 *target = self as *const Self as *mut AnyObject;
                 *action.cast::<Option<Sel>>() = Some(sel!(menuKeyEquivalentFired:));
@@ -166,6 +213,8 @@ define_class!(
         }
 
         /// Runs the item `menuHasKeyEquivalent:` matched.
+        // SAFETY: `-(void)menuKeyEquivalentFired:(id)sender`, an action
+        // method; the sender is unused and nullable.
         #[unsafe(method(menuKeyEquivalentFired:))]
         fn menu_key_equivalent_fired(&self, _sender: Option<&AnyObject>) {
             let model = STATE.with(|state| {
@@ -204,11 +253,35 @@ fn standard_application_chord(characters: &str, flags: u64) -> Option<Sel> {
     }
 }
 
+/// Records `model` as the bar to show, building it now when AppKit has
+/// finished launching and at [`finish_launching`] otherwise.
 pub(super) fn install(model: MenuBarModel) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         log::warn!("menu_bar::install called off the main thread; no menu bar installed");
         return false;
     };
+    if LAUNCHED.with(|launched| launched.get()) {
+        apply(mtm, model);
+    } else {
+        PENDING_MODEL.with(|pending| *pending.borrow_mut() = Some(model));
+    }
+    true
+}
+
+/// The shell saw `NewEvents(Init)`: winit has set its default menu, so a bar
+/// installed before now can replace it.
+pub(super) fn finish_launching() {
+    LAUNCHED.with(|launched| launched.set(true));
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if let Some(model) = PENDING_MODEL.with(|pending| pending.borrow_mut().take()) {
+        apply(mtm, model);
+    }
+}
+
+/// Builds `model` into a fresh NSMenu tree and makes it the main menu.
+fn apply(mtm: MainThreadMarker, model: MenuBarModel) {
     let controller = STATE.with(|state| {
         let mut state = state.borrow_mut();
         let state = state.get_or_insert_with(|| State {
@@ -252,7 +325,65 @@ pub(super) fn install(model: MenuBarModel) -> bool {
         main_menu.addItem(&menu_item);
     }
     NSApplication::sharedApplication(mtm).setMainMenu(Some(&main_menu));
-    true
+}
+
+/// See [`super::describe_main_menu`].
+pub(super) fn describe_main_menu() -> Vec<String> {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return Vec::new();
+    };
+    let process_name = NSProcessInfo::processInfo().processName().to_string();
+    let application_name = NSRunningApplication::currentApplication()
+        .localizedName()
+        .map(|name| name.to_string())
+        .unwrap_or_default();
+    let mut lines = vec![format!(
+        "process name: {process_name}; application name: {application_name}"
+    )];
+    let Some(main_menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
+        lines.push("no main menu".to_string());
+        return lines;
+    };
+    for index in 0..main_menu.numberOfItems() {
+        let Some(item) = main_menu.itemAtIndex(index) else {
+            continue;
+        };
+        lines.push(item.title().to_string());
+        if let Some(sub_menu) = item.submenu() {
+            for sub_index in 0..sub_menu.numberOfItems() {
+                if let Some(sub_item) = sub_menu.itemAtIndex(sub_index) {
+                    lines.push(format!("    {}", describe_item(&sub_item)));
+                }
+            }
+        }
+    }
+    lines
+}
+
+/// One menu item as text: its title, or a divider, and its key equivalent.
+fn describe_item(item: &NSMenuItem) -> String {
+    if item.isSeparatorItem() {
+        return "-----".to_string();
+    }
+    let key = item.keyEquivalent().to_string();
+    if key.is_empty() {
+        return item.title().to_string();
+    }
+    let mask = item.keyEquivalentModifierMask();
+    let mut chord = String::new();
+    if mask.contains(NSEventModifierFlags::Control) {
+        chord.push_str("Ctrl-");
+    }
+    if mask.contains(NSEventModifierFlags::Option) {
+        chord.push_str("Option-");
+    }
+    if mask.contains(NSEventModifierFlags::Shift) {
+        chord.push_str("Shift-");
+    }
+    if mask.contains(NSEventModifierFlags::Command) {
+        chord.push_str("Cmd-");
+    }
+    format!("{} [{chord}{key}]", item.title())
 }
 
 fn create_menu(
@@ -333,7 +464,10 @@ fn populate_menu(mtm: MainThreadMarker, menu: &NSMenu, container: &MenuItemModel
             };
             let menu_item =
                 create_menu_item(mtm, &child.text, Some(sel!(menuItemSelected:)), chord);
-            // SAFETY: the controller is a live object kept in STATE.
+            // SAFETY: the target must respond to the item's action with an
+            // action method's signature: the controller implements
+            // `menuItemSelected:` as `-(void)menuItemSelected:(id)sender`, and
+            // it lives in STATE for the life of the process.
             unsafe { menu_item.setTarget(Some(&controller)) };
             let tag = STATE.with(|state| {
                 let mut state = state.borrow_mut();
@@ -352,9 +486,6 @@ fn populate_menu(mtm: MainThreadMarker, menu: &NSMenu, container: &MenuItemModel
             }
             menu_item
         };
-        if let Some(tool_tip) = &child.tool_tip_text {
-            menu_item.setToolTip(Some(&NSString::from_str(tool_tip)));
-        }
         menu_item.setEnabled(is_enabled(&child));
         menu.addItem(&menu_item);
     }

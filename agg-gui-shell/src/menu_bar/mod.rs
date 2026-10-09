@@ -55,6 +55,8 @@ impl MenuItemRole {
 #[derive(Clone, Default)]
 pub struct MenuItemModel {
     pub text: String,
+    /// Hover help. Carried for the in-window menu; a native menu bar does not
+    /// show it (agg-sharp `MacMenuBar` sets no tooltips).
     pub tool_tip_text: Option<String>,
     pub role: MenuItemRole,
     pub is_separator: bool,
@@ -240,11 +242,20 @@ pub fn run_pending_activations() -> bool {
 }
 
 /// Makes `model` the application's native menu bar, replacing any bar a
-/// previous call installed (on macOS, also the default menu winit sets up).
-/// Call on the UI thread once the event loop is running - from the builder
-/// closure handed to [`crate::run`]. Returns whether a native bar was
+/// previous call installed. Call on the UI thread; calling it from the builder
+/// closure handed to [`crate::run`] is the usual place.
+///
+/// On macOS the bar is applied once AppKit has finished launching: winit sets
+/// its own default menu in `applicationDidFinishLaunching:`, so a bar applied
+/// before then would be replaced. The shell applies a model installed before
+/// launch at `NewEvents(StartCause::Init)`, which winit sends right after
+/// setting its default menu and before anything is drawn, so winit's menu is
+/// never seen; a model installed after launch is applied at once. An app that
+/// installs no model keeps winit's default menu.
+///
+/// Returns whether a native bar is (or will be, once launch finishes)
 /// installed: always `false` off macOS, where the app's own in-window menu is
-/// the only one.
+/// the only one, and `false` when called off the main thread.
 pub fn install(model: MenuBarModel) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -254,5 +265,28 @@ pub fn install(model: MenuBarModel) -> bool {
     {
         let _ = model;
         false
+    }
+}
+
+/// Told by the shell loop that the platform has finished launching
+/// (`NewEvents(StartCause::Init)`): applies a model [`install`]ed before then.
+pub(crate) fn finish_launching() {
+    #[cfg(target_os = "macos")]
+    macos::finish_launching();
+}
+
+/// A plain-text read-back of the menu bar the platform is showing now, for
+/// diagnostics: on macOS the process and application names AppKit titles the
+/// application menu with, then `-[NSApp mainMenu]`'s top-level titles, each
+/// followed by its submenu's items (indented, with their key equivalents).
+/// Empty off macOS.
+pub fn describe_main_menu() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::describe_main_menu()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
     }
 }
