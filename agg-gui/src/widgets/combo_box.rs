@@ -2,7 +2,9 @@
 //!
 //! The widget always occupies its compact closed height.  When open, options
 //! are painted as a floating panel below the button in `paint_overlay()` so
-//! sibling widgets are not pushed down by the dropdown.
+//! sibling widgets are not pushed down by the dropdown.  While open the combo
+//! is modal: a press outside the list closes it and goes no further
+//! (`combo_box/press.rs`).
 //!
 //! Text for the selected value and dropdown items is rendered through
 //! backbuffered [`Label`] children maintained in `selected_label` and
@@ -367,6 +369,7 @@ impl ComboBox {
 
 mod fit;
 mod geometry;
+mod press;
 mod selection;
 mod style;
 pub use style::{ComboBoxStateStyle, ComboBoxStyle};
@@ -406,6 +409,12 @@ impl Widget for ComboBox {
 
     fn hit_test_global_overlay(&self, local_pos: Point) -> bool {
         self.pos_in_popup(local_pos)
+    }
+
+    /// Open, the drop-down owns the pointer (`combo_box/press.rs`): the press
+    /// that closes it from outside, and that press's release, stop here.
+    fn has_active_modal(&self) -> bool {
+        self.open
     }
 
     fn margin(&self) -> Insets {
@@ -551,86 +560,11 @@ impl Widget for ComboBox {
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseDown {
-                button: MouseButton::Middle,
-                pos,
-                ..
-            } => {
-                if self.pos_in_popup(*pos) {
-                    self.middle_dragging = true;
-                    self.middle_last_pos = *pos;
-                    self.hovered_item = None;
-                    crate::animation::request_draw();
-                    return EventResult::Consumed;
-                }
-                EventResult::Ignored
-            }
-            Event::MouseDown {
                 button: MouseButton::Left,
                 pos,
                 ..
-            } => {
-                if self.in_button(*pos) {
-                    self.open = !self.open;
-                    self.hovered_item = None;
-                    self.scrollbar.hovered_bar = false;
-                    self.scrollbar.hovered_thumb = false;
-                    self.scrollbar.dragging = false;
-                    self.middle_dragging = false;
-                    if self.open {
-                        self.ensure_selected_visible();
-                    }
-                    crate::animation::request_draw();
-                    return EventResult::Consumed;
-                }
-                if self.open {
-                    if self.pos_in_scrollbar(*pos) {
-                        let style = self.popup_scroll_style();
-                        let viewport = self.popup_scroll_viewport();
-                        let geom = self.scrollbar_geometry(style);
-                        self.sync_scrollbar_from_rows();
-                        if self.scrollbar.begin_drag(*pos, viewport, style, geom) {
-                            // No visible effect until the cursor moves.
-                        } else if self.scrollbar.page_at(*pos, viewport, style, geom) {
-                            self.sync_rows_from_scrollbar();
-                        }
-                        self.hovered_item = None;
-                        self.scrollbar.hovered_thumb = self.pos_on_scroll_thumb(*pos);
-                        crate::animation::request_draw();
-                        return EventResult::Consumed;
-                    }
-                    if let Some(i) = self.item_for_pos(*pos) {
-                        // Route through `set_selected` so the closed
-                        // combo's preview label is rebuilt with the
-                        // newly-selected per-item font (when item_fonts
-                        // is set).  Direct `self.selected = i` would
-                        // change the index without swapping the face,
-                        // leaving the closed combo showing the new
-                        // name in the OLD typeface — the bug visible
-                        // when the System window's font picker showed
-                        // e.g. "Bangers" in Cascadia Code.
-                        self.set_selected(i);
-                        self.open = false;
-                        self.hovered_item = None;
-                        self.scrollbar.hovered_bar = false;
-                        self.scrollbar.hovered_thumb = false;
-                        self.scrollbar.dragging = false;
-                        self.middle_dragging = false;
-                        self.fire();
-                        crate::animation::request_draw();
-                        return EventResult::Consumed;
-                    }
-                    // Click outside the dropdown — close it.
-                    self.open = false;
-                    self.hovered_item = None;
-                    self.scrollbar.hovered_bar = false;
-                    self.scrollbar.hovered_thumb = false;
-                    self.scrollbar.dragging = false;
-                    self.middle_dragging = false;
-                    crate::animation::request_draw();
-                    return EventResult::Consumed;
-                }
-                EventResult::Ignored
-            }
+            } => self.on_left_press(*pos),
+            Event::MouseDown { button, pos, .. } => self.on_other_press(*button, *pos),
             Event::MouseMove { pos } => {
                 if self.middle_dragging {
                     let dy = pos.y - self.middle_last_pos.y;

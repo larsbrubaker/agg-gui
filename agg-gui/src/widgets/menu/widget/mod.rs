@@ -234,6 +234,8 @@ mod tests_2;
 #[cfg(test)]
 mod tests_bar_children;
 #[cfg(test)]
+mod tests_conformance;
+#[cfg(test)]
 mod tests_fit;
 #[cfg(test)]
 mod tests_image_icon;

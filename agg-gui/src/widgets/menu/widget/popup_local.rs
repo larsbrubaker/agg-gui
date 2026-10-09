@@ -11,7 +11,14 @@
 //!    [`PopupMenu::set_root_origin`] when the host knows it),
 //! 2. open with [`PopupMenu::open_at_local`],
 //! 3. forward events with [`PopupMenu::handle_local_event`] and paint with
-//!    [`PopupMenu::paint_local`] from `paint_global_overlay`.
+//!    [`PopupMenu::paint_local`] from `paint_global_overlay`,
+//! 4. while the menu is open, return [`PopupMenu::is_open`] from both
+//!    `has_active_modal` and `hit_test_global_overlay`, so every press comes
+//!    to the menu.  A press outside it then closes it and is consumed, and its
+//!    release comes back to the host: the widget under the press sees
+//!    nothing, as with native menus (`tests_conformance.rs`).  A host that
+//!    claims only the menu body lets an outside press through to the widget
+//!    beneath and never tells the menu to close.
 //!
 //! A menu opened at a local anchor follows its host: when the root origin
 //! changes the anchor is re-applied.

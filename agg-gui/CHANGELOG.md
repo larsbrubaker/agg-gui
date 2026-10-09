@@ -116,6 +116,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   interaction state). `None` fields keep the current appearance.
   `Slider::style()` reads it back.
 
+### Changed
+
+- A press outside an open popup menu closes it and goes no further, as native
+  Mac and Windows menus behave: the widget under the press sees neither the
+  press nor its release, and takes no focus from it. Menu-bar menus, the
+  text-editing and markdown context menus and their submenus already worked
+  this way; the `ComboBox` drop-down now does too (while open it is modal,
+  `has_active_modal`, so the press that closes it and its release stay with
+  the combo, and a right or middle press outside closes it as well). A press
+  on the combo's own box still just toggles it closed. A `PopupMenu` host
+  gets the same rule by claiming the pointer while the menu is open
+  (`popup_local.rs` documents the contract). No API changes, but this is a
+  behaviour break for apps that relied on the press that closes a drop-down
+  also acting on the widget beneath: that now takes a second click. Pinned
+  by `menu/widget/tests_conformance.rs` (agg-sharp
+  `PopupMenuConformanceTests`, with
+  `AnOutsidePressBothDismissesTheMenuAndReachesTheWidgetBeneath` converted).
+
 ### Fixed
 
 - A content-fitted child (a `FlexColumn` with `fit_width` or no flex rows)
