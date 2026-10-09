@@ -24,8 +24,10 @@
 
 mod bezier_flat;
 mod ellipsis;
+mod vertical_metrics;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
 pub use ellipsis::{ellipsize_to_width, ellipsize_with};
+pub use vertical_metrics::VerticalMetrics;
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -70,11 +72,16 @@ impl TextMetrics {
 pub struct Font {
     pub(crate) data: Arc<Vec<u8>>,
     index: u32,
-    /// Cached at construction to avoid repeated parsing.
+    /// Cached at construction to avoid repeated parsing. The vertical
+    /// metrics are the face's own (ascent, descent and line gap as
+    /// `ttf-parser` reports them: `hhea`, or OS/2's typographic values when
+    /// the face sets `USE_TYPO_METRICS`; cap height from OS/2 `sCapHeight`,
+    /// else 0) unless replaced with [`Font::with_vertical_metrics`].
     units_per_em: u16,
     ascender: i16,
     descender: i16,
     line_gap: i16,
+    cap_height: i16,
     /// Optional fallback used when the primary font lacks a glyph.
     pub(crate) fallback: Option<Arc<Font>>,
     /// Apply the OpenType `tnum` (tabular figures) feature when shaping
@@ -93,6 +100,7 @@ impl Font {
             ascender: face.ascender(),
             descender: face.descender(),
             line_gap: face.line_gap(),
+            cap_height: face.capital_height().unwrap_or(0),
             data: Arc::new(data),
             index: 0,
             fallback: None,
@@ -156,6 +164,7 @@ impl Font {
             ascender: self.ascender,
             descender: self.descender,
             line_gap: self.line_gap,
+            cap_height: self.cap_height,
             fallback: self.fallback.clone(),
             tabular_digits: true,
         }

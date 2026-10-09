@@ -10,6 +10,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `text::VerticalMetrics` and `Font::with_vertical_metrics`: an opt-in,
+  per-font override of the ascent, descent, line gap and cap height (font
+  units) a face reports. Everything that centres or baselines text with that
+  font follows it (`ascender_px` / `descender_px` / `line_height_px`, so
+  `TextMetrics` and every `DrawCtx::measure_text`: `Label`, `Button`,
+  `TextField`, the line boxes and the ellipsized paths). Lets an app place a
+  face where another renderer placed it (agg-sharp's Liberation Sans 1.07 SVG
+  metrics on the 2.x outlines). `Font::vertical_metrics` reports the metrics
+  in force and `Font::cap_height_px` the cap height (OS/2 `sCapHeight` when
+  not overridden). Fonts without an override are unchanged.
+
 - `lcd_display_detection`: agg-sharp's `LcdDisplayDetection`, the policy that
   picks a default for LCD subpixel text from what the OS reports about the
   display (`LcdDisplayEnvironment`: font smoothing on, ClearType style, RGB

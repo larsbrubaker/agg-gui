@@ -64,6 +64,12 @@ pub(crate) struct PaintRecorder {
     pub path_ops: Vec<PathOp>,
     /// Every `fill_text` call: the text and its baseline origin.
     pub texts: Vec<(String, f64, f64)>,
+    /// When set ([`PaintRecorder::with_real_fonts`]), `measure_text` measures
+    /// with the font and size the widget set, instead of the fixed seven
+    /// pixels a character.
+    real_fonts: bool,
+    font: Option<Arc<Font>>,
+    font_size: f64,
 }
 
 impl PaintRecorder {
@@ -78,6 +84,19 @@ impl PaintRecorder {
             strokes: Vec::new(),
             path_ops: Vec::new(),
             texts: Vec::new(),
+            real_fonts: false,
+            font: None,
+            font_size: 0.0,
+        }
+    }
+
+    /// A recorder whose `measure_text` measures with the real font the
+    /// widget set (`measure_text_metrics`), so recorded baselines are the
+    /// ones the widget computes for that face.
+    pub(crate) fn with_real_fonts() -> Self {
+        Self {
+            real_fonts: true,
+            ..Self::new()
         }
     }
 
@@ -109,8 +128,12 @@ impl DrawCtx for PaintRecorder {
     fn set_blend_mode(&mut self, _mode: CompOp) {}
     fn set_global_alpha(&mut self, _alpha: f64) {}
     fn set_fill_rule(&mut self, _rule: FillRule) {}
-    fn set_font(&mut self, _font: Arc<Font>) {}
-    fn set_font_size(&mut self, _size: f64) {}
+    fn set_font(&mut self, font: Arc<Font>) {
+        self.font = Some(font);
+    }
+    fn set_font_size(&mut self, size: f64) {
+        self.font_size = size;
+    }
     fn clip_rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64) {}
     fn reset_clip(&mut self) {}
     fn clear(&mut self, _color: Color) {}
@@ -171,6 +194,13 @@ impl DrawCtx for PaintRecorder {
     }
     fn fill_text_gsv(&mut self, _text: &str, _x: f64, _y: f64, _size: f64) {}
     fn measure_text(&self, text: &str) -> Option<TextMetrics> {
+        if let (true, Some(font)) = (self.real_fonts, self.font.as_ref()) {
+            return Some(crate::text::measure_text_metrics(
+                font,
+                text,
+                self.font_size,
+            ));
+        }
         Some(TextMetrics {
             width: text.chars().count() as f64 * 7.0,
             ascent: 10.0,
