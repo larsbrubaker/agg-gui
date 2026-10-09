@@ -258,14 +258,27 @@ impl MarkdownView {
         self.selectable_fragments.push(fragment);
     }
 
+    /// Keep the selection inside the rebuilt text, on character boundaries:
+    /// after [`set_markdown`](MarkdownView::set_markdown) the old byte offsets
+    /// may sit past the end or inside a character that changed, and slicing
+    /// there (copy, highlight) would panic.
     fn clamp_selection_to_text(&mut self) {
-        let len = self.selectable_text.len();
-        if self.selection_anchor.is_some_and(|pos| pos > len) {
-            self.selection_anchor = Some(len);
-        }
-        if self.selection_cursor.is_some_and(|pos| pos > len) {
-            self.selection_cursor = Some(len);
-        }
+        let text = &self.selectable_text;
+        let clamp = |pos: usize| {
+            let mut pos = pos.min(text.len());
+            while !text.is_char_boundary(pos) {
+                pos -= 1;
+            }
+            pos
+        };
+        self.selection_anchor = self.selection_anchor.map(clamp);
+        self.selection_cursor = self.selection_cursor.map(clamp);
+    }
+
+    /// Whether any text is selected (a drag across the words, a double-click
+    /// or Select All).
+    pub fn has_selection(&self) -> bool {
+        self.selection_range().is_some()
     }
 
     pub(super) fn text_pos_at(&self, pos: Point) -> Option<usize> {
@@ -344,7 +357,7 @@ impl MarkdownView {
         }
     }
 
-    fn copy_payloads(&self, range: Range<usize>) -> (String, String) {
+    pub(super) fn copy_payloads(&self, range: Range<usize>) -> (String, String) {
         let mut markdown = String::new();
         let mut cursor = range.start;
 

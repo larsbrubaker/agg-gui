@@ -1,8 +1,9 @@
-//! Per-widget colour overrides for [`super::TextField`].
+//! Per-widget colour overrides and the frame switch for [`super::TextField`].
 //!
 //! Split out of `text_field.rs` to keep the main file under the
 //! 800-line cap. See the [`TextFieldTheme`] struct + the
-//! `with_theme` builder method for the public surface.
+//! `with_theme` builder method for the public surface, and `with_frame` for
+//! a field without its own background and border (as `TextArea::with_frame`).
 
 use super::*;
 
@@ -39,5 +40,28 @@ impl TextField {
     pub fn with_theme(mut self, theme: TextFieldTheme) -> Self {
         self.theme = theme;
         self
+    }
+
+    /// Paint the background and border (`true`, the default) or leave both to
+    /// the host, so its own frame is the field (agg-sharp's `Border = 0` with a
+    /// transparent background). A frameless field draws no focus ring (the
+    /// focused border); the host shows focus. The text insets are unchanged.
+    pub fn with_frame(mut self, frame: bool) -> Self {
+        self.frame = frame;
+        self
+    }
+
+    /// Switch the frame on or off after construction (see
+    /// [`with_frame`](Self::with_frame)). The next layout re-rasters.
+    pub fn set_frame(&mut self, frame: bool) {
+        if self.frame != frame {
+            self.frame = frame;
+            crate::animation::request_draw();
+        }
+    }
+
+    /// Whether the background and border are painted.
+    pub fn has_frame(&self) -> bool {
+        self.frame
     }
 }

@@ -36,4 +36,6 @@ pub(super) struct TextFieldSig {
     // clip, caret and text origin all derive from them, so a live
     // `set_text_insets` must drop the cached bitmap.
     pub(super) insets_bits: [u64; 4],
+    // Whether the background and border are painted (`with_frame`).
+    pub(super) frame: bool,
 }

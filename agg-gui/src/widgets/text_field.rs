@@ -59,6 +59,8 @@ mod vertical_keys;
 mod widget_impl;
 
 #[cfg(test)]
+mod frame_tests;
+#[cfg(test)]
 mod inset_tests;
 #[cfg(test)]
 mod selection_tests;
@@ -180,6 +182,9 @@ pub struct TextField {
     /// Per-widget colour overrides — `None` colours fall back to
     /// the ambient `visuals()` palette. Set via [`with_theme`].
     pub theme: TextFieldTheme,
+    /// Paint the background and border (default); `false` leaves both to the
+    /// host. See `with_frame` in `text_field/theme.rs`.
+    pub(super) frame: bool,
 
     // ── Backbuffer cache ─────────────────────────────────────────────
     //
@@ -241,6 +246,7 @@ impl TextField {
                 crate::widgets::on_screen_keyboard::KeyboardInputMode::default(),
             )),
             theme: TextFieldTheme::default(),
+            frame: true,
             cache: BackbufferCache::default(),
             last_sig: None,
             context_menu: TextContextMenu::new(),

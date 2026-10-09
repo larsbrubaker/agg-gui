@@ -195,7 +195,6 @@ impl Widget for TextArea {
 
         let v = ctx.visuals();
         let w = self.bounds.width;
-        let h = self.bounds.height;
 
         // The framework only calls `paint` when the backbuffer is dirty, so this
         // counts real re-rasters. The band tests assert in-band scrolling never
@@ -231,28 +230,11 @@ impl Widget for TextArea {
             None => self.band_clip_y(),
         };
 
-        // Background — theme widget fill. In band mode fill the WHOLE buffer
-        // (incl. the over-scan margins that sit outside the widget bounds) with
-        // a plain opaque rect so scrolling never reveals an un-painted gap; the
-        // rounded frame + border + padding-ring are re-established, fixed, in
-        // `paint_overlay`. For a strip re-raster fill only the strip rows (full
-        // width, opaque) so the changed lines' old pixels are replaced while the
-        // retained buffer keeps every other row. Otherwise bake the rounded fill
-        // into the cache.
+        // Background — theme widget fill, shaped for band / strip / plain
+        // rasters (none when frameless); see `frame.rs`.
         tt.head_ms = pt::ms(&t);
         t = pt::start();
-        ctx.set_fill_color(v.widget_bg);
-        ctx.begin_path();
-        if strip.is_some() {
-            ctx.rect(0.0, clip_lo, w, (clip_hi - clip_lo).max(0.0));
-        } else if band {
-            let bg_lo = -self.band.over_bottom;
-            let bg_h = h + self.band.over_top + self.band.over_bottom;
-            ctx.rect(0.0, bg_lo, w, bg_h.max(0.0));
-        } else {
-            ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
-        }
-        ctx.fill();
+        self.paint_background(ctx, &v, strip.map(|_| (clip_lo, clip_hi)));
         tt.bg_fill_ms = pt::ms(&t);
 
         // Clip content to the padded inner width and the (band-expanded, or

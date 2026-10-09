@@ -103,8 +103,10 @@ impl TextArea {
     /// band untouched, so the sig is stable and no re-raster happens.
     pub(crate) fn recompute_band(&mut self) {
         let max_scroll = self.max_scroll_y();
-        if max_scroll <= 0.0 || self.cached_line_h <= 0.0 {
+        if max_scroll <= 0.0 || self.cached_line_h <= 0.0 || !self.frame {
             // Everything fits: no scrolling, so keep the plain bounds-sized path.
+            // A frameless area never bands: the band needs the opaque background
+            // and padding-ring fill it doesn't paint (see `frame.rs`).
             self.band.active = false;
             return;
         }
@@ -256,8 +258,11 @@ impl TextArea {
 
     /// Stroke the rounded border in the current focus/hover colour. Shared by
     /// the cached (non-band) paint and the fixed band-mode overlay so the frame
-    /// looks identical either way.
+    /// looks identical either way. Frameless: no border and so no focus ring.
     pub(crate) fn paint_border(&self, ctx: &mut dyn DrawCtx, v: &crate::theme::Visuals) {
+        if !self.frame {
+            return;
+        }
         let w = self.bounds.width;
         let h = self.bounds.height;
         let border = if self.focused {
@@ -287,7 +292,11 @@ impl TextArea {
     /// the widget bg so text that bled into the padding while scrolling is
     /// covered and the rounded corners are restored, then stroke the border.
     /// Drawn in `paint_overlay` so it never scrolls with the cached content.
+    /// Frameless areas never band (see `recompute_band`), so this is framed only.
     pub(crate) fn paint_band_frame(&self, ctx: &mut dyn DrawCtx, v: &crate::theme::Visuals) {
+        if !self.frame {
+            return;
+        }
         let w = self.bounds.width;
         let h = self.bounds.height;
         let inner_w = (w - self.padding * 2.0).max(0.0);

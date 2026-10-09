@@ -37,6 +37,8 @@
 //!   * agg-sharp `InternalTextEditWidget`'s caret API (`caret_api.rs`): line
 //!     spacing, `insert_bar_position`, clamping caret/selection index setters,
 //!     `copy_selection`; and `Widget::scroll_rect_into_view` (`scroll.rs`).
+//!   * a frameless mode ([`with_frame`](TextArea::with_frame), `frame.rs`): no
+//!     background and no border, for a host that draws its own field frame.
 //!
 //! Deferred (known gaps, filed for later polish):
 //!   * undo / redo;
@@ -120,11 +122,13 @@ fn clipboard_set(text: &str) {
 ///
 /// Deliberately excludes cursor-blink phase, the floating scrollbar, and the
 /// border — all paint in `paint_overlay` after the cache blit, so they never
-/// force a re-raster. It also excludes the *raw* scroll offset: the widget
-/// rasters an over-scan band anchored in content space, so plain scrolling
-/// within the band only moves the blit offset. Only the band *anchor* and its
-/// margins are tracked here, so re-anchoring (offset left the band) still
-/// re-rasters exactly once. Typography- and theme-driven invalidation (font
+/// force a re-raster. While the band is active it also excludes the *raw*
+/// scroll offset: the widget rasters an over-scan band anchored in content
+/// space, so plain scrolling within the band only moves the blit offset. Only
+/// the band *anchor* and its margins are tracked then, so re-anchoring (offset
+/// left the band) still re-rasters exactly once. Without a band (content fits,
+/// or a frameless area) the raster is taken at the live offset, which the sig
+/// then tracks. Typography- and theme-driven invalidation (font
 /// swap, LCD/hinting toggle, dark/light flip) is handled by the framework via
 /// the epoch checks in `paint_subtree_backbuffered`, so this sig only tracks the
 /// widget's own state.
@@ -149,6 +153,12 @@ struct TextAreaSig {
     h_align: TextHAlign,
     v_align: TextVAlign,
     font_size_bits: u64,
+    /// Whether the background and border are painted (see `frame.rs`).
+    frame: bool,
+    /// The live scroll offset while the band is inactive: the raster is then
+    /// taken at that offset (a frameless area scrolls without a band), so a
+    /// scroll must re-raster. Always `0` bits while the band is active.
+    unbanded_offset_bits: u64,
 }
 
 /// A multiline text editor that fills its available area.
@@ -297,6 +307,10 @@ pub struct TextArea {
     /// [`with_context_menu(false)`](Self::with_context_menu).
     context_menu: crate::widgets::text_context_menu::TextContextMenu,
     context_menu_enabled: bool,
+
+    /// Paint the background fill and the border (the default). `false` leaves
+    /// both to the host; see [`with_frame`](Self::with_frame) in `frame.rs`.
+    frame: bool,
 }
 
 impl TextArea {
@@ -349,6 +363,7 @@ impl TextArea {
             render_dirty_lines: Cell::new(None),
             context_menu: crate::widgets::text_context_menu::TextContextMenu::new(),
             context_menu_enabled: true,
+            frame: true,
         }
     }
 
@@ -370,6 +385,12 @@ impl TextArea {
             h_align: self.resolved_h_align(),
             v_align: self.resolved_v_align(),
             font_size_bits: self.font_size.to_bits(),
+            frame: self.frame,
+            unbanded_offset_bits: if self.band.active {
+                0
+            } else {
+                self.vbar.offset.to_bits()
+            },
         }
     }
 
@@ -654,6 +675,7 @@ mod callbacks;
 mod caret_api;
 mod context_menu;
 mod edit_ops;
+mod frame;
 mod geometry;
 mod highlight;
 mod scroll;
@@ -668,6 +690,8 @@ mod band_tests;
 mod caret_api_tests;
 #[cfg(test)]
 mod edit_complete_tests;
+#[cfg(test)]
+mod frame_tests;
 #[cfg(test)]
 mod redraw_tests;
 #[cfg(test)]

@@ -26,6 +26,14 @@
 //! - Horizontal rules (thin separator line)
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
 //! - Links (coloured text, URL is not opened — add `on_link_click` if needed)
+//!
+//! # Updating in place
+//!
+//! [`MarkdownView::set_markdown`] replaces the text of a live view, e.g. while
+//! a reply streams in. Every layout re-parses the markdown, so the view keeps
+//! its selection (clamped to the new text), its code-block and table scroll
+//! offsets and its decoded images; a host that rebuilt the view instead would
+//! lose them.
 
 use std::sync::{Arc, Mutex};
 
@@ -44,6 +52,8 @@ mod paint;
 mod parse;
 mod rich_html;
 mod selection;
+#[cfg(test)]
+mod update_tests;
 
 // ── Styled line representation ─────────────────────────────────────────────────
 
@@ -262,6 +272,23 @@ impl MarkdownView {
     pub fn with_padding(mut self, p: f64) -> Self {
         self.padding = p;
         self
+    }
+
+    /// The markdown source the view renders.
+    pub fn markdown(&self) -> &str {
+        &self.markdown
+    }
+
+    /// Replace the markdown in place (see "Updating in place" above). A
+    /// selection keeps its offsets into the rendered text, so text that is only
+    /// appended to (a streaming reply) keeps the same words selected; offsets
+    /// past the new end clamp to it. Setting the same text again does nothing.
+    pub fn set_markdown(&mut self, markdown: &str) {
+        if self.markdown == markdown {
+            return;
+        }
+        self.markdown = markdown.to_string();
+        crate::animation::request_layout();
     }
 
     /// Currently-active font — honours the thread-local system-font override

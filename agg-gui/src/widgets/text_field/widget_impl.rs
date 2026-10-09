@@ -159,6 +159,7 @@ impl Widget for TextField {
                     i.bottom.to_bits(),
                 ]
             },
+            frame: self.frame,
         };
         drop(st);
         if self.last_sig.as_ref() != Some(&sig) {
@@ -200,11 +201,13 @@ impl Widget for TextField {
         let v = ctx.visuals();
         let t = &self.theme;
 
-        // ── Background ────────────────────────────────────────────────────
-        ctx.set_fill_color(t.background.unwrap_or(v.widget_bg));
-        ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, r);
-        ctx.fill();
+        // ── Background (none when frameless: the host draws the field) ────
+        if self.frame {
+            ctx.set_fill_color(t.background.unwrap_or(v.widget_bg));
+            ctx.begin_path();
+            ctx.rounded_rect(0.0, 0.0, w, h, r);
+            ctx.fill();
+        }
 
         // ── Text area clip ────────────────────────────────────────────────
         ctx.clip_rect(ins.left, 0.0, (w - ins.left - ins.right).max(0.0), h);
@@ -253,7 +256,10 @@ impl Widget for TextField {
 
         ctx.reset_clip();
 
-        // ── Border ────────────────────────────────────────────────────────
+        // ── Border (none when frameless, so no focus ring either) ─────────
+        if !self.frame {
+            return;
+        }
         let border_color = if self.focused {
             t.border_color_focused.unwrap_or(v.accent)
         } else if self.hovered {
