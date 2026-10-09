@@ -457,17 +457,21 @@ impl Label {
             let line_h = self.line_height(size);
             let total_h = self.wrapped_lines.len() as f64 * line_h;
             let baseline = m.centered_baseline_y(line_h);
-            (
-                total_h - self.wrapped_lines.len() as f64 * line_h + baseline,
-                total_h - line_h + baseline,
-            )
+            (baseline, total_h - line_h + baseline)
         } else {
             let baseline = m.centered_baseline_y(h);
             (baseline, baseline)
         };
+        // Y hinting snaps each baseline to the nearest whole pixel, which can
+        // move it half a pixel either way.
+        let snap = if crate::font_settings::hinting_enabled() {
+            0.5
+        } else {
+            0.0
+        };
         (
-            (m.descent - lowest).max(0.0),
-            (highest + m.ascent - h).max(0.0),
+            (m.descent - lowest + snap).max(0.0),
+            (highest + m.ascent - h + snap).max(0.0),
         )
     }
 }

@@ -104,16 +104,22 @@ fn em_box_label_keeps_its_descenders_and_ascenders() {
         metrics.ascent + metrics.descent > SIZE,
         "the face's ink span overhangs the one-em box, as the case needs"
     );
-    for scale in [1.0, 2.0] {
-        for buffered in [false, true] {
-            let (label, used) = label_ink(buffered, scale);
-            let reference = unclipped_ink(used, scale);
-            assert_eq!(
-                label, reference,
-                "buffered={buffered} scale={scale}: the label's ink rows match the \
-                 unclipped run's (box {used:?})"
-            );
+    let hinting = crate::font_settings::hinting_enabled();
+    // Y hinting snaps the baseline to a whole pixel, up to half a pixel lower.
+    for hint in [false, true] {
+        crate::font_settings::set_hinting_enabled(hint);
+        for scale in [1.0, 2.0] {
+            for buffered in [false, true] {
+                let (label, used) = label_ink(buffered, scale);
+                let reference = unclipped_ink(used, scale);
+                assert_eq!(
+                    label, reference,
+                    "hinting={hint} buffered={buffered} scale={scale}: the label's ink rows \
+                     match the unclipped run's (box {used:?})"
+                );
+            }
         }
     }
+    crate::font_settings::set_hinting_enabled(hinting);
     crate::font_settings::clear_lcd_enabled_override();
 }
