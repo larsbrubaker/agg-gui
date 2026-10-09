@@ -443,15 +443,18 @@ fn strengthen(c: Color) -> Color {
 }
 
 impl Label {
-    /// How far `(below, above)` the face's descent and ascent reach past the
-    /// label's bounds at the baselines `paint` uses: the one-em line box
+    /// How far `(below, above)` the face's ink reaches past the label's
+    /// bounds at the baselines `paint` uses: the one-em line box
     /// ([`LineBox::Em`](crate::font_settings::LineBox::Em)) is shorter than
-    /// most faces' ink span, so its text overhangs the box a little.
+    /// most faces' ink span, so its text overhangs the box a little. The reach
+    /// is [`Font::ink_extent_px`](crate::text::Font::ink_extent_px), which a
+    /// vertical-metrics override cannot shrink below the face's own.
     fn ink_overhang(&self) -> (f64, f64) {
         let font = self.active_font();
         let size = self.active_font_size();
         let h = self.bounds.height;
         let m = crate::text::measure_text_metrics(&font, "", size);
+        let (ink_ascent, ink_descent) = font.ink_extent_px(size);
         let (lowest, highest) = if self.wrap && !self.wrapped_lines.is_empty() {
             // Line i is centred at total_h - (i + 0.5) * line_h (see `paint`).
             let line_h = self.line_height(size);
@@ -470,8 +473,8 @@ impl Label {
             0.0
         };
         (
-            (m.descent - lowest + snap).max(0.0),
-            (highest + m.ascent - h + snap).max(0.0),
+            (ink_descent - lowest + snap).max(0.0),
+            (highest + ink_ascent - h + snap).max(0.0),
         )
     }
 }

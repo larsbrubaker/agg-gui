@@ -82,6 +82,10 @@ pub struct Font {
     descender: i16,
     line_gap: i16,
     cap_height: i16,
+    /// The face's own ascender and descender, kept when the metrics are
+    /// overridden: how far its glyphs' ink reaches ([`Font::ink_extent_px`]).
+    face_ascender: i16,
+    face_descender: i16,
     /// Optional fallback used when the primary font lacks a glyph.
     pub(crate) fallback: Option<Arc<Font>>,
     /// Apply the OpenType `tnum` (tabular figures) feature when shaping
@@ -101,6 +105,8 @@ impl Font {
             descender: face.descender(),
             line_gap: face.line_gap(),
             cap_height: face.capital_height().unwrap_or(0),
+            face_ascender: face.ascender(),
+            face_descender: face.descender(),
             data: Arc::new(data),
             index: 0,
             fallback: None,
@@ -165,6 +171,8 @@ impl Font {
             descender: self.descender,
             line_gap: self.line_gap,
             cap_height: self.cap_height,
+            face_ascender: self.face_ascender,
+            face_descender: self.face_descender,
             fallback: self.fallback.clone(),
             tabular_digits: true,
         }

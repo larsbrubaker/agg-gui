@@ -7,12 +7,13 @@
 //! exactly its bounds — so the bottoms of "g", "j", "p", "q" and "y" were
 //! sheared off (MatterCAD's tab titles). The label's glyphs must come out
 //! exactly as the same run drawn unclipped at the same baseline, painted
-//! directly and through the backbuffer, at 1x and 2x.
+//! directly and through the backbuffer, at 1x and 2x — also when the font's
+//! vertical metrics are overridden with a span tighter than its glyphs.
 
 use crate::font_settings::LineBox;
 use crate::framebuffer::Framebuffer;
 use crate::gfx_ctx::GfxCtx;
-use crate::text::{measure_text_metrics, Font};
+use crate::text::{measure_text_metrics, Font, VerticalMetrics};
 use crate::widget::{paint_subtree, Widget};
 use crate::widgets::Label;
 use crate::{Color, Rect, Size};
@@ -47,8 +48,8 @@ fn ink_rows(fb: &Framebuffer) -> (u32, u32) {
 }
 
 /// The label, laid out on the one-em box, painted at (MARGIN, MARGIN).
-fn label_ink(buffered: bool, scale: f64) -> ((u32, u32), Size) {
-    let mut label = Label::new(TEXT, font())
+fn label_ink(font: &Arc<Font>, buffered: bool, scale: f64) -> ((u32, u32), Size) {
+    let mut label = Label::new(TEXT, Arc::clone(font))
         .with_font_size(SIZE)
         .with_line_box(LineBox::Em)
         .with_color(Color::black())
@@ -69,8 +70,7 @@ fn label_ink(buffered: bool, scale: f64) -> ((u32, u32), Size) {
 
 /// The same run drawn straight onto the canvas, unclipped, at the baseline the
 /// label centres it on.
-fn unclipped_ink(used: Size, scale: f64) -> (u32, u32) {
-    let font = font();
+fn unclipped_ink(font: &Arc<Font>, used: Size, scale: f64) -> (u32, u32) {
     let (w, h) = canvas(used, scale);
     let mut fb = Framebuffer::new(w, h);
     {
@@ -78,10 +78,10 @@ fn unclipped_ink(used: Size, scale: f64) -> (u32, u32) {
         ctx.clear(Color::white());
         ctx.scale(scale, scale);
         ctx.translate(MARGIN, MARGIN);
-        ctx.set_font(Arc::clone(&font));
+        ctx.set_font(Arc::clone(font));
         ctx.set_font_size(SIZE);
         ctx.set_fill_color(Color::black());
-        let baseline = measure_text_metrics(&font, TEXT, SIZE).centered_baseline_y(used.height);
+        let baseline = measure_text_metrics(font, TEXT, SIZE).centered_baseline_y(used.height);
         ctx.fill_text(TEXT, 0.0, baseline);
     }
     ink_rows(&fb)
@@ -94,6 +94,28 @@ fn canvas(used: Size, scale: f64) -> (u32, u32) {
     )
 }
 
+/// Paints the label every way (hinting on and off, 1x and 2x, direct and
+/// backbuffered) and checks its ink against the unclipped run.
+fn assert_label_keeps_its_ink(font: &Arc<Font>) {
+    let hinting = crate::font_settings::hinting_enabled();
+    // Y hinting snaps the baseline to a whole pixel, up to half a pixel lower.
+    for hint in [false, true] {
+        crate::font_settings::set_hinting_enabled(hint);
+        for scale in [1.0, 2.0] {
+            for buffered in [false, true] {
+                let (label, used) = label_ink(font, buffered, scale);
+                let reference = unclipped_ink(font, used, scale);
+                assert_eq!(
+                    label, reference,
+                    "hinting={hint} buffered={buffered} scale={scale}: the label's ink rows \
+                     match the unclipped run's (box {used:?})"
+                );
+            }
+        }
+    }
+    crate::font_settings::set_hinting_enabled(hinting);
+}
+
 #[test]
 fn em_box_label_keeps_its_descenders_and_ascenders() {
     let _profile = crate::input_profile::profile_test_lock();
@@ -104,22 +126,37 @@ fn em_box_label_keeps_its_descenders_and_ascenders() {
         metrics.ascent + metrics.descent > SIZE,
         "the face's ink span overhangs the one-em box, as the case needs"
     );
-    let hinting = crate::font_settings::hinting_enabled();
-    // Y hinting snaps the baseline to a whole pixel, up to half a pixel lower.
-    for hint in [false, true] {
-        crate::font_settings::set_hinting_enabled(hint);
-        for scale in [1.0, 2.0] {
-            for buffered in [false, true] {
-                let (label, used) = label_ink(buffered, scale);
-                let reference = unclipped_ink(used, scale);
-                assert_eq!(
-                    label, reference,
-                    "hinting={hint} buffered={buffered} scale={scale}: the label's ink rows \
-                     match the unclipped run's (box {used:?})"
-                );
-            }
-        }
-    }
-    crate::font_settings::set_hinting_enabled(hinting);
+    assert_label_keeps_its_ink(&font());
+    crate::font_settings::clear_lcd_enabled_override();
+}
+
+/// A vertical-metrics override whose span is exactly an em (as agg-sharp's
+/// Liberation Sans 1.07 metrics are) puts the box's bottom at the override's
+/// descent, above the glyphs' real descenders. The label still reaches its
+/// clip and backbuffer as far as the face's own ink.
+#[test]
+fn em_box_label_with_tight_vertical_metrics_keeps_its_descenders() {
+    let _profile = crate::input_profile::profile_test_lock();
+    crate::font_settings::set_lcd_enabled(false);
+    crate::device_scale::set_device_scale(1.0);
+    let tight = Arc::new(
+        Font::from_slice(FONT_BYTES)
+            .expect("font")
+            .with_vertical_metrics(VerticalMetrics {
+                ascent: 1848,
+                descent: -200,
+                line_gap: 0,
+                cap_height: 1400,
+            }),
+    );
+    let metrics = measure_text_metrics(&tight, TEXT, SIZE);
+    let (g_bottom, _) = tight.glyph_visual_bounds('g', SIZE).expect("g has ink");
+    assert!(
+        g_bottom < -metrics.descent - 1.0,
+        "the g ({g_bottom}) reaches more than a pixel below the override's descent \
+         (-{}), as the case needs",
+        metrics.descent
+    );
+    assert_label_keeps_its_ink(&tight);
     crate::font_settings::clear_lcd_enabled_override();
 }

@@ -71,6 +71,21 @@ impl Font {
     pub fn cap_height_px(&self, size: f64) -> f64 {
         self.cap_height as f64 * size / self.units_per_em as f64
     }
+
+    /// How far `(above, below)` the baseline this font's ink can reach, in
+    /// pixels (both positive): the larger of the metrics in force and the
+    /// face's own ascender and descender. An override may describe a line box
+    /// tighter than the face's glyphs (agg-sharp's Liberation Sans 1.07
+    /// metrics span exactly an em, and its descenders reach below that
+    /// descent), so whatever clips or buffers text reaches this far, never
+    /// only as far as the metrics, and no ink is cut. Without an override it
+    /// is [`Font::ascender_px`] and [`Font::descender_px`].
+    pub fn ink_extent_px(&self, size: f64) -> (f64, f64) {
+        let scale = size / self.units_per_em as f64;
+        let above = self.ascender.max(self.face_ascender) as f64 * scale;
+        let below = self.descender.min(self.face_descender).unsigned_abs() as f64 * scale;
+        (above, below)
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +146,42 @@ mod tests {
             font.variant_with_tabular_digits().vertical_metrics(),
             OVERRIDE
         );
+    }
+
+    #[test]
+    fn the_ink_extent_covers_both_the_override_and_the_face() {
+        let face = ttf_parser::Face::parse(FONT_BYTES, 0).unwrap();
+        let plain = Font::from_slice(FONT_BYTES).unwrap();
+        let upem = plain.units_per_em() as f64;
+        assert_eq!(
+            plain.ink_extent_px(upem),
+            (plain.ascender_px(upem), plain.descender_px(upem))
+        );
+        let tight = VerticalMetrics {
+            ascent: 1000,
+            descent: -100,
+            line_gap: 0,
+            cap_height: 700,
+        };
+        let font = Font::from_slice(FONT_BYTES)
+            .unwrap()
+            .with_vertical_metrics(tight);
+        assert_eq!(
+            font.ink_extent_px(upem),
+            (
+                face.ascender().max(1000) as f64,
+                face.descender().min(-100).unsigned_abs() as f64
+            )
+        );
+        let wide = VerticalMetrics {
+            ascent: 4000,
+            descent: -3000,
+            ..tight
+        };
+        let font = Font::from_slice(FONT_BYTES)
+            .unwrap()
+            .with_vertical_metrics(wide);
+        assert_eq!(font.ink_extent_px(upem), (4000.0, 3000.0));
     }
 
     #[test]

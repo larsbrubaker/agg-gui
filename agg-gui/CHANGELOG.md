@@ -19,7 +19,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   face where another renderer placed it (agg-sharp's Liberation Sans 1.07 SVG
   metrics on the 2.x outlines). `Font::vertical_metrics` reports the metrics
   in force and `Font::cap_height_px` the cap height (OS/2 `sCapHeight` when
-  not overridden). Fonts without an override are unchanged.
+  not overridden). `Font::ink_extent_px` is how far the ink can reach: the
+  larger of the override and the face's own ascender and descender. `Label`
+  reaches its clip and backbuffer that far, so an override tighter than the
+  glyphs (an em-high span, whose descenders hang below its descent) never cuts
+  them off. Fonts without an override are unchanged.
 
 - `lcd_display_detection`: agg-sharp's `LcdDisplayDetection`, the policy that
   picks a default for LCD subpixel text from what the OS reports about the
