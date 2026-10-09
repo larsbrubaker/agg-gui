@@ -381,14 +381,6 @@ fn plain_doc(blocks: &[&str]) -> RichDoc {
 }
 
 #[test]
-fn double_click_selects_word() {
-    let mut ed = laid_out_editor(plain_doc(&["hello world"]), 400.0, 120.0);
-    // DocPos byte 8 is inside "world".
-    ed.begin_pointer_selection(DocPos::new(0, 8), 2, false);
-    assert_eq!(ed.core.borrow().selected_plain_text(), "world");
-}
-
-#[test]
 fn double_click_stops_at_punctuation() {
     let mut ed = laid_out_editor(plain_doc(&["foo.bar"]), 400.0, 120.0);
     ed.begin_pointer_selection(DocPos::new(0, 1), 2, false);

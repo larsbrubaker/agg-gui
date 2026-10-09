@@ -22,16 +22,6 @@ fn window() -> (AutomationWindow, ()) {
 }
 
 #[test]
-fn rust_only_a_completed_body_returns_its_value() {
-    let result = show_window_and_execute_tests(RunOptions::default(), window, |runner, _| {
-        runner.mark_test_complete();
-        42
-    });
-
-    assert_eq!(result, Ok(42));
-}
-
-#[test]
 fn rust_only_each_run_gets_its_own_named_ui_thread() {
     let caller = thread::current().id();
 

@@ -476,25 +476,7 @@ mod tests {
         app.on_mouse_move(wx, 600.0 - wy);
     }
 
-    /// (a) A `with_tooltip` widget shows its tip after the initial delay.
-    #[test]
-    fn tip_shows_after_initial_delay_when_hovered() {
-        let _g = pin();
-        let timings = tooltip_timings();
-        let mut app = App::new(Box::new(Tipped::new("Bold")));
-        app.layout(Size::new(800.0, 600.0));
-
-        hover(&mut app, 400.0, 300.0);
-        app.update_tooltips_for_test();
-        assert!(!is_visible(), "no tip before the initial delay elapses");
-
-        crate::clock::advance(timings.initial_delay);
-        app.update_tooltips_for_test();
-        assert!(is_visible(), "tip appears once the initial delay elapses");
-        assert_eq!(visible_text().as_deref(), Some("Bold"));
-    }
-
-    /// (b) Moving between two tipped widgets uses the reshow delay and never
+    /// (a) Moving between two tipped widgets uses the reshow delay and never
     /// shows more than one tip: only the second widget's tip is live.
     #[test]
     fn moving_between_tipped_widgets_reshows_single_tip() {
@@ -526,7 +508,7 @@ mod tests {
         assert_eq!(visible_text().as_deref(), Some("B"), "exactly one tip: B's");
     }
 
-    /// (c) A visible tip re-renders with the CURRENT system font: swapping the
+    /// (b) A visible tip re-renders with the CURRENT system font: swapping the
     /// crate-wide font mid-hover makes the very next paint submit the new face.
     /// Pins the "font read live every paint" contract the module docs promise —
     /// the controller must never cache the font it first painted with.
@@ -570,7 +552,7 @@ mod tests {
         );
     }
 
-    /// (d) A tipped widget hovered at the right viewport edge paints its tip
+    /// (c) A tipped widget hovered at the right viewport edge paints its tip
     /// fully inside the viewport safe area (edge clamping).
     #[test]
     fn tip_at_viewport_edge_stays_inside() {

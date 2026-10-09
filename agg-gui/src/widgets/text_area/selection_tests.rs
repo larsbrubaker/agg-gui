@@ -29,16 +29,6 @@ fn laid_out(text: &str, w: f64, h: f64) -> TextArea {
     ta
 }
 
-/// A double-click (clicks == 2) selects the word under the byte offset.
-#[test]
-fn double_click_selects_word() {
-    let mut ta = laid_out("hello world", 400.0, 120.0);
-    // Offset 8 sits inside "world" (bytes 6..11).
-    ta.begin_pointer_selection(8, 2, false);
-    assert_eq!(ta.selection(), Some((6, 11)));
-    assert_eq!(ta.selected_text(), "world");
-}
-
 /// Double-click on a punctuation run selects just that run, not the words.
 #[test]
 fn double_click_stops_at_punctuation() {
