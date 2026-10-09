@@ -9,13 +9,16 @@
 //! alone happens to work while `ux_scale == 1` (desktop) and breaks on mobile,
 //! where the shell auto-sets ux ≈ 1.7.
 //!
-//! Every test here runs at device 2 × UX 1.5 (effective 3) and drives the
-//! production path — `App` layout, pointer events and paint into a
+//! Every test here runs at device 2 × UX 1.5 (effective 3) — the
+//! widget-anchored tooltip also at device 2 × UX 1 and a scale-1 control — and
+//! drives the production path — `App` layout, pointer events and paint into a
 //! physical-pixel framebuffer — then checks where the overlay actually landed:
 //!
 //! * the open `ComboBox` popup paints adjacent to the closed box,
 //! * an interactive `Tooltip` decides flip / shift against the viewport from
 //!   its real logical position,
+//! * a widget-anchored lightweight `Tooltip` (`at_widget`) paints its panel
+//!   just below the hovered widget, centred on it,
 //! * the `InspectorPanel` hover highlight lands over the hovered widget.
 //!
 //! The menu consumer (`PopupMenu::sync_root_origin`) is covered beside its
@@ -182,11 +185,21 @@ fn is_pure_green(p: [u8; 4]) -> bool {
 
 /// Logical-unit bounding box `(x0, y0, x1, y1)` of every pure-green pixel.
 fn green_bbox_logical(fb: &Framebuffer) -> Option<(f64, f64, f64, f64)> {
+    bbox_logical(fb, EFFECTIVE, is_pure_green)
+}
+
+/// Logical-unit bounding box `(x0, y0, x1, y1)` of every pixel matching
+/// `pred`, in a framebuffer painted at `scale` physical px per logical unit.
+fn bbox_logical(
+    fb: &Framebuffer,
+    scale: f64,
+    pred: impl Fn([u8; 4]) -> bool,
+) -> Option<(f64, f64, f64, f64)> {
     let (w, h) = (fb.width(), fb.height());
     let mut bbox: Option<(u32, u32, u32, u32)> = None;
     for y in 0..h {
         for x in 0..w {
-            if is_pure_green(sample(fb, x, y)) {
+            if pred(sample(fb, x, y)) {
                 bbox = Some(match bbox {
                     None => (x, y, x + 1, y + 1),
                     Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1)),
@@ -196,10 +209,10 @@ fn green_bbox_logical(fb: &Framebuffer) -> Option<(f64, f64, f64, f64)> {
     }
     bbox.map(|(x0, y0, x1, y1)| {
         (
-            x0 as f64 / EFFECTIVE,
-            y0 as f64 / EFFECTIVE,
-            x1 as f64 / EFFECTIVE,
-            y1 as f64 / EFFECTIVE,
+            x0 as f64 / scale,
+            y0 as f64 / scale,
+            x1 as f64 / scale,
+            y1 as f64 / scale,
         )
     })
 }
@@ -345,6 +358,84 @@ fn interactive_tooltip_avoids_viewport_edges_from_its_logical_position_at_ux_sca
         "the tip fits on the right and must not shift (content x ∈ [158, 258]); \
          it painted at x ∈ [{x0:.1}, {x1:.1}] (bbox {bbox:?})"
     );
+}
+
+/// A neutral grey: the lightweight tooltip panel's fill and its text, in either
+/// theme. Against a pure-red clear this skips the panel's antialiased edges and
+/// outer stroke half (both blend toward red) and its black drop shadow (dark
+/// red), so the bbox is the panel body.
+fn is_grey(p: [u8; 4]) -> bool {
+    let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
+    (r - g).abs() < 40 && (g - b).abs() < 40
+}
+
+/// Hover a widget-anchored (`at_widget`) lightweight `Tooltip` wrapping the
+/// widget at logical x ∈ [40, 100], y ∈ [100, 120] in a 300 × 200 viewport at
+/// `device` × `ux`, let the delay elapse on the virtual clock, paint, and
+/// check the panel hangs just below the widget, centred on it.
+///
+/// The tip is anchored at the widget's bottom centre, logical (70, 100), and
+/// the panel goes `TOOLTIP_GAP` (4) below it: top at y = 96, centre x = 70.
+/// Mapping the anchor through the device-pixel root transform without
+/// dividing out the effective scale `s` puts it at (70·s, 100·s): at s = 2 the
+/// panel's top lands at 196 (its below-position, clamped to the viewport) with
+/// its centre at x = 140; at s = 3 the same top, centre x = 210.
+fn assert_widget_anchored_tip_below_widget(device: f64, ux: f64) {
+    struct TooltipGuard;
+    impl Drop for TooltipGuard {
+        fn drop(&mut self) {
+            crate::widgets::tooltip::reset_tooltip_test_state();
+        }
+    }
+    let _scales = ScaleGuard::set(device, ux);
+    crate::widgets::tooltip::reset_tooltip_test_state();
+    let _tips = TooltipGuard;
+    crate::clock::start_virtual();
+    let scale = device * ux;
+
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let tooltip = Tooltip::new(Box::new(Block::empty()), "Tip", font).at_widget();
+    let root = Place::new().at(Rect::new(40.0, 100.0, 60.0, 20.0), Box::new(tooltip));
+    let mut app = App::new(Box::new(root));
+    let phys = Size::new(300.0 * scale, 200.0 * scale);
+    app.layout(phys);
+
+    // Hover the widget centre, logical (70, 110), in physical Y-down coords.
+    app.on_mouse_move(70.0 * scale, phys.height - 110.0 * scale);
+    crate::clock::advance(
+        crate::widgets::tooltip::tooltip_timings().initial_delay + Duration::from_millis(10),
+    );
+
+    let mut fb = Framebuffer::new(phys.width as u32, phys.height as u32);
+    let mut ctx = GfxCtx::new(&mut fb);
+    ctx.clear(Color::rgba(1.0, 0.0, 0.0, 1.0));
+    app.paint(&mut ctx);
+
+    let bbox = bbox_logical(&fb, scale, is_grey).expect("the widget-anchored tip never painted");
+    let (x0, _y0, x1, y1) = bbox;
+    let centre_x = (x0 + x1) * 0.5;
+    let near = |a: f64, b: f64| (a - b).abs() <= 1.0;
+    assert!(
+        near(y1, 96.0) && near(centre_x, 70.0),
+        "at device {device} × UX {ux} the tip panel must hang just below the \
+         widget (top at y = 96, centred on x = 70); it painted with its top at \
+         y = {y1:.1}, centre x = {centre_x:.1} (bbox {bbox:?})"
+    );
+}
+
+#[test]
+fn widget_anchored_tooltip_paints_below_its_widget_at_scale_1() {
+    assert_widget_anchored_tip_below_widget(1.0, 1.0);
+}
+
+#[test]
+fn widget_anchored_tooltip_paints_below_its_widget_at_device_2() {
+    assert_widget_anchored_tip_below_widget(DEVICE, 1.0);
+}
+
+#[test]
+fn widget_anchored_tooltip_paints_below_its_widget_at_device_2_ux_scale() {
+    assert_widget_anchored_tip_below_widget(DEVICE, UX);
 }
 
 /// The inspector's hover highlight must land over the hovered widget. Its
