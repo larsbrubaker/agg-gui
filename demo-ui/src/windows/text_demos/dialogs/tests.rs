@@ -209,3 +209,149 @@ fn modal_global_overlay_paints_after_normal_tree() {
         "modal global overlay should paint backdrop alpha"
     );
 }
+
+/// Restores the thread-local UX scale to 1.0 when dropped, including during
+/// unwinding from a failed assertion, so nothing that runs later on this
+/// thread sees the test's 2× scale. (libtest normally runs each test on its
+/// own thread, so this is hygiene rather than isolation between tests.)
+struct UxScaleGuard;
+
+impl Drop for UxScaleGuard {
+    fn drop(&mut self) {
+        agg_gui::ux_scale::set_ux_scale(1.0);
+    }
+}
+
+/// At an effective scale (device × UX) other than 1, the modal must paint in
+/// the same root-logical space it hit-tests in. `App::paint` scales the whole
+/// tree (and the global-overlay pass) by the effective scale, and
+/// `ModalOverlay::on_event` tests `current_mouse_world()` (root logical, the
+/// App divides screen coords by the effective scale) against `modal_rect`.
+/// So the dialog body must land at `modal_rect × scale` in device pixels, the
+/// backdrop must cover the whole device framebuffer, and a click on the
+/// dialog's painted centre must be seen by the overlay as inside the dialog
+/// (not as an outside click that closes it).
+#[test]
+fn modal_paints_where_it_hit_tests_at_effective_scale() {
+    let _guard = UxScaleGuard;
+    agg_gui::ux_scale::set_ux_scale(2.0);
+    let scale = agg_gui::ux_scale::effective_scale();
+    assert!(
+        (scale - 2.0).abs() < 1e-9,
+        "test assumes device_scale 1.0 so effective scale is 2.0, got {scale}"
+    );
+
+    let font = test_font();
+    let state = Rc::new(ModalState::default());
+    state.save_open.set(true);
+
+    // Only the modal paints anything opaque: the column has no background
+    // and the backdrop is translucent over the transparent framebuffer, so
+    // the only fully opaque pixels are the dialog body (fill, buttons, text).
+    // The padding and spacer put the overlay's bounds away from the root
+    // origin in both x and y, so the global-overlay pass paints it under a
+    // non-zero local translate: a fix that only keeps the App's scale and
+    // ignores that translate draws the dialog offset from where it hit-tests.
+    let mut root = FlexColumn::new().with_padding(30.0);
+    root.push(Box::new(SizedBox::new().with_height(40.0)), 0.0);
+    root.push(
+        Box::new(ModalOverlay::new(Arc::clone(&font), Rc::clone(&state))),
+        0.0,
+    );
+    let mut app = agg_gui::App::new(Box::new(root));
+    let (dev_w, dev_h) = (1280_u32, 960_u32);
+    app.layout(Size::new(dev_w as f64, dev_h as f64));
+
+    // Expected geometry straight from production `modal_rect` (root logical,
+    // Y-up), against the viewport the App layout just published.
+    let probe = ModalOverlay::new(Arc::clone(&font), Rc::clone(&state));
+    let expected = probe.modal_rect(ModalLayer::Save);
+
+    let mut fb = agg_gui::Framebuffer::new(dev_w, dev_h);
+    {
+        let mut ctx = agg_gui::GfxCtx::new(&mut fb);
+        app.paint(&mut ctx);
+    }
+    let px = fb.pixels();
+    let alpha_at = |x: u32, y: u32| px[((y * dev_w + x) * 4 + 3) as usize];
+
+    // Bounding box (device px, Y-up, half-open) of fully opaque pixels.
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0_u32, 0_u32);
+    for y in 0..dev_h {
+        for x in 0..dev_w {
+            if alpha_at(x, y) >= 250 {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x + 1);
+                max_y = max_y.max(y + 1);
+            }
+        }
+    }
+    assert!(
+        min_x < max_x && min_y < max_y,
+        "no opaque dialog pixels painted at all"
+    );
+    let painted_device = Rect::new(
+        min_x as f64,
+        min_y as f64,
+        (max_x - min_x) as f64,
+        (max_y - min_y) as f64,
+    );
+    let painted_logical = Rect::new(
+        painted_device.x / scale,
+        painted_device.y / scale,
+        painted_device.width / scale,
+        painted_device.height / scale,
+    );
+
+    // A: the dialog paints at modal_rect × scale (tolerance covers the 1px
+    // stroke, which overhangs the fill by at most 0.5 logical px, and
+    // anti-aliased edges).
+    let tol = 1.0;
+    let close = |a: f64, b: f64| (a - b).abs() <= tol;
+    assert!(
+        close(painted_logical.x, expected.x)
+            && close(painted_logical.y, expected.y)
+            && close(
+                painted_logical.x + painted_logical.width,
+                expected.x + expected.width
+            )
+            && close(
+                painted_logical.y + painted_logical.height,
+                expected.y + expected.height
+            ),
+        "modal must paint where it hit-tests at effective scale {scale}: \
+         hit-test modal_rect (logical) = {expected:?}, \
+         opaque bbox (device px) = {painted_device:?}, \
+         opaque bbox / scale (logical) = {painted_logical:?}"
+    );
+
+    // B: the backdrop covers the whole device framebuffer: both the
+    // bottom-left and the top-right corner. Checking both catches a backdrop
+    // that is unscaled (misses the top-right) and one that is scaled but
+    // offset by the overlay's local translate (misses the bottom-left).
+    for (x, y) in [(10, 10), (dev_w - 10, dev_h - 10)] {
+        let corner_alpha = alpha_at(x, y);
+        assert!(
+            corner_alpha > 0,
+            "backdrop must cover the full {dev_w}x{dev_h} device framebuffer; \
+             alpha at ({x}, {y}) = {corner_alpha}"
+        );
+    }
+
+    // C: clicking the dialog's painted centre (empty Save-modal body, not a
+    // button) is inside the dialog as the overlay sees it, so it must not
+    // close the modal. App screen coords are Y-down device px.
+    let cx = painted_device.x + painted_device.width * 0.5;
+    let cy = painted_device.y + painted_device.height * 0.5;
+    let (sx, sy) = (cx, dev_h as f64 - cy);
+    app.on_mouse_down(sx, sy, MouseButton::Left, Default::default());
+    app.on_mouse_up(sx, sy, MouseButton::Left, Default::default());
+    assert!(
+        state.save_open.get() && state.save_progress.get().is_none(),
+        "clicking the painted dialog centre (screen {sx}, {sy}) must not close \
+         or advance the Save modal; save_open = {}, save_progress = {:?}",
+        state.save_open.get(),
+        state.save_progress.get()
+    );
+}

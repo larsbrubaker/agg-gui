@@ -1,3 +1,18 @@
+//! Modals demo — port of egui's `Modals` demo — plus re-exports of the
+//! basic dialog-style demos.
+//!
+//! `modals_demo` builds the demo window content; its `ModalOverlay` widget
+//! owns the stacked modal layers (User, Save, Progress) held in
+//! `ModalState`. While a layer is open the overlay reports
+//! `has_active_modal`, so the App routes every pointer and key event to it,
+//! and it paints the backdrop and dialogs in the global-overlay pass, in root
+//! logical space (see `ModalOverlay::enter_root_logical_space`) — the same
+//! space its hit-testing reads through `agg_gui::current_mouse_world()`.
+//!
+//! The Undo/Redo and Window Options demos live in `dialogs/basic.rs` and are
+//! re-exported here; `text_demos.rs` re-exports this module's public demos to
+//! the window registry. Unit tests are in `dialogs/tests.rs`.
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -273,6 +288,25 @@ impl ModalOverlay {
     fn point_in_rect(p: Point, r: Rect) -> bool {
         p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
     }
+
+    /// Make `ctx` draw in root logical space — the Y-up space `modal_rect`
+    /// and `current_mouse_world()` use — by composing the inverse of
+    /// `logical_root_transform` onto the CTM (CTM' = CTM ∘ L⁻¹, so a root
+    /// point maps root → local → device). This keeps the effective scale
+    /// (device × UX) App applies above the tree; the `reset_transform()` it
+    /// replaces painted raw device pixels, so at any scale ≠ 1 the dialog
+    /// drew away from where it hit-tests. Caveat: `logical_root_transform`
+    /// includes the soft-keyboard lift, so composing its inverse strips the
+    /// lift too, while `current_mouse_world()` subtracts it from the pointer;
+    /// paint and hit-test therefore still disagree by the lift while the
+    /// on-screen keyboard lifts the tree.
+    fn enter_root_logical_space(ctx: &mut dyn DrawCtx) {
+        let mut root_to_local = agg_gui::widget::logical_root_transform(ctx);
+        root_to_local.invert();
+        let mut m = ctx.transform();
+        m.premultiply(&root_to_local);
+        ctx.set_transform(m);
+    }
 }
 
 impl Widget for ModalOverlay {
@@ -318,7 +352,8 @@ impl Widget for ModalOverlay {
 
         ctx.save();
         ctx.reset_clip();
-        ctx.reset_transform();
+        // Backdrop and dialog geometry are root logical (see `modal_rect`).
+        Self::enter_root_logical_space(ctx);
         ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.35));
         ctx.begin_path();
         ctx.rect(0.0, 0.0, w, h);
