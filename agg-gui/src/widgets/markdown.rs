@@ -603,9 +603,14 @@ fn is_rect_visible_in_root(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) ->
         .iter()
         .map(|(_, y)| *y)
         .fold(f64::NEG_INFINITY, f64::max);
+    // `root_transform` yields root-target DEVICE pixels, while
+    // `current_viewport()` is LOGICAL (App::layout divides by the effective
+    // scale), so scale the viewport up before comparing.  The paint clip
+    // below is already in root device pixels.
     let viewport = crate::widget::current_viewport();
-    let root_visible =
-        max_x >= 0.0 && min_x <= viewport.width && max_y >= 0.0 && min_y <= viewport.height;
+    let scale = crate::ux_scale::effective_scale();
+    let (viewport_w, viewport_h) = (viewport.width * scale, viewport.height * scale);
+    let root_visible = max_x >= 0.0 && min_x <= viewport_w && max_y >= 0.0 && min_y <= viewport_h;
     if !root_visible {
         return false;
     }

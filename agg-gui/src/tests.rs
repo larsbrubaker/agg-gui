@@ -72,6 +72,9 @@ mod layer_compositing;
 mod layout_lcd;
 mod layout_request;
 mod lcd_backbuffer_collapse;
+// Loopback HTTP server: native only.
+#[cfg(not(target_arch = "wasm32"))]
+mod markdown_image_visibility;
 mod menu_hidpi_scale;
 mod multi_touch_routing;
 mod on_screen_keyboard;
