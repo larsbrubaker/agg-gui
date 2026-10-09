@@ -43,6 +43,11 @@ pub fn motion_ends_selection(mods: Modifiers) -> bool {
     !mods.shift && (!(mods.ctrl || mods.meta) || mac_command_requested(mods))
 }
 
+// Guard: clipboard chords follow agg-sharp, not egui #8668.
+#[cfg(test)]
+#[path = "text_clipboard_chord_tests.rs"]
+mod clipboard_chord_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
