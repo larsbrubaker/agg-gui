@@ -337,6 +337,10 @@ impl Gpu {
     /// A non-sRGB surface format is preferred so the renderer's colour maths —
     /// which writes linear-space values — isn't gamma-corrected twice by the
     /// surface.
+    ///
+    /// The adapter and device requests run on their own thread within
+    /// [`GpuConfig::startup_budget`]; when it expires this returns
+    /// [`GpuInitError::StartupTimedOut`] instead of waiting on the driver.
     pub fn new(
         target: impl Into<wgpu::SurfaceTarget<'static>>,
         size: (u32, u32),
