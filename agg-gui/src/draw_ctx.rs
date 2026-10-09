@@ -285,10 +285,18 @@ pub trait DrawCtx {
     /// enclosing layer's origin (each recorded in its parent's device
     /// pixels), so it includes the App's effective scale (device × UX, see
     /// [`crate::ux_scale::effective_scale`]) and every layer offset. Callers
-    /// that want logical root coordinates divide the mapped point by
-    /// `crate::ux_scale::effective_scale()`. Global overlays and the paint
-    /// clip stack (`crate::widget::is_local_rect_in_paint_clip`) use this to
-    /// reason about app-level bounds.
+    /// that want logical root coordinates use
+    /// [`crate::widget::logical_root_transform`] rather than dividing by hand
+    /// (dividing by the device scale alone breaks whenever UX scale ≠ 1).
+    /// Global overlays and the paint clip stack
+    /// (`crate::widget::is_local_rect_in_paint_clip`) use this to reason
+    /// about app-level bounds.
+    ///
+    /// "Root" is only the true root while painting through the frame's own
+    /// context. Inside a CPU-backbuffered subtree (`paint_subtree_backbuffered`
+    /// paints into a fresh `GfxCtx` / `LcdGfxCtx`) it is relative to the
+    /// backbuffer bitmap, and `LcdGfxCtx::push_layer` resets the CTM to
+    /// identity, so inside an LCD layer the effective scale is not included.
     fn root_transform(&self) -> TransAffine {
         self.transform()
     }

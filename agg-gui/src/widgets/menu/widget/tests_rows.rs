@@ -333,3 +333,56 @@ fn sync_root_origin_reads_the_paint_transform_and_paint_local_matches() {
         "painted at the root anchor"
     );
 }
+
+/// The same read under `App::paint`'s effective scale at device 2 × UX 1.5:
+/// the root transform carries both factors (×3), so the synced origin must
+/// divide out the product. Dividing by the device scale alone (the mobile
+/// bug) reads it 1.5× too far out and the menu opens off its host.
+#[test]
+fn sync_root_origin_divides_out_the_effective_scale_at_ux_1_5() {
+    struct ScaleGuard;
+    impl Drop for ScaleGuard {
+        fn drop(&mut self) {
+            crate::device_scale::set_device_scale(1.0);
+            crate::ux_scale::set_ux_scale(1.0);
+        }
+    }
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let _scales = ScaleGuard;
+    crate::device_scale::set_device_scale(2.0);
+    crate::ux_scale::set_ux_scale(1.5);
+    let s = crate::ux_scale::effective_scale();
+    assert!((s - 3.0).abs() < 1e-12);
+
+    let (widget, _) = probe();
+    let mut menu = PopupMenu::new(Vec::new()).with_widget_row(widget, 40.0);
+    let mut fb = Framebuffer::new((VIEWPORT.width * s) as u32, (VIEWPORT.height * s) as u32);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::black());
+        ctx.scale(s, s); // as `App::paint` does
+        ctx.translate(30.0, 200.0);
+        menu.sync_root_origin(&ctx);
+        menu.open_at_local(Point::new(10.0, 0.0));
+        menu.paint_local(&mut ctx, test_font(), 14.0, VIEWPORT);
+    }
+    let o = menu.root_origin();
+    assert!(
+        (o.x - 30.0).abs() < 1e-9 && (o.y - 200.0).abs() < 1e-9,
+        "root origin must be the host's logical (30, 200); got {o:?}"
+    );
+    let row = row_rect(&menu, 0);
+    assert!(
+        (row.x - 40.0).abs() < 1e-9 && (row.y + row.height - 200.0).abs() < 1e-9,
+        "the menu must hang from the local anchor at logical (40, 200); row 0 is {row:?}"
+    );
+    let c = center(row);
+    let (px, py) = ((c.x * s) as u32, (c.y * s) as u32);
+    let i = ((py * fb.width() + px) * 4) as usize;
+    assert_eq!(
+        &fb.pixels()[i..i + 3],
+        &[255, 0, 0],
+        "painted at the root anchor"
+    );
+}

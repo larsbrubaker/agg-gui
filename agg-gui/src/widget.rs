@@ -46,7 +46,8 @@ pub use event_observer::{observe_events, EventObserver};
 pub use event_root::{event_pointer_local, event_rect_to_root, event_root_transform};
 pub(crate) use paint::paint_subtree_forced;
 pub use paint::{
-    current_paint_clip, is_local_rect_in_paint_clip, paint_global_overlays, paint_subtree,
+    current_paint_clip, is_local_rect_in_paint_clip, logical_root_transform, paint_global_overlays,
+    paint_subtree,
 };
 pub use tree::{
     activate_action_at, active_modal_path, cancel_action_path, default_action_path, dispatch_event,

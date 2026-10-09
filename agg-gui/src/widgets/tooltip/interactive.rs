@@ -27,7 +27,9 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key};
 use crate::geometry::{Point, Rect, Size};
-use crate::widget::{dispatch_event_dyn, hit_test_subtree, paint_subtree, Widget};
+use crate::widget::{
+    dispatch_event_dyn, hit_test_subtree, logical_root_transform, paint_subtree, Widget,
+};
 
 use super::render::current_tooltip_viewport;
 use super::timings::{tooltip_now, tooltip_timings};
@@ -132,7 +134,8 @@ impl Tooltip {
     ///
     /// The ctx CTM is at this widget's local origin (the anchor's bottom-left
     /// in world space). Geometry is computed in local coords; viewport-edge
-    /// clamping converts through the logical world origin from `root_transform`.
+    /// clamping converts through the logical root origin from
+    /// [`logical_root_transform`].
     pub(super) fn paint_interactive_tip(&mut self, ctx: &mut dyn DrawCtx) {
         self.update_interactive_state();
         if !self.tip_open || self.content.is_none() {
@@ -148,15 +151,10 @@ impl Tooltip {
         let mut panel_x = 0.0_f64;
         let mut panel_bottom = -TOOLTIP_GAP - panel_h;
 
-        // Viewport-edge avoidance in logical world coords. `root_transform`
-        // includes the outer device scale; strip it (as ComboBox does) so
-        // offsets stay in logical units.
-        let scale = crate::device_scale::device_scale().max(1e-6);
-        let mut ox = 0.0;
-        let mut oy = 0.0;
-        ctx.root_transform().transform(&mut ox, &mut oy);
-        let ox = ox / scale;
-        let oy = oy / scale;
+        // Viewport-edge avoidance in logical root coords, the units of the
+        // published tooltip viewport.
+        let (mut ox, mut oy) = (0.0, 0.0);
+        logical_root_transform(ctx).transform(&mut ox, &mut oy);
         let viewport = current_tooltip_viewport();
         if viewport.width > 0.0 && viewport.height > 0.0 {
             // Flip above the anchor when there is no room below.

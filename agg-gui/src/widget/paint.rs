@@ -55,6 +55,31 @@ pub fn is_local_rect_in_paint_clip(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h:
         && clip.y < r.y + r.height
 }
 
+/// Map from `ctx`'s current local space to the App root's **logical** Y-up
+/// paint space: the units of [`current_viewport`](crate::widget::current_viewport),
+/// layout bounds and the overlay / popup request queues.
+///
+/// [`DrawCtx::root_transform`] lands in root *device pixels*, which carry the
+/// effective scale `App::paint` applies (device × UX, see
+/// [`crate::ux_scale::effective_scale`]); this divides that whole product back
+/// out. Dividing by [`crate::device_scale::device_scale`] alone is only right
+/// while the UX scale is 1 — mobile shells auto-set it to ≈ 1.7.
+///
+/// It is the paint-time counterpart of
+/// [`event_root_transform`](crate::widget::event_root_transform), but not
+/// always equal to it: App paints the tree under the on-screen keyboard's lift
+/// translate, so while the keyboard lifts the tree this includes the lift (the
+/// on-screen position) and the event-time transform does not. It also
+/// inherits `root_transform`'s caveats inside CPU backbuffers and LCD layers.
+pub fn logical_root_transform(ctx: &dyn DrawCtx) -> crate::TransAffine {
+    let s = crate::ux_scale::effective_scale().max(1e-6);
+    let t = ctx.root_transform();
+    // Post-multiplying by a uniform 1/s scale, written as a divide of every
+    // coefficient so the local origin maps exactly as dividing the mapped
+    // point by `s` does (no extra 1/s rounding).
+    crate::TransAffine::new_custom(t.sx / s, t.shy / s, t.shx / s, t.sy / s, t.tx / s, t.ty / s)
+}
+
 // ---------------------------------------------------------------------------
 // Tree traversal helpers (free functions operating on &mut dyn Widget)
 // ---------------------------------------------------------------------------

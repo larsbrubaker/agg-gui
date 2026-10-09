@@ -8,7 +8,7 @@
 //! - [`NodeEditor::paint_canvas`] — body of the `Widget::paint` impl.
 //! - [`NodeEditor::finish_paint_canvas`] — body of the `Widget::finish_paint` impl.
 
-use agg_gui::widget::paint_subtree;
+use agg_gui::widget::{logical_root_transform, paint_subtree};
 use agg_gui::{DrawCtx, Size};
 
 use crate::draw::{draw_bezier_connection, draw_canvas_grid, CanvasPalette};
@@ -29,18 +29,16 @@ impl NodeEditor {
         let visuals = ctx.visuals();
         self.palette = CanvasPalette::from_visuals(&visuals);
 
-        // Capture our app-absolute origin from the root transform (logical
-        // units — divide out the device × UX zoom the App baked in, matching
-        // `Window::clamp_modal_into_viewport`). An inline editor handed to a
-        // screen-level `overlay_sink` uses this to convert its pill rect from
-        // editor-local to app-absolute so the host places it exactly over the
-        // pill rather than at the pane-relative offset.
+        // Capture our app-absolute origin in logical units
+        // (`logical_root_transform` divides out the device × UX zoom the App
+        // baked in). An inline editor handed to a screen-level `overlay_sink`
+        // uses this to convert its pill rect from editor-local to
+        // app-absolute so the host places it exactly over the pill rather
+        // than at the pane-relative offset.
         {
-            let scale = agg_gui::ux_scale::effective_scale().max(1e-6);
-            let mut ox = 0.0;
-            let mut oy = 0.0;
-            ctx.root_transform().transform(&mut ox, &mut oy);
-            self.last_abs_origin.set((ox / scale, oy / scale));
+            let (mut ox, mut oy) = (0.0, 0.0);
+            logical_root_transform(ctx).transform(&mut ox, &mut oy);
+            self.last_abs_origin.set((ox, oy));
         }
 
         if let Some(f) = agg_gui::font_settings::current_system_font() {

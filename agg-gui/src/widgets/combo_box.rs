@@ -505,20 +505,14 @@ impl Widget for ComboBox {
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if self.open {
-            let mut x = 0.0;
-            let mut y = 0.0;
-            let t = ctx.root_transform();
-            t.transform(&mut x, &mut y);
-            // `root_transform` includes the outer device-scale multiplier, but
-            // the popup queue is drained while that same scale is still active
-            // on the ctx and `viewport_h` (and the rest of the popup geometry)
-            // are in logical units.  Strip the scale here so request coords
-            // stay in logical root space — otherwise on HiDPI mobile (DPR 2-3)
-            // the popup paints at scale²-magnified position while hit-testing
-            // (which is purely logical) stays adjacent to the closed button.
-            let scale = crate::device_scale::device_scale().max(1e-6);
-            let x = x / scale;
-            let y = y / scale;
+            // The popup queue is drained while App's effective (device × UX)
+            // scale is still active on the ctx, and `viewport_h` (and the rest
+            // of the popup geometry) are logical, so the request coords must
+            // be in logical root space. Otherwise on HiDPI / UX-zoomed mobile
+            // the popup paints at a scale²-magnified position while
+            // hit-testing (purely logical) stays on the closed button.
+            let (mut x, mut y) = (0.0, 0.0);
+            crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
             let viewport_h = crate::widgets::combo_box::current_combo_viewport()
                 .map(|s| s.height)
                 .unwrap_or(f64::MAX / 4.0);

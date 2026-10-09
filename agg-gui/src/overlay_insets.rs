@@ -97,20 +97,13 @@ pub fn clip_to(container: Rect, insets: Insets, viewport: Size) -> Insets {
 /// `anchored_rect_with_insets` when the painting widget doesn't fill the
 /// viewport.
 pub fn for_paint_ctx(ctx: &dyn DrawCtx, local_size: Size) -> Insets {
-    // root_transform maps local → root *physical* pixels (it includes the
-    // App-level DPI/UX scale); divide back to logical viewport space.
-    let t = ctx.root_transform();
+    // Local → logical viewport space (App's device × UX scale divided out).
+    let t = crate::widget::logical_root_transform(ctx);
     let (mut x0, mut y0) = (0.0, 0.0);
     let (mut x1, mut y1) = (local_size.width, local_size.height);
     t.transform(&mut x0, &mut y0);
     t.transform(&mut x1, &mut y1);
-    let s = crate::ux_scale::effective_scale().max(1e-6);
-    let abs = Rect::new(
-        x0.min(x1) / s,
-        y0.min(y1) / s,
-        (x1 - x0).abs() / s,
-        (y1 - y0).abs() / s,
-    );
+    let abs = Rect::new(x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs());
     clip_to(abs, current(), crate::widget::current_viewport())
 }
 

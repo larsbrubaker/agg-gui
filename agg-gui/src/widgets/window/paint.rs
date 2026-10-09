@@ -228,17 +228,11 @@ pub(super) fn clamp_modal_into_viewport(window: &mut Window, ctx: &dyn DrawCtx) 
     if vp.width <= 1.0 || vp.height <= 1.0 {
         return (0.0, 0.0);
     }
-    // `App::paint` scales the ctx by the combined device × UX zoom factor, so
-    // the root transform maps logical units up by `effective_scale`; divide by
-    // the same to recover logical (device-independent) root coordinates that
-    // match `current_viewport()`.
-    let scale = crate::ux_scale::effective_scale().max(1e-6);
-    // Window-local origin mapped to physical root, then back to logical.
-    let mut ox = 0.0;
-    let mut oy = 0.0;
-    ctx.root_transform().transform(&mut ox, &mut oy);
-    let root_x = ox / scale;
-    let root_y = oy / scale;
+    // Window-local origin in logical (device-independent) root coordinates
+    // that match `current_viewport()`: `logical_root_transform` divides out
+    // the combined device × UX zoom `App::paint` scales the ctx by.
+    let (mut root_x, mut root_y) = (0.0, 0.0);
+    crate::widget::logical_root_transform(ctx).transform(&mut root_x, &mut root_y);
     // Cache the slot's canvas-absolute origin offset for the snap path, which
     // has no DrawCtx during `on_event`. `root_x/root_y` is the window's local
     // (0,0) in canvas space; subtracting the slot-local `bounds.origin` yields

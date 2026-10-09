@@ -167,13 +167,11 @@ impl ColorPicker {
     /// Paint the open popup in the global overlay pass: re-check the
     /// placement, then the panel background, border and rows.
     pub(super) fn paint_popup(&mut self, ctx: &mut dyn DrawCtx) {
-        // The widget's origin in logical root space (Y-up): the root
-        // transform carries the app's effective (device × UX) scale, which
-        // the logical geometry must not.
+        // The widget's origin in logical root space (Y-up), with the app's
+        // effective (device × UX) scale divided out of the root transform.
         let (mut x, mut y) = (0.0, 0.0);
-        ctx.root_transform().transform(&mut x, &mut y);
-        let scale = crate::ux_scale::effective_scale().max(1e-6);
-        self.place_popup_from_origin(Point::new(x / scale, y / scale));
+        crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
+        self.place_popup_from_origin(Point::new(x, y));
 
         let v = ctx.visuals();
         let r = self.regions();

@@ -255,21 +255,16 @@ impl Widget for InspectorPanel {
     /// the hovered widget lives inside.
     ///
     /// `hovered_bounds` is in logical root-space coordinates (Y-up); the
-    /// CTM at this point is local to the InspectorPanel, so we translate
-    /// the local origin back to root coords and offset the draw rect by
-    /// the inverse.  Strips the device-scale factor so logical inputs
-    /// stay logical under HiDPI.
+    /// CTM at this point is local to the InspectorPanel, so we map the
+    /// local origin to logical root coords (dividing out App's device × UX
+    /// scale) and offset the draw rect by the inverse.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let Some(overlay) = *self.hovered_bounds.borrow() else {
             return;
         };
 
-        let mut ox = 0.0;
-        let mut oy = 0.0;
-        ctx.root_transform().transform(&mut ox, &mut oy);
-        let scale = crate::device_scale::device_scale().max(1e-6);
-        let ox = ox / scale;
-        let oy = oy / scale;
+        let (mut ox, mut oy) = (0.0, 0.0);
+        crate::widget::logical_root_transform(ctx).transform(&mut ox, &mut oy);
 
         paint_inspector_overlay(ctx, overlay, ox, oy);
     }

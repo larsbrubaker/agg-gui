@@ -91,11 +91,11 @@ impl PopupMenu {
     /// Record the host's root origin from its paint context: call from the
     /// host's `paint` with the ctx positioned at the host's (0, 0).
     pub fn sync_root_origin(&mut self, ctx: &dyn DrawCtx) {
+        // Menu geometry is logical: map through the transform that divides
+        // out App's device × UX scale.
         let (mut x, mut y) = (0.0, 0.0);
-        ctx.root_transform().transform(&mut x, &mut y);
-        // `root_transform` carries the device scale; menu geometry is logical.
-        let scale = crate::device_scale::device_scale().max(1e-6);
-        self.set_root_origin(Point::new(x / scale, y / scale));
+        crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
+        self.set_root_origin(Point::new(x, y));
     }
 
     /// Open the menu with its top-left corner at `anchor`, given in the host
