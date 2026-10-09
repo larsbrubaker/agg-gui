@@ -12,8 +12,16 @@
 //! device scale 2 (alone and with a 1.5 UX scale) with the image in the
 //! right/top part of the screen, where its device coordinates exceed the
 //! logical viewport, and serves a real PNG from a loopback HTTP server so the
-//! production fetch path (`http_fetch.rs`) runs. A scale-1 control and an
-//! off-screen negative case pin that the culling itself keeps working.
+//! production fetch path (`http_fetch.rs`) runs. A scale-1 control and two
+//! off-screen negative cases pin that the culling itself keeps working: one
+//! behind the root's children clip, and one with no effective clip around the
+//! markdown, so only the device-pixel viewport test rejects it.
+//!
+//! Every test binds its thread to a private UI queue ([`PrivateUiQueue`]):
+//! the fetch's completion wakes the UI thread that started it
+//! (`image_loader::load_remote_image` captures that thread's queue), so these
+//! fetches never wake other, concurrently running tests. One test pins that
+//! routing itself.
 
 use super::*;
 use crate::draw_ctx::DrawCtx;
@@ -45,6 +53,26 @@ impl Drop for ScaleGuard {
     }
 }
 
+/// Makes the test thread a UI thread bound to a queue of its own for the
+/// test's duration, so the wakeups aimed at it (an image fetch's completion)
+/// reach no other test, and it reads none of theirs. Dropping it unbinds the
+/// thread again — test threads start unbound — even if an assertion fails.
+struct PrivateUiQueue;
+
+impl PrivateUiQueue {
+    fn bind() -> Self {
+        crate::ui_thread::UiQueue::new().attach_current_thread();
+        crate::ui_thread::mark_current_thread_as_ui_thread();
+        PrivateUiQueue
+    }
+}
+
+impl Drop for PrivateUiQueue {
+    fn drop(&mut self) {
+        crate::ui_thread::unbind_current_thread();
+    }
+}
+
 /// A one-shot loopback HTTP server: `url` serves `IMG_PX`² of opaque green
 /// PNG, and `requests` receives a message when a request arrives.
 struct ImageServer {
@@ -61,6 +89,17 @@ fn green_png() -> Vec<u8> {
 /// `http_fetch.rs` tests). If no request ever comes, the accept thread just
 /// stays parked until the test process exits.
 fn serve_png_once() -> ImageServer {
+    serve_png(None)
+}
+
+/// Like [`serve_png_once`], but the response is held back until the returned
+/// sender fires, so the test knows the fetch cannot have completed before.
+fn serve_png_once_gated() -> (ImageServer, mpsc::Sender<()>) {
+    let (release, gate) = mpsc::channel();
+    (serve_png(Some(gate)), release)
+}
+
+fn serve_png(gate: Option<mpsc::Receiver<()>>) -> ImageServer {
     let body = green_png();
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let addr = listener.local_addr().expect("local addr");
@@ -70,6 +109,10 @@ fn serve_png_once() -> ImageServer {
             let _ = tx.send(());
             let mut buf = [0u8; 2048];
             let _ = stream.read(&mut buf);
+            if let Some(gate) = gate {
+                // A dropped sender (the test failed early) releases it too.
+                let _ = gate.recv();
+            }
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\n\
                  Connection: close\r\n\r\n",
@@ -85,12 +128,19 @@ fn serve_png_once() -> ImageServer {
     }
 }
 
+/// Half-extent of the children clip an unclipped [`Placer`] reports: far
+/// beyond anything these tests place, at any scale they use.
+const NO_CLIP: f64 = 1.0e6;
+
 /// App root: fills the viewport and pins its single child, at its natural
 /// size for `slot`'s width/height, with its bottom-left at `slot`'s origin.
+/// With `clip_children` off it does not clip its child: the traversal always
+/// pushes a children clip, so it reports one far larger than the viewport.
 struct Placer {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     slot: Rect,
+    clip_children: bool,
 }
 
 impl Widget for Placer {
@@ -105,6 +155,14 @@ impl Widget for Placer {
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
         &mut self.children
+    }
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let b = self.bounds;
+        Some(if self.clip_children {
+            (0.0, 0.0, b.width, b.height)
+        } else {
+            (-NO_CLIP, -NO_CLIP, 2.0 * NO_CLIP, 2.0 * NO_CLIP)
+        })
     }
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
@@ -121,14 +179,20 @@ impl Widget for Placer {
 }
 
 /// An app whose only content is a `MarkdownView` holding one remote image,
-/// placed at `slot` (logical, Y-up).
+/// placed at `slot` (logical, Y-up), inside a root that clips it.
 fn markdown_app(url: &str, slot: Rect) -> App {
+    markdown_app_with_clip(url, slot, true)
+}
+
+/// [`markdown_app`], choosing whether the root clips the markdown.
+fn markdown_app_with_clip(url: &str, slot: Rect, clip_children: bool) -> App {
     let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font"));
     let view = MarkdownView::new(format!("![remote]({url})"), font);
     App::new(Box::new(Placer {
         bounds: Rect::default(),
         children: vec![Box::new(view)],
         slot,
+        clip_children,
     }))
 }
 
@@ -244,12 +308,14 @@ fn right_top_slot() -> Rect {
 #[test]
 fn right_top_remote_image_loads_at_device_scale_2() {
     let _g = ScaleGuard;
+    let _q = PrivateUiQueue::bind();
     assert_on_screen_image_loads("device 2 / ux 1", 2.0, 1.0, right_top_slot());
 }
 
 #[test]
 fn right_top_remote_image_loads_at_device_scale_2_ux_scale_1_5() {
     let _g = ScaleGuard;
+    let _q = PrivateUiQueue::bind();
     assert_on_screen_image_loads("device 2 / ux 1.5", 2.0, 1.5, right_top_slot());
 }
 
@@ -258,31 +324,118 @@ fn right_top_remote_image_loads_at_device_scale_2_ux_scale_1_5() {
 #[test]
 fn right_top_remote_image_loads_at_scale_1() {
     let _g = ScaleGuard;
+    let _q = PrivateUiQueue::bind();
     assert_on_screen_image_loads("device 1 / ux 1", 1.0, 1.0, right_top_slot());
 }
 
-/// Culling still works at HiDPI: an image placed just past the viewport's
-/// right edge is never requested.
+/// The fetch's completion wakes the UI thread that painted the image — the
+/// queue that thread is bound to — so a reactive App on a UI thread of its
+/// own repaints when the image arrives. The fetch's worker thread is unbound:
+/// signalling whatever queue *it* posts to would wake the process's main
+/// queue (and every unbound test thread reading it) instead.
 #[test]
-fn off_screen_remote_image_does_not_load_at_device_scale_2() {
+fn remote_image_completion_wakes_the_ui_thread_that_started_it() {
     let _g = ScaleGuard;
-    crate::set_device_scale(2.0);
+    let _q = PrivateUiQueue::bind();
     let phys = physical_viewport();
 
-    let server = serve_png_once();
-    let mut app = markdown_app(&server.url, Rect::new(VP_W + 10.0, 100.0, 150.0, 100.0));
-    let fb = frame(&mut app, phys);
+    let (server, release) = serve_png_once_gated();
+    let mut app = markdown_app(&server.url, right_top_slot());
+    frame(&mut app, phys);
+    server
+        .requests
+        .recv_timeout(LOAD_TIMEOUT)
+        .expect("the image server never received a request");
 
+    // The response is held, so the fetch has not completed: start idle.
+    crate::animation::clear_draw_request();
+    let epoch = crate::animation::async_state_epoch();
+    release.send(()).expect("release the response");
+
+    let deadline = Instant::now() + LOAD_TIMEOUT;
+    while crate::animation::async_state_epoch() == epoch {
+        assert!(
+            Instant::now() < deadline,
+            "the remote image's fetch completed, but its wakeup never reached \
+             the UI thread that started it (it went to another queue)"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        crate::animation::wants_draw(),
+        "the completion wakeup requests a draw on the starting UI thread"
+    );
+
+    // And that repaint shows the decoded image.
+    let deadline = Instant::now() + LOAD_TIMEOUT;
+    while green_bbox(&frame(&mut app, phys)).is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "the image was fetched but never painted"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Lay out and paint `app` once, then require that its markdown image was
+/// neither started nor requested from `server`, and that nothing green shows.
+fn assert_image_not_loaded(label: &str, app: &mut App, server: &ImageServer) {
+    let fb = frame(app, physical_viewport());
     assert!(
         !app.root().needs_draw(),
-        "an off-screen markdown image started loading"
+        "{label}: an off-screen markdown image started loading"
     );
     assert!(
         server
             .requests
             .recv_timeout(Duration::from_millis(500))
             .is_err(),
-        "the image server received a request for an off-screen image"
+        "{label}: the image server received a request for an off-screen image"
     );
-    assert!(green_bbox(&fb).is_none(), "an off-screen image was painted");
+    assert!(
+        green_bbox(&fb).is_none(),
+        "{label}: an off-screen image was painted"
+    );
+}
+
+/// Culling still works at HiDPI: an image placed just past the viewport's
+/// right edge is never requested. (The root's children clip alone rejects
+/// it here; the next test isolates the viewport check.)
+#[test]
+fn off_screen_remote_image_does_not_load_at_device_scale_2() {
+    let _g = ScaleGuard;
+    let _q = PrivateUiQueue::bind();
+    crate::set_device_scale(2.0);
+
+    let server = serve_png_once();
+    let mut app = markdown_app(&server.url, Rect::new(VP_W + 10.0, 100.0, 150.0, 100.0));
+    assert_image_not_loaded("clipped root, device 2", &mut app, &server);
+}
+
+/// The viewport check alone culls: no effective paint clip surrounds the
+/// markdown, so only `is_rect_visible_in_root`'s device-pixel viewport test
+/// stands between the image and a fetch. At device 2 × UX 1.5 (s = 3) the
+/// image sits just past the logical viewport's right edge: beyond the device
+/// viewport (viewport × s) but well inside a viewport scaled twice
+/// (viewport × s²), so a regression that applies the scale twice — or drops
+/// the viewport test — starts the fetch.
+#[test]
+fn off_screen_remote_image_does_not_load_without_a_clip_at_device_scale_2_ux_scale_1_5() {
+    let _g = ScaleGuard;
+    let _q = PrivateUiQueue::bind();
+    crate::set_device_scale(2.0);
+    crate::ux_scale::set_ux_scale(1.5);
+    let s = crate::ux_scale::effective_scale();
+
+    let slot = Rect::new(VP_W + 10.0, 100.0, 150.0, 100.0);
+    assert!(slot.y + slot.height <= VP_H, "vertically on screen");
+    assert!(slot.x > VP_W, "past the viewport's right edge at any scale");
+    assert!(
+        (slot.x + slot.width) * s < VP_W * s * s,
+        "inside a viewport scaled twice"
+    );
+
+    let server = serve_png_once();
+    let mut app = markdown_app_with_clip(&server.url, slot, false);
+    assert_image_not_loaded("unclipped root, device 2 / ux 1.5", &mut app, &server);
 }

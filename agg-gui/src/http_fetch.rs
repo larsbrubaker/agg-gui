@@ -9,7 +9,10 @@
 //!   in (`webpki-roots`).  The whole TLS stack is pure Rust: no ring, no
 //!   aws-lc, no `cc` build step.  The callback runs on the worker thread, so
 //!   it must be `Send` and signal the UI through thread-safe state (the
-//!   markdown loader uses `animation::signal_async_state_change`).
+//!   markdown loader signals the starting UI thread's queue, captured with
+//!   `ui_thread::current_queue` before the fetch: the worker is unbound, so
+//!   its own `animation::signal_async_state_change` would wake the main
+//!   queue instead).
 //! - **wasm32:** the browser's fetch API through `ehttp`; the callback runs on
 //!   the main thread when the promise resolves.
 

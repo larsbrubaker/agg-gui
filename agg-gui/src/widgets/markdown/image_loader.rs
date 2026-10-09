@@ -4,6 +4,10 @@
 //! module fetches and decodes HTTP(S) images. Fetching goes through
 //! [`crate::http_fetch::fetch_bytes`] (pure-Rust TLS on native, the browser's
 //! fetch on wasm), which calls the completion callback when bytes arrive.
+//! That callback may run on a worker thread, so the wakeup it sends goes to
+//! the queue of the UI thread that started the load
+//! ([`crate::ui_thread::current_queue`], captured up front), not to whatever
+//! queue the worker itself would post to.
 
 use std::sync::{Arc, Mutex};
 
@@ -12,6 +16,11 @@ use crate::framebuffer::unpremultiply_rgba_inplace;
 use super::{ImagePixels, ImageState};
 
 pub(super) fn load_remote_image(url: String, state: Arc<Mutex<ImageState>>) {
+    // Captured on the calling (painting) UI thread: the native completion runs
+    // on an unbound worker, whose own `current_queue()` is the process's main
+    // queue — the wrong thread for an App on a UI thread bound to a queue of
+    // its own. Unbound callers capture the main queue, as before.
+    let ui_queue = crate::ui_thread::current_queue();
     crate::http_fetch::fetch_bytes(url, move |result| {
         let next = match result {
             Ok(bytes) => decode_image(&bytes)
@@ -30,7 +39,7 @@ pub(super) fn load_remote_image(url: String, state: Arc<Mutex<ImageState>>) {
         // parent Window's cached FBO keeps compositing the previous
         // frame's placeholder rendering — the SVG-badge "wrong
         // scale until first re-draw" bug.
-        crate::animation::signal_async_state_change();
+        ui_queue.signal_async_state_change();
     });
 }
 
