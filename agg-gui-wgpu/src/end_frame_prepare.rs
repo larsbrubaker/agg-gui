@@ -10,8 +10,10 @@
 //!
 //! All vertex / index / uniform data is written into three persistent
 //! [`crate::buffer_arena::GpuArena`] instances owned by `WgpuGfxCtx`.  Each
-//! allocation is a `queue.write_buffer` into a chunk that was created once
-//! (per chunk) and is reused frame-after-frame.  This replaced the previous
+//! allocation is staged on the CPU for a chunk that was created once (per
+//! chunk) and is reused frame-after-frame; `flush_to_surface` then uploads
+//! each chunk with one `queue.write_buffer` (`FrameArenas::flush`) before
+//! submitting.  This replaced the previous
 //! `device.create_buffer_init(...)`-per-command pattern, which was the
 //! dominant cost in `prepare_all` (~9 ms for ~213 commands on a release
 //! build) — every `create_buffer_init` is a full GPU memory allocation
@@ -86,20 +88,10 @@ pub(crate) fn prepare_all(
                     _pad: [0.0; 2],
                     color: [color.r, color.g, color.b, a],
                 };
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&uniforms));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
                 let bg0 = mk_uniform_bg(device, &pipelines.solid_bgl, &ub);
-                let vb = alloc_vertex(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(verts.as_slice()),
-                );
-                let ib = alloc_index(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(indices.as_slice()),
-                );
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
+                let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::Solid {
                     vb,
                     ib,
@@ -125,20 +117,10 @@ pub(crate) fn prepare_all(
                     _pad: [0.0; 2],
                     color: [color.r, color.g, color.b, a],
                 };
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&uniforms));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
                 let bg0 = mk_uniform_bg(device, &pipelines.aa_solid_bgl, &ub);
-                let vb = alloc_vertex(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(verts.as_slice()),
-                );
-                let ib = alloc_index(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(indices.as_slice()),
-                );
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
+                let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::AaSolid {
                     vb,
                     ib,
@@ -164,15 +146,10 @@ pub(crate) fn prepare_all(
                     _pad: [0.0; 2],
                     color: [color.r, color.g, color.b, a],
                 };
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&uniforms));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
                 let bg0 = mk_uniform_bg(device, &pipelines.aa_texture_bgl0, &ub);
-                let vb = alloc_vertex(device, queue, arenas, aa_tex_verts_as_bytes(verts));
-                let ib = alloc_index(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(indices.as_slice()),
-                );
+                let vb = alloc_vertex(device, arenas, aa_tex_verts_as_bytes(verts));
+                let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::AaTexture {
                     vb,
                     ib,
@@ -195,7 +172,7 @@ pub(crate) fn prepare_all(
                 }
                 let mut u = *uniforms;
                 u.resolution = [cur_vp.0, cur_vp.1];
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
                 // Ramp texture is a one-off per command (data depends on the
                 // gradient stops); textures aren't pooled here yet because
                 // they're already arena-allocated inside wgpu and cost less
@@ -235,18 +212,8 @@ pub(crate) fn prepare_all(
                         },
                     ],
                 });
-                let vb = alloc_vertex(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(verts.as_slice()),
-                );
-                let ib = alloc_index(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(indices.as_slice()),
-                );
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
+                let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::Gradient {
                     _ramp_tex: ramp_tex,
                     _ramp_view: ramp_view,
@@ -272,7 +239,7 @@ pub(crate) fn prepare_all(
                     _pad: [0.0; 2],
                     tint: *tint,
                 };
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&uniforms));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
                 let bg0 = mk_uniform_bg(device, &pipelines.tex_bgl0, &ub);
                 let sampler = if *nearest {
                     &pipelines.nearest_sampler
@@ -293,12 +260,7 @@ pub(crate) fn prepare_all(
                         },
                     ],
                 });
-                let vb = alloc_vertex(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(verts.as_slice()),
-                );
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
                 out.push(Prepared::Textured {
                     _texture: Arc::clone(texture),
                     _view: view.clone(),
@@ -324,7 +286,7 @@ pub(crate) fn prepare_all(
                         _pad: 0,
                         color: [color.r, color.g, color.b, color.a],
                     };
-                    alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u))
+                    alloc_uniform(device, arenas, bytemuck::bytes_of(&u))
                 });
                 let bg0s: [wgpu::BindGroup; 3] =
                     std::array::from_fn(|ch| mk_uniform_bg(device, &pipelines.lcd_bgl0, &ubs[ch]));
@@ -343,13 +305,8 @@ pub(crate) fn prepare_all(
                     ],
                 });
                 let idx: [u32; 6] = [0, 1, 2, 0, 2, 3];
-                let vb = alloc_vertex(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(verts.as_slice()),
-                );
-                let ib = alloc_index(device, queue, arenas, bytemuck::cast_slice(&idx));
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
+                let ib = alloc_index(device, arenas, bytemuck::cast_slice(&idx));
                 out.push(Prepared::LcdMask {
                     _texture: Arc::clone(texture),
                     _view: view.clone(),
@@ -378,7 +335,7 @@ pub(crate) fn prepare_all(
                         channel: ch as u32,
                         global_alpha: *global_alpha,
                     };
-                    alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u))
+                    alloc_uniform(device, arenas, bytemuck::bytes_of(&u))
                 });
                 let bg0s: [wgpu::BindGroup; 3] =
                     std::array::from_fn(|ch| mk_uniform_bg(device, &pipelines.lcb_bgl0, &ubs[ch]));
@@ -401,13 +358,8 @@ pub(crate) fn prepare_all(
                     ],
                 });
                 let idx: [u32; 6] = [0, 1, 2, 0, 2, 3];
-                let vb = alloc_vertex(
-                    device,
-                    queue,
-                    arenas,
-                    bytemuck::cast_slice(verts.as_slice()),
-                );
-                let ib = alloc_index(device, queue, arenas, bytemuck::cast_slice(&idx));
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
+                let ib = alloc_index(device, arenas, bytemuck::cast_slice(&idx));
                 out.push(Prepared::LcbMask {
                     _color_tex: Arc::clone(color_tex),
                     _color_view: color_view.clone(),
@@ -462,7 +414,7 @@ pub(crate) fn prepare_all(
                     _pad0: 0.0,
                     mask_rect,
                 };
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
                 let bg0 = mk_uniform_bg(device, &pipelines.layer_bgl0, &ub);
                 let bg1 = layer_texture_bg(
                     device,
@@ -471,7 +423,7 @@ pub(crate) fn prepare_all(
                     &pipelines.linear_sampler,
                 );
                 let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
-                let vb = alloc_vertex(device, queue, arenas, bytemuck::cast_slice(&verts));
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(&verts));
                 out.push(Prepared::PopLayer {
                     _texture: Arc::clone(texture),
                     _view: view.clone(),
@@ -503,7 +455,7 @@ pub(crate) fn prepare_all(
                     _pad0: 0.0,
                     mask_rect: [0.0; 4],
                 };
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
                 let bg0 = mk_uniform_bg(device, &pipelines.layer_bgl0, &ub);
                 let bg1 = layer_texture_bg(
                     device,
@@ -522,8 +474,8 @@ pub(crate) fn prepare_all(
                 } else {
                     indices
                 };
-                let vb = alloc_vertex(device, queue, arenas, bytemuck::cast_slice(vsrc));
-                let ib = alloc_index(device, queue, arenas, bytemuck::cast_slice(isrc));
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(vsrc));
+                let ib = alloc_index(device, arenas, bytemuck::cast_slice(isrc));
                 out.push(Prepared::PopLayerMasked {
                     _texture: Arc::clone(texture),
                     _view: view.clone(),
@@ -560,7 +512,7 @@ pub(crate) fn prepare_all(
                     _pad0: 0.0,
                     mask_rect,
                 };
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&u));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
                 let bg0 = mk_uniform_bg(device, &pipelines.layer_bgl0, &ub);
                 let bg1 = layer_texture_bg(
                     device,
@@ -569,7 +521,7 @@ pub(crate) fn prepare_all(
                     &pipelines.linear_sampler,
                 );
                 let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
-                let vb = alloc_vertex(device, queue, arenas, bytemuck::cast_slice(&verts));
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(&verts));
                 out.push(Prepared::CompositeLayer {
                     _texture: Arc::clone(texture),
                     _view: view.clone(),
@@ -604,7 +556,7 @@ pub(crate) fn prepare_all(
                 size_stack.pop();
                 let parent_vp = *size_stack.last().unwrap_or(&viewport);
                 let uniforms = comp_op::composite_uniforms(*op, *source, format);
-                let ub = alloc_uniform(device, queue, arenas, bytemuck::bytes_of(&uniforms));
+                let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
                 out.push(comp_op::prepare_end(
                     device,
                     comp_op,
@@ -695,34 +647,19 @@ fn mk_uniform_bg(
 }
 
 #[inline]
-fn alloc_vertex(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    arenas: &mut FrameArenas,
-    data: &[u8],
-) -> PreparedSlice {
-    let (buf, offset, size) = arenas.vertex.alloc(device, queue, data);
+fn alloc_vertex(device: &wgpu::Device, arenas: &mut FrameArenas, data: &[u8]) -> PreparedSlice {
+    let (buf, offset, size) = arenas.vertex.alloc(device, data);
     PreparedSlice { buf, offset, size }
 }
 
 #[inline]
-fn alloc_index(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    arenas: &mut FrameArenas,
-    data: &[u8],
-) -> PreparedSlice {
-    let (buf, offset, size) = arenas.index.alloc(device, queue, data);
+fn alloc_index(device: &wgpu::Device, arenas: &mut FrameArenas, data: &[u8]) -> PreparedSlice {
+    let (buf, offset, size) = arenas.index.alloc(device, data);
     PreparedSlice { buf, offset, size }
 }
 
 #[inline]
-fn alloc_uniform(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    arenas: &mut FrameArenas,
-    data: &[u8],
-) -> PreparedSlice {
-    let (buf, offset, size) = arenas.uniform.alloc(device, queue, data);
+fn alloc_uniform(device: &wgpu::Device, arenas: &mut FrameArenas, data: &[u8]) -> PreparedSlice {
+    let (buf, offset, size) = arenas.uniform.alloc(device, data);
     PreparedSlice { buf, offset, size }
 }

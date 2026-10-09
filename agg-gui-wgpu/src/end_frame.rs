@@ -211,7 +211,8 @@ impl WgpuGfxCtx {
         // frame's `Prepared` Vec was dropped at the end of the previous
         // `flush_to_surface`, so nothing external still references the
         // chunks; the wgpu::Buffers themselves are kept and overwritten via
-        // `queue.write_buffer` instead of being reallocated.
+        // one `queue.write_buffer` per chunk (`FrameArenas::flush` below)
+        // instead of being reallocated.
         self.frame_arenas.begin_frame();
 
         // Wall-clock split of the three phases. We deliberately keep this
@@ -231,6 +232,10 @@ impl WgpuGfxCtx {
             &self.comp_op,
             self.surface_format,
         );
+        // Upload everything `prepare_all` staged in the arenas — one write
+        // per chunk.  Must precede the `queue.submit` below; timed as part of
+        // prepare, where the per-allocation writes used to be.
+        self.frame_arenas.flush(&self.queue);
         let prepare_us = t_prepare.elapsed().as_micros().min(u32::MAX as u128) as u32;
 
         let mut encoder = self

@@ -38,6 +38,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- Vertex, index and uniform data reach the GPU with one `queue.write_buffer`
+  per arena chunk per frame instead of one per allocation (about three per
+  draw command). wgpu backs every `write_buffer` with a staging buffer it
+  creates and destroys, which on Metal cost about half of an idle repaint's
+  main-thread time plus a third more in `device.poll`; the arena now stages
+  each chunk's bytes on the CPU and uploads them before the frame's submit.
+
 - `Gpu::new` builds its adapter and device on a separate thread and can now
   return `GpuInitError::StartupTimedOut` (new variant) when
   `GpuConfig::startup_budget` (new field) expires. `GpuInitError` and
