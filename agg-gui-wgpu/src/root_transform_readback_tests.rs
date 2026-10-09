@@ -330,6 +330,13 @@ fn probe_in_window_fbo_is_in_paint_clip_at_device_scale_2() {
     );
     ctx.clear(Color::white());
     app.paint(&mut ctx);
+    // `supports_retained_layers` only says the path is available; the Window
+    // must actually have stored its retained FBO this frame, or the probe
+    // read `root_transform` outside any layer and this test proves nothing.
+    assert!(
+        !ctx.retained_layers.is_empty(),
+        "the Window painted without compositing through a retained FBO layer"
+    );
     ctx.flush_to_surface(&target.view);
     let data = target.read();
 
