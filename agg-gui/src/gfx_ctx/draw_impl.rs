@@ -414,9 +414,11 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         self.transform()
     }
     fn root_transform(&self) -> agg_rust::trans_affine::TransAffine {
+        // Each layer origin is in its parent's device pixels, so it is added
+        // AFTER the in-layer CTM (post-multiply), innermost layer first.
         let mut t = self.transform();
         for layer in self.layer_stack.iter().rev() {
-            t.premultiply(&agg_rust::trans_affine::TransAffine::new_translation(
+            t.multiply(&agg_rust::trans_affine::TransAffine::new_translation(
                 layer.origin_x,
                 layer.origin_y,
             ));

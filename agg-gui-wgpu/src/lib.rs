@@ -150,6 +150,8 @@ mod layer_text_readback_tests;
 #[cfg(test)]
 mod lcd_arc_cache_tests;
 #[cfg(test)]
+mod root_transform_readback_tests;
+#[cfg(test)]
 mod screenshot_scaled_tests;
 
 use std::collections::{HashMap, VecDeque};

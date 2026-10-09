@@ -560,9 +560,11 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         self.state.transform
     }
     fn root_transform(&self) -> TransAffine {
+        // Each layer origin is in its parent's device pixels, so it is added
+        // AFTER the in-layer CTM (post-multiply), innermost layer first.
         let mut t = self.state.transform;
         for layer in self.layer_stack.iter().rev() {
-            t.premultiply(&TransAffine::new_translation(
+            t.multiply(&TransAffine::new_translation(
                 layer.origin_x,
                 layer.origin_y,
             ));

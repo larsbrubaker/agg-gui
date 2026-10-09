@@ -276,9 +276,19 @@ pub trait DrawCtx {
     /// Current accumulated transform (CTM).
     fn transform(&self) -> TransAffine;
 
-    /// Current transform expressed in the root render target's coordinate
-    /// space, even when drawing inside an offscreen layer whose local CTM was
-    /// reset to identity. Global overlays use this to submit app-level bounds.
+    /// Map from the current local coordinates to the ROOT render target's
+    /// **device pixels** (Y-up), even while drawing inside offscreen layers
+    /// (compositing layers, clip-path layers) whose local CTM was reset or
+    /// shifted.
+    ///
+    /// The result applies the current in-layer CTM first, then adds every
+    /// enclosing layer's origin (each recorded in its parent's device
+    /// pixels), so it includes the App's effective scale (device × UX, see
+    /// [`crate::ux_scale::effective_scale`]) and every layer offset. Callers
+    /// that want logical root coordinates divide the mapped point by
+    /// `crate::ux_scale::effective_scale()`. Global overlays and the paint
+    /// clip stack (`crate::widget::is_local_rect_in_paint_clip`) use this to
+    /// reason about app-level bounds.
     fn root_transform(&self) -> TransAffine {
         self.transform()
     }
