@@ -7,7 +7,8 @@
 //! `agg_gui::shell_input::ForwarderEvent`s fed to the loop's
 //! [`InputForwarder`], which owns the cursor position, held buttons and
 //! modifiers. Each loop iteration and each painted frame drains the thread's
-//! `agg_gui::ui_thread` queue.
+//! `agg_gui::ui_thread` queue. When the loop ends, the device is released
+//! within agg-sharp's GPU teardown budget (`finish`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -610,6 +611,14 @@ impl<H: ShellHost> ShellLoop<H> {
             store.save(self.current_bounds());
         }
         self.host.on_exit(&mut self.app);
+        // The close never waits on the GPU for long (agg-sharp `GpuTeardown`,
+        // 5 s): the drain runs on its own thread, and only a drain that came
+        // back in time is followed by the release, here, while the window
+        // still exists. A device still busy past the budget is leaked instead
+        // of holding the close (see `Gpu::release_within_budget`).
+        if let Some(gpu) = self.gpu.take() {
+            gpu.release_within_budget(agg_gui_wgpu::GPU_TEARDOWN_BUDGET);
+        }
     }
 }
 

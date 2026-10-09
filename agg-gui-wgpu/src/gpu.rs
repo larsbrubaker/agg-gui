@@ -13,12 +13,21 @@
 //! drives, live in the child module `gpu_acquire.rs`; the pure retry policy
 //! is `crate::surface_retry`.
 //!
+//! The adapter and device requests run inside agg-sharp's start-up budget
+//! (`crate::gpu_budget::create_within_budget`, [`GpuConfig::startup_budget`]),
+//! and [`Gpu::release_within_budget`] drains the GPU inside its teardown
+//! budget before releasing, so neither a hung driver at start-up nor a slow
+//! one at close can hold the UI thread forever.
+//!
 //! wasm shells configure their canvas surface through the browser and never
 //! block on an adapter request, so this module is native-only.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::gpu_budget::{
+    create_within_budget, drain_within_budget, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET,
+};
 use crate::surface_retry::{ConfigureRetry, DEFAULT_RETRY_BUDGET};
 
 #[path = "gpu_acquire.rs"]
@@ -83,6 +92,10 @@ pub struct GpuConfig {
     /// still gets a real retry run afterwards rather than an error at its
     /// first failed retry.
     pub surface_retry_budget: Duration,
+    /// How long [`Gpu::new`] waits for the adapter and device requests before
+    /// giving up with [`GpuInitError::StartupTimedOut`]. Default
+    /// [`crate::GPU_STARTUP_BUDGET`] (15 s, agg-sharp `GpuStartup`).
+    pub startup_budget: Duration,
 }
 
 impl Default for GpuConfig {
@@ -93,6 +106,7 @@ impl Default for GpuConfig {
             present_mode: wgpu::PresentMode::AutoVsync,
             optional_features: wgpu::Features::empty(),
             surface_retry_budget: DEFAULT_RETRY_BUDGET,
+            startup_budget: GPU_STARTUP_BUDGET,
         }
     }
 }
@@ -133,6 +147,13 @@ impl GpuConfig {
         self.surface_retry_budget = budget;
         self
     }
+
+    /// Override how long [`Gpu::new`] waits for its adapter and device
+    /// (default 15 s). See [`GpuConfig::startup_budget`].
+    pub fn with_startup_budget(mut self, budget: Duration) -> Self {
+        self.startup_budget = budget;
+        self
+    }
 }
 
 /// Why [`Gpu::new`] could not produce a usable surface.
@@ -155,6 +176,15 @@ pub enum GpuInitError {
     /// surface state; it is reported instead of retried. Carries wgpu's
     /// error text.
     ConfigureSurface(String),
+    /// The adapter or device request did not return inside
+    /// [`GpuConfig::startup_budget`] — a driver that hung. The half-built
+    /// device is leaked on its own thread (see `crate::gpu_budget`). Its
+    /// text is agg-sharp `WebGpuControl`'s start-up error, the message a user
+    /// is shown.
+    StartupTimedOut {
+        /// The budget that expired.
+        budget: Duration,
+    },
 }
 
 impl std::fmt::Display for GpuInitError {
@@ -169,6 +199,12 @@ impl std::fmt::Display for GpuInitError {
             Self::NoSurfaceFormats => write!(f, "surface reports no supported texture formats"),
             Self::NoAlphaModes => write!(f, "surface reports no supported alpha modes"),
             Self::ConfigureSurface(e) => write!(f, "configure wgpu surface: {e}"),
+            Self::StartupTimedOut { budget } => write!(
+                f,
+                "The GPU device could not be created: the adapter or device request did not \
+                 return within {}s.",
+                crate::gpu_budget::format_budget_seconds(*budget)
+            ),
         }
     }
 }
@@ -231,6 +267,49 @@ pub fn clamp_surface_size(w: u32, h: u32, max_dim: u32) -> (u32, u32) {
     (w.clamp(1, max_dim), h.clamp(1, max_dim))
 }
 
+/// What the budgeted half of [`Gpu::new`] hands back.
+type RequestedDevice = (
+    wgpu::Surface<'static>,
+    wgpu::Adapter,
+    wgpu::Device,
+    wgpu::Queue,
+);
+
+/// The adapter and device requests [`Gpu::new`] runs inside its start-up
+/// budget. Owns the instance and surface so that a request which never
+/// returns keeps them on its own (abandoned) thread.
+fn request_device(
+    instance: wgpu::Instance,
+    surface: wgpu::Surface<'static>,
+    label: &'static str,
+    optional_features: wgpu::Features,
+) -> Result<RequestedDevice, GpuInitError> {
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: Some(&surface),
+        force_fallback_adapter: false,
+    }))
+    .map_err(|_| GpuInitError::RequestAdapter)?;
+
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some(label),
+        // Optional features are masked against what the adapter actually
+        // offers, so asking for an absent one degrades instead of failing
+        // `request_device`.
+        required_features: optional_features & adapter.features(),
+        // The default limits, raised to the adapter's real texture size limit
+        // (usually 16384, against the default 8192): a supersampled 3D view on
+        // a fullscreen HiDPI window needs textures several times the window's
+        // size, and the default would force it down to a softer frame.
+        required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+        memory_hints: wgpu::MemoryHints::Performance,
+        experimental_features: wgpu::ExperimentalFeatures::default(),
+        trace: wgpu::Trace::Off,
+    }))
+    .map_err(|_| GpuInitError::RequestDevice)?;
+    Ok((surface, adapter, device, queue))
+}
+
 /// wgpu device + surface bundle for one OS window.
 pub struct Gpu {
     device: Arc<wgpu::Device>,
@@ -269,29 +348,25 @@ impl Gpu {
         let surface = instance
             .create_surface(target)
             .map_err(GpuInitError::CreateSurface)?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .map_err(|_| GpuInitError::RequestAdapter)?;
-
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some(config.label),
-            // Optional features are masked against what the adapter actually
-            // offers, so asking for an absent one degrades instead of failing
-            // `request_device`.
-            required_features: config.optional_features & adapter.features(),
-            // The default limits, raised to the adapter's real texture size limit
-            // (usually 16384, against the default 8192): a supersampled 3D view on
-            // a fullscreen HiDPI window needs textures several times the window's
-            // size, and the default would force it down to a softer frame.
-            required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
-            memory_hints: wgpu::MemoryHints::Performance,
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            trace: wgpu::Trace::Off,
-        }))
-        .map_err(|_| GpuInitError::RequestDevice)?;
+        // Budgeted (agg-sharp `WebGpuControl.InitializeWebGpu` through
+        // `GpuStartup`): these two requests are synchronous native calls that
+        // have been seen not to return on a loaded software rasterizer. The
+        // instance and surface go to the build thread with them, so a request
+        // that never returns leaks them there instead of the caller waiting.
+        let label = config.label;
+        let optional_features = config.optional_features;
+        let built = create_within_budget(
+            move || request_device(instance, surface, label, optional_features),
+            &format!("{label} device"),
+            config.startup_budget,
+            BACKGROUND_THREAD_AVAILABLE,
+            None,
+        )?;
+        let Some((surface, adapter, device, queue)) = built else {
+            return Err(GpuInitError::StartupTimedOut {
+                budget: config.startup_budget,
+            });
+        };
 
         let caps = surface.get_capabilities(&adapter);
         let surface_format = pick_surface_format(&caps.formats)?;
@@ -397,6 +472,48 @@ impl Gpu {
     /// physical pixel size the shell should hand to layout and `WgpuGfxCtx`.
     pub fn config(&self) -> &wgpu::SurfaceConfiguration {
         &self.config
+    }
+
+    /// Release this device and its surface at window close, waiting at most
+    /// `budget` for the GPU to finish what it was given (agg-sharp
+    /// `WebGpuControl.DisposeDeviceResources(budgetTheGpuDrain: true)`
+    /// through `GpuTeardown`; [`crate::GPU_TEARDOWN_BUDGET`] is its 5 s).
+    ///
+    /// The drain — `Device::poll` waiting for the queue, which touches no
+    /// window — runs on its own thread. If it comes back in time the surface,
+    /// device and queue are released here, on the caller's thread, while the
+    /// window still exists, and this returns `true`. If not, nothing is
+    /// released: the bundle is leaked until the process exits (the surface's
+    /// release would wait on the same fence, and race the window's
+    /// destruction), and this returns `false`. Other holders of the device or
+    /// queue (`WgpuGfxCtx`, an app renderer) can drop theirs afterwards
+    /// without waiting: this bundle's references keep both alive.
+    ///
+    /// Device-loss recovery should simply drop the old `Gpu` instead: it is
+    /// not on a deadline and wants the old device really gone.
+    pub fn release_within_budget(self, budget: Duration) -> bool {
+        let device = Arc::clone(&self.device);
+        let drained = drain_within_budget(
+            move || device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ()),
+            "agg-gui-wgpu device",
+            budget,
+            BACKGROUND_THREAD_AVAILABLE,
+            None,
+        );
+        match drained {
+            Ok(true) => true,
+            Ok(false) => {
+                // Deliberate leak; see the doc comment.
+                std::mem::forget(self);
+                false
+            }
+            Err(error) => {
+                // The drain itself failed (a lost device): there is nothing
+                // left to wait for, so the release cannot block.
+                log::warn!("agg-gui-wgpu: the GPU drain at close failed: {error}");
+                true
+            }
+        }
     }
 
     /// Reconfigure the swap chain for a new physical size. A zero-sized

@@ -41,6 +41,11 @@
 //! - A native application menu bar built from a [`menu_bar::MenuBarModel`]
 //!   (macOS; a no-op elsewhere), its picked items run on the UI thread at
 //!   the loop's next idle pass — see [`menu_bar`].
+//! - agg-sharp's GPU time limits: a device that does not arrive within
+//!   [`agg_gui_wgpu::GPU_STARTUP_BUDGET`] ends [`run`] with
+//!   [`ShellError::Gpu`]`(`[`agg_gui_wgpu::GpuInitError::StartupTimedOut`]`)`,
+//!   whose text is the message to show the user; closing waits at most
+//!   [`agg_gui_wgpu::GPU_TEARDOWN_BUDGET`] for the GPU to drain.
 //!
 //! # What the app owns
 //!
@@ -82,7 +87,7 @@ pub use shell_loop::ShellInit;
 
 // Re-exported so a consumer can build a `ShellHost` without naming the
 // renderer crate, and so the versions can never disagree.
-pub use agg_gui_wgpu::{CopySrc, Gpu, WgpuGfxCtx};
+pub use agg_gui_wgpu::{CopySrc, Gpu, GpuInitError, WgpuGfxCtx};
 
 /// The `wgpu` this shell was built against.
 ///

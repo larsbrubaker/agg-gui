@@ -63,10 +63,17 @@ pub use gpu::{
     clamp_surface_size, surface_acquire_action, CopySrc, FrameAcquire, Gpu, GpuConfig,
     GpuInitError, RetryWake, SurfaceAcquire, SurfaceError,
 };
+/// Wall-clock budgets around building a device at start-up and draining the
+/// GPU at close (agg-sharp `GpuStartup` / `GpuTeardown`).
+pub mod gpu_budget;
 /// When to retry a failed `Surface::configure`, when to give up, and what to
 /// log — the pure policy behind [`Gpu`]'s surface recovery.
 #[cfg(not(target_arch = "wasm32"))]
 mod surface_retry;
+pub use gpu_budget::{
+    create_within_budget, drain_within_budget, BudgetReport, GPU_STARTUP_BUDGET,
+    GPU_TEARDOWN_BUDGET,
+};
 
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
