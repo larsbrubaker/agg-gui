@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor::with_canvas_grid(bool)` / `canvas_grid()` (on by default):
+  off, the canvas draws no grid backdrop (MatterCAD's node editor draws a
+  plain canvas).
+- `NodeEditor::with_card_shadow(CardShadow { blur, offset, color })`:
+  hosted cards paint the host's drop shadow instead of agg-gui's window
+  shadow, whose 14 unit blur reaches over the start of the noodles beside
+  a card (MatterCAD's node card: a 3.5 unit blur, 1.5 down).
+
 - `NodeEditor::socket_at(local) -> Option<(NodeId, SocketSide, String)>`:
   the socket under an editor-local point, with the same hit area a press,
   hover or drop uses.

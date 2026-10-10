@@ -170,6 +170,15 @@ pub(crate) struct CardSocket {
 }
 
 /// What the card's chrome shows, refreshed by every editor layout.
+/// A hosted card's drop shadow, in canvas units: how far it blurs out, its
+/// offset (Y up) and its colour (`None`: the theme's window shadow).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CardShadow {
+    pub blur: f64,
+    pub offset: [f64; 2],
+    pub color: Option<Color>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct CardChrome {
     pub title: String,
@@ -187,6 +196,8 @@ pub(crate) struct CardChrome {
     /// The editor's socket hit box, half extents in card units (`None`:
     /// the round [`SOCKET_HIT_RADIUS`]).
     pub socket_hit: Option<[f64; 2]>,
+    /// The host's card shadow (`None`: agg-gui's window shadow).
+    pub shadow: Option<CardShadow>,
 }
 
 /// A hosted card: chrome and sockets around the host's body widget.
@@ -217,6 +228,7 @@ impl HostedCard {
                 style: Default::default(),
                 draw_sockets: true,
                 socket_hit: None,
+                shadow: None,
             },
         }
     }
@@ -270,6 +282,15 @@ impl HostedCard {
         };
         style.title_color = self.chrome.title_color;
         style.title_text_color = self.chrome.label;
+        if let Some(shadow) = self.chrome.shadow {
+            style.shadow_blur = shadow.blur;
+            style.shadow_dx = shadow.offset[0];
+            // `ChromeStyle`'s offset is Y down.
+            style.shadow_dy = -shadow.offset[1];
+            if let Some(color) = shadow.color {
+                style.shadow_color = color;
+            }
+        }
         style
     }
 }

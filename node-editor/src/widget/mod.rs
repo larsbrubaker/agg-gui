@@ -43,7 +43,7 @@ pub use commands::{NodeEditorCommand, NodeEditorHandle};
 pub use hosted::{
     HostedNodeBody, NodeBodyFactory, SocketAnchor, SocketAnchorFn, MIN_HOSTED_CARD_WIDTH,
 };
-pub use hosted_card::HostedCard;
+pub use hosted_card::{CardShadow, HostedCard};
 pub use view_anchor::ViewAnchor;
 pub use view_nav::InteractionMode;
 
@@ -56,6 +56,10 @@ mod nodes_tests;
 mod tests;
 #[cfg(test)]
 mod tests_add_menu;
+#[cfg(test)]
+mod tests_canvas_grid;
+#[cfg(test)]
+mod tests_card_shadow;
 #[cfg(test)]
 mod tests_commands;
 #[cfg(test)]

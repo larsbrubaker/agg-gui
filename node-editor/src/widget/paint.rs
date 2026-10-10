@@ -91,12 +91,14 @@ impl NodeEditor {
             (h - self.canvas_offset[1]) * inv_scale,
         ];
 
-        draw_canvas_grid(
-            ctx,
-            (visible_min, visible_max),
-            40.0,
-            self.palette.canvas_grid,
-        );
+        if self.presentation.canvas_grid {
+            draw_canvas_grid(
+                ctx,
+                (visible_min, visible_max),
+                40.0,
+                self.palette.canvas_grid,
+            );
+        }
 
         // Edges (under nodes).  Re-snapshot here rather than caching the
         // `layouts` from `layout()` so paint doesn't carry a hidden

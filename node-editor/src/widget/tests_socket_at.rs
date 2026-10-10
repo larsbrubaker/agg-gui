@@ -134,7 +134,7 @@ fn with_sockets_off_no_socket_dot_is_drawn_but_sockets_still_hit_test() {
 
 /// A hosted card body with no children of its own.
 #[derive(Default)]
-struct EmptyBody {
+pub(super) struct EmptyBody {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }

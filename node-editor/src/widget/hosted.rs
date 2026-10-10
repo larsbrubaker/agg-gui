@@ -326,6 +326,7 @@ impl NodeEditor {
                 style: self.presentation.noodle_style,
                 draw_sockets: self.presentation.show_sockets,
                 socket_hit,
+                shadow: self.presentation.card_shadow,
             };
             card.set_bounds(Rect::new(
                 n.position[0],

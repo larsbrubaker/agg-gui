@@ -27,6 +27,10 @@ pub(crate) struct PresentationState {
     pub hovered: Option<(NodeId, SocketSide, String)>,
     /// Sockets are drawn (MatterCAD's `NodeEditor.ShowSockets`).
     pub show_sockets: bool,
+    /// The grid backdrop is drawn.
+    pub canvas_grid: bool,
+    /// The hosted cards' drop shadow (`None`: agg-gui's window shadow).
+    pub card_shadow: Option<super::CardShadow>,
 }
 
 impl Default for PresentationState {
@@ -36,6 +40,8 @@ impl Default for PresentationState {
             socket_hover: false,
             hovered: None,
             show_sockets: true,
+            canvas_grid: true,
+            card_shadow: None,
         }
     }
 }
@@ -53,6 +59,26 @@ impl NodeEditor {
     /// [`NodeGraphModel::socket_hover_text`]. Off by default.
     pub fn with_socket_hover(mut self, enabled: bool) -> Self {
         self.presentation.socket_hover = enabled;
+        self
+    }
+
+    /// Draw the canvas's grid backdrop, or not (on by default; MatterCAD's
+    /// node editor draws a plain canvas).
+    pub fn with_canvas_grid(mut self, enabled: bool) -> Self {
+        self.presentation.canvas_grid = enabled;
+        self
+    }
+
+    /// Whether the grid backdrop is drawn (see [`Self::with_canvas_grid`]).
+    pub fn canvas_grid(&self) -> bool {
+        self.presentation.canvas_grid
+    }
+
+    /// Paint hosted cards with `shadow` instead of agg-gui's window shadow
+    /// (whose 14 unit blur reaches over the start of the noodles beside a
+    /// card; MatterCAD's node card blurs 3.5 units, 1.5 down).
+    pub fn with_card_shadow(mut self, shadow: super::CardShadow) -> Self {
+        self.presentation.card_shadow = Some(shadow);
         self
     }
 
