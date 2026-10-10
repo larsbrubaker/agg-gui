@@ -73,6 +73,7 @@ pub mod text_context_menu;
 pub mod text_field;
 pub mod text_field_core;
 pub mod text_key_bindings;
+pub mod text_suggestion;
 pub mod toggle_switch;
 pub mod tooltip;
 pub mod tree_view;
@@ -147,6 +148,9 @@ pub use text_area::{TextArea, TextAreaScrollInfo, TextHAlign, TextVAlign};
 pub use text_context_menu::{TextContextMenu, TextMenuAction};
 pub use text_field::{TextField, TextFieldTheme};
 pub use text_field_core::TextEditState;
+pub use text_suggestion::{
+    TextSuggestion, TextSuggestionController, TextSuggestionList, TextSuggestionProvider,
+};
 pub use toggle_switch::{ToggleSwitch, ToggleSwitchStyle};
 pub use tooltip::{set_tooltip_timings, tooltip_timings, Tooltip, TooltipTimings};
 pub use tree_view::{NodeIcon, TreeView};

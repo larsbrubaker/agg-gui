@@ -313,6 +313,9 @@ pub struct ScrollView {
     middle_start_world: Point,
     middle_start_v_offset: f64,
     middle_start_h_offset: f64,
+    /// Offsets of the last layout; a change is a scroll, announced to the
+    /// subtree (`Widget::on_ancestor_scrolled`).
+    laid_out_offsets: Option<(f64, f64)>,
 }
 
 impl ScrollView {
@@ -345,6 +348,7 @@ impl ScrollView {
             middle_start_v_offset: 0.0,
             middle_start_h_offset: 0.0,
             fade_color: None,
+            laid_out_offsets: None,
         }
     }
 

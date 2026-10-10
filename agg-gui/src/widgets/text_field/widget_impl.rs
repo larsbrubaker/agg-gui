@@ -1,4 +1,10 @@
-﻿use super::*;
+//! The `Widget` impl for [`TextField`]: layout (with the backbuffer cache
+//! signature), the cached body paint, the blinking caret overlay, the
+//! app-level overlays (context menu, caret suggestion list) and event
+//! routing. Key handling proper is `text_field.rs::handle_key`; pointer
+//! helpers are `pointer.rs`, suggestions `suggestions.rs`.
+
+use super::*;
 
 impl Widget for TextField {
     crate::widgets::widget_as_any!();
@@ -93,8 +99,25 @@ impl Widget for TextField {
     /// The context menu paints at app level so it can overflow the field bounds
     /// and clamp to the viewport.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        self.suggest_paint(ctx);
         let font = self.active_font();
         self.context_menu.paint(ctx, font, self.font_size);
+    }
+
+    /// The open suggestion list is drawn outside the field; presses and the
+    /// wheel on it come here (`text_field/suggestions.rs`).
+    fn hit_test_global_overlay(&self, local_pos: crate::geometry::Point) -> bool {
+        self.text_suggestions()
+            .is_some_and(|c| c.contains(local_pos))
+    }
+
+    /// The suggestion list is drawn unclipped over the window, so a scroll
+    /// that may carry the field out of view closes it (C#
+    /// `TextSuggestionPopup.Tracked_Scrolled`).
+    fn on_ancestor_scrolled(&mut self) {
+        if let Some(c) = self.text_suggestions() {
+            c.close();
+        }
     }
 
     fn margin(&self) -> Insets {
@@ -348,6 +371,39 @@ impl Widget for TextField {
         if let Some(result) = self.route_context_menu(event) {
             return result;
         }
+        if let Some(result) = self.suggest_pointer(event) {
+            return result;
+        }
+        let result = self.on_event_inner(event);
+        match event {
+            // A typed character asks for suggestions; any other edit or caret
+            // move refilters a list that is already open (C#
+            // `Field_KeyPressed` / `Field_EditedOrCaretMoved`).
+            Event::KeyDown {
+                key: Key::Char(c),
+                modifiers,
+            } if result.is_consumed()
+                && *c >= ' '
+                && !self.read_only
+                && !(modifiers.ctrl || modifiers.meta) =>
+            {
+                self.suggest_requery()
+            }
+            Event::KeyDown { .. } | Event::MouseDown { .. } => self.suggest_after_edit(),
+            Event::MouseMove { .. } if self.mouse_down => self.suggest_after_edit(),
+            Event::FocusLost => {
+                if let Some(c) = self.text_suggestions() {
+                    c.close();
+                }
+            }
+            _ => {}
+        }
+        result
+    }
+}
+
+impl TextField {
+    fn on_event_inner(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
@@ -490,6 +546,12 @@ impl Widget for TextField {
             Event::KeyDown { key, modifiers } if self.focused => {
                 // Reset blink on any keypress so cursor is visible immediately.
                 self.focus_time = Some(crate::clock::now());
+                // The suggestion list takes its keys before anything else
+                // (C# `PreviewKeyDown` runs before the `KeyDown` event).
+                if self.suggest_preview_key(key, *modifiers) {
+                    crate::animation::request_draw();
+                    return EventResult::Consumed;
+                }
                 // A wrapper's interceptor sees the key before the built-in
                 // handling (C#'s `KeyDown` event fires before `OnKeyDown`'s body).
                 if self.run_key_intercept(key, modifiers) {

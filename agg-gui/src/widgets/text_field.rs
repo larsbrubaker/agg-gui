@@ -54,6 +54,7 @@ mod layout_builders;
 mod password;
 mod pointer;
 mod sig;
+mod suggestions;
 mod theme;
 mod vertical_keys;
 mod widget_impl;
@@ -62,6 +63,8 @@ mod widget_impl;
 mod frame_tests;
 #[cfg(test)]
 mod inset_tests;
+#[cfg(test)]
+mod replace_range_tests;
 #[cfg(test)]
 mod selection_tests;
 
@@ -202,6 +205,8 @@ pub struct TextField {
     /// Per-instance line box; `None` follows
     /// [`font_settings::current_line_box`](crate::font_settings::current_line_box).
     pub(super) line_box: Option<crate::font_settings::LineBox>,
+    /// Caret suggestions; see `text_field/suggestions.rs`.
+    suggestions: Option<suggestions::AttachedSuggestions>,
 }
 
 impl TextField {
@@ -252,6 +257,7 @@ impl TextField {
             context_menu: TextContextMenu::new(),
             context_menu_enabled: true,
             line_box: None,
+            suggestions: None,
         }
     }
 
@@ -367,6 +373,7 @@ impl TextField {
         }
         self.undo.clear_history();
         self.pending_insert = None;
+        self.suggest_after_edit();
     }
 
     // ── Private state helpers ────────────────────────────────────────────────

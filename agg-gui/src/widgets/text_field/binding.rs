@@ -43,5 +43,6 @@ impl TextField {
         }
         self.ensure_cursor_visible();
         crate::animation::request_draw();
+        self.suggest_after_edit();
     }
 }

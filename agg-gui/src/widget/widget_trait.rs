@@ -116,6 +116,13 @@ pub trait Widget {
         false
     }
 
+    /// A [`ScrollView`](crate::widgets::ScrollView) above this widget has
+    /// scrolled. Delivered to the whole scrolled subtree, only while a
+    /// caret suggestion list is open anywhere; a widget showing an unclipped
+    /// overlay tied to its position (the `TextField` suggestion list) closes
+    /// it here. Default: nothing.
+    fn on_ancestor_scrolled(&mut self) {}
+
     /// Handle an event. The event's positions are already in **local** Y-up
     /// coordinates. Return [`EventResult::Consumed`] to stop bubbling.
     ///

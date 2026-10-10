@@ -10,6 +10,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Caret suggestions for `TextField` (agg-sharp's `TextSuggestionController`):
+  `TextField::with_text_suggestions(TextSuggestionController::new(provider))`
+  shows a provider's `TextSuggestionList` below the word being typed. Up /
+  Down move the highlight (wrapping), PageUp / PageDown page it, Enter or Tab
+  accept (replacing the list's span as one undo step), Escape closes, a click
+  on a row accepts, the wheel scrolls the rows, Ctrl+Space asks on demand;
+  focus never leaves the field. `with_font`, `with_background_color` and
+  `with_highlight_color` set the list's look (defaults: the field's font,
+  `Visuals::bg_color`, the accent at alpha 128). Offsets are UTF-8 bytes.
+  Also `TextField::replace_range` (one undo step; none for a no-op; skips
+  read-only fields; normalizes line endings and applies the char filter) and
+  `TextField::line_bounds_at`, and `Widget::on_ancestor_scrolled` (default
+  no-op), which a `ScrollView` delivers to its subtree when it scrolls while a
+  suggestion list is open, so the list closes instead of floating.
+
 - `clipboard::has_image()`: whether the clipboard holds a picture, without
   copying or decoding it (for a menu that enables "Paste picture" as it opens).
   macOS asks the pasteboard for TIFF and Windows for "PNG" / `CF_DIBV5`

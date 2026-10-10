@@ -227,6 +227,19 @@ impl Widget for ScrollView {
             ));
         }
 
+        // A changed offset is a scroll: tell the subtree, so an unclipped
+        // overlay tied to a child's position (a caret suggestion list) can
+        // close rather than float over unrelated content.
+        let offsets = (self.v.offset, self.h.offset);
+        if self.laid_out_offsets.is_some_and(|o| o != offsets)
+            && crate::widgets::text_suggestion::any_list_open()
+        {
+            if let Some(child) = self.children.first_mut() {
+                notify_ancestor_scrolled(child.as_mut());
+            }
+        }
+        self.laid_out_offsets = Some(offsets);
+
         available
     }
 
@@ -590,5 +603,13 @@ impl ScrollView {
             ctx.rect(x + i as f64 * strip_w, y, strip_w + 0.5, h);
             ctx.fill();
         }
+    }
+}
+
+/// Deliver `Widget::on_ancestor_scrolled` to `widget` and its whole subtree.
+fn notify_ancestor_scrolled(widget: &mut dyn Widget) {
+    widget.on_ancestor_scrolled();
+    for child in widget.children_mut().iter_mut() {
+        notify_ancestor_scrolled(child.as_mut());
     }
 }
