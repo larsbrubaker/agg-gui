@@ -14,6 +14,10 @@
 //! from the model each time it is about to be shown, so recent-file lists and
 //! gates answer for the moment they are looked at.
 //!
+//! An item can also carry its own shortcut ([`MenuItemModel::shortcut`], the
+//! in-window menu's [`MenuShortcut`]), shown in the native menu and fired by
+//! its Command chord; those decisions live in `shortcuts.rs`.
+//!
 //! Picked items do not run inline. AppKit sends an item's action from inside
 //! its menu-tracking loop, so the action is queued here and run by the shell
 //! loop's next `about_to_wait` ([`run_pending_activations`]), on the UI thread,
@@ -21,9 +25,16 @@
 
 #[cfg(target_os = "macos")]
 mod macos;
+mod shortcuts;
+
+pub use shortcuts::{
+    chord_fires, key_equivalent, match_shortcut, shortcut_key_equivalent, KeyEquivalent,
+};
 
 use std::cell::RefCell;
 use std::rc::Rc;
+
+pub use agg_gui::widgets::menu::{MenuShortcut, ShortcutKey};
 
 /// What a native menu reads to give an item its conventional shortcut and
 /// position (agg-sharp `MenuItemRole`).
@@ -59,6 +70,11 @@ pub struct MenuItemModel {
     /// show it (agg-sharp `MacMenuBar` sets no tooltips).
     pub tool_tip_text: Option<String>,
     pub role: MenuItemRole,
+    /// The item's own shortcut, shown in the native menu (overriding its
+    /// role's chord) and fired by the key chord when it includes Command
+    /// (see `shortcuts.rs`). Like role chords, shown and fired only for
+    /// items directly in a top-level menu.
+    pub shortcut: Option<MenuShortcut>,
     pub is_separator: bool,
     /// Asked each time a menu is built; `None` means visible. A hidden item is
     /// left out of the menu, not added and hidden.
@@ -81,6 +97,12 @@ impl MenuItemModel {
             text: text.into(),
             ..Self::default()
         }
+    }
+
+    /// This item with `shortcut` (see [`Self::shortcut`]).
+    pub fn with_shortcut(mut self, shortcut: MenuShortcut) -> Self {
+        self.shortcut = Some(shortcut);
+        self
     }
 
     /// A divider.
@@ -200,7 +222,9 @@ pub fn match_key_equivalent(
     for menu in top_level_menus(&model.menus) {
         for item in children_of(&menu) {
             // A separator has no shortcut and a submenu is opened, never run.
-            if item.is_separator || item.sub_menu_items.is_some() {
+            // An item with its own shortcut no longer shows its role's chord
+            // (`match_shortcut` answers for it).
+            if item.is_separator || item.sub_menu_items.is_some() || item.shortcut.is_some() {
                 continue;
             }
             let chord = key_equivalent_for(item.role);

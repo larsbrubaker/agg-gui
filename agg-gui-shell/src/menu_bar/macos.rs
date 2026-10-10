@@ -34,6 +34,14 @@
 //! handling. Every other chord, and every chord whose item is hidden or
 //! disabled, falls through to the window as before.
 //!
+//! **Custom shortcuts.** An item's own [`MenuItemModel::shortcut`] is shown as
+//! its key equivalent and modifier mask (`super::shortcuts`). The items built
+//! with one directly in a top-level menu are remembered per menu
+//! (`State::shown_shortcuts`, refreshed each time that menu is rebuilt), and
+//! `menuHasKeyEquivalent:` asks [`super::match_shortcut`] among them once no
+//! role claims the chord, so what fires is what the menu last showed and
+//! matching still never runs a provider.
+//!
 //! Tooltips are not set on native items, as in agg-sharp `MacMenuBar`.
 
 use std::cell::RefCell;
@@ -50,8 +58,8 @@ use objc2_app_kit::{
 use objc2_foundation::{NSProcessInfo, NSString};
 
 use super::{
-    children_of, is_enabled, key_equivalent_for, match_key_equivalent, modifier_flags,
-    queue_activation, top_level_menus, MenuBarModel, MenuItemModel, MenuItemRole,
+    children_of, is_enabled, key_equivalent, match_key_equivalent, match_shortcut, modifier_flags,
+    queue_activation, top_level_menus, KeyEquivalent, MenuBarModel, MenuItemModel, MenuItemRole,
 };
 
 /// What the controller needs to answer AppKit: the models behind the built
@@ -70,6 +78,10 @@ struct State {
     application_title: String,
     installed: Option<MenuBarModel>,
     pending_key_equivalent: Option<MenuItemModel>,
+    /// Items with their own shortcut built directly into a top-level menu,
+    /// with that menu's address (the menu is retained in `owners`), in
+    /// build order.
+    shown_shortcuts: Vec<(usize, MenuItemModel)>,
 }
 
 thread_local! {
@@ -192,7 +204,16 @@ define_class!(
                     .as_ref()
                     .and_then(|state| state.installed.clone())
             });
-            let matched = match_key_equivalent(installed.as_ref(), &characters, flags);
+            let matched =
+                match_key_equivalent(installed.as_ref(), &characters, flags).or_else(|| {
+                    // Same rule: cloned out, so the gates run unborrowed.
+                    let shown: Vec<MenuItemModel> = STATE.with(|state| {
+                        state.borrow().as_ref().map_or_else(Vec::new, |state| {
+                            state.shown_shortcuts.iter().map(|(_, i)| i.clone()).collect()
+                        })
+                    });
+                    match_shortcut(&shown, &characters, flags)
+                });
             let Some(matched) = matched else {
                 return Bool::NO;
             };
@@ -293,9 +314,11 @@ fn apply(mtm: MainThreadMarker, model: MenuBarModel) {
             application_title: String::new(),
             installed: None,
             pending_key_equivalent: None,
+            shown_shortcuts: Vec::new(),
         });
         state.items.clear();
         state.owners.clear();
+        state.shown_shortcuts.clear();
         state.application_menu = None;
         state.pending_key_equivalent = None;
         state.installed = Some(model.clone());
@@ -457,13 +480,21 @@ fn populate_menu(mtm: MainThreadMarker, menu: &NSMenu, container: &MenuItemModel
             menu_item.setSubmenu(Some(&sub_menu));
             menu_item
         } else {
-            let chord = if top {
-                key_equivalent_for(child.role)
-            } else {
-                ""
-            };
-            let menu_item =
-                create_menu_item(mtm, &child.text, Some(sel!(menuItemSelected:)), chord);
+            let menu_item = create_menu_item(mtm, &child.text, Some(sel!(menuItemSelected:)), "");
+            if top {
+                if let Some(chord) = key_equivalent(&child) {
+                    set_key_equivalent(&menu_item, &chord);
+                }
+                if child.shortcut.is_some() {
+                    STATE.with(|state| {
+                        if let Some(state) = state.borrow_mut().as_mut() {
+                            state
+                                .shown_shortcuts
+                                .push((menu_address(menu), child.clone()));
+                        }
+                    });
+                }
+            }
             // SAFETY: the target must respond to the item's action with an
             // action method's signature: the controller implements
             // `menuItemSelected:` as `-(void)menuItemSelected:(id)sender`, and
@@ -516,9 +547,33 @@ fn add_standard_hide_group(mtm: MainThreadMarker, menu: &NSMenu) {
     menu.addItem(&NSMenuItem::separatorItem(mtm));
 }
 
-/// Drops the models of everything currently inside `menu`, submenus included.
-/// The menu itself stays: it is being refilled.
+/// The identity `State::shown_shortcuts` keys a menu by.
+fn menu_address(menu: &NSMenu) -> usize {
+    menu as *const NSMenu as usize
+}
+
+/// The `NSEventModifierFlags` for a [`KeyEquivalent`]'s [`modifier_flags`]
+/// bits (the same values; only the four chord modifiers are kept).
+fn modifier_mask(flags: u64) -> NSEventModifierFlags {
+    use modifier_flags::{COMMAND, CONTROL, OPTION, SHIFT};
+    NSEventModifierFlags((flags & (COMMAND | SHIFT | CONTROL | OPTION)) as usize)
+}
+
+/// Shows `chord` on `item`: its key equivalent and modifier mask.
+fn set_key_equivalent(item: &NSMenuItem, chord: &KeyEquivalent) {
+    item.setKeyEquivalent(&NSString::from_str(&chord.key));
+    item.setKeyEquivalentModifierMask(modifier_mask(chord.modifier_flags));
+}
+
+/// Drops the models of everything currently inside `menu`, submenus included,
+/// and the shortcuts it showed. The menu itself stays: it is being refilled.
 fn forget_contents(menu: &NSMenu) {
+    let address = menu_address(menu);
+    STATE.with(|state| {
+        if let Some(state) = state.borrow_mut().as_mut() {
+            state.shown_shortcuts.retain(|(owner, _)| *owner != address);
+        }
+    });
     for index in 0..menu.numberOfItems() {
         let Some(item) = menu.itemAtIndex(index) else {
             continue;
@@ -539,5 +594,35 @@ fn forget_contents(menu: &NSMenu) {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The model's modifier bits are AppKit's, so a mask converts bit for bit.
+    #[test]
+    fn modifier_flags_are_appkits() {
+        use modifier_flags::{CAPS_LOCK, COMMAND, CONTROL, OPTION, SHIFT};
+        assert_eq!(NSEventModifierFlags::Command.0 as u64, COMMAND);
+        assert_eq!(NSEventModifierFlags::Shift.0 as u64, SHIFT);
+        assert_eq!(NSEventModifierFlags::Option.0 as u64, OPTION);
+        assert_eq!(NSEventModifierFlags::Control.0 as u64, CONTROL);
+        assert_eq!(NSEventModifierFlags::CapsLock.0 as u64, CAPS_LOCK);
+    }
+
+    #[test]
+    fn a_shortcut_mask_keeps_only_chord_modifiers() {
+        use modifier_flags::{CAPS_LOCK, COMMAND, OPTION, SHIFT};
+        assert_eq!(
+            modifier_mask(COMMAND | SHIFT | CAPS_LOCK),
+            NSEventModifierFlags::Command | NSEventModifierFlags::Shift
+        );
+        assert_eq!(
+            modifier_mask(COMMAND | OPTION),
+            NSEventModifierFlags::Command | NSEventModifierFlags::Option
+        );
+        assert_eq!(modifier_mask(0), NSEventModifierFlags(0));
     }
 }
