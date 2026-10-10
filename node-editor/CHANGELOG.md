@@ -10,6 +10,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Hosts can supply a node's right-click menu:
+  `NodeGraphModel::node_context_menu(node) -> Option<Vec<MenuEntry>>`
+  (default `None`, the built-in "Delete" + Add Node menu; an empty list opens
+  no menu) and `on_node_context_action(node, action) -> Option<NodeEditorCommand>`,
+  called with the chosen item's `action` string (which hosts use as the
+  item's automation name, e.g. MatterCAD's `"Delete Node Menu Item"`); the
+  returned command is applied after the model lock is released.
+  `NodeEditor::open_context_menu()` exposes the open `PopupMenu` (editor-local
+  coordinates) so automation can find a row.
+- `NodeGraphModel::can_delete_from_keyboard()` (default `true`): returning
+  `false` leaves Delete / Backspace unconsumed, so the host can send the key
+  elsewhere.
+- `NodeEditor::select_node(id, reveal)` and
+  `NodeEditorCommand::SelectNode { id, reveal }`: make one node the selection
+  and primary selection (MatterCAD's `NodeEditor.SelectNode`), optionally
+  panning so its card is centred when it is not wholly on screen.
+
 - `NodeEditor::with_raise_on_click(false)` keeps hosted cards in model order,
   as MatterCAD's NodeDesigner keeps its node windows: a press on a card
   selects it without raising it, and where two cards overlap the one later in

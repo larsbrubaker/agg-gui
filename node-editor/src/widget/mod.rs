@@ -53,6 +53,8 @@ mod tests_commands;
 #[cfg(test)]
 mod tests_common;
 #[cfg(test)]
+mod tests_context_menu;
+#[cfg(test)]
 mod tests_enum;
 #[cfg(test)]
 mod tests_error_badge;
@@ -234,6 +236,8 @@ pub struct NodeEditor {
     /// where the user clicked (used as the new node's position).
     popup: PopupMenu,
     popup_canvas_pos: [f64; 2],
+    /// The node whose host-supplied menu is open; `None` for built-ins.
+    popup_host_node: Option<NodeId>,
     /// Retained GL FBO state — `paint_subtree_gl_backbuffer` keys its
     /// texture cache off this struct's `id()` and skips re-rasterising
     /// while `dirty` is false.
@@ -325,6 +329,7 @@ impl NodeEditor {
             id: "node-editor",
             popup: PopupMenu::new(popup_items),
             popup_canvas_pos: [0.0, 0.0],
+            popup_host_node: None,
             backbuffer: BackbufferState::new(),
             last_paint_fingerprint: None,
             overlay: None,

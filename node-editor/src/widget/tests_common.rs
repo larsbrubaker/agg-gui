@@ -36,6 +36,14 @@ pub(super) struct Memory {
     /// group (the seam hosts hang one undo step off) rather than as N
     /// separate removals.
     pub remove_groups: Vec<Vec<NodeId>>,
+    /// What `node_context_menu` answers (`None`: the built-in menu).
+    pub context_menu: Option<Vec<agg_gui::MenuEntry>>,
+    /// Every `on_node_context_action` call, in order.
+    pub context_actions: Vec<(NodeId, String)>,
+    /// What `on_node_context_action` returns.
+    pub context_command: Option<NodeEditorCommand>,
+    /// `can_delete_from_keyboard` answers `!block_keyboard_delete`.
+    pub block_keyboard_delete: bool,
 }
 
 impl NodeGraphModel for Memory {
@@ -115,6 +123,16 @@ impl NodeGraphModel for Memory {
     fn on_node_activated(&mut self, node: NodeId) -> bool {
         self.activated.push(node);
         self.activation_handled
+    }
+    fn node_context_menu(&self, _node: NodeId) -> Option<Vec<agg_gui::MenuEntry>> {
+        self.context_menu.clone()
+    }
+    fn on_node_context_action(&mut self, node: NodeId, action: &str) -> Option<NodeEditorCommand> {
+        self.context_actions.push((node, action.to_string()));
+        self.context_command
+    }
+    fn can_delete_from_keyboard(&self) -> bool {
+        !self.block_keyboard_delete
     }
 }
 

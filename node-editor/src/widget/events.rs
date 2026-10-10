@@ -329,7 +329,8 @@ impl NodeEditor {
             MouseButton::Right => {
                 self.popup_canvas_pos = canvas_pos;
                 // Right-click on a node selects it and offers a
-                // node-context menu (Delete + Add Node submenu); on
+                // node-context menu (the host's, or Delete + Add Node
+                // submenu); on
                 // empty canvas, the plain Add-Node menu opens.
                 if let Some(node_id) = self.hit_node(&layouts, canvas_pos) {
                     if !modifiers.shift {
@@ -337,7 +338,11 @@ impl NodeEditor {
                     }
                     self.selected.insert(node_id);
                     self.notify_primary_selection(Some(node_id));
-                    self.rebuild_popup_for_node_context();
+                    if !self.rebuild_popup_for_node_context(node_id) {
+                        // The host's menu for this node is empty.
+                        agg_gui::animation::request_draw();
+                        return EventResult::Consumed;
+                    }
                 } else {
                     self.rebuild_popup_for_empty_canvas();
                 }
@@ -697,8 +702,11 @@ impl NodeEditor {
             Key::Delete | Key::Backspace => {
                 // Backspace is the canonical "delete selection" key on
                 // macOS; Delete on Windows / Linux. Accepting both keeps
-                // the muscle memory consistent across platforms.
-                if self.delete_selection() {
+                // the muscle memory consistent across platforms. The host
+                // may hand the key elsewhere
+                // (`NodeGraphModel::can_delete_from_keyboard`).
+                let allowed = self.model.lock().unwrap().can_delete_from_keyboard();
+                if allowed && self.delete_selection() {
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored

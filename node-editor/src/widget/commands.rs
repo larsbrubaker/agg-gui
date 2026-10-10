@@ -72,6 +72,10 @@ pub enum NodeEditorCommand {
     /// Switch what a left-drag on the canvas does. See
     /// [`InteractionMode`](super::InteractionMode).
     SetInteractionMode(super::InteractionMode),
+    /// Make `id` the only selected node (and the primary selection), as
+    /// MatterCAD's `NodeEditor.SelectNode` does; with `reveal`, also pan
+    /// the view so its card is on screen. See [`NodeEditor::select_node`].
+    SelectNode { id: NodeId, reveal: bool },
 }
 
 /// Clonable command channel between a host's chrome and a
@@ -220,26 +224,84 @@ impl NodeEditor {
             return;
         };
         for command in handle.take() {
-            match command {
-                NodeEditorCommand::DeleteSelection => {
-                    self.delete_selection();
-                }
-                NodeEditorCommand::SelectAll => {
-                    self.select_all();
-                }
-                NodeEditorCommand::FitToContent => {
-                    self.fit_to_content();
-                }
-                NodeEditorCommand::SetView { scale, offset } => {
-                    // A non-finite view is refused (see `set_view`);
-                    // there is nothing useful a queue drain can do about
-                    // it beyond not applying it.
-                    let _ = self.set_view(scale, offset);
-                }
-                NodeEditorCommand::SetInteractionMode(mode) => {
-                    self.set_interaction_mode(mode);
-                }
+            self.apply_command(command);
+        }
+    }
+
+    /// Apply one command now: the queue drain, and the command a host's
+    /// node-menu action returns (`NodeGraphModel::on_node_context_action`).
+    pub(super) fn apply_command(&mut self, command: NodeEditorCommand) {
+        match command {
+            NodeEditorCommand::DeleteSelection => {
+                self.delete_selection();
+            }
+            NodeEditorCommand::SelectAll => {
+                self.select_all();
+            }
+            NodeEditorCommand::FitToContent => {
+                self.fit_to_content();
+            }
+            NodeEditorCommand::SetView { scale, offset } => {
+                // A non-finite view is refused (see `set_view`);
+                // there is nothing useful a queue drain can do about
+                // it beyond not applying it.
+                let _ = self.set_view(scale, offset);
+            }
+            NodeEditorCommand::SetInteractionMode(mode) => {
+                self.set_interaction_mode(mode);
+            }
+            NodeEditorCommand::SelectNode { id, reveal } => {
+                self.select_node(id, reveal);
             }
         }
+    }
+
+    /// Make `id` the only selected node and report it as the primary
+    /// selection (`NodeGraphModel::on_primary_selection_changed`), as
+    /// MatterCAD's `NodeEditor.SelectNode` makes it the graph's selected
+    /// node. With `reveal`, pan the view (instantly, zoom unchanged) so the
+    /// node's card is centred when any of it is outside the pane. Returns
+    /// `false` (and does nothing) when the model has no such node.
+    pub fn select_node(&mut self, id: NodeId, reveal: bool) -> bool {
+        let layouts = self.snapshot_layouts();
+        let Some(layout) = layouts.iter().find(|l| l.node_id == id) else {
+            return false;
+        };
+        let already = self.selected.len() == 1 && self.selected.contains(&id);
+        if !already {
+            self.selected.clear();
+            self.selected.insert(id);
+        }
+        if self.model.lock().unwrap().primary_selection() != Some(id) {
+            self.notify_primary_selection(Some(id));
+        }
+        if reveal {
+            self.reveal_layout(layout.top_left, layout.size);
+        }
+        self.backbuffer.invalidate();
+        agg_gui::animation::request_draw();
+        true
+    }
+
+    /// Pan so the card at canvas `top_left` (Y up, its top edge) of `size`
+    /// sits centred in the pane, unless it is already wholly visible.
+    fn reveal_layout(&mut self, top_left: [f64; 2], size: [f64; 2]) {
+        let (w, h) = (self.bounds.width, self.bounds.height);
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let s = self.canvas_scale;
+        let o = self.canvas_offset;
+        // Editor-local = canvas * scale + offset.
+        let x0 = top_left[0] * s + o[0];
+        let x1 = (top_left[0] + size[0]) * s + o[0];
+        let y1 = top_left[1] * s + o[1];
+        let y0 = (top_left[1] - size[1]) * s + o[1];
+        if x0 >= 0.0 && y0 >= 0.0 && x1 <= w && y1 <= h {
+            return;
+        }
+        let cx = top_left[0] + size[0] * 0.5;
+        let cy = top_left[1] - size[1] * 0.5;
+        let _ = self.set_view(s, [w * 0.5 - cx * s, h * 0.5 - cy * s]);
     }
 }

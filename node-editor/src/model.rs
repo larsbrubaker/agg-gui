@@ -22,7 +22,9 @@
 //! and is displayed but not directly editable in the canvas — hosts
 //! surface richer editors elsewhere (typically an inspector pane).
 
-use agg_gui::Color;
+use agg_gui::{Color, MenuEntry};
+
+use crate::widget::NodeEditorCommand;
 
 /// Opaque node identifier — host-owned. The widget never inspects the
 /// numeric value, only compares it for equality and uses it to fetch
@@ -451,6 +453,47 @@ pub trait NodeGraphModel {
     /// model `Arc` — the mutex is non-reentrant and would deadlock.
     fn on_node_activated(&mut self, _node: NodeId) -> bool {
         false
+    }
+
+    // ── Context menu and keyboard ───────────────────────────────────────
+
+    /// The right-click menu of `node`. `None` — the default — keeps the
+    /// editor's built-in menu ("Delete", then the Add Node submenus).
+    /// `Some(entries)` replaces it; an empty list opens no menu at all
+    /// (the right-click still selects the node). Each item's `action`
+    /// string is handed back to [`Self::on_node_context_action`]; hosts
+    /// whose automation finds menu rows by name (MatterCAD's
+    /// `"Delete Node Menu Item"`) use that name as the action. The
+    /// right-clicked node is selected before this is asked.
+    ///
+    /// Called with the model locked: don't re-lock the same model `Arc`.
+    fn node_context_menu(&self, _node: NodeId) -> Option<Vec<MenuEntry>> {
+        None
+    }
+
+    /// The user chose the item with `action` from the menu
+    /// [`Self::node_context_menu`] supplied for `node`. Return a command
+    /// for the editor to apply once the model lock is released — e.g.
+    /// [`NodeEditorCommand::DeleteSelection`] for a "Delete Node" item
+    /// (the right-clicked node is selected), so the deletion takes the
+    /// editor's own path — or `None` when the host did all the work.
+    ///
+    /// Called with the model locked: don't re-lock the same model `Arc`.
+    fn on_node_context_action(
+        &mut self,
+        _node: NodeId,
+        _action: &str,
+    ) -> Option<NodeEditorCommand> {
+        None
+    }
+
+    /// Whether the editor's own Delete / Backspace handling may delete the
+    /// selected nodes right now. Default `true`. A host returns `false`
+    /// when the key belongs elsewhere — MatterCAD's editor loses focus
+    /// when the user's last press was outside it, and Delete then goes to
+    /// the design — and the editor leaves the key unconsumed.
+    fn can_delete_from_keyboard(&self) -> bool {
+        true
     }
 
     // ── Hosted cards (see `NodeEditor::with_body_factory`) ──────────────
