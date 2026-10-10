@@ -59,6 +59,11 @@ pub fn get_image() -> Option<ClipboardImage> {
     IMAGE_BUFFER.with(|b| b.borrow().clone())
 }
 
+/// Whether the latest paste left a picture, without copying it.
+pub fn has_image() -> bool {
+    IMAGE_BUFFER.with(|b| b.borrow().is_some())
+}
+
 /// Overwrite the clipboard buffer with `text` (dropping any HTML and
 /// picture).
 pub fn set(text: &str) {

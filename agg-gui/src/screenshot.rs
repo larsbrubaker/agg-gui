@@ -198,7 +198,7 @@ pub fn download_rgba_as_png(
     download_png(filename, &png)
 }
 
-/// Copy a top-down RGBA8 screenshot to the system clipboard.
+/// Copy a top-down RGBA8 screenshot to the clipboard ([`crate::clipboard`]).
 pub fn copy_rgba_to_clipboard(
     rgba: &[u8],
     width: u32,
@@ -260,21 +260,22 @@ fn unique_download_path(dir: &std::path::Path, filename: &str) -> std::path::Pat
     unreachable!("unbounded integer iterator should always produce a path")
 }
 
+/// Goes through [`crate::clipboard`], so it lands on the system clipboard only
+/// once the app has called `use_system_clipboard` (and on a simulated one in
+/// tests).
 #[cfg(all(not(target_arch = "wasm32"), feature = "clipboard"))]
 fn copy_rgba_to_clipboard_impl(
     rgba: &[u8],
     width: u32,
     height: u32,
 ) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
-    let image = arboard::ImageData {
-        width: width as usize,
-        height: height as usize,
-        bytes: std::borrow::Cow::Borrowed(rgba),
-    };
-    arboard::Clipboard::new()
-        .and_then(|mut clipboard| clipboard.set_image(image))
-        .map_err(|e| ScreenshotExportError::Clipboard(e.to_string()))?;
-    Ok(ScreenshotExportOutcome::Started)
+    if crate::clipboard::set_image_rgba(rgba, width, height) {
+        Ok(ScreenshotExportOutcome::Started)
+    } else {
+        Err(ScreenshotExportError::Clipboard(
+            "the clipboard did not accept the picture".to_string(),
+        ))
+    }
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "clipboard")))]

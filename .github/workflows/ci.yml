@@ -32,6 +32,12 @@ jobs:
       - name: Run tests
         run: cargo test -p agg-gui
 
+      # The `clipboard` feature's arboard backend (the X11 / Wayland path
+      # here) is otherwise never compiled: the tests above build agg-gui
+      # without it.
+      - name: Check clipboard feature
+        run: cargo check -p agg-gui --features clipboard
+
       # The wgpu renderer and the shells on top of it. The headless GPU
       # read-back tests in these crates skip themselves when no adapter is
       # available, which is the case on a stock runner, so this covers the
@@ -45,6 +51,33 @@ jobs:
 
       - name: Run wgpu renderer + shell tests
         run: cargo test -p agg-gui-wgpu -p agg-gui-shell -p demo-wgpu
+
+  # The clipboard feature's per-platform code (`clipboard::has_image` asks the
+  # Windows and macOS clipboards for a picture format directly). A check, not
+  # a test run, to keep these runners cheap.
+  check-clipboard:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-clipboard-${{ hashFiles('**/Cargo.toml') }}
+
+      - name: Check clipboard feature
+        run: cargo check -p agg-gui --features clipboard
 
   build-wasm:
     runs-on: ubuntu-latest

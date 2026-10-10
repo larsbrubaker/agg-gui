@@ -36,6 +36,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- `run` switches agg-gui to the system clipboard at startup
+  (`agg_gui::clipboard::use_system_clipboard`, which agg-gui now requires
+  before it touches the OS clipboard) and closes that connection
+  (`release_system_clipboard`) when `run` returns, on every exit path, so copied text
+  outlives the app under an X11 clipboard manager. Apps on the shell keep the
+  system clipboard with no change.
+
 - `Frame::needs_layout` is also `true` while a widget's
   `agg_gui::animation::request_layout()` is pending, so a request made during
   layout gets the next frame laid out even when the size, scale and

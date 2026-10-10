@@ -1,8 +1,16 @@
 //! Clipboard helpers shared by text widgets, rich Markdown copy and picture
 //! paste.
 //!
-//! Native builds use `arboard` when the `clipboard` feature is enabled. WASM
-//! builds use the in-process clipboard (`wasm_clipboard`) that
+//! Native builds with the `clipboard` feature start on an **in-process
+//! clipboard**: copy and paste work inside the program, and the user's real
+//! clipboard is never read or overwritten. A windowed app calls
+//! [`use_system_clipboard`] once at startup to switch to the system clipboard
+//! (`arboard`); `agg-gui-shell`'s `run` does this for every app it hosts. So a
+//! test binary that links the feature (often only through Cargo feature
+//! unification) can copy freely without touching the developer's clipboard.
+//! Without the feature there is no native clipboard at all.
+//!
+//! WASM builds use the in-process clipboard (`wasm_clipboard`) that
 //! `web_adapter::install_keyboard_listeners` bridges to the browser's
 //! `copy` / `cut` / `paste` events; a pasted picture arrives through the
 //! `paste` event (`web_paste`), so in the browser [`get_image_rgba`] answers
@@ -10,14 +18,16 @@
 //!
 //! [`simulate`] swaps in an in-process clipboard for the calling thread (C#
 //! agg-sharp's `Clipboard.SetSystemClipboard(new SimulatedClipboard())`), so
-//! a test can copy and paste text and pictures without touching the user's
-//! real clipboard.
+//! a test can copy and paste text and pictures in isolation; it takes
+//! precedence over both the in-process and the system clipboard.
+//!
+//! `router.rs` decides between the in-process and the system clipboard;
+//! `backend.rs` holds the per-build instance it runs on.
 
-#[cfg(all(feature = "clipboard", not(test)))]
-use std::borrow::Cow;
-
-#[cfg(all(feature = "clipboard", not(test)))]
-use arboard::Clipboard;
+mod backend;
+// The router only exists where there is a native clipboard to route.
+#[cfg(all(not(target_arch = "wasm32"), any(feature = "clipboard", test)))]
+mod router;
 
 /// A picture on the clipboard: RGBA8 pixels, rows top to bottom, alpha not
 /// premultiplied (what `arboard` and the browser's `getImageData` both hand
@@ -87,12 +97,6 @@ impl Contents {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-thread_local! {
-    /// The clipboard unit tests see in place of the system one.
-    static TEST_CONTENTS: std::cell::RefCell<Contents> = std::cell::RefCell::new(Contents::default());
-}
-
 thread_local! {
     /// The calling thread's simulated clipboard while one is installed
     /// (`None` when none is).
@@ -121,32 +125,43 @@ pub fn simulate() -> SimulatedClipboard {
     SimulatedClipboard { previous }
 }
 
+/// Use the operating system's clipboard from now on, for the whole process.
+///
+/// Until this is called, a native build's clipboard is an in-process one
+/// (text or a picture, shared by every thread), so programs that are not
+/// interactive apps, test binaries above all, never overwrite the user's
+/// clipboard. A windowed app calls it once at startup; `agg-gui-shell`'s `run`
+/// already does. The system connection is made on first use and then kept for
+/// the life of the process (on X11 the copying process serves its clipboard,
+/// so it must stay connected); when it can't be made, the in-process clipboard
+/// answers and the next call tries again. A [`simulate`]d clipboard still takes
+/// precedence.
+///
+/// The switch is sticky: nothing switches back, for the rest of the process.
+/// A test that calls it (or that runs `agg_gui_shell::run`) puts every later
+/// test in the same test binary on the OS clipboard too, unless those tests
+/// [`simulate`]. Does nothing without the `clipboard` feature (there is no
+/// native clipboard then) or in the browser (the web shell bridges the page's
+/// clipboard events already).
+pub fn use_system_clipboard() {
+    backend::use_system();
+}
+
+/// Close the system clipboard connection [`use_system_clipboard`] keeps.
+/// Call it as the app shuts down: on X11, closing the last connection hands
+/// the copied contents to the desktop's clipboard manager, so they outlive the
+/// app (this can take up to about 100 ms). A later clipboard call reconnects.
+/// `agg-gui-shell`'s `run` calls it when its event loop ends.
+pub fn release_system_clipboard() {
+    backend::release_system();
+}
+
 /// Read plain text from the clipboard.
 pub fn get_text() -> Option<String> {
     if let Some(text) = SIMULATED.with(|slot| slot.borrow().as_ref().map(|c| c.text.clone())) {
         return text;
     }
-    get_text_impl()
-}
-
-#[cfg(all(feature = "clipboard", not(test)))]
-fn get_text_impl() -> Option<String> {
-    Clipboard::new().ok()?.get_text().ok()
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-fn get_text_impl() -> Option<String> {
-    TEST_CONTENTS.with(|contents| contents.borrow().text.clone())
-}
-
-#[cfg(all(not(feature = "clipboard"), not(test), not(target_arch = "wasm32")))]
-fn get_text_impl() -> Option<String> {
-    None
-}
-
-#[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn get_text_impl() -> Option<String> {
-    crate::wasm_clipboard::get()
+    backend::get_text()
 }
 
 /// Write plain text to the clipboard.
@@ -154,7 +169,7 @@ pub fn set_text(text: &str) {
     if set_simulated(text) {
         return;
     }
-    set_text_impl(text);
+    backend::set_text(text);
 }
 
 /// Write `text` to the simulated clipboard when one is installed.
@@ -168,33 +183,13 @@ fn set_simulated(text: &str) -> bool {
     })
 }
 
-#[cfg(all(feature = "clipboard", not(test)))]
-fn set_text_impl(text: &str) {
-    if let Ok(mut cb) = Clipboard::new() {
-        let _ = cb.set_text(text.to_string());
-    }
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-fn set_text_impl(text: &str) {
-    TEST_CONTENTS.with(|contents| contents.borrow_mut().put_text(text));
-}
-
-#[cfg(all(not(feature = "clipboard"), not(test), not(target_arch = "wasm32")))]
-fn set_text_impl(_: &str) {}
-
-#[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn set_text_impl(text: &str) {
-    crate::wasm_clipboard::set(text);
-}
-
 /// Write HTML plus a plain-text fallback to the clipboard.
 pub fn set_rich_text(plain_text: &str, html_text: &str) {
     if set_simulated(plain_text) {
         return;
     }
     let html = html_fragment_for_clipboard(html_text);
-    set_rich_text_impl(plain_text, &html);
+    backend::set_rich_text(plain_text, &html);
 }
 
 /// Mark the selected HTML fragment explicitly for rich-text paste targets.
@@ -209,90 +204,32 @@ pub fn html_fragment_for_clipboard(html_text: &str) -> String {
     }
 }
 
-#[cfg(all(feature = "clipboard", not(test)))]
-fn set_rich_text_impl(plain_text: &str, html_text: &str) {
-    if let Ok(mut cb) = Clipboard::new() {
-        if cb
-            .set_html(Cow::Borrowed(html_text), Some(Cow::Borrowed(plain_text)))
-            .is_ok()
-        {
-            return;
-        }
-    }
-    set_text(plain_text);
-}
-
-#[cfg(all(any(not(feature = "clipboard"), test), not(target_arch = "wasm32")))]
-fn set_rich_text_impl(plain_text: &str, _: &str) {
-    set_text(plain_text);
-}
-
-#[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn set_rich_text_impl(plain_text: &str, html_text: &str) {
-    crate::wasm_clipboard::set_rich(plain_text, html_text);
-}
-
 /// Try to write an RGBA image to the clipboard: `width * height * 4` bytes
 /// of RGBA8, top row first. `false` when the clipboard can't take it (a
 /// malformed buffer, no system clipboard, or the browser, which only
 /// receives pictures from a paste).
 pub fn set_image_rgba(data: &[u8], width: u32, height: u32) -> bool {
-    if let Some(stored) = SIMULATED.with(|slot| {
-        slot.borrow_mut().as_mut().map(|simulated| {
-            match ClipboardImage::new(width, height, data.to_vec()) {
-                Some(image) => {
-                    simulated.put_image(image);
-                    true
-                }
-                None => false,
-            }
-        })
-    }) {
-        return stored;
-    }
-    set_image_rgba_impl(data, width, height)
-}
-
-#[cfg(all(feature = "clipboard", not(test)))]
-fn set_image_rgba_impl(data: &[u8], width: u32, height: u32) -> bool {
-    use arboard::ImageData;
-
-    let Ok(mut cb) = Clipboard::new() else {
-        return false;
-    };
-    cb.set_image(ImageData {
-        width: width as usize,
-        height: height as usize,
-        bytes: Cow::Borrowed(data),
-    })
-    .is_ok()
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-fn set_image_rgba_impl(data: &[u8], width: u32, height: u32) -> bool {
     let Some(image) = ClipboardImage::new(width, height, data.to_vec()) else {
         return false;
     };
-    TEST_CONTENTS.with(|contents| contents.borrow_mut().put_image(image));
-    true
-}
-
-#[cfg(all(not(feature = "clipboard"), not(test), not(target_arch = "wasm32")))]
-fn set_image_rgba_impl(_: &[u8], _: u32, _: u32) -> bool {
-    false
-}
-
-/// The browser only receives pictures from a paste; writing one to the
-/// system clipboard would need the asynchronous `ClipboardItem` API.
-#[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn set_image_rgba_impl(_: &[u8], _: u32, _: u32) -> bool {
-    false
+    let image = match SIMULATED.with(|slot| match slot.borrow_mut().as_mut() {
+        Some(simulated) => {
+            simulated.put_image(image);
+            None
+        }
+        None => Some(image),
+    }) {
+        Some(image) => image,
+        None => return true,
+    };
+    backend::set_image(image)
 }
 
 /// Read the picture on the clipboard, `None` when there is none (or it can't
 /// be read). Natively this is the system clipboard's picture (`arboard`, with
-/// the `clipboard` feature); in the browser it is the picture of the latest
-/// `paste` event, which arrives just before that paste's synthesized `Ctrl+V`.
+/// the `clipboard` feature, after [`use_system_clipboard`]); in the browser it
+/// is the picture of the latest `paste` event, which arrives just before that
+/// paste's synthesized `Ctrl+V`.
 ///
 /// A browser paste can carry text and a picture together (a picture copied
 /// from a web page brings its markup as text): both are then readable, through
@@ -303,39 +240,29 @@ pub fn get_image_rgba() -> Option<ClipboardImage> {
     if let Some(image) = SIMULATED.with(|slot| slot.borrow().as_ref().map(|c| c.image.clone())) {
         return image;
     }
-    get_image_rgba_impl()
+    backend::get_image()
 }
 
-#[cfg(all(feature = "clipboard", not(test)))]
-fn get_image_rgba_impl() -> Option<ClipboardImage> {
-    let image = Clipboard::new().ok()?.get_image().ok()?;
-    ClipboardImage::new(
-        u32::try_from(image.width).ok()?,
-        u32::try_from(image.height).ok()?,
-        image.bytes.into_owned(),
-    )
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-fn get_image_rgba_impl() -> Option<ClipboardImage> {
-    TEST_CONTENTS.with(|contents| contents.borrow().image.clone())
-}
-
-#[cfg(all(not(feature = "clipboard"), not(test), not(target_arch = "wasm32")))]
-fn get_image_rgba_impl() -> Option<ClipboardImage> {
-    None
-}
-
-#[cfg(all(not(feature = "clipboard"), target_arch = "wasm32"))]
-fn get_image_rgba_impl() -> Option<ClipboardImage> {
-    crate::wasm_clipboard::get_image()
+/// Whether the clipboard holds a picture, without handing it out: for a menu
+/// that enables "Paste picture" when it opens, where [`get_image_rgba`] would
+/// copy (natively, decode) a possibly screen-sized image. On macOS and
+/// Windows the system clipboard is asked for a picture format and nothing is
+/// read; on Linux (X11 / Wayland) arboard offers no format query, so the
+/// picture is read and decoded as [`get_image_rgba`] would. The in-process,
+/// simulated and browser clipboards answer from what they hold (in the
+/// browser: the picture of the latest paste).
+pub fn has_image() -> bool {
+    if let Some(has) = SIMULATED.with(|slot| slot.borrow().as_ref().map(|c| c.image.is_some())) {
+        return has;
+    }
+    backend::has_image()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        get_image_rgba, get_text, html_fragment_for_clipboard, set_image_rgba, set_text, simulate,
-        ClipboardImage,
+        get_image_rgba, get_text, has_image, html_fragment_for_clipboard, set_image_rgba, set_text,
+        simulate, ClipboardImage,
     };
 
     const RED_THEN_CLEAR: [u8; 8] = [255, 0, 0, 255, 0, 0, 0, 0];
@@ -400,7 +327,8 @@ mod tests {
 
     #[test]
     fn unsimulated_clipboard_carries_pictures_too() {
-        // Unit tests replace the system clipboard with a per-thread buffer.
+        // Unit tests never opt in to the system clipboard, so this is the
+        // in-process one (per thread in unit tests).
         assert!(set_image_rgba(&RED_THEN_CLEAR, 2, 1));
         assert_eq!(
             get_image_rgba(),
@@ -408,6 +336,35 @@ mod tests {
         );
         set_text("text");
         assert_eq!(get_image_rgba(), None);
+    }
+
+    #[test]
+    fn has_image_answers_without_handing_the_picture_out() {
+        set_text("words");
+        assert!(!has_image());
+        assert!(set_image_rgba(&RED_THEN_CLEAR, 2, 1));
+        assert!(has_image(), "the in-process clipboard holds a picture");
+        {
+            let _clipboard = simulate();
+            assert!(!has_image(), "the simulated clipboard starts empty");
+            assert!(set_image_rgba(&RED_THEN_CLEAR, 2, 1));
+            assert!(has_image());
+            set_text("replaced");
+            assert!(!has_image());
+        }
+        assert!(has_image(), "the in-process picture is still there");
+    }
+
+    #[test]
+    fn simulated_clipboard_takes_precedence_over_the_in_process_one() {
+        set_text("outer");
+        {
+            let _clipboard = simulate();
+            assert_eq!(get_text(), None);
+            set_text("inner");
+            assert_eq!(get_text().as_deref(), Some("inner"));
+        }
+        assert_eq!(get_text().as_deref(), Some("outer"));
     }
 
     #[test]

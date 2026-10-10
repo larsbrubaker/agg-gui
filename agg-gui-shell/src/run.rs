@@ -54,6 +54,10 @@ use crate::ShellError;
 ///    not-yet-configured surface.
 /// 3. Install the agg-gui host waker only after the window and GPU came up,
 ///    and clear it on every exit path (`HostWakerGuard`).
+///
+/// Before anything else, `run` switches agg-gui to the system clipboard
+/// (`agg_gui::clipboard::use_system_clipboard`), and releases that connection
+/// when it returns, on every exit path (`SystemClipboardGuard`).
 pub fn run<H, B>(config: ShellConfig, build: B) -> Result<(), ShellError>
 where
     H: ShellHost + 'static,
@@ -63,6 +67,12 @@ where
     // loop drains: bind it before `build`, so work the app queues while it
     // builds lands there.
     agg_gui::ui_thread::mark_current_thread_as_ui_thread();
+    // A windowed app copies and pastes through the OS clipboard; agg-gui keeps
+    // an in-process one until told otherwise, so test binaries never touch the
+    // user's clipboard. (A no-op unless the app enables agg-gui's `clipboard`
+    // feature.)
+    agg_gui::clipboard::use_system_clipboard();
+    let clipboard_guard = SystemClipboardGuard;
     let event_loop = EventLoop::new().map_err(ShellError::EventLoop)?;
 
     let restored_bounds = config.bounds_store.as_ref().and_then(|s| s.load());
@@ -164,9 +174,12 @@ where
     }
     window.set_visible(true);
 
-    event_loop
+    let run_result = event_loop
         .run(move |event, elwt| shell.handle(event, elwt))
-        .map_err(ShellError::EventLoop)?;
+        .map_err(ShellError::EventLoop);
+    // Released before a relaunch starts the next copy of the app.
+    drop(clipboard_guard);
+    run_result?;
 
     if let Some(e) = error.borrow_mut().take() {
         return Err(e);
@@ -175,6 +188,18 @@ where
         relaunch()?;
     }
     Ok(())
+}
+
+/// Closes the system clipboard connection when `run` ends, on every path (an
+/// init error's early return, a panic, a clean exit): on X11 closing it hands
+/// the copied contents to the desktop's clipboard manager, so what the user
+/// copied outlives the app.
+struct SystemClipboardGuard;
+
+impl Drop for SystemClipboardGuard {
+    fn drop(&mut self) {
+        agg_gui::clipboard::release_system_clipboard();
+    }
 }
 
 /// Start a fresh copy of this executable. Called after the loop has exited and

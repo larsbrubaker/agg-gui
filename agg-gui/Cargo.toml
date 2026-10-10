@@ -41,7 +41,10 @@ base64 = "0.22.1"
 
 [features]
 default        = ["reflect"]
-clipboard      = ["dep:arboard"]
+# clipboard: the native system clipboard through arboard, plus the platform
+# APIs arboard wraps for `clipboard::has_image`'s cheap format check (arboard
+# itself can only answer by decoding the picture).
+clipboard      = ["dep:arboard", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:clipboard-win"]
 # winit-adapter: exposes `agg_gui::winit_adapter` with helpers mapping
 # `winit` types (`MouseButton`, `Modifiers`, `Key`, `CursorIcon`) to the
 # crate's input/cursor types.  Off by default so consumers that don't use
@@ -63,6 +66,18 @@ reflect        = ["dep:bevy_reflect"]
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
 rustls-rustcrypto = "0.0.2-alpha"
+
+# `clipboard::has_image` asks the pasteboard for a picture flavour without
+# reading it; the same crates (and versions) arboard already links.
+# objc2-foundation: MIT; objc2-app-kit: Zlib OR Apache-2.0 OR MIT.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSArray", "NSString"] }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "NSPasteboard"] }
+
+# Same purpose on Windows: `IsClipboardFormatAvailable` through the crate
+# arboard uses. clipboard-win: BSL-1.0.
+[target.'cfg(windows)'.dependencies]
+clipboard-win = { version = "5.3.1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

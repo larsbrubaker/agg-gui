@@ -36,6 +36,9 @@
 //! - Surface-acquire recovery, swap-chain resize coalescing, and rebuilding
 //!   the device after a **device loss** (TDR, driver reset, GPU removal, RDP
 //!   session change) — see [`ShellHost::on_gpu_rebuilt`].
+//! - The system clipboard: `run` calls
+//!   `agg_gui::clipboard::use_system_clipboard` at start-up (agg-gui stays on
+//!   an in-process clipboard until then) and releases the connection on exit.
 //! - Optional deterministic screenshot capture, and fullscreen toggles
 //!   requested through `agg_gui::fullscreen`.
 //! - A native application menu bar built from a [`menu_bar::MenuBarModel`]

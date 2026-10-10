@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `clipboard::has_image()`: whether the clipboard holds a picture, without
+  copying or decoding it (for a menu that enables "Paste picture" as it opens).
+  macOS asks the pasteboard for TIFF and Windows for "PNG" / `CF_DIBV5`
+  (`objc2-app-kit` / `clipboard-win`, the crates arboard already links, now
+  direct optional dependencies of the `clipboard` feature); Linux has no
+  arboard format query, so there it reads the picture. The in-process,
+  simulated and browser clipboards answer from what they hold.
+
 - `Color::to_rgba8` is public: the 8-bit conversion the software renderer
   blends with, so a GPU backend can quantise a colour the same way.
 
@@ -150,6 +158,22 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   bounds (`clamp_rect` itself is unchanged).
 
 ### Changed
+
+- **Native clipboard requires an opt-in.** With the `clipboard` feature, the
+  `clipboard` functions (and `screenshot::copy_rgba_to_clipboard`) now use a
+  process-wide in-process clipboard (text or a picture, holding one clears
+  the other) until the app calls `clipboard::use_system_clipboard()`, so a
+  test binary that links the feature, often only through Cargo feature
+  unification, no longer overwrites the developer's real clipboard.
+  `agg-gui-shell`'s `run` opts in, so shell-based apps need no change; an app
+  with its own event loop calls `use_system_clipboard()` at startup. After the
+  opt-in one `arboard` connection is kept for the life of the process instead
+  of being made and dropped on every call (on X11 that dropped connection
+  stopped serving the copied text, and each drop could block);
+  `clipboard::release_system_clipboard()` closes it at shutdown, handing the
+  contents to the clipboard manager. `clipboard::simulate()` still takes
+  precedence, builds without the feature still have no native clipboard, and
+  the browser keeps its page-event bridge.
 
 - A press outside an open popup menu closes it and goes no further, as native
   Mac and Windows menus behave: the widget under the press sees neither the
