@@ -567,6 +567,43 @@ pub trait NodeGraphModel {
         true
     }
 
+    /// The add menu opened by Shift+A or a right-click on empty canvas at
+    /// `canvas_pos` (the pointer in canvas space). `None` — the default —
+    /// keeps the built-in category submenus of
+    /// [`Self::node_types_by_category`]; `Some(entries)` replaces them, an
+    /// empty list opening nothing. Each item's `action` goes back to
+    /// [`Self::on_add_menu_action`]. A host whose menu is a widget (a
+    /// search box over a list) uses `NodeEditor::with_add_menu` instead,
+    /// which takes precedence.
+    ///
+    /// Called with the model locked: don't re-lock the same model `Arc`.
+    fn add_menu(&self, _canvas_pos: [f64; 2]) -> Option<Vec<MenuEntry>> {
+        None
+    }
+
+    /// The user chose the item with `action` from [`Self::add_menu`]'s
+    /// entries for a menu opened at `canvas_pos`. Return a command for the
+    /// editor to apply once the model lock is released, or `None`.
+    ///
+    /// Called with the model locked: don't re-lock the same model `Arc`.
+    fn on_add_menu_action(
+        &mut self,
+        _action: &str,
+        _canvas_pos: [f64; 2],
+    ) -> Option<NodeEditorCommand> {
+        None
+    }
+
+    /// Escape reached the editor with no menu of its own open (an open add
+    /// or context menu closes first). Return `true` when the host acted on
+    /// it — MatterCAD steps back out of a nested graph — so the key is
+    /// consumed; the default `false` leaves it unconsumed for the window.
+    ///
+    /// Called with the model locked: don't re-lock the same model `Arc`.
+    fn on_escape(&mut self) -> bool {
+        false
+    }
+
     // ── Hosted cards (see `NodeEditor::with_body_factory`) ──────────────
     //
     // Read only when the editor has a body factory; hosts without one can

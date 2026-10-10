@@ -166,8 +166,12 @@ impl NodeEditor {
     /// underneath the drag and then snaps to its target when its 500 ms
     /// are up, which reads as the editor fighting the pointer.
     ///
+    /// It also drops a pending [`Self::request_center_on_draw`]: the user
+    /// has taken the view, and a late centring must not snatch it back.
+    ///
     /// Returns `true` when an animation was actually running.
     pub fn cancel_view_animation(&mut self) -> bool {
+        self.view.center_pending = false;
         self.view_anim.take().is_some()
     }
 
@@ -177,7 +181,8 @@ impl NodeEditor {
         self.view_anim.is_some()
     }
 
-    /// Adopt an exact view. Instant, clamped, and reported to the model's
+    /// Adopt an exact view; `offset` is a pan measured from the
+    /// [`super::ViewAnchor`], as [`Self::pan`] returns it. Instant, clamped, and reported to the model's
     /// pan / zoom hooks so a host mirroring the view sees the new values.
     ///
     /// A non-finite component is **ignored outright** rather than
@@ -191,7 +196,8 @@ impl NodeEditor {
             return false;
         }
         self.view_anim = None;
-        self.apply_view(scale.clamp(ZOOM_MIN, ZOOM_MAX), offset);
+        let raw = self.raw_offset(offset);
+        self.apply_view(scale.clamp(ZOOM_MIN, ZOOM_MAX), raw);
         true
     }
 
@@ -257,12 +263,13 @@ impl NodeEditor {
     /// Write a view straight onto the canvas fields and fire both model
     /// hooks under one lock, so a host recomputing from the pair never
     /// sees a half-updated view (same contract as the wheel handler).
-    fn apply_view(&mut self, scale: f64, offset: [f64; 2]) {
+    pub(super) fn apply_view(&mut self, scale: f64, offset: [f64; 2]) {
         self.canvas_scale = scale;
         self.canvas_offset = offset;
+        let pan = self.reported_pan();
         {
             let mut model = self.model.lock().unwrap();
-            model.on_canvas_pan_changed(offset);
+            model.on_canvas_pan_changed(pan);
             model.on_canvas_zoom_changed(scale);
         }
         self.backbuffer.invalidate();

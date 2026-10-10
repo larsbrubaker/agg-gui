@@ -13,6 +13,7 @@
 //! Hosted cards (node bodies built by the host as real widgets) live in
 //! [`hosted`], [`hosted_card`] and [`hosted_events`].
 
+mod add_menu;
 mod canvas_state;
 mod collapse_snap;
 mod commands;
@@ -34,13 +35,16 @@ mod popup;
 mod presentation;
 mod snap_guides;
 mod value_editor_widget;
+mod view_anchor;
 pub mod view_nav;
 
+pub use add_menu::AddMenuRequest;
 pub use commands::{NodeEditorCommand, NodeEditorHandle};
 pub use hosted::{
     HostedNodeBody, NodeBodyFactory, SocketAnchor, SocketAnchorFn, MIN_HOSTED_CARD_WIDTH,
 };
 pub use hosted_card::HostedCard;
+pub use view_anchor::ViewAnchor;
 pub use view_nav::InteractionMode;
 
 use popup::{build_add_node_popup_items, translate_event_into};
@@ -50,6 +54,8 @@ use view_nav::ViewAnimation;
 mod nodes_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_add_menu;
 #[cfg(test)]
 mod tests_commands;
 #[cfg(test)]
@@ -80,6 +86,8 @@ mod tests_presentation;
 mod tests_socket_visibility;
 #[cfg(test)]
 mod tests_value;
+#[cfg(test)]
+mod tests_view_anchor;
 #[cfg(test)]
 mod tests_view_nav;
 
@@ -242,6 +250,10 @@ pub struct NodeEditor {
     /// Keep a picked-up noodle in the model until the drop (see
     /// [`connect`]); off by default.
     pub(crate) deferred_pickup: bool,
+    /// The add menu's source and gestures (see [`add_menu`]).
+    pub(crate) add_menu: add_menu::AddMenuState,
+    /// View anchor, drop ring and pending centring (see [`view_anchor`]).
+    pub(crate) view: view_anchor::ViewState,
 }
 
 impl NodeEditor {
@@ -283,6 +295,8 @@ impl NodeEditor {
             hosted: hosted::HostedState::default(),
             presentation: presentation::PresentationState::default(),
             deferred_pickup: false,
+            add_menu: add_menu::AddMenuState::default(),
+            view: view_anchor::ViewState::default(),
         }
     }
 
@@ -327,8 +341,9 @@ impl NodeEditor {
         self.palette = palette;
     }
 
+    /// The pan, measured from the [`ViewAnchor`].
     pub fn pan(&self) -> [f64; 2] {
-        self.canvas_offset
+        self.reported_pan()
     }
 
     pub fn scale(&self) -> f64 {
@@ -560,6 +575,7 @@ impl Widget for NodeEditor {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        self.view_resized(available);
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
 
         // Apply host-queued commands (Edit → Delete Selected / Select
@@ -581,6 +597,7 @@ impl Widget for NodeEditor {
         }
 
         self.layout_hosted(available);
+        self.run_pending_center();
 
         // Snapshot once for both the fingerprint AND the (possible)
         // children rebuild — avoids hitting the model twice.
@@ -650,6 +667,7 @@ impl Widget for NodeEditor {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        self.add_menu_preview(event);
         // Overlay (color-picker dialog) consumes events first while it's
         // up — it draws on top and needs to capture clicks before they
         // reach the canvas underneath.  After dispatching, drain the

@@ -232,6 +232,9 @@ impl NodeEditor {
             }
         }
 
+        // The ring of an external drag that will drop here, over it all.
+        self.paint_drop_feedback(ctx);
+
         // Pop the outer clip save.
         ctx.restore();
     }

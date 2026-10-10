@@ -13,6 +13,10 @@ pub(super) enum CanvasState {
     PanningCanvas {
         start_offset: [f64; 2],
         start_local: agg_gui::Point,
+        /// A right-press on empty canvas (`NodeEditor::with_right_drag_pan`):
+        /// released within [`super::add_menu::CLICK_SLOP`] of the press it is
+        /// a click and opens the add menu there; moved further it was a pan.
+        menu_on_click: bool,
     },
     DraggingNode {
         ids: Vec<NodeId>,

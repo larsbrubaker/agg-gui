@@ -1,5 +1,6 @@
 //! Right-click menu construction — the built-in "Add Node" / node-context
-//! menus, or the host's own node menu (`NodeGraphModel::node_context_menu`,
+//! menus (the add menu's sources are chosen in `add_menu`), or the host's
+//! own node menu (`NodeGraphModel::node_context_menu`,
 //! whose chosen items go back through `on_node_context_action`) — and the
 //! event-translate helper used by the editor's floating overlays.
 //!
@@ -78,6 +79,17 @@ impl NodeEditor {
             agg_gui::animation::request_draw();
             return;
         }
+        if self.add_menu.host_popup {
+            // The host's add menu (`NodeGraphModel::add_menu`).
+            let pos = self.popup_canvas_pos;
+            let command = self.model.lock().unwrap().on_add_menu_action(action, pos);
+            if let Some(command) = command {
+                self.apply_command(command);
+            }
+            self.backbuffer.invalidate();
+            agg_gui::animation::request_draw();
+            return;
+        }
         match action {
             "delete" => {
                 // Shares `NodeEditor::delete_selection` with the Delete
@@ -110,9 +122,13 @@ impl NodeEditor {
             let open = !items.is_empty();
             self.popup = PopupMenu::new(items);
             self.popup_host_node = Some(node);
+            self.add_menu.host_popup = false;
+            self.add_menu.in_popup = false;
             return open;
         }
         self.popup_host_node = None;
+        self.add_menu.host_popup = false;
+        self.add_menu.in_popup = false;
         let mut items = vec![
             MenuEntry::Item(MenuItem::action("Delete", "delete")),
             MenuEntry::Separator,
@@ -120,14 +136,6 @@ impl NodeEditor {
         items.extend(build_add_node_popup_items(&self.model));
         self.popup = PopupMenu::new(items);
         true
-    }
-
-    /// Rebuild the popup to show only the Add Node submenu — called
-    /// when right-click lands on empty canvas.
-    pub(super) fn rebuild_popup_for_empty_canvas(&mut self) {
-        let items = build_add_node_popup_items(&self.model);
-        self.popup = PopupMenu::new(items);
-        self.popup_host_node = None;
     }
 
     /// The right-click menu while it is open (editor-local coordinates,

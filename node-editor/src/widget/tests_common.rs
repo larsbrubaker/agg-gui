@@ -53,6 +53,15 @@ pub(super) struct Memory {
     pub moves: Vec<(NoodleView, Option<NoodleView>)>,
     /// `socket_multi_input` answers `true` for every input when set.
     pub multi_input: bool,
+    /// What `add_menu` answers (`None`: the built-in menu).
+    pub add_menu: Option<Vec<agg_gui::MenuEntry>>,
+    /// Every `on_add_menu_action` call, in order.
+    pub add_actions: Vec<(String, [f64; 2])>,
+    /// Calls of `on_escape`, and what it answers.
+    pub escapes: usize,
+    pub escape_handled: bool,
+    /// What `node_types_by_category` answers (the built-in add menu).
+    pub node_types: Vec<(String, Vec<NodeTypeView>)>,
 }
 
 impl NodeGraphModel for Memory {
@@ -63,7 +72,7 @@ impl NodeGraphModel for Memory {
         self.noodles.clone()
     }
     fn node_types_by_category(&self) -> Vec<(String, Vec<NodeTypeView>)> {
-        vec![]
+        self.node_types.clone()
     }
     fn set_node_position(&mut self, id: NodeId, pos: [f64; 2]) {
         if let Some(n) = self.nodes.iter_mut().find(|n| n.id == id) {
@@ -189,6 +198,21 @@ impl NodeGraphModel for Memory {
     }
     fn socket_multi_input(&self, _node: NodeId, _socket: &str) -> bool {
         self.multi_input
+    }
+    fn add_menu(&self, _canvas_pos: [f64; 2]) -> Option<Vec<agg_gui::MenuEntry>> {
+        self.add_menu.clone()
+    }
+    fn on_add_menu_action(
+        &mut self,
+        action: &str,
+        canvas_pos: [f64; 2],
+    ) -> Option<NodeEditorCommand> {
+        self.add_actions.push((action.to_string(), canvas_pos));
+        None
+    }
+    fn on_escape(&mut self) -> bool {
+        self.escapes += 1;
+        self.escape_handled
     }
 }
 

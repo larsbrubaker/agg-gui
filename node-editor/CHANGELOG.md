@@ -10,6 +10,41 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- The add menu opens at the pointer on Shift+A as well as on a right-click
+  on empty canvas, from the first source that answers:
+  `NodeEditor::with_add_menu(|AddMenuRequest| -> Option<Box<dyn Widget>>)`,
+  a host widget (a search box over a list) placed top-left at the pointer
+  and kept inside the editor, handed to the `overlay_sink` or shown over the
+  canvas (a press outside it, Escape or its `close` flag closes it);
+  `NodeGraphModel::add_menu(canvas_pos) -> Option<Vec<MenuEntry>>`, entries
+  shown in the editor's popup with each pick handed to
+  `on_add_menu_action(action, canvas_pos) -> Option<NodeEditorCommand>`;
+  or the built-in category submenus. `open_add_menu(local)`,
+  `is_add_menu_open()` and `close_add_menu()` drive it from outside. An
+  empty add menu no longer opens an empty popup.
+- `NodeEditor::with_right_drag_pan(true)`: a right-drag on empty canvas
+  pans, and a right-click released within 3 px of its press opens the add
+  menu at the release (NodeDesigner). Off by default, keeping the menu on
+  the press.
+- `NodeGraphModel::on_escape() -> bool` (default `false`): Escape with no
+  editor menu open goes to the host, and is consumed when it returns `true`;
+  an open add or context menu closes first.
+- `NodeEditor::screen_to_canvas` / `canvas_to_screen` (editor-local ↔
+  canvas), `app_origin()` and `app_to_canvas` (app-absolute → canvas, for a
+  drag from another panel).
+- `NodeEditor::set_drop_feedback(bool)` / `drop_feedback()`: a 2 px
+  theme-accent ring round the editor while an external drag will drop.
+- `ViewAnchor` and `NodeEditor::with_view_anchor`: `ViewAnchor::Center`
+  measures `pan()`, `set_view` and `on_canvas_pan_changed` from the
+  editor's centre, as NodeDesigner does, and a resize keeps the centre
+  fixed; the default `ViewAnchor::Origin` is the old bottom-left.
+- `NodeEditor::center_nodes_in_view() -> bool`, NodeDesigner's
+  `CenterNodesInView` (fit at most at 100 %, instant; `false` for an empty
+  graph or a panel too short), and `request_center_on_draw()` /
+  `cancel_center_on_draw()` / `is_center_pending()`: centre on the next
+  layout that can, retried while the panel is too short, cancelled when the
+  user pans, zooms or wheels (`cancel_view_animation` drops it too).
+
 - `NodeEditor` implements `Widget::as_any` / `as_any_mut`, so a host holding
   it as a `Box<dyn Widget>` child can downcast it and call
   `open_context_menu()`, `select_node()` and the rest.

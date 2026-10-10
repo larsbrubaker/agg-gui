@@ -14,6 +14,7 @@ use agg_gui::{EventResult, Key, Modifiers, MouseButton, Point};
 use crate::draw::{NodeLayoutInfo, TITLE_HEIGHT};
 use crate::model::{EditorHint, NodeId, PropertyValue};
 
+use super::add_menu::CLICK_SLOP;
 use super::collapse_snap::snap_single_node;
 use super::overlay_editors::scrub_value;
 
@@ -62,6 +63,7 @@ impl NodeEditor {
                         self.interaction = CanvasState::PanningCanvas {
                             start_offset: self.canvas_offset,
                             start_local: pos,
+                            menu_on_click: false,
                         };
                         return EventResult::Consumed;
                     }
@@ -81,6 +83,7 @@ impl NodeEditor {
                     self.interaction = CanvasState::PanningCanvas {
                         start_offset: self.canvas_offset,
                         start_local: pos,
+                        menu_on_click: false,
                     };
                     return EventResult::Consumed;
                 }
@@ -272,6 +275,7 @@ impl NodeEditor {
                 self.interaction = CanvasState::PanningCanvas {
                     start_offset: self.canvas_offset,
                     start_local: pos,
+                    menu_on_click: false,
                 };
                 EventResult::Consumed
             }
@@ -292,8 +296,19 @@ impl NodeEditor {
                         agg_gui::animation::request_draw();
                         return EventResult::Consumed;
                     }
+                } else if self.add_menu.right_drag_pan {
+                    // Pans while it drags; a click opens the add menu on
+                    // release (`on_mouse_up`), as NodeDesigner does.
+                    self.cancel_view_animation();
+                    self.interaction = CanvasState::PanningCanvas {
+                        start_offset: self.canvas_offset,
+                        start_local: pos,
+                        menu_on_click: true,
+                    };
+                    return EventResult::Consumed;
                 } else {
-                    self.rebuild_popup_for_empty_canvas();
+                    self.open_add_menu(pos);
+                    return EventResult::Consumed;
                 }
                 self.popup.open_at(pos);
                 // Opening the popup must invalidate or the menu will
@@ -342,6 +357,7 @@ impl NodeEditor {
             CanvasState::PanningCanvas {
                 start_offset,
                 start_local,
+                ..
             } => {
                 self.canvas_offset = [
                     start_offset[0] + (pos.x - start_local.x),
@@ -353,7 +369,7 @@ impl NodeEditor {
                 self.model
                     .lock()
                     .unwrap()
-                    .on_canvas_pan_changed(self.canvas_offset);
+                    .on_canvas_pan_changed(self.reported_pan());
                 EventResult::Consumed
             }
             CanvasState::ZoomingCanvas {
@@ -374,7 +390,7 @@ impl NodeEditor {
                 self.canvas_offset = [press.x - anchor[0] * scale, press.y - anchor[1] * scale];
                 {
                     let mut model = self.model.lock().unwrap();
-                    model.on_canvas_pan_changed(self.canvas_offset);
+                    model.on_canvas_pan_changed(self.reported_pan());
                     model.on_canvas_zoom_changed(scale);
                 }
                 self.backbuffer.invalidate();
@@ -504,6 +520,19 @@ impl NodeEditor {
                 agg_gui::animation::request_draw();
                 EventResult::Consumed
             }
+            (
+                MouseButton::Right,
+                CanvasState::PanningCanvas {
+                    start_local,
+                    menu_on_click: true,
+                    ..
+                },
+            ) => {
+                if (pos.x - start_local.x).hypot(pos.y - start_local.y) < CLICK_SLOP {
+                    self.open_add_menu(pos);
+                }
+                EventResult::Consumed
+            }
             (_, CanvasState::PanningCanvas { .. }) | (_, CanvasState::ZoomingCanvas { .. }) => {
                 EventResult::Consumed
             }
@@ -579,14 +608,17 @@ impl NodeEditor {
             // fire — under one lock, so a host that recomputes from the
             // pair never sees a half-updated view.
             let mut model = self.model.lock().unwrap();
-            model.on_canvas_pan_changed(self.canvas_offset);
+            model.on_canvas_pan_changed(self.reported_pan());
             model.on_canvas_zoom_changed(new_scale);
         }
         agg_gui::animation::request_draw();
         EventResult::Consumed
     }
 
-    pub(super) fn on_key_down(&mut self, key: &Key, _mods: Modifiers) -> EventResult {
+    pub(super) fn on_key_down(&mut self, key: &Key, mods: Modifiers) -> EventResult {
+        if let Some(result) = self.add_menu_key_down(key, mods) {
+            return result;
+        }
         match key {
             Key::Char(' ') => {
                 self.space_held = true;
