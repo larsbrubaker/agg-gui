@@ -82,6 +82,7 @@ mod layout_lcd;
 mod layout_request;
 mod lcd_backbuffer_collapse;
 mod logical_root_transform;
+mod nested_child_transform;
 mod stale_path_removed_widget;
 // Loopback HTTP server: native only.
 #[cfg(not(target_arch = "wasm32"))]

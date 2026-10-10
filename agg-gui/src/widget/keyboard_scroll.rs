@@ -440,10 +440,8 @@ pub(crate) fn focused_widget_screen_bounds(root: &dyn Widget, path: &[usize]) ->
         // Descend from `widget` into child `idx`: shift into the widget's own
         // frame, then apply its child transform (identity for most widgets).
         let b = widget.bounds();
-        to_screen.translate(b.x, b.y);
-        if let Some(ct) = widget.child_transform() {
-            to_screen.premultiply(&ct);
-        }
+        let ct = widget.child_transform().unwrap_or_default();
+        to_screen = crate::widget::tree_inspector::compose_child_to_screen(&to_screen, b, &ct);
         let children = widget.children();
         if idx >= children.len() {
             return None;
@@ -625,6 +623,32 @@ mod tests {
                 && (r.height - 8.0).abs() < 1e-6,
             "focused bounds must reflect the parent's child_transform; got {:?}",
             r
+        );
+    }
+
+    /// A focused leaf inside a card on a zoomed canvas: the card's offset is in
+    /// the canvas's scaled space, so it is scaled too.
+    #[test]
+    fn focused_bounds_scale_a_nested_offset() {
+        let leaf = Leaf {
+            bounds: Rect::new(5.0, 30.0, 40.0, 10.0),
+            children: vec![],
+        };
+        let card = Leaf {
+            bounds: Rect::new(200.0, 100.0, 120.0, 80.0),
+            children: vec![Box::new(leaf)],
+        };
+        let parent = ScaleParent {
+            bounds: Rect::new(0.0, 0.0, 800.0, 600.0),
+            children: vec![Box::new(card)],
+            zoom: 0.8,
+            offset: (10.0, 20.0),
+        };
+        // Painted at canvas (205, 130): x = 10 + 205 * 0.8 = 174, y = 20 + 130 * 0.8 = 124.
+        let r = focused_widget_screen_bounds(&parent, &[0, 0]).expect("bounds");
+        assert!(
+            (r.x - 174.0).abs() < 1e-9 && (r.y - 124.0).abs() < 1e-9,
+            "a nested focused widget is placed through the zoom; got {r:?}"
         );
     }
 

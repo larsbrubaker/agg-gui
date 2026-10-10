@@ -93,6 +93,29 @@ fn center_nodes_in_view_ports_nodedesigners_formula() {
     assert!(close(o[1], u[1] * s + 150.0));
 }
 
+/// NodeDesigner's margins are device pixels: on a 2x display the graph keeps
+/// half as many logical points of margin, so the fit matches C# there.
+#[test]
+fn center_nodes_in_view_margins_are_device_pixels() {
+    let (mut editor, _typed) = editor_with(vec![
+        mk_node(1, "a", [0.0, 0.0]),
+        mk_node(2, "b", [600.0, 100.0]),
+    ]);
+    let (min_x, min_y, max_x, max_y) = content_bounds(&editor.snapshot_layouts()).unwrap();
+    agg_gui::set_device_scale(2.0);
+    let centred = editor.center_nodes_in_view();
+    agg_gui::set_device_scale(1.0);
+    assert!(centred);
+    // fit = min((300 - 15 - 20) / bh, (400 - 15) / bw): 30 and 20 device pixels at 2x.
+    let fit = ((300.0 - 15.0 - 20.0) / (max_y - min_y)).min((400.0 - 15.0) / (max_x - min_x));
+    let s = fit.min(1.0);
+    assert!(close(editor.scale(), s));
+    let u = [-(min_x + max_x) / 2.0, -(min_y + max_y) / 2.0 + 10.0 * s];
+    let o = editor.pan();
+    assert!(close(o[0], u[0] * s + 200.0));
+    assert!(close(o[1], u[1] * s + 150.0));
+}
+
 #[test]
 fn center_nodes_in_view_caps_the_zoom_at_100_percent() {
     let (mut editor, _typed) = editor_with(vec![mk_node(1, "a", [0.0, 0.0])]);

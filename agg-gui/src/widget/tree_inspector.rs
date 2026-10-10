@@ -224,9 +224,8 @@ fn find_widget_screen_rect_inner(
     if widget.id() == Some(id) {
         return Some(transform_rect_aabb(parent_to_screen, b));
     }
-    let mut child_to_screen = *parent_to_screen;
-    child_to_screen.translate(b.x, b.y);
-    child_to_screen.premultiply(&widget.inspector_child_transform());
+    let child_to_screen =
+        compose_child_to_screen(parent_to_screen, b, &widget.inspector_child_transform());
     for child in widget.children() {
         if let Some(found) = find_widget_screen_rect_inner(child.as_ref(), id, &child_to_screen) {
             return Some(found);
@@ -273,6 +272,23 @@ pub fn collect_inspector_nodes(
 /// AABB of `rect`'s four corners after passing through `t` — equals
 /// `t(rect)` exactly for translation + uniform scale (no rotation), and
 /// is the right conservative bound otherwise.
+/// The transform from a widget's children's space to the screen: a point in
+/// child space goes through the widget's `child_transform` first, then the
+/// widget's bounds offset (its place in its parent's space), then the
+/// parent's chain. The offset must be applied *before* the parent's chain,
+/// not added to it afterwards: under a scaling ancestor (NodeEditor's zoomed
+/// canvas) the widget's offset is in the ancestor's scaled space too.
+pub(crate) fn compose_child_to_screen(
+    parent_to_screen: &crate::TransAffine,
+    bounds: Rect,
+    child_transform: &crate::TransAffine,
+) -> crate::TransAffine {
+    let mut m = *child_transform;
+    m.translate(bounds.x, bounds.y);
+    m.multiply(parent_to_screen);
+    m
+}
+
 fn transform_rect_aabb(t: &crate::TransAffine, rect: Rect) -> Rect {
     let corners = [
         (rect.x, rect.y),
@@ -418,10 +434,8 @@ fn collect_inspector_nodes_with_path(
     // transform (e.g. NodeEditor's pan/zoom), then translate by the
     // widget's bounds offset (its position in its parent), then through
     // the parent_to_screen chain.
-    let mut child_to_screen = *parent_to_screen;
-    child_to_screen.translate(b.x, b.y);
-    let extra = widget.inspector_child_transform();
-    child_to_screen.premultiply(&extra);
+    let child_to_screen =
+        compose_child_to_screen(parent_to_screen, b, &widget.inspector_child_transform());
 
     let mut child_path: Vec<usize> = Vec::with_capacity(path_prefix.len() + 1);
     child_path.extend_from_slice(path_prefix);

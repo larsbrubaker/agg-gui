@@ -50,9 +50,10 @@ pub(crate) struct ViewState {
     pub last_size: Size,
 }
 
-/// NodeDesigner's `CenterNodesInView` margins, in logical pixels: the
-/// graph keeps `MARGIN` in total across each axis, plus `BOTTOM_PIXELS`
-/// above and below.
+/// NodeDesigner's `CenterNodesInView` margins, in device pixels (its
+/// widgets measure in them): the graph keeps `MARGIN` in total across each
+/// axis, plus `BOTTOM_PIXELS` above and below. Divided by the device scale
+/// for the editor's logical units, so a 2x display fits as NodeDesigner does.
 const MARGIN: f64 = 30.0;
 const BOTTOM_PIXELS: f64 = 20.0;
 
@@ -124,8 +125,10 @@ impl NodeEditor {
         let Some((min_x, min_y, max_x, max_y)) = content_bounds(&self.snapshot_layouts()) else {
             return false;
         };
-        let by_height = (h - MARGIN - BOTTOM_PIXELS * 2.0) / (max_y - min_y);
-        let by_width = (w - MARGIN) / (max_x - min_x);
+        let device = agg_gui::device_scale();
+        let (margin, bottom_pixels) = (MARGIN / device, BOTTOM_PIXELS / device);
+        let by_height = (h - margin - bottom_pixels * 2.0) / (max_y - min_y);
+        let by_width = (w - margin) / (max_x - min_x);
         // C#'s `Math.Min` keeps a NaN where `f64::min` would drop it.
         let fit = if by_height.is_nan() || by_width.is_nan() {
             f64::NAN
@@ -144,7 +147,7 @@ impl NodeEditor {
         // then `local = (canvas + U) * scale + size / 2`.
         let u = [
             -(min_x + max_x) * 0.5,
-            -(min_y + max_y) * 0.5 + BOTTOM_PIXELS * scale,
+            -(min_y + max_y) * 0.5 + bottom_pixels * scale,
         ];
         self.view_anim = None;
         self.apply_view(scale, [u[0] * scale + w * 0.5, u[1] * scale + h * 0.5]);
