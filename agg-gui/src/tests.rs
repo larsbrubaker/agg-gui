@@ -91,6 +91,7 @@ mod container_fit_in_row;
 #[cfg(not(target_arch = "wasm32"))]
 mod markdown_image_visibility;
 mod menu_hidpi_scale;
+mod modal_sheet_resize;
 mod multi_touch_routing;
 mod on_screen_keyboard;
 pub(crate) mod paint_recorder;

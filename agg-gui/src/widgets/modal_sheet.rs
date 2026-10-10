@@ -1,9 +1,11 @@
 //! ModalSheet — a centered modal panel over a dimming scrim, the
 //! SwiftUI-`.sheet` / desktop-dialog presentation.
 //!
-//! Unlike [`Window`](super::window::Window) the sheet is not draggable,
-//! resizable, or collapsible: it is a fixed-size surface centered over
-//! the app, with a translucent scrim blocking interaction with
+//! Unlike [`Window`](super::window::Window) the sheet is not draggable or
+//! collapsible: it is a surface centered over the app, fixed-size unless it
+//! opts in to edge / corner resizing with
+//! [`with_resizable`](ModalSheet::with_resizable) (see `modal_sheet/resize.rs`),
+//! with a translucent scrim blocking interaction with
 //! everything behind it. Place it as a late child of the root
 //! [`Stack`](super::primitives::Stack) so it paints above the app; while
 //! its visibility cell is `true`, `has_active_modal` routes all input to
@@ -46,11 +48,13 @@ use std::rc::Rc;
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::WidgetBase;
 use crate::theme::current_visuals;
 use crate::widget::{activate_action_at, cancel_action_path, default_action_path, Widget};
 use crate::widgets::window::chrome::{paint_chrome_shadow, ChromeStyle};
+
+mod resize;
 
 /// Minimum gap kept between the panel and the host bounds when the
 /// desired panel size doesn't fit.
@@ -87,6 +91,14 @@ pub struct ModalSheet {
     /// INSTEAD of closing the sheet — the action owns dismissal, exactly
     /// like the Cancel button it mirrors.
     cancel_action: Option<Box<dyn Fn()>>,
+    /// Edge / corner resizing is on (default false; see `resize.rs`).
+    resizable: bool,
+    /// The edge drag in progress, if any.
+    resize_drag: Option<resize::ResizeDrag>,
+    /// Invoked with the new panel size whenever a user resize changes it.
+    on_size_changed: Option<Box<dyn Fn(Size)>>,
+    /// The host size of the last layout; a resize clamps against it.
+    host_size: Size,
 }
 
 impl ModalSheet {
@@ -104,6 +116,10 @@ impl ModalSheet {
             on_close: None,
             default_action: None,
             cancel_action: None,
+            resizable: false,
+            resize_drag: None,
+            on_size_changed: None,
+            host_size: Size::ZERO,
         }
     }
 
@@ -120,6 +136,58 @@ impl ModalSheet {
     pub fn with_panel_size(mut self, size: Size) -> Self {
         self.panel_size = size;
         self
+    }
+
+    /// Replace the desired panel size on a built sheet — a host restoring a
+    /// remembered size. Not reported to
+    /// [`with_on_size_changed`](Self::with_on_size_changed).
+    pub fn set_panel_size(&mut self, size: Size) {
+        self.panel_size = size;
+        crate::animation::request_draw();
+    }
+
+    /// The desired panel size (after any user resize).
+    pub fn panel_size(&self) -> Size {
+        self.panel_size
+    }
+
+    /// The panel's rect in sheet-local coordinates as of the last layout.
+    pub fn panel_rect(&self) -> Rect {
+        self.panel
+    }
+
+    /// Let the user resize the panel by dragging its edges and corners, as a
+    /// desktop dialog window allows (default off). The panel stays centred,
+    /// never shrinks below [`with_min_panel_size`](Self::with_min_panel_size)
+    /// and never grows past the host bounds minus the edge margin.
+    pub fn with_resizable(mut self, resizable: bool) -> Self {
+        self.resizable = resizable;
+        self
+    }
+
+    /// Object-safe counterpart of [`with_resizable`](Self::with_resizable).
+    pub fn set_resizable(&mut self, resizable: bool) {
+        self.resizable = resizable;
+        if !resizable {
+            self.resize_drag = None;
+        }
+    }
+
+    /// Whether edge / corner resizing is on.
+    pub fn is_resizable(&self) -> bool {
+        self.resizable
+    }
+
+    /// Run `on_size_changed` with the new panel size each time a user resize
+    /// changes it (every step of a drag), so a host can remember the size.
+    pub fn with_on_size_changed(mut self, on_size_changed: impl Fn(Size) + 'static) -> Self {
+        self.on_size_changed = Some(Box::new(on_size_changed));
+        self
+    }
+
+    /// Object-safe counterpart of [`with_on_size_changed`](Self::with_on_size_changed).
+    pub fn set_on_size_changed(&mut self, on_size_changed: impl Fn(Size) + 'static) {
+        self.on_size_changed = Some(Box::new(on_size_changed));
     }
 
     /// Smallest panel size: the clamp to the host bounds stops here, as a
@@ -271,11 +339,18 @@ impl Widget for ModalSheet {
         self.visible.get()
     }
 
+    /// Edge / corner grab bands (and a drag in progress) take the pointer
+    /// before the content beneath them.
+    fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
+        self.is_resizing() || self.resize_dir_at(local_pos).is_some()
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         if !self.visible.get() {
             self.bounds = Rect::new(0.0, 0.0, 0.0, 0.0);
             return Size::new(0.0, 0.0);
         }
+        self.host_size = available;
         let w = self
             .panel_size
             .width
@@ -341,6 +416,9 @@ impl Widget for ModalSheet {
     fn on_event(&mut self, event: &Event) -> EventResult {
         if !self.visible.get() {
             return EventResult::Ignored;
+        }
+        if let Some(result) = self.resize_event(event) {
+            return result;
         }
         match event {
             // Scrim: swallow pointer input the panel content didn't take,

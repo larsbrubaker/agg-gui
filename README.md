@@ -80,7 +80,7 @@ wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
 | `ImageView` | Image display widget |
 | `ScrollView` | Vertical scroll with drag-thumb and mouse-wheel support |
 | `Window` | Floating panel: draggable title bar, close button, resize handles, collapse |
-| `ModalSheet` | Centered fixed-size panel over a scrim; Escape to dismiss, Return fires the sheet's default action (`Button::with_default_action`) |
+| `ModalSheet` | Centered panel over a scrim, fixed-size or opt-in resizable from its edges (`with_resizable`, minimum size, size-changed callback); Escape to dismiss, Return fires the sheet's default action (`Button::with_default_action`) |
 | `FlexColumn` | Vertical flex layout with gap, padding, fixed + growing children |
 | `FlexRow` | Horizontal flex layout |
 | `Stack` | Z-ordered overlay layout (for floating windows) |

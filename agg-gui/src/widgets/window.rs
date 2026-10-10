@@ -688,7 +688,7 @@ impl Window {
 }
 
 /// Map a resize direction to the appropriate OS cursor icon.
-fn resize_cursor(dir: ResizeDir) -> CursorIcon {
+pub(crate) fn resize_cursor(dir: ResizeDir) -> CursorIcon {
     match dir {
         ResizeDir::N => CursorIcon::ResizeNorth,
         ResizeDir::S => CursorIcon::ResizeSouth,
