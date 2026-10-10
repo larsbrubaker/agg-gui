@@ -223,7 +223,7 @@ impl PopupMenu {
             );
             self.row_widgets.paint_level(ctx, &self.items, layout);
         }
-        popup_paint::offer_hovered_row_tooltip(&self.items, &self.state, &layouts);
+        popup_paint::offer_hovered_row_tooltip(ctx, &self.items, &self.state, &layouts);
     }
 }
 

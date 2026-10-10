@@ -179,6 +179,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A `MenuBar` dropdown offers its rows' `MenuItem::tooltip`s wherever the bar
+  sits. The row-tip hit test read the root pointer against the popup's
+  layouts, but `MenuBar` runs its popup in the bar's local space, so a bar
+  away from the root origin (a menu bar at the top of the window) never
+  offered a tip. The pointer is now mapped through the inverse of the paint
+  ctx's `logical_root_transform`, so the hit test lands in whatever space the
+  host painted the menu in, with or without the keyboard lift or a scale.
+
 - The `PerformanceView` sparkline plots longer frames higher, so spikes read
   as peaks (it mapped samples Y-down in the Y-up context), and its 16.7 ms
   budget line sits at the top of the strip while every frame is under budget.

@@ -13,8 +13,16 @@
 //! `offer_hovered_row_tooltip` hands the pointer-hovered row's
 //! `MenuItem::tooltip` to the central tooltip controller each frame the
 //! popup paints, so a closed popup (which does not paint) offers nothing.
+//! Its hit test maps the root pointer into the popup's paint space, so it
+//! works whatever space the host runs the menu in (`MenuBar` runs it
+//! bar-local; `paint_local` hosts run it in root space).  That assumes the
+//! host paints the popup in the space it routes the popup's events in: true
+//! for `paint_global_overlay` hosts, whose overlay pass translates by bounds
+//! as event dispatch does, but the pass does not apply a `child_transform`
+//! (e.g. `Scene`'s), so a menu hosted under one would mismatch.
 
 use crate::draw_ctx::DrawCtx;
+use crate::geometry::Point;
 
 use super::super::geometry::{hit_test, item_at_path, MenuHit, PopupLayout};
 use super::super::model::{MenuEntry, MenuSelection};
@@ -188,8 +196,10 @@ fn items_for_layout<'a>(items: &'a [MenuEntry], path: &[usize]) -> &'a [MenuEntr
 
 /// Offer the hovered row's tooltip to the central controller for this frame.
 /// Only a row the pointer is actually over counts: a keyboard-selected row
-/// has no pointer to anchor its tip to, so it shows none.
+/// has no pointer to anchor its tip to, so it shows none.  `ctx` is the one
+/// the popup painted `layouts` with; the pointer is hit-tested in its space.
 pub(super) fn offer_hovered_row_tooltip(
+    ctx: &dyn DrawCtx,
     items: &[MenuEntry],
     state: &PopupMenuState,
     layouts: &[PopupLayout],
@@ -200,7 +210,7 @@ pub(super) fn offer_hovered_row_tooltip(
     let Some(text) = item_at_path(items, path).and_then(|item| item.tooltip.as_deref()) else {
         return;
     };
-    let Some(pointer) = crate::widget::current_mouse_world() else {
+    let Some(pointer) = pointer_in_paint_space(ctx) else {
         return;
     };
     match hit_test(layouts, pointer) {
@@ -209,4 +219,21 @@ pub(super) fn offer_hovered_row_tooltip(
         }
         _ => {}
     }
+}
+
+/// The pointer in `ctx`'s current local space, i.e. the space the popup's
+/// layouts were painted in.
+///
+/// `current_mouse_world` and `logical_root_transform` share one space: root
+/// logical coordinates with the on-screen keyboard's lift taken out.  So
+/// inverting the paint transform lands the pointer in whatever space the
+/// host painted the menu in, however that host was translated or scaled,
+/// and with or without a lift.  This matches the popup's hover only if the
+/// host paints the popup in the same space it routes the popup's events in
+/// (see the file header).
+fn pointer_in_paint_space(ctx: &dyn DrawCtx) -> Option<Point> {
+    let world = crate::widget::current_mouse_world()?;
+    let (mut x, mut y) = (world.x, world.y);
+    crate::widget::logical_root_transform(ctx).inverse_transform(&mut x, &mut y);
+    Some(Point::new(x, y))
 }
