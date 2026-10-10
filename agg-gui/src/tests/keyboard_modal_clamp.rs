@@ -14,11 +14,17 @@
 //!   window's global-overlay paint. It reads the window origin through
 //!   `logical_root_transform` (which takes the lift out), clamps the dialog
 //!   against `visible_root_rect`, folds any correction into `window.bounds`,
-//!   and caches `Window::world_offset` for snap registration.
+//!   and caches `Window::world_offset` for snap registration. Its vertical
+//!   clamp stands down for the modal holding a lifted focused field
+//!   (`keyboard_scroll::lifted_modal_focus_rect`), so the two can't ratchet.
 //!
 //! Pinned: a dialog that fits above the keyboard is lifted fully on screen,
 //! the lift settles, the dialog keeps its bounds and the field clears the
-//! keyboard (`short_modal_with_keyboard_lift_stays_on_screen`); and a lifted
+//! keyboard (`short_modal_with_keyboard_lift_stays_on_screen`); a dialog too
+//! tall to both clear the keyboard and keep its top on screen keeps its
+//! bounds, the field being typed in clears the keyboard, the lift settles
+//! within a few frames, and the dialog's top may sit above the screen until
+//! the keyboard is dismissed (`tall_modal_with_keyboard_lift_*`); and a lifted
 //! modal registers its UN-lifted rect as its snap target, at unit scale and at
 //! device 2 × UX 1.7, where the lift must come out in LOGICAL units.
 //!
@@ -379,6 +385,94 @@ fn assert_checks(label: &str, checks: &[(&str, Option<String>)]) {
         failures.is_empty(),
         "[{label}] {} check(s) failed:\n  {}",
         failures.len(),
+        failures.join("\n  ")
+    );
+}
+
+/// Dialog height for the INFEASIBLE geometry: it fits the viewport with no
+/// keyboard, but `H + panel_h + margin − f` exceeds the viewport by about
+/// `panel_h / 2`, so clearing the keyboard pushes its top above the screen.
+fn tall_height(panel_h: f64) -> f64 {
+    let dlg_h = (VP_H - panel_h * 0.5).round();
+    assert!(
+        dlg_h < VP_H,
+        "precondition: dialog fits without the keyboard"
+    );
+    dlg_h
+}
+
+/// INFEASIBLE geometry: the dialog is tall enough that clearing the keyboard
+/// pushes its top above the viewport. The lift must still settle with the
+/// field visible, and must not ratchet the dialog's bounds downward.
+fn tall_scenario(label: &str, device_scale: f64, ux_scale: f64) {
+    let _fx = Fixture::new(device_scale, ux_scale);
+    let dlg_h = tall_height(panel_height());
+    let run = run_scenario(label, dlg_h);
+    assert!(
+        excess(&run) > FEASIBILITY_MARGIN,
+        "precondition: geometry must be infeasible by a clear margin; excess = {:.2}",
+        excess(&run)
+    );
+
+    assert_checks(
+        label,
+        &[
+            ("(a) converged", check_converged(&run)),
+            ("(b) field visible", check_field_visible(&run)),
+            ("(c) dialog unmoved", check_dialog_unmoved(&run)),
+        ],
+    );
+}
+
+#[test]
+fn tall_modal_with_keyboard_lift_converges() {
+    tall_scenario("tall", 1.0, 1.0);
+}
+
+/// Same infeasible geometry at the mobile UX zoom, where the lift lives inside
+/// the effective scale and must be handled in LOGICAL units.
+#[test]
+fn tall_modal_with_keyboard_lift_converges_at_ux_scale() {
+    tall_scenario("tall@ux1.7", 1.0, 1.7);
+}
+
+/// Frames after focus by which the 0.22 s lift tween (≈ 14 frames of 16 ms)
+/// must have finished and everything stopped moving.
+const SETTLE_WITHIN_FRAMES: usize = 16;
+
+/// No drift: a lifted tall modal holds still on EVERY frame — its bounds
+/// never move, the lift target never changes after focus — and the lift
+/// stops within a few frames of the tween's duration.
+#[test]
+fn tall_modal_with_keyboard_lift_settles_within_a_few_frames() {
+    let _fx = Fixture::new(1.0, 1.0);
+    let dlg_h = tall_height(panel_height());
+    let run = run_scenario("tall-settle", dlg_h);
+    let first_target = run.frames[0].target;
+    let mut failures = Vec::new();
+    for (i, f) in run.frames.iter().enumerate() {
+        if !rect_eq(f.dialog, run.pre_focus_dialog) {
+            failures.push(format!(
+                "frame {i}: dialog {:?} moved from {:?}",
+                f.dialog, run.pre_focus_dialog
+            ));
+        }
+        if (f.target - first_target).abs() >= TOL {
+            failures.push(format!(
+                "frame {i}: lift target {:.2} drifted from {first_target:.2}",
+                f.target
+            ));
+        }
+        if i >= SETTLE_WITHIN_FRAMES && (f.animating || (f.lift - first_target).abs() >= TOL) {
+            failures.push(format!(
+                "frame {i}: lift {:.2} (animating {}) has not settled at {first_target:.2}",
+                f.lift, f.animating
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "a lifted tall modal must settle without drifting:\n  {}",
         failures.join("\n  ")
     );
 }

@@ -185,6 +185,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A modal dialog too tall to both clear the on-screen keyboard and keep its
+  top on screen no longer drifts down every frame while a field inside it has
+  focus. The modal viewport clamp pulled the dialog back on screen, the field
+  dropped behind the keyboard, the keyboard lift rose to follow, and the two
+  ratcheted against each other. While the lift exists to show a focused field
+  inside a modal, that modal's vertical viewport clamp now stands down: the
+  field being typed in stays visible above the keyboard, the dialog keeps its
+  position, the lift settles within the slide, and the dialog's top may sit
+  above the screen until the keyboard is dismissed. Other modals clamp as
+  before.
+
 - A `MenuBar` dropdown offers its rows' `MenuItem::tooltip`s wherever the bar
   sits. The row-tip hit test read the root pointer against the popup's
   layouts, but `MenuBar` runs its popup in the bar's local space, so a bar

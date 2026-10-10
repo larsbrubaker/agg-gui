@@ -93,6 +93,36 @@ thread_local! {
     /// [`logical_root_transform`](crate::widget::logical_root_transform)
     /// take it back out, so paint-time root coordinates are unlifted.
     static PAINT_LIFT: Cell<f64> = const { Cell::new(0.0) };
+
+    /// Root logical (unlifted) rect of the focused text field while it sits
+    /// inside the active modal AND needs a positive global lift to clear the
+    /// keyboard; `None` otherwise. See [`lifted_modal_focus_rect`].
+    static LIFTED_MODAL_FOCUS: Cell<Option<Rect>> = const { Cell::new(None) };
+}
+
+/// The unlifted root-space rect of the focused text field when the global
+/// keyboard lift exists to show it AND it lives inside the active modal
+/// dialog; `None` when no field needs lifting or focus is outside a modal.
+///
+/// The modal viewport clamp
+/// (`widgets/window/paint.rs::clamp_modal_into_viewport`) reads this to
+/// stand down vertically for the modal holding the field: a dialog too tall
+/// to both clear the keyboard and keep its top on screen would otherwise be
+/// pulled down by the clamp, the field would drop, [`relift_after_layout`]
+/// would raise the lift again, and the two would ratchet the dialog downward
+/// forever. The field being typed in wins; the dialog's top may sit above the
+/// screen until the keyboard is dismissed. Refreshed on every focus change
+/// and every `App::layout`.
+pub(crate) fn lifted_modal_focus_rect() -> Option<Rect> {
+    LIFTED_MODAL_FOCUS.with(|c| c.get())
+}
+
+/// `Some(rect)` iff `path` (the focus path) runs through the active modal.
+fn record_lifted_modal_focus(root: &dyn Widget, path: &[usize], rect: Option<Rect>) {
+    let in_modal = rect.is_some()
+        && crate::widget::active_modal_path(root)
+            .is_some_and(|modal| path.len() > modal.len() && path.starts_with(&modal));
+    LIFTED_MODAL_FOCUS.with(|c| c.set(if in_modal { rect } else { None }));
 }
 
 /// The keyboard lift translate currently applied to the paint ctx by
@@ -170,6 +200,7 @@ pub fn is_lift_animating() -> bool {
 #[cfg(test)]
 pub fn reset_lift_for_test() {
     LIFT.with(|c| *c.borrow_mut() = Tween::new(0.0, LIFT_DURATION_SECS));
+    LIFTED_MODAL_FOCUS.with(|c| c.set(None));
 }
 
 /// Pin the lift at a settled `v` (no animation in flight), so
@@ -265,6 +296,7 @@ pub(crate) fn notify_focus_change(
     root: &mut dyn Widget,
 ) {
     use crate::widgets::on_screen_keyboard::{set_text_input_focused, KeyboardInputMode};
+    LIFTED_MODAL_FOCUS.with(|c| c.set(None));
     // Read the affordance bundle from the focused widget — text input
     // flag, current text (for the sentence-start auto-cap heuristic),
     // and the preferred keyboard mode (Numeric fields open on digits).
@@ -311,6 +343,7 @@ pub(crate) fn relift_after_layout(
     viewport_width: f64,
     root: &mut dyn Widget,
 ) {
+    LIFTED_MODAL_FOCUS.with(|c| c.set(None));
     if !crate::widgets::on_screen_keyboard::is_enabled() {
         return;
     }
@@ -334,6 +367,7 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
     viewport_width: f64,
     root: &mut dyn Widget,
 ) {
+    LIFTED_MODAL_FOCUS.with(|c| c.set(None));
     let Some(path) = focus else {
         return;
     };
@@ -372,6 +406,12 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
     // takes.  Animated via `Tween` so the raise / lower glides
     // alongside the keyboard's own slide.
     request_lift(residual);
+    // Recorded against the CURRENT layout after any scroll absorption moved
+    // the field, so the clamp compares it with the same frame's bounds.
+    let lifted_rect = (residual > 0.0)
+        .then(|| focused_widget_screen_bounds(&*root, path))
+        .flatten();
+    record_lifted_modal_focus(&*root, path, lifted_rect);
 }
 
 /// Walk from `root` down `path` and compose each visited widget's

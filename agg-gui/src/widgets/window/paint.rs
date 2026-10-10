@@ -222,6 +222,16 @@ pub(super) fn paint_overlay(window: &mut Window, ctx: &mut dyn DrawCtx) {
 /// while the on-screen keyboard lifts the tree, so the dialog stays fully on
 /// SCREEN — `vis.y ≤ root_y` and `root_y + height ≤ vis.y + vis.height`.
 ///
+/// Exception: while the keyboard lift exists to show a focused text field
+/// inside THIS dialog
+/// ([`lifted_modal_focus_rect`](crate::widget::keyboard_scroll::lifted_modal_focus_rect)),
+/// the vertical clamp stands down. The field being typed in must stay
+/// visible; for a dialog too tall to both clear the keyboard and keep its top
+/// on screen, clamping pulled it down, the field dropped, the lift rose to
+/// follow and the two ratcheted the dialog downward every frame. Its top may
+/// sit above the screen until the keyboard is dismissed. The horizontal clamp
+/// is independent of the lift and still applies.
+///
 /// Note: this folds the clamp correction into `bounds`. A modal window paired
 /// with `with_position_cell` would therefore persist the clamp shift to disk;
 /// no current caller pairs the two (dialogs are transient and unpositioned), so
@@ -249,7 +259,22 @@ pub(super) fn clamp_modal_into_viewport(window: &mut Window, ctx: &dyn DrawCtx) 
     let max_x = (vis.x + vis.width - window.bounds.width).max(vis.x);
     let max_y = (vis.y + vis.height - window.bounds.height).max(vis.y);
     let dx = root_x.clamp(vis.x, max_x) - root_x;
-    let dy = root_y.clamp(vis.y, max_y) - root_y;
+    let holds_lifted_focus =
+        crate::widget::keyboard_scroll::lifted_modal_focus_rect().is_some_and(|field| {
+            // Both rects are root logical and unlifted; the field belongs to
+            // this dialog when it lies inside the dialog's rect (half-pixel
+            // slack for the float sums along the two walks).
+            const SLACK: f64 = 0.5;
+            field.x >= root_x - SLACK
+                && field.y >= root_y - SLACK
+                && field.x + field.width <= root_x + window.bounds.width + SLACK
+                && field.y + field.height <= root_y + window.bounds.height + SLACK
+        });
+    let dy = if holds_lifted_focus {
+        0.0
+    } else {
+        root_y.clamp(vis.y, max_y) - root_y
+    };
     window.bounds.x += dx;
     window.bounds.y += dy;
     (dx, dy)
