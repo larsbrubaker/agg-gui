@@ -1,7 +1,7 @@
 //! Socket and noodle presentation state for [`NodeEditor`]: the noodle
 //! style, the socket hover ring with its name label, and the pass that
-//! stamps each socket layout with its model-chosen shape and the number of
-//! noodles landed on a multi-input.
+//! stamps each socket layout with its model-chosen shape, the number of
+//! noodles landed on a multi-input and its visibility.
 //!
 //! The drawing itself is [`crate::socket_style`]; this file decides *what*
 //! to draw from the model and the editor's interaction state. MatterCAD's
@@ -56,6 +56,30 @@ impl NodeEditor {
             .hovered
             .as_ref()
             .map(|(n, s, name)| (*n, *s, name.as_str()))
+    }
+
+    /// Where `socket` on `node` sits, in editor-local coordinates at the
+    /// current pan and zoom: the centre noodles end at and a press must
+    /// land on. `None` when the node or socket is not in the model. A
+    /// socket hidden by [`NodeGraphModel::socket_visible`] still reports
+    /// its laid-out place (wired noodles draw to it). Locks the model, so
+    /// call it without holding the model lock.
+    pub fn socket_position(
+        &self,
+        node: NodeId,
+        side: SocketSide,
+        socket: &str,
+    ) -> Option<agg_gui::Point> {
+        let layouts = self.snapshot_layouts();
+        let s = layouts
+            .iter()
+            .find(|l| l.node_id == node)?
+            .sockets()
+            .find(|s| s.side == side && s.name == socket)?;
+        Some(agg_gui::Point::new(
+            s.center[0] * self.canvas_scale + self.canvas_offset[0],
+            s.center[1] * self.canvas_scale + self.canvas_offset[1],
+        ))
     }
 
     /// Track the socket under `canvas_pos` on an idle pointer move.
@@ -171,7 +195,8 @@ pub(crate) fn landed_on(
         .count()
 }
 
-/// Stamp every socket layout with its shape and landed-noodle count.
+/// Stamp every socket layout with its shape, landed-noodle count and
+/// whether the host hides it.
 pub(crate) fn apply_socket_styles(
     model: &dyn NodeGraphModel,
     noodles: &[NoodleView],
@@ -185,6 +210,7 @@ pub(crate) fn apply_socket_styles(
                 NodeRow::Property(_) => continue,
             };
             s.shape = model.socket_shape(node, s.side, &s.name, s.socket_type);
+            s.hidden = !model.socket_visible(node, s.side, &s.name);
             s.landed = match s.side {
                 SocketSide::Input => landed_on(model, noodles, node, &s.name),
                 SocketSide::Output => 0,

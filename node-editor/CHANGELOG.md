@@ -10,6 +10,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor` implements `Widget::as_any` / `as_any_mut`, so a host holding
+  it as a `Box<dyn Widget>` child can downcast it and call
+  `open_context_menu()`, `select_node()` and the rest.
+- `NodeGraphModel::socket_visible(node, side, socket) -> bool` (default
+  `true`): a hidden socket is neither drawn (simplified card dot, hosted card)
+  nor hit-tested (hover, press, drop snap), while a noodle wired to it still
+  draws to its laid-out place. `SocketLayout` gains the matching
+  `hidden: bool`.
+- `NodeEditor::socket_position(node, side, socket) -> Option<Point>`: a
+  socket's laid-out centre in editor-local coordinates at the current pan
+  and zoom (hidden sockets included).
 - Connection semantics for noodle drags, all defaulted so today's behaviour
   stays (new module `connection`, `SocketRef` re-exported):
   `NodeGraphModel::can_connect(from, to) -> Result<(), String>` is asked on
@@ -101,3 +112,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `NodeEditor::with_collapse_enabled(bool)` and `with_snap_guides(bool)` turn
   off the collapse toggle and the node-drag snap guides (both on by default).
 - `SocketSide` is re-exported at the crate root.
+
+### Fixed
+
+- Dashed noodles stroke with butt caps, as MatterCAD / NodeDesigner do; the
+  default round cap nearly closed their 8-unit gaps.

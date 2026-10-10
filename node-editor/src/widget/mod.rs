@@ -77,6 +77,8 @@ mod tests_overlay;
 #[cfg(test)]
 mod tests_presentation;
 #[cfg(test)]
+mod tests_socket_visibility;
+#[cfg(test)]
 mod tests_value;
 #[cfg(test)]
 mod tests_view_nav;
@@ -501,6 +503,12 @@ impl NodeEditor {
 }
 
 impl Widget for NodeEditor {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
     fn bounds(&self) -> Rect {
         self.bounds
     }

@@ -1,6 +1,6 @@
 //! A recording `DrawCtx` for the presentation tests (`socket_style_tests`,
 //! `widget/tests_presentation`): every fill and stroke becomes a [`Shot`]
-//! holding its colour, line width, dash pattern and path, with coordinates
+//! holding its colour, line width, line cap, dash pattern and path, with coordinates
 //! mapped through the translate / uniform scale in effect, so a test can
 //! assert exactly which shapes were drawn where.
 
@@ -29,6 +29,8 @@ pub(crate) struct Shot {
     pub color: Color,
     pub width: f64,
     pub dash: Vec<f64>,
+    /// The line cap in effect (agg-gui's default is round).
+    pub cap: LineCap,
     pub path: Vec<Op>,
 }
 
@@ -44,6 +46,7 @@ pub(crate) struct Recorder {
     stroke_color: Color,
     width: f64,
     dash: Vec<f64>,
+    cap: LineCap,
     path: Vec<Op>,
     xf: Xf,
     stack: Vec<Xf>,
@@ -58,6 +61,7 @@ impl Default for Recorder {
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
             width: 1.0,
             dash: Vec::new(),
+            cap: LineCap::Round,
             path: Vec::new(),
             xf: Xf {
                 s: 1.0,
@@ -94,6 +98,7 @@ impl Recorder {
             },
             width: self.width * self.xf.s,
             dash: self.dash.clone(),
+            cap: self.cap,
             path,
         });
     }
@@ -118,7 +123,9 @@ impl DrawCtx for Recorder {
         self.width = w;
     }
     fn set_line_join(&mut self, _join: LineJoin) {}
-    fn set_line_cap(&mut self, _cap: LineCap) {}
+    fn set_line_cap(&mut self, cap: LineCap) {
+        self.cap = cap;
+    }
     fn set_miter_limit(&mut self, _limit: f64) {}
     fn set_line_dash(&mut self, dashes: &[f64], _offset: f64) {
         self.dash = dashes.to_vec();

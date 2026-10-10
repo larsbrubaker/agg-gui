@@ -333,6 +333,16 @@ pub trait NodeGraphModel {
         crate::socket_style::SocketShape::Circle
     }
 
+    /// Whether `socket` on `node` is drawn. A hidden socket is neither
+    /// drawn nor hit-tested (no hover, no drag from it, no drop onto it),
+    /// but a noodle already wired to it still draws to its laid-out place.
+    /// MatterCAD hides the unwired socket of a hidden row; a wired one it
+    /// keeps visible in a strip at the card bottom, which is the host's
+    /// anchor choice (`HostedNodeBody::with_socket_anchor`). Default: `true`.
+    fn socket_visible(&self, _node: NodeId, _side: crate::draw::SocketSide, _socket: &str) -> bool {
+        true
+    }
+
     /// Whether input `socket` on `node` takes several noodles. A
     /// multi-input with more than one noodle is drawn as a pill along the
     /// node's edge, each noodle landing at its own point in the order

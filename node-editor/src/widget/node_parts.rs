@@ -97,6 +97,11 @@ impl Widget for SocketDotWidget {
         Size::new(self.bounds.width, self.bounds.height)
     }
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        // A socket the host hides keeps its widget (rows keep their shape)
+        // but draws nothing.
+        if self.socket.hidden {
+            return;
+        }
         // The widget is a 2R x 2R square (R = SOCKET_RADIUS at the canvas
         // zoom); draw at its centre in canvas units scaled by the zoom, as
         // the `socket_style` helpers work in unscaled canvas units.

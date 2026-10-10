@@ -56,7 +56,7 @@ fn same_noodle(a: &NoodleView, b: &NoodleView) -> bool {
         && a.to_socket == b.to_socket
 }
 
-/// The accepting socket nearest `cursor` within the drop-snap radius: the
+/// The accepting, shown socket nearest `cursor` within the drop-snap radius: the
 /// one the in-flight noodle snaps to and rings.
 pub(super) fn find_target_near<'a>(
     layouts: &'a [NodeLayoutInfo],
@@ -68,7 +68,8 @@ pub(super) fn find_target_near<'a>(
     let snap_r = crate::draw::SOCKET_HIT_RADIUS * 1.6;
     let mut best: Option<(&SocketLayout, f64)> = None;
     for l in layouts {
-        for s in l.sockets() {
+        // A socket the host hides takes no drop.
+        for s in l.sockets().filter(|s| !s.hidden) {
             let dx = s.center[0] - cursor[0];
             let dy = s.center[1] - cursor[1];
             let d2 = dx * dx + dy * dy;
@@ -289,7 +290,12 @@ impl NodeEditor {
         let candidates: Vec<SocketRef> = layouts
             .iter()
             .filter(|l| l.node_id == body)
-            .flat_map(|l| l.sockets().map(move |s| socket_ref(l.node_id, s)))
+            .flat_map(|l| {
+                // Only shown sockets, as MatterCAD's `AutoPick`.
+                l.sockets()
+                    .filter(|s| !s.hidden)
+                    .map(move |s| socket_ref(l.node_id, s))
+            })
             .filter(|to| to != fixed && accepts(&*model, fixed, picked_up, to).is_ok())
             .collect();
         model

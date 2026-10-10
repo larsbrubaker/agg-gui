@@ -17,7 +17,7 @@
 //! `widget/node_parts.rs`, `widget/hosted_card.rs` and `draw_immediate.rs`
 //! (sockets), `widget/presentation.rs` (the hover ring and its label).
 
-use agg_gui::{Color, DrawCtx};
+use agg_gui::{Color, DrawCtx, LineCap};
 
 use crate::draw::SOCKET_RADIUS;
 
@@ -227,7 +227,7 @@ pub fn draw_socket_ring(ctx: &mut dyn DrawCtx, center: [f64; 2], p: &SocketPaint
 /// whose control points lie a quarter of the ends' distance out
 /// horizontally (rightward from the output, leftward into the input).
 /// A `dashed` noodle (MatterCAD: one into a field input) is 8 on, 8 off,
-/// edge and colour alike.
+/// edge and colour alike, with butt caps so the gaps stay open.
 pub fn draw_noodle(
     ctx: &mut dyn DrawCtx,
     from: [f64; 2],
@@ -237,6 +237,10 @@ pub fn draw_noodle(
     style: NoodleStyle,
 ) {
     if dashed {
+        // Butt caps, as MatterCAD / NodeDesigner draw it: a round cap adds
+        // half the 7-unit edge to each end of every dash and nearly closes
+        // the 8-unit gaps.
+        ctx.set_line_cap(LineCap::Butt);
         ctx.set_line_dash(&[NOODLE_DASH, NOODLE_DASH], 0.0);
     }
     match style {
@@ -250,6 +254,8 @@ pub fn draw_noodle(
     }
     if dashed {
         ctx.set_line_dash(&[], 0.0);
+        // Back to agg-gui's default cap.
+        ctx.set_line_cap(LineCap::Round);
     }
     if style == NoodleStyle::NodeDesigner {
         // The curve is symmetric, so its middle is the ends' midpoint.

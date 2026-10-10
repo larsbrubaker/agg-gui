@@ -202,3 +202,52 @@ fn a_dashed_noodle_dashes_eight_on_eight_off_and_resets() {
     );
     assert!(r.shots.last().unwrap().dash.is_empty());
 }
+
+#[test]
+fn a_dashed_noodle_strokes_with_butt_caps_and_restores_round() {
+    let mut r = Recorder::default();
+    draw_noodle(
+        &mut r,
+        [0.0, 0.0],
+        [100.0, 0.0],
+        RED,
+        true,
+        NoodleStyle::NodeDesigner,
+    );
+    assert!(r.strokes().all(|s| s.cap == agg_gui::LineCap::Butt));
+    draw_noodle(
+        &mut r,
+        [0.0, 0.0],
+        [100.0, 0.0],
+        RED,
+        false,
+        NoodleStyle::NodeDesigner,
+    );
+    let last = r.strokes().last().unwrap();
+    assert_eq!(last.cap, agg_gui::LineCap::Round);
+}
+
+#[test]
+fn a_dashed_noodle_shows_its_gaps_in_pixels() {
+    // A straight noodle along y = 20: dashes cover x 0-8, 16-24, ...; the
+    // gaps 8-16, 24-32, ... must stay empty. A round cap on the 7-unit
+    // edge would reach 3.5 into each gap, leaving only x 11.5-12.5 clear.
+    let mut fb = agg_gui::Framebuffer::new(110, 40);
+    {
+        let mut ctx = agg_gui::GfxCtx::new(&mut fb);
+        draw_noodle(
+            &mut ctx,
+            [0.0, 20.0],
+            [100.0, 20.0],
+            RED,
+            true,
+            NoodleStyle::NodeDesigner,
+        );
+    }
+    let alpha = |x: u32, y: u32| fb.pixels()[((y * fb.width() + x) * 4 + 3) as usize];
+    assert!(alpha(4, 20) > 0, "inside the first dash");
+    assert!(alpha(20, 20) > 0, "inside the second dash");
+    for x in [9, 10, 11, 12, 13, 14, 25, 26, 27, 28, 29, 30] {
+        assert_eq!(alpha(x, 20), 0, "gap pixel x = {x} is painted");
+    }
+}

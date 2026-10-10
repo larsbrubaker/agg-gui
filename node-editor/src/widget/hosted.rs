@@ -100,6 +100,8 @@ struct SocketLook {
     color: agg_gui::Color,
     shape: crate::socket_style::SocketShape,
     landed: usize,
+    /// [`crate::NodeGraphModel::socket_visible`] said no: not drawn.
+    hidden: bool,
 }
 
 /// Canvas-space geometry of one hosted card, captured by `layout()` and
@@ -259,6 +261,7 @@ impl NodeEditor {
                             }
                             SocketSide::Output => 0,
                         },
+                        hidden: !model.socket_visible(n.id, side, &s.name),
                     })
                     .collect();
                 (width, title, sockets)
@@ -301,6 +304,7 @@ impl NodeEditor {
                 .sockets
                 .iter()
                 .zip(colors)
+                .filter(|(_, look)| !look.hidden)
                 .map(|((_, side, y), look)| CardSocket {
                     side: *side,
                     from_top: *y,
@@ -425,6 +429,7 @@ fn hosted_layout(n: &NodeView, g: &CardGeom) -> NodeLayoutInfo {
                 center,
                 shape: Default::default(),
                 landed: 0,
+                hidden: false,
             }));
         } else if let Some(s) = n.inputs.iter().find(|s| &s.name == name) {
             rows.push(NodeRow::Input {
@@ -436,6 +441,7 @@ fn hosted_layout(n: &NodeView, g: &CardGeom) -> NodeLayoutInfo {
                     center,
                     shape: Default::default(),
                     landed: 0,
+                    hidden: false,
                 },
                 editor: None,
                 height: ROW_HEIGHT,

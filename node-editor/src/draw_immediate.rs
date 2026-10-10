@@ -169,6 +169,9 @@ fn draw_socket<M: NodeGraphModel + ?Sized>(
     palette: &CanvasPalette,
     model: &M,
 ) {
+    if socket.hidden {
+        return;
+    }
     let paint = crate::socket_style::SocketPaint {
         shape: socket.shape,
         color: model.socket_color(socket.socket_type),

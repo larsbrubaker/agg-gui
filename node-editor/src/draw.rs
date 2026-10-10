@@ -74,6 +74,10 @@ pub struct SocketLayout {
     /// ([`crate::NodeGraphModel::socket_multi_input`]); zero otherwise.
     /// Two or more stretch the socket into a pill.
     pub landed: usize,
+    /// The host hides this socket ([`crate::NodeGraphModel::socket_visible`]
+    /// returned `false`): it is neither drawn nor hit-tested, but a noodle
+    /// wired to it still ends at [`center`](Self::center).
+    pub hidden: bool,
 }
 
 impl SocketLayout {
@@ -273,9 +277,10 @@ impl NodeLayoutInfo {
         self.rows.iter().filter_map(NodeRow::editor)
     }
 
-    /// Find a socket whose hit radius contains `canvas_pos`.
+    /// Find a visible (not [`SocketLayout::hidden`]) socket whose hit
+    /// radius contains `canvas_pos`.
     pub fn socket_at(&self, canvas_pos: [f64; 2]) -> Option<&SocketLayout> {
-        self.sockets().find(|s| {
+        self.sockets().filter(|s| !s.hidden).find(|s| {
             let dx = s.center[0] - canvas_pos[0];
             let dy = s.center[1] - canvas_pos[1];
             dx * dx + dy * dy <= SOCKET_HIT_RADIUS * SOCKET_HIT_RADIUS
@@ -369,6 +374,7 @@ where
                 center: [top_left[0] + node_width, center_y],
                 shape: Default::default(),
                 landed: 0,
+                hidden: false,
             }));
         }
         for s in &node.inputs {
@@ -384,6 +390,7 @@ where
                     center: [top_left[0], center_y],
                     shape: Default::default(),
                     landed: 0,
+                    hidden: false,
                 },
                 editor: None,
                 height: ROW_HEIGHT,
@@ -448,6 +455,7 @@ where
             center: [top_left[0] + node_width, center_y],
             shape: Default::default(),
             landed: 0,
+            hidden: false,
         }));
         y_offset += rows[rows.len() - 1].height();
     }
@@ -465,6 +473,7 @@ where
                 center: [top_left[0], center_y],
                 shape: Default::default(),
                 landed: 0,
+                hidden: false,
             },
             editor: None,
             height: ROW_HEIGHT,
@@ -498,6 +507,7 @@ where
                 center: [top_left[0], center_y],
                 shape: Default::default(),
                 landed: 0,
+                hidden: false,
             };
             // Hide the inline editor when the socket is connected — the
             // upstream value wins. Static layout reserves the slot
