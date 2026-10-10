@@ -1,5 +1,6 @@
 // Extra title-bar buttons for `Window` — a port of agg-sharp's
-// `WindowWidget.AddTitleBarButton`.
+// `WindowWidget.AddTitleBarButton`, plus `Maximizable`, which decides
+// whether the maximize button they sit beside is shown.
 //
 // The buttons are children of the `WindowTitleBar` sub-widget (which places
 // them left of the maximize / close buttons; see `window_title_bar.rs`). The
@@ -28,6 +29,31 @@ impl Window {
     /// Builder form of [`Window::add_title_bar_button`].
     pub fn with_title_bar_button(mut self, button: Box<dyn Widget>) -> Self {
         self.add_title_bar_button(button);
+        self
+    }
+
+    /// Whether the maximize button and double-click-to-maximize are offered.
+    pub fn maximizable(&self) -> bool {
+        self.maximizable
+    }
+
+    /// Offer or hide the maximize button and double-click-to-maximize
+    /// (agg-sharp `WindowWidget.Maximizable`). Hidden, the close button
+    /// stays put and added title-bar buttons sit directly left of it.
+    /// Programmatic maximize state is left alone.
+    pub fn set_maximizable(&mut self, maximizable: bool) {
+        if self.maximizable != maximizable {
+            self.maximizable = maximizable;
+            self.maximize_hovered = false;
+            self.title_bar.set_maximizable(maximizable);
+            self.backbuffer.invalidate();
+            crate::animation::request_draw();
+        }
+    }
+
+    /// Builder form of [`Window::set_maximizable`].
+    pub fn with_maximizable(mut self, maximizable: bool) -> Self {
+        self.set_maximizable(maximizable);
         self
     }
 

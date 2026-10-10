@@ -258,7 +258,9 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
             // Title bar drag + double-click maximize.
             if window.in_title_bar(*pos) {
                 // Double-click detection.
-                let is_double = if is_left_click {
+                // A window that is not maximizable has no double-click
+                // maximize: the second press just starts another drag.
+                let is_double = if is_left_click && window.maximizable {
                     let now = crate::clock::now();
                     window
                         .last_title_click

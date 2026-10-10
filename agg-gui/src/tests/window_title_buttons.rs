@@ -3,7 +3,9 @@
 //! `GuiWidget.BackbufferOpacity` on a double-buffered window.
 //!
 //! Covers placement (left of the maximize / close buttons, later buttons
-//! nearer close), the real App pointer path (a press and release on the
+//! nearer close; directly beside close on a window built
+//! `with_maximizable(false)`, which also drops double-click maximize), the
+//! real App pointer path (a press and release on the
 //! button clicks it; hovering it shows its tooltip), the opacity setter's
 //! clamp, and a software-ctx pixel test that a window at opacity 0.6 blends
 //! over what is behind it.
@@ -200,4 +202,71 @@ fn window_at_opacity_blends_over_what_is_behind_it() {
         faded[0] > opaque[0] + 40,
         "the red behind must show through: opaque {opaque:?}, faded {faded:?}"
     );
+}
+
+/// The close button's circle reaches this far left of the right edge
+/// (centre 10 px in, radius 6).
+const CLOSE_LEFT_INSET: f64 = 16.0;
+
+#[test]
+fn non_maximizable_window_puts_buttons_beside_close() {
+    let font = font();
+    let mut win = Window::new("Buttons", Arc::clone(&font), Box::new(SizedBox::new()))
+        .with_bounds(Rect::new(0.0, 0.0, 300.0, 200.0))
+        .with_maximizable(false)
+        .with_title_bar_button(Box::new(small_button("T", &font)));
+    win.layout(Size::new(VP_W, VP_H));
+    assert!(!win.maximizable());
+
+    let r = win.title_bar_button_rect(0).unwrap();
+    assert!(
+        r.x + r.width <= 300.0 - CLOSE_LEFT_INSET,
+        "button ends left of close: {r:?}"
+    );
+    assert!(
+        r.x + r.width > 300.0 - MAXIMIZE_LEFT_INSET,
+        "button moves into the maximize button's slot: {r:?}"
+    );
+
+    // Where the maximize button would be does nothing (a press there starts
+    // a title drag, which the release ends), and double-clicking the title
+    // bar does not maximize.
+    let max_center = Point::new(300.0 - 26.0, 200.0 - TITLE_H * 0.5);
+    let title_spot = Point::new(120.0, 200.0 - TITLE_H * 0.5);
+    for p in [max_center, title_spot, title_spot] {
+        win.on_event(&crate::Event::MouseDown {
+            pos: p,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        win.on_event(&crate::Event::MouseUp {
+            pos: p,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+    }
+    win.layout(Size::new(VP_W, VP_H));
+    assert_eq!(win.bounds(), Rect::new(0.0, 0.0, 300.0, 200.0));
+}
+
+#[test]
+fn maximizable_window_still_maximizes_on_double_click() {
+    let mut win = Window::new("Max", font(), Box::new(SizedBox::new()))
+        .with_bounds(Rect::new(0.0, 0.0, 300.0, 200.0));
+    win.layout(Size::new(VP_W, VP_H));
+    assert!(win.maximizable());
+    let p = Point::new(120.0, 200.0 - TITLE_H * 0.5);
+    for _ in 0..2 {
+        win.on_event(&crate::Event::MouseDown {
+            pos: p,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+        win.on_event(&crate::Event::MouseUp {
+            pos: p,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        });
+    }
+    assert_eq!(win.bounds().width, VP_W, "double click maximizes");
 }

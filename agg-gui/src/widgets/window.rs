@@ -306,6 +306,9 @@ pub struct Window {
     /// Index (into the extra title-bar buttons) of the one under the pointer,
     /// whose tooltip the window answers with. See `window/title_buttons.rs`.
     title_button_hover: Option<usize>,
+    /// Whether the maximize button (and double-click-to-maximize) is
+    /// offered (agg-sharp `WindowWidget.Maximizable`). Default `true`.
+    maximizable: bool,
 }
 
 impl Window {
@@ -391,6 +394,7 @@ impl Window {
             backbuffer_opacity: 1.0,
             title_bar_capture: None,
             title_button_hover: None,
+            maximizable: true,
         }
     }
 
@@ -598,7 +602,7 @@ impl Window {
     }
 
     fn in_maximize_button(&self, local: Point) -> bool {
-        if !self.chrome {
+        if !self.chrome || !self.maximizable {
             return false;
         }
         let c = self.maximize_center();
@@ -681,90 +685,6 @@ impl Window {
             _ => None,
         }
     }
-
-    /// Effective minimum height for this resize pass.  Honours
-    /// either `tight_content_fit` (lock + floor) or
-    /// `floor_content_height` (floor only) so a window whose content
-    /// has a natural height > MIN_H can never be dragged smaller
-    /// than its content.
-    fn effective_min_h(&self) -> f64 {
-        if self.tight_content_fit || self.floor_content_height {
-            let content_min = self.last_content_natural_h.get() + TITLE_H;
-            MIN_H.max(content_min)
-        } else {
-            MIN_H
-        }
-    }
-
-    /// Apply a mouse-world-space delta to bounds according to the resize direction.
-    fn apply_resize(&mut self, world_pos: Point) {
-        let dx = world_pos.x - self.drag_start_world.x;
-        let dy = world_pos.y - self.drag_start_world.y;
-        let sb = self.drag_start_bounds;
-        let min_h = self.effective_min_h();
-
-        let (mut x, mut y, mut w, mut h) = (sb.x, sb.y, sb.width, sb.height);
-
-        if let DragMode::Resize(dir) = self.drag_mode {
-            match dir {
-                ResizeDir::N => {
-                    h = (sb.height + dy).max(min_h);
-                }
-                ResizeDir::S => {
-                    y = sb.y + dy;
-                    h = (sb.height - dy).max(min_h);
-                    if h == min_h {
-                        y = sb.y + sb.height - min_h;
-                    }
-                }
-                ResizeDir::E => {
-                    w = (sb.width + dx).max(MIN_W);
-                }
-                ResizeDir::W => {
-                    x = sb.x + dx;
-                    w = (sb.width - dx).max(MIN_W);
-                    if w == MIN_W {
-                        x = sb.x + sb.width - MIN_W;
-                    }
-                }
-                ResizeDir::NE => {
-                    w = (sb.width + dx).max(MIN_W);
-                    h = (sb.height + dy).max(min_h);
-                }
-                ResizeDir::NW => {
-                    x = sb.x + dx;
-                    w = (sb.width - dx).max(MIN_W);
-                    if w == MIN_W {
-                        x = sb.x + sb.width - MIN_W;
-                    }
-                    h = (sb.height + dy).max(min_h);
-                }
-                ResizeDir::SE => {
-                    w = (sb.width + dx).max(MIN_W);
-                    y = sb.y + dy;
-                    h = (sb.height - dy).max(min_h);
-                    if h == min_h {
-                        y = sb.y + sb.height - min_h;
-                    }
-                }
-                ResizeDir::SW => {
-                    x = sb.x + dx;
-                    w = (sb.width - dx).max(MIN_W);
-                    if w == MIN_W {
-                        x = sb.x + sb.width - MIN_W;
-                    }
-                    y = sb.y + dy;
-                    h = (sb.height - dy).max(min_h);
-                    if h == min_h {
-                        y = sb.y + sb.height - min_h;
-                    }
-                }
-            }
-        }
-
-        self.bounds = snap(Rect::new(x, y, w, h));
-        self.clamp_to_canvas();
-    }
 }
 
 /// Map a resize direction to the appropriate OS cursor icon.
@@ -787,6 +707,7 @@ mod close;
 mod events;
 mod opacity;
 mod paint;
+mod resize;
 mod snap_glue;
 mod title_buttons;
 mod widget_impl;

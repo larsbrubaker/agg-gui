@@ -102,6 +102,9 @@ pub(crate) struct WindowTitleBar {
     /// is hidden and inert. `Window` writes it each layout from its own
     /// `collapsible` flag (egui's `Window::collapsible(bool)`).
     collapsible: Rc<Cell<bool>>,
+    /// Whether the maximize button is drawn and its slot reserved. Written
+    /// by `Window::set_maximizable`.
+    maximizable: bool,
 }
 
 impl WindowTitleBar {
@@ -128,6 +131,7 @@ impl WindowTitleBar {
             chevron_color,
             chevron_clicked,
             collapsible,
+            maximizable: true,
         }
     }
 
@@ -152,6 +156,12 @@ impl WindowTitleBar {
         self.collapsed.set(collapsed);
     }
 
+    /// Show or hide the maximize button; the extra buttons move into its
+    /// slot when it is hidden.
+    pub(crate) fn set_maximizable(&mut self, on: bool) {
+        self.maximizable = on;
+    }
+
     /// Append an extra title-bar button (see the module docs for placement).
     pub(crate) fn add_button(&mut self, button: Box<dyn Widget>) {
         self.children.push(button);
@@ -171,7 +181,8 @@ impl WindowTitleBar {
     /// maximize button, centred vertically. Returns the x of the leftmost
     /// button's left margin edge (the right limit for the title label).
     fn layout_buttons(&mut self, available: Size) -> f64 {
-        let mut right = available.width - MAX_PAD - CLOSE_R - EXTRA_GAP;
+        let nearest_pad = if self.maximizable { MAX_PAD } else { CLOSE_PAD };
+        let mut right = available.width - nearest_pad - CLOSE_R - EXTRA_GAP;
         for button in self.children[FIRST_EXTRA..].iter_mut().rev() {
             if !button.is_visible() {
                 continue;
@@ -288,39 +299,9 @@ impl Widget for WindowTitleBar {
         self.collapsed.set(st.collapsed);
         self.children[1].set_label_color(st.title_color);
 
-        // Maximize / restore button.
-        let mc_x = w - MAX_PAD;
-        let mc_y = h * 0.5;
-        let max_bg = if st.maximize_hovered {
-            v.window_close_bg_hovered
-        } else {
-            v.window_close_bg
-        };
-        ctx.set_fill_color(max_bg);
-        ctx.begin_path();
-        ctx.circle(mc_x, mc_y, CLOSE_R);
-        ctx.fill();
-
-        ctx.set_stroke_color(v.window_close_fg);
-        ctx.set_line_width(1.5);
-        let sz = 3.5_f64;
-        if st.maximized {
-            let off = 2.0_f64;
-            let sq = sz * 2.0 - off;
-            ctx.begin_path();
-            ctx.rect(mc_x - sz + off, mc_y - sz + off, sq, sq);
-            ctx.stroke();
-            ctx.set_fill_color(max_bg);
-            ctx.begin_path();
-            ctx.rect(mc_x - sz, mc_y - sz, sq, sq);
-            ctx.fill();
-            ctx.begin_path();
-            ctx.rect(mc_x - sz, mc_y - sz, sq, sq);
-            ctx.stroke();
-        } else {
-            ctx.begin_path();
-            ctx.rect(mc_x - sz, mc_y - sz, sz * 2.0, sz * 2.0);
-            ctx.stroke();
+        // Maximize / restore button (absent when not maximizable).
+        if self.maximizable {
+            paint_maximize(ctx, &st, &v, w, h);
         }
 
         // Close button.
@@ -351,5 +332,49 @@ impl Widget for WindowTitleBar {
 
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+/// The maximize / restore button, drawn inline at its fixed slot left of
+/// the close button.
+fn paint_maximize(
+    ctx: &mut dyn DrawCtx,
+    st: &TitleBarView,
+    v: &crate::theme::Visuals,
+    w: f64,
+    h: f64,
+) {
+    let mc_x = w - MAX_PAD;
+    let mc_y = h * 0.5;
+    let max_bg = if st.maximize_hovered {
+        v.window_close_bg_hovered
+    } else {
+        v.window_close_bg
+    };
+    ctx.set_fill_color(max_bg);
+    ctx.begin_path();
+    ctx.circle(mc_x, mc_y, CLOSE_R);
+    ctx.fill();
+
+    ctx.set_stroke_color(v.window_close_fg);
+    ctx.set_line_width(1.5);
+    let sz = 3.5_f64;
+    if st.maximized {
+        let off = 2.0_f64;
+        let sq = sz * 2.0 - off;
+        ctx.begin_path();
+        ctx.rect(mc_x - sz + off, mc_y - sz + off, sq, sq);
+        ctx.stroke();
+        ctx.set_fill_color(max_bg);
+        ctx.begin_path();
+        ctx.rect(mc_x - sz, mc_y - sz, sq, sq);
+        ctx.fill();
+        ctx.begin_path();
+        ctx.rect(mc_x - sz, mc_y - sz, sq, sq);
+        ctx.stroke();
+    } else {
+        ctx.begin_path();
+        ctx.rect(mc_x - sz, mc_y - sz, sz * 2.0, sz * 2.0);
+        ctx.stroke();
     }
 }
