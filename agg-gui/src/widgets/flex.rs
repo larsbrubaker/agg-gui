@@ -39,6 +39,7 @@ use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
+use crate::widgets::flex_share::{share_flex_space, FlexItem};
 
 // ---------------------------------------------------------------------------
 // Default inter-child spacing
@@ -341,7 +342,14 @@ impl Widget for FlexColumn {
         let gap = self.gap;
         let n = self.children.len();
         if n == 0 {
-            return available;
+            // Nothing to stack: only the padding is natural height (an
+            // empty column must not claim the whole slot).
+            let w = if self.fit_width {
+                pad_l + pad_r
+            } else {
+                available.width
+            };
+            return Size::new(w, pad_t + pad_b);
         }
 
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
@@ -407,30 +415,33 @@ impl Widget for FlexColumn {
         }
 
         // -------------------------------------------------------------------
-        // Step 2: distribute remaining space to flex children.
+        // Step 2: distribute remaining space to flex children.  A child
+        // capped by its max height passes the space it can't use on to the
+        // other flex children (see `flex_share`).
         // -------------------------------------------------------------------
         let remaining =
             (inner_h - total_fixed_with_margins - total_gap - total_flex_margin_v).max(0.0);
-        let flex_unit = if total_flex > 0.0 {
-            remaining / total_flex
-        } else {
-            0.0
-        };
+        let items: Vec<FlexItem> = (0..n)
+            .map(|i| FlexItem {
+                flex: if visible[i] {
+                    self.flex_factors[i]
+                } else {
+                    0.0
+                },
+                min: self.children[i].min_size().height,
+                max: self.children[i].max_size().height,
+            })
+            .collect();
+        let flex_used = share_flex_space(&items, &mut content_heights, remaining);
 
-        for i in 0..n {
-            if self.flex_factors[i] > 0.0 && visible[i] {
-                let raw = self.flex_factors[i] * flex_unit;
-                content_heights[i] = raw.clamp(
-                    self.children[i].min_size().height,
-                    self.children[i].max_size().height,
-                );
-            }
-        }
-
-        // Natural content height (all-fixed case) determines the column's
-        // reported size when there are no flex children.
-        let natural_content_h = total_fixed_with_margins + total_gap;
-        let effective_h = if total_flex > 0.0 {
+        // Natural content height: the fixed children, gaps, and whatever the
+        // flex children took.  The column fills its slot only when its flex
+        // children absorb the remaining space; when there are none, or all
+        // of them are capped short of it, it reports its content height.
+        let natural_content_h =
+            total_fixed_with_margins + total_gap + total_flex_margin_v + flex_used;
+        let fills_slot = total_flex > 0.0 && flex_used + 0.5 >= remaining;
+        let effective_h = if fills_slot {
             inner_h
         } else {
             natural_content_h
@@ -520,7 +531,7 @@ impl Widget for FlexColumn {
         } else {
             available.width
         };
-        if total_flex > 0.0 {
+        if fills_slot {
             Size::new(reported_w, available.height)
         } else {
             Size::new(reported_w, natural_content_h + pad_t + pad_b)

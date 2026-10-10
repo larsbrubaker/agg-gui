@@ -21,6 +21,7 @@ use crate::geometry::{Rect, Size};
 use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 use crate::widgets::flex::DEFAULT_ROW_GAP;
+use crate::widgets::flex_share::{share_flex_space, FlexItem};
 
 /// Compute `(y, actual_height)` for a child in a `FlexRow` (vertical
 /// cross-axis placement, Y-up).
@@ -258,7 +259,15 @@ impl Widget for FlexRow {
         let gap = self.gap;
         let n = self.children.len();
         if n == 0 {
-            return available;
+            // Nothing to lay out: only the padding is natural height, so an
+            // empty row (e.g. built by a `Rebuilder` with nothing to show)
+            // doesn't claim the whole slot.  Mirrors `FlexColumn`.
+            let w = if self.fit_width {
+                pad_l + pad_r
+            } else {
+                available.width
+            };
+            return Size::new(w, pad_t + pad_b);
         }
 
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
@@ -272,7 +281,6 @@ impl Widget for FlexRow {
         // -------------------------------------------------------------------
         let mut content_widths = vec![0.0f64; n];
         let mut total_fixed_with_margins = 0.0f64;
-        let mut total_flex = 0.0f64;
         let mut total_flex_margin_h = 0.0f64;
 
         for i in 0..n {
@@ -309,7 +317,6 @@ impl Widget for FlexRow {
             if self.flex_factors[i] == 0.0 {
                 total_fixed_with_margins += content_widths[i] + m.horizontal();
             } else {
-                total_flex += self.flex_factors[i];
                 total_flex_margin_h += m.horizontal();
             }
         }
@@ -337,21 +344,20 @@ impl Widget for FlexRow {
         // -------------------------------------------------------------------
         let remaining =
             (inner_w - total_fixed_with_margins - total_gap - total_flex_margin_h).max(0.0);
-        let flex_unit = if total_flex > 0.0 {
-            remaining / total_flex
-        } else {
-            0.0
-        };
-
-        for i in 0..n {
-            if self.flex_factors[i] > 0.0 && visible[i] {
-                let raw = self.flex_factors[i] * flex_unit;
-                content_widths[i] = raw.clamp(
-                    self.children[i].min_size().width,
-                    self.children[i].max_size().width,
-                );
-            }
-        }
+        // A child capped by its max width passes the space it can't use on
+        // to the other flex children (see `flex_share`).
+        let items: Vec<FlexItem> = (0..n)
+            .map(|i| FlexItem {
+                flex: if visible[i] {
+                    self.flex_factors[i]
+                } else {
+                    0.0
+                },
+                min: self.children[i].min_size().width,
+                max: self.children[i].max_size().width,
+            })
+            .collect();
+        share_flex_space(&items, &mut content_widths, remaining);
 
         // -------------------------------------------------------------------
         // Step 3: place children left-to-right with cross-axis anchoring.

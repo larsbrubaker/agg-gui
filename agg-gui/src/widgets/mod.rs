@@ -32,6 +32,7 @@ pub mod container;
 pub mod drag_value;
 pub mod flex;
 pub mod flex_row;
+mod flex_share;
 pub mod hyperlink;
 pub mod image_view;
 pub mod inspector;

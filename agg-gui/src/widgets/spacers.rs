@@ -101,8 +101,14 @@ impl Widget for Spacer {
         self.base.max_size
     }
 
+    /// Fills what it is given, within its own min / max size — so a spacer
+    /// capped at zero height (a horizontal-only filler) stays zero tall.
     fn layout(&mut self, available: Size) -> Size {
-        available
+        let (min, max) = (self.base.min_size, self.base.max_size);
+        Size::new(
+            available.width.min(max.width).max(min.width),
+            available.height.min(max.height).max(min.height),
+        )
     }
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
