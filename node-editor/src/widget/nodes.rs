@@ -33,7 +33,7 @@ use agg_gui::{
     Color, DrawCtx, Event, EventResult, HAnchor, Insets, Rect, Size, VAnchor, Widget, WidgetBase,
 };
 
-use crate::draw::{NodeLayoutInfo, NodeRow, SocketSide, NODE_RADIUS, SOCKET_RADIUS, TITLE_HEIGHT};
+use crate::draw::{NodeLayoutInfo, NodeRow, SocketSide, NODE_RADIUS, TITLE_HEIGHT};
 use crate::model::NodeId;
 
 pub(super) const ROW_PADDING_X: f64 = 6.0;
@@ -219,7 +219,7 @@ impl Widget for NodeWidget {
     /// shadow halo. Without this override the default clip rect is the
     /// node body, and the outer half of each socket dot gets clipped.
     fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
-        let r = SOCKET_RADIUS * self.ctx.scale;
+        let r = super::presentation::socket_reach(self.ctx.scale);
         Some((-r, 0.0, self.bounds.width + 2.0 * r, self.bounds.height))
     }
     fn properties(&self) -> Vec<(&'static str, String)> {
@@ -622,7 +622,7 @@ impl Widget for NodeRowWidget {
     /// outer half into the surrounding shadow halo without getting
     /// clipped at the row boundary.
     fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
-        let r = SOCKET_RADIUS * self.scale;
+        let r = super::presentation::socket_reach(self.scale);
         Some((-r, 0.0, self.bounds.width + 2.0 * r, self.bounds.height))
     }
     fn properties(&self) -> Vec<(&'static str, String)> {

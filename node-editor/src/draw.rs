@@ -68,6 +68,19 @@ pub struct SocketLayout {
     pub socket_type: SocketTypeId,
     /// Canvas-space center of the socket circle.
     pub center: [f64; 2],
+    /// How the socket is drawn, from [`crate::NodeGraphModel::socket_shape`].
+    pub shape: crate::socket_style::SocketShape,
+    /// Noodles landed on a multi-input socket
+    /// ([`crate::NodeGraphModel::socket_multi_input`]); zero otherwise.
+    /// Two or more stretch the socket into a pill.
+    pub landed: usize,
+}
+
+impl SocketLayout {
+    /// How far the socket's pill reaches past its centre above and below.
+    pub fn stretch(&self) -> f64 {
+        crate::socket_style::multi_input_stretch(self.landed)
+    }
 }
 
 /// One editable property hit-rect inside a node — either bound to an
@@ -354,6 +367,8 @@ where
                 display_label: s.label().to_string(),
                 socket_type: s.socket_type,
                 center: [top_left[0] + node_width, center_y],
+                shape: Default::default(),
+                landed: 0,
             }));
         }
         for s in &node.inputs {
@@ -367,6 +382,8 @@ where
                     display_label: s.label().to_string(),
                     socket_type: s.socket_type,
                     center: [top_left[0], center_y],
+                    shape: Default::default(),
+                    landed: 0,
                 },
                 editor: None,
                 height: ROW_HEIGHT,
@@ -429,6 +446,8 @@ where
             display_label: s.label().to_string(),
             socket_type: s.socket_type,
             center: [top_left[0] + node_width, center_y],
+            shape: Default::default(),
+            landed: 0,
         }));
         y_offset += rows[rows.len() - 1].height();
     }
@@ -444,6 +463,8 @@ where
                 display_label: s.label().to_string(),
                 socket_type: s.socket_type,
                 center: [top_left[0], center_y],
+                shape: Default::default(),
+                landed: 0,
             },
             editor: None,
             height: ROW_HEIGHT,
@@ -475,6 +496,8 @@ where
                 display_label: s.label().to_string(),
                 socket_type: s.socket_type,
                 center: [top_left[0], center_y],
+                shape: Default::default(),
+                landed: 0,
             };
             // Hide the inline editor when the socket is connected — the
             // upstream value wins. Static layout reserves the slot

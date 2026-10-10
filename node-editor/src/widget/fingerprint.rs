@@ -24,11 +24,14 @@ pub(super) fn hash_row<H: std::hash::Hasher>(row: &NodeRow, h: &mut H) {
             s.name.hash(h);
             s.display_label.hash(h);
             s.socket_type.0.hash(h);
+            s.shape.hash(h);
         }
         NodeRow::Input { socket, editor, .. } => {
             socket.name.hash(h);
             socket.display_label.hash(h);
             socket.socket_type.0.hash(h);
+            socket.shape.hash(h);
+            socket.landed.hash(h);
             if let Some(e) = editor {
                 hash_prop_layout(e, h);
             }

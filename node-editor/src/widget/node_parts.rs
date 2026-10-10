@@ -13,6 +13,7 @@ use agg_gui::{DrawCtx, Event, EventResult, Rect, Size, Widget, WidgetBase};
 
 use super::nodes::{LABEL_FONT_SIZE, ROW_PADDING_X};
 use crate::draw::{SocketLayout, SocketSide, SOCKET_RADIUS};
+use crate::socket_style::{draw_socket, SocketPaint};
 
 pub use super::node_paint_context::NodePaintContext;
 
@@ -96,22 +97,23 @@ impl Widget for SocketDotWidget {
         Size::new(self.bounds.width, self.bounds.height)
     }
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        // The widget is a 2R x 2R square; draw the dot at its centre in
-        // local coords.  `bounds.width` is exactly 2*SOCKET_RADIUS so
-        // we can recover the radius without referencing the constant.
-        let r = self.bounds.width * 0.5;
-        let cx = r;
+        // The widget is a 2R x 2R square (R = SOCKET_RADIUS at the canvas
+        // zoom); draw at its centre in canvas units scaled by the zoom, as
+        // the `socket_style` helpers work in unscaled canvas units.
+        let cx = self.bounds.width * 0.5;
         let cy = self.bounds.height * 0.5;
-        let fill = (self.ctx.socket_colors)(self.socket.socket_type);
-        ctx.set_fill_color(fill);
-        ctx.begin_path();
-        ctx.circle(cx, cy, r);
-        ctx.fill();
-        ctx.set_stroke_color(self.ctx.palette.node_border);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.circle(cx, cy, r);
-        ctx.stroke();
+        let paint = SocketPaint {
+            shape: self.socket.shape,
+            color: (self.ctx.socket_colors)(self.socket.socket_type),
+            stretch: self.socket.stretch(),
+            style: self.ctx.noodle_style,
+            border: self.ctx.palette.node_border,
+        };
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(self.ctx.scale, self.ctx.scale);
+        draw_socket(ctx, [0.0, 0.0], &paint);
+        ctx.restore();
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored

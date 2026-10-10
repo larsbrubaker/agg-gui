@@ -27,6 +27,9 @@ pub struct NodePaintContext {
     /// translate composes additively in screen-space and doesn't
     /// respect a parent's scale (the existing nested-translate limit).
     pub scale: f64,
+    /// The editor's noodle style, which also decides how sockets are
+    /// outlined (see [`crate::socket_style::draw_socket`]).
+    pub noodle_style: crate::socket_style::NoodleStyle,
 }
 
 impl NodePaintContext {
@@ -87,6 +90,7 @@ impl NodePaintContext {
             socket_colors,
             title_colors,
             scale: 1.0,
+            noodle_style: Default::default(),
         }
     }
 }

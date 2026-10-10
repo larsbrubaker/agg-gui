@@ -42,6 +42,11 @@ pub mod draw_immediate;
 mod draw_tests;
 pub mod model;
 mod palette;
+pub mod socket_style;
+#[cfg(test)]
+mod socket_style_tests;
+#[cfg(test)]
+mod test_recorder;
 pub mod widget;
 
 pub use draw::{CanvasPalette, SocketSide};
@@ -50,6 +55,7 @@ pub use model::{
     BadgeSeverity, EditorHint, NodeGraphModel, NodeId, NodeTypeView, NodeView, NoodleResult,
     NoodleView, PropertyValue, PropertyView, SocketTypeId, SocketView,
 };
+pub use socket_style::{NoodleStyle, SocketShape};
 pub use widget::{
     HostedCard, HostedNodeBody, InteractionMode, NodeBodyFactory, NodeEditor, NodeEditorCommand,
     NodeEditorHandle, SharedModel, SocketAnchor, SocketAnchorFn, MIN_HOSTED_CARD_WIDTH,

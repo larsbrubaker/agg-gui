@@ -95,6 +95,13 @@ where
     }
 }
 
+/// What one socket of a hosted card looks like, read from the model.
+struct SocketLook {
+    color: agg_gui::Color,
+    shape: crate::socket_style::SocketShape,
+    landed: usize,
+}
+
 /// Canvas-space geometry of one hosted card, captured by `layout()` and
 /// read by `snapshot_layouts()` for hit-testing, noodles and snapping.
 #[derive(Clone, Debug, PartialEq)]
@@ -231,18 +238,30 @@ impl NodeEditor {
         let epoch = model.body_epoch();
         let ext_sel = model.primary_selection();
         let palette = CanvasPalette::from_visuals(&agg_gui::current_visuals());
-        let looks: Vec<(f64, agg_gui::Color, Vec<agg_gui::Color>)> = nodes
+        let noodles = model.noodles();
+        let looks: Vec<(f64, agg_gui::Color, Vec<SocketLook>)> = nodes
             .iter()
             .map(|n| {
                 let width = model.node_width(n.id).unwrap_or(NODE_WIDTH);
                 let title = model.category_color(&n.category, palette.node_title_fallback);
-                let colors = n
+                // Same order as `HostedCard::layout_card`'s sockets.
+                let sockets = n
                     .outputs
                     .iter()
-                    .chain(n.inputs.iter())
-                    .map(|s| model.socket_color(s.socket_type))
+                    .map(|s| (s, SocketSide::Output))
+                    .chain(n.inputs.iter().map(|s| (s, SocketSide::Input)))
+                    .map(|(s, side)| SocketLook {
+                        color: model.socket_color(s.socket_type),
+                        shape: model.socket_shape(n.id, side, &s.name, s.socket_type),
+                        landed: match side {
+                            SocketSide::Input => {
+                                super::presentation::landed_on(&*model, &noodles, n.id, &s.name)
+                            }
+                            SocketSide::Output => 0,
+                        },
+                    })
                     .collect();
-                (width, title, colors)
+                (width, title, sockets)
             })
             .collect();
         drop(model);
@@ -282,10 +301,12 @@ impl NodeEditor {
                 .sockets
                 .iter()
                 .zip(colors)
-                .map(|((_, side, y), color)| CardSocket {
+                .map(|((_, side, y), look)| CardSocket {
                     side: *side,
                     from_top: *y,
-                    color,
+                    color: look.color,
+                    shape: look.shape,
+                    stretch: crate::socket_style::multi_input_stretch(look.landed),
                 })
                 .collect();
             card.chrome = CardChrome {
@@ -297,6 +318,7 @@ impl NodeEditor {
                 selected,
                 badge: n.badge().map(|(s, _)| (s, palette.badge_color(s))),
                 sockets,
+                style: self.presentation.noodle_style,
             };
             card.set_bounds(Rect::new(
                 n.position[0],
@@ -401,6 +423,8 @@ fn hosted_layout(n: &NodeView, g: &CardGeom) -> NodeLayoutInfo {
                 display_label: s.label().to_string(),
                 socket_type: s.socket_type,
                 center,
+                shape: Default::default(),
+                landed: 0,
             }));
         } else if let Some(s) = n.inputs.iter().find(|s| &s.name == name) {
             rows.push(NodeRow::Input {
@@ -410,6 +434,8 @@ fn hosted_layout(n: &NodeView, g: &CardGeom) -> NodeLayoutInfo {
                     display_label: s.label().to_string(),
                     socket_type: s.socket_type,
                     center,
+                    shape: Default::default(),
+                    landed: 0,
                 },
                 editor: None,
                 height: ROW_HEIGHT,

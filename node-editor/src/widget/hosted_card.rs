@@ -24,8 +24,7 @@ use agg_gui::widgets::window::{
 use agg_gui::{Color, DrawCtx, Event, EventResult, Point, Rect, Size, TransAffine, Widget};
 
 use crate::draw::{
-    SocketSide, NODE_BOTTOM_PAD, NODE_RADIUS, ROW_HEIGHT, SOCKET_HIT_RADIUS, SOCKET_RADIUS,
-    TITLE_HEIGHT,
+    SocketSide, NODE_BOTTOM_PAD, NODE_RADIUS, ROW_HEIGHT, SOCKET_HIT_RADIUS, TITLE_HEIGHT,
 };
 use crate::model::{BadgeSeverity, NodeId, NodeView};
 
@@ -167,6 +166,9 @@ pub(crate) struct CardSocket {
     /// Distance from the card's top edge.
     pub from_top: f64,
     pub color: Color,
+    pub shape: crate::socket_style::SocketShape,
+    /// [`crate::socket_style::multi_input_stretch`] of a multi-input.
+    pub stretch: f64,
 }
 
 /// What the card's chrome shows, refreshed by every editor layout.
@@ -180,6 +182,7 @@ pub(crate) struct CardChrome {
     pub selected: bool,
     pub badge: Option<(BadgeSeverity, Color)>,
     pub sockets: Vec<CardSocket>,
+    pub style: crate::socket_style::NoodleStyle,
 }
 
 /// A hosted card: chrome and sockets around the host's body widget.
@@ -207,6 +210,7 @@ impl HostedCard {
                 selected: false,
                 badge: None,
                 sockets: Vec::new(),
+                style: Default::default(),
             },
         }
     }
@@ -360,15 +364,14 @@ impl Widget for HostedCard {
                 SocketSide::Output => w,
             };
             let cy = h - s.from_top;
-            ctx.set_fill_color(s.color);
-            ctx.begin_path();
-            ctx.circle(cx, cy, SOCKET_RADIUS);
-            ctx.fill();
-            ctx.set_stroke_color(self.chrome.border);
-            ctx.set_line_width(1.0);
-            ctx.begin_path();
-            ctx.circle(cx, cy, SOCKET_RADIUS);
-            ctx.stroke();
+            let paint = crate::socket_style::SocketPaint {
+                shape: s.shape,
+                color: s.color,
+                stretch: s.stretch,
+                style: self.chrome.style,
+                border: self.chrome.border,
+            };
+            crate::socket_style::draw_socket(ctx, [cx, cy], &paint);
         }
     }
 

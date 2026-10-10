@@ -15,6 +15,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   selects it without raising it, and where two cards overlap the one later in
   model order stays on top and takes the press. On by default (a pressed card
   is raised, as before).
+- Socket and noodle presentation, all opt-in (the existing look stays the
+  default). New `NodeGraphModel` methods, each with a default:
+  `socket_shape(node, side, socket, ty) -> SocketShape` (`Circle`, `Bar`,
+  `Diamond`, `DiamondDot`), `socket_multi_input(node, socket)` (two or more
+  noodles stretch the socket into a pill and land 10 units apart in
+  `noodles()` order, the first highest), `noodle_dashed(&NoodleView)`
+  (8 on, 8 off), `noodle_color(&NoodleView) -> Option<Color>` (overrides the
+  source socket's colour) and `socket_hover_text(node, side, socket)`.
+  `NodeEditor::with_noodle_style(NoodleStyle::NodeDesigner)` draws
+  NodeDesigner's noodles (a 3-unit core over a 7-unit `#444` edge with a
+  5-unit dot at the middle) and sockets (radius 6 with a 1-unit `#444`
+  outline round every shape) and rings the drop target in the theme's text
+  colour; `with_socket_hover(true)` rings the socket under the pointer and
+  names it with `socket_hover_text` (`hovered_socket()` reports it). The
+  drawing helpers are public in `socket_style` (`draw_socket`,
+  `draw_socket_ring`, `draw_noodle`, `multi_input_stretch`,
+  `landing_offset`), and `SocketLayout` carries `shape` and `landed`.
+  Shapes reach the widget-tree cards, hosted cards and `draw_node`.
 - A press on a widget inside a hosted card body (a slider, a text field)
   selects and raises the card, as a press anywhere in a MatterCAD node card
   does, while the widget still gets the press. The editor does this in its

@@ -29,6 +29,7 @@ pub mod nodes;
 mod overlay_editors;
 mod paint;
 mod popup;
+mod presentation;
 mod snap_guides;
 mod value_editor_widget;
 pub mod view_nav;
@@ -67,6 +68,8 @@ mod tests_inline_editor;
 mod tests_noodle;
 #[cfg(test)]
 mod tests_overlay;
+#[cfg(test)]
+mod tests_presentation;
 #[cfg(test)]
 mod tests_value;
 #[cfg(test)]
@@ -285,6 +288,8 @@ pub struct NodeEditor {
     pub(crate) command_handle: Option<NodeEditorHandle>,
     /// Hosted-card mode (see [`hosted`]); inert without a body factory.
     pub(crate) hosted: hosted::HostedState,
+    /// Socket shapes, noodle style and socket hover (see [`presentation`]).
+    pub(crate) presentation: presentation::PresentationState,
 }
 
 impl NodeEditor {
@@ -323,6 +328,7 @@ impl NodeEditor {
             last_abs_origin: Cell::new((0.0, 0.0)),
             command_handle: None,
             hosted: hosted::HostedState::default(),
+            presentation: presentation::PresentationState::default(),
         }
     }
 
@@ -437,6 +443,8 @@ impl NodeEditor {
             })
             .collect();
         self.order_layouts(&nodes, &mut layouts, ext_sel);
+        let model = self.model.lock().unwrap();
+        presentation::apply_socket_styles(&*model, &noodles, &mut layouts);
         layouts
     }
 
@@ -485,7 +493,8 @@ impl NodeEditor {
         let visuals = agg_gui::current_visuals();
         let palette = CanvasPalette::from_visuals(&visuals);
         let model = self.model.lock().unwrap();
-        let node_ctx = NodePaintContext::from_model(palette, &*model);
+        let mut node_ctx = NodePaintContext::from_model(palette, &*model);
+        node_ctx.noodle_style = self.presentation.noodle_style;
         drop(model);
 
         let scale = self.canvas_scale;
@@ -727,6 +736,10 @@ impl Widget for NodeEditor {
                 modifiers,
             } => self.on_mouse_up(*pos, *button, *modifiers),
             Event::MouseMove { pos } => self.on_mouse_move(*pos),
+            Event::MouseLeave => {
+                self.set_hovered_socket(None);
+                EventResult::Ignored
+            }
             Event::MouseWheel {
                 pos,
                 delta_y,

@@ -312,6 +312,54 @@ pub trait NodeGraphModel {
         out_ty == in_ty
     }
 
+    // ── Socket and noodle presentation (see `crate::socket_style`) ──────
+
+    /// How `socket` on `node` is drawn. Default: a circle. MatterCAD
+    /// answers a bar for a single value, a diamond for a field output and
+    /// a diamond with a dot for a field input.
+    fn socket_shape(
+        &self,
+        _node: NodeId,
+        _side: crate::draw::SocketSide,
+        _socket: &str,
+        _ty: SocketTypeId,
+    ) -> crate::socket_style::SocketShape {
+        crate::socket_style::SocketShape::Circle
+    }
+
+    /// Whether input `socket` on `node` takes several noodles. A
+    /// multi-input with more than one noodle is drawn as a pill along the
+    /// node's edge, each noodle landing at its own point in the order
+    /// [`Self::noodles`] lists them (the first highest). Default: `false`.
+    fn socket_multi_input(&self, _node: NodeId, _socket: &str) -> bool {
+        false
+    }
+
+    /// Whether `noodle` is drawn dashed (8 on, 8 off). MatterCAD dashes a
+    /// noodle into a field input. Default: `false`.
+    fn noodle_dashed(&self, _noodle: &NoodleView) -> bool {
+        false
+    }
+
+    /// The colour of `noodle`, overriding its source socket's
+    /// [`Self::socket_color`] (MatterCAD: an "any" input draws as the type
+    /// that flows into it). Default: `None`, the source socket's colour.
+    fn noodle_color(&self, _noodle: &NoodleView) -> Option<Color> {
+        None
+    }
+
+    /// The text named beside a hovered socket when the editor has
+    /// `with_socket_hover(true)`; `None` (the default) rings the socket
+    /// without a label. MatterCAD shows "Name (type)".
+    fn socket_hover_text(
+        &self,
+        _node: NodeId,
+        _side: crate::draw::SocketSide,
+        _socket: &str,
+    ) -> Option<String> {
+        None
+    }
+
     // ── Mutation ────────────────────────────────────────────────────────
 
     /// Move a node. `pos` is canvas-space top-left.

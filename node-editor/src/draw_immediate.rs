@@ -169,16 +169,14 @@ fn draw_socket<M: NodeGraphModel + ?Sized>(
     palette: &CanvasPalette,
     model: &M,
 ) {
-    let c = model.socket_color(socket.socket_type);
-    ctx.set_fill_color(c);
-    ctx.begin_path();
-    ctx.circle(socket.center[0], socket.center[1], SOCKET_RADIUS);
-    ctx.fill();
-    ctx.set_stroke_color(palette.node_border);
-    ctx.set_line_width(1.0);
-    ctx.begin_path();
-    ctx.circle(socket.center[0], socket.center[1], SOCKET_RADIUS);
-    ctx.stroke();
+    let paint = crate::socket_style::SocketPaint {
+        shape: socket.shape,
+        color: model.socket_color(socket.socket_type),
+        stretch: socket.stretch(),
+        style: crate::socket_style::NoodleStyle::Simple,
+        border: palette.node_border,
+    };
+    crate::socket_style::draw_socket(ctx, socket.center, &paint);
 }
 
 fn draw_value_editor(ctx: &mut dyn DrawCtx, prop: &PropLayout, palette: &CanvasPalette) {

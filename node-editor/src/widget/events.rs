@@ -507,6 +507,9 @@ impl NodeEditor {
         if result.is_consumed() {
             agg_gui::animation::request_draw();
         }
+        if matches!(self.interaction, CanvasState::Idle) {
+            self.update_socket_hover(&layouts_snapshot, canvas_pos);
+        }
         result
     }
 

@@ -11,9 +11,11 @@
 use agg_gui::widget::{logical_root_transform, paint_subtree};
 use agg_gui::{DrawCtx, Size};
 
-use crate::draw::{draw_bezier_connection, draw_canvas_grid, CanvasPalette};
+use crate::draw::{draw_canvas_grid, CanvasPalette};
+use crate::socket_style::{draw_noodle, draw_socket_ring, NoodleStyle};
 
 use super::hover;
+use super::presentation;
 use super::snap_guides::paint_snap_guides_canvas;
 use super::{CanvasState, NodeEditor, SocketSide};
 
@@ -102,10 +104,14 @@ impl NodeEditor {
         let layouts = self.snapshot_layouts();
         let model = self.model.lock().unwrap();
         let noodles = model.noodles();
+        let style = self.presentation.noodle_style;
         for noodle in &noodles {
             if let Some((f, t)) = hover::resolve_noodle_endpoints(&layouts, noodle) {
-                let col = model.socket_color(f.socket_type);
-                draw_bezier_connection(ctx, f.center, t.center, col, 2.0);
+                let col = model
+                    .noodle_color(noodle)
+                    .unwrap_or_else(|| model.socket_color(f.socket_type));
+                let end = presentation::landing_point(&noodles, noodle, t);
+                draw_noodle(ctx, f.center, end, col, model.noodle_dashed(noodle), style);
             }
         }
 
@@ -147,8 +153,12 @@ impl NodeEditor {
                 SocketSide::Output => (*from_canvas, endpoint),
                 SocketSide::Input => (endpoint, *from_canvas),
             };
-            draw_bezier_connection(ctx, line_from, line_to, col, 2.0);
-            if let Some(s) = &hover {
+            draw_noodle(ctx, line_from, line_to, col, false, style);
+            if let (NoodleStyle::NodeDesigner, Some(s)) = (style, &hover) {
+                // NodeDesigner's ring, in the theme's text colour.
+                let paint = self.socket_paint(s, self.palette.label_text);
+                draw_socket_ring(ctx, s.center, &paint, self.palette.label_text);
+            } else if let Some(s) = &hover {
                 // Halo ring at the prospective drop target.
                 let halo = model.socket_color(s.socket_type);
                 ctx.set_stroke_color(halo);
@@ -177,6 +187,9 @@ impl NodeEditor {
     }
 
     pub(super) fn finish_paint_canvas(&mut self, ctx: &mut dyn DrawCtx) {
+        // The hovered socket's ring and name, over the cards.
+        self.paint_socket_hover(ctx);
+
         // Popup paints in widget-local space, on top of nodes & edges
         // but inside the canvas clip.
         if self.popup.is_open() {
