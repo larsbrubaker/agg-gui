@@ -179,9 +179,9 @@ fn test_lcd_gfx_ctx_circle_darkens_center_not_corner() {
 /// Rect (0,0)–(20,20) with r=8: the BL corner arc has centre (8,8)
 /// and radius 8, so any pixel outside that arc (distance from (8,8)
 /// > 8) but inside the bbox is in the "rounded-off" region.  We
-/// pick (1,1) which is ~9.9 px from (8,8) — well past the arc edge,
-/// so AA leak from the LCD filter (which has ±2 subpixel = ~0.67
-/// pixel reach) cannot reach it.
+/// >    pick (1,1) which is ~9.9 px from (8,8) — well past the arc edge,
+/// >    so AA leak from the LCD filter (which has ±2 subpixel = ~0.67
+/// >    pixel reach) cannot reach it.
 #[test]
 fn test_lcd_gfx_ctx_rounded_rect_clips_corners() {
     let mut buf = LcdBuffer::new(20, 20);
@@ -295,7 +295,7 @@ fn test_lcd_gfx_ctx_image_blit_alpha_blends_with_destination() {
         ctx.clear(Color::white());
         ctx.draw_image_rgba(&img, 1, 1, 1.0, 1.0, 1.0, 1.0);
     }
-    let i = (1 * 4 + 1) * 3;
+    let i = (4 + 1) * 3;
     let (r, g, b) = (
         buf.color_plane()[i],
         buf.color_plane()[i + 1],

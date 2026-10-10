@@ -49,17 +49,14 @@ pub(super) fn paint_subtree_unified_backbuffer(
             paint_subtree_gl_backbuffer(widget, ctx, include_overlay, spec);
             true
         }
-        BackbufferKind::SoftwareRgba | BackbufferKind::SoftwareLcd => {
+        BackbufferKind::SoftwareRgba | BackbufferKind::SoftwareLcd
             // Existing CPU widgets still use `backbuffer_cache_mut`; the
             // unified spec provides the migration point without changing their
             // current behavior.
-            if widget.backbuffer_cache_mut().is_some() {
+            if widget.backbuffer_cache_mut().is_some() => {
                 paint_subtree_backbuffered(widget, ctx);
                 true
-            } else {
-                false
             }
-        }
         _ => false,
     }
 }
@@ -308,7 +305,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                 && cache
                     .lcd_buffer
                     .as_ref()
-                    .map_or(false, |b| b.width() == w_phys && b.height() == h_phys)
+                    .is_some_and(|b| b.width() == w_phys && b.height() == h_phys)
         };
         {
             widget.backbuffer_cache_mut().unwrap().partial_allowed = partial_reuse;
@@ -332,14 +329,11 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
         let plane_len = (w_phys as usize) * (h_phys as usize) * 3;
         let strip_rows: Option<(f64, f64)> = if partial_reuse {
             let cache = widget.backbuffer_cache_mut().unwrap();
-            let planes_ok = cache
-                .pixels
-                .as_ref()
-                .map_or(false, |p| p.len() == plane_len)
+            let planes_ok = cache.pixels.as_ref().is_some_and(|p| p.len() == plane_len)
                 && cache
                     .lcd_alpha
                     .as_ref()
-                    .map_or(false, |a| a.len() == plane_len);
+                    .is_some_and(|a| a.len() == plane_len);
             if planes_ok {
                 band.and_then(|b| b.dirty_strip_y)
             } else {

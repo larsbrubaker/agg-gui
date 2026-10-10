@@ -512,8 +512,8 @@ mod tests {
             labels[0].contains("Demos"),
             "Demos must be the leftmost menu, got {labels:?}"
         );
-        assert!(labels.iter().any(|l| *l == "View"));
-        assert!(labels.iter().any(|l| *l == "Help"));
+        assert!(labels.contains(&"View"));
+        assert!(labels.contains(&"Help"));
     }
 
     #[test]

@@ -320,7 +320,7 @@ fn test_lcd_buffer_composite_buffer_opaque_pixel_replaces_dst() {
     // src: pixel (1,1) painted opaque red, rest transparent.
     let mut src = LcdBuffer::new(3, 3);
     // Manually set pixel (1,1) premultiplied red + full alpha on all three channels.
-    let i = (1 * 3 + 1) * 3;
+    let i = (3 + 1) * 3;
     src.color_plane_mut()[i] = 255; // R premult = 1.0 * 1.0 = 1.0 → 255
     src.color_plane_mut()[i + 1] = 0;
     src.color_plane_mut()[i + 2] = 0;
@@ -674,10 +674,9 @@ fn collapsed_backbuffer_luminance_matches_per_channel_composite() {
     for (arm, text, dsts) in arms {
         let (color, alpha, rgba) = collapse_probe(text);
 
-        for x in 0..PROBE_COVS.len() {
+        for (x, &cov) in PROBE_COVS.iter().enumerate() {
             let pi = x * 3;
             let qi = x * 4;
-            let cov = PROBE_COVS[x];
             let a_byte = rgba[qi + 3];
             let af = a_byte as f64 / 255.0;
 

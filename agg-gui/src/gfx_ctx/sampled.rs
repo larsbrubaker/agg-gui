@@ -1,5 +1,7 @@
 use super::*;
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rasterize_linear_gradient_fill(
     fb: &mut Framebuffer,
     path: &mut PathStorage,
@@ -22,6 +24,8 @@ pub(crate) fn rasterize_linear_gradient_fill(
     );
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rasterize_radial_gradient_fill(
     fb: &mut Framebuffer,
     path: &mut PathStorage,
@@ -44,6 +48,8 @@ pub(crate) fn rasterize_radial_gradient_fill(
     );
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rasterize_pattern_fill(
     fb: &mut Framebuffer,
     path: &mut PathStorage,
@@ -66,6 +72,8 @@ pub(crate) fn rasterize_pattern_fill(
     );
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn rasterize_sampled_fill<F>(
     fb: &mut Framebuffer,
     path: &mut PathStorage,

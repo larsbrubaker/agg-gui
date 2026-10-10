@@ -165,7 +165,7 @@ thread_local! {
     static FONT_CACHE: RefCell<HashMap<String, Arc<Font>>> = RefCell::new(HashMap::new());
     static FONT_BYTES_CACHE: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
     static PENDING_FONT_REQUESTS: RefCell<VecDeque<FontLoadRequest>> =
-        RefCell::new(VecDeque::new());
+        const { RefCell::new(VecDeque::new()) };
     static FONT_CACHE_EPOCH: RefCell<u64> = const { RefCell::new(0) };
 }
 

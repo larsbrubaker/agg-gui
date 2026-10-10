@@ -701,7 +701,7 @@ fn combo_row(
     if let Some(tips) = tooltips {
         combo = combo.with_item_tooltips(tips);
     }
-    let caption_w = (caption.len() as f64 * 6.7).max(CAPTION_W).min(280.0);
+    let caption_w = (caption.len() as f64 * 6.7).clamp(CAPTION_W, 280.0);
     Box::new(
         FlexRow::new()
             .with_gap(8.0)

@@ -94,10 +94,6 @@ impl ResizeTestWindow {
         self.tight_fit = true;
         self
     }
-    fn with_floor_fit(mut self) -> Self {
-        self.floor_fit = true;
-        self
-    }
 }
 
 /// Helper: a small "(source code)" hyperlink that opens the test

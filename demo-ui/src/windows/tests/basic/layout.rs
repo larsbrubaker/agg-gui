@@ -152,7 +152,7 @@ fn build_placed_widget(
         _ => Box::new(
             Button::new("Example button", Arc::clone(font))
                 .with_font_size(13.0)
-                .on_click(|| agg_gui::animation::request_draw()),
+                .on_click(agg_gui::animation::request_draw),
         ),
     }
 }

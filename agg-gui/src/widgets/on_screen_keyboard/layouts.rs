@@ -401,47 +401,48 @@ fn symbols_shift_layer() -> Layout {
 fn numpad_layer() -> Layout {
     let digit = |c: char| wide_key(c, 2.0);
 
-    let mut rows: Vec<Vec<KeySpec>> = Vec::with_capacity(4);
-    rows.push(vec![
-        util_char('+', 1.5),
-        digit('1'),
-        digit('2'),
-        digit('3'),
-        util_char('%', 1.5),
-    ]);
-    rows.push(vec![
-        util_char('-', 1.5),
-        digit('4'),
-        digit('5'),
-        digit('6'),
-        KeySpec {
-            width_units: 1.5,
-            cap: KeyCap::Glyph(KeyGlyph::Space),
-            action: KeyAction::Space,
-            kind: KeyKind::Utility,
-            pill: false,
-        },
-    ]);
-    rows.push(vec![
-        util_char('*', 1.5),
-        digit('7'),
-        digit('8'),
-        digit('9'),
-        backspace(1.5),
-    ]);
-    rows.push(vec![
-        mode_pill("ABC", Layer::Letters),
-        util_char(',', 1.0),
-        KeySpec {
-            cap: KeyCap::Text("!?#".to_string()),
-            action: KeyAction::Switch(Layer::Symbols),
-            ..key(' ')
-        },
-        wide_key('0', 2.0),
-        key('='),
-        util_char('.', 1.0),
-        enter_key(),
-    ]);
+    let rows: Vec<Vec<KeySpec>> = vec![
+        vec![
+            util_char('+', 1.5),
+            digit('1'),
+            digit('2'),
+            digit('3'),
+            util_char('%', 1.5),
+        ],
+        vec![
+            util_char('-', 1.5),
+            digit('4'),
+            digit('5'),
+            digit('6'),
+            KeySpec {
+                width_units: 1.5,
+                cap: KeyCap::Glyph(KeyGlyph::Space),
+                action: KeyAction::Space,
+                kind: KeyKind::Utility,
+                pill: false,
+            },
+        ],
+        vec![
+            util_char('*', 1.5),
+            digit('7'),
+            digit('8'),
+            digit('9'),
+            backspace(1.5),
+        ],
+        vec![
+            mode_pill("ABC", Layer::Letters),
+            util_char(',', 1.0),
+            KeySpec {
+                cap: KeyCap::Text("!?#".to_string()),
+                action: KeyAction::Switch(Layer::Symbols),
+                ..key(' ')
+            },
+            wide_key('0', 2.0),
+            key('='),
+            util_char('.', 1.0),
+            enter_key(),
+        ],
+    ];
 
     Layout { rows }
 }

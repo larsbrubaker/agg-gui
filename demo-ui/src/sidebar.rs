@@ -7,7 +7,7 @@
 //!   4. Separator
 //!   5. Search field (filters the groups below by substring)
 //!   6. Scrollable list of `CollapsingHeader` groups:
-//!        Widgets · Layout · Graphics · Interaction · Tests · Tools
+//!      Widgets · Layout · Graphics · Interaction · Tests · Tools
 //!      Each entry is a [`FilterableItem`] that hides itself when the search
 //!      text does not match its label.
 //!   7. Separator

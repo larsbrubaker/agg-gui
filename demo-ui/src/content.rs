@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -10,11 +10,13 @@ use crate::windows;
 
 // ── Demo content dispatcher ────────────────────────────────────────────────────
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_demo_content(
     title: &str,
     font: Arc<Font>,
     screenshot_request: Rc<Cell<bool>>,
-    screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
+    screenshot_image: agg_gui::screenshot::SharedArcRgbaImage,
     screenshot_capturing: Rc<Cell<bool>>,
     screenshot_available: Rc<Cell<bool>>,
     screenshot_save_pending: Rc<Cell<bool>>,

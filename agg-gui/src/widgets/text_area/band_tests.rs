@@ -3,10 +3,12 @@
 //! through the production `paint_subtree` path.
 //!
 //! They pin the behaviours the band + strip model promise:
+//!
 //!   * scrolling *within* the band re-blits (no re-raster);
 //!   * scrolling *out of* the band re-anchors and re-rasters exactly once;
 //!   * an in-place edit re-rasters ONLY the changed line strip;
 //!   * a strip re-raster reproduces a full re-raster pixel-for-pixel;
+//!
 //! plus the mandatory guard-rail: the over-scan margins are clipped to the
 //! widget bounds, so neither the band blit nor a strip re-raster ever touches
 //! an adjacent sibling.

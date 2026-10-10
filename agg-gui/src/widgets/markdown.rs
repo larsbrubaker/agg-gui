@@ -1,4 +1,4 @@
-﻿//! `MarkdownView` — render a Markdown string as formatted text with images.
+//! `MarkdownView` — render a Markdown string as formatted text with images.
 //!
 //! Uses `pulldown-cmark` for parsing, then converts the event stream into a
 //! flat list of styled lines, inline image runs, and image placeholders. Word-wrapping is
@@ -197,6 +197,12 @@ enum ImageState {
 
 // ── MarkdownView widget ────────────────────────────────────────────────────────
 
+/// Resolves an image URL to decoded RGBA `(pixels, width, height)`.
+type ImageProvider = Box<dyn Fn(&str) -> Option<(Vec<u8>, u32, u32)>>;
+
+/// A callback handed a link or image URL.
+type UrlCallback = Box<dyn FnMut(&str)>;
+
 /// A widget that renders a Markdown string as formatted, word-wrapped text
 /// with optional image support.
 pub struct MarkdownView {
@@ -211,7 +217,7 @@ pub struct MarkdownView {
 
     /// Optional image decoder.  Receives a URL/path, returns RGBA8 pixel data
     /// (top-row first) + (width, height), or `None` if unavailable.
-    image_provider: Option<Box<dyn Fn(&str) -> Option<(Vec<u8>, u32, u32)>>>,
+    image_provider: Option<ImageProvider>,
 
     /// Cached image data, indexed by `LineRun::Image::cache_idx`.
     image_cache: Vec<ImageEntry>,
@@ -220,8 +226,8 @@ pub struct MarkdownView {
     items: Vec<LayoutItem>,
     /// Total content height from the last layout pass.
     content_h: f64,
-    on_link_click: Option<Box<dyn FnMut(&str)>>,
-    on_image_open: Option<Box<dyn FnMut(&str)>>,
+    on_link_click: Option<UrlCallback>,
+    on_image_open: Option<UrlCallback>,
     block_scrolls: Vec<BlockScroll>,
     focused: bool,
     selecting_drag: bool,
@@ -399,10 +405,8 @@ impl MarkdownView {
                             width,
                             height,
                             ..
-                        } => {
-                            if point_in_rect(pos, tx + x, y + y_offset, *width, *height) {
-                                return Some(url);
-                            }
+                        } if point_in_rect(pos, tx + x, y + y_offset, *width, *height) => {
+                            return Some(url);
                         }
                         _ => {}
                     }

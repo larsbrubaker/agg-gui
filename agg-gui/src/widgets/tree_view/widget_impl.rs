@@ -95,7 +95,7 @@ impl Widget for TreeView {
                 !self
                     .drag
                     .as_ref()
-                    .map_or(false, |d| d.live && d.node_idx == flat.node_idx)
+                    .is_some_and(|d| d.live && d.node_idx == flat.node_idx)
             })
             .collect();
         let new_sig = self.row_content_signature();
@@ -235,7 +235,7 @@ impl Widget for TreeView {
         // Drop indicator and ghost (drag feedback)
         let rows = flatten_visible(&self.nodes);
         if let Some(drop_target) = self.drop_target {
-            if self.drag.as_ref().map_or(false, |d| d.live) {
+            if self.drag.as_ref().is_some_and(|d| d.live) {
                 let rh = self.row_height;
                 let off = self.scroll_offset;
                 let ind = self.indent_width;

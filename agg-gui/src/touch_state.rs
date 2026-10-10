@@ -360,7 +360,7 @@ impl TouchState {
 // ---------------------------------------------------------------------------
 
 thread_local! {
-    static CURRENT: RefCell<Option<MultiTouchInfo>> = RefCell::new(None);
+    static CURRENT: RefCell<Option<MultiTouchInfo>> = const { RefCell::new(None) };
     /// Wall-clock time of the most recent touch lifecycle event
     /// (`Start` / `Move` / `End` / `Cancel`).  Set by `App`'s touch
     /// entry points.  Mouse events the touch shell synthesises arrive

@@ -443,6 +443,8 @@ impl BarGridWgpuRenderer {
     /// `pipelines` is the shared 2-D pipeline collection — used for the
     /// blit pass that copies the (resolved) bar-grid output into
     /// `target_view`.
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -550,7 +552,7 @@ impl BarGridWgpuRenderer {
             pass.set_vertex_buffer(0, self.vbo.slice(..));
             pass.set_vertex_buffer(1, self.instance_vbo.slice(..));
             pass.set_index_buffer(self.ibo.slice(..), wgpu::IndexFormat::Uint16);
-            let instances = (GRID_COLS * GRID_ROWS) as u32;
+            let instances = GRID_COLS * GRID_ROWS;
             pass.draw_indexed(0..36, 0, 0..instances);
         }
 
@@ -572,7 +574,7 @@ impl BarGridWgpuRenderer {
         // transparent pixels (where bars aren't covered) preserve the 2-D
         // content underneath.
         match self.ssaa_scale {
-            0 | 1 | 2 => fb.blit_to(
+            0..=2 => fb.blit_to(
                 device,
                 encoder,
                 target_view,

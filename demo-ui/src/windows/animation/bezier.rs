@@ -316,6 +316,55 @@ impl Widget for BezierCanvas {
     }
 }
 
+/// Build the Bézier Curve demo — the degree radio and instructions above the
+/// interactive canvas.
+pub fn bezier_curve(font: Arc<Font>) -> Box<dyn Widget> {
+    // Default degree is cubic (egui default `degree = 4`), i.e. radio index 1.
+    let degree_idx = Rc::new(Cell::new(1_usize));
+
+    let mut col = FlexColumn::new()
+        .with_gap(8.0)
+        .with_padding(8.0)
+        .with_panel_bg();
+
+    col.push(
+        Box::new(
+            RadioGroup::new(
+                vec!["Quadratic Bézier", "Cubic Bézier"],
+                degree_idx.get(),
+                Arc::clone(&font),
+            )
+            .with_font_size(13.0)
+            .with_selected_cell(Rc::clone(&degree_idx))
+            .on_change(|_| agg_gui::animation::request_draw()),
+        ),
+        0.0,
+    );
+
+    col.push(
+        Box::new(
+            Label::new("Move the points by dragging them.", Arc::clone(&font)).with_font_size(12.0),
+        ),
+        0.0,
+    );
+
+    col.push(
+        Box::new(
+            Label::new(
+                "Only convex curves can be accurately filled.",
+                Arc::clone(&font),
+            )
+            .with_font_size(10.0)
+            .with_wrap(true),
+        ),
+        0.0,
+    );
+
+    col.push(Box::new(BezierCanvas::new(Rc::clone(&degree_idx))), 1.0);
+
+    Box::new(col)
+}
+
 #[cfg(test)]
 mod bezier_tests {
     use super::*;
@@ -384,53 +433,4 @@ mod bezier_tests {
         assert!(bx0 <= 80.0 && bx1 >= 280.0);
         assert!(by0 <= 90.0 && by1 >= 90.0);
     }
-}
-
-/// Build the Bézier Curve demo — the degree radio and instructions above the
-/// interactive canvas.
-pub fn bezier_curve(font: Arc<Font>) -> Box<dyn Widget> {
-    // Default degree is cubic (egui default `degree = 4`), i.e. radio index 1.
-    let degree_idx = Rc::new(Cell::new(1_usize));
-
-    let mut col = FlexColumn::new()
-        .with_gap(8.0)
-        .with_padding(8.0)
-        .with_panel_bg();
-
-    col.push(
-        Box::new(
-            RadioGroup::new(
-                vec!["Quadratic Bézier", "Cubic Bézier"],
-                degree_idx.get(),
-                Arc::clone(&font),
-            )
-            .with_font_size(13.0)
-            .with_selected_cell(Rc::clone(&degree_idx))
-            .on_change(|_| agg_gui::animation::request_draw()),
-        ),
-        0.0,
-    );
-
-    col.push(
-        Box::new(
-            Label::new("Move the points by dragging them.", Arc::clone(&font)).with_font_size(12.0),
-        ),
-        0.0,
-    );
-
-    col.push(
-        Box::new(
-            Label::new(
-                "Only convex curves can be accurately filled.",
-                Arc::clone(&font),
-            )
-            .with_font_size(10.0)
-            .with_wrap(true),
-        ),
-        0.0,
-    );
-
-    col.push(Box::new(BezierCanvas::new(Rc::clone(&degree_idx))), 1.0);
-
-    Box::new(col)
 }

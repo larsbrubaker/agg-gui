@@ -31,7 +31,7 @@ use std::sync::Arc;
 /// in the schema lets headless callers (tests, serialization, future
 /// inspector ports) reason about the editor shape without depending
 /// on the rendered widget tree.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum EditorKind {
     /// Click-and-drag horizontally to edit a number. Default for
     /// `Number` properties.
@@ -48,6 +48,7 @@ pub enum EditorKind {
     Matrix,
     /// Read-only text display. Used when a property's value isn't
     /// directly editable on the node row (e.g. a derived value).
+    #[default]
     Display,
     /// Editable single-line string. MatterCAD's default `string`
     /// editor.
@@ -152,12 +153,6 @@ impl EditorKind {
             EditorKind::NumberDrag(a) | EditorKind::Slider(a) => Some(a),
             _ => None,
         }
-    }
-}
-
-impl Default for EditorKind {
-    fn default() -> Self {
-        EditorKind::Display
     }
 }
 
@@ -355,7 +350,7 @@ mod tests {
             .with_editor(EditorKind::slider_range(1.0, 400.0))
             .with_description("Width across.")
             .advanced();
-        assert_eq!(a.label.as_deref().map(|x| x.as_ref()), Some("Diameter"));
+        assert_eq!(a.label.as_deref(), Some("Diameter"));
         assert!(matches!(a.editor, EditorKind::Slider(_)));
         assert!(a
             .description

@@ -77,6 +77,8 @@ impl WgpuGfxCtx {
     /// uploads across frames; LRU-evict at [`TEX_CACHE_MAX`] entries.
     ///
     /// Sampler: linear (smooth scaling for non-1:1 blits).
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_image_rgba_slice_impl(
         &mut self,
         data: &[u8],
@@ -142,6 +144,8 @@ impl WgpuGfxCtx {
     /// Sampler: nearest (preserves crisp 1:1 backbuffers — the same rationale
     /// as the GL backend; LINEAR yields driver-dependent fuzz on integer-aligned
     /// labels because of sub-texel rounding differences).
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_image_rgba_arc_impl(
         &mut self,
         data: &Arc<Vec<u8>>,
@@ -463,12 +467,13 @@ fn box_downsample(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) ->
                     n += 1;
                 }
             }
-            if n > 0 {
-                let di = ((dy * dst_w + dx) * 4) as usize;
-                dst[di] = (r / n) as u8;
-                dst[di + 1] = (g / n) as u8;
-                dst[di + 2] = (b / n) as u8;
-                dst[di + 3] = (a / n) as u8;
+            // `checked_div` is `None` only for an empty source block (n == 0),
+            // which leaves that destination pixel transparent.
+            let di = ((dy * dst_w + dx) * 4) as usize;
+            for (k, sum) in [r, g, b, a].into_iter().enumerate() {
+                if let Some(avg) = sum.checked_div(n) {
+                    dst[di + k] = avg as u8;
+                }
             }
         }
     }

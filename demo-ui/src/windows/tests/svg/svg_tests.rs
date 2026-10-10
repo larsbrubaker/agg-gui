@@ -128,10 +128,10 @@ fn svg_zoom_buttons_change_to_their_own_targets() {
     let mut root = super::svg_test(font);
     root.layout(Size::new(520.0, 260.0));
 
-    let default_content_w = svg_scroll_property(&root, "h_content");
+    let default_content_w = svg_scroll_property(root.as_ref(), "h_content");
     click_header_button(&mut root, 1);
     root.layout(Size::new(520.0, 260.0));
-    let zoom_100_content_w = svg_scroll_property(&root, "h_content");
+    let zoom_100_content_w = svg_scroll_property(root.as_ref(), "h_content");
     assert!(
         zoom_100_content_w > default_content_w,
         "100% button should increase content width"
@@ -139,7 +139,7 @@ fn svg_zoom_buttons_change_to_their_own_targets() {
 
     click_header_button(&mut root, 0);
     root.layout(Size::new(520.0, 260.0));
-    let zoom_50_content_w = svg_scroll_property(&root, "h_content");
+    let zoom_50_content_w = svg_scroll_property(root.as_ref(), "h_content");
     assert!(
         zoom_50_content_w < zoom_100_content_w,
         "50% button should restore the smaller half-zoom content width"
@@ -302,7 +302,7 @@ struct PixelDiff {
 fn pixel_diff(a: &[u8], b: &[u8]) -> PixelDiff {
     let mut mismatched_pixels = usize::from(a.len() != b.len());
     let mut max_delta = 0_u8;
-    for (a, b) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+    for (a, b) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
         let pixel_delta = a
             .iter()
             .zip(b.iter())
@@ -388,8 +388,8 @@ fn click_header_button(root: &mut Box<dyn agg_gui::Widget>, index: usize) {
     });
 }
 
-fn svg_scroll_property(root: &Box<dyn agg_gui::Widget>, name: &str) -> f64 {
-    let scroll = find_widget_by_type(root.as_ref(), "ScrollView").expect("SVG Test scroll view");
+fn svg_scroll_property(root: &dyn agg_gui::Widget, name: &str) -> f64 {
+    let scroll = find_widget_by_type(root, "ScrollView").expect("SVG Test scroll view");
     property_value(&scroll.properties(), name)
         .parse::<f64>()
         .unwrap_or_else(|_| panic!("{name} should be a number"))

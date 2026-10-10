@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use crate::event::{Key, Modifiers};
 
 thread_local! {
-    static QUEUE: RefCell<Vec<(Key, Modifiers)>> = RefCell::new(Vec::new());
+    static QUEUE: RefCell<Vec<(Key, Modifiers)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Enqueue a synthetic key event. Called by the keyboard module when a

@@ -184,6 +184,8 @@ impl StyleCells {
 
 // ── Compact row: a narrow drag-value + descriptive label ─────────────────────
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn drag_row(
     font: Arc<Font>,
     cell: Rc<Cell<f64>>,
@@ -557,34 +559,6 @@ pub fn build(font: Arc<Font>) -> Box<dyn Widget> {
     Box::new(col)
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use agg_gui::{Font, Size, Widget};
-
-    fn count_widgets_by_type(widget: &dyn Widget, type_name: &str) -> usize {
-        let here = usize::from(widget.type_name() == type_name);
-        here + widget
-            .children()
-            .iter()
-            .map(|child| count_widgets_by_type(child.as_ref(), type_name))
-            .sum::<usize>()
-    }
-
-    #[test]
-    fn content_length_uses_only_slider_value_readout() {
-        const BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
-        let font = Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"));
-        let mut root = super::build(font);
-
-        root.layout(Size::new(680.0, 360.0));
-
-        assert_eq!(count_widgets_by_type(root.as_ref(), "Slider"), 1);
-        assert_eq!(count_widgets_by_type(root.as_ref(), "LiveLabel"), 0);
-    }
-}
-
 // ── ConditionalRow ─ wraps a child widget and shows/hides it each layout
 //                     based on a predicate closure.  When hidden, it reports
 //                     zero size and `is_visible = false`, so the framework
@@ -700,5 +674,33 @@ impl Widget for WatchCell {
     fn paint(&mut self, _: &mut dyn agg_gui::DrawCtx) {}
     fn on_event(&mut self, _: &agg_gui::Event) -> agg_gui::EventResult {
         agg_gui::EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use agg_gui::{Font, Size, Widget};
+
+    fn count_widgets_by_type(widget: &dyn Widget, type_name: &str) -> usize {
+        let here = usize::from(widget.type_name() == type_name);
+        here + widget
+            .children()
+            .iter()
+            .map(|child| count_widgets_by_type(child.as_ref(), type_name))
+            .sum::<usize>()
+    }
+
+    #[test]
+    fn content_length_uses_only_slider_value_readout() {
+        const BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+        let font = Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"));
+        let mut root = super::build(font);
+
+        root.layout(Size::new(680.0, 360.0));
+
+        assert_eq!(count_widgets_by_type(root.as_ref(), "Slider"), 1);
+        assert_eq!(count_widgets_by_type(root.as_ref(), "LiveLabel"), 0);
     }
 }

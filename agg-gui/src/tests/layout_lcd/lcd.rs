@@ -368,7 +368,7 @@ fn test_gfx_ctx_draw_lcd_backbuffer_arc_preserves_per_channel_chroma() {
 /// variation at glyph edges — LCD chroma survived the cache.
 ///
 /// If the blit path had fallen through to the default-trait collapse
-/// + `draw_image_rgba`, channels would be indistinguishable (grayscale
+/// plus `draw_image_rgba`, channels would be indistinguishable (grayscale
 /// AA) and this test would fail.
 #[test]
 fn test_paint_subtree_backbuffered_lcd_cache_preserves_chroma_at_destination() {

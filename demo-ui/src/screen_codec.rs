@@ -295,7 +295,7 @@ fn lzw_decompress(bytes: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
     let mut codes = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         codes.push(u16::from_le_bytes([pair[0], pair[1]]));
     }
 

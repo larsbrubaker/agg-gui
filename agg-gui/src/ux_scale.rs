@@ -37,7 +37,7 @@
 use std::cell::Cell;
 
 thread_local! {
-    static UX_SCALE: Cell<f64> = Cell::new(1.0);
+    static UX_SCALE: Cell<f64> = const { Cell::new(1.0) };
 }
 
 /// Current UX scale factor. Multiplied with [`crate::device_scale`] in

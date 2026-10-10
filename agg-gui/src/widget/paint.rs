@@ -26,7 +26,7 @@ use offscreen::{
 
 std::thread_local! {
     static PAINT_CLIP_STACK: std::cell::RefCell<Vec<Rect>> =
-        std::cell::RefCell::new(Vec::new());
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Current visible paint clip in root coordinates, if painting is inside a
@@ -163,7 +163,6 @@ pub(crate) fn paint_subtree_forced(widget: &mut dyn Widget, ctx: &mut dyn DrawCt
     // backbuffer path bypasses this because the bitmap is already at
     // integer texel positions by construction.
     if paint_subtree_unified_backbuffer(widget, ctx, true) {
-        return;
     } else if widget.backbuffer_cache_mut().is_some() {
         paint_subtree_backbuffered(widget, ctx);
     } else {

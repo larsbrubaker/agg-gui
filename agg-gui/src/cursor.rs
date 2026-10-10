@@ -132,7 +132,7 @@ impl CursorIcon {
 }
 
 thread_local! {
-    static CURSOR_ICON: Cell<CursorIcon> = Cell::new(CursorIcon::Default);
+    static CURSOR_ICON: Cell<CursorIcon> = const { Cell::new(CursorIcon::Default) };
 }
 
 /// Set the cursor icon for this frame.

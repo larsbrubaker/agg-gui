@@ -101,6 +101,9 @@ enum DragMode {
     Resize(ResizeDir),
 }
 
+/// A callback handed the window's title.
+type TitleCallback = Box<dyn FnMut(&str)>;
+
 /// A floating panel with a draggable/resizable title bar and a single content child.
 pub struct Window {
     bounds: Rect,
@@ -265,7 +268,7 @@ pub struct Window {
     /// Receives the window title.  Used by the demo's z-order tracker
     /// to record "most recently raised" so the stacking order survives
     /// a save/restore round-trip.
-    on_raised: Option<Box<dyn FnMut(&str)>>,
+    on_raised: Option<TitleCallback>,
 
     /// Identity for the snap-layout system.  Minted once at
     /// construction from a process-wide counter and never changes —

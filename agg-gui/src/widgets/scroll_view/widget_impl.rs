@@ -295,11 +295,11 @@ impl Widget for ScrollView {
                 // content). Same sign for horizontal.
                 let mut consumed = false;
                 if self.v.enabled {
-                    self.v.offset = self.v.offset - delta_y * 40.0;
+                    self.v.offset -= delta_y * 40.0;
                     consumed = true;
                 }
                 if self.h.enabled {
-                    self.h.offset = self.h.offset - delta_x * 40.0;
+                    self.h.offset -= delta_x * 40.0;
                     consumed = true;
                 }
                 self.clamp_offsets();
@@ -572,6 +572,8 @@ impl ScrollView {
     /// When `opaque_at_bottom` is `true` the gradient runs opaque→transparent
     /// bottom-to-top (bottom edge fade); when `false` it runs
     /// transparent→opaque bottom-to-top (top edge fade).
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     fn fill_v_gradient(
         ctx: &mut dyn DrawCtx,
         c: Color,
@@ -600,6 +602,8 @@ impl ScrollView {
     /// When `opaque_at_left` is `true` the gradient runs opaque→transparent
     /// left-to-right (left edge fade); when `false` it runs
     /// transparent→opaque left-to-right (right edge fade).
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     fn fill_h_gradient(
         ctx: &mut dyn DrawCtx,
         c: Color,

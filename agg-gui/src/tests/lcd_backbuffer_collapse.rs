@@ -104,9 +104,9 @@ fn probe_planes(level: f64) -> (Arc<Vec<u8>>, Arc<Vec<u8>>) {
     let mut color = Vec::new();
     let mut alpha = Vec::new();
     for cov in COVS {
-        for c in 0..3 {
-            color.push((cov[c] as f64 * level).round() as u8);
-            alpha.push(cov[c]);
+        for &c in &cov[..3] {
+            color.push((c as f64 * level).round() as u8);
+            alpha.push(c);
         }
     }
     (Arc::new(color), Arc::new(alpha))

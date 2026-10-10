@@ -490,11 +490,10 @@ pub fn splice_fragment(doc: &mut RichDoc, pos: DocPos, fragment: &[Block]) -> Do
             && target.align == default.align
             && target.list == default.list
             && target.indent == default.indent;
-        let mut idx = target.ensure_boundary(pos.byte);
+        let first = target.ensure_boundary(pos.byte);
         let mut added = 0usize;
-        for run in &fragment[0].runs {
+        for (idx, run) in (first..).zip(fragment[0].runs.iter()) {
             target.runs.insert(idx, run.clone());
-            idx += 1;
             added += run.text.len();
         }
         target.normalize();

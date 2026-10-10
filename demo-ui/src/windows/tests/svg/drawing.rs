@@ -17,6 +17,8 @@ pub(super) fn draw_panel(ctx: &mut dyn DrawCtx, x: f64, y: f64, w: f64, h: f64, 
     ctx.stroke();
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_raster_column(
     ctx: &mut dyn DrawCtx,
     pixels: &Result<Arc<Vec<u8>>, String>,
@@ -39,6 +41,8 @@ pub(super) fn draw_raster_column(
     }
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_lcd_column(
     ctx: &mut dyn DrawCtx,
     pixels: &Result<SvgLcdPreview, String>,
@@ -71,6 +75,8 @@ pub(super) fn draw_lcd_column(
     }
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_hardware_column(
     ctx: &mut dyn DrawCtx,
     sample: &SvgSampleRender,
@@ -135,7 +141,7 @@ pub(super) fn decode_png_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String
         png::ColorType::Rgba => src.to_vec(),
         png::ColorType::Rgb => {
             let mut out = Vec::with_capacity(info.width as usize * info.height as usize * 4);
-            for chunk in src.chunks_exact(3) {
+            for chunk in src.as_chunks::<3>().0 {
                 out.extend_from_slice(chunk);
                 out.push(255);
             }
@@ -150,7 +156,7 @@ pub(super) fn decode_png_rgba(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String
         }
         png::ColorType::GrayscaleAlpha => {
             let mut out = Vec::with_capacity(info.width as usize * info.height as usize * 4);
-            for chunk in src.chunks_exact(2) {
+            for chunk in src.as_chunks::<2>().0 {
                 out.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
             }
             out
@@ -179,8 +185,10 @@ pub(super) fn rgba_matches_reference(rendered: &[u8], reference: &[u8]) -> bool 
 
 pub(super) fn diff_rgba_pixels(reference: &[u8], rendered: &[u8]) -> Vec<u8> {
     reference
-        .chunks_exact(4)
-        .zip(rendered.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(rendered.as_chunks::<4>().0)
         .flat_map(|(reference, rendered)| {
             let dr = reference[0].abs_diff(rendered[0]);
             let dg = reference[1].abs_diff(rendered[1]);

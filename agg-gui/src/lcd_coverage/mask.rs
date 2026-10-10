@@ -90,7 +90,7 @@ thread_local! {
     static MASK_CACHE: RefCell<HashMap<LcdMaskKey, LcdMaskEntry>>
         = RefCell::new(HashMap::new());
     static MASK_LRU: RefCell<VecDeque<LcdMaskKey>>
-        = RefCell::new(VecDeque::new());
+        = const { RefCell::new(VecDeque::new()) };
 }
 
 const MASK_CACHE_MAX: usize = 1024;
@@ -263,6 +263,8 @@ pub struct LcdMask {
 /// The returned mask has **no colour**; at composite time `composite_lcd_mask`
 /// mixes the caller's desired text colour into the destination through the
 /// per-channel coverage.
+// Public API: the signature is shared with downstream callers.
+#[allow(clippy::too_many_arguments)]
 pub fn rasterize_lcd_mask(
     font: &Font,
     text: &str,

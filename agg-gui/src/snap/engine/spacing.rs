@@ -400,10 +400,8 @@ fn horizontal_neighbours(moving: Rect, targets: &[Rect]) -> (Option<Rect>, Optio
             {
                 left_n = Some(*t);
             }
-        } else if t.x >= m_right {
-            if right_n.as_ref().map(|r| r.x > t.x).unwrap_or(true) {
-                right_n = Some(*t);
-            }
+        } else if t.x >= m_right && right_n.as_ref().map(|r| r.x > t.x).unwrap_or(true) {
+            right_n = Some(*t);
         }
     }
     (left_n, right_n)
@@ -463,10 +461,8 @@ fn vertical_neighbours(moving: Rect, targets: &[Rect]) -> (Option<Rect>, Option<
             {
                 bot = Some(*t);
             }
-        } else if t_bottom >= m_top {
-            if top.as_ref().map(|tn| tn.y > t_bottom).unwrap_or(true) {
-                top = Some(*t);
-            }
+        } else if t_bottom >= m_top && top.as_ref().map(|tn| tn.y > t_bottom).unwrap_or(true) {
+            top = Some(*t);
         }
     }
     (bot, top)

@@ -16,35 +16,25 @@ use crate::color::Color;
 use agg_rust::trans_affine::TransAffine;
 
 /// Fill rule used when rasterizing closed paths.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FillRule {
     /// Non-zero winding rule.
+    #[default]
     NonZero,
     /// Even-odd parity rule.
     EvenOdd,
 }
 
-impl Default for FillRule {
-    fn default() -> Self {
-        Self::NonZero
-    }
-}
-
 /// How a gradient behaves outside the normalized `0..=1` range.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum GradientSpread {
     /// Clamp to the nearest edge stop.
+    #[default]
     Pad,
     /// Mirror each repeated interval.
     Reflect,
     /// Repeat the gradient ramp.
     Repeat,
-}
-
-impl Default for GradientSpread {
-    fn default() -> Self {
-        Self::Pad
-    }
 }
 
 /// One color stop in a bridge-level gradient paint.

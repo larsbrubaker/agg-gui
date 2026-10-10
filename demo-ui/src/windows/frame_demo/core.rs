@@ -131,6 +131,8 @@ const KAPPA: f64 = 0.5522847498307933;
 ///
 /// Each `r_*` is clamped against half the shorter side so extreme values
 /// don't produce kinks.
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn rounded_rect_4(
     ctx: &mut dyn DrawCtx,
     x: f64,

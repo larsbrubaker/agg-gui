@@ -100,7 +100,7 @@ fn is_stale(out: &Path, dirs: &[PathBuf], exts: &[&str], extra: &[PathBuf]) -> b
     for d in dirs {
         scan_newest(d, exts, &mut newest);
     }
-    newest.map_or(false, |n| n > out_t)
+    newest.is_some_and(|n| n > out_t)
 }
 
 fn mtime(p: &Path) -> Option<SystemTime> {
@@ -109,7 +109,7 @@ fn mtime(p: &Path) -> Option<SystemTime> {
 
 fn bump(newest: &mut Option<SystemTime>, t: Option<SystemTime>) {
     if let Some(t) = t {
-        if newest.map_or(true, |n| t > n) {
+        if newest.is_none_or(|n| t > n) {
             *newest = Some(t);
         }
     }
@@ -127,7 +127,7 @@ fn scan_newest(dir: &Path, exts: &[&str], newest: &mut Option<SystemTime>) {
         } else if p
             .extension()
             .and_then(|e| e.to_str())
-            .map_or(false, |e| exts.contains(&e))
+            .is_some_and(|e| exts.contains(&e))
         {
             bump(newest, mtime(&p));
         }
@@ -327,13 +327,13 @@ mod tests {
 
         // Source older than the build → fresh (no rebuild).
         touch(&src.join("old.rs"), t0 - Duration::from_secs(10));
-        assert!(!is_stale(&out, &[src.clone()], &["rs"], &[]));
+        assert!(!is_stale(&out, std::slice::from_ref(&src), &["rs"], &[]));
 
         // A source edited after the build → stale; non-.rs is ignored.
         touch(&src.join("ignored.txt"), t0 + Duration::from_secs(50));
-        assert!(!is_stale(&out, &[src.clone()], &["rs"], &[]));
+        assert!(!is_stale(&out, std::slice::from_ref(&src), &["rs"], &[]));
         touch(&src.join("new.rs"), t0 + Duration::from_secs(50));
-        assert!(is_stale(&out, &[src.clone()], &["rs"], &[]));
+        assert!(is_stale(&out, std::slice::from_ref(&src), &["rs"], &[]));
     }
 
     #[test]

@@ -140,7 +140,7 @@ fn tessellate_glyph(font: &Font, glyph_id: u16, size: f64) -> Option<CachedGlyph
         let mut all_vf: Vec<f32> = Vec::new();
         let mut all_idx: Vec<u32> = Vec::new();
         for contour in &contours {
-            if let Some((vf, idx)) = tessellate_fill(&[contour.clone()]) {
+            if let Some((vf, idx)) = tessellate_fill(std::slice::from_ref(contour)) {
                 let base = (all_vf.len() / 2) as u32;
                 all_vf.extend_from_slice(&vf);
                 all_idx.extend(idx.iter().map(|&i| i + base));
@@ -258,11 +258,11 @@ mod tests {
 
         for &[x, y] in &cached.verts {
             assert!(
-                x >= -2.0 && x <= 20.0,
+                (-2.0..=20.0).contains(&x),
                 "x={x} must be in glyph-local pixels, not font units"
             );
             assert!(
-                y >= -4.0 && y <= 18.0,
+                (-4.0..=18.0).contains(&y),
                 "y={y} must be in glyph-local pixels, not font units"
             );
         }

@@ -9,6 +9,9 @@ use agg_gui::Color;
 use crate::draw::CanvasPalette;
 use crate::model::NodeGraphModel;
 
+/// Maps a node's category name and base colour to its title-bar colour.
+pub type TitleColorFn = Arc<dyn Fn(&str, Color) -> Color + Send + Sync>;
+
 /// Shared per-frame context every node widget needs to render.  Cloning
 /// the `Arc` is cheap — the inner data is rebuilt by `NodeEditor` each
 /// paint frame.
@@ -19,7 +22,7 @@ pub struct NodePaintContext {
     /// socket widgets don't need to lock the host model during paint.
     pub socket_colors: Arc<dyn Fn(crate::model::SocketTypeId) -> Color + Send + Sync>,
     /// Title-bar colour lookup by category.
-    pub title_colors: Arc<dyn Fn(&str, Color) -> Color + Send + Sync>,
+    pub title_colors: TitleColorFn,
     /// Active canvas zoom factor — multiplies every dimension (bounds,
     /// font sizes, radii, padding) so the widget tree paints at the
     /// right screen size.  We bake the scale into the widget tree
@@ -76,14 +79,13 @@ impl NodePaintContext {
         }
         let category_pairs = Arc::new(category_pairs);
         let category_pairs_clone = category_pairs.clone();
-        let title_colors: Arc<dyn Fn(&str, Color) -> Color + Send + Sync> =
-            Arc::new(move |cat: &str, fallback: Color| -> Color {
-                category_pairs_clone
-                    .iter()
-                    .find(|(c, _)| c == cat)
-                    .map(|(_, col)| *col)
-                    .unwrap_or(fallback)
-            });
+        let title_colors: TitleColorFn = Arc::new(move |cat: &str, fallback: Color| -> Color {
+            category_pairs_clone
+                .iter()
+                .find(|(c, _)| c == cat)
+                .map(|(_, col)| *col)
+                .unwrap_or(fallback)
+        });
 
         Self {
             palette: Arc::new(palette),

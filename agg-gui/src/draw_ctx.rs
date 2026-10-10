@@ -548,6 +548,8 @@ pub trait DrawCtx {
     ///
     /// Default implementation: no-op (GL path or software paths that do not
     /// implement blitting can leave this as a placeholder).
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
     fn draw_image_rgba(
         &mut self,
         data: &[u8],
@@ -573,6 +575,8 @@ pub trait DrawCtx {
     /// Default implementation: forward to [`draw_image_rgba`] via slice
     /// borrow.  Software backends don't benefit from GPU texture caching so
     /// the default is usually fine; the GL backend overrides.
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
     fn draw_image_rgba_arc(
         &mut self,
         data: &std::sync::Arc<Vec<u8>>,
@@ -656,6 +660,8 @@ pub trait DrawCtx {
     /// This default is live CPU code, not a fallback stub: `LcdGfxCtx` does not
     /// override it, so a nested `BackbufferMode::LcdCoverage` widget blitting
     /// into a parent LCD backbuffer lands here.
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
     fn draw_lcd_backbuffer_arc(
         &mut self,
         color: &std::sync::Arc<Vec<u8>>,

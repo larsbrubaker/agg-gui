@@ -75,10 +75,9 @@ pub(super) fn wrap_text_indexed(
             // Decide where to break: the last word boundary if we have
             // one AND we're not at the end of the paragraph; else just
             // at `fit_end`.
-            let break_at = if fit_end < para.len() && last_word_end.is_some() {
-                last_word_end.unwrap()
-            } else {
-                fit_end.max(next_char_boundary(para, line_start))
+            let break_at = match last_word_end {
+                Some(word_end) if fit_end < para.len() => word_end,
+                _ => fit_end.max(next_char_boundary(para, line_start)),
             };
             let _ = last_boundary; // reserved for future hyphenation
             let line_text = para[line_start..break_at].trim_end().to_string();
@@ -106,15 +105,15 @@ pub(super) fn wrap_text_indexed(
         }
         // Emit at least one line for an empty paragraph (blank line
         // between \n\n, or a fresh doc with no content).
-        if out.is_empty() || out.last().map(|l| l.end).unwrap_or(0) != para_abs_end {
-            if para.is_empty() {
-                out.push(WrappedLine {
-                    start: para_abs_start,
-                    end: para_abs_end,
-                    text: String::new(),
-                    hard_break: false,
-                });
-            }
+        if (out.is_empty() || out.last().map(|l| l.end).unwrap_or(0) != para_abs_end)
+            && para.is_empty()
+        {
+            out.push(WrappedLine {
+                start: para_abs_start,
+                end: para_abs_end,
+                text: String::new(),
+                hard_break: false,
+            });
         }
         // Mark the paragraph's last visual line as ending with a hard
         // break if the source had a trailing newline (see

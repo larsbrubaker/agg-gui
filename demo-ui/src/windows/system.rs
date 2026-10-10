@@ -62,7 +62,7 @@ pub struct SystemCells {
 }
 
 thread_local! {
-    static CELLS: RefCell<Option<SystemCells>> = RefCell::new(None);
+    static CELLS: RefCell<Option<SystemCells>> = const { RefCell::new(None) };
 }
 
 /// Wire the System window's cells.  Call once from `build_demo_ui` before
@@ -293,7 +293,7 @@ fn build_font_tab(font: Arc<Font>) -> Box<dyn Widget> {
         let slider = Slider::new(cell.get(), min, max, Arc::clone(&font))
             .with_step(step)
             .with_value_cell(Rc::clone(&cell))
-            .on_change(move |v| apply(v));
+            .on_change(apply);
         // Slider is a flex child so the FlexRow shrinks it to the
         // space left after the fixed-width label column.
         let row = FlexRow::new()

@@ -62,6 +62,13 @@ use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::rc::Rc;
 
+/// A captured RGBA image `(pixels, width, height)` shared with the UI.
+pub type SharedRgbaImage = Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>;
+
+/// A captured RGBA image whose pixels are an `Arc`, so the texture cache can
+/// key on the pointer identity.
+pub type SharedArcRgbaImage = Rc<RefCell<Option<(std::sync::Arc<Vec<u8>>, u32, u32)>>>;
+
 /// Shared capture state.  Clone freely; all inner fields are `Rc<...>`.
 #[derive(Clone)]
 pub struct ScreenshotHandle {
@@ -71,7 +78,7 @@ pub struct ScreenshotHandle {
     pub request: Rc<Cell<bool>>,
     /// Most recent captured image — top-down RGBA8, plus `(width, height)`.
     /// `None` until the first capture completes.
-    pub image: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
+    pub image: SharedRgbaImage,
 }
 
 impl ScreenshotHandle {
@@ -402,7 +409,7 @@ extern "C" {
 pub fn run_frame_with_capture<C>(
     request: &Rc<Cell<bool>>,
     capturing: &Rc<Cell<bool>>,
-    image: &Rc<RefCell<Option<(std::sync::Arc<Vec<u8>>, u32, u32)>>>,
+    image: &SharedArcRgbaImage,
     ctx: &mut C,
     mut render_fn: impl FnMut(&mut C),
     read_back_buffer: impl FnOnce(&mut C) -> (Vec<u8>, u32, u32),

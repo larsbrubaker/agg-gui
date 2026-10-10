@@ -188,8 +188,10 @@ fn parse_svg_tree(data: &[u8], resources_dir: Option<&Path>) -> Result<usvg::Tre
 
 /// Parse an SVG document using caller-supplied parse options.
 pub fn parse_svg(data: &[u8], svg_options: &SvgParseOptions) -> Result<usvg::Tree, SvgRenderError> {
-    let mut options = usvg::Options::default();
-    options.resources_dir = svg_options.resources_dir.clone();
+    let mut options = usvg::Options {
+        resources_dir: svg_options.resources_dir.clone(),
+        ..Default::default()
+    };
     if let Some(font_family) = &svg_options.font_family {
         options.font_family = font_family.clone();
     }

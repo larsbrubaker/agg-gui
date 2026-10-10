@@ -72,6 +72,8 @@ pub const DEFAULT_ROW_GAP: f64 = 8.0;
 /// - `margin_l/r` — child's left/right margins (logical units).
 /// - `natural_w` — width returned by `child.layout()`.
 /// - `min_w/max_w` — child's min/max width constraints.
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn place_cross_h(
     anchor: HAnchor,
     pad_l: f64,
@@ -228,6 +230,8 @@ impl FlexColumn {
     }
 
     /// Add a fixed-size child (flex = 0).
+    // Builder-style child append, not arithmetic; `add` is public API.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self.flex_factors.push(0.0);

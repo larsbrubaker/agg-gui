@@ -120,6 +120,8 @@ pub fn paint_chrome_body(
 /// `bar_x`/`bar_y` are the bar's lower-left in the frame's local
 /// coordinate space; the bar's width is the frame's width and its
 /// height is `style.title_height`.
+// Public API: the signature is shared with downstream callers.
+#[allow(clippy::too_many_arguments)]
 pub fn paint_chrome_title_bar(
     ctx: &mut dyn DrawCtx,
     bar_x: f64,

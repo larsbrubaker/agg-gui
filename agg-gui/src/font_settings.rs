@@ -72,13 +72,13 @@ pub fn current_thread_typography_epoch() -> u64 {
 thread_local! {
     /// System-wide font override.  `None` means "widgets keep whatever font
     /// they were constructed with".
-    static SYSTEM_FONT:     RefCell<Option<Arc<Font>>> = RefCell::new(None);
+    static SYSTEM_FONT:     RefCell<Option<Arc<Font>>> = const { RefCell::new(None) };
     /// System-wide font size multiplier — applied to every widget's own
     /// `font_size` at paint/layout time.  `1.0` = unchanged.  Acts like
     /// egui's `pixels_per_point` for typography: shrink or enlarge ALL
     /// text while preserving the relative hierarchy (body stays smaller
     /// than headings, etc.).
-    static FONT_SIZE_SCALE: RefCell<f64>  = RefCell::new(1.0);
+    static FONT_SIZE_SCALE: RefCell<f64>  = const { RefCell::new(1.0) };
     /// System-wide LCD-subpixel override.  When `Some(true|false)`, text-
     /// rendering widgets honour it directly.  When `None` (the default),
     /// [`lcd_enabled`] derives the effective value from
@@ -98,7 +98,7 @@ thread_local! {
     /// `truetype_test_02_win` demo.  This preserves horizontal subpixel
     /// positioning (critical for LCD) while giving sharper vertical
     /// metrics — the pragmatic compromise used by the agg-rust reference.
-    static HINTING_ENABLED: RefCell<bool> = RefCell::new(false);
+    static HINTING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
 
     // ── Typography-style parameters (driven by the System window's
     // typography controls / Sample Text tab, and every text paint
@@ -107,19 +107,19 @@ thread_local! {
 
     /// Gamma correction applied post-raster.  1.0 = off (linear output).
     /// Range 0.5..=2.5.
-    static GAMMA:          RefCell<f64> = RefCell::new(1.0);
+    static GAMMA:          RefCell<f64> = const { RefCell::new(1.0) };
     /// Horizontal glyph width scale.  1.0 = native widths.
     /// Range 0.75..=1.25.
-    static WIDTH:          RefCell<f64> = RefCell::new(1.0);
+    static WIDTH:          RefCell<f64> = const { RefCell::new(1.0) };
     /// Extra letter-spacing as a fraction of em.  0.0 = unchanged.
     /// Range -0.2..=0.2.
-    static INTERVAL:       RefCell<f64> = RefCell::new(0.0);
+    static INTERVAL:       RefCell<f64> = const { RefCell::new(0.0) };
     /// Synthetic boldness via outline contour offset.
     /// Range -1.0..=1.0; 0.0 = unchanged, positive = heavier, negative = lighter.
-    static FAUX_WEIGHT:    RefCell<f64> = RefCell::new(0.0);
+    static FAUX_WEIGHT:    RefCell<f64> = const { RefCell::new(0.0) };
     /// Synthetic italic slant expressed as a horizontal-shear factor.
     /// Range -1.0..=1.0; 0.0 = upright.
-    static FAUX_ITALIC:    RefCell<f64> = RefCell::new(0.0);
+    static FAUX_ITALIC:    RefCell<f64> = const { RefCell::new(0.0) };
     /// LCD primary-weight (the pixel coverage weight of the own-channel
     /// vs the neighbouring channels in the 3-tap distribution LUT).
     /// Range 0.0..=1.0; default 1/3 gives a neutral LUT.

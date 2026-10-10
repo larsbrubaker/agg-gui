@@ -44,6 +44,8 @@ use widgets::{ScreenSizeLabel, TogglePill};
 /// Mirrors egui's Backend panel layout: renderer/backend info, screen size,
 /// run mode selector, FPS sparkline + mean CPU usage, inspector checkbox,
 /// and a reset button.
+// Each argument is a distinct shared handle the panel binds to; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub fn build_backend_panel(
     font: Arc<Font>,
     run_mode: Rc<Cell<RunMode>>,

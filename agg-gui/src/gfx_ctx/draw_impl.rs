@@ -14,7 +14,7 @@ use super::*;
 #[inline]
 pub(super) fn active_fb<'a>(
     base_fb: &'a mut Framebuffer,
-    layer_stack: &'a mut Vec<LayerEntry>,
+    layer_stack: &'a mut [LayerEntry],
 ) -> &'a mut Framebuffer {
     if let Some(top) = layer_stack.last_mut() {
         &mut top.fb
@@ -131,7 +131,7 @@ pub(crate) fn rasterize_fill(
     ras.filling_rule(to_agg_fill_rule(fill_rule));
     let mut sl = ScanlineU8::new();
     let mut curves = ConvCurve::new(path);
-    let mut transformed = ConvTransform::new(&mut curves, transform.clone());
+    let mut transformed = ConvTransform::new(&mut curves, *transform);
     ras.add_path(&mut transformed, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
 }
@@ -143,6 +143,8 @@ fn to_agg_fill_rule(rule: FillRule) -> FillingRule {
     }
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rasterize_stroke(
     fb: &mut Framebuffer,
     path: &mut PathStorage,
@@ -189,6 +191,8 @@ pub(crate) fn rasterize_stroke(
     }
 }
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn rasterize_stroke_source<VS: VertexSource>(
     fb: &mut Framebuffer,
     source: VS,
@@ -218,7 +222,7 @@ fn rasterize_stroke_source<VS: VertexSource>(
     stroke.set_line_join(join);
     stroke.set_line_cap(cap);
     stroke.set_miter_limit(miter_limit);
-    let mut transformed = ConvTransform::new(&mut stroke, transform.clone());
+    let mut transformed = ConvTransform::new(&mut stroke, *transform);
     ras.add_path(&mut transformed, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
 }
@@ -521,7 +525,7 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // backbuffers (see `Widget::backbuffer_band`) crop their margins to the
         // widget bounds instead of painting over sibling widgets.
         let clip = self.state.clip;
-        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
         let fw = fb.width() as i32;
         let fh = fb.height() as i32;
         let (cx1, cy1, cx2, cy2) = match clip {
@@ -611,7 +615,7 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         let t = &self.state.transform;
         let sx = dst_x * t.sx + dst_y * t.shx + t.tx;
         let sy = dst_x * t.shy + dst_y * t.sy + t.ty;
-        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
         let fw = fb.width();
         let fh = fb.height();
         let origin_x = sx.round() as i32;
@@ -766,7 +770,7 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // the widget bounds; ordinary full-image blits set no tighter clip than
         // their bounds, so this is a no-op for them.
         let clip = self.state.clip;
-        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
         composite_framebuffers(fb, &scaled, screen_x, screen_y, ga, clip);
     }
 }

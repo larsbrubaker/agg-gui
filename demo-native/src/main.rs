@@ -163,7 +163,7 @@ fn main() -> Result<(), ShellError> {
         // installs the host waker, and `signal_async_state_change` is what a
         // background thread is supposed to call.
         let wake: Arc<dyn Fn() + Send + Sync> =
-            Arc::new(|| agg_gui::animation::signal_async_state_change());
+            Arc::new(agg_gui::animation::signal_async_state_change);
         let screen_share = screen_share::start(&screen_share_runtime, &handles.screen_share, wake);
 
         handles.screen_size.set(init.size());

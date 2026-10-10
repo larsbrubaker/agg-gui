@@ -117,9 +117,9 @@ pub struct InspectorOverlay {
 
 thread_local! {
     static CURRENT_MOUSE_WORLD: std::cell::Cell<Option<Point>> =
-        std::cell::Cell::new(None);
+        const { std::cell::Cell::new(None) };
     static CURRENT_VIEWPORT: std::cell::Cell<Size> =
-        std::cell::Cell::new(Size::new(1.0, 1.0));
+        const { std::cell::Cell::new(Size::new(1.0, 1.0)) };
 }
 
 /// Record the current mouse cursor position in app-level (world / Y-up

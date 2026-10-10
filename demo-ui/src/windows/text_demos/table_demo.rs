@@ -21,7 +21,7 @@ const ROW_THICK: f64 = 30.0;
 const CELL_PAD_X: f64 = 6.0;
 
 fn thick_row(i: usize) -> bool {
-    i % 6 == 0
+    i.is_multiple_of(6)
 }
 
 fn long_text(i: usize) -> String {
@@ -268,7 +268,7 @@ impl Widget for VisibilitySync {
 
 // ── Cell + header painters ──────────────────────────────────────────────────
 
-fn make_cell_painter(state: Rc<DemoState>) -> Box<dyn FnMut(&CellInfo, &mut dyn agg_gui::DrawCtx)> {
+fn make_cell_painter(state: Rc<DemoState>) -> agg_gui::widgets::CellPainter {
     Box::new(move |info: &CellInfo, ctx: &mut dyn agg_gui::DrawCtx| {
         let v = info.visuals;
         let demo = state.current_demo();
@@ -356,9 +356,7 @@ fn make_cell_painter(state: Rc<DemoState>) -> Box<dyn FnMut(&CellInfo, &mut dyn 
     })
 }
 
-fn make_header_painter(
-    state: Rc<DemoState>,
-) -> Box<dyn FnMut(&HeaderInfo, &mut dyn agg_gui::DrawCtx)> {
+fn make_header_painter(state: Rc<DemoState>) -> agg_gui::widgets::HeaderPainter {
     let labels = [
         "Row",
         "Clipped text",

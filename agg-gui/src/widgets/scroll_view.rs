@@ -38,49 +38,34 @@ use super::scrollbar::{
 /// [`ScrollBarStyle`], not by this enum — a Floating bar with
 /// `VisibleWhenNeeded` only appears on hover; a Solid bar with
 /// `VisibleWhenNeeded` is always visible when content overflows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ScrollBarVisibility {
     /// Paint whenever content overflows, regardless of hover.
     AlwaysVisible,
     /// Paint when content overflows.  If the style is `Floating` the bar
     /// additionally hides until the cursor enters the hover zone.
+    #[default]
     VisibleWhenNeeded,
     /// Never paint — wheel/drag still work, but no visual indicator.
     AlwaysHidden,
 }
 
-impl Default for ScrollBarVisibility {
-    fn default() -> Self {
-        Self::VisibleWhenNeeded
-    }
-}
-
 /// Whether the bar reserves layout space (Solid) or floats over content (Floating).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ScrollBarKind {
     Solid,
+    #[default]
     Floating,
 }
 
-impl Default for ScrollBarKind {
-    fn default() -> Self {
-        Self::Floating
-    }
-}
-
 /// Which pair of colours is used for the track vs thumb.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ScrollBarColor {
     /// Track = neutral background; thumb = slightly brighter.  Default.
+    #[default]
     Background,
     /// Track = transparent; thumb = accent-tinted foreground.
     Foreground,
-}
-
-impl Default for ScrollBarColor {
-    fn default() -> Self {
-        Self::Background
-    }
 }
 
 /// Full scrollbar appearance configuration — mirrors egui's `style.spacing.scroll`.
@@ -209,8 +194,8 @@ impl ScrollBarStyle {
 
 std::thread_local! {
     static CURRENT_SCROLL_STYLE:      Cell<ScrollBarStyle>      = Cell::new(ScrollBarStyle::default());
-    static CURRENT_SCROLL_VISIBILITY: Cell<ScrollBarVisibility> = Cell::new(ScrollBarVisibility::VisibleWhenNeeded);
-    static SCROLL_STYLE_EPOCH:        Cell<u64>                 = Cell::new(1);
+    static CURRENT_SCROLL_VISIBILITY: Cell<ScrollBarVisibility> = const { Cell::new(ScrollBarVisibility::VisibleWhenNeeded) };
+    static SCROLL_STYLE_EPOCH:        Cell<u64>                 = const { Cell::new(1) };
 }
 
 /// Read the current global scroll-bar style.
@@ -479,16 +464,11 @@ impl ScrollView {
             return (0.0, 0.0);
         }
         let span = self.style.bar_width + self.style.outer_margin + self.style.inner_margin;
-        let rx = if self.h.enabled && self.h.content > self.bounds.width {
-            0.0
-        } else {
-            0.0
-        };
         // We reserve vertical bar width on the right when vertical scrolling
         // is potentially active (has content overflow).
         let need_v = self.v.enabled && self.v.content > self.bounds.height - self.h_bar_thickness();
         let need_h = self.h.enabled && self.h.content > self.bounds.width - self.v_bar_thickness();
-        let rx = rx + if need_v { span } else { 0.0 };
+        let rx = if need_v { span } else { 0.0 };
         let ry = if need_h { span } else { 0.0 };
         (rx, ry)
     }

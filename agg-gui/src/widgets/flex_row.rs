@@ -30,6 +30,8 @@ use crate::widgets::flex::DEFAULT_ROW_GAP;
 /// - `margin_b/t` — child's bottom/top margins (logical units).
 /// - `natural_h` — height returned by `child.layout()`.
 /// - `min_h/max_h` — child's min/max height constraints.
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn place_cross_v(
     anchor: VAnchor,
     pad_b: f64,
@@ -179,6 +181,8 @@ impl FlexRow {
         self
     }
 
+    // Builder-style child append, not arithmetic; `add` is public API.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self.flex_factors.push(0.0);

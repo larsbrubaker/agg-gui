@@ -406,12 +406,12 @@ impl Widget for LineGutter {
         let rows = &info.source_line_rows;
         let (first, last) = visible_gutter_lines(scroll_y, h, self.padding, line_h, rows);
         ctx.set_fill_color(num_color);
-        for i in first..last {
+        for (i, &row) in rows.iter().enumerate().take(last).skip(first) {
             let num = format!("{}", i + 1);
             let num_w = measure_text_metrics(&self.font, &num, self.font_size).width;
             // Right-align within the gutter, leaving an 8px right margin.
             let x = (w - 8.0 - num_w).max(0.0);
-            let line_top = h - self.padding - rows[i] as f64 * line_h + scroll_y;
+            let line_top = h - self.padding - row as f64 * line_h + scroll_y;
             let line_bottom = line_top - line_h;
             let baseline_y = line_bottom + (line_h - (m.ascent - m.descent)) * 0.5 + m.descent;
             ctx.fill_text(&num, x, baseline_y);

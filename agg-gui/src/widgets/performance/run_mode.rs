@@ -8,7 +8,7 @@
 //! Wiring:
 //!   * `RunMode`            — host loop policy (Reactive | Continuous).
 //!   * `shared_run_mode`    — convenience to build the `Rc<Cell<RunMode>>`
-//!                            handle that the selector reads / writes.
+//!     handle that the selector reads / writes.
 //!   * `RunModeRow`         — two-button segmented control.
 //!   * `RunModeDesc`        — dynamic description label (FPS in Continuous).
 //!

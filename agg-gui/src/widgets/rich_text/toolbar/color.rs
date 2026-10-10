@@ -9,11 +9,11 @@
 //!
 //! * open   → [`RichEditHandle::begin_preview`] (snapshot + suspend undo feed),
 //! * drag   → `on_change` execs a fresh `SetTextColor` / `SetHighlight` so the
-//!            selection recolours in context,
+//!   selection recolours in context,
 //! * Select → [`RichEditHandle::commit_preview`] banks the whole drag as one
-//!            undo step,
+//!   undo step,
 //! * Cancel / × / Escape → [`RichEditHandle::cancel_preview`] restores the
-//!            pre-dialog state.
+//!   pre-dialog state.
 //!
 //! The picker dialog is a **modal** [`Window`](crate::widgets::window::Window),
 //! so it paints through the clip-free global-overlay pass and clamps into the

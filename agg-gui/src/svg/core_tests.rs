@@ -133,7 +133,7 @@ fn multiplies_group_and_paint_opacity() {
         render_svg(svg, &mut ctx).expect("SVG should render");
     }
 
-    let center = ((1 * fb.width() + 1) * 4) as usize;
+    let center = ((fb.width() + 1) * 4) as usize;
     assert_eq!(&fb.pixels()[center..center + 4], &[64, 0, 0, 64]);
 }
 
@@ -206,7 +206,7 @@ fn svg_coordinates_are_y_down_in_visual_space() {
         "SVG y=1 should land one pixel below the visual top"
     );
 
-    let bottom_right_svg_pixel = ((1 * fb.width() + 4) * 4) as usize;
+    let bottom_right_svg_pixel = ((fb.width() + 4) * 4) as usize;
     assert_eq!(
         &fb.pixels()[bottom_right_svg_pixel..bottom_right_svg_pixel + 4],
         &[0, 0, 255, 255],

@@ -77,6 +77,9 @@ pub use theme::TextFieldTheme;
 // TextField
 // ---------------------------------------------------------------------------
 
+/// A callback handed the current text.
+type TextCallback = Box<dyn FnMut(&str)>;
+
 /// Single-line editable text field.
 pub struct TextField {
     bounds: Rect,
@@ -158,9 +161,9 @@ pub struct TextField {
     pub(super) text_insets_cell: Option<Rc<Cell<crate::layout_props::Insets>>>,
 
     // Callbacks
-    on_change: Option<Box<dyn FnMut(&str)>>,
-    on_enter: Option<Box<dyn FnMut(&str)>>,
-    on_edit_complete: Option<Box<dyn FnMut(&str)>>,
+    on_change: Option<TextCallback>,
+    on_enter: Option<TextCallback>,
+    on_edit_complete: Option<TextCallback>,
     text_cell: Option<Rc<RefCell<String>>>,
 
     /// Pre-default key interceptor. See

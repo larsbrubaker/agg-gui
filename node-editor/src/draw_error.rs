@@ -66,6 +66,8 @@ pub fn error_badge_center(layout: &NodeLayoutInfo) -> [f64; 2] {
 }
 
 /// Re-stroke a node body outline in the error colour.
+// Public API: the signature is shared with downstream callers.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_error_outline(
     ctx: &mut dyn DrawCtx,
     x: f64,

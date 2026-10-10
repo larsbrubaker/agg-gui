@@ -229,7 +229,7 @@ fn code_editor_scroll_probe() {
         let (cx, cy) = (w * 0.5, h_large * 0.5);
         let mut i = 0usize;
         mean_ms(4, 40, || {
-            let dir = if i % 2 == 0 { 1.0 } else { -1.0 };
+            let dir = if i.is_multiple_of(2) { 1.0 } else { -1.0 };
             i += 1;
             app.on_mouse_wheel(cx, cy, dir);
             app.layout(Size::new(w, h_large));

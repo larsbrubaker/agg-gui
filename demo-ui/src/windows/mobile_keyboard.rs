@@ -64,7 +64,7 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
     let profiles: Vec<&str> = vec!["Desktop (no keyboard)", "iPhone", "Android"];
     let radio = RadioGroup::new(profiles, initial, Arc::clone(&font))
         .with_font_size(13.0)
-        .on_change(|idx| apply_profile_choice(idx));
+        .on_change(apply_profile_choice);
     col.push(Box::new(radio), 0.0);
 
     col.push(

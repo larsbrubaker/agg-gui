@@ -60,7 +60,7 @@ pub struct Button {
     /// the accent button.
     active_fn: Option<Rc<dyn Fn() -> bool>>,
     /// `true` selects the muted "secondary" visual style (theme widget_bg
-    /// + theme text colour) instead of the accent appearance.  Combined
+    /// plus theme text colour) instead of the accent appearance.  Combined
     /// with `active_fn`, this drives segmented toggles: each segment is a
     /// subtle button that flips to the accent look when its `active_fn`
     /// returns true.

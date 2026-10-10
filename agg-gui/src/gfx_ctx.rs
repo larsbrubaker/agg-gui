@@ -406,14 +406,14 @@ impl<'a> GfxCtx<'a> {
     /// Fill the entire active framebuffer with `color`, ignoring transform and clip.
     pub fn clear(&mut self, color: Color) {
         let rgba = color.to_rgba8();
-        for chunk in active_fb(&mut self.base_fb, &mut self.layer_stack)
+        for chunk in active_fb(self.base_fb, &mut self.layer_stack)
             .pixels_mut()
             .chunks_exact_mut(4)
         {
-            chunk[0] = rgba.r as u8;
-            chunk[1] = rgba.g as u8;
-            chunk[2] = rgba.b as u8;
-            chunk[3] = rgba.a as u8;
+            chunk[0] = rgba.r;
+            chunk[1] = rgba.g;
+            chunk[2] = rgba.b;
+            chunk[3] = rgba.a;
         }
     }
 
@@ -489,8 +489,8 @@ impl<'a> GfxCtx<'a> {
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
         let fill_rule = self.state.fill_rule;
-        let transform = self.state.transform.clone();
-        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let transform = self.state.transform;
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
         if let Some(gradient) = self.state.fill_linear_gradient.clone() {
             sampled::rasterize_linear_gradient_fill(
                 fb,
@@ -545,8 +545,8 @@ impl<'a> GfxCtx<'a> {
         let dash_offset = self.state.dash_offset;
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
-        let transform = self.state.transform.clone();
-        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let transform = self.state.transform;
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
         if let Some(gradient) = self.state.stroke_linear_gradient.clone() {
             let mut outline = stroke::materialize_stroke_outline(
                 &mut self.path,
@@ -703,11 +703,11 @@ impl<'a> GfxCtx<'a> {
         let rgba = color.to_rgba8();
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
-        let transform = self.state.transform.clone();
+        let transform = self.state.transform;
 
         // Shape text and collect per-glyph outline paths.
         let (glyph_paths, _) = shape_text(&font, text, font_size, x, y);
-        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
         for mut path in glyph_paths {
             rasterize_fill(
                 fb,
@@ -748,9 +748,9 @@ impl<'a> GfxCtx<'a> {
         let rgba = color.to_rgba8();
         let mode = self.state.blend_mode;
         let clip = self.state.clip;
-        let transform = self.state.transform.clone();
+        let transform = self.state.transform;
 
-        let fb = active_fb(&mut self.base_fb, &mut self.layer_stack);
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
         let w = fb.width();
         let h = fb.height();
         let stride = (w * 4) as i32;

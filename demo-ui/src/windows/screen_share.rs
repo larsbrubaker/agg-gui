@@ -227,53 +227,6 @@ impl Widget for ScreenShareView {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::screen_share::QueuedScreenTransport;
-    use std::sync::Mutex;
-
-    const TEST_FONT: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
-
-    /// The view requests a redraw only on a pending connect/disconnect
-    /// transition — never continuously while connected. Frame delivery drives
-    /// its own redraw via the shells' invalidation, so a steady connected view
-    /// must report `needs_draw() == false`.
-    #[test]
-    fn needs_draw_only_on_transition_not_continuously() {
-        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font"));
-        let latest = Arc::new(Mutex::new(None));
-        let connected = Arc::new(Mutex::new(true));
-        let transport =
-            QueuedScreenTransport::new(latest, connected.clone(), "ag-test".to_string());
-
-        let handles = ScreenShareHandles::new();
-        *handles.transport.borrow_mut() = Box::new(transport);
-
-        let mut view = screen_share_demo(Arc::clone(&font), handles);
-        // Lay out so `sync()` reconciles the shown state to "connected".
-        view.layout(Size::new(360.0, 480.0));
-        assert!(
-            !view.needs_draw(),
-            "a connected, reconciled view must not repaint continuously"
-        );
-
-        // A dropped connection is a transition the view hasn't shown yet.
-        *connected.lock().unwrap() = false;
-        assert!(
-            view.needs_draw(),
-            "a pending connect/disconnect transition must request a redraw"
-        );
-
-        // Re-laying out reconciles it (back to the QR) and it falls idle again.
-        view.layout(Size::new(360.0, 480.0));
-        assert!(
-            !view.needs_draw(),
-            "the view must fall idle once the transition is reconciled"
-        );
-    }
-}
-
 /// A single line of status text pulled live from a shared string. Sized to one
 /// line so the QR / live-view area gets the rest of the window.
 struct StatusText {
@@ -331,5 +284,52 @@ impl Widget for StatusText {
 
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::screen_share::QueuedScreenTransport;
+    use std::sync::Mutex;
+
+    const TEST_FONT: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+
+    /// The view requests a redraw only on a pending connect/disconnect
+    /// transition — never continuously while connected. Frame delivery drives
+    /// its own redraw via the shells' invalidation, so a steady connected view
+    /// must report `needs_draw() == false`.
+    #[test]
+    fn needs_draw_only_on_transition_not_continuously() {
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font"));
+        let latest = Arc::new(Mutex::new(None));
+        let connected = Arc::new(Mutex::new(true));
+        let transport =
+            QueuedScreenTransport::new(latest, connected.clone(), "ag-test".to_string());
+
+        let handles = ScreenShareHandles::new();
+        *handles.transport.borrow_mut() = Box::new(transport);
+
+        let mut view = screen_share_demo(Arc::clone(&font), handles);
+        // Lay out so `sync()` reconciles the shown state to "connected".
+        view.layout(Size::new(360.0, 480.0));
+        assert!(
+            !view.needs_draw(),
+            "a connected, reconciled view must not repaint continuously"
+        );
+
+        // A dropped connection is a transition the view hasn't shown yet.
+        *connected.lock().unwrap() = false;
+        assert!(
+            view.needs_draw(),
+            "a pending connect/disconnect transition must request a redraw"
+        );
+
+        // Re-laying out reconciles it (back to the QR) and it falls idle again.
+        view.layout(Size::new(360.0, 480.0));
+        assert!(
+            !view.needs_draw(),
+            "the view must fall idle once the transition is reconciled"
+        );
     }
 }

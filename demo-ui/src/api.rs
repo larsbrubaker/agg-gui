@@ -1,12 +1,14 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use agg_gui::InspectorNode;
 use agg_gui::InspectorOverlay;
 
 use crate::backend_panel::{FrameHistory, RunMode};
 use crate::state::StateAccessor;
+
+/// Asks the host to load a font `(family, url)`.
+pub type FontRequestFn = Rc<dyn Fn(&str, &str)>;
 
 // ── Platform hook ─────────────────────────────────────────────────────────────
 
@@ -44,7 +46,7 @@ pub struct PlatformHooks {
     /// Invoked when a UI action selects a font that has not been loaded yet.
     /// Platform shells own the actual bytes: native can read from disk, while
     /// WASM can fetch the asset URL asynchronously and install it later.
-    pub on_font_request: Rc<dyn Fn(&str, &str)>,
+    pub on_font_request: FontRequestFn,
 }
 
 impl PlatformHooks {
@@ -112,7 +114,7 @@ pub struct DemoHandles {
     /// addresses across consecutive captures and the content-hash key
     /// (first/last 8 bytes) collided on screenshots whose corners were
     /// stable, causing stale frames to be bound.
-    pub screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
+    pub screenshot_image: agg_gui::screenshot::SharedArcRgbaImage,
     /// Transient flag set by the harness during the FIRST render pass of a
     /// capture frame.  Read by the screenshot demo's preview pane so it
     /// paints an empty frame (not the stale previous capture) — this keeps

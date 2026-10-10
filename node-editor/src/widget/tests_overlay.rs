@@ -12,6 +12,9 @@
 use super::tests_common::{fixture_with_typed_handle, install_test_font_once, mk_node, seed_nodes};
 use super::*;
 
+/// The overlay widget and close flag the sink captured.
+type CapturedOverlay = Rc<std::cell::RefCell<Option<(Box<dyn Widget>, Rc<Cell<bool>>)>>>;
+
 /// Sink branch: with an overlay sink installed, opening the color
 /// picker hands the dialog off via the callback and leaves
 /// `self.overlay` unset.
@@ -20,8 +23,7 @@ fn open_color_picker_hands_off_to_sink_when_installed() {
     use std::cell::RefCell;
     install_test_font_once();
     let (model, memory) = fixture_with_typed_handle();
-    let captured: Rc<RefCell<Option<(Box<dyn Widget>, Rc<Cell<bool>>)>>> =
-        Rc::new(RefCell::new(None));
+    let captured: CapturedOverlay = Rc::new(RefCell::new(None));
     let sink_captured = Rc::clone(&captured);
     let mut editor = NodeEditor::new(model).with_overlay_sink(move |dialog, flag| {
         *sink_captured.borrow_mut() = Some((dialog, flag));
@@ -75,8 +77,7 @@ fn open_text_editor_hands_off_to_sink_when_installed() {
     use std::cell::RefCell;
     install_test_font_once();
     let (model, memory) = fixture_with_typed_handle();
-    let captured: Rc<RefCell<Option<(Box<dyn Widget>, Rc<Cell<bool>>)>>> =
-        Rc::new(RefCell::new(None));
+    let captured: CapturedOverlay = Rc::new(RefCell::new(None));
     let sink_captured = Rc::clone(&captured);
     let mut editor = NodeEditor::new(model).with_overlay_sink(move |dialog, flag| {
         *sink_captured.borrow_mut() = Some((dialog, flag));

@@ -278,6 +278,8 @@ impl ttf_parser::OutlineBuilder for FlatContourBuilder {
 ///
 /// Control points are in **font units**; flatness_sq and output are in
 /// **screen pixels**.  Mirrors the same approach used in `subdivide_cubic`.
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn subdivide_quad(
     p0: [f32; 2],
     p1: [f32; 2],
@@ -315,6 +317,8 @@ fn subdivide_quad(
 }
 
 /// Recursively subdivide a cubic Bézier until flat (in screen space).
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn subdivide_cubic(
     p0: [f32; 2],
     p1: [f32; 2],

@@ -91,8 +91,6 @@ impl MarkdownView {
                                         }
                                         ctx.set_fill_color(if link.is_some() {
                                             v.accent
-                                        } else if *code {
-                                            v.text_color
                                         } else {
                                             v.text_color
                                         });

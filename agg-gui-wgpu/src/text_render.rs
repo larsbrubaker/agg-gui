@@ -198,6 +198,8 @@ impl WgpuGfxCtx {
     /// Composite a two-plane LCD backbuffer (colour + alpha planes, both Y-down
     /// RGB8) at `(dst_x, dst_y)` with size `(dst_w, dst_h)`.  Each plane is
     /// cached separately on its `Arc` pointer.
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_lcd_backbuffer_arc_impl(
         &mut self,
         color: &Arc<Vec<u8>>,
@@ -280,6 +282,8 @@ impl WgpuGfxCtx {
     /// Origin is snapped to the integer pixel grid for the same reason as
     /// `draw_lcd_backbuffer_arc_impl`: LCD coverage encodes a phased subpixel
     /// pattern at 1:1 texel-to-pixel resolution.
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     fn push_lcd_mask_command(
         &mut self,
         texture: Arc<wgpu::Texture>,

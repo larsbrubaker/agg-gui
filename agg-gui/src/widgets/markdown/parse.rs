@@ -109,7 +109,7 @@ fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
         if let Some(cell) = table_cell.as_mut() {
             match &ev {
                 MdEvent::Text(t) => append_text(cell, t),
-                MdEvent::Code(t) => append_text(cell, &t),
+                MdEvent::Code(t) => append_text(cell, t),
                 MdEvent::SoftBreak | MdEvent::HardBreak => cell.push(' '),
                 _ => {}
             }

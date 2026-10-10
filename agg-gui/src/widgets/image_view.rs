@@ -1,4 +1,4 @@
-﻿//! `ImageView` — paints an `Option<(rgba8_top_down, w, h)>` as an image.
+//! `ImageView` — paints an `Option<(rgba8_top_down, w, h)>` as an image.
 //!
 //! Reads its pixel data from an `Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>`
 //! — the same shape [`ScreenshotHandle::image`][crate::ScreenshotHandle]
@@ -8,8 +8,6 @@
 //!
 //! Shows a themed "No image yet." placeholder while the source is `None`.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -17,6 +15,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::screenshot::SharedRgbaImage;
 use crate::text::Font;
 use crate::widget::Widget;
 
@@ -25,7 +24,7 @@ pub struct ImageView {
     children: Vec<Box<dyn Widget>>, // always empty
     base: WidgetBase,
     font: Arc<Font>,
-    source: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>,
+    source: SharedRgbaImage,
     /// Text shown when `source` is `None`.
     placeholder: String,
     /// Height floor; the widget expands to available height but never below.
@@ -38,7 +37,7 @@ pub struct ImageView {
 }
 
 impl ImageView {
-    pub fn new(font: Arc<Font>, source: Rc<RefCell<Option<(Vec<u8>, u32, u32)>>>) -> Self {
+    pub fn new(font: Arc<Font>, source: SharedRgbaImage) -> Self {
         Self {
             bounds: Rect::default(),
             children: Vec::new(),

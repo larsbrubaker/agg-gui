@@ -79,7 +79,7 @@ pub fn compute_drop_target(
 // ---------------------------------------------------------------------------
 
 /// Move `drag_node_idx` to the position described by `target`.
-pub fn apply_drop(nodes: &mut Vec<TreeNode>, drag_node_idx: usize, target: DropPosition) {
+pub fn apply_drop(nodes: &mut [TreeNode], drag_node_idx: usize, target: DropPosition) {
     match target {
         DropPosition::AsChild(parent_idx) => {
             // Find the max order among existing children, append after them.
@@ -154,6 +154,8 @@ pub fn paint_drop_child_highlight(ctx: &mut dyn DrawCtx, y_bottom: f64, width: f
 }
 
 /// Paint a semi-transparent ghost of the dragged row at the cursor position.
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub fn paint_ghost(
     ctx: &mut dyn DrawCtx,
     label: &str,

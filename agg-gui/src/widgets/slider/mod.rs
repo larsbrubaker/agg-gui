@@ -50,19 +50,14 @@ pub enum SliderClamping {
 }
 
 /// Shape of a [`Slider`]'s draggable handle.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum HandleShape {
     /// A circle (the default).
+    #[default]
     Circle,
     /// A rectangle whose extent along the slider axis is `aspect_ratio` times
     /// its cross-axis extent.
     Rect { aspect_ratio: f64 },
-}
-
-impl Default for HandleShape {
-    fn default() -> Self {
-        Self::Circle
-    }
 }
 
 /// Pixels of "aim radius" used when smart aim is on: the drag samples the value

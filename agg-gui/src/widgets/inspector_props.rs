@@ -18,6 +18,8 @@ use super::inspector::{
     c_border, c_dim_text, c_text, InsetsSide, InsetsTarget, PropHit, PropHitKind, FONT_SIZE,
 };
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn paint_properties(
     ctx: &mut dyn DrawCtx,
     available_h: f64,
@@ -94,7 +96,7 @@ pub(super) fn paint_properties(
         if ry < 4.0 {
             break;
         }
-        let step = (val.abs() * 0.5 + 0.5).min(4.0).max(0.5);
+        let step = (val.abs() * 0.5 + 0.5).clamp(0.5, 4.0);
         let hit = paint_row_editable(
             ctx,
             w,

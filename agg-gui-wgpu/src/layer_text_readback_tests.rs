@@ -229,6 +229,9 @@ fn rec709(r: f64, g: f64, b: f64) -> f64 {
 /// The unequal-alpha probe patches — a green-heavy and a blue-heavy LCD edge.
 const PATCHES: [[u8; 3]; 2] = [[85, 200, 85], [50, 120, 230]];
 
+/// A (colour, alpha) plane pair shared with the image cache.
+type PlanePair = (Arc<Vec<u8>>, Arc<Vec<u8>>);
+
 /// Flatten fidelity: a PARTIALLY-covered two-plane backbuffer (per-channel
 /// alphas that differ, as at every LCD glyph edge) blitted inside a layer must
 /// keep the perceived luminance of the per-channel composite, in BOTH
@@ -279,7 +282,7 @@ fn flattened_lcd_backbuffer_luminance_inside_layer() {
         ctx.reset(w as f32, h as f32);
 
         // The colour plane is premultiplied, so colour_c = round(level * alpha_c).
-        let planes: Vec<(Arc<Vec<u8>>, Arc<Vec<u8>>)> = PATCHES
+        let planes: Vec<PlanePair> = PATCHES
             .iter()
             .map(|cov| {
                 let premult: [u8; 3] = [

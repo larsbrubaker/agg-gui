@@ -6,6 +6,36 @@ on:
   pull_request:
 
 jobs:
+  # fmt and clippy run on the toolchain pinned in rust-toolchain.toml, so a
+  # newer stable's lints never fail CI unannounced. clippy covers every
+  # workspace target (tests and demos included); the SVG fixtures are needed
+  # because demo-ui embeds sample files from them at compile time.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout SVG test fixtures
+        run: git submodule update --init tests/resvg-test-suite
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.toml', 'rust-toolchain.toml') }}
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
   test:
     runs-on: ubuntu-latest
     steps:

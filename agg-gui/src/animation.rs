@@ -117,11 +117,11 @@ pub fn request_draw_after_tagged(delay: Duration, reason: &'static str) {
 }
 
 std::thread_local! {
-    static NEEDS_DRAW:        Cell<bool>            = Cell::new(false);
-    static NEXT_DRAW_AT:      Cell<Option<Instant>> = Cell::new(None);
+    static NEEDS_DRAW:        Cell<bool>            = const { Cell::new(false) };
+    static NEXT_DRAW_AT:      Cell<Option<Instant>> = const { Cell::new(None) };
     /// Pending [`request_layout`]; consumed only by `App::layout`.
     static LAYOUT_REQUESTED:  Cell<bool>            = const { Cell::new(false) };
-    static INVALIDATION_EPOCH: Cell<u64>             = Cell::new(0);
+    static INVALIDATION_EPOCH: Cell<u64>             = const { Cell::new(0) };
     /// Bumped whenever an async source (image fetch + decode, font
     /// load, etc.) finishes outside the event-dispatch path.  Retained
     /// backbuffers (Window FBOs, in-process bitmap caches) compare
@@ -132,13 +132,13 @@ std::thread_local! {
     /// image draws into the placeholder-sized rect the previous
     /// layout reserved (the user-visible "wrong scale on first
     /// frame" bug).
-    static ASYNC_STATE_EPOCH: Cell<u64> = Cell::new(0);
+    static ASYNC_STATE_EPOCH: Cell<u64> = const { Cell::new(0) };
     /// Per-thread snapshot of its queue's wakeup count last observed by
     /// [`pump_async_wakeup`].  When the count differs from this, the
     /// current thread's [`NEEDS_DRAW`], [`INVALIDATION_EPOCH`] and
     /// [`ASYNC_STATE_EPOCH`] are bumped — see the comment above the host
     /// waker for why this indirection is required.
-    static LAST_SEEN_ASYNC_WAKEUP: Cell<u64> = Cell::new(0);
+    static LAST_SEEN_ASYNC_WAKEUP: Cell<u64> = const { Cell::new(0) };
     /// Monotonic counter bumped once per pointer press that reaches the
     /// widget tree (see [`bump_pointer_press_epoch`]).  A widget that runs
     /// its own multi-click gesture but no longer sees every press —
@@ -148,7 +148,7 @@ std::thread_local! {
     /// happened between two of its own background clicks, so a
     /// background double-click that straddles a child interaction does
     /// not falsely fire.
-    static POINTER_PRESS_EPOCH: Cell<u64> = Cell::new(0);
+    static POINTER_PRESS_EPOCH: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Advance the pointer-press epoch.  Called by [`App`](crate::App) once per

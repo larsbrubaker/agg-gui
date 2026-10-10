@@ -347,6 +347,8 @@ pub struct NodeHeaderWidget {
 }
 
 impl NodeHeaderWidget {
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     fn new(
         node_w: f64,
         node_h: f64,

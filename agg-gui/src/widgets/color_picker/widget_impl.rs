@@ -63,7 +63,7 @@ impl Widget for ColorPicker {
         let w = if self.open {
             PANEL_W.min(available.width.max(PANEL_W))
         } else {
-            available.width.max(SWATCH_MIN_W).min(PANEL_W)
+            available.width.clamp(SWATCH_MIN_W, PANEL_W)
         };
 
         let h = if self.open {

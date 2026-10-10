@@ -77,6 +77,8 @@ impl Container {
     }
 
     /// Append a child widget.
+    // Builder-style child append, not arithmetic; `add` is public API.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self

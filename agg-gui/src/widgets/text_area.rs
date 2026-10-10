@@ -161,6 +161,9 @@ struct TextAreaSig {
     unbanded_offset_bits: u64,
 }
 
+/// A callback handed the current text.
+type TextCallback = Box<dyn FnMut(&str)>;
+
 /// A multiline text editor that fills its available area.
 pub struct TextArea {
     bounds: Rect,
@@ -206,11 +209,11 @@ pub struct TextArea {
     /// key-intercept edits that advance the content epoch). Mirrors
     /// TextField's `on_change`. Builder + dispatcher live in
     /// `text_area/callbacks.rs`.
-    on_change: Option<Box<dyn FnMut(&str)>>,
+    on_change: Option<TextCallback>,
 
     /// Fired when focus leaves after the text changed. Mirrors TextField's
     /// `on_edit_complete`; builder + dispatcher live in `text_area/callbacks.rs`.
-    on_edit_complete: Option<Box<dyn FnMut(&str)>>,
+    on_edit_complete: Option<TextCallback>,
     /// Text snapshot taken on `FocusGained`; `FocusLost` compares against it
     /// to decide whether `on_edit_complete` fires.
     text_on_focus: String,

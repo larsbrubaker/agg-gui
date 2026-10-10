@@ -544,9 +544,7 @@ fn handle_layer_switch(target: Layer) {
 fn tick_key_repeat() {
     let now = crate::clock::now();
     let action = with_state_mut(|s| {
-        let Some(repeat) = s.key_repeat.as_mut() else {
-            return None;
-        };
+        let repeat = s.key_repeat.as_mut()?;
         // Repeat is only valid while the user is still holding the key
         // (captured_pointer == true && pressed_key_index matches).
         if !s.captured_pointer || s.pressed_key_index != Some(repeat.key_index) {
@@ -566,11 +564,8 @@ fn tick_key_repeat() {
         None
     });
     if let Some(action) = action {
-        match action {
-            key::KeyAction::Backspace => {
-                push_synthetic_key(Key::Backspace, Modifiers::default());
-            }
-            _ => {}
+        if let key::KeyAction::Backspace = action {
+            push_synthetic_key(Key::Backspace, Modifiers::default());
         }
         // Keep the loop hot for the next tick.
         crate::animation::request_draw();

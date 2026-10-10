@@ -212,6 +212,9 @@ fn relaunch() -> Result<(), ShellError> {
         .map_err(ShellError::Relaunch)
 }
 
+/// The created window and the restored windowed size that was applied.
+type CreatedWindow = (Arc<Window>, Option<(u32, u32)>);
+
 /// Create the window, returning it alongside the sanitised restored size that
 /// was applied (`None` when nothing was restored). The caller needs that size
 /// to seed [`WindowedSizeTracker`]: it is the last *windowed* size, which the
@@ -220,7 +223,7 @@ fn create_window(
     event_loop: &EventLoop<()>,
     config: &ShellConfig,
     restored: Option<SavedBounds>,
-) -> Result<(Arc<Window>, Option<(u32, u32)>), ShellError> {
+) -> Result<CreatedWindow, ShellError> {
     // A restored size is physical px and may be corrupt (an old DPI-ratchet
     // bug, a zeroed file), so it is sanitised before winit ever sees it. This
     // first pass has no monitor information: winit 0.30 exposes monitors on

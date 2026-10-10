@@ -203,6 +203,8 @@ impl SsaaFramebuffer {
     /// `parent_clip` is intersected with `dst_rect` to set the pass scissor —
     /// pass the framework scissor that was active when the widget called
     /// `gl_paint` / pushed its draw command.
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
     pub fn blit_to(
         &self,
         device: &wgpu::Device,
@@ -233,6 +235,8 @@ impl SsaaFramebuffer {
     /// entirely skips one row + one column — visually close to no AA at
     /// all — so 3× SSAA *needs* this dedicated pipeline to be worth its
     /// pixel cost.
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
     pub fn blit_downsample_3x_to(
         &self,
         device: &wgpu::Device,
@@ -260,6 +264,8 @@ impl SsaaFramebuffer {
     /// runs `tex_downsample_4x_pipeline` so all 16 source texels under each
     /// output pixel contribute equally, instead of the 4-of-16 you'd get
     /// from a single bilinear tap.
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
     pub fn blit_downsample_4x_to(
         &self,
         device: &wgpu::Device,
@@ -319,7 +325,7 @@ impl SsaaFramebuffer {
         factor: u32,
     ) {
         let pipeline = match factor {
-            0 | 1 | 2 => &pipelines.tex_pipeline,
+            0..=2 => &pipelines.tex_pipeline,
             3 => &pipelines.tex_downsample_3x_pipeline,
             _ => &pipelines.tex_downsample_4x_pipeline,
         };

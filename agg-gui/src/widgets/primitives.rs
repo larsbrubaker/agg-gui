@@ -60,6 +60,8 @@ impl Stack {
     }
 
     /// Add a child stretched to fill the stack's full area.
+    // Builder-style child append, not arithmetic; `add` is public API.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self.aligned.push(false);
@@ -532,7 +534,7 @@ impl Widget for SizedBox {
         // available axis — which would otherwise push sibling widgets off
         // screen.
         let w = self.width.unwrap_or(available.width);
-        let mut h = self.height.unwrap_or_else(|| {
+        let mut h = self.height.unwrap_or({
             if self.children.is_empty() {
                 0.0
             } else {

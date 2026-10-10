@@ -195,9 +195,11 @@ fn docrange_ordering() {
 
 #[test]
 fn colors_round_trip_through_style() {
-    let mut s = InlineStyle::default();
-    s.text_color = Some(Color::from_rgb8(10, 20, 30));
-    s.highlight = Some(Color::from_rgb8(200, 200, 0));
+    let s = InlineStyle {
+        text_color: Some(Color::from_rgb8(10, 20, 30)),
+        highlight: Some(Color::from_rgb8(200, 200, 0)),
+        ..InlineStyle::default()
+    };
     let run = TextRun::new("x", s.clone());
     assert_eq!(run.style, s);
 }

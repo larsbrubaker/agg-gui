@@ -200,46 +200,6 @@ fn is_dynamic_readme_badge_line(line: &str) -> bool {
             || (trimmed.contains("github.com/") && trimmed.contains("/badge.svg")))
 }
 
-#[cfg(test)]
-mod about_tests {
-    use super::*;
-
-    #[test]
-    fn strip_dynamic_readme_badges_removes_remote_svg_badges() {
-        let readme = "\
-# agg-gui
-
-[![crates.io](https://img.shields.io/crates/v/agg-gui.svg)](https://crates.io/crates/agg-gui)
-[![docs.rs](https://docs.rs/agg-gui/badge.svg)](https://docs.rs/agg-gui)
-[![CI](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml)
-
-## Live Demo
-";
-
-        let stripped = strip_dynamic_readme_badges(readme);
-
-        assert!(!stripped.contains("img.shields.io"));
-        assert!(!stripped.contains("docs.rs/agg-gui/badge.svg"));
-        assert!(!stripped.contains("actions/workflows/ci.yml/badge.svg"));
-        assert!(stripped.contains("# agg-gui"));
-        assert!(stripped.contains("## Live Demo"));
-    }
-
-    #[test]
-    fn strip_dynamic_readme_badges_keeps_hero_image_and_links() {
-        let readme = "\
-> **[Open interactive WASM demo ->](https://larsbrubaker.github.io/agg-gui/)**
-
-[![agg-gui demo](agg-gui/readme_hero.png)](https://larsbrubaker.github.io/agg-gui/)
-";
-
-        let stripped = strip_dynamic_readme_badges(readme);
-
-        assert!(stripped.contains("Open interactive WASM demo"));
-        assert!(stripped.contains("agg-gui/readme_hero.png"));
-    }
-}
-
 // ---------------------------------------------------------------------------
 // PNG loader (shared by about())
 // ---------------------------------------------------------------------------
@@ -389,5 +349,45 @@ impl Widget for CubeSizeProbe {
 
     fn on_event(&mut self, _event: &agg_gui::Event) -> agg_gui::EventResult {
         agg_gui::EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod about_tests {
+    use super::*;
+
+    #[test]
+    fn strip_dynamic_readme_badges_removes_remote_svg_badges() {
+        let readme = "\
+# agg-gui
+
+[![crates.io](https://img.shields.io/crates/v/agg-gui.svg)](https://crates.io/crates/agg-gui)
+[![docs.rs](https://docs.rs/agg-gui/badge.svg)](https://docs.rs/agg-gui)
+[![CI](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/larsbrubaker/agg-gui/actions/workflows/ci.yml)
+
+## Live Demo
+";
+
+        let stripped = strip_dynamic_readme_badges(readme);
+
+        assert!(!stripped.contains("img.shields.io"));
+        assert!(!stripped.contains("docs.rs/agg-gui/badge.svg"));
+        assert!(!stripped.contains("actions/workflows/ci.yml/badge.svg"));
+        assert!(stripped.contains("# agg-gui"));
+        assert!(stripped.contains("## Live Demo"));
+    }
+
+    #[test]
+    fn strip_dynamic_readme_badges_keeps_hero_image_and_links() {
+        let readme = "\
+> **[Open interactive WASM demo ->](https://larsbrubaker.github.io/agg-gui/)**
+
+[![agg-gui demo](agg-gui/readme_hero.png)](https://larsbrubaker.github.io/agg-gui/)
+";
+
+        let stripped = strip_dynamic_readme_badges(readme);
+
+        assert!(stripped.contains("Open interactive WASM demo"));
+        assert!(stripped.contains("agg-gui/readme_hero.png"));
     }
 }

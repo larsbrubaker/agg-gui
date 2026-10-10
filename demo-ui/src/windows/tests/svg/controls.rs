@@ -1,11 +1,13 @@
 use super::*;
 
 impl SvgZoomButton {
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         label: &'static str,
         target_zoom: Option<f64>,
         font: Arc<Font>,
-        samples: Arc<Vec<SvgSampleRender>>,
+        samples: Rc<Vec<SvgSampleRender>>,
         zoom: Rc<Cell<f64>>,
         v_offset: Rc<Cell<f64>>,
         v_max: Rc<Cell<f64>>,

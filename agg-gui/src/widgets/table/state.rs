@@ -13,6 +13,9 @@ use super::config::{CellPainter, RowPredicate, RowsProvider, TableRows};
 
 // ── Live state shared between Table and its body ────────────────────────────
 
+/// Row-click callback `(row, column)`.
+pub(crate) type RowClickHandler = Box<dyn FnMut(usize, usize)>;
+
 #[derive(Clone)]
 pub(crate) struct TableState {
     pub(crate) rows: Rc<RefCell<TableRows>>,
@@ -34,7 +37,7 @@ pub(crate) struct TableState {
     pub(crate) scroll_offset: Rc<Cell<f64>>,
     pub(crate) scroll_to_row: Rc<Cell<Option<usize>>>,
     pub(crate) cell_painter: Rc<RefCell<Option<CellPainter>>>,
-    pub(crate) on_row_click: Rc<RefCell<Option<Box<dyn FnMut(usize, usize)>>>>,
+    pub(crate) on_row_click: Rc<RefCell<Option<RowClickHandler>>>,
     /// Row currently under the mouse, painted with a subtle highlight.
     /// `None` when the cursor is outside the body.  Tracked here rather
     /// than in the body widget so external code can observe it.

@@ -141,9 +141,11 @@ fn test_scroll_fade_does_not_overpaint_front_window() {
 
     let font = Arc::new(crate::text::Font::from_slice(TEST_FONT).unwrap());
     let offset = Rc::new(Cell::new(120.0));
-    let mut scroll_style = ScrollBarStyle::default();
-    scroll_style.fade_strength = 1.0;
-    scroll_style.fade_size = 80.0;
+    let scroll_style = ScrollBarStyle {
+        fade_strength: 1.0,
+        fade_size: 80.0,
+        ..ScrollBarStyle::default()
+    };
 
     let back_content = Box::new(SizedBox::new().with_height(600.0));
     let back_scroll = ScrollView::new(back_content)
@@ -207,9 +209,11 @@ fn test_scroll_fade_uses_window_background() {
     set_visuals(visuals);
 
     let offset = Rc::new(Cell::new(40.0));
-    let mut style = ScrollBarStyle::default();
-    style.fade_strength = 1.0;
-    style.fade_size = 40.0;
+    let style = ScrollBarStyle {
+        fade_strength: 1.0,
+        fade_size: 40.0,
+        ..ScrollBarStyle::default()
+    };
 
     let content = Box::new(SizedBox::new().with_height(300.0));
     let mut scroll = ScrollView::new(content)

@@ -86,7 +86,7 @@ thread_local! {
     /// Animated via [`Tween`] so the raise / lower reads as a smooth
     /// slide rather than a snap.  Updated by [`request_lift`] when
     /// focus changes and ticked by `App::paint`.
-    static LIFT: RefCell<Tween> = RefCell::new(Tween::new(0.0, LIFT_DURATION_SECS));
+    static LIFT: RefCell<Tween> = const { RefCell::new(Tween::new(0.0, LIFT_DURATION_SECS)) };
 
     /// The lift translate [`paint_lifted_tree`] has applied to the paint
     /// ctx right now — 0 outside it. Lets

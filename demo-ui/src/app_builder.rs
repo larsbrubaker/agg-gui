@@ -12,6 +12,9 @@ use crate::specs::{find_cube_idx, tile_rect, DEMOS, TESTS};
 use crate::state::{SavedState, StateAccessor};
 use crate::top_bar::{self, build_top_bar_inner};
 use crate::windows;
+
+/// Builds the 3D cube widget from the shared cube-face selection cell.
+pub type CubeWidgetFactory = Box<dyn FnOnce(Rc<Cell<u8>>) -> Box<dyn Widget>>;
 use agg_gui::{
     AccentColor, App, FlexColumn, FlexRow, Font, InspectorNode, InspectorPanel, Key, MenuBarStrip,
     Modifiers, Rect, Size, Stack, ThemePreference, Widget, Window,
@@ -19,7 +22,7 @@ use agg_gui::{
 
 pub fn build_demo_ui(
     font: Arc<Font>,
-    cube_widget_factory: Box<dyn FnOnce(Rc<Cell<u8>>) -> Box<dyn Widget>>,
+    cube_widget_factory: CubeWidgetFactory,
     renderer_name: &'static str,
     backend_name: &'static str,
     initial_state: Option<SavedState>,
@@ -51,8 +54,7 @@ pub fn build_demo_ui(
             .unwrap_or(false),
     ));
     let screenshot_request = Rc::new(Cell::new(false));
-    let screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>> =
-        Rc::new(RefCell::new(None));
+    let screenshot_image: agg_gui::screenshot::SharedArcRgbaImage = Rc::new(RefCell::new(None));
     let screenshot_capturing = Rc::new(Cell::new(false));
     let screenshot_available = Rc::new(Cell::new(false));
     let screenshot_save_pending = Rc::new(Cell::new(false));
@@ -265,7 +267,7 @@ pub fn build_demo_ui(
                     .map(|(_, e)| e)
                     .collect(),
             };
-            entries.sort_by(|a, b| sidebar_sort_key(a.label).cmp(&sidebar_sort_key(b.label)));
+            entries.sort_by_key(|e| sidebar_sort_key(e.label));
             SidebarGroup { name, entries }
         })
         .collect();

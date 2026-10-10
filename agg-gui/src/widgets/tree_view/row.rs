@@ -311,11 +311,12 @@ impl TreeRow {
         row_height: f64,
     ) -> Self {
         let indent_px = depth as f64 * indent_width;
-        let mut children: Vec<Box<dyn Widget>> = Vec::with_capacity(4);
-        children.push(Box::new(SizedBox::fixed(indent_px, row_height)));
-        children.push(Box::new(ExpandToggle::new(has_children, is_expanded)));
-        children.push(Box::new(NodeIconWidget::new(icon)));
-        children.push(Box::new(Label::new(label, font).with_font_size(font_size)));
+        let children: Vec<Box<dyn Widget>> = vec![
+            Box::new(SizedBox::fixed(indent_px, row_height)),
+            Box::new(ExpandToggle::new(has_children, is_expanded)),
+            Box::new(NodeIconWidget::new(icon)),
+            Box::new(Label::new(label, font).with_font_size(font_size)),
+        ];
 
         Self {
             bounds: Rect::default(),

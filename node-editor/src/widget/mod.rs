@@ -183,6 +183,12 @@ enum CanvasState {
 #[cfg(test)]
 pub(crate) use hover::resolve_noodle_endpoints;
 
+/// Receives an overlay widget and the flag that closes it.
+pub(crate) type OverlaySink = Box<dyn FnMut(Box<dyn Widget>, Rc<Cell<bool>>)>;
+
+/// Receives dropped file paths and the drop point in graph space.
+pub(crate) type FileDropHandler = Box<dyn FnMut(&[std::path::PathBuf], [f64; 2])>;
+
 /// The reusable node-editor widget.
 pub struct NodeEditor {
     bounds: Rect,
@@ -263,7 +269,7 @@ pub struct NodeEditor {
     /// windows) so the user can drag it anywhere on screen — not just
     /// within the node-editor pane. Other hosts that don't supply a
     /// sink fall back to the in-editor overlay (the legacy default).
-    pub(crate) overlay_sink: Option<Box<dyn FnMut(Box<dyn Widget>, Rc<Cell<bool>>)>>,
+    pub(crate) overlay_sink: Option<OverlaySink>,
     /// Optional host hook fired when one or more files are dropped onto
     /// the canvas. Receives the dropped paths and the canvas-space
     /// position of the cursor at drop time — typically used to import
@@ -272,7 +278,7 @@ pub struct NodeEditor {
     /// AtomArtist's app shell installs this to turn `.stl`/`.obj`/`.3mf`
     /// drops into `MeshNode`s. Hosts that don't care about file drops
     /// leave the field `None` and the event is simply ignored.
-    pub(crate) file_drop_handler: Option<Box<dyn FnMut(&[std::path::PathBuf], [f64; 2])>>,
+    pub(crate) file_drop_handler: Option<FileDropHandler>,
     /// The editor's own top-left origin in **app-absolute** logical
     /// coordinates, captured every paint from the `DrawCtx` root transform.
     /// Used to hoist an inline editor's pill rect from editor-local space up

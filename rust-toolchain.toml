@@ -1,0 +1,7 @@
+# Pins the toolchain so local checks and CI run the same clippy and rustfmt (a newer stable
+# clippy can fail CI on lints the local one does not have). Matches mattercad-rust's pin, the
+# main consumer, so both repos lint with the same rules. Bump deliberately.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

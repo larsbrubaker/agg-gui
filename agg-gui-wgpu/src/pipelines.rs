@@ -722,6 +722,8 @@ fn mk_layout(
 /// same module), a single vertex buffer slot, a blend state, and a colour
 /// write mask.  All 2D pipelines use `TriangleList` topology with no depth
 /// test, no culling, and no MSAA.
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn build_pipeline(
     device: &wgpu::Device,
     label: &str,

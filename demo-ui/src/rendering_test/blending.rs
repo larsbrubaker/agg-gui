@@ -69,7 +69,7 @@ impl Widget for BlendingTest {
 /// Paint one half of the blending test, matching egui's `paint_fine_lines_and_text`:
 /// - Left side:  corner-sweeping CubicBézier arcs (spiral inward) at 7 stroke widths
 /// - Right side: three text columns (white / gray / black) at 8 opacity levels,
-///               followed by font-size ramp samples
+///   followed by font-size ramp samples
 ///
 /// The arc rect starts at the left half of this half-panel, shrunk 16 px on every side.
 /// Each iteration the visual top drops 24 px and the right edge retreats 24 px, producing

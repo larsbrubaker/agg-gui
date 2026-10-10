@@ -345,7 +345,7 @@ fn w1_outer_window_tracks_inner_resize_growth() {
     };
     // Dispatch MouseDown + MouseMove + MouseUp to the Resize widget
     // directly (it owns the drag state).  Walk the tree to get &mut.
-    fn resize_mut<'a>(root: &'a mut dyn Widget) -> Option<&'a mut dyn Widget> {
+    fn resize_mut(root: &mut dyn Widget) -> Option<&mut dyn Widget> {
         if root.type_name() == "Resize" {
             return Some(root);
         }
@@ -477,7 +477,7 @@ fn w1_inner_resize_oversize_pushes_window_wider() {
 
     // Drive an SE drag on the Resize: move 400 px further right than
     // the current window inner width, 0 delta in Y.
-    fn find_resize_mut<'a>(root: &'a mut dyn Widget) -> Option<&'a mut dyn Widget> {
+    fn find_resize_mut(root: &mut dyn Widget) -> Option<&mut dyn Widget> {
         if root.type_name() == "Resize" {
             return Some(root);
         }

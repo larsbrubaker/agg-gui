@@ -4,7 +4,7 @@
 //! platform export actions live in `agg_gui::screenshot` so native and WASM
 //! shells use the same public library surface.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -40,7 +40,7 @@ const EXPORT_BUTTON_LABEL: &str = "\u{F019}  Download";
 pub fn screenshot_demo(
     font: Arc<Font>,
     screenshot_request: Rc<Cell<bool>>,
-    screenshot_image: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
+    screenshot_image: agg_gui::screenshot::SharedArcRgbaImage,
     _screenshot_capturing: Rc<Cell<bool>>,
     screenshot_available: Rc<Cell<bool>>,
     screenshot_save_pending: Rc<Cell<bool>>,
@@ -172,7 +172,7 @@ struct ImageView {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     font: Arc<Font>,
-    source: Rc<RefCell<Option<(Arc<Vec<u8>>, u32, u32)>>>,
+    source: agg_gui::screenshot::SharedArcRgbaImage,
     /// Continuous-capture flag.  When set, `needs_draw` returns `true` so
     /// the enclosing Window's retained backbuffer re-rasters every frame —
     /// otherwise the GPU capture texture would update underneath a cached
@@ -331,7 +331,7 @@ mod tests {
         let mut demo = screenshot_demo(
             font(),
             Rc::new(Cell::new(false)),
-            Rc::new(RefCell::new(None)),
+            Rc::new(std::cell::RefCell::new(None)),
             Rc::new(Cell::new(false)),
             Rc::new(Cell::new(false)),
             Rc::new(Cell::new(false)),

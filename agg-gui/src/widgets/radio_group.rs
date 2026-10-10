@@ -61,8 +61,11 @@ pub struct RadioGroup {
     /// `(dot_cx, dot_cy, label_x, has_label, hit_box)` in widget-local
     /// coordinates (x-left / y-up). Empty in vertical mode, where
     /// `row_center_y`/`row_for_y` are used instead.
-    hwrap_items: Vec<(f64, f64, f64, bool, Rect)>,
+    hwrap_items: Vec<HwrapCell>,
 }
+
+/// One option's wrap geometry: `(dot_cx, dot_cy, label_x, has_label, hit_box)`.
+type HwrapCell = (f64, f64, f64, bool, Rect);
 
 impl RadioGroup {
     pub fn new(options: Vec<impl Into<String>>, selected: usize, font: Arc<Font>) -> Self {
@@ -206,7 +209,7 @@ impl RadioGroup {
     /// plus the total height. Coordinates are widget-local (x grows right,
     /// y grows up, so the first wrapped line sits at the top). Pure w.r.t.
     /// widget state — used by both `layout` and `measure_min_height`.
-    fn compute_hwrap(&self, available_w: f64) -> (Vec<(f64, f64, f64, bool, Rect)>, f64) {
+    fn compute_hwrap(&self, available_w: f64) -> (Vec<HwrapCell>, f64) {
         let n = self.options.len();
         if n == 0 {
             return (Vec::new(), 0.0);
@@ -487,13 +490,9 @@ impl Widget for RadioGroup {
                             false
                         }
                     }
-                    Key::ArrowDown | Key::ArrowRight => {
-                        if self.selected + 1 < n {
-                            self.selected += 1;
-                            true
-                        } else {
-                            false
-                        }
+                    Key::ArrowDown | Key::ArrowRight if self.selected + 1 < n => {
+                        self.selected += 1;
+                        true
                     }
                     _ => false,
                 };

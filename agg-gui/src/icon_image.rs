@@ -221,7 +221,10 @@ impl IconImage {
     /// `(x, y)` (Y-up local coordinates), rasterised for the current
     /// `device_scale()`.
     pub fn draw(&self, ctx: &mut dyn DrawCtx, x: f64, y: f64) {
-        self.draw_in(ctx, Rect::new(x, y, self.inner.size.width, self.inner.size.height));
+        self.draw_in(
+            ctx,
+            Rect::new(x, y, self.inner.size.width, self.inner.size.height),
+        );
     }
 
     /// Draw the icon scaled into `rect` (Y-up local coordinates).  SVG icons
@@ -250,7 +253,8 @@ impl IconImage {
 impl IconImage {
     /// Physical sizes currently cached, oldest first.
     pub(crate) fn cached_raster_sizes(&self) -> Vec<(u32, u32)> {
-        self.inner.cache
+        self.inner
+            .cache
             .lock()
             .map(|c| c.iter().map(|r| (r.width, r.height)).collect())
             .unwrap_or_default()

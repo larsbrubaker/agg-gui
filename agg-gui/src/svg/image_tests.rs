@@ -25,7 +25,7 @@ fn embedded_svg_image_preserves_left_to_right_orientation() {
     );
 
     let fb = render_svg_to_framebuffer(svg.as_bytes()).expect("SVG image should render");
-    let left = ((fb.width() + 0) * 4) as usize;
+    let left = (fb.width() * 4) as usize;
     let right = ((fb.width() + 3) * 4) as usize;
     assert!(fb.pixels()[left] > fb.pixels()[left + 2]);
     assert!(fb.pixels()[right + 2] > fb.pixels()[right]);

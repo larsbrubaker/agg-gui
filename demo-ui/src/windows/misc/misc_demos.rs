@@ -127,7 +127,7 @@ impl Widget for ManyCirclesWidget {
         // Lay out 100 circles of radius 0..10 in wrapping rows.
         let cols = 20_usize;
         let cell = 18.0_f64;
-        let rows = (100 + cols - 1) / cols;
+        let rows = 100_usize.div_ceil(cols);
         let h = rows as f64 * cell + 4.0;
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
         Size::new(available.width, h)
@@ -144,7 +144,7 @@ impl Widget for ManyCirclesWidget {
             let row = i / cols;
             let cx = col as f64 * cell + cell * 0.5;
             // Y-up: row 0 is at top = highest y
-            let rows = (100 + cols - 1) / cols;
+            let rows = 100_usize.div_ceil(cols);
             let cy = h - row as f64 * cell - cell * 0.5;
             let _ = rows;
             ctx.set_fill_color(v.text_color);

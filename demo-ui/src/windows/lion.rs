@@ -486,6 +486,39 @@ impl Widget for LionView {
     }
 }
 
+// ── Demo window entry point ──────────────────────────────────────────────────
+
+pub fn lion_demo(font: Arc<Font>) -> Box<dyn Widget> {
+    use agg_gui::FlexColumn;
+
+    let alpha = Rc::new(Cell::new(1.0f64));
+    let alp_c = Rc::clone(&alpha);
+    let alp_slider = Slider::new(1.0, 0.0, 1.0, Arc::clone(&font)).on_change(move |v| alp_c.set(v));
+
+    let alp_label = Label::new("Alpha", Arc::clone(&font)).with_font_size(12.0);
+    let note = Label::new(
+        "Left-drag or one-finger drag: rotate + scale (relative to \
+         start).  Wheel / pinch: zoom.  Two-finger twist: rotate.  \
+         Two-finger drag: pan.  Right-drag: skew.  MSAA is off; smooth \
+         silhouette = halo-AA edges; fresh tess2 every frame.",
+        Arc::clone(&font),
+    )
+    .with_font_size(11.0)
+    .with_wrap(true);
+
+    let view = LionView::new(alpha);
+
+    Box::new(
+        FlexColumn::new()
+            .with_gap(6.0)
+            .with_padding(8.0)
+            .add(Box::new(alp_label))
+            .add(Box::new(alp_slider))
+            .add(Box::new(note))
+            .add_flex(Box::new(view), 1.0),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,37 +646,4 @@ mod tests {
         assert_eq!(mv, EventResult::Consumed);
         assert_ne!(v.angle, before, "left-drag must rotate the lion");
     }
-}
-
-// ── Demo window entry point ──────────────────────────────────────────────────
-
-pub fn lion_demo(font: Arc<Font>) -> Box<dyn Widget> {
-    use agg_gui::FlexColumn;
-
-    let alpha = Rc::new(Cell::new(1.0f64));
-    let alp_c = Rc::clone(&alpha);
-    let alp_slider = Slider::new(1.0, 0.0, 1.0, Arc::clone(&font)).on_change(move |v| alp_c.set(v));
-
-    let alp_label = Label::new("Alpha", Arc::clone(&font)).with_font_size(12.0);
-    let note = Label::new(
-        "Left-drag or one-finger drag: rotate + scale (relative to \
-         start).  Wheel / pinch: zoom.  Two-finger twist: rotate.  \
-         Two-finger drag: pan.  Right-drag: skew.  MSAA is off; smooth \
-         silhouette = halo-AA edges; fresh tess2 every frame.",
-        Arc::clone(&font),
-    )
-    .with_font_size(11.0)
-    .with_wrap(true);
-
-    let view = LionView::new(alpha);
-
-    Box::new(
-        FlexColumn::new()
-            .with_gap(6.0)
-            .with_padding(8.0)
-            .add(Box::new(alp_label))
-            .add(Box::new(alp_slider))
-            .add(Box::new(note))
-            .add_flex(Box::new(view), 1.0),
-    )
 }

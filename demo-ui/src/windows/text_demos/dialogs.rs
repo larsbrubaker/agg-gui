@@ -460,17 +460,15 @@ impl Widget for ModalOverlay {
                         self.focus = Some(ModalFocus::Name);
                         self.name_field.on_event(&Event::FocusGained);
                         let field_pos = Point::new(local.x - name_rect.x, local.y - name_rect.y);
-                        let result = self.name_field.on_event(&Event::MouseDown {
+                        self.name_field.on_event(&Event::MouseDown {
                             pos: field_pos,
                             button: MouseButton::Left,
                             modifiers: Default::default(),
                         });
                         agg_gui::animation::request_draw();
-                        return if result == EventResult::Consumed {
-                            EventResult::Consumed
-                        } else {
-                            EventResult::Consumed
-                        };
+                        // The click landed on the field, so the modal consumes it
+                        // whether or not the field itself did.
+                        return EventResult::Consumed;
                     }
 
                     let role_rect = self.role_rect(modal_rect);

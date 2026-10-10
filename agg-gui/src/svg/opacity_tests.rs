@@ -18,7 +18,7 @@ fn group_opacity_is_applied_after_children_are_composited() {
     "##;
 
     let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
-    let center = ((1 * fb.width() + 1) * 4) as usize;
+    let center = ((fb.width() + 1) * 4) as usize;
 
     assert_eq!(
         &fb.pixels()[center..center + 4],

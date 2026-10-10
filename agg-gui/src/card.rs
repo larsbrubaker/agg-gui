@@ -283,6 +283,8 @@ fn wrap_details(
 /// or not the widget fills the viewport. `extra_insets` is merged in
 /// per-edge max — pass the widget's own reserved strips (e.g. an
 /// in-widget ruler) or `Insets::default()`.
+// Public API: the signature is shared with downstream callers.
+#[allow(clippy::too_many_arguments)]
 pub fn paint_anchored(
     ctx: &mut dyn DrawCtx,
     font: Arc<Font>,

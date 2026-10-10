@@ -21,7 +21,7 @@ fn renders_linear_gradient_fill_via_rgba_target() {
     "##;
 
     let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
-    let left = ((fb.width() + 0) * 4) as usize;
+    let left = (fb.width() * 4) as usize;
     let right = ((fb.width() + 3) * 4) as usize;
 
     assert!(
@@ -51,7 +51,7 @@ fn renders_linear_gradient_fill_via_lcd_target() {
 
     let buffer = render_svg_to_lcd_buffer(svg).expect("SVG should render");
     let row = buffer.width() as usize;
-    let left = (row + 0) * 3;
+    let left = row * 3;
     let right = (row + 3) * 3;
 
     assert!(
@@ -140,7 +140,7 @@ fn renders_radial_gradient_fill_via_rgba_target() {
 
     let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
     let center = ((2 * fb.width() + 2) * 4) as usize;
-    let corner = ((4 * fb.width() + 0) * 4) as usize;
+    let corner = ((4 * fb.width()) * 4) as usize;
 
     assert!(
         fb.pixels()[center] > fb.pixels()[center + 2],
@@ -170,7 +170,7 @@ fn renders_radial_gradient_fill_via_lcd_target() {
     let buffer = render_svg_to_lcd_buffer(svg).expect("SVG should render");
     let row = buffer.width() as usize;
     let center = (2 * row + 2) * 3;
-    let corner = (4 * row + 0) * 3;
+    let corner = (4 * row) * 3;
 
     assert!(
         buffer.color_plane()[center] > buffer.color_plane()[center + 2],
@@ -198,7 +198,7 @@ fn renders_pattern_fill_via_rgba_target() {
     "##;
 
     let fb = render_svg_to_framebuffer(svg).expect("SVG should render");
-    let green = ((fb.width() + 0) * 4) as usize;
+    let green = (fb.width() * 4) as usize;
     let blue = ((fb.width() + 1) * 4) as usize;
     let repeated_green = ((fb.width() + 2) * 4) as usize;
 
@@ -233,7 +233,7 @@ fn renders_pattern_fill_via_lcd_target() {
 
     let buffer = render_svg_to_lcd_buffer(svg).expect("SVG should render");
     let row = buffer.width() as usize;
-    let green = (row + 0) * 3;
+    let green = row * 3;
     let blue = (row + 1) * 3;
     let repeated_green = (row + 2) * 3;
 

@@ -84,11 +84,11 @@ fn modal_window_world(app: &App) -> Rect {
     let mut widget: &dyn Widget = app.root();
     let (mut ox, mut oy) = (0.0, 0.0);
     for &idx in &path {
-        let child: &Box<dyn Widget> = &widget.children()[idx];
+        let child: &dyn Widget = widget.children()[idx].as_ref();
         let b = child.bounds();
         ox += b.x;
         oy += b.y;
-        widget = child.as_ref();
+        widget = child;
     }
     let b = widget.bounds();
     Rect::new(ox, oy, b.width, b.height)
