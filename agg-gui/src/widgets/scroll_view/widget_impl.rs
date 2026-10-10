@@ -180,6 +180,16 @@ impl Widget for ScrollView {
             } else {
                 vw_guess
             };
+            // Content that places its children from the top (or right) of
+            // the unbounded measuring size — a top-anchored `FlexColumn`, a
+            // vertical `MenuBar` — leaves them near 1e308.  Lay it out again
+            // at the measured size it is about to be given.  Only when a
+            // direct child actually lies outside that box, so ordinary
+            // natural-anchored content keeps its single layout pass.
+            let measured = Size::new(self.h.content, self.v.content);
+            if children_outside(child.as_ref(), measured) {
+                child.layout(measured);
+            }
         }
 
         // Re-query viewport now that content dimensions are known (Solid bars
@@ -633,4 +643,18 @@ fn notify_ancestor_scrolled(widget: &mut dyn Widget) {
     for child in widget.children_mut().iter_mut() {
         notify_ancestor_scrolled(child.as_mut());
     }
+}
+
+/// Whether any direct child of `content` lies outside a `size` box at the
+/// origin — the sign that `content` placed its children against the
+/// unbounded measuring size rather than the size it will be given.
+fn children_outside(content: &dyn Widget, size: Size) -> bool {
+    const SLACK: f64 = 0.5;
+    content.children().iter().any(|c| {
+        let b = c.bounds();
+        b.y < -SLACK
+            || b.y + b.height > size.height + SLACK
+            || b.x < -SLACK
+            || b.x + b.width > size.width + SLACK
+    })
 }
