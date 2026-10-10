@@ -58,6 +58,8 @@ mod tests_error_badge;
 #[cfg(test)]
 mod tests_hosted;
 #[cfg(test)]
+mod tests_hosted_order;
+#[cfg(test)]
 mod tests_hosted_preview;
 #[cfg(test)]
 mod tests_inline_editor;

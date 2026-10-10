@@ -30,7 +30,8 @@ impl NodeEditor {
     /// Preview of a press routed into the hosted layer: a left press on a
     /// card's body or title bar selects the card (the same rule as a press
     /// that reaches the editor: Shift adds, a press on a selected card keeps
-    /// the selection) and raises it. Sockets and the resize band are left to
+    /// the selection) and raises it (unless `with_raise_on_click(false)`).
+    /// Sockets and the resize band are left to
     /// the editor's own handlers. Never consumes. Selection order only
     /// changes `hosted.order`; the layer is re-sorted at the next layout, so
     /// the dispatch path in flight stays valid.

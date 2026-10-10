@@ -10,6 +10,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor::with_raise_on_click(false)` keeps hosted cards in model order,
+  as MatterCAD's NodeDesigner keeps its node windows: a press on a card
+  selects it without raising it, and where two cards overlap the one later in
+  model order stays on top and takes the press. On by default (a pressed card
+  is raised, as before).
 - A press on a widget inside a hosted card body (a slider, a text field)
   selects and raises the card, as a press anywhere in a MatterCAD node card
   does, while the widget still gets the press. The editor does this in its

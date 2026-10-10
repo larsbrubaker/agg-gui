@@ -119,8 +119,12 @@ pub(crate) struct HostedState {
     /// Body epoch the cached bodies were built at.
     pub epoch: Option<u64>,
     pub cards: HashMap<NodeId, CardGeom>,
-    /// Hosted cards bottom → top: the last-clicked card is painted last.
+    /// Hosted cards bottom → top: the last-clicked card is painted last
+    /// (model order when `raise_on_click` is off).
     pub order: Vec<NodeId>,
+    /// A press on a card raises it. Off keeps the cards in model order,
+    /// as MatterCAD's NodeDesigner does.
+    pub raise_on_click: bool,
     pub resize: Option<ResizeDrag>,
     /// Card heights last reported through `on_node_measured`.
     pub measured: HashMap<NodeId, f64>,
@@ -140,6 +144,7 @@ impl Default for HostedState {
             epoch: None,
             cards: HashMap::new(),
             order: Vec::new(),
+            raise_on_click: true,
             resize: None,
             measured: HashMap::new(),
             collapse_enabled: true,
@@ -174,13 +179,28 @@ impl NodeEditor {
         self
     }
 
+    /// Whether a press on a hosted card raises it to the top of the paint
+    /// order. On by default. Off keeps the cards in the order the model
+    /// lists its nodes (MatterCAD's NodeDesigner keeps its node windows in
+    /// the order they were added): a press still selects the card, and
+    /// where two cards overlap the one later in model order is on top and
+    /// takes the press.
+    pub fn with_raise_on_click(mut self, raise: bool) -> Self {
+        self.hosted.raise_on_click = raise;
+        self
+    }
+
     /// The hosted cards' node ids, bottom → top.
     pub fn hosted_card_order(&self) -> &[NodeId] {
         &self.hosted.order
     }
 
-    /// Bring a hosted card to the top of the paint order.
+    /// Bring a hosted card to the top of the paint order. Does nothing when
+    /// [`Self::with_raise_on_click`] is off: the cards stay in model order.
     pub fn raise_card(&mut self, id: NodeId) {
+        if !self.hosted.raise_on_click {
+            return;
+        }
         if self.hosted.order.last() == Some(&id) || !self.hosted.order.contains(&id) {
             return;
         }
@@ -287,7 +307,12 @@ impl NodeEditor {
             geoms.insert(n.id, geom);
         }
 
-        // Z-order: keep the existing order, append new cards on top.
+        // Z-order: keep the existing order, append new cards on top. Without
+        // raise-on-click the order is the model's, rebuilt every layout so
+        // it follows the model if it reorders its nodes.
+        if !self.hosted.raise_on_click {
+            self.hosted.order.clear();
+        }
         self.hosted.order.retain(|id| geoms.contains_key(id));
         for n in &nodes {
             if geoms.contains_key(&n.id) && !self.hosted.order.contains(&n.id) {
