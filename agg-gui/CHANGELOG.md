@@ -18,6 +18,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   does: outline at alpha 30, closed label and arrow at alpha 50, fill
   unchanged, overridable with `ComboBox::with_disabled_style(
   ComboBoxDisabledStyle { border_alpha, label_alpha })`.
+- Window activation (agg-sharp's `SystemWindow.Deactivated`):
+  `App::on_window_deactivated` / `App::on_window_activated` send
+  `Event::WindowDeactivated` / `Event::WindowActivated` to every widget, once
+  per change, and `agg_gui::window_is_active()` (also
+  `App::window_is_active()`) reports the state. Deactivation leaves keyboard
+  focus alone (no `FocusLost`). A widget holding pointer capture first gets
+  the new `Event::MouseCaptureLost` and the capture is cleared: the release of
+  its press goes to the app the user switched to, so before this the drag kept
+  following the pointer, button up, until the next click. No `MouseUp` is made
+  up, so a pressed button does not click. `Slider` ends such a drag with its
+  one `on_release`, as it does for focus loss. Shells forward
+  `ForwarderEvent::WindowActivated` / `WindowDeactivated` (which also clears
+  the forwarder's held buttons): `agg-gui-shell` from winit's
+  `WindowEvent::Focused`, `agg-gui-web-shell` from the page's `focus` / `blur`.
+  Both are platform input, dropped while an automation run has real input
+  off. `HeadlessWindow::on_deactivated` / `on_activated` simulate them. Code
+  matching `Event` or `ForwarderEvent` exhaustively needs arms for the new
+  variants.
 
 - Caret suggestions for `TextField` (agg-sharp's `TextSuggestionController`):
   `TextField::with_text_suggestions(TextSuggestionController::new(provider))`

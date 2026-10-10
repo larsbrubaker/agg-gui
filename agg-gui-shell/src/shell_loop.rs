@@ -173,6 +173,20 @@ impl<H: ShellHost> ShellLoop<H> {
                 winit_adapter::apply_cursor(&self.window, agg_gui::current_cursor_icon());
             }
 
+            // The window gaining / losing key status (an app switch, a click
+            // on another window). Gated like other platform input, so an
+            // automation run that turned real input off is not disturbed by
+            // the desktop handing focus around mid-run (agg-sharp's
+            // `ForwardPlatformDeactivation`).
+            WindowEvent::Focused(focused) => {
+                self.forward(if focused {
+                    ForwarderEvent::WindowActivated
+                } else {
+                    ForwarderEvent::WindowDeactivated
+                });
+                self.window.request_redraw();
+            }
+
             WindowEvent::CursorLeft { .. } => {
                 self.forward(ForwarderEvent::MouseLeave);
             }

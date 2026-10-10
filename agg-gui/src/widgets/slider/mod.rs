@@ -142,7 +142,8 @@ pub struct Slider {
     focused: bool,
     hovered: bool,
     on_change: Option<Box<dyn FnMut(f64)>>,
-    /// Fired once when a pointer drag (or click) on the slider ends.
+    /// Fired once when a pointer drag (or click) on the slider ends with a
+    /// release, focus loss or pointer-capture loss.
     on_release: Option<Box<dyn FnMut(f64)>>,
     /// Optional external mirror of `value`.  When `Some`, `layout()` re-reads
     /// the cell every frame so a second widget that writes the same cell
@@ -357,8 +358,9 @@ impl Slider {
     }
 
     /// Called once with the final value when a pointer drag (or a plain
-    /// click) on the slider ends — on `MouseUp`, or on `FocusLost` if the
-    /// drag is torn down without a release. Use it to commit one undo step
+    /// click) on the slider ends — on `MouseUp`, or on `FocusLost` /
+    /// [`Event::MouseCaptureLost`] (the window lost activation mid-drag) if
+    /// the drag is torn down without a release. Use it to commit one undo step
     /// per drag while `on_change` streams live values. Keyboard nudges don't
     /// fire it: each is already a discrete, complete edit.
     pub fn on_release(mut self, cb: impl FnMut(f64) + 'static) -> Self {
@@ -694,6 +696,19 @@ impl Widget for Slider {
                     crate::animation::request_draw();
                 }
                 EventResult::Consumed
+            }
+            // The press ended without a release (the window lost
+            // activation mid-drag). The drag ends where it was, with its
+            // one `on_release`, exactly as when focus loss tears a drag
+            // down: the live `on_change` values already landed, and an app
+            // committing an undo step on release must still get it.
+            Event::MouseCaptureLost => {
+                if std::mem::take(&mut self.dragging) {
+                    self.fire_release();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             Event::KeyDown { key, .. } => {
                 // Arrows move the value along the slider's own axis: left/right

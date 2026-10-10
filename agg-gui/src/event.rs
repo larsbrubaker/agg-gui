@@ -233,6 +233,42 @@ pub enum Event {
     /// [`Event::MouseLeave`] here). Sent before the chain's `MouseLeave`s;
     /// see [`Event::MouseOver`].
     MouseOut,
+    /// The window became the active (key / focused) window again: the user
+    /// switched back to the app, or clicked its window.
+    ///
+    /// Sent by [`crate::widget::App::on_window_activated`] to **every**
+    /// widget in the tree (it does not bubble and cannot be consumed), once
+    /// per change. agg-sharp's `SystemWindow` raises no activation event of
+    /// its own; this is the counterpart of [`Event::WindowDeactivated`] so a
+    /// widget that dims or pauses while inactive can undo it.
+    WindowActivated,
+    /// The window lost activation: the user switched to another application
+    /// (Cmd/Alt+Tab, a click on another window), or the browser tab or page
+    /// lost focus. agg-sharp's `SystemWindow.Deactivated`.
+    ///
+    /// Sent by [`crate::widget::App::on_window_deactivated`] to **every**
+    /// widget in the tree (it does not bubble and cannot be consumed), once
+    /// per change. It is not a focus change: keyboard focus stays where it
+    /// was (as on agg-sharp, where a text field stays focused across an app
+    /// switch) and no [`Event::FocusLost`] is sent. A pointer capture does
+    /// end — see [`Event::MouseCaptureLost`], which reaches the capture
+    /// holder before this event.
+    WindowDeactivated,
+    /// The widget holding pointer capture (the one that consumed the
+    /// `MouseDown` of an in-progress press or drag) lost it **without** a
+    /// `MouseUp`: the press is over and no release will follow.
+    ///
+    /// Sent by [`crate::widget::App`] when the window deactivates mid-press
+    /// — the OS hands the release to whichever app or window the user
+    /// switched to, so it never arrives here. Dispatched along the capture
+    /// path like a release (leaf first, bubbling until consumed). A widget
+    /// with drag state ends the drag here; whether that commits or abandons
+    /// it is the widget's call (agg-gui's `Slider` fires its `on_release`,
+    /// as it does when focus loss ends a drag; agg-sharp's MatterCAD
+    /// abandons its property-slider drag on `Deactivated`). A button must
+    /// not click: the press was never released over it. After this the App
+    /// holds no capture, so later moves go to whatever is under the pointer.
+    MouseCaptureLost,
 }
 
 /// One file of an [`Event::FileDataDropped`]: its name (no directory — the
@@ -289,6 +325,25 @@ pub fn current_modifiers() -> Modifiers {
 /// Called by the App's input entry points; widgets should not need it.
 pub(crate) fn set_current_modifiers(mods: Modifiers) -> bool {
     CURRENT_MODIFIERS.with(|m| m.replace(mods) != mods)
+}
+
+thread_local! {
+    static WINDOW_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Whether the window is active (the key / focused window), as last reported
+/// to [`crate::widget::App::on_window_activated`] /
+/// [`crate::widget::App::on_window_deactivated`]. `true` until a shell
+/// reports otherwise. Per UI thread, like [`current_modifiers`], so a widget
+/// can read it while painting or handling any event.
+pub fn window_is_active() -> bool {
+    WINDOW_ACTIVE.with(|a| a.get())
+}
+
+/// Record the window's activation. Returns `true` when it changed. Called
+/// by the App's activation entry points; widgets should not need it.
+pub(crate) fn set_window_active(active: bool) -> bool {
+    WINDOW_ACTIVE.with(|a| a.replace(active) != active)
 }
 
 /// What a widget returns from [`crate::widget::Widget::on_event`].

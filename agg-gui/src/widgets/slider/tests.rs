@@ -317,3 +317,31 @@ fn on_release_fires_when_drag_ends_by_focus_loss() {
     s.on_event(&Event::FocusLost);
     assert_eq!(count.get(), 1);
 }
+
+/// A drag whose press ends without a release (the window lost activation,
+/// `Event::MouseCaptureLost`) ends with one release at the value it reached,
+/// as a focus-loss teardown does, and stops following the pointer.
+#[test]
+fn on_release_fires_when_drag_ends_by_capture_loss() {
+    let releases = Rc::new(std::cell::RefCell::new(Vec::<f64>::new()));
+    let r = Rc::clone(&releases);
+    let mut s = Slider::new(0.0, 0.0, 100.0, test_font())
+        .with_smart_aim(false)
+        .on_release(move |v| r.borrow_mut().push(v));
+    let _ = s.layout(Size::new(300.0, WIDGET_H));
+    s.set_bounds(Rect::new(0.0, 0.0, 300.0, WIDGET_H));
+    let y = WIDGET_H * 0.5;
+    s.on_event(&mouse_down(50.0, y));
+    s.on_event(&mouse_move(150.0, y));
+    let reached = s.value();
+
+    assert!(s.on_event(&Event::MouseCaptureLost).is_consumed());
+    assert_eq!(*releases.borrow(), vec![reached]);
+
+    // No longer dragging: a later move leaves the value alone, and a second
+    // capture loss is not this slider's.
+    s.on_event(&mouse_move(250.0, y));
+    assert_eq!(s.value(), reached);
+    assert_eq!(s.on_event(&Event::MouseCaptureLost), EventResult::Ignored);
+    assert_eq!(releases.borrow().len(), 1);
+}

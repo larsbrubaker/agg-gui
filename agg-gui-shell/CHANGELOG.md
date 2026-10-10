@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Window activation: winit's `WindowEvent::Focused` reaches the app as
+  `App::on_window_activated` / `App::on_window_deactivated` (through the
+  input forwarder, so an automation run with real input off ignores it). A
+  drag in progress when the window deactivates ends with
+  `Event::MouseCaptureLost`.
+
 - `ShellConfig::force_fallback_adapter` / `with_force_fallback_adapter`: the
   window renders on wgpu's software (fallback) adapter, for a user whose GPU
   driver is broken; a device rebuilt after a loss keeps the choice. With no

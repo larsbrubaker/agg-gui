@@ -3,7 +3,8 @@
 //! contacts, see [`crate::pointer`]), the window-level release listener that
 //! keeps it honest, the `visibilitychange` / `pagehide` flush that calls
 //! [`crate::WebShellHost::on_page_hide`], the window `resize` listener, and
-//! the `webglcontextlost` listener.
+//! the `webglcontextlost` listener, and the window `focus` / `blur` pair that
+//! becomes `App::on_window_activated` / `App::on_window_deactivated`.
 //!
 //! Extracted from AtomArtist's `demo-wasm/src/web_lifecycle.rs`. The count is
 //! maintained by three independent paths, each sufficient to reopen the guard
@@ -11,6 +12,7 @@
 //! `buttons` resync on every move, and the window-level listener here — which
 //! catches a release over browser chrome, where the canvas never hears it.
 
+use agg_gui::shell_input::ForwarderEvent;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
@@ -109,6 +111,26 @@ pub(super) fn install_page_hide() {
         });
     }
     listen(window.as_ref(), "pagehide", |_| page_hide());
+}
+
+/// `blur` / `focus` on `window`: the page losing or regaining focus — the
+/// user switched tabs or applications, or clicked into the browser chrome or
+/// another frame. Focus moving between elements inside the page (the hidden
+/// IME `<textarea>`) fires neither on `window`. Becomes
+/// `ForwarderEvent::WindowDeactivated` / `WindowActivated`, which also ends a
+/// pointer capture whose release the page will never hear.
+pub(super) fn install_window_activation() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    listen(window.as_ref(), "blur", |_| {
+        super::forward(ForwarderEvent::WindowDeactivated);
+        super::note_input();
+    });
+    listen(window.as_ref(), "focus", |_| {
+        super::forward(ForwarderEvent::WindowActivated);
+        super::note_input();
+    });
 }
 
 /// Window resizes / monitor moves / browser zoom. The rAF tick re-syncs

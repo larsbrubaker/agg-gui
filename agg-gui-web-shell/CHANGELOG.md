@@ -10,6 +10,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Window activation: the page's `blur` / `focus` on `window` (a tab or app
+  switch) reach the app as `App::on_window_deactivated` /
+  `App::on_window_activated`; a drag in progress on blur ends with
+  `Event::MouseCaptureLost`.
+
 - File drag-and-drop on the canvas: `dragenter` / `dragover` of a drag that
   carries files are accepted (so the browser delivers the drop instead of
   opening the file) and sent as `App::on_file_drag_hover` with no paths;

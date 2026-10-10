@@ -150,4 +150,17 @@ impl HeadlessWindow {
             modifiers: Some(modifiers),
         });
     }
+
+    /// C# `SystemWindow.OnDeactivated`: the window loses activation, as when
+    /// the user switches to another application.
+    pub fn on_deactivated(&mut self) {
+        self.deliver(ForwarderEvent::WindowDeactivated);
+    }
+
+    /// The window becomes active again (the counterpart of
+    /// [`on_deactivated`](Self::on_deactivated); agg-sharp has no
+    /// `OnActivated`).
+    pub fn on_activated(&mut self) {
+        self.deliver(ForwarderEvent::WindowActivated);
+    }
 }

@@ -214,6 +214,7 @@ where
     lifecycle::install_window_pointer_release();
     lifecycle::install_page_hide();
     lifecycle::install_resize();
+    lifecycle::install_window_activation();
     lifecycle::install_webgl_context_lost(&canvas);
 
     let builder: Builder = Box::new(move |init| {

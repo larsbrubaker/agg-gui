@@ -1,5 +1,6 @@
 use super::*;
 
+mod activation;
 mod file_drop;
 mod gesture;
 mod hover_chain;

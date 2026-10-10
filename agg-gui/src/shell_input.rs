@@ -155,6 +155,12 @@ pub enum ForwarderEvent {
         y: f64,
         files: Vec<DroppedFileData>,
     },
+    /// The window became active again (`App::on_window_activated`).
+    WindowActivated,
+    /// The window lost activation (`App::on_window_deactivated`). The
+    /// releases of any held buttons go to the app the user switched to, so
+    /// the held-button bookkeeping is cleared too.
+    WindowDeactivated,
 }
 
 /// The press a click sequence continues from.
@@ -353,6 +359,12 @@ impl InputForwarder {
             ForwarderEvent::FileDropped { x, y, paths } => app.on_file_dropped(x, y, paths),
             ForwarderEvent::FileDataDropped { x, y, files } => {
                 app.on_file_data_dropped(x, y, files)
+            }
+            ForwarderEvent::WindowActivated => app.on_window_activated(),
+            ForwarderEvent::WindowDeactivated => {
+                self.buttons_down = 0;
+                self.held.clear();
+                app.on_window_deactivated();
             }
         }
         true
