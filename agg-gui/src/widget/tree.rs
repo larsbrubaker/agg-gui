@@ -5,7 +5,9 @@
 //! [`hit_test_subtree`], [`active_modal_path`], [`global_overlay_hit_path`]
 //! — returns a `Vec<usize>` path of child indices identifying the deepest
 //! widget that claims a position; the App event router uses that path to
-//! dispatch mouse events to the right subtree. The dispatch family keeps
+//! dispatch mouse events to the right subtree. Routed dispatch offers the
+//! event to each ancestor's `preview_event` root-first before delivering it
+//! to the target and bubbling it back up. The dispatch family keeps
 //! [`event_root`](super::event_root)'s local → root stack in step with the
 //! path it walks, so handlers can ask where they sit in root space.
 //!
@@ -212,8 +214,11 @@ fn auto_request_draw(result: EventResult) -> EventResult {
 }
 
 /// Dispatch `event` through a path (list of child indices from the root).
-/// The event bubbles leaf → root; returns a consuming result if any widget
-/// consumed it (preserving the `Consumed` vs `ConsumedQuiet` distinction).
+/// Every ancestor of the target first gets
+/// [`Widget::preview_event`](crate::widget::Widget::preview_event), root
+/// first; then the event bubbles leaf → root through `on_event`. Returns a
+/// consuming result if any widget consumed it (preserving the `Consumed` vs
+/// `ConsumedQuiet` distinction).
 ///
 /// `pos_in_root` is the event position in the root widget's coordinate space.
 /// The function translates it down through each level of the path.
@@ -261,6 +266,16 @@ fn dispatch_path(
             root.mark_dirty();
         }
         return result;
+    }
+    // Parent-first preview (`Widget::preview_event`): an ancestor sees the
+    // event before anything below it. A consuming preview intercepts it.
+    let before_preview = crate::animation::invalidation_epoch();
+    let preview = auto_request_draw(root.preview_event(event));
+    if preview.requests_redraw() || before_preview != crate::animation::invalidation_epoch() {
+        root.mark_dirty();
+    }
+    if preview.is_consumed() {
+        return preview;
     }
     let idx = path[0];
     // Path can become stale between when it was captured (hit-test or

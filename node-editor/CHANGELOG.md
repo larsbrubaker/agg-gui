@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- A press on a widget inside a hosted card body (a slider, a text field)
+  selects and raises the card, as a press anywhere in a MatterCAD node card
+  does, while the widget still gets the press. The editor does this in its
+  `Widget::preview_event`; Shift adds to the selection, a press on an already
+  selected card keeps the selection, and sockets and the resize band are left
+  to the editor's own handlers.
 - Hosted cards: a host can supply each node card's body as real agg-gui
   widgets. `NodeEditor::with_body_factory(factory)` takes a `NodeBodyFactory`
   (any `FnMut(&NodeView) -> Option<HostedNodeBody>`, called with no model lock

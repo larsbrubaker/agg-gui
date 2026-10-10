@@ -153,3 +153,99 @@ fn on_colours_and_outlines_are_used() {
     );
     assert_eq!(sw.ripple_color(&crate::theme::current_visuals()), green);
 }
+
+fn press_and_release(sw: &mut ToggleSwitch) -> (EventResult, EventResult) {
+    let pos = Point::new(sw.circle_cx_at(0.0), sw.circle_cy());
+    let down = sw.on_event(&Event::MouseDown {
+        pos,
+        button: MouseButton::Left,
+        modifiers: crate::event::Modifiers::default(),
+    });
+    let up = sw.on_event(&Event::MouseUp {
+        pos,
+        button: MouseButton::Left,
+        modifiers: crate::event::Modifiers::default(),
+    });
+    (down, up)
+}
+
+/// A switch gated off ignores clicks and keys, is not focusable, and follows
+/// its predicate live.
+#[test]
+fn disabled_switch_ignores_input_until_enabled() {
+    let enabled = Rc::new(Cell::new(false));
+    let e = enabled.clone();
+    let changes = Rc::new(Cell::new(0));
+    let c = changes.clone();
+    let mut sw = ToggleSwitch::new(false)
+        .with_enabled_fn(move || e.get())
+        .on_change(move |_| c.set(c.get() + 1));
+    sw.layout(Size::new(100.0, 100.0));
+    assert!(!sw.is_enabled());
+    assert!(!sw.is_focusable());
+    assert_eq!(
+        press_and_release(&mut sw),
+        (EventResult::Ignored, EventResult::Ignored)
+    );
+    let key = sw.on_event(&Event::KeyDown {
+        key: Key::Char(' '),
+        modifiers: crate::event::Modifiers::default(),
+    });
+    assert_eq!(key, EventResult::Ignored);
+    assert!(!sw.is_on());
+    assert!(!sw.pressed);
+    assert_eq!(changes.get(), 0);
+
+    enabled.set(true);
+    assert!(sw.is_enabled());
+    assert!(sw.is_focusable());
+    assert!(press_and_release(&mut sw).1.is_consumed());
+    assert!(sw.is_on());
+    assert_eq!(changes.get(), 1);
+}
+
+/// Default disabled look (agg-sharp `SelectionControlStyle.DrawSwitch`):
+/// bar and knob keep their colours at `DisabledOpacity` (0.4) alpha.
+#[test]
+fn disabled_switch_paints_dimmed() {
+    let v = crate::theme::current_visuals();
+    let mut sw = ToggleSwitch::new(false).with_enabled_fn(|| false);
+    let fb = render(&mut sw);
+    let cy = sw.circle_cy();
+    let bar = px(&fb, 26.0, cy);
+    assert!(
+        near(bar, rgb8(ToggleSwitch::dim(v.widget_stroke))),
+        "{bar:?}"
+    );
+    // The white knob at 0.4 alpha over the dimmed bar beneath it.
+    let knob = px(&fb, sw.circle_cx_at(0.0), cy);
+    let over = bar.map(|b| (b as f32 + (255.0 - b as f32) * 0.4).round() as u8);
+    assert!(near(knob, over), "{knob:?} vs {over:?}");
+    // Hover never tints a disabled bar.
+    sw.hovered = true;
+    let fb = render(&mut sw);
+    assert!(!sw.hovered);
+    assert!(near(px(&fb, 26.0, cy), bar));
+}
+
+/// MatterCAD `RoundedToggleSwitch` disabled look: the bar is a 1 px outline
+/// (its inside stays unpainted) and the knob is filled, both in
+/// `disabled_color`.
+#[test]
+fn disabled_color_draws_outlined_bar_and_flat_knob() {
+    let grey = Color::rgb(0.5, 0.5, 0.5);
+    let mut sw = ToggleSwitch::new(true)
+        .with_style(ToggleSwitchStyle {
+            disabled_color: Some(grey),
+            ..Default::default()
+        })
+        .with_enabled_fn(|| false);
+    let fb = render(&mut sw);
+    let cy = sw.circle_cy();
+    assert!(near(px(&fb, sw.circle_cx_at(1.0), cy), rgb8(grey)));
+    // Inside the bar, away from the knob: background only.
+    assert_eq!(px(&fb, 8.0, cy), [0, 0, 0]);
+    // The outline straddles the bar's top edge (y = 19).
+    let edge = px(&fb, 17.0, 18.5);
+    assert!(edge[0] > 40, "{edge:?}");
+}

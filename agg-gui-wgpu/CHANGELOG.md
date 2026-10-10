@@ -65,6 +65,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- `clip_path` masks fade over `AA_HALO_WIDTH` (half a pixel, agg-sharp's
+  `HaloWidth`) like every GPU fill, instead of a full pixel, so a clip edge
+  and a fill edge on the same outline match.
 - Vertex, index and uniform data reach the GPU with one `queue.write_buffer`
   per arena chunk per frame instead of one per allocation (about three per
   draw command). wgpu backs every `write_buffer` with a staging buffer it

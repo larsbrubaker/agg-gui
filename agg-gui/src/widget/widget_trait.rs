@@ -148,6 +148,29 @@ pub trait Widget {
     /// composite — see its rustdoc.
     fn on_event(&mut self, event: &Event) -> EventResult;
 
+    /// Preview an event routed to one of this widget's descendants, before
+    /// the descendant sees it.
+    ///
+    /// Routed dispatch ([`dispatch_event`](crate::widget::dispatch_event))
+    /// calls this on every ancestor of the target, root first, with the
+    /// event in the ancestor's local coordinates, and only then delivers
+    /// the event to the target and bubbles it back up through `on_event`.
+    /// It is agg-sharp's `MouseDown` / `MouseDownCaptured` split seen from
+    /// the parent: a GuiWidget's `MouseDown` fires even when a child took
+    /// the press, so a container (a node card, a window) can react to a
+    /// press anywhere inside it — select or raise itself — while the slider
+    /// or text field under the pointer still gets the press.
+    ///
+    /// Return `Ignored` (the default) to let the event continue. Returning
+    /// a consuming result intercepts it: no deeper preview runs and no
+    /// widget's `on_event` sees the event. A preview that only observes
+    /// should return `Ignored` and call
+    /// [`request_draw`](crate::animation::request_draw) if it changed
+    /// paint state.
+    fn preview_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+
     /// Handle a key that was not consumed by the focused widget path.
     ///
     /// This is used for window/menu accelerators: focused controls get first

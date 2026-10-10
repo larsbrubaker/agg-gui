@@ -68,10 +68,17 @@ impl WgpuGfxCtx {
         let fill_rule = self.fill_rule;
         // Legacy per-vertex-alpha tessellation (as `do_fill` uses for
         // gradients): the halo strip's alpha is exactly the clip coverage.
+        // The strip is `AA_HALO_WIDTH` (C#'s `HaloWidth`, half a pixel) wide,
+        // the same fade every GPU fill uses, so a clip edge and a fill edge
+        // along the same outline line up.
         let tess = {
             let mut curves = ConvCurve::new(&mut self.path);
             let mut transformed = ConvTransform::new(&mut curves, ctm);
-            agg_gui::gl_renderer::tessellate_path_aa(&mut transformed, 1.0, fill_rule)
+            agg_gui::gl_renderer::tessellate_path_aa(
+                &mut transformed,
+                agg_gui::gl_renderer::AA_HALO_WIDTH,
+                fill_rule,
+            )
         };
         let (verts, indices) = match tess {
             Some((v, i)) if !v.is_empty() && !i.is_empty() => (v, i),

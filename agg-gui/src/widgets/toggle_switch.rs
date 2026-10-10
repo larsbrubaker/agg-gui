@@ -4,7 +4,9 @@
 //! The pill is gray when off and blue when on.  Supports keyboard activation
 //! (Space / Enter) and an optional shared [`Cell<bool>`] for two-way binding
 //! with external state.  Colours and geometry can be overridden per instance
-//! with a [`ToggleSwitchStyle`] (`toggle_switch/style.rs`).
+//! with a [`ToggleSwitchStyle`] (`toggle_switch/style.rs`).  A switch gated
+//! with `with_enabled_fn` paints dimmed and ignores input while disabled
+//! (`toggle_switch/enabled.rs`).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -16,7 +18,9 @@ use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
+mod enabled;
 mod style;
+pub use enabled::TOGGLE_DISABLED_OPACITY;
 pub use style::ToggleSwitchStyle;
 
 // ── Geometry constants ─────────────────────────────────────────────────────
@@ -91,6 +95,9 @@ pub struct ToggleSwitch {
     on_change: Option<Box<dyn FnMut(bool)>>,
     /// Per-instance colour / geometry overrides — see [`ToggleSwitchStyle`].
     style: ToggleSwitchStyle,
+    /// Live enabled gate — see [`ToggleSwitch::with_enabled_fn`]
+    /// (`toggle_switch/enabled.rs`).  `None` = always enabled.
+    enabled_fn: Option<Rc<dyn Fn() -> bool>>,
 }
 
 // ── Constructors & builder methods ─────────────────────────────────────────
@@ -111,6 +118,7 @@ impl ToggleSwitch {
             press_anim: crate::animation::Tween::new(0.0, RING_ANIM_SECS),
             on_change: None,
             style: ToggleSwitchStyle::default(),
+            enabled_fn: None,
         }
     }
 
@@ -235,8 +243,11 @@ impl Widget for ToggleSwitch {
     fn as_reflect_mut(&mut self) -> Option<&mut dyn bevy_reflect::Reflect> {
         Some(&mut self.props)
     }
+    fn is_enabled(&self) -> bool {
+        self.enabled_now()
+    }
     fn is_focusable(&self) -> bool {
-        true
+        self.enabled_now()
     }
 
     fn margin(&self) -> Insets {
@@ -285,6 +296,11 @@ impl Widget for ToggleSwitch {
         // advance it to get this frame's interpolated position.
         self.anim.set_target(if self.is_on() { 1.0 } else { 0.0 });
         let t = self.anim.tick();
+        if !self.enabled_now() {
+            self.clear_interaction();
+            self.paint_disabled(ctx, t);
+            return;
+        }
 
         // Inset the pill by the halo margin so halo-AA has room inside
         // the widget's own clip.  Origin (0,0) is the widget's bottom-
@@ -342,7 +358,7 @@ impl Widget for ToggleSwitch {
         // `reset_clip` so the ring can render the full ripple geometry (then
         // `restore` puts the saved clip state back before returning).
         let ring_t = self.press_anim.tick();
-        if ring_t <= 0.001 {
+        if ring_t <= 0.001 || !self.enabled_now() {
             return;
         }
 
@@ -367,6 +383,10 @@ impl Widget for ToggleSwitch {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if !self.enabled_now() {
+            self.clear_interaction();
+            return EventResult::Ignored;
+        }
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;

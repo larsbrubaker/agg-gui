@@ -44,6 +44,11 @@ pub struct ToggleSwitchStyle {
     pub track_height: Option<f64>,
     /// Knob radius.  Default 6.5 (the bar's half height less a 2.5 margin).
     pub knob_radius: Option<f64>,
+    /// MatterCAD `RoundedToggleSwitch`'s disabled look: when set, a disabled
+    /// switch strokes the bar as a 1 px outline and fills the knob, both in
+    /// this colour (its `inactiveBarColor`).  Default: agg-sharp's dimmed
+    /// switch (see `toggle_switch/enabled.rs`).
+    pub disabled_color: Option<Color>,
 }
 
 impl ToggleSwitch {

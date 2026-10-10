@@ -27,7 +27,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   selection drags (a pending click-to-select-all is dropped), `MarkdownView`
   selection and code-block scroll-bar drags, and `ComboBox` list scroll-bar
   drags. Before, each kept dragging until its next `MouseUp`.
-
+- Parent-first event preview: `Widget::preview_event(&mut self, &Event) ->
+  EventResult` (default `Ignored`). Routed dispatch (`dispatch_event`,
+  `dispatch_event_dyn`, and so every `App` pointer and key path) calls it on
+  every ancestor of the target, root first, in the ancestor's local
+  coordinates, before the target's `on_event` and the bubble. A container can
+  react to a press anywhere inside it (select or raise itself) while the
+  slider or text field under the pointer still gets the press, as agg-sharp's
+  `MouseDown` fires on every widget under the pointer. A consuming preview
+  intercepts the event: nothing below it previews and no `on_event` runs.
+- An enabled state for `ToggleSwitch`: `ToggleSwitch::with_enabled_fn(|| ...)`
+  (the `Button` / `ComboBox` convention). While the predicate is `false`,
+  `is_enabled()` and `is_focusable()` are false, pointer and keyboard input
+  are ignored (hover and press state are dropped), and the switch paints as
+  agg-sharp's `SelectionControlStyle.DrawSwitch` does when disabled: bar and
+  knob at `TOGGLE_DISABLED_OPACITY` (0.4) of their alpha, no hover tint, no
+  press ripple. `ToggleSwitchStyle::disabled_color` selects MatterCAD's
+  `RoundedToggleSwitch` disabled look instead: a 1 px bar outline and a filled
+  knob, both in that colour.
 - An enabled state for `ComboBox`: `ComboBox::with_enabled_fn(|| ...)` (the
   same live-predicate convention as `Button` and `SegmentedControl`). While
   the predicate is `false`, `is_enabled()` and `is_focusable()` are false, the

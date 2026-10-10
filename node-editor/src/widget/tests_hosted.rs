@@ -26,8 +26,8 @@ const BODY_H: f64 = 50.0;
 
 /// A model with the hosted-card hooks, delegating the rest to `Memory`.
 #[derive(Default)]
-struct HostedModel {
-    inner: Memory,
+pub(super) struct HostedModel {
+    pub(super) inner: Memory,
     epoch: u64,
     widths: Vec<(NodeId, f64)>,
     measured: Vec<(NodeId, f64)>,
@@ -134,7 +134,7 @@ struct Fixture {
     clicks: Rc<RefCell<Vec<Point>>>,
 }
 
-fn node_with_sockets(id: u64, pos: [f64; 2]) -> NodeView {
+pub(super) fn node_with_sockets(id: u64, pos: [f64; 2]) -> NodeView {
     let mut n = mk_node(id, "Box", pos);
     n.outputs.push(SocketView {
         name: "Result".into(),
@@ -194,12 +194,12 @@ fn card(editor: &NodeEditor) -> &HostedCard {
 
 /// Run `event` through the framework's hit-test and dispatch, as the App
 /// does, with `pos` in editor-local coordinates.
-fn dispatch(editor: &mut NodeEditor, event: Event, pos: Point) -> EventResult {
+pub(super) fn dispatch(editor: &mut NodeEditor, event: Event, pos: Point) -> EventResult {
     let path = hit_test_subtree(editor, pos).expect("the editor is hit");
     dispatch_event_dyn(editor, &path, &event, pos)
 }
 
-fn press(pos: Point) -> Event {
+pub(super) fn press(pos: Point) -> Event {
     Event::MouseDown {
         pos,
         button: MouseButton::Left,
@@ -207,7 +207,7 @@ fn press(pos: Point) -> Event {
     }
 }
 
-fn release(pos: Point) -> Event {
+pub(super) fn release(pos: Point) -> Event {
     Event::MouseUp {
         pos,
         button: MouseButton::Left,
@@ -386,7 +386,7 @@ fn the_pressed_card_paints_on_top() {
     );
 }
 
-fn card_by_id(editor: &NodeEditor, id: NodeId) -> &HostedCard {
+pub(super) fn card_by_id(editor: &NodeEditor, id: NodeId) -> &HostedCard {
     let layer = editor.children().last().unwrap();
     layer
         .children()

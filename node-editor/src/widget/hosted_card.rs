@@ -13,7 +13,9 @@
 //! z-order (last-clicked on top). Each card paints its own sockets, so a
 //! card on top hides the sockets of a card beneath it. Neither the layer
 //! nor the card consumes events: anything the body ignores bubbles to the
-//! editor, which owns selection, node drags, noodles and menus.
+//! editor, which owns selection, node drags, noodles and menus. A press the
+//! body does take still selects and raises its card, through the editor's
+//! `Widget::preview_event` (`hosted_events.rs`).
 
 use agg_gui::widgets::window::{
     paint_chrome_body, paint_chrome_border, paint_chrome_shadow, paint_chrome_title_bar,

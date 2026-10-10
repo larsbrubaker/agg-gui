@@ -58,6 +58,8 @@ mod tests_error_badge;
 #[cfg(test)]
 mod tests_hosted;
 #[cfg(test)]
+mod tests_hosted_preview;
+#[cfg(test)]
 mod tests_inline_editor;
 #[cfg(test)]
 mod tests_noodle;
@@ -547,6 +549,12 @@ impl Widget for NodeEditor {
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
         &mut self.children
+    }
+
+    /// A press anywhere on a hosted card selects and raises it before the
+    /// body widget under the pointer gets it (`hosted_events.rs`).
+    fn preview_event(&mut self, event: &Event) -> EventResult {
+        self.hosted_preview_event(event)
     }
 
     /// The canvas accepts Delete/Backspace even when it isn't the

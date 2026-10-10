@@ -294,6 +294,12 @@ fn compositing_layer_inside_a_clip_path() {
 
 /// The clip edge is anti-aliased: some pixel straddling the circle boundary
 /// is strictly between the clipped fill and the background.
+///
+/// The probe runs along the circle's 45° diagonal, where the edge
+/// (r / √2 ≈ 11.31 px from the centre on each axis) crosses pixels
+/// mid-way. On an axis the edge lands exactly on a pixel boundary
+/// (32 + 16 = 48), where a half-pixel halo leaves the boundary pixels
+/// fully in or fully out even when the edge is anti-aliased.
 #[test]
 fn clip_path_edge_is_anti_aliased() {
     let Some(data) = render(|ctx| {
@@ -308,10 +314,11 @@ fn clip_path_edge_is_anti_aliased() {
         return;
     };
 
-    let row: Vec<[u8; 4]> = (44..54).map(|x| at(&data, x, 32)).collect();
+    let diagonal: Vec<[u8; 4]> = (38..50).map(|i| at(&data, i, i)).collect();
     assert!(
-        row.iter()
+        diagonal
+            .iter()
             .any(|p| p[0] > 0 && p[0] < 255 && p[2] > 0 && p[2] < 255),
-        "no anti-aliased pixel on the clip edge: {row:?}"
+        "no anti-aliased pixel on the clip edge: {diagonal:?}"
     );
 }
