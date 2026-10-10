@@ -30,7 +30,9 @@
 //! # Cross-axis anchoring
 //!
 //! `FlexColumn` reads each child's `h_anchor()` to place it horizontally
-//! within the column's inner width.  `FlexRow` reads `v_anchor()` to place
+//! within the column's inner width.  A `FlexColumn` child whose `v_anchor()`
+//! stretches is a flex child of factor 1 on the main axis (agg-sharp's
+//! `FlowLayoutWidget`), unless it was added with a factor of its own.  `FlexRow` reads `v_anchor()` to place
 //! children vertically within the row's inner height.
 
 use crate::color::Color;
@@ -352,6 +354,22 @@ impl Widget for FlexColumn {
             return Size::new(w, pad_t + pad_b);
         }
 
+        // A child anchored to stretch vertically takes a share of the free height like a flex
+        // child of factor 1 (agg-sharp's top-to-bottom `FlowLayoutWidget` gives every
+        // `VAnchor.Stretch` child an equal share), unless it was added with its own factor.
+        let flex_factors: Vec<f64> = self
+            .children
+            .iter()
+            .zip(&self.flex_factors)
+            .map(|(child, &flex)| {
+                if flex == 0.0 && child.v_anchor().is_stretch() {
+                    1.0
+                } else {
+                    flex
+                }
+            })
+            .collect();
+
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
         let inner_h = (available.height - pad_t - pad_b).max(0.0);
 
@@ -372,7 +390,7 @@ impl Widget for FlexColumn {
         let mut max_child_natural_w = 0.0f64;
 
         for i in 0..n {
-            if self.flex_factors[i] == 0.0 {
+            if flex_factors[i] == 0.0 {
                 let m = &margins[i];
                 let slot_w = (inner_w - m.left - m.right).max(0.0);
                 // Measure at natural height; pass inner_h as the available
@@ -405,11 +423,11 @@ impl Widget for FlexColumn {
                 continue;
             }
             let m = &margins[i];
-            if self.flex_factors[i] == 0.0 {
+            if flex_factors[i] == 0.0 {
                 total_fixed_with_margins += content_heights[i] + m.vertical();
                 max_child_natural_w = max_child_natural_w.max(natural_widths[i] + m.horizontal());
             } else {
-                total_flex += self.flex_factors[i];
+                total_flex += flex_factors[i];
                 total_flex_margin_v += m.vertical();
             }
         }
@@ -423,11 +441,7 @@ impl Widget for FlexColumn {
             (inner_h - total_fixed_with_margins - total_gap - total_flex_margin_v).max(0.0);
         let items: Vec<FlexItem> = (0..n)
             .map(|i| FlexItem {
-                flex: if visible[i] {
-                    self.flex_factors[i]
-                } else {
-                    0.0
-                },
+                flex: if visible[i] { flex_factors[i] } else { 0.0 },
                 min: self.children[i].min_size().height,
                 max: self.children[i].max_size().height,
             })
