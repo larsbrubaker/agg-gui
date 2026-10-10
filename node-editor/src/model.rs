@@ -404,4 +404,37 @@ pub trait NodeGraphModel {
     fn on_node_activated(&mut self, _node: NodeId) -> bool {
         false
     }
+
+    // ── Hosted cards (see `NodeEditor::with_body_factory`) ──────────────
+    //
+    // Read only when the editor has a body factory; hosts without one can
+    // ignore all four.
+
+    /// Version of the hosted card bodies. The editor builds a node's body
+    /// once and keeps it (with its focus and any edit in progress) until
+    /// this value changes, then rebuilds every body. Bump it when what the
+    /// bodies show changes shape (a setting appears or disappears); plain
+    /// value changes belong to the body widgets themselves.
+    fn body_epoch(&self) -> u64 {
+        0
+    }
+
+    /// Width of the node's hosted card in canvas units; `None` uses the
+    /// default [`crate::draw::NODE_WIDTH`].
+    fn node_width(&self, _id: NodeId) -> Option<f64> {
+        None
+    }
+
+    /// The user dragged the hosted card's right edge to `width`. Hosts
+    /// store it and answer it from [`Self::node_width`].
+    fn set_node_width(&mut self, _id: NodeId, _width: f64) {}
+
+    /// The hosted card's height, measured from its body, changed to
+    /// `height` canvas units. The card grows downward from its top-left
+    /// [`NodeView::position`], so a host that keeps the top fixed needs
+    /// nothing more; a host that saves card sizes stores it here.
+    ///
+    /// Called from the editor's `layout()` with the model locked: don't
+    /// re-lock the same model `Arc` here.
+    fn on_node_measured(&mut self, _id: NodeId, _height: f64) {}
 }

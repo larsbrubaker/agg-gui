@@ -44,10 +44,13 @@ pub mod model;
 mod palette;
 pub mod widget;
 
-pub use draw::CanvasPalette;
+pub use draw::{CanvasPalette, SocketSide};
 pub use draw_immediate::draw_node;
 pub use model::{
     BadgeSeverity, EditorHint, NodeGraphModel, NodeId, NodeTypeView, NodeView, NoodleResult,
     NoodleView, PropertyValue, PropertyView, SocketTypeId, SocketView,
 };
-pub use widget::{InteractionMode, NodeEditor, NodeEditorCommand, NodeEditorHandle, SharedModel};
+pub use widget::{
+    HostedCard, HostedNodeBody, InteractionMode, NodeBodyFactory, NodeEditor, NodeEditorCommand,
+    NodeEditorHandle, SharedModel, SocketAnchor, SocketAnchorFn, MIN_HOSTED_CARD_WIDTH,
+};

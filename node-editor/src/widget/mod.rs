@@ -8,15 +8,20 @@
 //!
 //! Interaction is a small state machine — see `CanvasState`. Drawing is
 //! delegated to [`crate::draw`]. Event handlers (mouse / wheel / key)
-//! live in the [`events`] submodule, while paint-cache fingerprinting
-//! and child rebuild logic live in [`paint_cache`], so this file stays
-//! under the 800-line guardrail.
+//! live in the [`events`] submodule and paint-cache fingerprinting in
+//! [`fingerprint`], so this file stays under the 800-line guardrail.
+//! Hosted cards (node bodies built by the host as real widgets) live in
+//! [`hosted`], [`hosted_card`] and [`hosted_events`].
 
+mod collapse_snap;
 mod commands;
 mod enum_row;
 mod events;
 mod fingerprint;
 mod host_hooks;
+mod hosted;
+mod hosted_card;
+mod hosted_events;
 mod hover;
 mod node_paint_context;
 pub mod node_parts;
@@ -29,6 +34,10 @@ mod value_editor_widget;
 pub mod view_nav;
 
 pub use commands::{NodeEditorCommand, NodeEditorHandle};
+pub use hosted::{
+    HostedNodeBody, NodeBodyFactory, SocketAnchor, SocketAnchorFn, MIN_HOSTED_CARD_WIDTH,
+};
+pub use hosted_card::HostedCard;
 pub use view_nav::InteractionMode;
 
 use popup::{build_add_node_popup_items, translate_event_into};
@@ -46,6 +55,8 @@ mod tests_common;
 mod tests_enum;
 #[cfg(test)]
 mod tests_error_badge;
+#[cfg(test)]
+mod tests_hosted;
 #[cfg(test)]
 mod tests_inline_editor;
 #[cfg(test)]
@@ -74,7 +85,6 @@ use crate::draw::{
 use crate::model::{NodeGraphModel, NodeId, SocketTypeId};
 
 use crate::widget::nodes::{NodePaintContext, NodeWidget};
-use fingerprint::hash_row;
 
 const ZOOM_MIN: f64 = 0.15;
 const ZOOM_MAX: f64 = 3.0;
@@ -269,6 +279,8 @@ pub struct NodeEditor {
     /// outside the widget tree — an Edit menu, a toolbar — pushes
     /// [`NodeEditorCommand`]s here; `layout()` drains them.
     pub(crate) command_handle: Option<NodeEditorHandle>,
+    /// Hosted-card mode (see [`hosted`]); inert without a body factory.
+    pub(crate) hosted: hosted::HostedState,
 }
 
 impl NodeEditor {
@@ -306,6 +318,7 @@ impl NodeEditor {
             file_drop_handler: None,
             last_abs_origin: Cell::new((0.0, 0.0)),
             command_handle: None,
+            hosted: hosted::HostedState::default(),
         }
     }
 
@@ -419,11 +432,7 @@ impl NodeEditor {
                 )
             })
             .collect();
-        layouts.sort_by_key(|l| {
-            let local = self.selected.contains(&l.node_id) as u8;
-            let external = (ext_sel == Some(l.node_id)) as u8;
-            (local | external, l.node_id.0)
-        });
+        self.order_layouts(&nodes, &mut layouts, ext_sel);
         layouts
     }
 
@@ -462,59 +471,6 @@ impl NodeEditor {
         None
     }
 
-    /// Hash of every input that affects how the children's paint looks
-    /// across one frame.  Mismatch between the previous fingerprint and
-    /// the new one drives both the children rebuild and the GL FBO
-    /// invalidation — paint outputs change ⇒ the cached texture must
-    /// regenerate.
-    ///
-    /// Pan/zoom IS part of the fingerprint: layout bakes them into the
-    /// child widgets' screen-space bounds (so the inspector tree picks
-    /// them up correctly via `collect_inspector_nodes`), which means a
-    /// pan/zoom change demands a children rebuild.
-    fn compute_fingerprint(&self, layouts: &[NodeLayoutInfo], ext_sel: Option<NodeId>) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        layouts.len().hash(&mut h);
-        for l in layouts {
-            l.node_id.0.hash(&mut h);
-            l.top_left[0].to_bits().hash(&mut h);
-            l.top_left[1].to_bits().hash(&mut h);
-            l.size[0].to_bits().hash(&mut h);
-            l.size[1].to_bits().hash(&mut h);
-            l.display_name.hash(&mut h);
-            l.category.hash(&mut h);
-            l.rows.len().hash(&mut h);
-            // Row content must participate in the fingerprint — without
-            // it, dragging a slider mutates the underlying value but
-            // the cached child widgets keep their stale `PropLayout`
-            // and the value pill never repaints with the new number.
-            for row in &l.rows {
-                hash_row(row, &mut h);
-            }
-            let sel = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
-            sel.hash(&mut h);
-            l.collapsed.hash(&mut h);
-            // An error arriving from an *asynchronous* host evaluation
-            // changes nothing else about the layout, so without this the
-            // badge would only appear (or clear) on the next unrelated
-            // interaction that happened to dirty the fingerprint.
-            l.error.hash(&mut h);
-            l.warning.hash(&mut h);
-        }
-        self.canvas_offset[0].to_bits().hash(&mut h);
-        self.canvas_offset[1].to_bits().hash(&mut h);
-        self.canvas_scale.to_bits().hash(&mut h);
-        // Theme epoch participates: every child NodeWidget bakes the
-        // active `CanvasPalette` into its `NodePaintContext` at
-        // rebuild time, so a light↔dark flip with no other model
-        // change must still trigger `rebuild_children` — otherwise
-        // the cached chrome (body, border, labels, sockets) keeps
-        // painting in the old theme's colours.
-        agg_gui::current_visuals_epoch().hash(&mut h);
-        h.finish()
-    }
-
     /// Tear down `self.children` and build a fresh `Vec<NodeWidget>`
     /// from `layouts`.  Bounds are in **screen-space** — the canvas
     /// pan/zoom is baked into each NodeWidget's position and size so
@@ -530,8 +486,12 @@ impl NodeEditor {
 
         let scale = self.canvas_scale;
         let offset = self.canvas_offset;
-        let mut new_children: Vec<Box<dyn Widget>> = Vec::with_capacity(layouts.len());
-        for l in layouts {
+        let layer = self.take_hosted_layer();
+        let mut new_children: Vec<Box<dyn Widget>> = Vec::with_capacity(layouts.len() + 1);
+        for l in layouts
+            .iter()
+            .filter(|l| !self.hosted.cards.contains_key(&l.node_id))
+        {
             let selected = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
             let nw = NodeWidget::from_layout_transformed(
                 l,
@@ -543,6 +503,7 @@ impl NodeEditor {
             );
             new_children.push(Box::new(nw));
         }
+        new_children.extend(layer);
         self.children = new_children;
     }
 
@@ -640,6 +601,8 @@ impl Widget for NodeEditor {
             self.toggle_collapsed(id);
         }
 
+        self.layout_hosted(available);
+
         // Snapshot once for both the fingerprint AND the (possible)
         // children rebuild — avoids hitting the model twice.
         let layouts = self.snapshot_layouts();
@@ -704,7 +667,7 @@ impl Widget for NodeEditor {
     }
 
     fn claims_pointer_exclusively(&self, _local_pos: agg_gui::Point) -> bool {
-        !matches!(self.interaction, CanvasState::Idle)
+        !matches!(self.interaction, CanvasState::Idle) || self.hosted_resizing()
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
@@ -738,6 +701,9 @@ impl Widget for NodeEditor {
             if result.is_consumed() {
                 return EventResult::Consumed;
             }
+        }
+        if let Some(result) = self.hosted_on_event(event) {
+            return result;
         }
         match event {
             Event::MouseDown {
