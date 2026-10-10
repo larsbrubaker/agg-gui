@@ -33,6 +33,8 @@ pub mod drag_value;
 pub mod flex;
 pub mod flex_row;
 mod flex_share;
+pub mod flow_left_right_with_wrapping;
+pub mod flow_wrap_row;
 pub mod hyperlink;
 pub mod image_view;
 pub mod inspector;
@@ -55,6 +57,7 @@ pub mod radio_group;
 pub mod rebuilder;
 pub mod reserve_inset;
 pub mod resize;
+pub mod responsive_image_widget;
 pub mod rich_text;
 pub mod scene;
 pub mod scroll_view;
@@ -100,6 +103,9 @@ pub use container::Container;
 pub use drag_value::DragValue;
 pub use flex::{FlexColumn, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP};
 pub use flex_row::FlexRow;
+pub use flow_left_right_with_wrapping::{
+    FlowLeftRightWithWrapping, HardBreak, RowSpacer, SkipIfFirstSpace, WrapRow,
+};
 pub use hyperlink::Hyperlink;
 pub use image_view::ImageView;
 pub use inspector::{InspectorPanel, InspectorSavedState};
@@ -128,6 +134,7 @@ pub use radio_group::RadioGroup;
 pub use rebuilder::Rebuilder;
 pub use reserve_inset::{ReserveInset, ReservedEdge};
 pub use resize::Resize;
+pub use responsive_image_widget::ResponsiveImageWidget;
 pub use rich_text::{
     apply_command, range_common_style, single_font_resolver, style_at, Block, CommonStyle, DocPos,
     DocRange, InlineStyle, ListKind, RichCommand, RichDoc, RichEditHandle, RichTextEdit,
