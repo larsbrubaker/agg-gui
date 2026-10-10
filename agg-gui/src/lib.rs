@@ -179,7 +179,10 @@ pub use svg::{
     DEFAULT_MISMATCH_RATIO, DEFAULT_OPAQUE_RGB_TOLERANCE, DEFAULT_TRANSLUCENT_RGB_TOLERANCE,
     DEFAULT_VISUAL_RGB_TOLERANCE,
 };
-pub use text::{ellipsize_to_width, ellipsize_with, measure_text_metrics, Font, TextMetrics};
+pub use text::{
+    elide_text, elide_to_width, ellipsize_to_width, ellipsize_with, measure_text_metrics,
+    EllipsisMode, Font, TextMetrics,
+};
 pub use theme::{
     current_visuals, current_visuals_epoch, set_visuals, AccentColor, ThemePreference, Visuals,
 };

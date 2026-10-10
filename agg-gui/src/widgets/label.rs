@@ -26,8 +26,10 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::Font;
+use crate::text::{EllipsisMode, Font};
 use crate::widget::Widget;
+
+mod ellipsis;
 
 /// Break `text` into lines that each fit within `max_width` pixels at the given
 /// font size.  Explicit `\n` characters always produce a new line.  Returns at
@@ -122,11 +124,12 @@ pub struct Label {
     /// `available.width`.  The label height expands to fit all lines.
     /// Disabled by default; enable with `.with_wrap(true)`.
     wrap: bool,
-    /// agg-sharp `TextWidget.EllipsisIfClipped`: a single line wider than the
-    /// label's bounds is cut back to end in "..." (see
-    /// [`crate::text::ellipsize_with`]) instead of being cut mid-glyph by the
-    /// clip. Off by default; enable with `.with_ellipsis_if_clipped(true)`.
-    ellipsis_if_clipped: bool,
+    /// How a single line wider than the label's bounds is shortened instead
+    /// of being cut mid-glyph by the clip: `Some(End)` is agg-sharp's
+    /// `TextWidget.EllipsisIfClipped` ("..." at the end), `Some(Middle)` /
+    /// `Some(PathMiddle)` cut the middle (see [`crate::text::elide_text`]).
+    /// Off (`None`) by default; see `label/ellipsis.rs` for the builders.
+    ellipsis: Option<EllipsisMode>,
     /// When `true`, this Label ignores the system-wide font override
     /// (`font_settings::current_system_font`) and always renders with
     /// the specific `self.font` passed to `Label::new`.  Used by font
@@ -193,7 +196,7 @@ impl Label {
             buffered: true,
             cache: crate::widget::BackbufferCache::new(),
             wrap: false,
-            ellipsis_if_clipped: false,
+            ellipsis: None,
             ignore_system_font: false,
             lcd_pref: None,
             line_box: None,
@@ -255,44 +258,6 @@ impl Label {
     /// Enable or disable word-wrapping.  When `true`, long lines are broken at
     /// word boundaries to fit the available width; the label height expands to
     /// accommodate all lines.  Newlines in the text are always honoured.
-    pub fn with_ellipsis_if_clipped(mut self, on: bool) -> Self {
-        self.set_ellipsis_if_clipped(on);
-        self
-    }
-
-    /// agg-sharp `TextWidget.EllipsisIfClipped` setter.
-    pub fn set_ellipsis_if_clipped(&mut self, on: bool) {
-        if self.ellipsis_if_clipped != on {
-            self.ellipsis_if_clipped = on;
-            self.cache.invalidate();
-        }
-    }
-
-    /// agg-sharp `TextWidget.EllipsisActive`: ellipsis is on and the full text is
-    /// wider than the label's laid-out bounds (single-line labels only).
-    pub fn ellipsis_active(&self) -> bool {
-        self.ellipsis_if_clipped
-            && !self.wrap
-            && self.layout_text == self.text
-            && self.layout_width > self.bounds.width
-    }
-
-    /// The text a paint draws now: the full text, or its ellipsized form while
-    /// [`Self::ellipsis_active`].
-    pub fn shown_text(&self) -> String {
-        if self.ellipsis_active() {
-            let font = self.active_font();
-            crate::text::ellipsize_to_width(
-                &font,
-                &self.text,
-                self.active_font_size(),
-                self.bounds.width,
-            )
-        } else {
-            self.text.clone()
-        }
-    }
-
     pub fn with_wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
         self
@@ -680,9 +645,9 @@ impl Widget for Label {
         } else {
             // Ellipsis is measured with the paint context, the same metrics the
             // line is drawn with, so the shortened line lands inside the box.
-            let text = match ctx.measure_text(&self.text) {
-                Some(full) if self.ellipsis_if_clipped && full.width > w => {
-                    crate::text::ellipsize_with(&self.text, w, |s| {
+            let text = match (self.ellipsis, ctx.measure_text(&self.text)) {
+                (Some(mode), Some(full)) if full.width > w => {
+                    crate::text::elide_text(&self.text, w, mode, |s| {
                         ctx.measure_text(s).map_or(0.0, |m| m.width)
                     })
                 }
@@ -724,10 +689,11 @@ impl Widget for Label {
         self.base.max_size
     }
 
-    /// An ellipsizing single-line label gives way in a crowded row: it ends
-    /// its line in "..." instead of pushing its neighbours out.
+    /// An ellipsizing single-line label gives way in a crowded row: it
+    /// shortens its line with an ellipsis instead of pushing its neighbours
+    /// out.
     fn shrink_min_width(&self) -> Option<f64> {
-        (self.ellipsis_if_clipped && !self.wrap).then_some(self.base.min_size.width)
+        (self.ellipsis.is_some() && !self.wrap).then_some(self.base.min_size.width)
     }
 
     /// agg-sharp `TextWidget.ToolTipText`: with no tip of its own, a label cut

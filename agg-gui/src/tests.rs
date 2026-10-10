@@ -75,6 +75,7 @@ mod keyboard_lift_tooltips;
 mod keyboard_modal_clamp;
 mod label_descenders;
 mod label_ellipsis;
+mod label_ellipsis_mode;
 mod label_hidpi_backbuffer;
 mod label_theme;
 mod layer_compositing;

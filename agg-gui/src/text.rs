@@ -23,10 +23,14 @@
 //! which is correct for Y-up rendering.
 
 mod bezier_flat;
+mod elide;
+#[cfg(test)]
+mod elide_tests;
 mod ellipsis;
 mod shape_cache;
 mod vertical_metrics;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
+pub use elide::{elide_text, elide_to_width, EllipsisMode, ELLIPSIS};
 pub use ellipsis::{ellipsize_to_width, ellipsize_with};
 pub use shape_cache::shape_glyphs;
 pub use vertical_metrics::VerticalMetrics;
