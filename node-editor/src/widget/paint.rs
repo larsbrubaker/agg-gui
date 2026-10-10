@@ -14,6 +14,7 @@ use agg_gui::{DrawCtx, Size};
 use crate::draw::{draw_canvas_grid, CanvasPalette};
 use crate::socket_style::{draw_noodle, draw_socket_ring, NoodleStyle};
 
+use super::connect;
 use super::hover;
 use super::presentation;
 use super::snap_guides::paint_snap_guides_canvas;
@@ -105,7 +106,18 @@ impl NodeEditor {
         let model = self.model.lock().unwrap();
         let noodles = model.noodles();
         let style = self.presentation.noodle_style;
+        let picked_up = self.picked_up_noodle();
         for noodle in &noodles {
+            // A noodle being moved by a deferred pick-up follows the
+            // pointer instead of drawing in its place.
+            if picked_up.is_some_and(|p| {
+                p.from_node == noodle.from_node
+                    && p.from_socket == noodle.from_socket
+                    && p.to_node == noodle.to_node
+                    && p.to_socket == noodle.to_socket
+            }) {
+                continue;
+            }
             if let Some((f, t)) = hover::resolve_noodle_endpoints(&layouts, noodle) {
                 let col = model
                     .noodle_color(noodle)
@@ -125,16 +137,23 @@ impl NodeEditor {
             from_socket_type,
             from_node,
             from_side,
+            from_socket,
+            picked_up,
             ..
         } = &self.interaction
         {
-            let hover = hover::find_compatible_socket_near(
+            let fixed = crate::connection::SocketRef {
+                node: *from_node,
+                side: *from_side,
+                socket: from_socket.clone(),
+                socket_type: *from_socket_type,
+            };
+            let hover = connect::find_target_near(
                 &layouts,
                 &*model,
                 *cursor_canvas,
-                *from_node,
-                *from_side,
-                *from_socket_type,
+                &fixed,
+                picked_up.as_ref(),
             );
             let endpoint = match &hover {
                 Some(s) => s.center,
@@ -189,6 +208,8 @@ impl NodeEditor {
     pub(super) fn finish_paint_canvas(&mut self, ctx: &mut dyn DrawCtx) {
         // The hovered socket's ring and name, over the cards.
         self.paint_socket_hover(ctx);
+        // Why the socket under a dragged noodle refuses it.
+        self.paint_refusal_note(ctx);
 
         // Popup paints in widget-local space, on top of nodes & edges
         // but inside the canvas clip.

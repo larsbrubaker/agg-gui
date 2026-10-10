@@ -44,6 +44,15 @@ pub(super) struct Memory {
     pub context_command: Option<NodeEditorCommand>,
     /// `can_delete_from_keyboard` answers `!block_keyboard_delete`.
     pub block_keyboard_delete: bool,
+    /// `can_connect` refuses a drop on an input named here with the
+    /// paired reason; everything else takes the default rule.
+    pub refusals: Vec<(String, String)>,
+    /// `auto_pick_socket` answers NodeDesigner's pick when set.
+    pub auto_pick: bool,
+    /// Every `move_noodle` call, in order.
+    pub moves: Vec<(NoodleView, Option<NoodleView>)>,
+    /// `socket_multi_input` answers `true` for every input when set.
+    pub multi_input: bool,
 }
 
 impl NodeGraphModel for Memory {
@@ -133,6 +142,53 @@ impl NodeGraphModel for Memory {
     }
     fn can_delete_from_keyboard(&self) -> bool {
         !self.block_keyboard_delete
+    }
+    fn can_connect(
+        &self,
+        from: &crate::connection::SocketRef,
+        to: &crate::connection::SocketRef,
+    ) -> Result<(), String> {
+        let input = if to.side == crate::SocketSide::Input {
+            to
+        } else {
+            from
+        };
+        match self.refusals.iter().find(|(s, _)| *s == input.socket) {
+            Some((_, reason)) => Err(reason.clone()),
+            None => crate::connection::default_can_connect(self, from, to),
+        }
+    }
+    fn auto_pick_socket(
+        &self,
+        _node: NodeId,
+        from: &crate::connection::SocketRef,
+        candidates: &[crate::connection::SocketRef],
+    ) -> Option<String> {
+        self.auto_pick
+            .then(|| {
+                crate::connection::node_designer_auto_pick(
+                    from,
+                    candidates,
+                    |_| false,
+                    &self.noodles,
+                )
+            })
+            .flatten()
+    }
+    fn move_noodle(&mut self, picked_up: &NoodleView, to: Option<&NoodleView>) {
+        self.moves.push((picked_up.clone(), to.cloned()));
+        self.remove_noodle(
+            picked_up.from_node,
+            &picked_up.from_socket,
+            picked_up.to_node,
+            &picked_up.to_socket,
+        );
+        if let Some(n) = to {
+            self.try_add_noodle(n.from_node, &n.from_socket, n.to_node, &n.to_socket);
+        }
+    }
+    fn socket_multi_input(&self, _node: NodeId, _socket: &str) -> bool {
+        self.multi_input
     }
 }
 

@@ -249,6 +249,10 @@ pub struct NodeTypeView {
 }
 
 /// Outcome of an attempted noodle connection.
+///
+/// Replacing the noodle already in a single input, or appending to a
+/// multi-input ([`NodeGraphModel::socket_multi_input`]), is the host's
+/// call inside [`NodeGraphModel::try_add_noodle`]; the editor only asks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoodleResult {
     /// Noodle was added cleanly.
@@ -362,6 +366,43 @@ pub trait NodeGraphModel {
         None
     }
 
+    // ── Connection semantics (see `crate::connection`) ──────────────────
+
+    /// Whether a noodle dragged from `from` (the end that stays put) may be
+    /// dropped on `to`, asked on every pointer move of the drag and at the
+    /// drop. `Ok` rings `to` and snaps the noodle to it; `Err(reason)`
+    /// refuses it, and a non-empty reason is shown beside the pointer
+    /// ("That would make a loop"). Either end may be the input: a drag
+    /// backwards from an empty input has `from` on the input side. Not
+    /// asked for the socket the drag started on, nor for a picked-up
+    /// noodle's own place (putting it back is always allowed).
+    ///
+    /// Default: [`crate::connection::default_can_connect`] — an output to
+    /// an input on another node with [`Self::sockets_compatible`] types,
+    /// refusing silently.
+    fn can_connect(
+        &self,
+        from: &crate::connection::SocketRef,
+        to: &crate::connection::SocketRef,
+    ) -> Result<(), String> {
+        crate::connection::default_can_connect(self, from, to)
+    }
+
+    /// The socket of `node` a noodle dragged from `from` connects to when it
+    /// is dropped on the card's body rather than on a socket. `candidates`
+    /// are the card's sockets that accept it ([`Self::can_connect`]), in
+    /// card order; an answer not among them is ignored. Default `None`: a
+    /// drop on a body connects nothing. MatterCAD answers
+    /// [`crate::connection::node_designer_auto_pick`].
+    fn auto_pick_socket(
+        &self,
+        _node: NodeId,
+        _from: &crate::connection::SocketRef,
+        _candidates: &[crate::connection::SocketRef],
+    ) -> Option<String> {
+        None
+    }
+
     // ── Mutation ────────────────────────────────────────────────────────
 
     /// Move a node. `pos` is canvas-space top-left.
@@ -407,6 +448,26 @@ pub trait NodeGraphModel {
         to_node: NodeId,
         to_socket: &str,
     ) -> bool;
+
+    /// Move a noodle the user picked up off its input: to `to`, or, with
+    /// `None`, nowhere (it was dropped on empty canvas, which deletes it).
+    /// Called once per drop by an editor with
+    /// [`crate::NodeEditor::with_deferred_noodle_pickup`], so a host with an
+    /// undo stack records one step; not called when the noodle is put back
+    /// where it was or dropped where nothing accepts it. Default: remove it
+    /// with [`Self::remove_noodle`], then add `to` with
+    /// [`Self::try_add_noodle`].
+    fn move_noodle(&mut self, picked_up: &NoodleView, to: Option<&NoodleView>) {
+        self.remove_noodle(
+            picked_up.from_node,
+            &picked_up.from_socket,
+            picked_up.to_node,
+            &picked_up.to_socket,
+        );
+        if let Some(n) = to {
+            let _ = self.try_add_noodle(n.from_node, &n.from_socket, n.to_node, &n.to_socket);
+        }
+    }
 
     /// Update a property value (only invoked for `Number` / `Bool`).
     fn set_property(&mut self, id: NodeId, name: &str, value: PropertyValue);

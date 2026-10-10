@@ -10,6 +10,28 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Connection semantics for noodle drags, all defaulted so today's behaviour
+  stays (new module `connection`, `SocketRef` re-exported):
+  `NodeGraphModel::can_connect(from, to) -> Result<(), String>` is asked on
+  every pointer move of a drag and at the drop (`from` is the end that stays
+  put, so a drag backwards from an empty input has it on the input side);
+  `Ok` rings and snaps, `Err(reason)` refuses, and a non-empty reason is
+  shown beside the pointer in a note kept inside the editor
+  (`connection::refusal_note_position`, MatterCAD's `RefusalPosition`;
+  `NodeEditor::noodle_refusal()` reads it). The default
+  (`connection::default_can_connect`) is the old rule: an output to a
+  `sockets_compatible` input on another node, refused silently.
+  `auto_pick_socket(node, from, candidates) -> Option<String>` picks the
+  socket for a drop on a card body among the card's accepting sockets
+  (default `None`, nothing connects; `connection::node_designer_auto_pick`
+  is NodeDesigner's same type → any type → free input order).
+  `NodeEditor::with_deferred_noodle_pickup(true)` keeps a noodle picked up
+  off its input in the model, undrawn, until the drop, then calls the new
+  `NodeGraphModel::move_noodle(picked_up, to)` once (one undo step): to the
+  socket or auto-picked card dropped on, or `None` on empty canvas, which
+  deletes it; a drop back in place or where nothing accepts it changes
+  nothing. Off by default (the press removes the noodle at once). A press
+  on a multi-input picks up the noodle landing nearest the press.
 - Hosts can supply a node's right-click menu:
   `NodeGraphModel::node_context_menu(node) -> Option<Vec<MenuEntry>>`
   (default `None`, the built-in "Delete" + Add Node menu; an empty list opens

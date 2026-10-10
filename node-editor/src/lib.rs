@@ -35,6 +35,9 @@
 //! See [`crate::model`] for the trait + view types and [`crate::widget`]
 //! for the widget implementation.
 
+pub mod connection;
+#[cfg(test)]
+mod connection_tests;
 pub mod draw;
 pub mod draw_error;
 pub mod draw_immediate;
@@ -49,6 +52,7 @@ mod socket_style_tests;
 mod test_recorder;
 pub mod widget;
 
+pub use connection::SocketRef;
 pub use draw::{CanvasPalette, SocketSide};
 pub use draw_immediate::draw_node;
 pub use model::{

@@ -11,7 +11,7 @@
 use agg_gui::widgets::EditorKind;
 use agg_gui::{EventResult, Key, Modifiers, MouseButton, Point};
 
-use crate::draw::{NodeLayoutInfo, SocketSide, TITLE_HEIGHT};
+use crate::draw::{NodeLayoutInfo, TITLE_HEIGHT};
 use crate::model::{EditorHint, NodeId, PropertyValue};
 
 use super::collapse_snap::snap_single_node;
@@ -85,63 +85,12 @@ impl NodeEditor {
                     return EventResult::Consumed;
                 }
                 if let Some((node_id, socket)) = self.hit_socket(&layouts, canvas_pos) {
-                    // Click on a connected INPUT socket = disconnect-
-                    // by-drag: pop the existing noodle off and start
-                    // a re-attach drag from the noodle's SOURCE
-                    // socket. Releasing on empty canvas leaves the
-                    // noodle removed; releasing on a compatible socket
-                    // re-routes it. Matches the canonical NodeDesigner
-                    // "grab the input end of the wire" interaction.
-                    if socket.side == SocketSide::Input {
-                        let connected = self
-                            .model
-                            .lock()
-                            .unwrap()
-                            .noodles()
-                            .iter()
-                            .find(|n| n.to_node == node_id && n.to_socket == socket.name)
-                            .cloned();
-                        if let Some(noodle) = connected {
-                            // Find the source socket layout so the
-                            // drag starts at the actual output dot.
-                            let from_socket_layout = layouts
-                                .iter()
-                                .find(|l| l.node_id == noodle.from_node)
-                                .and_then(|l| {
-                                    l.sockets().find(|s| {
-                                        s.side == SocketSide::Output && s.name == noodle.from_socket
-                                    })
-                                })
-                                .cloned();
-                            self.model.lock().unwrap().remove_noodle(
-                                noodle.from_node,
-                                &noodle.from_socket,
-                                noodle.to_node,
-                                &noodle.to_socket,
-                            );
-                            if let Some(src) = from_socket_layout {
-                                self.interaction = CanvasState::DrawingConnection {
-                                    from_node: noodle.from_node,
-                                    from_socket: noodle.from_socket.clone(),
-                                    from_canvas: src.center,
-                                    cursor_canvas: canvas_pos,
-                                    from_socket_type: src.socket_type,
-                                    from_side: SocketSide::Output,
-                                };
-                                agg_gui::animation::request_draw();
-                                return EventResult::Consumed;
-                            }
-                        }
-                    }
-                    self.interaction = CanvasState::DrawingConnection {
-                        from_node: node_id,
-                        from_socket: socket.name.clone(),
-                        from_canvas: socket.center,
-                        cursor_canvas: canvas_pos,
-                        from_socket_type: socket.socket_type,
-                        from_side: socket.side,
-                    };
-                    return EventResult::Consumed;
+                    // A press on an output starts a noodle; on an empty
+                    // input it drags backwards; on a connected input it
+                    // picks that input's noodle up, dragged from its
+                    // source (NodeDesigner's "grab the input end of the
+                    // wire"). See `connect`.
+                    return self.begin_connection(&layouts, node_id, &socket, canvas_pos, pos);
                 }
                 // Property row?
                 if let Some((node_id, prop)) = self.hit_property(&layouts, canvas_pos) {
@@ -459,8 +408,8 @@ impl NodeEditor {
                 }
                 EventResult::Consumed
             }
-            CanvasState::DrawingConnection { cursor_canvas, .. } => {
-                *cursor_canvas = canvas_pos;
+            CanvasState::DrawingConnection { .. } => {
+                self.update_connection_drag(&layouts_snapshot, pos, canvas_pos);
                 EventResult::Consumed
             }
             CanvasState::DraggingProperty {
@@ -530,66 +479,10 @@ impl NodeEditor {
             std::mem::replace(&mut self.interaction, CanvasState::Idle),
         ) {
             (
-                MouseButton::Left,
-                CanvasState::DrawingConnection {
-                    from_node,
-                    from_socket,
-                    from_socket_type,
-                    from_side,
-                    ..
-                },
-            )
-            | (
-                MouseButton::Middle,
-                CanvasState::DrawingConnection {
-                    from_node,
-                    from_socket,
-                    from_socket_type,
-                    from_side,
-                    ..
-                },
+                MouseButton::Left | MouseButton::Middle,
+                state @ CanvasState::DrawingConnection { .. },
             ) => {
-                let layouts = self.snapshot_layouts();
-                if let Some((target_node, target_socket)) = self.hit_socket(&layouts, canvas_pos) {
-                    let model = self.model.lock().unwrap();
-                    let compatible =
-                        model.sockets_compatible(from_socket_type, target_socket.socket_type);
-                    drop(model);
-                    if target_node != from_node && compatible {
-                        let (out_node, out_sock, in_node, in_sock) =
-                            match (from_side, target_socket.side) {
-                                (SocketSide::Output, SocketSide::Input) => (
-                                    from_node,
-                                    from_socket.clone(),
-                                    target_node,
-                                    target_socket.name.clone(),
-                                ),
-                                (SocketSide::Input, SocketSide::Output) => (
-                                    target_node,
-                                    target_socket.name.clone(),
-                                    from_node,
-                                    from_socket.clone(),
-                                ),
-                                _ => {
-                                    self.backbuffer.invalidate();
-                                    agg_gui::animation::request_draw();
-                                    return EventResult::Consumed;
-                                }
-                            };
-                        let _ = self
-                            .model
-                            .lock()
-                            .unwrap()
-                            .try_add_noodle(out_node, &out_sock, in_node, &in_sock);
-                    }
-                }
-                // Whether the drop landed on a socket or empty
-                // canvas, the dangling bezier we were drawing during
-                // the drag has to disappear. Invalidate the cached
-                // backbuffer + request a redraw so the canvas
-                // repaints without the in-flight line.
-                self.backbuffer.invalidate();
-                agg_gui::animation::request_draw();
+                self.finish_connection(canvas_pos, state);
                 EventResult::Consumed
             }
             (_, CanvasState::DraggingNode { .. }) => {

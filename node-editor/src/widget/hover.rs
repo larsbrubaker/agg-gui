@@ -1,12 +1,11 @@
-//! Drop-target hover logic for the in-progress noodle drag.
+//! Noodle endpoint resolution against the per-node layouts.
 //!
 //! Lives in its own file so [`super::mod`] stays under the 800-line
-//! cap. The helper finds the best socket to highlight as the user
-//! drags a connection: opposite side, not the source node, compatible
-//! type, within a snap radius of the cursor.
+//! cap. The drop target a dragged noodle snaps to is chosen in
+//! [`super::connect`].
 
 use crate::draw::{NodeLayoutInfo, SocketLayout, SocketSide};
-use crate::model::{NodeGraphModel, NodeId, NoodleView, SocketTypeId};
+use crate::model::NoodleView;
 
 /// Resolve a noodle's `(from, to)` endpoint sockets against the
 /// per-node layouts that paint just produced.
@@ -38,49 +37,4 @@ pub(crate) fn resolve_noodle_endpoints<'a>(
                 .find(|s| s.side == SocketSide::Input && s.name == noodle.to_socket)
         })?;
     Some((from, to))
-}
-
-/// Find a socket within the drop-snap radius of `cursor_canvas` that's
-/// a valid drop target for the in-progress connection — the right
-/// side (Input if dragging from Output, vice versa), not the source
-/// node itself, and compatible socket types. Used to draw the hover
-/// halo while the user drags a noodle.
-pub(super) fn find_compatible_socket_near<'a>(
-    layouts: &'a [NodeLayoutInfo],
-    model: &dyn NodeGraphModel,
-    cursor_canvas: [f64; 2],
-    from_node: NodeId,
-    from_side: SocketSide,
-    from_socket_type: SocketTypeId,
-) -> Option<&'a SocketLayout> {
-    let snap_r = crate::draw::SOCKET_HIT_RADIUS * 1.6;
-    let want_side = match from_side {
-        SocketSide::Output => SocketSide::Input,
-        SocketSide::Input => SocketSide::Output,
-    };
-    let mut best: Option<(&SocketLayout, f64)> = None;
-    for l in layouts {
-        if l.node_id == from_node {
-            continue;
-        }
-        for s in l.sockets() {
-            if s.side != want_side {
-                continue;
-            }
-            let compatible = match from_side {
-                SocketSide::Output => model.sockets_compatible(from_socket_type, s.socket_type),
-                SocketSide::Input => model.sockets_compatible(s.socket_type, from_socket_type),
-            };
-            if !compatible {
-                continue;
-            }
-            let dx = s.center[0] - cursor_canvas[0];
-            let dy = s.center[1] - cursor_canvas[1];
-            let d2 = dx * dx + dy * dy;
-            if d2 <= snap_r * snap_r && best.map(|(_, b)| d2 < b).unwrap_or(true) {
-                best = Some((s, d2));
-            }
-        }
-    }
-    best.map(|(s, _)| s)
 }
