@@ -1,21 +1,81 @@
-﻿//! `Widget` impl for `TreeView` — extracted from `mod.rs` to keep the
-//! main file under the project's 800-line cap.  All TreeView logic
-//! still lives in `mod.rs`; this submodule only routes the trait
-//! methods (layout / paint / event dispatch / focus / hit-test) into
-//! the helpers TreeView already exposes.
+//! `Widget` impl for `TreeView` — extracted from `mod.rs` to keep the
+//! main file under the project's 800-line cap.  Layout is virtualised:
+//! `layout()` builds `TreeRow` widgets only for the rows inside the viewport
+//! and reuses a row's widget while its signature ([`row_signature`]) is
+//! unchanged.  `paint()` draws the background, scrollbar, selection, hover
+//! and drag feedback; the framework then paints the row widgets on top.
+//! Input handling lives in `input.rs`, the row cache in `flat.rs`.
 
 use std::sync::Arc;
 
+use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
+use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 use super::drag::{paint_drop_child_highlight, paint_drop_line, paint_ghost};
-use super::node::{flatten_visible, DropPosition, FlatRow};
+use super::node::{DropPosition, FlatRow, TreeNode};
 use super::row::{icon_color, TreeRow, EXPAND_W};
 use super::{RowMeta, TreeView, SCROLLBAR_W};
+
+/// Hash of everything a row widget shows — its node's content and depth,
+/// plus the tree-wide metrics and fonts.  Selection, hover and focus are
+/// painted by `TreeView::paint`, so they are deliberately not part of it.
+fn row_signature(tree: &TreeView, node: &TreeNode, flat: &FlatRow) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    node.label.hash(&mut h);
+    flat.depth.hash(&mut h);
+    flat.has_children.hash(&mut h);
+    node.is_expanded.hash(&mut h);
+    (node.icon as u8).hash(&mut h);
+    node.icon_image
+        .as_ref()
+        .map(IconImage::identity)
+        .hash(&mut h);
+    if let Some(g) = node.icon_glyph {
+        g.glyph.hash(&mut h);
+        [g.color.r, g.color.g, g.color.b, g.color.a]
+            .map(f32::to_bits)
+            .hash(&mut h);
+    }
+    node.secondary_text.hash(&mut h);
+    node.fraction.map(f32::to_bits).hash(&mut h);
+    Arc::as_ptr(&tree.font).hash(&mut h);
+    tree.icon_font.as_ref().map(Arc::as_ptr).hash(&mut h);
+    tree.font_size.to_bits().hash(&mut h);
+    tree.row_height.to_bits().hash(&mut h);
+    tree.indent_width.to_bits().hash(&mut h);
+    h.finish()
+}
+
+impl TreeView {
+    /// Build the `TreeRow` widget for `flat`.
+    fn build_row(&self, flat: &FlatRow) -> TreeRow {
+        let node = &self.nodes[flat.node_idx];
+        let glyph_font = self.icon_font.as_ref().unwrap_or(&self.font);
+        TreeRow::new(
+            flat.node_idx,
+            flat.depth,
+            flat.has_children,
+            node.is_expanded,
+            false, // selection is painted by `TreeView::paint`
+            false,
+            node.icon,
+            node.label.clone(),
+            Arc::clone(&self.font),
+            self.font_size,
+            self.indent_width,
+            self.row_height,
+        )
+        .with_icon_image(node.icon_image.clone())
+        .with_icon_glyph(node.icon_glyph.map(|g| (g, Arc::clone(glyph_font))))
+        .with_trailing(node.secondary_text.clone(), node.fraction)
+    }
+}
 
 impl Widget for TreeView {
     crate::widgets::widget_as_any!();
@@ -72,95 +132,59 @@ impl Widget for TreeView {
             && local_pos.y <= b.height
     }
 
-    fn layout(&mut self, available: Size) -> Size {
-        let rows = flatten_visible(&self.nodes);
-        self.content_height = rows.len() as f64 * self.row_height;
-        self.scroll_offset = self.scroll_offset.clamp(0.0, self.max_scroll());
+    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
+        // Rows are display-only: every press must reach (and focus) the
+        // tree itself, not a row's child label.
+        true
+    }
 
+    fn layout(&mut self, available: Size) -> Size {
+        self.refresh_flat();
         let h = available.height;
         let w = available.width - SCROLLBAR_W;
         let rh = self.row_height;
-        let ind = self.indent_width;
-        let font_size = self.font_size;
+        self.viewport_h = h;
+        self.content_height = self.flat.rows.len() as f64 * rh;
+        self.apply_pending_scroll();
+        self.scroll_offset = self
+            .scroll_offset
+            .clamp(0.0, (self.content_height - h).max(0.0));
 
-        // Reuse cached rows when the row content is unchanged from the
-        // previous layout — happens every frame of a window-resize drag.
-        // We only reposition the existing TreeRow widgets and refresh the
-        // toggle_rects, preserving each TreeRow's child Label backbuffers.
-        // Without this, resizing a window with the inspector open
-        // re-rasterised every label every frame.
-        let visible_rows: Vec<&FlatRow> = rows
-            .iter()
-            .filter(|flat| {
-                !self
-                    .drag
-                    .as_ref()
-                    .is_some_and(|d| d.live && d.node_idx == flat.node_idx)
-            })
+        // Only the rows inside the viewport get a widget.
+        let display_len = self.display_len();
+        let (first, end) = if rh > 0.0 && h > 0.0 {
+            let first = (self.scroll_offset / rh).floor().max(0.0) as usize;
+            let end = ((self.scroll_offset + h) / rh).ceil().max(0.0) as usize;
+            (first.min(display_len), end.min(display_len))
+        } else {
+            (0, 0)
+        };
+
+        // Keep each row widget whose content is unchanged (its labels keep
+        // their rasters); build the rest.
+        let mut old: Vec<(RowMeta, Box<dyn Widget>)> = std::mem::take(&mut self.row_metas)
+            .into_iter()
+            .zip(std::mem::take(&mut self.row_widgets))
             .collect();
-        let new_sig = self.row_content_signature();
-        let can_reuse = self.last_row_content_sig == Some(new_sig)
-            && self.row_widgets.len() == visible_rows.len()
-            && !self.row_widgets.is_empty();
-
-        if can_reuse {
-            // Reposition existing rows in place — no allocations, no
-            // text re-rasterisation.
-            for (i, flat) in visible_rows.iter().enumerate() {
-                let y_bot = h - (i as f64 + 1.0) * rh + self.scroll_offset;
-                let row = &mut self.row_widgets[i];
-                row.layout(Size::new(w, rh));
-                row.set_bounds(Rect::new(0.0, y_bot, w, rh));
-                if let Some(meta) = self.row_metas.get_mut(i) {
-                    debug_assert_eq!(meta.node_idx, flat.node_idx);
-                    if let Some(ref mut tr) = meta.toggle_rect {
-                        tr.y = y_bot + (rh - tr.height) * 0.5;
-                    }
-                }
-            }
-            return available;
-        }
-
-        // Full rebuild path — content has changed since the last layout.
-        self.row_widgets.clear();
-        self.row_metas.clear();
-
-        for (i, flat) in visible_rows.iter().enumerate() {
-            let node = &self.nodes[flat.node_idx];
-            let y_bot = h - (i as f64 + 1.0) * rh + self.scroll_offset;
-            let mut tree_row = TreeRow::new(
-                flat.node_idx,
-                flat.depth,
-                flat.has_children,
-                node.is_expanded,
-                node.is_selected,
-                self.focused,
-                node.icon,
-                node.label.clone(),
-                Arc::clone(&self.font),
-                font_size,
-                ind,
-                rh,
-            )
-            .with_icon_image(node.icon_image.clone());
-
-            tree_row.layout(Size::new(w, rh));
-            tree_row.set_bounds(Rect::new(0.0, y_bot, w, rh));
-
-            let toggle_rect = if flat.has_children {
-                let tlb = tree_row.toggle_local_bounds;
-                Some(Rect::new(tlb.x, y_bot + tlb.y, tlb.width, tlb.height))
-            } else {
-                None
+        for i in first..end {
+            let Some(flat) = self.display_row(i) else {
+                break;
             };
-
+            let sig = row_signature(self, &self.nodes[flat.node_idx], &flat);
+            let reused = old
+                .iter()
+                .position(|(m, _)| m.node_idx == flat.node_idx && m.sig == sig)
+                .map(|k| old.swap_remove(k).1);
+            let mut row = reused.unwrap_or_else(|| Box::new(self.build_row(&flat)));
+            let y_bot = self.row_y(i);
+            row.layout(Size::new(w, rh));
+            row.set_bounds(Rect::new(0.0, y_bot, w, rh));
             self.row_metas.push(RowMeta {
                 node_idx: flat.node_idx,
-                toggle_rect,
+                sig,
             });
-            self.row_widgets.push(Box::new(tree_row));
+            self.row_widgets.push(row);
         }
-        self.last_row_content_sig = Some(new_sig);
 
         available
     }
@@ -203,37 +227,39 @@ impl Widget for TreeView {
         // This clip is active during framework recursion into row_widgets (after paint() returns).
         ctx.clip_rect(0.0, 0.0, content_w, h);
 
-        // Hover background — painted here (not on the individual `TreeRow`
-        // widgets) so a hover flip doesn't have to invalidate the row's
-        // cached label backbuffers.  Framework recursion paints each row's
-        // content on top of this band.  Skip when the row is also
-        // selected (the selection tint already conveys focus).
-        if let Some(hi) = self.hovered_row {
-            if let (Some(meta), Some(row_widget)) =
-                (self.row_metas.get(hi), self.row_widgets.get(hi))
-            {
-                let is_sel = self
-                    .nodes
-                    .get(meta.node_idx)
-                    .map(|n| n.is_selected)
-                    .unwrap_or(false);
-                if !is_sel {
-                    let rb = row_widget.bounds();
-                    ctx.set_fill_color(crate::color::Color::rgba(
-                        v.text_color.r,
-                        v.text_color.g,
-                        v.text_color.b,
-                        0.08,
-                    ));
-                    ctx.begin_path();
-                    ctx.rect(rb.x, rb.y, rb.width, rb.height);
-                    ctx.fill();
-                }
-            }
+        // Selection and hover backgrounds — painted here, not by the
+        // `TreeRow` widgets, so changing them never rebuilds a row (whose
+        // labels keep their cached rasters).  Framework recursion paints
+        // each row's content on top.  Hover is skipped on a selected row
+        // (the selection tint already marks it).
+        let selected_fill = if self.focused {
+            // Accent-tinted overlay — same colour in both themes so the
+            // selection reads as "selected" regardless of palette.
+            Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.25)
+        } else {
+            // Theme-neutral dim overlay: subtle tint of the text color.
+            Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.12)
+        };
+        let hover_fill = Color::rgba(v.text_color.r, v.text_color.g, v.text_color.b, 0.08);
+        let hovered_node = self.hovered_node_idx();
+        for (meta, row) in self.row_metas.iter().zip(&self.row_widgets) {
+            let is_sel = self.nodes.get(meta.node_idx).is_some_and(|n| n.is_selected);
+            let fill = if is_sel {
+                selected_fill
+            } else if hovered_node == Some(meta.node_idx) {
+                hover_fill
+            } else {
+                continue;
+            };
+            let rb = row.bounds();
+            ctx.set_fill_color(fill);
+            ctx.begin_path();
+            ctx.rect(rb.x, rb.y, rb.width, rb.height);
+            ctx.fill();
         }
 
         // Drop indicator and ghost (drag feedback)
-        let rows = flatten_visible(&self.nodes);
+        let rows = &self.flat.rows;
         if let Some(drop_target) = self.drop_target {
             if self.drag.as_ref().is_some_and(|d| d.live) {
                 let rh = self.row_height;
@@ -245,7 +271,7 @@ impl Widget for TreeView {
                     | DropPosition::AsChild(ni) => ni,
                 };
                 if let Some(ri) = rows.iter().position(|r| r.node_idx == ref_node) {
-                    let y_bot = h - (ri as f64 + 1.0) * rh + off;
+                    let y_bot = self.viewport_h - (ri as f64 + 1.0) * rh + off;
                     let indent = rows[ri].depth as f64 * ind + EXPAND_W;
                     match drop_target {
                         DropPosition::Before(_) => {

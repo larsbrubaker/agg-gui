@@ -155,6 +155,6 @@ pub use text_suggestion::{
 };
 pub use toggle_switch::{ToggleSwitch, ToggleSwitchStyle};
 pub use tooltip::{set_tooltip_timings, tooltip_timings, Tooltip, TooltipTimings};
-pub use tree_view::{NodeIcon, TreeView};
+pub use tree_view::{NodeGlyph, NodeIcon, ScrollAlign, TreeView, TreeViewEvent};
 pub use tumble_cube::{TumbleCube, TumbleCubeCamera, TumbleCubeGpuRenderer};
 pub use window::{ClickAwayAction, CloseReason, Window};

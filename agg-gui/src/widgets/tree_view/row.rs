@@ -1,8 +1,11 @@
-﻿//! Compositional row widgets for `TreeView`:
+//! Compositional row widgets for `TreeView`:
 //! `ExpandToggle`, `NodeIconWidget`, and `TreeRow`.
 //!
-//! These widgets are intended to be composed into a `FlexRow` (or positioned
-//! manually) by the `TreeView` when building visible rows.
+//! `TreeView` builds one `TreeRow` per on-screen row and positions it; the
+//! row lays out its parts left to right — indent, expand arrow, icon (a
+//! procedural shape, an image, or a font glyph), label — plus optional
+//! trailing parts at the right edge: dimmed secondary text and a fraction
+//! bar (`row_trailing.rs`).
 
 use std::sync::Arc;
 
@@ -17,7 +20,8 @@ use crate::widget::Widget;
 use crate::widgets::label::Label;
 use crate::widgets::primitives::SizedBox;
 
-use super::node::NodeIcon;
+use super::node::{NodeGlyph, NodeIcon};
+use super::row_trailing::FractionBar;
 
 // ---------------------------------------------------------------------------
 // Constants (moved from mod.rs so drag.rs and row.rs share one source)
@@ -26,6 +30,8 @@ use super::node::NodeIcon;
 pub const EXPAND_W: f64 = 18.0; // space reserved for expand arrow
 pub const ICON_W: f64 = 14.0;
 pub const ICON_GAP: f64 = 4.0;
+/// Space between the label and each trailing part.
+pub const TRAILING_GAP: f64 = 6.0;
 
 // ---------------------------------------------------------------------------
 // icon_color helper
@@ -165,6 +171,9 @@ pub struct NodeIconWidget {
     pub icon: NodeIcon,
     /// Image drawn instead of the procedural `icon` when `Some`.
     pub image: Option<IconImage>,
+    /// Glyph (and the font to draw it with) drawn instead of the image or
+    /// procedural icon when `Some`.
+    pub glyph: Option<(NodeGlyph, Arc<Font>)>,
     children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
 }
@@ -175,9 +184,17 @@ impl NodeIconWidget {
             bounds: Rect::default(),
             icon,
             image: None,
+            glyph: None,
             children: Vec::new(),
             base: WidgetBase::new(),
         }
+    }
+
+    /// Draw `glyph` with its font (e.g. a Font Awesome code point) instead
+    /// of the image or procedural icon.  `None` keeps those.
+    pub fn with_glyph(mut self, glyph: Option<(NodeGlyph, Arc<Font>)>) -> Self {
+        self.glyph = glyph;
+        self
     }
 
     /// Draw `image` (at its logical size, device-resolution raster) instead
@@ -228,10 +245,10 @@ impl Widget for NodeIconWidget {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let icon_w = self
-            .image
-            .as_ref()
-            .map_or(ICON_W, |image| image.size().width.max(ICON_W));
+        let icon_w = match (&self.glyph, &self.image) {
+            (Some(_), _) | (None, None) => ICON_W,
+            (None, Some(image)) => image.size().width.max(ICON_W),
+        };
         Size::new(icon_w + ICON_GAP, available.height)
     }
 
@@ -239,6 +256,10 @@ impl Widget for NodeIconWidget {
     // All drawing coordinates are widget-local (0,0 = bottom-left of this widget).
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let h = self.bounds.height;
+        if let Some((glyph, font)) = &self.glyph {
+            paint_glyph(ctx, glyph, font, h);
+            return;
+        }
         if let Some(image) = &self.image {
             image.draw(ctx, 0.0, (h - image.size().height) * 0.5);
             return;
@@ -267,7 +288,9 @@ impl Widget for NodeIconWidget {
 // TreeRow
 // ---------------------------------------------------------------------------
 
-/// Compositional row: `SizedBox` (indent) | `ExpandToggle` | `NodeIconWidget` | `Label`.
+/// Compositional row: `SizedBox` (indent) | `ExpandToggle` | `NodeIconWidget` |
+/// `Label`, then optionally a dimmed secondary `Label` and a `FractionBar`
+/// at the right edge ([`TreeRow::with_trailing`]).
 ///
 /// **Event-routing note:** `TreeRow` and its children all return `EventResult::Ignored`.
 /// The containing `TreeView` handles all events (selection, expand/collapse) using its
@@ -290,6 +313,13 @@ pub struct TreeRow {
     pub toggle_local_bounds: Rect,
     is_selected: bool,
     focused: bool,
+    /// Index in `children` of the trailing secondary-text label.
+    secondary_idx: Option<usize>,
+    /// Index in `children` of the trailing fraction bar.
+    fraction_idx: Option<usize>,
+    /// Font and size of the main label, reused for the secondary text.
+    font: Arc<Font>,
+    font_size: f64,
     children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
 }
@@ -315,7 +345,7 @@ impl TreeRow {
             Box::new(SizedBox::fixed(indent_px, row_height)),
             Box::new(ExpandToggle::new(has_children, is_expanded)),
             Box::new(NodeIconWidget::new(icon)),
-            Box::new(Label::new(label, font).with_font_size(font_size)),
+            Box::new(Label::new(label, Arc::clone(&font)).with_font_size(font_size)),
         ];
 
         Self {
@@ -325,6 +355,10 @@ impl TreeRow {
             toggle_local_bounds: Rect::default(),
             is_selected,
             focused,
+            secondary_idx: None,
+            fraction_idx: None,
+            font,
+            font_size,
             children,
             base: WidgetBase::new(),
         }
@@ -337,9 +371,36 @@ impl TreeRow {
         }
         self
     }
+
+    /// Show a font glyph in the icon cell (takes precedence over an image).
+    pub fn with_icon_glyph(mut self, glyph: Option<(NodeGlyph, Arc<Font>)>) -> Self {
+        if glyph.is_some() {
+            self.children[2] = Box::new(NodeIconWidget::new(self.icon).with_glyph(glyph));
+        }
+        self
+    }
+
+    /// Add right-aligned dimmed `secondary` text and / or a fraction bar
+    /// (`0..=1`) at the row's trailing edge.  The main label gives up the
+    /// width they take.
+    pub fn with_trailing(mut self, secondary: Option<String>, fraction: Option<f32>) -> Self {
+        if let Some(text) = secondary {
+            let label = Label::new(text, Arc::clone(&self.font))
+                .with_font_size(self.font_size)
+                .with_dim(true);
+            self.secondary_idx = Some(self.children.len());
+            self.children.push(Box::new(label));
+        }
+        if let Some(f) = fraction {
+            self.fraction_idx = Some(self.children.len());
+            self.children.push(Box::new(FractionBar::new(f)));
+        }
+        self
+    }
 }
 
 impl Widget for TreeRow {
+    crate::widgets::widget_as_any!();
     fn type_name(&self) -> &'static str {
         "TreeRow"
     }
@@ -402,8 +463,20 @@ impl Widget for TreeRow {
         self.children[2].set_bounds(Rect::new(x, 0.0, s2.width, h));
         x += s2.width;
 
+        // Trailing parts, right to left: fraction bar, then secondary text.
+        let mut right = total_w;
+        for idx in [self.fraction_idx, self.secondary_idx]
+            .into_iter()
+            .flatten()
+        {
+            let s = self.children[idx].layout(Size::new((right - x).max(0.0), h));
+            right -= s.width;
+            self.children[idx].set_bounds(Rect::new(right, 0.0, s.width, h));
+            right -= TRAILING_GAP;
+        }
+
         // Child 3: Label — remaining width
-        let label_w = (total_w - x).max(0.0);
+        let label_w = (right - x).max(0.0);
         let s3 = self.children[3].layout(Size::new(label_w, h));
         self.children[3].set_bounds(Rect::new(x, 0.0, s3.width, h));
 
@@ -433,5 +506,20 @@ impl Widget for TreeRow {
 
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+/// Draw `glyph` with `font`, centred in the `ICON_W` cell of a row `h` tall.
+/// Drawn as text every paint, so it follows the display scale.
+fn paint_glyph(ctx: &mut dyn DrawCtx, glyph: &NodeGlyph, font: &Arc<Font>, h: f64) {
+    let text = glyph.glyph.to_string();
+    ctx.set_font(Arc::clone(font));
+    ctx.set_font_size(ICON_W);
+    ctx.set_fill_color(glyph.color);
+    if let Some(m) = ctx.measure_text(&text) {
+        let x = ((ICON_W - m.width) * 0.5).max(0.0);
+        // Centre the ascent-to-descent box vertically (Y up, baseline at y).
+        let y = (h - (m.ascent + m.descent)) * 0.5 + m.descent;
+        ctx.fill_text(&text, x, y);
     }
 }

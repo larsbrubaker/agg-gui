@@ -1,29 +1,57 @@
 //! `TreeView` — compositional tree widget with expand/collapse, multi-select,
 //! keyboard navigation, and drag-and-drop reordering.
 //!
-//! Each visible row is represented by a `TreeRow` child widget stored in
-//! `row_widgets`.  The framework recurses into these children after `paint()`
-//! returns, so the `clip_rect` set at the end of `paint()` is active during
-//! child painting.
+//! Layout is virtualised: only the rows inside the viewport get a `TreeRow`
+//! child widget (`row_widgets`), and a row widget is kept across layouts as
+//! long as what it shows is unchanged, so its labels keep their cached
+//! rasters.  The list of visible rows comes from `flat::FlatCache`, rebuilt
+//! only when the structure or expansion changes.  Selection, hover and
+//! focus are painted by `TreeView::paint` underneath the rows, so changing
+//! them never rebuilds a row widget.
+//!
+//! The framework recurses into `row_widgets` after `paint()` returns, so the
+//! `clip_rect` set at the end of `paint()` is active during child painting.
+//! The rows are display-only: `TreeView` claims the pointer for its whole
+//! area (`claims_pointer_exclusively`), so a click on a row focuses the tree
+//! and selects the row.
+//!
+//! Module map: `node.rs` (data types), `flat.rs` (row cache), `row.rs`
+//! (row widgets), `input.rs` (mouse / keyboard handling), `api.rs` (public
+//! programmatic API and change events), `drag.rs` (drag and drop),
+//! `widget_impl.rs` (the `Widget` impl: layout, paint, dispatch).
 
+mod api;
 mod drag;
+mod flat;
+mod input;
 mod node;
 pub mod row;
+mod row_trailing;
 mod widget_impl;
 
-use drag::{apply_drop, compute_drop_target};
-use node::{flatten_visible, DragState, DropPosition, FlatRow};
-pub use node::{NodeIcon, TreeNode};
+pub use api::{ScrollAlign, TreeViewEvent};
+use flat::FlatCache;
+use node::{DragState, DropPosition, FlatRow};
+pub use node::{NodeGlyph, NodeIcon, TreeNode};
 pub use row::{ExpandToggle, NodeIconWidget, TreeRow};
 
 use std::sync::Arc;
 
-use crate::event::{EventResult, Key, Modifiers};
 use crate::geometry::{Point, Rect, Size};
 use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
+
+/// Node ids of the visible rows by the uncached reference walk, for tests
+/// of the cached rows.
+#[cfg(test)]
+pub(crate) fn reference_rows(nodes: &[TreeNode]) -> Vec<usize> {
+    node::flatten_visible(nodes)
+        .into_iter()
+        .map(|r| r.node_idx)
+        .collect()
+}
 
 const SCROLLBAR_W: f64 = 10.0;
 const DRAG_THRESHOLD: f64 = 4.0;
@@ -32,13 +60,24 @@ const DRAG_THRESHOLD: f64 = 4.0;
 // RowMeta
 // ---------------------------------------------------------------------------
 
-/// Metadata for one visible row; parallel to `row_widgets` after `layout()`.
+/// Metadata for one built row widget; parallel to `row_widgets`.
 struct RowMeta {
     /// Index into `self.nodes` for this row.
     node_idx: usize,
-    /// Bounds of the `ExpandToggle` in **TreeView-local** coordinates.
-    /// `None` if the node has no children.
-    toggle_rect: Option<Rect>,
+    /// Hash of everything the row widget shows (see
+    /// `widget_impl::row_signature`); a widget is reused while it matches.
+    sig: u64,
+}
+
+/// Callback registered with [`TreeView::on_tree_event`].
+type EventCallback = Box<dyn FnMut(&TreeViewEvent)>;
+
+/// A scroll request resolved at the next `layout()`, once the visible rows
+/// and the viewport height are current.
+#[derive(Clone, Copy, Debug)]
+enum PendingScroll {
+    Node(usize, ScrollAlign),
+    Row(usize, ScrollAlign),
 }
 
 // ---------------------------------------------------------------------------
@@ -47,10 +86,10 @@ struct RowMeta {
 
 pub struct TreeView {
     bounds: Rect,
-    /// One `TreeRow` per currently-visible node; rebuilt each `layout()` call.
+    /// One `TreeRow` per visible row inside the viewport.
     row_widgets: Vec<Box<dyn Widget>>,
     base: WidgetBase,
-    /// Parallel to `row_widgets` — metadata for hit-testing in `on_event()`.
+    /// Parallel to `row_widgets`.
     row_metas: Vec<RowMeta>,
 
     pub nodes: Vec<TreeNode>,
@@ -58,12 +97,16 @@ pub struct TreeView {
     // Scroll state
     scroll_offset: f64,
     content_height: f64,
+    /// Viewport height of the last `layout()`; row positions derive from it.
+    viewport_h: f64,
 
     // Row metrics
     pub row_height: f64,
     pub indent_width: f64,
     pub font: Arc<Font>,
     pub font_size: f64,
+    /// Font for [`NodeGlyph`] icons; `None` uses `font`.
+    pub icon_font: Option<Arc<Font>>,
 
     // Interaction
     pub drag_enabled: bool,
@@ -75,9 +118,13 @@ pub struct TreeView {
     /// Leave `false` for the inspector tree, where clicking selects without
     /// accidentally collapsing an expanded branch.
     pub toggle_on_row_click: bool,
+    /// When `true` (the default), Enter toggles the cursor row's expansion as
+    /// well as reporting [`TreeViewEvent::Activated`].  Set `false` when
+    /// activation means something else (open, zoom).
+    pub enter_toggles_expansion: bool,
     hover_repaint: bool,
     focused: bool,
-    /// Flat-row index of the row under the cursor.
+    /// Display-row index of the row under the cursor.
     hovered_row: Option<usize>,
     /// Node index used as the keyboard cursor / shift-click anchor.
     cursor_node: Option<usize>,
@@ -92,16 +139,17 @@ pub struct TreeView {
     sb_drag_start_y: f64,
     sb_drag_start_offset: f64,
 
-    /// Hash of the row-content state at the last `layout()` rebuild —
-    /// covers everything that affects WHICH `TreeRow` widgets exist
-    /// (node order, label text, expand / select / hover / focus state)
-    /// but NOT what affects only their bounds (viewport size, scroll
-    /// offset).  When the next `layout()` finds an unchanged signature,
-    /// it reuses the cached `row_widgets` Vec — preserving each Label's
-    /// backbuffer cache — and only repositions them.  Without this,
-    /// resizing a window with a 250+-row tree (the inspector) re-rasterised
-    /// every label every frame.
-    last_row_content_sig: Option<u64>,
+    /// Cached child index and visible rows.
+    flat: FlatCache,
+    pending_scroll: Option<PendingScroll>,
+    /// Changes the user made, for [`TreeView::take_events`].
+    events: Vec<TreeViewEvent>,
+    event_cb: Option<EventCallback>,
+    /// Children counted per parent (`[0]` = roots, `[p + 1]` = children of
+    /// `p`) so `add_root` / `add_child` are O(1); valid while
+    /// `nodes.len() == counted_len`.
+    sibling_counts: Vec<u32>,
+    counted_len: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -118,12 +166,15 @@ impl TreeView {
             nodes: Vec::new(),
             scroll_offset: 0.0,
             content_height: 0.0,
+            viewport_h: 0.0,
             row_height: 24.0,
             indent_width: 16.0,
             font,
             font_size: crate::font_settings::default_font_size_or(13.0),
+            icon_font: None,
             drag_enabled: false,
             toggle_on_row_click: false,
+            enter_toggles_expansion: true,
             hover_repaint: true,
             focused: false,
             hovered_row: None,
@@ -134,43 +185,13 @@ impl TreeView {
             dragging_scrollbar: false,
             sb_drag_start_y: 0.0,
             sb_drag_start_offset: 0.0,
-            last_row_content_sig: None,
+            flat: FlatCache::default(),
+            pending_scroll: None,
+            events: Vec::new(),
+            event_cb: None,
+            sibling_counts: Vec::new(),
+            counted_len: usize::MAX,
         }
-    }
-
-    /// Hash of everything that affects WHICH `TreeRow` widgets we'd build
-    /// — but not their bounds.  Used by `layout()` to skip rebuilding the
-    /// row widget vec when the user is just resizing the parent (window
-    /// resize, scroll, etc.) and the underlying node list hasn't moved.
-    ///
-    /// `hovered_row` is intentionally NOT part of the signature.  Hover
-    /// is painted by `TreeView::paint` from `self.hovered_row` directly,
-    /// without touching the per-row `TreeRow` widgets, so a hover flip
-    /// doesn't throw away the row vec (and with it every cached `Label`
-    /// backbuffer).
-    fn row_content_signature(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.nodes.len().hash(&mut h);
-        for n in &self.nodes {
-            n.label.hash(&mut h);
-            n.parent.hash(&mut h);
-            n.order.hash(&mut h);
-            n.is_expanded.hash(&mut h);
-            n.is_selected.hash(&mut h);
-            (n.icon as u8).hash(&mut h);
-            n.icon_image.as_ref().map(IconImage::identity).hash(&mut h);
-        }
-        self.focused.hash(&mut h);
-        // Drag state affects which row to skip in the build.
-        self.drag
-            .as_ref()
-            .map(|d| (d.live, d.node_idx))
-            .hash(&mut h);
-        self.font_size.to_bits().hash(&mut h);
-        self.row_height.to_bits().hash(&mut h);
-        self.indent_width.to_bits().hash(&mut h);
-        h.finish()
     }
 
     pub fn with_row_height(mut self, h: f64) -> Self {
@@ -197,6 +218,16 @@ impl TreeView {
         self.hover_repaint = repaint;
         self
     }
+    /// Font for [`NodeGlyph`] icons (e.g. a Font Awesome face).
+    pub fn with_icon_font(mut self, font: Arc<Font>) -> Self {
+        self.icon_font = Some(font);
+        self
+    }
+    /// See [`TreeView::enter_toggles_expansion`].
+    pub fn with_enter_toggles_expansion(mut self, toggles: bool) -> Self {
+        self.enter_toggles_expansion = toggles;
+        self
+    }
 
     pub fn with_margin(mut self, m: Insets) -> Self {
         self.base.margin = m;
@@ -221,9 +252,10 @@ impl TreeView {
 
     /// Add a root-level node; returns its index.
     pub fn add_root(&mut self, label: impl Into<String>, icon: NodeIcon) -> usize {
-        let order = self.nodes.iter().filter(|n| n.parent.is_none()).count() as u32;
+        let order = self.next_sibling_order(None);
         let idx = self.nodes.len();
         self.nodes.push(TreeNode::new(label, icon, None, order));
+        self.counted_len = self.nodes.len();
         idx
     }
 
@@ -234,15 +266,42 @@ impl TreeView {
         label: impl Into<String>,
         icon: NodeIcon,
     ) -> usize {
-        let order = self
-            .nodes
-            .iter()
-            .filter(|n| n.parent == Some(parent_idx))
-            .count() as u32;
+        let order = self.next_sibling_order(Some(parent_idx));
         let idx = self.nodes.len();
         self.nodes
             .push(TreeNode::new(label, icon, Some(parent_idx), order));
+        self.counted_len = self.nodes.len();
         idx
+    }
+
+    /// The `order` for a new last child of `parent` — the number of children
+    /// it has.  Recounts (O(n)) only when `nodes` changed length behind the
+    /// count's back (a direct `nodes` edit); O(1) for runs of `add_*` calls.
+    fn next_sibling_order(&mut self, parent: Option<usize>) -> u32 {
+        let len = self.nodes.len();
+        let slot = match parent {
+            None => 0,
+            Some(p) if p < len => p + 1,
+            // A parent that doesn't exist (yet): count the slow way.
+            Some(p) => return self.nodes.iter().filter(|n| n.parent == Some(p)).count() as u32,
+        };
+        if self.counted_len != len {
+            self.sibling_counts.clear();
+            self.sibling_counts.resize(len + 1, 0);
+            for n in &self.nodes {
+                match n.parent {
+                    None => self.sibling_counts[0] += 1,
+                    Some(p) if p < len => self.sibling_counts[p + 1] += 1,
+                    Some(_) => {}
+                }
+            }
+        }
+        if self.sibling_counts.len() < len + 2 {
+            self.sibling_counts.resize(len + 2, 0);
+        }
+        let order = self.sibling_counts[slot];
+        self.sibling_counts[slot] += 1;
+        order
     }
 
     /// Show `image` instead of the procedural icon for the node at `idx`
@@ -292,22 +351,56 @@ impl TreeView {
         local_pos.x >= self.scrollbar_x()
     }
 
-    /// Returns the flat-row index (into `row_metas`/`row_widgets`) for the row
-    /// under `pos` in TreeView-local coordinates, or `None`.
+    /// Bring the visible-row cache up to date with `nodes`.
+    fn refresh_flat(&mut self) {
+        self.flat.refresh(&self.nodes);
+    }
+
+    /// Position of the node being dragged (live) in `flat.rows` — that row
+    /// is hidden while it follows the cursor, so display rows after it shift
+    /// up by one.
+    fn drag_skip(&self) -> Option<usize> {
+        let d = self.drag.as_ref().filter(|d| d.live)?;
+        self.flat.position_of(d.node_idx)
+    }
+
+    /// Number of display rows (visible rows minus a live-dragged one).
+    fn display_len(&self) -> usize {
+        self.flat.rows.len() - usize::from(self.drag_skip().is_some())
+    }
+
+    /// The display row at `i` (see [`Self::drag_skip`]).
+    fn display_row(&self, i: usize) -> Option<FlatRow> {
+        let skip = self.drag_skip();
+        let flat_i = match skip {
+            Some(s) if i >= s => i + 1,
+            _ => i,
+        };
+        self.flat.rows.get(flat_i).copied()
+    }
+
+    /// Bottom edge (Y-up, TreeView-local) of display row `i`.
+    fn row_y(&self, i: usize) -> f64 {
+        self.viewport_h - (i as f64 + 1.0) * self.row_height + self.scroll_offset
+    }
+
+    /// The display-row index under `pos` (TreeView-local), or `None`.
     fn row_index_at(&self, pos: Point) -> Option<usize> {
-        for (i, widget) in self.row_widgets.iter().enumerate() {
-            let b = widget.bounds();
-            // Clamp to visible content area — rows scrolled off-screen have b.y < 0
-            // or b.y + b.height > self.bounds.height; exclude those slivers.
-            if pos.y >= b.y.max(0.0)
-                && pos.y < (b.y + b.height).min(self.bounds.height)
-                && pos.x >= 0.0
-                && pos.x < self.bounds.width - SCROLLBAR_W
-            {
-                return Some(i);
-            }
+        // Rows scrolled partly off-screen only count where they are visible.
+        if pos.x < 0.0
+            || pos.x >= self.bounds.width - SCROLLBAR_W
+            || pos.y < 0.0
+            || pos.y >= self.bounds.height.min(self.viewport_h)
+            || self.row_height <= 0.0
+        {
+            return None;
         }
-        None
+        let raw = (self.viewport_h - pos.y + self.scroll_offset) / self.row_height;
+        if raw < 0.0 {
+            return None;
+        }
+        let i = raw.floor() as usize;
+        (i < self.display_len()).then_some(i)
     }
 }
 
@@ -316,12 +409,17 @@ impl TreeView {
 // ---------------------------------------------------------------------------
 
 impl TreeView {
-    fn select_single(&mut self, node_idx: usize) {
-        for n in &mut self.nodes {
-            n.is_selected = false;
+    /// Select only `node_idx` and move the cursor to it.  Returns whether
+    /// any node's selection changed.
+    fn set_single_selection(&mut self, node_idx: usize) -> bool {
+        let mut changed = false;
+        for (i, n) in self.nodes.iter_mut().enumerate() {
+            let sel = i == node_idx;
+            changed |= n.is_selected != sel;
+            n.is_selected = sel;
         }
-        self.nodes[node_idx].is_selected = true;
         self.cursor_node = Some(node_idx);
+        changed
     }
 
     fn toggle_select(&mut self, node_idx: usize) {
@@ -329,40 +427,51 @@ impl TreeView {
         self.cursor_node = Some(node_idx);
     }
 
-    fn range_select(&mut self, anchor_node: usize, target_node: usize, rows: &[FlatRow]) {
-        let a = rows.iter().position(|r| r.node_idx == anchor_node);
-        let b = rows.iter().position(|r| r.node_idx == target_node);
+    /// Select the visible rows from `anchor_node` to `target_node`.  Returns
+    /// whether any node's selection changed.
+    fn range_select(&mut self, anchor_node: usize, target_node: usize) -> bool {
+        let a = self.flat.position_of(anchor_node);
+        let b = self.flat.position_of(target_node);
+        let mut changed = false;
         if let (Some(a), Some(b)) = (a, b) {
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-            for n in &mut self.nodes {
-                n.is_selected = false;
+            let mut want = vec![false; self.nodes.len()];
+            for r in &self.flat.rows[lo..=hi] {
+                want[r.node_idx] = true;
             }
-            for r in &rows[lo..=hi] {
-                self.nodes[r.node_idx].is_selected = true;
+            for (n, sel) in self.nodes.iter_mut().zip(want) {
+                changed |= n.is_selected != sel;
+                n.is_selected = sel;
             }
         }
         self.cursor_node = Some(target_node);
+        changed
     }
 
-    fn move_cursor(&mut self, delta: i32, rows: &[FlatRow]) {
+    /// Move the cursor `delta` visible rows, selecting that row.  Returns
+    /// whether the selection changed.
+    fn move_cursor(&mut self, delta: i32) -> bool {
+        let rows = &self.flat.rows;
         if rows.is_empty() {
-            return;
+            return false;
         }
         let cur_flat = self
             .cursor_node
-            .and_then(|ni| rows.iter().position(|r| r.node_idx == ni))
+            .and_then(|ni| self.flat.position_of(ni))
             .unwrap_or(0);
         let new_flat = (cur_flat as i32 + delta).clamp(0, rows.len() as i32 - 1) as usize;
         let ni = rows[new_flat].node_idx;
-        self.select_single(ni);
+        let changed = self.set_single_selection(ni);
         // Scroll to keep the new row visible.
-        self.scroll_to_row(new_flat);
+        self.reveal_row_now(new_flat);
+        changed
     }
 
     /// Returns the node index currently under the cursor, or `None`.
     pub fn hovered_node_idx(&self) -> Option<usize> {
         self.hovered_row
-            .and_then(|ri| self.row_metas.get(ri).map(|m| m.node_idx))
+            .and_then(|ri| self.display_row(ri))
+            .map(|r| r.node_idx)
     }
 
     /// Clear the hover state — useful when the mouse leaves the area the
@@ -377,216 +486,16 @@ impl TreeView {
         }
     }
 
-    fn scroll_to_row(&mut self, flat_idx: usize) {
-        // `row_widgets` bounds reflect the `scroll_offset` from the last `layout()` call.
-        // The framework calls `layout()` every frame before rendering, so `scroll_offset`
-        // changes here will be reflected before the next mouse hit-test.
-        // Y-up coordinates: y_bottom is the lower edge (smaller Y) and y_top is the upper edge (larger Y).
-        let y_bottom =
-            self.bounds.height - (flat_idx as f64 + 1.0) * self.row_height + self.scroll_offset;
-        let y_top = y_bottom + self.row_height;
-        if y_bottom < 0.0 {
-            self.scroll_offset = (self.scroll_offset - y_bottom).min(self.max_scroll());
-        } else if y_top > self.bounds.height {
-            self.scroll_offset = (self.scroll_offset - (y_top - self.bounds.height)).max(0.0);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Widget impl
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Mouse event handlers
-// ---------------------------------------------------------------------------
-
-impl TreeView {
-    fn handle_mouse_move(&mut self, pos: Point) -> EventResult {
-        let old_hovered_scrollbar = self.hovered_scrollbar;
-        let old_hovered_row = self.hovered_row;
-        self.hovered_scrollbar = self.in_scrollbar(pos);
-
-        if self.dragging_scrollbar {
-            if let Some((_, thumb_h)) = self.thumb_metrics() {
-                let h = self.bounds.height;
-                let track_h = (h - thumb_h).max(1.0);
-                let delta_y = self.sb_drag_start_y - pos.y;
-                let spp = self.max_scroll() / track_h;
-                self.scroll_offset =
-                    (self.sb_drag_start_offset + delta_y * spp).clamp(0.0, self.max_scroll());
-            }
-            return EventResult::Consumed;
-        }
-
-        if let Some(drag) = &mut self.drag {
-            let dx = pos.x - drag.current_pos.x;
-            let dy = pos.y - drag.current_pos.y;
-            drag.current_pos = pos;
-            if !drag.live && (dx * dx + dy * dy).sqrt() > DRAG_THRESHOLD {
-                drag.live = true;
-            }
-            if drag.live {
-                let node_idx = drag.node_idx;
-                let rows = flatten_visible(&self.nodes);
-                self.drop_target = compute_drop_target(
-                    pos,
-                    &rows,
-                    &self.nodes,
-                    self.bounds.height,
-                    self.row_height,
-                    self.scroll_offset,
-                    self.drag.as_ref().unwrap(),
-                );
-                let _ = node_idx;
-            }
-            return EventResult::Consumed;
-        }
-
-        self.hovered_row = self.row_index_at(pos);
-        if self.hover_repaint
-            && (self.hovered_scrollbar != old_hovered_scrollbar
-                || self.hovered_row != old_hovered_row)
-        {
-            EventResult::Consumed
-        } else {
-            EventResult::Ignored
-        }
-    }
-
-    fn handle_mouse_down(&mut self, pos: Point, mods: Modifiers) -> EventResult {
-        if self.in_scrollbar(pos) {
-            self.dragging_scrollbar = true;
-            self.sb_drag_start_y = pos.y;
-            self.sb_drag_start_offset = self.scroll_offset;
-            return EventResult::Consumed;
-        }
-
-        let Some(flat_i) = self.row_index_at(pos) else {
-            return EventResult::Ignored;
-        };
-        let meta = &self.row_metas[flat_i];
-        let node_idx = meta.node_idx;
-
-        // Expand/collapse: any click on a row with children toggles it when
-        // `toggle_on_row_click` is enabled (file-explorer style).  Otherwise
-        // only the expand-toggle arrow triggers expansion so that clicking a
-        // row in the inspector tree selects it without accidentally collapsing
-        // a branch the user was browsing.
-        if self.toggle_on_row_click {
-            if meta.toggle_rect.is_some() {
-                self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
-            }
-        } else if let Some(tr) = meta.toggle_rect {
-            if pos.x >= tr.x && pos.x < tr.x + tr.width && pos.y >= tr.y && pos.y < tr.y + tr.height
-            {
-                self.nodes[node_idx].is_expanded = !self.nodes[node_idx].is_expanded;
-            }
-        }
-
-        // Selection
-        if mods.ctrl {
-            self.toggle_select(node_idx);
-        } else if mods.shift {
-            if let Some(a) = self.cursor_node {
-                let rows2 = flatten_visible(&self.nodes);
-                self.range_select(a, node_idx, &rows2);
-            } else {
-                self.select_single(node_idx);
-            }
-        } else {
-            self.select_single(node_idx);
-            if self.drag_enabled {
-                let y_bot = self.row_widgets[flat_i].bounds().y;
-                self.drag = Some(DragState {
-                    node_idx,
-                    _cursor_row_offset: pos.y - y_bot,
-                    current_pos: pos,
-                    live: false,
-                });
-            }
-        }
-
-        EventResult::Consumed
-    }
-
-    fn handle_mouse_up(&mut self, pos: Point) -> EventResult {
-        // Scrollbar drag end
-        if self.dragging_scrollbar {
-            self.dragging_scrollbar = false;
-            return EventResult::Consumed;
-        }
-
-        // Node drag end
-        if let Some(drag) = self.drag.take() {
-            if drag.live {
-                if let Some(target) = self.drop_target.take() {
-                    apply_drop(&mut self.nodes, drag.node_idx, target);
-                }
-            } else {
-                // Was a click, not a drag — finalize single-select.
-                self.select_single(drag.node_idx);
-            }
-            self.drop_target = None;
-            return EventResult::Consumed;
-        }
-
-        let _ = pos;
-        EventResult::Ignored
-    }
-
-    fn handle_key_down(&mut self, key: &Key, mods: Modifiers) -> EventResult {
-        let rows = flatten_visible(&self.nodes);
-        match key {
-            Key::ArrowDown => {
-                self.move_cursor(1, &rows);
-                EventResult::Consumed
-            }
-            Key::ArrowUp => {
-                self.move_cursor(-1, &rows);
-                EventResult::Consumed
-            }
-            Key::ArrowRight => {
-                if let Some(ni) = self.cursor_node {
-                    if !self.nodes[ni].is_expanded
-                        && rows.iter().any(|r| r.node_idx == ni && r.has_children)
-                    {
-                        self.nodes[ni].is_expanded = true;
-                    } else {
-                        // Move to first child
-                        if rows.iter().any(|r| r.node_idx == ni) {
-                            self.move_cursor(1, &rows);
-                        }
-                    }
-                }
-                EventResult::Consumed
-            }
-            Key::ArrowLeft => {
-                if let Some(ni) = self.cursor_node {
-                    if self.nodes[ni].is_expanded {
-                        self.nodes[ni].is_expanded = false;
-                    } else if let Some(parent_idx) = self.nodes[ni].parent {
-                        self.select_single(parent_idx);
-                        if let Some(fi) = rows.iter().position(|r| r.node_idx == parent_idx) {
-                            self.scroll_to_row(fi);
-                        }
-                    }
-                }
-                EventResult::Consumed
-            }
-            Key::Char(' ') | Key::Enter => {
-                if let Some(ni) = self.cursor_node {
-                    if rows.iter().any(|r| r.node_idx == ni && r.has_children) {
-                        self.nodes[ni].is_expanded = !self.nodes[ni].is_expanded;
-                    }
-                }
-                EventResult::Consumed
-            }
-            Key::Tab => EventResult::Ignored, // let App handle focus advancement
-            _ => {
-                let _ = mods;
-                EventResult::Ignored
-            }
-        }
+    /// Scroll the least amount that shows visible row `flat_idx`, using the
+    /// current viewport (event handlers run after a layout).
+    fn reveal_row_now(&mut self, flat_idx: usize) {
+        self.scroll_offset = api::scroll_for_row(
+            flat_idx,
+            ScrollAlign::Minimal,
+            self.scroll_offset,
+            self.viewport_h,
+            self.row_height,
+            self.content_height,
+        );
     }
 }

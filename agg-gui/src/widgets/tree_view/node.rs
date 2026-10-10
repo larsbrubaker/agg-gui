@@ -1,5 +1,10 @@
-//! Data types and flat-row engine for `TreeView`.
+//! Data types for `TreeView`: the node record, its icon kinds, the flat-row
+//! record and the drag/drop state.
+//!
+//! The visible-row list itself is built and cached by `flat.rs`;
+//! `flatten_visible` is the uncached reference walk, kept for tests.
 
+use crate::color::Color;
 use crate::geometry::Point;
 use crate::icon_image::IconImage;
 
@@ -15,6 +20,21 @@ pub struct TreeNode {
     /// `TreeView::set_node_icon_image`).  `icon` still decides drop
     /// behaviour (folders and packages accept children).
     pub icon_image: Option<IconImage>,
+    /// Font glyph drawn instead of the procedural `icon` (and of
+    /// `icon_image`) when `Some` — e.g. a Font Awesome code point.  Drawn as
+    /// text at paint time, so it stays sharp when the display scale changes.
+    /// Set with `TreeView::set_node_icon_glyph`.
+    pub icon_glyph: Option<NodeGlyph>,
+    /// Right-aligned secondary text at the row's trailing edge (a size, a
+    /// count), drawn dimmed.
+    pub secondary_text: Option<String>,
+    /// Small horizontal bar at the row's trailing edge, filled to this
+    /// fraction (clamped to `0..=1`) — e.g. a share of the parent's size.
+    pub fraction: Option<f32>,
+    /// Show the expand arrow even though no children have been added yet —
+    /// for lazily populated trees, which add the children on
+    /// [`TreeViewEvent::Expanded`](super::TreeViewEvent::Expanded).
+    pub may_have_children: bool,
     /// Index of the parent node; `None` means root-level.
     pub parent: Option<usize>,
     pub is_expanded: bool,
@@ -34,6 +54,10 @@ impl TreeNode {
             label: label.into(),
             icon,
             icon_image: None,
+            icon_glyph: None,
+            secondary_text: None,
+            fraction: None,
+            may_have_children: false,
             parent,
             is_expanded: false,
             is_selected: false,
@@ -50,11 +74,28 @@ pub enum NodeIcon {
     Package,
 }
 
+/// A font glyph used as a node icon (see [`TreeNode::icon_glyph`]).  The
+/// glyph is drawn with the tree's icon font (`TreeView::with_icon_font`,
+/// falling back to the row font, whose standard fallback chain includes
+/// Font Awesome) in `color`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NodeGlyph {
+    pub glyph: char,
+    pub color: Color,
+}
+
+impl NodeGlyph {
+    pub fn new(glyph: char, color: Color) -> Self {
+        Self { glyph, color }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Flat-row representation (recomputed every frame)
+// Flat-row representation (cached by `flat.rs`)
 // ---------------------------------------------------------------------------
 
 /// One visible row after DFS expansion of the tree.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlatRow {
     /// Index into `TreeView::nodes`.
     pub node_idx: usize,
@@ -64,6 +105,10 @@ pub struct FlatRow {
 
 /// Produce an ordered list of visible rows by DFS traversal, respecting
 /// `is_expanded`.  Nodes at each level are sorted by `order`.
+///
+/// O(nodes × visible rows): the reference the cached `flat::FlatCache` is
+/// tested against.  `TreeView` itself never calls it.
+#[cfg(test)]
 pub fn flatten_visible(nodes: &[TreeNode]) -> Vec<FlatRow> {
     if nodes.is_empty() {
         return Vec::new();
@@ -91,7 +136,7 @@ pub fn flatten_visible(nodes: &[TreeNode]) -> Vec<FlatRow> {
             .collect();
         children.sort_by_key(|&i| nodes[i].order);
 
-        let has_children = !children.is_empty();
+        let has_children = !children.is_empty() || nodes[node_idx].may_have_children;
         result.push(FlatRow {
             node_idx,
             depth,

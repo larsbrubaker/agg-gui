@@ -87,7 +87,7 @@ wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
 | `SizedBox` | Fixed-size constraint wrapper |
 | `Splitter` | Draggable divider between two panes |
 | `TabView` | Tabbed panel switcher |
-| `TreeView` | Hierarchical list with expand/collapse and drag-and-drop |
+| `TreeView` | Virtualised hierarchical list: expand/collapse (lazy children), selection and scroll API with change events, glyph icons, trailing text and fraction bars, drag-and-drop |
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
 | `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; popup rows can host any widget (`MenuItem::widget_row` + `PopupMenu::set_row_widget` / `push_widget_row`), and a host widget can open a `PopupMenu` at a local anchor (`open_at_local`, `handle_local_event`, `paint_local`); any widget also gets a hover tooltip via `with_tooltip(...)` |
