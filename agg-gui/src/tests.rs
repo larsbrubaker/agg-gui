@@ -86,6 +86,7 @@ mod logical_root_transform;
 mod nested_child_transform;
 mod stale_path_removed_widget;
 // Loopback HTTP server: native only.
+mod container_fit_in_row;
 #[cfg(not(target_arch = "wasm32"))]
 mod markdown_image_visibility;
 mod menu_hidpi_scale;

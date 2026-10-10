@@ -70,7 +70,9 @@ impl Container {
     /// available height.  Required when this `Container` sits inside
     /// an auto-sized ancestor (e.g. `Window::with_auto_size(true)`),
     /// which would otherwise pick up the full available height as
-    /// the container's preferred size and inflate the window.
+    /// the container's preferred size and inflate the window.  An empty
+    /// fit-height container also fits its width (to its padding), so it can
+    /// serve as a swatch inside a `FlexRow`.
     pub fn with_fit_height(mut self, fit: bool) -> Self {
         self.props.fit_height = fit;
         self
@@ -264,7 +266,16 @@ impl Widget for Container {
             if (available.height - natural_h).abs() > 0.5 {
                 layout_children(&mut self.children, inner_w, pad_l, pad_t, pad_b, natural_h);
             }
-            Size::new(available.width, natural_h)
+            // An empty content-fit box (a swatch, a chip) is as wide as its
+            // padding; its parent widens it to `min_size` or a stretch
+            // anchor.  Reporting the full width made a `FlexRow` give it the
+            // whole row and push its sibling labels out of view.
+            let width = if self.children.is_empty() {
+                (pad_l + pad_r).min(available.width)
+            } else {
+                available.width
+            };
+            Size::new(width, natural_h)
         } else {
             Size::new(available.width, available.height)
         }
