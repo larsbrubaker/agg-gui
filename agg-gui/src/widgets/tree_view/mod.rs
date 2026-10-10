@@ -40,7 +40,7 @@ use std::sync::Arc;
 use crate::geometry::{Point, Rect, Size};
 use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::Font;
+use crate::text::{EllipsisMode, Font};
 use crate::widget::Widget;
 
 /// Node ids of the visible rows by the uncached reference walk, for tests
@@ -122,6 +122,11 @@ pub struct TreeView {
     /// well as reporting [`TreeViewEvent::Activated`].  Set `false` when
     /// activation means something else (open, zoom).
     pub enter_toggles_expansion: bool,
+    /// How a row name too wide for its row (next to the trailing secondary
+    /// text and fraction bar) is shortened; `None` clips it.  Default
+    /// [`EllipsisMode::End`].  An elided name is the tree's tooltip while
+    /// the pointer is over its row.
+    pub name_ellipsis: Option<EllipsisMode>,
     hover_repaint: bool,
     focused: bool,
     /// Display-row index of the row under the cursor.
@@ -175,6 +180,7 @@ impl TreeView {
             drag_enabled: false,
             toggle_on_row_click: false,
             enter_toggles_expansion: true,
+            name_ellipsis: Some(EllipsisMode::End),
             hover_repaint: true,
             focused: false,
             hovered_row: None,
@@ -227,6 +233,19 @@ impl TreeView {
     pub fn with_enter_toggles_expansion(mut self, toggles: bool) -> Self {
         self.enter_toggles_expansion = toggles;
         self
+    }
+
+    /// Shorten row names that don't fit with `mode` (default
+    /// [`EllipsisMode::End`]; [`EllipsisMode::Middle`] keeps file
+    /// extensions visible).
+    pub fn with_name_ellipsis(mut self, mode: EllipsisMode) -> Self {
+        self.name_ellipsis = Some(mode);
+        self
+    }
+    /// Set (`Some`) or turn off (`None`, names are clipped) the row-name
+    /// ellipsis; see [`TreeView::name_ellipsis`].
+    pub fn set_name_ellipsis(&mut self, mode: Option<EllipsisMode>) {
+        self.name_ellipsis = mode;
     }
 
     pub fn with_margin(mut self, m: Insets) -> Self {

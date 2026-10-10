@@ -5,7 +5,10 @@
 //! row lays out its parts left to right — indent, expand arrow, icon (a
 //! procedural shape, an image, or a font glyph), label — plus optional
 //! trailing parts at the right edge: dimmed secondary text and a fraction
-//! bar (`row_trailing.rs`).
+//! bar (`row_trailing.rs`).  The label gives the trailing parts the room
+//! they need and ellipsizes (`TreeView::name_ellipsis`); while it is elided
+//! the row's tooltip is the full name, which `TreeView` reports for the
+//! hovered row.
 
 use std::sync::Arc;
 
@@ -15,7 +18,7 @@ use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
-use crate::text::Font;
+use crate::text::{EllipsisMode, Font};
 use crate::widget::Widget;
 use crate::widgets::label::Label;
 use crate::widgets::primitives::SizedBox;
@@ -345,7 +348,11 @@ impl TreeRow {
             Box::new(SizedBox::fixed(indent_px, row_height)),
             Box::new(ExpandToggle::new(has_children, is_expanded)),
             Box::new(NodeIconWidget::new(icon)),
-            Box::new(Label::new(label, Arc::clone(&font)).with_font_size(font_size)),
+            Box::new(
+                Label::new(label, Arc::clone(&font))
+                    .with_font_size(font_size)
+                    .with_ellipsis_mode(EllipsisMode::End),
+            ),
         ];
 
         Self {
@@ -376,6 +383,18 @@ impl TreeRow {
     pub fn with_icon_glyph(mut self, glyph: Option<(NodeGlyph, Arc<Font>)>) -> Self {
         if glyph.is_some() {
             self.children[2] = Box::new(NodeIconWidget::new(self.icon).with_glyph(glyph));
+        }
+        self
+    }
+
+    /// Shorten a name too wide for the row with `mode` (`None` clips it).
+    /// Rows start with [`EllipsisMode::End`].
+    pub fn with_name_ellipsis(mut self, mode: Option<EllipsisMode>) -> Self {
+        if let Some(label) = self.children[3]
+            .as_any_mut()
+            .and_then(|a| a.downcast_mut::<Label>())
+        {
+            label.set_ellipsis_mode(mode);
         }
         self
     }
@@ -437,6 +456,15 @@ impl Widget for TreeRow {
     }
     fn max_size(&self) -> Size {
         self.base.max_size
+    }
+
+    /// The row's own tip, else the full name while it is elided (the name
+    /// label's tip).
+    fn tooltip_text(&self) -> Option<&str> {
+        match self.base.tooltip.as_deref() {
+            Some(tip) if !tip.is_empty() => Some(tip),
+            _ => self.children[3].tooltip_text(),
+        }
     }
 
     fn layout(&mut self, available: Size) -> Size {

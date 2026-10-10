@@ -122,6 +122,7 @@ mod trackpad_pinch;
 mod trackpad_pinch_fingers;
 mod tree_view;
 mod tree_view_api;
+mod tree_view_ellipsis;
 mod tree_view_perf;
 mod under_mouse_state;
 mod widget_cursors;

@@ -49,6 +49,7 @@ fn row_signature(tree: &TreeView, node: &TreeNode, flat: &FlatRow) -> u64 {
     tree.font_size.to_bits().hash(&mut h);
     tree.row_height.to_bits().hash(&mut h);
     tree.indent_width.to_bits().hash(&mut h);
+    tree.name_ellipsis.hash(&mut h);
     h.finish()
 }
 
@@ -74,6 +75,23 @@ impl TreeView {
         .with_icon_image(node.icon_image.clone())
         .with_icon_glyph(node.icon_glyph.map(|g| (g, Arc::clone(glyph_font))))
         .with_trailing(node.secondary_text.clone(), node.fraction)
+        .with_name_ellipsis(self.name_ellipsis)
+    }
+
+    /// The hovered row's widget and node, unless a drag is under way.
+    fn hovered_row_widget(&self) -> Option<(usize, &dyn Widget)> {
+        if self.drag.is_some() {
+            return None;
+        }
+        let node = self.hovered_node_idx()?;
+        let k = self.row_metas.iter().position(|m| m.node_idx == node)?;
+        Some((node, self.row_widgets.get(k)?.as_ref()))
+    }
+
+    /// The hovered row's tip — its full name while elided.
+    fn hovered_row_tip(&self) -> Option<(usize, &str)> {
+        let (node, row) = self.hovered_row_widget()?;
+        Some((node, row.tooltip_text()?))
     }
 }
 
@@ -130,6 +148,21 @@ impl Widget for TreeView {
             && local_pos.x <= b.width
             && local_pos.y >= 0.0
             && local_pos.y <= b.height
+    }
+
+    /// The hovered row's elided name (see [`TreeView::name_ellipsis`]),
+    /// else the tree's own tip.
+    fn tooltip_text(&self) -> Option<&str> {
+        match self.hovered_row_tip() {
+            Some((_, tip)) => Some(tip),
+            None => self.base.tooltip.as_deref(),
+        }
+    }
+
+    /// The hovered node while its row tips, so moving to another elided row
+    /// re-arms the tooltip.
+    fn tooltip_key(&self) -> Option<u64> {
+        self.hovered_row_tip().map(|(node, _)| node as u64)
     }
 
     fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
