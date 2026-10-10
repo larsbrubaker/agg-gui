@@ -114,6 +114,7 @@ mod stack_aligned;
 mod text_defaults;
 mod text_field_select_all;
 mod text_vertical_metrics;
+mod tooltip_lines_keys;
 mod tooltip_window_hover;
 mod touch_scroll;
 mod trackpad_pinch;

@@ -113,6 +113,22 @@ macro_rules! widget_layout_hooks {
             self.widget_base().and_then(|b| b.tooltip.as_deref())
         }
 
+        /// Which item this widget's tip currently describes, for widgets that
+        /// show many items under one bounds (a treemap cell, a chart bar, a
+        /// list row painted without child widgets). Default: `None` — the
+        /// widget is one item.
+        ///
+        /// The central tooltip controller treats a change of key while the
+        /// pointer stays over this widget exactly as entering a different
+        /// widget: the visible tip hides and the hover delay re-arms — the
+        /// quick reshow delay when a tip was recently visible, otherwise the
+        /// full initial delay. Without a key, only the
+        /// [`tooltip_text`](Self::tooltip_text) changes and a visible tip just
+        /// updates in place. Read alongside `tooltip_text` once per frame.
+        fn tooltip_key(&self) -> Option<u64> {
+            None
+        }
+
         /// Builder sugar: attach hover-help text, returning `self` for chaining.
         ///
         /// Available on every widget that embeds a [`WidgetBase`] with **zero

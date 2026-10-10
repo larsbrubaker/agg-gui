@@ -56,13 +56,15 @@ use super::render::{
     current_tooltip_viewport, panel_size, place_panel, submit_tooltip, TooltipRequest,
 };
 use super::timings::{note_tooltip_visible, tooltip_now, tooltip_timings};
-use super::{TooltipLine, TooltipLineKind, TOOLTIP_FONT_SIZE};
+use super::{text_to_lines, TOOLTIP_FONT_SIZE};
 
 /// The single app-wide tip state machine. See the module docs.
 #[derive(Default)]
 struct Controller {
-    /// Identity (child-index path) of the widget currently supplying the tip,
-    /// used to detect target changes (move to another control ⇒ reshow).
+    /// Identity (child-index path, plus a `Widget::tooltip_key` suffix when
+    /// the widget reports one) of the widget/item currently supplying the tip,
+    /// used to detect target changes (move to another control or item ⇒
+    /// reshow).
     target: Option<Vec<usize>>,
     /// Tip text for the current target.
     text: String,
@@ -224,8 +226,15 @@ impl Controller {
             self.last_rect = None;
             return;
         };
-        let text_w = measure_advance(&font, &self.text, TOOLTIP_FONT_SIZE);
-        let size = panel_size(text_w, 1);
+        // Split on `\n` exactly as the `Tooltip` wrapper does (shared
+        // `text_to_lines`), so a multi-line tip never hands a newline to
+        // `fill_text` and the panel is measured line by line.
+        let lines = text_to_lines(self.text.as_str());
+        let text_w = lines
+            .iter()
+            .map(|l| measure_advance(&font, &l.text, TOOLTIP_FONT_SIZE))
+            .fold(0.0_f64, f64::max);
+        let size = panel_size(text_w, lines.len());
         let viewport = current_tooltip_viewport();
         if viewport.width > 0.0 && viewport.height > 0.0 {
             let visible = crate::widget::visible_root_rect(viewport);
@@ -233,10 +242,7 @@ impl Controller {
         }
         submit_tooltip(TooltipRequest {
             font,
-            lines: vec![TooltipLine {
-                text: self.text.clone(),
-                kind: TooltipLineKind::Text,
-            }],
+            lines,
             anchor: self.anchor,
             at_pointer: true,
         });

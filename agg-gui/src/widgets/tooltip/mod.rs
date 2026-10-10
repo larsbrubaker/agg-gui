@@ -589,6 +589,9 @@ impl Widget for Tooltip {
     }
 }
 
+/// Split tip text into one `Text` line per `\n`-separated line. Shared by the
+/// `Tooltip` wrapper and the central [`controller`], so both lay out
+/// multi-line tips identically.
 fn text_to_lines(text: impl Into<String>) -> Vec<TooltipLine> {
     text.into()
         .lines()
