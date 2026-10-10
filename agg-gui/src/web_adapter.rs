@@ -60,7 +60,7 @@ pub fn cursor_style(icon: CursorIcon) -> String {
 /// Keys typed into those must stay with the browser — an agg-gui canvas
 /// app usually shares the page with at least a hidden mobile text input,
 /// and may sit inside a larger host page with its own form controls.
-fn targets_dom_editor(event: &web_sys::Event) -> bool {
+pub(crate) fn targets_dom_editor(event: &web_sys::Event) -> bool {
     let Some(target) = event.target() else {
         return false;
     };
@@ -103,9 +103,10 @@ fn modifiers_of(e: &web_sys::KeyboardEvent) -> Modifiers {
 /// - Events targeting real DOM editors (`<input>`, `<textarea>`,
 ///   `contenteditable`) are left for the browser.
 /// - `Ctrl/Cmd+V` keydowns are NOT forwarded — the `paste` listener owns
-///   pasting so the system clipboard text is captured synchronously; it
-///   stores the text in [`crate::wasm_clipboard`] and then synthesizes
-///   the `Ctrl+V` through `on_key` itself.
+///   pasting so the system clipboard is captured synchronously; it stores
+///   the text and any picture in [`crate::wasm_clipboard`] and then
+///   synthesizes the `Ctrl+V` through `on_key` itself (after the picture
+///   has decoded, when there is one).
 /// - `copy` / `cut` publish the [`crate::wasm_clipboard`] buffer (already
 ///   written by the widget's Ctrl+C/X handler) to the system clipboard.
 /// - Typing/navigation keys are `preventDefault()`ed so space / arrows /
@@ -121,7 +122,7 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
     let Some(window) = web_sys::window() else {
         return;
     };
-    let on_key: Rc<RefCell<dyn FnMut(Key, Modifiers, bool)>> = Rc::new(RefCell::new(on_key));
+    let on_key: crate::web_paste::OnKey = Rc::new(RefCell::new(on_key));
 
     // --- keydown -----------------------------------------------------------
     let down_cb = {
@@ -190,33 +191,8 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
     }
 
     // --- paste ---------------------------------------------------------------
-    // Capture the system clipboard text synchronously, stash it in the
-    // in-process buffer, then synthesize Ctrl+V so the focused widget's
-    // paste handler runs against the fresh buffer.
-    let paste_cb = {
-        let on_key = Rc::clone(&on_key);
-        Closure::<dyn FnMut(web_sys::ClipboardEvent)>::new(move |e: web_sys::ClipboardEvent| {
-            if targets_dom_editor(&e) {
-                return;
-            }
-            let Some(data) = e.clipboard_data() else {
-                return;
-            };
-            let Ok(text) = data.get_data("text/plain") else {
-                return;
-            };
-            if text.is_empty() {
-                return;
-            }
-            e.prevent_default();
-            crate::wasm_clipboard::set(&text);
-            let mods = Modifiers {
-                ctrl: true,
-                ..Modifiers::default()
-            };
-            (on_key.borrow_mut())(Key::Char('v'), mods, true);
-        })
-    };
-    let _ = window.add_event_listener_with_callback("paste", paste_cb.as_ref().unchecked_ref());
-    paste_cb.forget();
+    // Capture the system clipboard's text (and picture, decoded off the
+    // frame) into the in-process buffers, then synthesize Ctrl+V so the
+    // focused widget's paste handler runs against them (`web_paste`).
+    crate::web_paste::install(&window, on_key);
 }

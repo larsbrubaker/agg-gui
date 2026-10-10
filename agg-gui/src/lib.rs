@@ -56,6 +56,11 @@ pub mod animation;
 pub mod app_state;
 pub mod card;
 pub mod clipboard;
+/// How a browser `paste` event becomes a paste (text, picture, or both).
+/// Pure logic, compiled for tests too so it is checked natively; used by
+/// `web_paste`.
+#[cfg(any(test, target_arch = "wasm32"))]
+mod clipboard_paste;
 pub mod clock;
 pub mod color;
 pub mod confetti;
@@ -125,6 +130,10 @@ pub mod winit_adapter;
 /// for `wasm32` targets.
 #[cfg(target_arch = "wasm32")]
 pub mod web_adapter;
+
+/// The browser `paste` listener `web_adapter` installs (text and pictures).
+#[cfg(target_arch = "wasm32")]
+mod web_paste;
 
 /// Which forwarded browser keydowns suppress the browser's default action.
 /// Pure logic, compiled everywhere so its tests run natively; used by

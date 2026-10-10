@@ -66,6 +66,9 @@ rustls-rustcrypto = "0.0.2-alpha"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
+# web_paste: awaits the browser's asynchronous picture decode
+# (`createImageBitmap`) for a pasted picture. MIT OR Apache-2.0.
+wasm-bindgen-futures = "0.4"
 # The browser's fetch API (ehttp has no native TLS dependency on wasm32).
 ehttp = "0.3.1"
 
@@ -82,4 +85,17 @@ web-sys = { version = "0.3.82", features = [
     "DataTransfer",
     "Element",
     "HtmlElement",
+    # web_paste — a pasted picture: the paste event's items, the picture
+    # file, its decode, and the offscreen canvas its pixels are read from.
+    "DataTransferItemList",
+    "DataTransferItem",
+    "Blob",
+    "File",
+    "ImageBitmap",
+    "ImageBitmapOptions",
+    "PremultiplyAlpha",
+    "ColorSpaceConversion",
+    "ImageData",
+    "OffscreenCanvas",
+    "OffscreenCanvasRenderingContext2d",
 ] }

@@ -155,7 +155,9 @@ renders under sibling chrome or off-screen.
 The core crate owns its event, cursor, clipboard, font, device-scale, screenshot,
 and platform types. Optional adapters map winit input types into `agg-gui`. On
 WASM, `web_adapter::install_keyboard_listeners` gives any shell physical-keyboard
-typing plus the copy/cut/paste clipboard bridge; the in-repo
+typing plus the copy/cut/paste clipboard bridge (a pasted picture included:
+`clipboard::get_image_rgba` reads it natively through `arboard` with the
+`clipboard` feature, and in the browser from the paste event); the in-repo
 `agg-gui-shell` (native) and `agg-gui-web-shell` (browser) are turn-key
 platform shells (window / canvas, wgpu surface, frame loop, all input
 forwarding) so an app shim reduces to its app-specific glue. Append `?agg_input=mobile` to any `agg-gui-web-shell` URL to
