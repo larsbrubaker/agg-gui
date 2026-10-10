@@ -177,6 +177,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   against `visible_root_rect`, so they keep things on screen. At lift 0
   nothing changes.
 
+- `Tween::tick` now requests its in-flight frames with the tag
+  `"animation.tween"`, so the drained provenance trace and `draw_trace_log`
+  name a running tween instead of an anonymous or `"untagged"` request.
+  `request_layout` likewise now logs its `"animation.request_layout"` tag to
+  `draw_trace_log` instead of `"untagged"`. Behaviour is otherwise unchanged.
+
 ### Fixed
 
 - A `MenuBar` dropdown offers its rows' `MenuItem::tooltip`s wherever the bar

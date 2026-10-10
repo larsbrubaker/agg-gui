@@ -52,9 +52,9 @@ use web_time::Instant;
 // A thread-local ring buffer of `&'static str` reason tags, appended by the
 // `*_tagged` request helpers below.  It exists to answer one question that a
 // stack-free thread-local signal otherwise makes impossible: *who* keeps the
-// reactive host awake when the app should be idle?  When the quiescence
-// regression guard (demo-ui) finds the app still wants a draw after settling,
-// it drains this buffer and names the culprits in its failure message.
+// reactive host awake when the app should be idle?  demo-ui's all-closed
+// quiescence guard drains it to name culprits; the close-phase guard reads
+// `draw_trace_log` (fed by the same helpers) by cursor instead.
 //
 // Cost: recording is compiled out entirely in release (`debug_assertions`
 // off) so shipping hosts pay nothing.  In debug/test builds each tagged
@@ -355,9 +355,8 @@ pub fn request_draw_without_invalidation() {
 /// epoch re-lays out too.  Re-request on each pass for as long as work
 /// remains; the loop goes idle once a pass makes no request.
 pub fn request_layout() {
-    record_draw_trace("animation.request_layout");
     LAYOUT_REQUESTED.with(|c| c.set(true));
-    request_draw();
+    request_draw_tagged("animation.request_layout");
 }
 
 /// Non-destructive read of the pending [`request_layout`] flag.  Hosts OR this
@@ -584,9 +583,11 @@ impl Tween {
         }
     }
 
-    /// Advance the animation based on elapsed wall time and return the new
-    /// interpolated value.  Ease-out cubic.  While in flight this also calls
-    /// [`request_draw`] so the host keeps drawing frames until completion.
+    /// Advance the animation by elapsed UI-clock time (`crate::clock`) and
+    /// return the new interpolated value.  Ease-out cubic.  While in flight
+    /// this also requests a draw tagged `"animation.tween"` (see
+    /// [`request_draw_tagged`]) so the host keeps drawing frames until
+    /// completion, and a running tween is named in the provenance trace.
     pub fn tick(&mut self) -> f64 {
         if let Some(start) = self.start_time {
             let elapsed = crate::clock::since(start).as_secs_f64();
@@ -597,7 +598,7 @@ impl Tween {
                 self.current = self.target;
                 self.start_time = None;
             } else {
-                request_draw();
+                request_draw_tagged("animation.tween");
             }
         }
         self.current

@@ -145,6 +145,31 @@ mod tests {
         clear_draw_request();
     }
 
+    /// A running tween names itself in both traces, so a quiescence guard can
+    /// attribute the frames it keeps requesting; a settled tween logs nothing.
+    #[test]
+    fn a_running_tween_tags_its_draw_requests() {
+        let _clock = crate::clock::scoped_virtual(None);
+        clear_draw_request();
+        let _ = drain_draw_trace();
+        let mut tween = crate::animation::Tween::new(0.0, 0.18);
+        tween.set_target(1.0);
+
+        let cursor = draw_trace_cursor();
+        crate::clock::advance(std::time::Duration::from_millis(10));
+        tween.tick();
+        assert_eq!(draw_trace_since(cursor).tags, vec!["animation.tween"]);
+        assert_eq!(drain_draw_trace(), vec!["animation.tween"]);
+
+        crate::clock::advance(std::time::Duration::from_millis(200));
+        let cursor = draw_trace_cursor();
+        tween.tick();
+        assert!(!tween.is_animating());
+        assert!(draw_trace_since(cursor).tags.is_empty());
+        assert!(drain_draw_trace().is_empty());
+        clear_draw_request();
+    }
+
     #[test]
     fn a_reader_left_behind_learns_how_many_it_missed() {
         let start = draw_trace_cursor();

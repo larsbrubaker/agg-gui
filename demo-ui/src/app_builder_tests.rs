@@ -17,6 +17,11 @@ use crate::RunMode;
 
 const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
+/// One host frame at 60 Hz: how far [`paint_until_idle`] advances the UI clock
+/// before each paint, so time-based transitions progress at a fixed rate per
+/// frame instead of at whatever speed this machine paints.
+const HOST_FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
+
 struct IdleCube {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
@@ -202,18 +207,32 @@ fn reactive_demo_with_all_windows_closed_quiesces() {
 }
 
 /// Paint frames like a reactive host until the app stops asking for more or
-/// `cap` frames elapse. Returns whether it quiesced and the drained trace.
+/// `cap` frames elapse. Returns whether it quiesced and every draw-request
+/// tag logged during the run (untagged requests appear as `"untagged"`).
 ///
-/// Two independent runaway signatures are caught without any wall-clock sleep:
-/// an immediate re-request keeps `app.wants_draw()` true every frame (looped
-/// here), and a re-armed *scheduled* deadline leaves
-/// `peek_next_draw_deadline()` populated (asserted by the caller). Headless
-/// paints are sub-millisecond, so a sleep would only mask, never expose, a
-/// recurring timer — the armed-deadline check is the reliable probe.
+/// Frames are paced at a fixed 60 Hz on the virtual UI clock: the UI clock
+/// advances by [`HOST_FRAME`] before each paint, so the verdict does not
+/// depend on how fast this machine paints. Time-based transitions (Window's
+/// 180 ms close fade) complete in UI time, not in a number of frames; on the
+/// real clock a fast machine painted every frame before the fade ended and
+/// the guard flaked. The caller must hold `agg_gui::clock::scoped_virtual`;
+/// the assert at the top enforces it.
+///
+/// An immediate re-request keeps `app.wants_draw()` true every frame (looped
+/// here); a re-armed *scheduled* deadline leaves `peek_next_draw_deadline()`
+/// populated, which the caller checks.
 fn paint_until_idle(app: &mut agg_gui::App, cap: usize) -> (bool, Vec<&'static str>) {
+    assert!(
+        agg_gui::clock::is_virtual(),
+        "paint_until_idle paces frames on the virtual UI clock; hold agg_gui::clock::scoped_virtual"
+    );
+    // Not part of the verdict (that reads the cursor below): keeps the drained
+    // ring buffer from carrying earlier tags into the next reader.
     let _ = agg_gui::animation::drain_draw_trace();
+    let cursor = agg_gui::draw_trace_log::draw_trace_cursor();
     let mut idle = false;
     for _ in 0..cap {
+        agg_gui::clock::advance(HOST_FRAME);
         let mut fb = Framebuffer::new(1200, 900);
         let mut ctx = GfxCtx::new(&mut fb);
         app.paint(&mut ctx);
@@ -222,7 +241,7 @@ fn paint_until_idle(app: &mut agg_gui::App, cap: usize) -> (bool, Vec<&'static s
             break;
         }
     }
-    (idle, agg_gui::animation::drain_draw_trace())
+    (idle, agg_gui::draw_trace_log::draw_trace_since(cursor).tags)
 }
 
 /// Matrix regression guard: opening a demo window and then CLOSING it again
@@ -237,9 +256,14 @@ fn paint_until_idle(app: &mut agg_gui::App, cap: usize) -> (bool, Vec<&'static s
 /// While the window is open we deliberately do NOT require quiescence (animated
 /// demos never idle by design); we only require that after the close the app
 /// settles within a few frames, and that no scheduled deadline is left armed.
+/// Frames run on a virtual 60 Hz UI clock (see [`paint_until_idle`]), so the
+/// frame caps are fixed amounts of UI time on every machine.
 #[test]
 fn each_demo_window_quiesces_after_close() {
     let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+    // Virtual UI clock from before the app exists, so every timestamp the
+    // tree takes is on it; restored when the guard drops.
+    let _clock = agg_gui::clock::scoped_virtual(None);
     let (mut app, handles) = build_demo_ui(
         font,
         Box::new(|_msaa_cell| Box::new(IdleCube::new())),
@@ -280,21 +304,34 @@ fn each_demo_window_quiesces_after_close() {
         app.layout(Size::new(1200.0, 900.0));
         let _ = paint_until_idle(&mut app, 6);
 
-        // Close, lay out, and require the app to go idle.
+        // Close, lay out, and require the app to go idle. 12 frames at 60 Hz
+        // is 200 ms of UI time. The closing window hides once its fade alpha
+        // drops to 0.001 or below (about 162 ms into the 180 ms fade) and the
+        // app idles the frame after: frame 11 of 12. A longer fade will need
+        // a bigger cap.
         cell.set(false);
         app.layout(Size::new(1200.0, 900.0));
         let (idle, trace) = paint_until_idle(&mut app, 12);
         let deadline_armed = agg_gui::animation::peek_next_draw_deadline().is_some();
-        if !idle || deadline_armed {
+        // The host arms its wake from `App::next_draw_deadline`: the global
+        // deadline above plus each visible widget's own `next_draw_deadline`
+        // (cursor blink and the like), which neither `wants_draw()` nor
+        // `peek_next_draw_deadline()` sees. It is also true whenever
+        // `deadline_armed` is.
+        let widget_deadline_armed = app.next_draw_deadline().is_some();
+        if !idle || deadline_armed || widget_deadline_armed {
             let root_needs = app.root().needs_draw();
             failures.push(format!(
                 "'{}' (demo #{i}): idle={idle} deadline_armed={deadline_armed} \
+                 widget_deadline_armed={widget_deadline_armed} \
                  root_needs={root_needs} trace={trace:?}",
                 spec.title
             ));
         }
         // Reset per-window transient state so one window's residue can't mask
-        // or contaminate the next window's verdict.
+        // or contaminate the next window's verdict. The drain keeps the
+        // drained ring buffer from carrying this window's tags into the next
+        // reader; the verdict itself reads `draw_trace_log` by cursor.
         agg_gui::animation::clear_draw_request();
         let _ = agg_gui::animation::drain_draw_trace();
     }
@@ -302,7 +339,8 @@ fn each_demo_window_quiesces_after_close() {
     assert!(
         failures.is_empty(),
         "these demo windows did NOT return the reactive app to idle after being closed \
-         (continuous-repaint cascade). Culprits with drained draw-request trace:\n{}",
+         (continuous-repaint cascade). Culprits with draw-request tags logged while \
+         settling:\n{}",
         failures.join("\n")
     );
 }
