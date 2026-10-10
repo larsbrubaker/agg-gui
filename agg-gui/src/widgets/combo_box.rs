@@ -146,6 +146,10 @@ pub struct ComboBox {
     /// Report the widest option's width instead of the whole offered width —
     /// see [`ComboBox::with_fit_width`] (`combo_box/fit.rs`).
     fit_width: bool,
+    /// Live enabled gate — see [`ComboBox::with_enabled_fn`] (`combo_box/enabled.rs`).
+    enabled_fn: Option<Rc<dyn Fn() -> bool>>,
+    /// Disabled paint — see [`ComboBoxDisabledStyle`].
+    disabled_style: ComboBoxDisabledStyle,
 }
 
 impl ComboBox {
@@ -201,6 +205,8 @@ impl ComboBox {
             has_selection: true,
             placeholder: String::new(),
             fit_width: false,
+            enabled_fn: None,
+            disabled_style: ComboBoxDisabledStyle::default(),
         }
     }
 
@@ -370,11 +376,13 @@ impl ComboBox {
     }
 }
 
+mod enabled;
 mod fit;
 mod geometry;
 mod press;
 mod selection;
 mod style;
+pub use enabled::ComboBoxDisabledStyle;
 pub use style::{ComboBoxStateStyle, ComboBoxStyle};
 
 impl Widget for ComboBox {
@@ -396,7 +404,11 @@ impl Widget for ComboBox {
     }
 
     fn is_focusable(&self) -> bool {
-        true
+        self.enabled_now()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled_now()
     }
 
     fn needs_draw(&self) -> bool {
@@ -417,7 +429,7 @@ impl Widget for ComboBox {
     /// Open, the drop-down owns the pointer (`combo_box/press.rs`): the press
     /// that closes it from outside, and that press's release, stop here.
     fn has_active_modal(&self) -> bool {
-        self.open
+        self.open && self.enabled_now()
     }
 
     fn margin(&self) -> Insets {
@@ -447,6 +459,7 @@ impl Widget for ComboBox {
         // the same selected_cell wrote a new index since our last paint.
         // Skip while open so an in-progress dropdown interaction doesn't
         // get yanked back.
+        self.close_if_disabled();
         if !self.open {
             if let Some(cell) = &self.selected_cell {
                 let n = self.options.len();
@@ -495,7 +508,8 @@ impl Widget for ComboBox {
         self.paint_closed_box(ctx);
 
         // ── Selected label ────────────────────────────────────────────────────
-        self.selected_label.set_color(v.text_color);
+        self.selected_label
+            .set_color(self.text_for_state(v.text_color));
         let sl_bounds = self.selected_label.bounds();
 
         ctx.save();
@@ -507,7 +521,7 @@ impl Widget for ComboBox {
     fn paint_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        if self.open {
+        if self.open && !self.close_if_disabled() {
             // The popup queue is drained while App's effective (device × UX)
             // scale and keyboard lift are still active on the ctx, so the
             // request coords must be root logical (unlifted). Otherwise on
@@ -555,6 +569,9 @@ impl Widget for ComboBox {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if self.close_if_disabled() {
+            return self.on_disabled_event(event);
+        }
         match event {
             Event::MouseDown {
                 button: MouseButton::Left,

@@ -10,6 +10,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- An enabled state for `ComboBox`: `ComboBox::with_enabled_fn(|| ...)` (the
+  same live-predicate convention as `Button` and `SegmentedControl`). While
+  the predicate is `false`, `is_enabled()` and `is_focusable()` are false, the
+  combo refuses to open, drops pointer and keyboard input, holds no modal, and
+  closes its list if it was open. It paints as agg-sharp's `DropDownList`
+  does: outline at alpha 30, closed label and arrow at alpha 50, fill
+  unchanged, overridable with `ComboBox::with_disabled_style(
+  ComboBoxDisabledStyle { border_alpha, label_alpha })`.
+
 - Caret suggestions for `TextField` (agg-sharp's `TextSuggestionController`):
   `TextField::with_text_suggestions(TextSuggestionController::new(provider))`
   shows a provider's `TextSuggestionList` below the word being typed. Up /

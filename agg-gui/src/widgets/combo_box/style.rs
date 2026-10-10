@@ -123,6 +123,7 @@ impl ComboBox {
             None
         }
         .unwrap_or(rest_border);
+        let border = self.border_for_state(border);
 
         ctx.set_fill_color(fill);
         ctx.begin_path();
@@ -139,7 +140,7 @@ impl ComboBox {
         let arrow_x = w - ARROW_W * 0.5;
         let arrow_cy = h * 0.5;
         let arrow_sz = 4.0;
-        ctx.set_fill_color(v.text_dim);
+        ctx.set_fill_color(self.text_for_state(v.text_dim));
         ctx.begin_path();
         // Small downward triangle.
         ctx.move_to(arrow_x - arrow_sz, arrow_cy + arrow_sz * 0.5);
