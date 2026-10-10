@@ -141,7 +141,8 @@ impl App {
     pub fn focused_widget_type_name(&self) -> Option<&'static str> {
         self.focus
             .as_deref()
-            .map(|path| widget_at_path_ref(self.root.as_ref(), path).type_name())
+            .and_then(|path| widget_at_path_ref(self.root.as_ref(), path))
+            .map(|w| w.type_name())
     }
 
     /// Whether the focused widget accepts typed text (a `TextField`, `TextArea`,
@@ -159,7 +160,8 @@ impl App {
     pub fn focused_is_text_input(&self) -> bool {
         self.focus
             .as_deref()
-            .is_some_and(|path| widget_at_path_ref(self.root.as_ref(), path).accepts_text_input())
+            .and_then(|path| widget_at_path_ref(self.root.as_ref(), path))
+            .is_some_and(|w| w.accepts_text_input())
     }
 
     /// Register a legacy global key handler invoked only after the widget tree
@@ -244,7 +246,8 @@ impl App {
             let applies = match blur {
                 crate::focus::BlurRequest::Any => true,
                 crate::focus::BlurRequest::Owner(id) => self.focus.as_ref().is_some_and(|p| {
-                    widget_at_path_ref(self.root.as_ref(), p).focus_id() == Some(id)
+                    widget_at_path_ref(self.root.as_ref(), p)
+                        .is_some_and(|w| w.focus_id() == Some(id))
                 }),
             };
             if applies {
@@ -256,9 +259,9 @@ impl App {
         };
         let mut all: Vec<Vec<usize>> = Vec::new();
         collect_focusable(self.root.as_ref(), &mut Vec::new(), &mut all);
-        let target = all
-            .into_iter()
-            .find(|p| widget_at_path_ref(self.root.as_ref(), p).focus_id() == Some(id));
+        let target = all.into_iter().find(|p| {
+            widget_at_path_ref(self.root.as_ref(), p).is_some_and(|w| w.focus_id() == Some(id))
+        });
         if let Some(path) = target {
             self.set_focus(Some(path));
         }
@@ -557,17 +560,17 @@ impl App {
         };
 
         // Check there's actually a sibling to leapfrog.
-        let n = {
-            let parent = widget_at_path(&mut self.root, &parent_path);
-            parent.children().len()
+        let Some(n) =
+            widget_at_path(&mut self.root, &parent_path).map(|parent| parent.children().len())
+        else {
+            return;
         };
         if win_idx >= n - 1 {
             return;
         } // already at front
 
         // Move the window to the end of its parent's children (mutable pass).
-        {
-            let parent = widget_at_path(&mut self.root, &parent_path);
+        if let Some(parent) = widget_at_path(&mut self.root, &parent_path) {
             let child = parent.children_mut().remove(win_idx);
             parent.children_mut().push(child);
         }

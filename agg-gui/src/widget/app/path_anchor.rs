@@ -16,9 +16,11 @@
 //! `Vec<Box<dyn Widget>>`, and reordering the vector moves the boxes, never the
 //! widgets they point to. No widget opts in and no API changes — any reorder
 //! of an existing child (swap, remove + insert, rebuild of the `Vec` from the
-//! same boxes) is followed. A widget that was dropped has no new index; its
-//! path is left as it was (dispatch already tolerates stale paths, see
-//! `tree::dispatch_event`). The current index is checked first, so a path whose
+//! same boxes) is followed. A widget that was dropped has no new index: when
+//! its path now indexes past the tree, the path is dropped (focus clears,
+//! hover and capture fall back to what the pointer is over); when another
+//! widget now sits at its indices, the path names that widget (see the
+//! replacement note below). The current index is checked first, so a path whose
 //! widgets did not move resolves in O(depth) without searching.
 //!
 //! A path whose widget was *replaced* by a same-shaped one resolves to the
@@ -104,6 +106,14 @@ impl App {
     /// Follow every stored path (focus, hover, pointer capture, gesture
     /// capture, the enter/leave hover chain) to where its widgets now sit, after any reordering of
     /// children since the path was recorded.
+    ///
+    /// A focus, hover or capture path that no longer names a widget at all
+    /// (its widget, or an ancestor, was removed from the tree) is dropped:
+    /// using it would address a widget that does not exist. Dropping focus
+    /// sends no `FocusLost` (the widget that had focus is gone) but does tell
+    /// the keyboard layer, so the on-screen keyboard and its lift let go. The
+    /// hover chain is left alone: its enter/leave diff already skips widgets
+    /// that left the tree (see `hover_chain.rs`).
     pub(super) fn resolve_tracked_paths(&mut self) {
         let root = self.root.as_ref();
         let anchors = &self.anchors;
@@ -117,6 +127,38 @@ impl App {
             if let Some(path) = path {
                 resolve(root, path, anchor);
             }
+        }
+        self.drop_stale_paths();
+    }
+
+    /// Clear each stored focus, hover and capture path that indexes past the
+    /// tree (see [`resolve_tracked_paths`](Self::resolve_tracked_paths)).
+    fn drop_stale_paths(&mut self) {
+        let root = self.root.as_ref();
+        let stale = |p: &Option<Vec<usize>>| {
+            p.as_deref()
+                .is_some_and(|p| anchor_of(root, Some(p)).len() != p.len())
+        };
+        let focus_stale = stale(&self.focus);
+        let hovered_stale = stale(&self.hovered);
+        let captured_stale = stale(&self.captured);
+        let gesture_stale = stale(&self.gesture_captured);
+        if hovered_stale {
+            self.store_hovered(None);
+        }
+        if captured_stale {
+            self.store_captured(None);
+        }
+        if gesture_stale {
+            self.store_gesture_captured(None);
+        }
+        if focus_stale {
+            self.store_focus(None);
+            crate::widget::keyboard_scroll::notify_focus_change(
+                None,
+                self.viewport_size.width,
+                self.root.as_mut(),
+            );
         }
     }
 

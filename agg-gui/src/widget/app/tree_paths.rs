@@ -3,7 +3,7 @@
 //! Carved out of `app.rs` so that file stays under the workspace 800-line
 //! cap. These walk the `App` root by `Vec<usize>` child-index paths: collect
 //! every focusable widget in paint order, and resolve a path to a (mutable or
-//! shared) widget reference. Used by `App`'s focus, hit-test, and
+//! shared) widget reference, or `None` when the path has gone stale. Used by `App`'s focus, hit-test, and
 //! bring-to-front logic.
 
 use crate::widget::Widget;
@@ -33,24 +33,28 @@ pub(super) fn collect_focusable(
     }
 }
 
-/// Get a mutable reference to the widget at the given path.
+/// Get a mutable reference to the widget at the given path; `None` when the
+/// path no longer names a widget (a stored path whose widget, or an ancestor
+/// of it, has since been removed from the tree).
 pub(super) fn widget_at_path<'a>(
     root: &'a mut Box<dyn Widget>,
     path: &[usize],
-) -> &'a mut dyn Widget {
-    if path.is_empty() {
-        return root.as_mut();
-    }
-    let idx = path[0];
-    widget_at_path(&mut root.children_mut()[idx], &path[1..])
+) -> Option<&'a mut dyn Widget> {
+    let Some((&idx, rest)) = path.split_first() else {
+        return Some(root.as_mut());
+    };
+    widget_at_path(root.children_mut().get_mut(idx)?, rest)
 }
 
-pub(super) fn widget_at_path_ref<'a>(root: &'a dyn Widget, path: &[usize]) -> &'a dyn Widget {
-    if path.is_empty() {
-        return root;
-    }
-    let idx = path[0];
-    widget_at_path_ref(root.children()[idx].as_ref(), &path[1..])
+/// Shared-reference form of [`widget_at_path`]; `None` for a stale path.
+pub(super) fn widget_at_path_ref<'a>(
+    root: &'a dyn Widget,
+    path: &[usize],
+) -> Option<&'a dyn Widget> {
+    let Some((&idx, rest)) = path.split_first() else {
+        return Some(root);
+    };
+    widget_at_path_ref(root.children().get(idx)?.as_ref(), rest)
 }
 
 #[cfg(test)]

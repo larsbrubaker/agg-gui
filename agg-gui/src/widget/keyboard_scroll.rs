@@ -301,14 +301,14 @@ pub(crate) fn notify_focus_change(
     // flag, current text (for the sentence-start auto-cap heuristic),
     // and the preferred keyboard mode (Numeric fields open on digits).
     let (accepts, existing_text, mode) = match new_path {
-        Some(p) => {
-            let w = mutable_widget_at_path(root, p);
-            (
+        Some(p) => match mutable_widget_at_path(root, p) {
+            Some(w) => (
                 w.accepts_text_input(),
                 w.text_input_value(),
                 w.text_input_mode(),
-            )
-        }
+            ),
+            None => (false, None, KeyboardInputMode::Text),
+        },
         None => (false, None, KeyboardInputMode::Text),
     };
     set_text_input_focused(accepts, existing_text.as_deref(), mode);
@@ -350,7 +350,7 @@ pub(crate) fn relift_after_layout(
     let Some(path) = focus else {
         return;
     };
-    if !mutable_widget_at_path(root, path).accepts_text_input() {
+    if !mutable_widget_at_path(root, path).is_some_and(|w| w.accepts_text_input()) {
         return;
     }
     ensure_focused_visible_above_keyboard(Some(path), viewport_width, root);
@@ -506,7 +506,9 @@ pub(crate) fn apply_lift_along_path(
     }
     for ancestor_depth in (0..n).rev() {
         let ancestor_path = &path[..ancestor_depth];
-        let ancestor = mutable_widget_at_path(root, ancestor_path);
+        let Some(ancestor) = mutable_widget_at_path(root, ancestor_path) else {
+            break;
+        };
         let applied = ancestor.try_scroll_to_lift(deficit);
         total_applied += applied;
         deficit -= applied;
@@ -517,13 +519,17 @@ pub(crate) fn apply_lift_along_path(
     total_applied
 }
 
-fn mutable_widget_at_path<'a>(root: &'a mut dyn Widget, path: &[usize]) -> &'a mut dyn Widget {
-    if path.is_empty() {
-        return root;
-    }
-    let idx = path[0];
-    let child = &mut root.children_mut()[idx];
-    mutable_widget_at_path(child.as_mut(), &path[1..])
+/// The widget at `path` under `root`; `None` when the path is stale (its
+/// widget or an ancestor was removed from the tree).
+fn mutable_widget_at_path<'a>(
+    root: &'a mut dyn Widget,
+    path: &[usize],
+) -> Option<&'a mut dyn Widget> {
+    let Some((&idx, rest)) = path.split_first() else {
+        return Some(root);
+    };
+    let child = root.children_mut().get_mut(idx)?;
+    mutable_widget_at_path(child.as_mut(), rest)
 }
 
 #[cfg(test)]

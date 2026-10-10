@@ -3,7 +3,7 @@
 //! (800-line guardrail); keyboard routing is in `keyboard.rs`, wheel
 //! routing stays in `app.rs`.
 
-use super::tree_paths::widget_at_path;
+use super::tree_paths::widget_at_path_ref;
 use crate::event::{Event, Modifiers, MouseButton};
 use crate::geometry::Point;
 use crate::widget::tree::{active_modal_path, dispatch_event, hit_test_subtree};
@@ -157,7 +157,7 @@ impl App {
             // (text fields in dialogs need focus to type).
             let path = self.extend_modal_path(&path, pos);
             self.update_hover_chain(Some(&path), None);
-            if takes_click_focus(widget_at_path(&mut self.root, &path)) {
+            if widget_at_path_ref(self.root.as_ref(), &path).is_some_and(takes_click_focus) {
                 self.set_focus(Some(path.clone()));
             } else {
                 self.set_focus(None);
@@ -176,8 +176,7 @@ impl App {
         // Click-to-focus: if the hit widget is focusable (and accepts focus
         // from a click), give it focus.
         if let Some(ref path) = hit {
-            let w = widget_at_path(&mut self.root, path);
-            if takes_click_focus(w) {
+            if widget_at_path_ref(self.root.as_ref(), path).is_some_and(takes_click_focus) {
                 self.set_focus(Some(path.clone()));
             } else {
                 self.set_focus(None);
