@@ -293,6 +293,7 @@ impl NodeEditor {
         self.hosted.factory = factory;
 
         let mut geoms = HashMap::new();
+        let socket_hit = self.socket_hit_half();
         let layer = layer_in(&mut self.children).expect("hosted layer exists");
         for (n, (width, title_color, colors)) in nodes.iter().zip(looks) {
             let Some(card) = layer.card_mut(n.id) else {
@@ -323,6 +324,8 @@ impl NodeEditor {
                 badge: n.badge().map(|(s, _)| (s, palette.badge_color(s))),
                 sockets,
                 style: self.presentation.noodle_style,
+                draw_sockets: self.presentation.show_sockets,
+                socket_hit,
             };
             card.set_bounds(Rect::new(
                 n.position[0],

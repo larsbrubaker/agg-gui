@@ -19,13 +19,25 @@ use crate::socket_style::{
 use super::{CanvasState, NodeEditor};
 
 /// The editor's presentation choices and the socket under the pointer.
-#[derive(Default)]
 pub(crate) struct PresentationState {
     pub noodle_style: NoodleStyle,
     pub socket_hover: bool,
     /// The hovered socket, `(node, side, name)`; tracked only with
     /// `socket_hover` on and the canvas idle.
     pub hovered: Option<(NodeId, SocketSide, String)>,
+    /// Sockets are drawn (MatterCAD's `NodeEditor.ShowSockets`).
+    pub show_sockets: bool,
+}
+
+impl Default for PresentationState {
+    fn default() -> Self {
+        Self {
+            noodle_style: NoodleStyle::default(),
+            socket_hover: false,
+            hovered: None,
+            show_sockets: true,
+        }
+    }
 }
 
 impl NodeEditor {
@@ -42,6 +54,54 @@ impl NodeEditor {
     pub fn with_socket_hover(mut self, enabled: bool) -> Self {
         self.presentation.socket_hover = enabled;
         self
+    }
+
+    /// Draw sockets, or not (MatterCAD's `NodeEditor.ShowSockets`, on by
+    /// default; its tests turn sockets off to tell them from what a card
+    /// draws under them). Off, no socket, socket ring or dragged noodle is
+    /// drawn; noodles between nodes still are, and sockets still hit-test.
+    pub fn set_show_sockets(&mut self, show: bool) {
+        if self.presentation.show_sockets != show {
+            self.presentation.show_sockets = show;
+            self.last_paint_fingerprint = None;
+            self.backbuffer.invalidate();
+            agg_gui::animation::request_draw();
+        }
+    }
+
+    /// Whether sockets are drawn (see [`Self::set_show_sockets`]).
+    pub fn show_sockets(&self) -> bool {
+        self.presentation.show_sockets
+    }
+
+    /// The socket under `local` (editor-local coordinates at the current
+    /// pan and zoom), `(node, side, socket name)`: the same hit area a
+    /// press, hover or drop uses. Sockets the host hides take no hit.
+    /// Locks the model, so call it without holding the model lock.
+    pub fn socket_at(&self, local: agg_gui::Point) -> Option<(NodeId, SocketSide, String)> {
+        let layouts = self.snapshot_layouts();
+        let canvas = [
+            (local.x - self.canvas_offset[0]) / self.canvas_scale,
+            (local.y - self.canvas_offset[1]) / self.canvas_scale,
+        ];
+        self.hit_socket(&layouts, canvas)
+            .map(|(node, s)| (node, s.side, s.name))
+    }
+
+    /// Half extents, in canvas units, of the socket hit box: MatterCAD's
+    /// 6 x 10 design units either side for [`NoodleStyle::NodeDesigner`],
+    /// never under 8 device pixels a side however far the graph is zoomed
+    /// out (`NoodleDragController.SocketAt`). `None` for
+    /// [`NoodleStyle::Simple`], whose hit area is the round
+    /// [`crate::draw::SOCKET_HIT_RADIUS`].
+    pub(super) fn socket_hit_half(&self) -> Option<[f64; 2]> {
+        match self.presentation.noodle_style {
+            NoodleStyle::Simple => None,
+            NoodleStyle::NodeDesigner => {
+                let floor = 8.0 / (agg_gui::device_scale() * self.canvas_scale);
+                Some([6f64.max(floor), 10f64.max(floor)])
+            }
+        }
     }
 
     /// The noodle style the editor draws with.
@@ -117,7 +177,10 @@ impl NodeEditor {
     /// Paint the hover ring and label, in canvas space, over the cards.
     /// Called from `finish_paint` while the canvas is idle.
     pub(super) fn paint_socket_hover(&mut self, ctx: &mut dyn DrawCtx) {
-        if !self.presentation.socket_hover || !matches!(self.interaction, CanvasState::Idle) {
+        if !self.presentation.socket_hover
+            || !self.presentation.show_sockets
+            || !matches!(self.interaction, CanvasState::Idle)
+        {
             return;
         }
         let Some((node, side, name)) = self.presentation.hovered.clone() else {
@@ -193,6 +256,20 @@ pub(crate) fn landed_on(
         .iter()
         .filter(|n| n.to_node == node && n.to_socket == socket)
         .count()
+}
+
+/// A copy of `layouts` with every socket marked hidden, for drawing the
+/// node widgets while sockets are off.
+pub(crate) fn undrawn_sockets(layouts: &[NodeLayoutInfo]) -> Vec<NodeLayoutInfo> {
+    let mut copy = layouts.to_vec();
+    for l in &mut copy {
+        for row in &mut l.rows {
+            if let NodeRow::Output(s) | NodeRow::Input { socket: s, .. } = row {
+                s.hidden = true;
+            }
+        }
+    }
+    copy
 }
 
 /// Stamp every socket layout with its shape, landed-noodle count and

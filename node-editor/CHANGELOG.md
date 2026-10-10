@@ -10,6 +10,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor::socket_at(local) -> Option<(NodeId, SocketSide, String)>`:
+  the socket under an editor-local point, with the same hit area a press,
+  hover or drop uses.
+- `NodeEditor::set_show_sockets(bool)` / `show_sockets()` (on by default):
+  off, no socket, socket ring or dragged noodle is drawn; noodles between
+  nodes still draw and sockets still hit-test (MatterCAD's
+  `NodeEditor.ShowSockets`).
+- `draw::socket_hit` and `NodeLayoutInfo::socket_within`, the shared socket
+  hit test.
+
+### Changed
+
+- With `NoodleStyle::NodeDesigner` a socket's hit area is MatterCAD's box,
+  6 x 10 canvas units either side and never under 8 device pixels a side,
+  instead of the round `SOCKET_HIT_RADIUS` (still used by
+  `NoodleStyle::Simple`).
+
 - The add menu opens at the pointer on Shift+A as well as on a right-click
   on empty canvas, from the first source that answers:
   `NodeEditor::with_add_menu(|AddMenuRequest| -> Option<Box<dyn Widget>>)`,

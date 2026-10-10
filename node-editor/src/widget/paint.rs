@@ -131,16 +131,21 @@ impl NodeEditor {
         // compatible socket under the cursor when one is in reach. The
         // snapped socket also gets a halo ring so the user has clear
         // feedback that a release here will land.
-        if let CanvasState::DrawingConnection {
-            from_canvas,
-            cursor_canvas,
-            from_socket_type,
-            from_node,
-            from_side,
-            from_socket,
-            picked_up,
-            ..
-        } = &self.interaction
+        // MatterCAD's overlay (`NoodleDragController.DrawOverlay`) draws
+        // nothing while sockets are off.
+        if let (
+            true,
+            CanvasState::DrawingConnection {
+                from_canvas,
+                cursor_canvas,
+                from_socket_type,
+                from_node,
+                from_side,
+                from_socket,
+                picked_up,
+                ..
+            },
+        ) = (self.presentation.show_sockets, &self.interaction)
         {
             let fixed = crate::connection::SocketRef {
                 node: *from_node,

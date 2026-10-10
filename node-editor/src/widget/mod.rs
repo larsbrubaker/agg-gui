@@ -83,6 +83,8 @@ mod tests_overlay;
 #[cfg(test)]
 mod tests_presentation;
 #[cfg(test)]
+mod tests_socket_at;
+#[cfg(test)]
 mod tests_socket_visibility;
 #[cfg(test)]
 mod tests_value;
@@ -431,8 +433,9 @@ impl NodeEditor {
         layouts: &[NodeLayoutInfo],
         canvas_pos: [f64; 2],
     ) -> Option<(NodeId, SocketLayout)> {
+        let half = self.socket_hit_half();
         for l in layouts.iter().rev() {
-            if let Some(s) = l.socket_at(canvas_pos) {
+            if let Some(s) = l.socket_within(canvas_pos, half) {
                 return Some((l.node_id, s.clone()));
             }
         }
@@ -468,6 +471,15 @@ impl NodeEditor {
 
         let scale = self.canvas_scale;
         let offset = self.canvas_offset;
+        // Sockets off: draw the dots of a copy marked hidden; hit-testing
+        // reads the live layouts, so the sockets still take presses.
+        let undrawn;
+        let layouts = if self.presentation.show_sockets {
+            layouts
+        } else {
+            undrawn = presentation::undrawn_sockets(layouts);
+            &undrawn[..]
+        };
         let layer = self.take_hosted_layer();
         let mut new_children: Vec<Box<dyn Widget>> = Vec::with_capacity(layouts.len() + 1);
         for l in layouts

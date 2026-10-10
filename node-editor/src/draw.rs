@@ -43,6 +43,18 @@ pub const ROW_HEIGHT: f64 = 22.0;
 pub const NODE_BOTTOM_PAD: f64 = 6.0;
 pub const SOCKET_RADIUS: f64 = 5.5;
 pub const SOCKET_HIT_RADIUS: f64 = 9.0;
+
+/// Whether `p` lands on the socket centred at `center`: inside the box of
+/// `half` extents either side when given (MatterCAD's NodeDesigner hit
+/// area), otherwise within [`SOCKET_HIT_RADIUS`].
+pub fn socket_hit(center: [f64; 2], p: [f64; 2], half: Option<[f64; 2]>) -> bool {
+    let dx = center[0] - p[0];
+    let dy = center[1] - p[1];
+    match half {
+        Some([hw, hh]) => dx.abs() <= hw && dy.abs() <= hh,
+        None => dx * dx + dy * dy <= SOCKET_HIT_RADIUS * SOCKET_HIT_RADIUS,
+    }
+}
 pub const NODE_RADIUS: f64 = 6.0;
 /// Right-side reserved width for an inline editor on an input row.
 pub const EDITOR_WIDTH: f64 = 90.0;
@@ -280,11 +292,19 @@ impl NodeLayoutInfo {
     /// Find a visible (not [`SocketLayout::hidden`]) socket whose hit
     /// radius contains `canvas_pos`.
     pub fn socket_at(&self, canvas_pos: [f64; 2]) -> Option<&SocketLayout> {
-        self.sockets().filter(|s| !s.hidden).find(|s| {
-            let dx = s.center[0] - canvas_pos[0];
-            let dy = s.center[1] - canvas_pos[1];
-            dx * dx + dy * dy <= SOCKET_HIT_RADIUS * SOCKET_HIT_RADIUS
-        })
+        self.socket_within(canvas_pos, None)
+    }
+
+    /// Find a visible socket whose hit area (see [`socket_hit`]) contains
+    /// `canvas_pos`.
+    pub fn socket_within(
+        &self,
+        canvas_pos: [f64; 2],
+        half: Option<[f64; 2]>,
+    ) -> Option<&SocketLayout> {
+        self.sockets()
+            .filter(|s| !s.hidden)
+            .find(|s| socket_hit(s.center, canvas_pos, half))
     }
 
     /// Find the property row hit by `canvas_pos`.

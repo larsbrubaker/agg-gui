@@ -23,9 +23,7 @@ use agg_gui::widgets::window::{
 };
 use agg_gui::{Color, DrawCtx, Event, EventResult, Point, Rect, Size, TransAffine, Widget};
 
-use crate::draw::{
-    SocketSide, NODE_BOTTOM_PAD, NODE_RADIUS, ROW_HEIGHT, SOCKET_HIT_RADIUS, TITLE_HEIGHT,
-};
+use crate::draw::{SocketSide, NODE_BOTTOM_PAD, NODE_RADIUS, ROW_HEIGHT, TITLE_HEIGHT};
 use crate::model::{BadgeSeverity, NodeId, NodeView};
 
 use super::hosted::{card_height, CardGeom, HostedNodeBody, SocketAnchorFn};
@@ -183,6 +181,12 @@ pub(crate) struct CardChrome {
     pub badge: Option<(BadgeSeverity, Color)>,
     pub sockets: Vec<CardSocket>,
     pub style: crate::socket_style::NoodleStyle,
+    /// `false` while the editor's sockets are off: none are drawn, but
+    /// they keep their hit area.
+    pub draw_sockets: bool,
+    /// The editor's socket hit box, half extents in card units (`None`:
+    /// the round [`SOCKET_HIT_RADIUS`]).
+    pub socket_hit: Option<[f64; 2]>,
 }
 
 /// A hosted card: chrome and sockets around the host's body widget.
@@ -211,6 +215,8 @@ impl HostedCard {
                 badge: None,
                 sockets: Vec::new(),
                 style: Default::default(),
+                draw_sockets: true,
+                socket_hit: None,
             },
         }
     }
@@ -357,6 +363,9 @@ impl Widget for HostedCard {
     /// Sockets go over the body (they straddle the card's edges), so they
     /// paint after the children.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        if !self.chrome.draw_sockets {
+            return;
+        }
         let (w, h) = (self.bounds.width, self.bounds.height);
         for s in &self.chrome.sockets {
             let cx = match s.side {
@@ -389,8 +398,7 @@ impl Widget for HostedCard {
                 SocketSide::Input => 0.0,
                 SocketSide::Output => w,
             };
-            let (dx, dy) = (p.x - cx, p.y - (h - s.from_top));
-            dx * dx + dy * dy <= SOCKET_HIT_RADIUS * SOCKET_HIT_RADIUS
+            crate::draw::socket_hit([cx, h - s.from_top], [p.x, p.y], self.chrome.socket_hit)
         })
     }
 
