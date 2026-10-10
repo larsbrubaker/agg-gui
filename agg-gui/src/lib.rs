@@ -223,8 +223,9 @@ pub use widgets::{
     SharedResolver, ShortcutKey, SizedBox, Slider, SliderClamping, SliderOrientation, SliderStyle,
     Spacer, Spinner, SpinnerSize, Splitter, SplitterRatio, Stack, TabView, Table, TableBuilder,
     TableColumn, TableRows, TextArea, TextAreaScrollInfo, TextEditState, TextField, TextHAlign,
-    TextVAlign, ToggleSwitch, ToggleSwitchStyle, Tooltip, TooltipTimings, TopMenu, TreeView,
-    TreeViewEvent, TumbleCube, TumbleCubeCamera, Window, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
+    TextVAlign, Toast, ToastHost, ToastId, ToastKind, Toasts, ToggleSwitch, ToggleSwitchStyle,
+    Tooltip, TooltipTimings, TopMenu, TreeView, TreeViewEvent, TumbleCube, TumbleCubeCamera,
+    Window, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
 };
 
 // Re-export AGG types so callers don't need to import agg-rust directly.

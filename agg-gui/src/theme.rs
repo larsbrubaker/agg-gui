@@ -253,6 +253,36 @@ impl Visuals {
         0.299 * self.bg_color.r + 0.587 * self.bg_color.g + 0.114 * self.bg_color.b < 0.5
     }
 
+    /// Colour for "it worked" status (toasts, badges): a green readable on
+    /// this palette's background.
+    pub fn success_color(&self) -> Color {
+        if self.is_dark() {
+            Color::rgb(0.36, 0.78, 0.46)
+        } else {
+            Color::rgb(0.13, 0.55, 0.25)
+        }
+    }
+
+    /// Colour for warnings: an orange readable on this palette's background
+    /// (egui's `warn_fg_color`).
+    pub fn warning_color(&self) -> Color {
+        if self.is_dark() {
+            Color::rgb(1.0, 0.56, 0.0)
+        } else {
+            Color::rgb(0.86, 0.39, 0.0)
+        }
+    }
+
+    /// Colour for errors: a red readable on this palette's background
+    /// (egui's `error_fg_color`, softened).
+    pub fn error_color(&self) -> Color {
+        if self.is_dark() {
+            Color::rgb(0.96, 0.36, 0.33)
+        } else {
+            Color::rgb(0.80, 0.14, 0.14)
+        }
+    }
+
     /// Return this palette with its primary accent replaced.
     pub fn with_accent(mut self, accent: Color) -> Self {
         let hovered = Self::accent_hovered(accent);

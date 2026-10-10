@@ -75,6 +75,7 @@ pub mod text_field;
 pub mod text_field_core;
 pub mod text_key_bindings;
 pub mod text_suggestion;
+pub mod toast;
 pub mod toggle_switch;
 pub mod tooltip;
 pub mod tree_view;
@@ -152,6 +153,10 @@ pub use text_field::{TextField, TextFieldTheme};
 pub use text_field_core::TextEditState;
 pub use text_suggestion::{
     TextSuggestion, TextSuggestionController, TextSuggestionList, TextSuggestionProvider,
+};
+pub use toast::{
+    PaintedToast, Toast, ToastHost, ToastId, ToastKind, Toasts, DEFAULT_TOAST_DURATION,
+    ERROR_TOAST_DURATION,
 };
 pub use toggle_switch::{ToggleSwitch, ToggleSwitchStyle};
 pub use tooltip::{set_tooltip_timings, tooltip_timings, Tooltip, TooltipTimings};
