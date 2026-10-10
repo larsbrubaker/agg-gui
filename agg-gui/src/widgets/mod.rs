@@ -22,6 +22,7 @@ pub mod button;
 pub mod button_theme;
 pub mod checkbox;
 pub mod chevron;
+pub mod clickable;
 pub mod collapsing_header;
 pub mod color_picker;
 pub mod color_wheel_picker;
@@ -85,6 +86,7 @@ pub use absolute_layout::AbsoluteLayout;
 pub use button::{Button, ButtonIcon, ButtonTheme};
 pub use checkbox::Checkbox;
 pub use chevron::{ChevronWidget, CHEVRON_SIZE};
+pub use clickable::Clickable;
 pub use collapsing_header::CollapsingHeader;
 pub use color_picker::ColorPicker;
 pub use color_wheel_picker::{

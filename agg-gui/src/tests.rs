@@ -43,6 +43,7 @@ mod button_click_focus;
 mod button_click_semantics;
 mod capture_reorder;
 mod caret_deadline;
+mod clickable;
 mod clip_path_software;
 mod color_clickaway;
 mod color_dialog_overlay;
