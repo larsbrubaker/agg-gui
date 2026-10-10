@@ -124,6 +124,14 @@ pub struct ShellConfig {
     /// to `agg_gui_wgpu::GpuConfig` (which masks them against
     /// `adapter.features()` so an adapter lacking one still yields a device).
     pub optional_features: wgpu::Features,
+    /// Render on wgpu's software (fallback) adapter instead of the GPU,
+    /// passed through to `agg_gui_wgpu::GpuConfig::force_fallback_adapter`
+    /// — for a user whose GPU driver is broken. Default `false`. With no
+    /// fallback adapter on the system, [`crate::run`] fails with
+    /// [`crate::ShellError::Gpu`]`(`[`agg_gui_wgpu::GpuInitError::NoFallbackAdapter`]`)`, whose
+    /// text is meant for the user. A rebuilt device after a device loss keeps
+    /// the choice.
+    pub force_fallback_adapter: bool,
     /// Deterministic capture, see [`ScreenshotConfig`].
     pub screenshot: Option<ScreenshotConfig>,
     /// Seed `agg_gui`'s tooltip timings from the OS (Windows:
@@ -149,6 +157,7 @@ impl Default for ShellConfig {
             present_mode: wgpu::PresentMode::AutoVsync,
             device_label: "agg-gui-shell",
             optional_features: wgpu::Features::empty(),
+            force_fallback_adapter: false,
             screenshot: None,
             os_tooltip_timings: true,
             bounds_store: None,
@@ -237,6 +246,13 @@ impl ShellConfig {
         self
     }
 
+    /// Render on wgpu's software (fallback) adapter. See
+    /// [`ShellConfig::force_fallback_adapter`].
+    pub fn with_force_fallback_adapter(mut self, force: bool) -> Self {
+        self.force_fallback_adapter = force;
+        self
+    }
+
     /// Headless-style capture: after `settle_frames` painted frames, read the
     /// frame back, write it as a PNG to `path`, and leave the event loop.
     /// The shell polls and paints every idle iteration until the capture
@@ -278,12 +294,15 @@ mod tests {
         assert_eq!(cfg.size, WindowSize::Logical(1280.0, 720.0));
         assert_eq!(cfg.redraw_policy, RedrawPolicy::Reactive);
         assert!(cfg.os_tooltip_timings);
+        assert!(!cfg.force_fallback_adapter, "the GPU is the default");
 
         let cfg = cfg
             .with_physical_size(1600, 900)
             .with_min_logical_size(640.0, 480.0)
             .with_redraw_policy(RedrawPolicy::Continuous)
-            .with_screenshot("out.png", 6);
+            .with_screenshot("out.png", 6)
+            .with_force_fallback_adapter(true);
+        assert!(cfg.force_fallback_adapter);
         assert_eq!(cfg.size, WindowSize::Physical(1600, 900));
         assert_eq!(cfg.min_size, Some(WindowSize::Logical(640.0, 480.0)));
         assert_eq!(cfg.redraw_policy, RedrawPolicy::Continuous);

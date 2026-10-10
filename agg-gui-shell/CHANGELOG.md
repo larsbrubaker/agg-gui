@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `ShellConfig::force_fallback_adapter` / `with_force_fallback_adapter`: the
+  window renders on wgpu's software (fallback) adapter, for a user whose GPU
+  driver is broken; a device rebuilt after a loss keeps the choice. With no
+  fallback adapter, `run` ends with
+  `ShellError::Gpu(GpuInitError::NoFallbackAdapter)`.
+
 - `WindowsLcdDisplayEnvironmentProvider`: agg-sharp's Windows reader for LCD
   subpixel detection (`SPI_GETFONTSMOOTHING`, `SPI_GETFONTSMOOTHINGTYPE`,
   `SPI_GETFONTSMOOTHINGORIENTATION`, `SM_REMOTESESSION` and the primary

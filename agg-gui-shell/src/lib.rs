@@ -46,6 +46,10 @@
 //!   [`ShellError::Gpu`]`(`[`agg_gui_wgpu::GpuInitError::StartupTimedOut`]`)`,
 //!   whose text is the message to show the user; closing waits at most
 //!   [`agg_gui_wgpu::GPU_TEARDOWN_BUDGET`] for the GPU to drain.
+//! - Software rendering on request: [`ShellConfig::force_fallback_adapter`]
+//!   puts the window on wgpu's fallback adapter (WARP, lavapipe) for a user
+//!   whose GPU driver is broken; `ShellInit::gpu().adapter()` reports which
+//!   adapter the window got.
 //! - The OS reader for LCD subpixel detection,
 //!   [`WindowsLcdDisplayEnvironmentProvider`] (Windows' ClearType settings;
 //!   "cannot say" elsewhere), for an app to feed

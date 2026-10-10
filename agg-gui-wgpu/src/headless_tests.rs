@@ -2,10 +2,11 @@
 //! painted through [`HeadlessFrame::render_app`] lands in the read-back where
 //! layout put it, custom render passes run inside a headless frame, the
 //! read-back is RGBA in both row orders at widths whose rows need padding,
-//! and every frame shares one device.
+//! every frame shares one device, and wgpu's software (fallback) adapter
+//! paints the same frame where the platform has one.
 //!
 //! Like the crate's other GPU tests they skip (pass trivially) when the
-//! machine has no adapter. `app_frame_at_1280x800_with_readback` prints the
+//! machine has no adapter (or, for the fallback test, no fallback adapter). `app_frame_at_1280x800_with_readback` prints the
 //! cost of a full-window frame plus read-back (run with `--nocapture`).
 
 use std::cell::Cell;
@@ -226,6 +227,69 @@ fn second_frame_reuses_the_shared_device() {
     let c = first.read_rgba().expect("read back");
     assert_eq!(c.len(), 40 * 20 * 4);
     assert!(c.chunks_exact(4).all(|p| p == GREEN));
+}
+
+/// Asking for the hardware device by option is asking for the shared one.
+#[test]
+fn shared_with_no_fallback_is_the_shared_device() {
+    let Some(gpu) = gpu() else { return };
+    let by_option = HeadlessGpu::shared_with(false).expect("the shared device exists");
+    assert!(std::ptr::eq(gpu, by_option));
+}
+
+/// On wgpu's software (fallback) adapter — WARP on Windows, lavapipe on
+/// Linux — the same pipelines and shaders paint a widget tree where layout
+/// put it, as they do on the GPU. Skips where the platform has no fallback
+/// adapter (macOS).
+#[test]
+fn fallback_adapter_paints_a_frame_with_the_same_shaders() {
+    let gpu = match HeadlessGpu::shared_with(true) {
+        Ok(gpu) => gpu,
+        Err(e) => {
+            eprintln!("SKIP: {e}");
+            return;
+        }
+    };
+    let adapter = gpu.adapter();
+    eprintln!("fallback adapter: {adapter}");
+    assert!(
+        adapter.is_fallback,
+        "a forced fallback is a CPU adapter: {adapter}"
+    );
+    if let Ok(hardware) = HeadlessGpu::shared() {
+        assert!(
+            !std::ptr::eq(gpu, hardware),
+            "the fallback device is its own"
+        );
+    }
+
+    let (w, h) = (64u32, 40u32);
+    let child = Container::new()
+        .with_background(color(RED))
+        .with_margin(Insets {
+            left: 0.0,
+            right: w as f64 / 2.0,
+            top: 0.0,
+            bottom: h as f64 / 2.0,
+        });
+    let root = Container::new()
+        .with_background(color(GREEN))
+        .add(Box::new(child));
+    let mut app = App::new(Box::new(root));
+    app.layout(Size::new(w as f64, h as f64));
+
+    let mut frame = HeadlessFrame::new(gpu, w, h);
+    frame.render(Color::white(), |ctx| {
+        app.paint(ctx);
+        ctx.set_fill_color(color(BLUE));
+        ctx.begin_path();
+        ctx.rect(0.0, 0.0, w as f64, 6.0);
+        ctx.fill();
+    });
+    let data = frame.read_rgba().expect("read back");
+    assert_eq!(px(&data, w, 8, 8), RED, "inside the child");
+    assert_eq!(px(&data, w, w / 2 + 4, 8), GREEN, "right of the child");
+    assert_eq!(px(&data, w, 8, h - 2), BLUE, "the bar along the bottom");
 }
 
 /// What a test harness pays per frame: a 1280x800 `App` (a root and forty

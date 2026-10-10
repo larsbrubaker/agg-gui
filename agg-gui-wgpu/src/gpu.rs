@@ -19,6 +19,11 @@
 //! budget before releasing, so neither a hung driver at start-up nor a slow
 //! one at close can hold the UI thread forever.
 //!
+//! The adapter request itself — hardware first, wgpu's software (fallback)
+//! adapter only on demand ([`GpuConfig::force_fallback_adapter`]) — and the
+//! [`AdapterSummary`] of the adapter chosen live in the child module
+//! `gpu_adapter.rs`, shared with `crate::headless`.
+//!
 //! wasm shells configure their canvas surface through the browser and never
 //! block on an adapter request, so this module is native-only.
 
@@ -31,6 +36,10 @@ use crate::surface_retry::{ConfigureRetry, DEFAULT_RETRY_BUDGET};
 #[path = "gpu_acquire.rs"]
 mod acquire;
 pub use acquire::{FrameAcquire, RetryWake, SurfaceError};
+#[path = "gpu_adapter.rs"]
+mod adapter;
+pub(crate) use adapter::adapter_options;
+pub use adapter::{is_fallback_adapter, AdapterSummary};
 
 /// How badly the caller needs `COPY_SRC` on the surface texture.
 ///
@@ -94,6 +103,15 @@ pub struct GpuConfig {
     /// giving up with [`GpuInitError::StartupTimedOut`]. Default
     /// [`crate::GPU_STARTUP_BUDGET`] (15 s, agg-sharp `GpuStartup`).
     pub startup_budget: Duration,
+    /// Demand wgpu's software (fallback) adapter instead of the GPU — WARP
+    /// on Windows, lavapipe/llvmpipe on Linux; macOS has none — and run the
+    /// same shaders on it. Default `false`. For a host whose user's GPU
+    /// driver is broken (MatterCAD's `FORCE_SOFTWARE_RENDERING`); a software
+    /// rasterizer costs roughly 100x the frame time, so it is opt-in only.
+    /// When the system has no fallback adapter, [`Gpu::new`] returns
+    /// [`GpuInitError::NoFallbackAdapter`]. [`Gpu::adapter`] reports what
+    /// was chosen.
+    pub force_fallback_adapter: bool,
 }
 
 impl Default for GpuConfig {
@@ -105,6 +123,7 @@ impl Default for GpuConfig {
             optional_features: wgpu::Features::empty(),
             surface_retry_budget: DEFAULT_RETRY_BUDGET,
             startup_budget: GPU_STARTUP_BUDGET,
+            force_fallback_adapter: false,
         }
     }
 }
@@ -152,6 +171,13 @@ impl GpuConfig {
         self.startup_budget = budget;
         self
     }
+
+    /// Demand wgpu's software (fallback) adapter. See
+    /// [`GpuConfig::force_fallback_adapter`].
+    pub fn with_force_fallback_adapter(mut self, force: bool) -> Self {
+        self.force_fallback_adapter = force;
+        self
+    }
 }
 
 /// Why [`Gpu::new`] could not produce a usable surface.
@@ -160,6 +186,10 @@ impl GpuConfig {
 pub enum GpuInitError {
     CreateSurface(wgpu::CreateSurfaceError),
     RequestAdapter,
+    /// [`GpuConfig::force_fallback_adapter`] demanded wgpu's software adapter
+    /// and the system has none (macOS never does; Linux without lavapipe).
+    /// Its text is written for the host to show the user.
+    NoFallbackAdapter,
     RequestDevice,
     /// [`CopySrc::Required`] was asked for and the surface does not offer it.
     CopySrcUnsupported,
@@ -190,6 +220,11 @@ impl std::fmt::Display for GpuInitError {
         match self {
             Self::CreateSurface(e) => write!(f, "create wgpu surface: {e}"),
             Self::RequestAdapter => write!(f, "no suitable wgpu adapter"),
+            Self::NoFallbackAdapter => write!(
+                f,
+                "Software rendering was requested, but this computer has no software graphics \
+                 adapter. Start without software rendering to use the GPU."
+            ),
             Self::RequestDevice => write!(f, "could not request a wgpu device"),
             Self::CopySrcUnsupported => {
                 write!(f, "surface does not support COPY_SRC read-back")
@@ -281,13 +316,17 @@ fn request_device(
     surface: wgpu::Surface<'static>,
     label: &'static str,
     optional_features: wgpu::Features,
+    force_fallback_adapter: bool,
 ) -> Result<RequestedDevice, GpuInitError> {
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: Some(&surface),
-        force_fallback_adapter: false,
-    }))
-    .map_err(|_| GpuInitError::RequestAdapter)?;
+    let adapter = pollster::block_on(
+        instance.request_adapter(&adapter_options(force_fallback_adapter, Some(&surface))),
+    )
+    .map_err(|e| {
+        // wgpu's text names every backend it tried and why each had no
+        // adapter; the error a host shows is plainer, so it goes to the log.
+        log::warn!("agg-gui-wgpu: {label} adapter request failed: {e}");
+        adapter::adapter_request_error(force_fallback_adapter)
+    })?;
 
     let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(
         label,
@@ -328,6 +367,7 @@ pub(crate) fn device_descriptor<'a>(
 pub struct Gpu {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
+    adapter_info: wgpu::AdapterInfo,
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
@@ -373,8 +413,9 @@ impl Gpu {
         // that never returns leaks them there instead of the caller waiting.
         let label = config.label;
         let optional_features = config.optional_features;
+        let force_fallback = config.force_fallback_adapter;
         let built = create_within_budget(
-            move || request_device(instance, surface, label, optional_features),
+            move || request_device(instance, surface, label, optional_features, force_fallback),
             &format!("{label} device"),
             config.startup_budget,
             BACKGROUND_THREAD_AVAILABLE,
@@ -385,6 +426,12 @@ impl Gpu {
                 budget: config.startup_budget,
             });
         };
+
+        let adapter_info = adapter.get_info();
+        log::info!(
+            "agg-gui-wgpu: {label} renders on {}",
+            AdapterSummary::from_info(&adapter_info)
+        );
 
         let caps = surface.get_capabilities(&adapter);
         let surface_format = pick_surface_format(&caps.formats)?;
@@ -444,6 +491,7 @@ impl Gpu {
         Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
+            adapter_info,
             surface,
             surface_format,
             config: surface_config,
@@ -476,6 +524,17 @@ impl Gpu {
 
     pub fn queue(&self) -> &Arc<wgpu::Queue> {
         &self.queue
+    }
+
+    /// Everything wgpu reports about the adapter this device runs on.
+    pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
+        &self.adapter_info
+    }
+
+    /// Which adapter this device runs on — name, backend, and whether it is
+    /// the software fallback — for a host to report.
+    pub fn adapter(&self) -> AdapterSummary {
+        AdapterSummary::from_info(&self.adapter_info)
     }
 
     pub fn surface(&self) -> &wgpu::Surface<'static> {

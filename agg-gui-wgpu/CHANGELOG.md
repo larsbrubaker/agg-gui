@@ -10,6 +10,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Software rendering on request (native only), agg-sharp's
+  `UseSoftwareAdapter`: `GpuConfig::force_fallback_adapter` /
+  `with_force_fallback_adapter` makes `Gpu::new` demand wgpu's fallback
+  adapter (WARP on Windows, lavapipe/llvmpipe on Linux; macOS has none) and
+  run the same shaders on it, inside the same start-up budget. With no
+  fallback adapter it returns `GpuInitError::NoFallbackAdapter`, whose text is
+  written for the user. `HeadlessGpu::shared_with(force_fallback_adapter)`
+  takes the same option (`HeadlessError::NoFallbackAdapter` when the platform
+  has none). `Gpu::adapter` and `HeadlessGpu::adapter` report the adapter
+  chosen as an `AdapterSummary` (name, backend, `is_fallback`), and
+  `Gpu::adapter_info` gives wgpu's full `AdapterInfo`; `Gpu::new` logs it at
+  `info`.
+
 - `headless` (native only): paint a whole widget tree on the GPU with no
   window and read it back. `HeadlessGpu::shared()` returns one device and
   queue for the process, requested with `Gpu::new`'s backends, features,

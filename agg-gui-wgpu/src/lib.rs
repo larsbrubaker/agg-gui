@@ -61,8 +61,8 @@
 pub mod gpu;
 #[cfg(not(target_arch = "wasm32"))]
 pub use gpu::{
-    clamp_surface_size, surface_acquire_action, CopySrc, FrameAcquire, Gpu, GpuConfig,
-    GpuInitError, RetryWake, SurfaceAcquire, SurfaceError,
+    clamp_surface_size, is_fallback_adapter, surface_acquire_action, AdapterSummary, CopySrc,
+    FrameAcquire, Gpu, GpuConfig, GpuInitError, RetryWake, SurfaceAcquire, SurfaceError,
 };
 /// Wall-clock budgets around building a device at start-up and draining the
 /// GPU at close (agg-sharp `GpuStartup` / `GpuTeardown`).

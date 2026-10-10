@@ -5,6 +5,9 @@
 //! - [`HeadlessGpu::shared`] — one device and queue for the whole process,
 //!   requested the way [`crate::Gpu::new`] requests a window's (same backends,
 //!   features and limits, same start-up budget), but with no surface.
+//!   [`HeadlessGpu::shared_with`] takes the window's
+//!   [`crate::GpuConfig::force_fallback_adapter`] option, so a harness can
+//!   paint on wgpu's software adapter where the platform has one.
 //! - [`HeadlessTarget`] — an offscreen texture of a given device-pixel size in
 //!   [`HEADLESS_FORMAT`], with RGBA8 read-back ([`HeadlessTarget::read_rgba`],
 //!   top row first, unpadded) and an `agg_gui::Framebuffer` copy (bottom row
@@ -45,6 +48,10 @@ pub enum HeadlessError {
     /// No adapter on the primary backends (Vulkan, Metal, DX12): a machine
     /// with no GPU and no software Vulkan driver. Carries wgpu's text.
     NoAdapter(String),
+    /// The software (fallback) adapter was demanded and the platform has
+    /// none — always on macOS, on Linux without lavapipe. Carries wgpu's
+    /// text. A caller skips, as on [`Self::NoAdapter`].
+    NoFallbackAdapter(String),
     /// The adapter refused the device request. Carries wgpu's text.
     RequestDevice(String),
     /// The adapter or device request did not return within the start-up
@@ -67,6 +74,10 @@ impl std::fmt::Display for HeadlessError {
             Self::NoAdapter(e) => write!(
                 f,
                 "no wgpu adapter for headless rendering (Vulkan, Metal or DX12): {e}"
+            ),
+            Self::NoFallbackAdapter(e) => write!(
+                f,
+                "no software (fallback) wgpu adapter for headless rendering on this platform: {e}"
             ),
             Self::RequestDevice(e) => write!(f, "could not request a headless wgpu device: {e}"),
             Self::StartupTimedOut { budget } => write!(
@@ -125,9 +136,28 @@ impl HeadlessGpu {
     /// fails a test suite is the caller's policy. agg-gui's own GPU tests skip
     /// (pass trivially) on [`HeadlessError::NoAdapter`].
     pub fn shared() -> Result<&'static HeadlessGpu, HeadlessError> {
-        static SHARED: OnceLock<Result<HeadlessGpu, HeadlessError>> = OnceLock::new();
-        SHARED
-            .get_or_init(create_shared)
+        Self::shared_with(false)
+    }
+
+    /// [`Self::shared`], or with `force_fallback_adapter` the process-wide
+    /// device on wgpu's software (fallback) adapter — the same option as
+    /// [`crate::GpuConfig::force_fallback_adapter`]. Each choice is created
+    /// once and never dropped, so a process that asks for both holds two
+    /// devices for its lifetime, never creating or destroying one per test
+    /// (see [`Self::shared`]). A platform with no fallback adapter returns
+    /// [`HeadlessError::NoFallbackAdapter`] every time.
+    pub fn shared_with(
+        force_fallback_adapter: bool,
+    ) -> Result<&'static HeadlessGpu, HeadlessError> {
+        static HARDWARE: OnceLock<Result<HeadlessGpu, HeadlessError>> = OnceLock::new();
+        static FALLBACK: OnceLock<Result<HeadlessGpu, HeadlessError>> = OnceLock::new();
+        let shared = if force_fallback_adapter {
+            &FALLBACK
+        } else {
+            &HARDWARE
+        };
+        shared
+            .get_or_init(|| create_shared(force_fallback_adapter))
             .as_ref()
             .map_err(Clone::clone)
     }
@@ -146,14 +176,20 @@ impl HeadlessGpu {
     pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
         &self.adapter_info
     }
+
+    /// Which adapter the device runs on — name, backend, and whether it is
+    /// the software fallback.
+    pub fn adapter(&self) -> crate::AdapterSummary {
+        crate::AdapterSummary::from_info(&self.adapter_info)
+    }
 }
 
 /// Build the shared device inside the start-up budget `Gpu::new` uses, so a
 /// hung driver fails the caller with [`HeadlessError::StartupTimedOut`]
 /// instead of hanging it.
-fn create_shared() -> Result<HeadlessGpu, HeadlessError> {
+fn create_shared(force_fallback_adapter: bool) -> Result<HeadlessGpu, HeadlessError> {
     create_within_budget(
-        request_headless_device,
+        move || request_headless_device(force_fallback_adapter),
         HEADLESS_LABEL,
         GPU_STARTUP_BUDGET,
         BACKGROUND_THREAD_AVAILABLE,
@@ -166,16 +202,20 @@ fn create_shared() -> Result<HeadlessGpu, HeadlessError> {
 
 /// The adapter and device requests of [`create_shared`]: `Gpu::new`'s, with
 /// no surface to be compatible with.
-fn request_headless_device() -> Result<HeadlessGpu, HeadlessError> {
+fn request_headless_device(force_fallback_adapter: bool) -> Result<HeadlessGpu, HeadlessError> {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = wgpu::Backends::PRIMARY;
     let instance = wgpu::Instance::new(desc);
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    }))
-    .map_err(|e| HeadlessError::NoAdapter(e.to_string()))?;
+    let adapter = pollster::block_on(
+        instance.request_adapter(&crate::gpu::adapter_options(force_fallback_adapter, None)),
+    )
+    .map_err(|e| {
+        if force_fallback_adapter {
+            HeadlessError::NoFallbackAdapter(e.to_string())
+        } else {
+            HeadlessError::NoAdapter(e.to_string())
+        }
+    })?;
     let descriptor =
         crate::gpu::device_descriptor(HEADLESS_LABEL, wgpu::Features::empty(), &adapter);
     let (device, queue) = pollster::block_on(adapter.request_device(&descriptor))

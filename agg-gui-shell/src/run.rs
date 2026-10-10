@@ -81,6 +81,7 @@ where
     let gpu_config = GpuConfig::new(config.device_label)
         .with_present_mode(config.present_mode)
         .with_optional_features(config.optional_features)
+        .with_force_fallback_adapter(config.force_fallback_adapter)
         // A capture run that silently produced nothing would be worse than a
         // hard failure, so a configured screenshot *requires* read-back.
         .with_copy_src(if config.screenshot.is_some() {
