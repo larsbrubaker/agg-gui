@@ -18,10 +18,10 @@
 //! (Vec<f32>, Vec<u32>)   ready for glBufferData
 //! ```
 //!
-//! Anti-aliased edge expansion (for strokes) follows the approach in
-//! `AARenderTesselator.cs`: each boundary edge is expanded by 1 px outward and
-//! a coverage ramp (0 → alpha) is applied across the expansion quad. For now
-//! we implement non-AA fill tessellation; AA strokes are planned as Phase D ext.
+//! Anti-aliased fills and strokes ([`tessellate_path_aa`], [`expand_aa_halo`];
+//! agg-sharp `HaloAaTesselator`): the interior triangles stay opaque and each
+//! boundary edge gets an outward quad whose coverage ramps from the edge to
+//! zero [`AA_HALO_WIDTH`] pixels out.
 
 use crate::draw_ctx::FillRule;
 use agg_rust::basics::{is_end_poly, is_move_to, is_stop, VertexSource};
@@ -302,24 +302,6 @@ pub fn tessellate_path<VS: VertexSource>(path: &mut VS) -> Option<(Vec<f32>, Vec
 // Analytic edge AA via tess2 edge flags
 // ---------------------------------------------------------------------------
 
-/// Tessellate `path` and produce **`(x, y, alpha)` vertices + triangle
-/// indices** for analytic edge-AA rendering.
-///
-/// For every triangle-vertex tess2 emits, the matching
-/// [`edge_flags`](tess2_rust::Tessellator::edge_flags) entry tells us
-/// whether the edge starting at that vertex (going CCW around the same
-/// triangle) is an **original polygon boundary edge**.  For each such
-/// boundary edge we emit a 1-pixel-wide halo quad extending OUTWARD:
-///   - inner vertices (on the polygon edge): alpha = 1.0
-///   - outer vertices (one pixel outside):   alpha = 0.0
-/// The GPU linearly interpolates alpha across the halo, giving a clean
-/// analytic edge-coverage ramp at the silhouette — no hardware MSAA needed.
-///
-/// This mirrors the MatterCAD agg-sharp `AARenderTesselator` strategy, with
-/// a shader-side alpha attribute instead of a texture-coord trick.
-///
-/// `halo_px` is the halo strip width in logical pixels; `1.0` is the
-/// convention (gives one pixel of alpha falloff outward from the boundary).
 /// Cached result of tessellating an AGG path **once** at load time.
 ///
 /// Callers who want to rotate / scale / skew the same geometry across
@@ -354,22 +336,50 @@ pub struct CachedTess {
 /// Returns `None` if the path yielded no usable triangles (empty path or
 /// a degenerate shape tess2 can't handle).
 pub fn tessellate_interior<VS: VertexSource>(path: &mut VS) -> Option<CachedTess> {
-    let contours = agg_path_to_contours(path);
-    try_tessellate(&contours, WindingRule::Odd, "tessellate_interior", |tess| {
-        Some(CachedTess {
-            vertices: tess.vertices().iter().map(|&v| v as f32).collect(),
-            indices: tess.elements().to_vec(),
-            edge_flags: tess.edge_flags().to_vec(),
-        })
-    })
+    tessellate_interior_with_rule(path, FillRule::EvenOdd)
 }
+
+/// [`tessellate_interior`] under an explicit fill rule — agg-sharp's
+/// `CachedTesselator` with its `WindingRule` set: the interior triangles
+/// (`VerticesCache` / `IndicesCache`) a halo mesh is built from.
+pub fn tessellate_interior_with_rule<VS: VertexSource>(
+    path: &mut VS,
+    fill_rule: FillRule,
+) -> Option<CachedTess> {
+    let contours = agg_path_to_contours(path);
+    try_tessellate(
+        &contours,
+        to_tess_winding_rule(fill_rule),
+        "tessellate_interior",
+        |tess| {
+            Some(CachedTess {
+                vertices: tess.vertices().iter().map(|&v| v as f32).collect(),
+                indices: tess.elements().to_vec(),
+                edge_flags: tess.edge_flags().to_vec(),
+            })
+        },
+    )
+}
+
+/// How far outside the outline the halo's coverage ramp reaches, in screen
+/// pixels — agg-sharp `HaloAaTesselator.HaloWidth`.
+///
+/// The ramp falls one coverage level per pixel, so the edge itself carries
+/// coverage `min(1, halo)`. At half a pixel, a pixel whose centre is `d`
+/// outside the edge gets `0.5 - d`: an edge on a pixel boundary leaves the
+/// outside pixel untouched and an edge through a pixel centre half covers it,
+/// as software AGG's area coverage does. A ramp from 1 at the edge to 0 a
+/// whole pixel out half covered the pixel outside every aligned edge and drew
+/// each shape about a pixel fatter than software.
+pub const AA_HALO_WIDTH: f32 = 0.5;
 
 /// Given a pre-computed `CachedTess` whose vertices have already been
 /// transformed into screen space, emit `(x, y, alpha)` vertices + triangle
-/// indices for the halo-AA solid pipeline.  Interior triangles get
-/// alpha = 1.0 on every vertex; every boundary edge additionally spawns a
-/// `halo_px`-wide outward quad with the outer pair at alpha = 0.0, giving
-/// analytic 1-pixel edge coverage.
+/// indices for the halo-AA solid pipeline (agg-sharp
+/// `HaloAaTesselator.BuildHaloMesh`).  Interior vertices come first, one per
+/// `cached` vertex, with alpha = 1.0; every boundary edge then adds four: the
+/// edge's ends at alpha `min(1, halo_px)` and the ends pushed `halo_px`
+/// outward at alpha = 0.0.
 ///
 /// The outward normal is taken in screen space (`(dy, -dx)` of each edge
 /// direction, Y-up CCW → right = outside), so the halo is always exactly
@@ -394,6 +404,8 @@ pub fn expand_aa_halo(
     }
     out_indices.extend_from_slice(&cached.indices);
 
+    // The ramp falls one coverage level per pixel (see `AA_HALO_WIDTH`).
+    let edge_coverage = halo_px.min(1.0);
     let n_tris = n_indices / 3;
     for t in 0..n_tris {
         let ia = cached.indices[t * 3] as usize;
@@ -425,9 +437,10 @@ pub fn expand_aa_halo(
             if len < 1e-6 {
                 continue;
             }
-            // Right-hand perpendicular, flipped if it points into the
-            // triangle (toward `c`).  See `tessellate_path_aa` for the
-            // full explanation.
+            // Right-hand perpendicular, flipped if it points toward the
+            // triangle's third vertex `c`.  A winding assumption would not
+            // do: tess2 emits CW triangles for CW input and inside
+            // self-intersections, and their halos would point inward.
             let mut nx = dy / len * halo_px;
             let mut ny = -dx / len * halo_px;
             let dot_c = nx * (c[0] - a[0]) + ny * (c[1] - a[1]);
@@ -436,8 +449,8 @@ pub fn expand_aa_halo(
                 ny = -ny;
             }
             let base = out_verts.len() as u32;
-            out_verts.push([a[0], a[1], 1.0]);
-            out_verts.push([b[0], b[1], 1.0]);
+            out_verts.push([a[0], a[1], edge_coverage]);
+            out_verts.push([b[0], b[1], edge_coverage]);
             out_verts.push([a[0] + nx, a[1] + ny, 0.0]);
             out_verts.push([b[0] + nx, b[1] + ny, 0.0]);
             out_indices.extend_from_slice(&[
@@ -454,123 +467,25 @@ pub fn expand_aa_halo(
     Some((out_verts, out_indices))
 }
 
+/// Tessellate `path` and produce **`(x, y, alpha)` vertices + triangle
+/// indices** for analytic edge-AA rendering: [`tessellate_interior_with_rule`]
+/// followed by [`expand_aa_halo`] (agg-sharp `HaloAaTesselator`, which ported
+/// this function and then corrected its ramp; see [`AA_HALO_WIDTH`]).
+///
+/// For every triangle-vertex tess2 emits, the matching
+/// [`edge_flags`](tess2_rust::Tessellator::edge_flags) entry tells us
+/// whether the edge starting at that vertex (going CCW around the same
+/// triangle) is an **original polygon boundary edge**.  For each such
+/// boundary edge a `halo_px`-wide quad extends OUTWARD, so the interior is
+/// always exactly opaque and the tessellation's choice of diagonals cannot
+/// change a pixel's coverage.
 pub fn tessellate_path_aa<VS: VertexSource>(
     path: &mut VS,
     halo_px: f32,
     fill_rule: FillRule,
 ) -> Option<(Vec<[f32; 3]>, Vec<u32>)> {
-    let contours = agg_path_to_contours(path);
-    if contours.is_empty() {
-        return None;
-    }
-
-    struct TessOut {
-        verts: Vec<f32>,
-        indices: Vec<u32>,
-        flags: Vec<u8>,
-        vcount: usize,
-    }
-    let out = try_tessellate(
-        &contours,
-        to_tess_winding_rule(fill_rule),
-        "tessellate_path_aa",
-        |tess| {
-            Some(TessOut {
-                verts: tess.vertices().iter().map(|&v| v as f32).collect(),
-                indices: tess.elements().to_vec(),
-                flags: tess.edge_flags().to_vec(),
-                vcount: tess.vertex_count(),
-            })
-        },
-    )?;
-
-    let in_verts: &[f32] = &out.verts; // flat [x, y, x, y, …]
-    let in_indices: &[u32] = &out.indices; // [i0, i1, i2, …]
-    let edge_flags: &[u8] = &out.flags; // parallel to in_indices
-
-    let n_interior = out.vcount;
-    let n_indices = in_indices.len();
-    if n_indices == 0 {
-        return None;
-    }
-
-    let mut out_verts: Vec<[f32; 3]> = Vec::with_capacity(n_interior + n_indices * 4);
-    let mut out_indices: Vec<u32> = Vec::with_capacity(n_indices + n_indices * 2);
-
-    // Interior triangles — alpha 1.0 everywhere.
-    for i in 0..n_interior {
-        out_verts.push([in_verts[i * 2], in_verts[i * 2 + 1], 1.0]);
-    }
-    out_indices.extend_from_slice(in_indices);
-
-    // Halo strips — one quad per boundary edge, always extruded AWAY from
-    // the triangle's third vertex.
-    //
-    // Mirrors MatterCAD agg-sharp `AARenderTesselator.Draw1EdgeTriangle`:
-    // compute the right-hand perpendicular of the edge, then flip its sign
-    // if it points toward the third (non-edge) vertex.  A single winding
-    // assumption isn't reliable — tess2 can emit CW triangles for CW-input
-    // polygons or for internal regions of self-intersecting inputs, and
-    // those would have gotten their halo pushed INWARD (invisible), which
-    // is what produced the jagged lion silhouette edges.
-    let n_tris = n_indices / 3;
-    for t in 0..n_tris {
-        let ia = in_indices[t * 3] as usize;
-        let ib = in_indices[t * 3 + 1] as usize;
-        let ic = in_indices[t * 3 + 2] as usize;
-        if ia >= n_interior || ib >= n_interior || ic >= n_interior {
-            continue;
-        }
-        let p = [
-            [in_verts[ia * 2], in_verts[ia * 2 + 1]],
-            [in_verts[ib * 2], in_verts[ib * 2 + 1]],
-            [in_verts[ic * 2], in_verts[ic * 2 + 1]],
-        ];
-        let flag = [
-            edge_flags.get(t * 3).copied().unwrap_or(0),
-            edge_flags.get(t * 3 + 1).copied().unwrap_or(0),
-            edge_flags.get(t * 3 + 2).copied().unwrap_or(0),
-        ];
-        for k in 0..3 {
-            if flag[k] == 0 {
-                continue;
-            }
-            let a = p[k];
-            let b = p[(k + 1) % 3];
-            let c = p[(k + 2) % 3]; // third vertex — the "nonAaPoint"
-            let dx = b[0] - a[0];
-            let dy = b[1] - a[1];
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 1e-6 {
-                continue;
-            }
-            // Right-hand perpendicular of (dx, dy).  Sign is flipped below
-            // if it ends up pointing toward `c` (i.e. into the triangle).
-            let mut nx = dy / len * halo_px;
-            let mut ny = -dx / len * halo_px;
-            let dot_c = nx * (c[0] - a[0]) + ny * (c[1] - a[1]);
-            if dot_c > 0.0 {
-                nx = -nx;
-                ny = -ny;
-            }
-
-            let base = out_verts.len() as u32;
-            out_verts.push([a[0], a[1], 1.0]); // 0: inner a
-            out_verts.push([b[0], b[1], 1.0]); // 1: inner b
-            out_verts.push([a[0] + nx, a[1] + ny, 0.0]); // 2: outer a
-            out_verts.push([b[0] + nx, b[1] + ny, 0.0]); // 3: outer b
-            out_indices.extend_from_slice(&[
-                base,
-                base + 1,
-                base + 2,
-                base + 1,
-                base + 3,
-                base + 2,
-            ]);
-        }
-    }
-
-    Some((out_verts, out_indices))
+    let cached = tessellate_interior_with_rule(path, fill_rule)?;
+    expand_aa_halo(&cached.vertices, &cached, halo_px)
 }
 
 pub(crate) fn to_tess_winding_rule(fill_rule: FillRule) -> WindingRule {

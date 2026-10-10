@@ -8,6 +8,8 @@
 //!   [`HeadlessGpu::shared_with`] takes the window's
 //!   [`crate::GpuConfig::force_fallback_adapter`] option, so a harness can
 //!   paint on wgpu's software adapter where the platform has one.
+//!   [`HeadlessGpu::create`] builds a device the caller owns, for the rare
+//!   test binary that has to end its device's life (device-loss recovery).
 //! - [`HeadlessTarget`] — an offscreen texture of a given device-pixel size in
 //!   [`HEADLESS_FORMAT`], with RGBA8 read-back ([`HeadlessTarget::read_rgba`],
 //!   top row first, unpadded) and an `agg_gui::Framebuffer` copy (bottom row
@@ -103,6 +105,8 @@ pub struct HeadlessGpu {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     adapter_info: wgpu::AdapterInfo,
+    adapter_limits: wgpu::Limits,
+    device_lost: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl HeadlessGpu {
@@ -162,6 +166,19 @@ impl HeadlessGpu {
             .map_err(Clone::clone)
     }
 
+    /// A headless device of the caller's own, requested exactly as
+    /// [`Self::shared`]'s (same backends, features, limits and start-up
+    /// budget) but not shared: dropping it releases it, and destroying it
+    /// affects no one else.
+    ///
+    /// For a test binary that has to end its device's life — destroy it to
+    /// simulate a loss and rebuild, as a shell recovers a lost window
+    /// device. Everything else uses [`Self::shared`]: see its doc for why a
+    /// device per test is unsafe on some drivers.
+    pub fn create() -> Result<HeadlessGpu, HeadlessError> {
+        create_shared(false)
+    }
+
     /// The device every target and frame of this GPU allocates on.
     pub fn device(&self) -> &Arc<wgpu::Device> {
         &self.device
@@ -181,6 +198,18 @@ impl HeadlessGpu {
     /// the software fallback.
     pub fn adapter(&self) -> crate::AdapterSummary {
         crate::AdapterSummary::from_info(&self.adapter_info)
+    }
+
+    /// The adapter's own limits, which the device's request raised its
+    /// texture size limit to (see `device_descriptor`).
+    pub fn adapter_limits(&self) -> &wgpu::Limits {
+        &self.adapter_limits
+    }
+
+    /// Has this device been lost (or destroyed) since it was created? The
+    /// same flag as [`crate::Gpu::device_lost`].
+    pub fn device_lost(&self) -> bool {
+        self.device_lost.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -220,10 +249,13 @@ fn request_headless_device(force_fallback_adapter: bool) -> Result<HeadlessGpu, 
         crate::gpu::device_descriptor(HEADLESS_LABEL, wgpu::Features::empty(), &adapter);
     let (device, queue) = pollster::block_on(adapter.request_device(&descriptor))
         .map_err(|e| HeadlessError::RequestDevice(e.to_string()))?;
+    let device_lost = crate::gpu::watch_device_loss(&device);
     Ok(HeadlessGpu {
         device: Arc::new(device),
         queue: Arc::new(queue),
         adapter_info: adapter.get_info(),
+        adapter_limits: adapter.limits(),
+        device_lost,
     })
 }
 

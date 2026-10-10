@@ -38,6 +38,7 @@ mod acquire;
 pub use acquire::{FrameAcquire, RetryWake, SurfaceError};
 #[path = "gpu_adapter.rs"]
 mod adapter;
+pub(crate) use acquire::watch_device_loss;
 pub(crate) use adapter::adapter_options;
 pub use adapter::{is_fallback_adapter, AdapterSummary};
 
@@ -454,19 +455,8 @@ impl Gpu {
             }
         }
 
-        // Device loss (TDR, driver update, GPU reset, RDP session change) is
-        // reported out-of-band: nothing in the per-frame API returns an error,
-        // so a shell that does not watch this flag silently renders nothing
-        // forever. `Destroyed` is our own teardown, not a fault.
-        let device_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        {
-            let flag = Arc::clone(&device_lost);
-            device.set_device_lost_callback(move |reason, _message| {
-                if reason != wgpu::DeviceLostReason::Destroyed {
-                    flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-            });
-        }
+        // Device loss is reported out-of-band; see `watch_device_loss`.
+        let device_lost = acquire::watch_device_loss(&device);
 
         let (cfg_w, cfg_h) =
             clamp_surface_size(size.0, size.1, device.limits().max_texture_dimension_2d);
@@ -504,7 +494,7 @@ impl Gpu {
     /// Has this device been lost since it was created?
     ///
     /// Set from wgpu's device-lost callback (TDR / driver reset / GPU removal
-    /// / RDP session change); our own `Device::destroy` is not counted. A
+    /// / RDP session change, or `Device::destroy`). A
     /// lost device cannot be revived — every resource created from it is dead
     /// too — so the only recovery is to build a fresh [`Gpu`] for the same
     /// window, rebuild the renderer on the new device, and drop any GPU

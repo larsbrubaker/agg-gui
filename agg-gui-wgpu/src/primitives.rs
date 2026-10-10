@@ -13,7 +13,7 @@
 use super::*;
 
 use agg_gui::draw_ctx::FillRule;
-use agg_gui::gl_renderer::{tessellate_path_aa, tessellate_path_aa_texture};
+use agg_gui::gl_renderer::{tessellate_path_aa, tessellate_path_aa_texture, AA_HALO_WIDTH};
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
@@ -45,7 +45,7 @@ impl WgpuGfxCtx {
             let tess = {
                 let mut curves = ConvCurve::new(&mut self.path);
                 let mut transformed = ConvTransform::new(&mut curves, transform);
-                tessellate_path_aa(&mut transformed, 1.0, fill_rule)
+                tessellate_path_aa(&mut transformed, AA_HALO_WIDTH, fill_rule)
             };
             if let Some((verts, idx)) = tess {
                 self.push_fill_tess(verts, idx, &transform);
@@ -107,7 +107,7 @@ impl WgpuGfxCtx {
                     stroke.set_line_cap(cap);
                     stroke.set_miter_limit(miter_limit);
                     let mut transformed = ConvTransform::new(&mut stroke, transform);
-                    tessellate_path_aa(&mut transformed, 1.0, FillRule::NonZero)
+                    tessellate_path_aa(&mut transformed, AA_HALO_WIDTH, FillRule::NonZero)
                 } else {
                     let mut dash = ConvDash::new(&mut curves);
                     configure_dashes(&mut dash, &dashes, dash_offset);
@@ -117,7 +117,7 @@ impl WgpuGfxCtx {
                     stroke.set_line_cap(cap);
                     stroke.set_miter_limit(miter_limit);
                     let mut transformed = ConvTransform::new(&mut stroke, transform);
-                    tessellate_path_aa(&mut transformed, 1.0, FillRule::NonZero)
+                    tessellate_path_aa(&mut transformed, AA_HALO_WIDTH, FillRule::NonZero)
                 }
             };
             if let Some((verts, idx)) = tess {
