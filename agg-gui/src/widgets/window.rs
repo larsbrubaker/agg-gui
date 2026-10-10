@@ -21,6 +21,10 @@
 //! - **Maximize** — double-click the title bar (or click the maximize button)
 //!   to toggle between maximised and restored size.
 //! - **Close** — click the × button; syncs with an optional shared `visible_cell`.
+//! - **Title-bar buttons** — [`Window::add_title_bar_button`] puts caller
+//!   widgets in the title bar, left of the maximize / close buttons.
+//! - **Opacity** — [`Window::set_backbuffer_opacity`] composites the whole
+//!   window (chrome and content) over what is behind it at that alpha.
 //!
 //! # ⚠ Backbuffer caching gotcha — read before adding a custom Window
 //!
@@ -291,6 +295,17 @@ pub struct Window {
     /// one frame stale relative to the drag; the host slot rarely moves while
     /// the user drags the dialog, so this is acceptable.
     world_offset: Cell<(f64, f64)>,
+
+    /// Whole-window opacity applied when the window's buffered pixels are
+    /// composited onto its parent (agg-sharp `GuiWidget.BackbufferOpacity`).
+    /// `1.0` is opaque. See `window/opacity.rs`.
+    backbuffer_opacity: f64,
+    /// Title-bar child path that consumed the current press, so the release
+    /// (which the App delivers to the window) reaches it and can click.
+    title_bar_capture: Option<Vec<usize>>,
+    /// Index (into the extra title-bar buttons) of the one under the pointer,
+    /// whose tooltip the window answers with. See `window/title_buttons.rs`.
+    title_button_hover: Option<usize>,
 }
 
 impl Window {
@@ -373,6 +388,9 @@ impl Window {
             live_content: false,
             snap_id: crate::snap::next_snap_id(),
             world_offset: Cell::new((0.0, 0.0)),
+            backbuffer_opacity: 1.0,
+            title_bar_capture: None,
+            title_button_hover: None,
         }
     }
 
@@ -767,8 +785,10 @@ mod builder;
 pub mod chrome;
 mod close;
 mod events;
+mod opacity;
 mod paint;
 mod snap_glue;
+mod title_buttons;
 mod widget_impl;
 
 pub use close::{ClickAwayAction, CloseReason};

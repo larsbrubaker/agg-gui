@@ -165,7 +165,9 @@ impl Widget for Window {
         BackbufferSpec {
             kind: BackbufferKind::GlFbo,
             cached: true,
-            alpha,
+            // The whole-window opacity rides on the retained layer's
+            // composite alpha (see `opacity.rs`).
+            alpha: alpha * self.backbuffer_opacity,
             outsets: Insets {
                 left: outset_left,
                 right: outset_right,
@@ -178,6 +180,18 @@ impl Widget for Window {
 
     fn backbuffer_state_mut(&mut self) -> Option<&mut BackbufferState> {
         Some(&mut self.backbuffer)
+    }
+
+    /// Applies [`Window::backbuffer_opacity`] where the retained backbuffer
+    /// path is not taken (software ctx, or `with_gl_backbuffer(false)`).
+    fn compositing_layer(&mut self) -> Option<crate::widget::CompositingLayer> {
+        self.opacity_layer()
+    }
+
+    /// The hovered extra title-bar button's tip, else the window's own.
+    fn tooltip_text(&self) -> Option<&str> {
+        self.hovered_title_button_tip()
+            .or(self.base.tooltip.as_deref())
     }
 
     /// Clip child painting to the content area (below the title bar).

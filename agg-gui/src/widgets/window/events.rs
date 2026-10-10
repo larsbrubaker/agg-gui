@@ -105,6 +105,9 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
             let was_dir = window.hover_dir;
             window.close_hovered = window.in_close_button(*pos);
             window.maximize_hovered = window.in_maximize_button(*pos);
+            if window.drag_mode == DragMode::None {
+                window.forward_title_button_move(*pos);
+            }
 
             match window.drag_mode {
                 DragMode::Move => {
@@ -228,6 +231,9 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
                             tb_local,
                         );
                         if result.is_consumed() {
+                            // The release comes back to the window; hand
+                            // it to this child so a button can click.
+                            window.capture_title_bar_press(path);
                             // Chevron flag is drained in `layout`,
                             // but we also want this frame to redraw
                             // before that.
@@ -291,8 +297,12 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
 
         Event::MouseUp {
             button: MouseButton::Left | MouseButton::Middle,
+            pos,
             ..
         } => {
+            if window.release_title_bar_capture(event, Some(*pos)) {
+                return EventResult::Consumed;
+            }
             let was_dragging = window.drag_mode != DragMode::None;
             window.drag_mode = DragMode::None;
             if was_dragging {
@@ -311,6 +321,9 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
         // mid-drag): a title-bar move or edge resize ends where it was, as
         // if released there, and its snap guides clear.
         Event::MouseCaptureLost => {
+            if window.release_title_bar_capture(event, None) {
+                return EventResult::Consumed;
+            }
             if window.drag_mode == DragMode::None {
                 return EventResult::Ignored;
             }

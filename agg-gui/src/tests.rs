@@ -124,4 +124,5 @@ mod widgets;
 mod window_layout;
 mod window_maximize;
 mod window_snap_coords;
+mod window_title_buttons;
 mod windowing;

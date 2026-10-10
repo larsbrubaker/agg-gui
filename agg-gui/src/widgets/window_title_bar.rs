@@ -15,6 +15,16 @@
 //! resulting display state (drag-fill variant, button-hover flags, etc.)
 //! into a shared `TitleBarView` every frame before `paint_subtree` descends
 //! into this widget.
+//!
+//! # Extra title-bar buttons
+//!
+//! `Window::add_title_bar_button` (agg-sharp `WindowWidget.AddTitleBarButton`)
+//! appends caller widgets after the chevron and label (`children[2..]`). They
+//! are laid out right to left from just left of the maximize button, so the
+//! close and maximize buttons never move when a window adds a feature, and a
+//! later-added button sits nearer the close button (agg-sharp inserts each one
+//! just before its close button). `Window` routes pointer events to them (see
+//! `window/title_buttons.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -38,6 +48,10 @@ const CLOSE_R: f64 = 6.0;
 const CLOSE_PAD: f64 = 10.0;
 const MAX_PAD: f64 = CLOSE_PAD + CLOSE_R * 2.0 + 4.0;
 const CORNER_R: f64 = 8.0;
+/// Gap between the maximize button's circle and the nearest extra button.
+const EXTRA_GAP: f64 = 4.0;
+/// Index of the first extra button in `children` (after chevron + label).
+pub(crate) const FIRST_EXTRA: usize = 2;
 
 /// Display-state snapshot `Window` hands to the title bar each frame.
 pub(crate) struct TitleBarView {
@@ -138,6 +152,43 @@ impl WindowTitleBar {
         self.collapsed.set(collapsed);
     }
 
+    /// Append an extra title-bar button (see the module docs for placement).
+    pub(crate) fn add_button(&mut self, button: Box<dyn Widget>) {
+        self.children.push(button);
+    }
+
+    /// The extra buttons, in the order they were added.
+    pub(crate) fn buttons(&self) -> &[Box<dyn Widget>] {
+        &self.children[FIRST_EXTRA..]
+    }
+
+    /// Mutable access to the extra buttons, in the order they were added.
+    pub(crate) fn buttons_mut(&mut self) -> &mut [Box<dyn Widget>] {
+        &mut self.children[FIRST_EXTRA..]
+    }
+
+    /// Lay the extra buttons out right to left from just left of the
+    /// maximize button, centred vertically. Returns the x of the leftmost
+    /// button's left margin edge (the right limit for the title label).
+    fn layout_buttons(&mut self, available: Size) -> f64 {
+        let mut right = available.width - MAX_PAD - CLOSE_R - EXTRA_GAP;
+        for button in self.children[FIRST_EXTRA..].iter_mut().rev() {
+            if !button.is_visible() {
+                continue;
+            }
+            let m = button.margin();
+            let s = button.layout(Size::new(available.width, available.height));
+            let bh = s.height.min(available.height);
+            // Floor, not round: rounding could push a button right into
+            // the one already placed beside it.
+            let x = (right - m.right - s.width).floor();
+            let y = ((available.height - bh) * 0.5).round();
+            button.set_bounds(Rect::new(x, y, s.width, bh));
+            right = x - m.left;
+        }
+        right
+    }
+
     pub fn set_title(&mut self, title: &str) {
         // children[1] is the label (children[0] is the chevron).
         self.children[1].set_label_text(title);
@@ -182,12 +233,19 @@ impl Widget for WindowTitleBar {
         let chev_y = (available.height - chev_size) * 0.5;
         self.children[0].set_bounds(Rect::new(chev_x, chev_y, chev_size, chev_size));
 
+        // Extra buttons first: they decide how much room the label gets.
+        let buttons_left = self.layout_buttons(available);
+
         // Title label — inset past the chevron, reserve right-side
         // room for the inline close / max buttons (Window paints them
-        // directly until they're migrated to child widgets).
-        let label = &mut self.children[1];
-        let s = label.layout(Size::new(available.width - 24.0 - 48.0, available.height));
+        // directly until they're migrated to child widgets) and any
+        // extra buttons left of them.
         let lx = 24.0;
+        let label_w = (available.width - lx - 48.0)
+            .min(buttons_left - lx)
+            .max(0.0);
+        let label = &mut self.children[1];
+        let s = label.layout(Size::new(label_w, available.height));
         let ly = (available.height - s.height) * 0.5;
         label.set_bounds(Rect::new(lx, ly, s.width, s.height));
         available
