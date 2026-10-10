@@ -257,6 +257,13 @@ impl ModalOverlay {
                 ctx.save();
                 ctx.translate(role_rect.x, role_rect.y);
                 paint_subtree(&mut self.role_combo, ctx);
+                // `role_combo` is not one of this overlay's children, so the
+                // `paint_global_overlays` walk never reaches it, and a
+                // `ComboBox` submits its open list only from
+                // `paint_global_overlay`. Forward it here, in the combo's own
+                // space; `paint_lifted_tree` drains combo popups after the
+                // global-overlay pass, so the list lands above the dialog.
+                self.role_combo.paint_global_overlay(ctx);
                 ctx.restore();
             }
             ModalLayer::Save => {

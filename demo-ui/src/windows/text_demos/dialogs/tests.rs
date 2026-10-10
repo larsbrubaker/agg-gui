@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod role_dropdown;
+
 fn test_font() -> Arc<Font> {
     const BYTES: &[u8] = include_bytes!("../../../../../demo/assets/CascadiaCode.ttf");
     Arc::new(Font::from_slice(BYTES).expect("parse CascadiaCode.ttf"))
