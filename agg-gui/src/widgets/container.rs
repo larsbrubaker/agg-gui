@@ -208,8 +208,13 @@ impl Widget for Container {
         ) -> f64 {
             // Stack children top-to-bottom (first child = visually highest).
             // In Y-up coordinates, "top" = higher Y values.
-            let start_cursor = height - pad_t;
-            let mut cursor_y = start_cursor;
+            let mut cursor_y = height - pad_t;
+            // Content height is summed from the slots, never derived as
+            // `start - cursor`: a parent measuring natural size (ScrollView)
+            // passes `f64::MAX / 2`, and at that magnitude subtracting a
+            // child's few-pixel height from the cursor is absorbed by
+            // floating-point rounding, which measured every child as 0 tall.
+            let mut consumed = 0.0;
 
             for child in children.iter_mut() {
                 // Margins are logical units; DPI is applied at the App
@@ -232,9 +237,10 @@ impl Widget for Container {
                 let child_y = cursor_y - desired.height;
                 child.set_bounds(Rect::new(pad_l + m.left, child_y, final_w, desired.height));
                 cursor_y = child_y - m.bottom;
+                consumed += m.top + desired.height + m.bottom;
             }
 
-            (start_cursor - cursor_y).max(0.0)
+            consumed.max(0.0)
         }
 
         let consumed_h = layout_children(

@@ -102,6 +102,7 @@ mod root_transform_layers;
 mod root_transform_paint_clip;
 mod row_overflow;
 mod scene_focus;
+mod scroll_fit_height;
 mod scroll_view;
 mod shell_input;
 mod stack_aligned;
