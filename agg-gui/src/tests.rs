@@ -61,6 +61,7 @@ mod focus;
 mod focus_blur;
 mod focus_replaced_subtree;
 mod hover_enter_leave;
+mod huge_offset_blit;
 mod image_icons;
 mod inspector_hover;
 mod inspector_tree;

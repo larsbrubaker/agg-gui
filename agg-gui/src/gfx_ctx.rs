@@ -781,13 +781,15 @@ impl<'a> GfxCtx<'a> {
     }
 }
 
+mod composite;
 mod draw_impl;
 mod layers;
 mod raster_clip;
 mod sampled;
 mod stroke;
 
-use draw_impl::{active_fb, composite_framebuffers};
+use composite::{blit_origin, composite_framebuffers};
+use draw_impl::active_fb;
 pub(crate) use draw_impl::{apply_clip, rasterize_fill, rasterize_stroke};
 pub(crate) use raster_clip::clip_rasterizer;
 #[cfg(test)]
