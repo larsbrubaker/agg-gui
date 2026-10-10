@@ -229,6 +229,16 @@ impl PopupMenuState {
                 button: MouseButton::Left,
                 ..
             } => self.handle_left_down(items, *pos, viewport),
+            // The user switched to another application: close, as a native
+            // menu does (agg-sharp's `PopupPlacement` / `PopupWidget` close on
+            // `SystemWindow.Deactivated`). Focus is not consulted — the host
+            // keeps it across an app switch. `Closed` lets the host run the
+            // same teardown as any other dismissal.
+            Event::WindowDeactivated => {
+                self.close();
+                crate::animation::request_draw();
+                (EventResult::Consumed, MenuResponse::Closed)
+            }
             // Any non-left press dismisses — the desktop convention.
             // Right-clicking with a menu open closes it instead of
             // leaving it hanging over whatever context menu that press

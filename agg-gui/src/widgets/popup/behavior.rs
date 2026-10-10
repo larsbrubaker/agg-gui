@@ -206,6 +206,22 @@ impl Popup {
         }
     }
 
+    /// Close because the window lost activation (the user switched to
+    /// another application), as agg-sharp's `PopupWidget` closes on
+    /// `SystemWindow.Deactivated`. An [`PopupCloseBehavior::IgnoreClicks`]
+    /// popup stays open, as C# keeps a popup whose anchor asks to
+    /// `AlwaysKeepOpen`: it is closed only on purpose. Hosts call this from
+    /// their [`Event::WindowDeactivated`](crate::event::Event::WindowDeactivated)
+    /// handler. Returns `true` if this call closed the popup.
+    pub fn on_window_deactivated(&mut self) -> bool {
+        if self.open && self.close_behavior != PopupCloseBehavior::IgnoreClicks {
+            self.open = false;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Apply the close behavior to a left mouse-down at `pos`.
     ///
     /// Returns the [`PopupClickOutcome`] so the host knows whether the popup
@@ -359,5 +375,21 @@ mod tests {
         // Plenty of room: the configured align is kept.
         p.set_anchor(Rect::new(100.0, 300.0, 40.0, 20.0));
         assert_eq!(p.effective_align(VIEWPORT), RectAlign::BOTTOM_START);
+    }
+
+    #[test]
+    fn window_deactivation_closes_unless_the_popup_ignores_clicks() {
+        for (behavior, closes) in [
+            (PopupCloseBehavior::CloseOnClick, true),
+            (PopupCloseBehavior::CloseOnClickOutside, true),
+            (PopupCloseBehavior::IgnoreClicks, false),
+        ] {
+            let mut p = popup(behavior);
+            p.open();
+            assert_eq!(p.on_window_deactivated(), closes, "{behavior:?}");
+            assert_eq!(p.is_open(), !closes, "{behavior:?}");
+            p.close();
+            assert!(!p.on_window_deactivated(), "a closed popup stays closed");
+        }
     }
 }

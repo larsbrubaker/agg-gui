@@ -238,6 +238,14 @@ impl ColorPicker {
                 crate::animation::request_draw();
                 Some(EventResult::Consumed)
             }
+            // Switching to another application closes the popup the way
+            // clicking away does, keeping the working colour (agg-sharp's
+            // `PopupWidget` closes on `SystemWindow.Deactivated`).
+            Event::WindowDeactivated if self.open => {
+                self.drag = Drag::None;
+                self.close_committing();
+                Some(EventResult::Consumed)
+            }
             Event::FocusLost if self.open => {
                 self.drag = Drag::None;
                 self.close_committing();

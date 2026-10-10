@@ -698,17 +698,29 @@ impl Widget for ComboBox {
             }
             Event::FocusLost => {
                 self.set_focused(false);
-                let was_open = self.open;
-                self.open = false;
-                self.hovered_item = None;
-                self.scrollbar.hovered_bar = false;
-                self.scrollbar.hovered_thumb = false;
+                self.close_list();
+                EventResult::Ignored
+            }
+            // Switching to another application closes the list, as
+            // agg-sharp's `DropDownList` menu closes on
+            // `SystemWindow.Deactivated`; focus stays.
+            Event::WindowDeactivated if self.open => {
+                self.close_list();
+                EventResult::Consumed
+            }
+            // The press ended without a release (the window lost activation
+            // mid-drag): a list scroll-bar or middle-button drag ends where
+            // it was.
+            Event::MouseCaptureLost => {
+                let was = self.scrollbar.dragging || self.middle_dragging;
                 self.scrollbar.dragging = false;
                 self.middle_dragging = false;
-                if was_open {
+                if was {
                     crate::animation::request_draw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
                 }
-                EventResult::Ignored
             }
             Event::MouseUp { button, .. } => {
                 if *button == MouseButton::Left && self.scrollbar.dragging {

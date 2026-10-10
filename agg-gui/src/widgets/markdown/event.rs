@@ -108,6 +108,33 @@ impl MarkdownView {
                 crate::animation::request_draw();
                 EventResult::Ignored
             }
+            // The image context menu closes when the window deactivates,
+            // as every agg-gui popup does.
+            Event::WindowDeactivated if self.context_menu.is_some() => {
+                self.context_menu = None;
+                crate::animation::request_draw();
+                EventResult::Consumed
+            }
+            // The press ended without a release (the window lost activation
+            // mid-drag): end a block scroll-bar drag or a selection drag
+            // where it was. The selection stays; no link activates, since
+            // the press was never released over it.
+            Event::MouseCaptureLost => {
+                let was =
+                    self.selecting_drag || self.block_scrolls.iter().any(|scroll| scroll.dragging);
+                for scroll in &mut self.block_scrolls {
+                    scroll.dragging = false;
+                }
+                self.selecting_drag = false;
+                self.selection_drag_start = None;
+                self.selection_dragged = false;
+                if was {
+                    crate::animation::request_draw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
             Event::FocusLost => {
                 self.focused = false;
                 self.selecting_drag = false;

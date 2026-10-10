@@ -448,6 +448,23 @@ impl Widget for ScrollView {
                 EventResult::Ignored
             }
 
+            // ── Capture lost ──────────────────────────────────────────────────
+            // The press ended without a release (the window lost activation
+            // mid-drag): a thumb or middle-button drag ends at the offset it
+            // reached, as if released there.
+            Event::MouseCaptureLost => {
+                let was = self.v.dragging || self.h.dragging || self.middle_dragging;
+                self.v.dragging = false;
+                self.h.dragging = false;
+                self.middle_dragging = false;
+                if was {
+                    crate::animation::request_draw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
             // ── Mouse up ──────────────────────────────────────────────────────
             Event::MouseUp { button, .. } => {
                 let was = self.v.dragging

@@ -350,6 +350,17 @@ impl Widget for PopupsDemo {
                     EventResult::Ignored
                 }
             }
+            // Switching to another application closes the popup (unless
+            // it ignores clicks), as agg-gui's menus do.
+            Event::WindowDeactivated => {
+                if self.popup.on_window_deactivated() {
+                    self.cfg.open_flag.set(false);
+                    agg_gui::animation::request_draw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,

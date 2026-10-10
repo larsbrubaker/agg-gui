@@ -400,6 +400,17 @@ impl Widget for Splitter {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // The press ended without a release (the window lost activation
+        // mid-drag): the drag ends where it was — the ratio already
+        // follows the pointer — instead of tracking the next hover.
+        if let Event::MouseCaptureLost = event {
+            return if std::mem::take(&mut self.dragging) {
+                crate::animation::request_draw();
+                EventResult::Consumed
+            } else {
+                EventResult::Ignored
+            };
+        }
         if self.vertical {
             let div = self.divider_width;
             let total = self.bounds.height;

@@ -252,7 +252,8 @@ pub enum Event {
     /// was (as on agg-sharp, where a text field stays focused across an app
     /// switch) and no [`Event::FocusLost`] is sent. A pointer capture does
     /// end — see [`Event::MouseCaptureLost`], which reaches the capture
-    /// holder before this event.
+    /// holder before this event. Open popups (menus, combo lists, the
+    /// colour picker's panel) close on it, as agg-sharp's do.
     WindowDeactivated,
     /// The widget holding pointer capture (the one that consumed the
     /// `MouseDown` of an in-progress press or drag) lost it **without** a

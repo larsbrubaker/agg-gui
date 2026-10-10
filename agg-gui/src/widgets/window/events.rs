@@ -307,6 +307,19 @@ pub(super) fn on_event(window: &mut Window, event: &Event) -> EventResult {
             }
         }
 
+        // The press ended without a release (the window lost activation
+        // mid-drag): a title-bar move or edge resize ends where it was, as
+        // if released there, and its snap guides clear.
+        Event::MouseCaptureLost => {
+            if window.drag_mode == DragMode::None {
+                return EventResult::Ignored;
+            }
+            window.drag_mode = DragMode::None;
+            crate::snap::clear_guides();
+            crate::animation::request_draw();
+            EventResult::Consumed
+        }
+
         // Escape closes a modal window (standard dialog convention),
         // running the same teardown as the × button so `on_close` fires.
         // Modal key routing bubbles Escape up to us when no inner field

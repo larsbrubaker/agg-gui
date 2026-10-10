@@ -500,6 +500,13 @@ impl Widget for TextArea {
                 self.selecting_drag = false;
                 EventResult::Consumed
             }
+            // The press ended without a release (the window lost activation
+            // mid-drag): a selection or scroll-bar drag ends where it was.
+            Event::MouseCaptureLost => {
+                self.scrollbar_end_drag();
+                self.selecting_drag = false;
+                EventResult::Consumed
+            }
             Event::MouseWheel { delta_y, .. } => {
                 if self.scroll_by_wheel(*delta_y) {
                     crate::animation::request_draw();

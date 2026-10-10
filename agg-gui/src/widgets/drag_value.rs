@@ -706,6 +706,25 @@ impl Widget for DragValue {
                 EventResult::Consumed
             }
 
+            // The press ended without a release (the window lost activation
+            // mid-drag). A drag ends at the value it reached (`on_change`
+            // already streamed it); a press that never became a drag does
+            // not enter edit mode, since it was never released as a click.
+            Event::MouseCaptureLost => {
+                let was = self.mouse_pressed || self.dragging;
+                let was_drag = self.dragging;
+                self.dragging = false;
+                self.mouse_pressed = false;
+                if was_drag {
+                    crate::animation::request_draw();
+                }
+                if was {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
             // ── Focus ─────────────────────────────────────────────────────
             Event::FocusGained => {
                 self.focused = true;

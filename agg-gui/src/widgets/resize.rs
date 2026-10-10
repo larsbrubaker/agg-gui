@@ -336,7 +336,9 @@ impl Widget for Resize {
                 crate::animation::request_draw();
                 EventResult::Consumed
             }
-            Event::MouseUp { .. } if self.dragging => {
+            // A press ended without a release (the window lost activation
+            // mid-drag) ends the resize at the size it reached.
+            Event::MouseUp { .. } | Event::MouseCaptureLost if self.dragging => {
                 self.dragging = false;
                 crate::animation::request_draw();
                 EventResult::Consumed

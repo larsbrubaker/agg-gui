@@ -512,6 +512,19 @@ impl TextField {
                 EventResult::Ignored
             }
 
+            // The press ended without a release (the window lost activation
+            // mid-drag): the selection drag ends where it was. A pending
+            // click-to-select-all is dropped: the click never completed.
+            Event::MouseCaptureLost => {
+                let was = std::mem::take(&mut self.mouse_down);
+                self.select_all_on_mouse_up = false;
+                if was {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
             Event::FocusGained => {
                 self.focused = true;
                 self.focus_time = Some(crate::clock::now());

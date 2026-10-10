@@ -82,6 +82,21 @@ impl ComboBox {
         }
     }
 
+    /// Close the list and drop its hover / drag state (focus loss, window
+    /// deactivation).
+    pub(super) fn close_list(&mut self) {
+        let was_open = self.open;
+        self.open = false;
+        self.hovered_item = None;
+        self.scrollbar.hovered_bar = false;
+        self.scrollbar.hovered_thumb = false;
+        self.scrollbar.dragging = false;
+        self.middle_dragging = false;
+        if was_open {
+            crate::animation::request_draw();
+        }
+    }
+
     /// Close the list and drop hover / drag state when the predicate has
     /// turned `false`.  Returns whether the combo is disabled.
     pub(super) fn close_if_disabled(&mut self) -> bool {

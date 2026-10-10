@@ -5,22 +5,118 @@
 //! C#'s `window.OnDeactivated(EventArgs.Empty)` is
 //! [`HeadlessWindow::on_deactivated`], which sends the same
 //! `ForwarderEvent::WindowDeactivated` a shell sends when the OS reports the
-//! window losing activation. `DeactivatingTheWindowClosesAnOpenMenu` and
-//! `DeactivatingTheWindowClosesAnOpenPopupWidget` are not ported here:
-//! closing popups on deactivation is the popup widgets' behaviour, built on
-//! the event this file tests, and agg-gui's popups do not yet subscribe.
+//! window losing activation. C#'s `PopupMenu.ShowMenu` popup is a
+//! [`MenuBar`] drop-down here (agg-gui menus are overlays their host owns,
+//! not children added to the window), and C#'s `PopupWidget` (MatterCAD's
+//! `PopupButton`) is the [`ColorPicker`]'s popup panel.
 //! `AnAutomationRunIgnoresTheDesktopDeactivatingItsWindow` becomes the
 //! real-input gate check: an automation run turns platform input off
 //! (`InputForwarder::set_platform_input_enabled`), and a platform
 //! deactivation is platform input.
 
+use std::cell::Cell;
+use std::rc::Rc;
+use std::sync::Arc;
+
 use agg_gui::event::{Event, EventResult, MouseButton};
 use agg_gui::shell_input::{ForwarderEvent, InputForwarder};
-use agg_gui::{App, Rect, Size};
+use agg_gui::widgets::menu::{MenuBar, MenuEntry, MenuItem, TopMenu};
+use agg_gui::{App, Color, ColorPicker, ComboBox, Rect, Size, Widget};
+use agg_gui_automation::tree_query::{screen_rect, WidgetHandle};
 use agg_gui_automation::{HeadlessWindow, ProbeWidget, UiDriver};
 
 fn count(log: &[Event], pred: impl Fn(&Event) -> bool) -> usize {
     log.iter().filter(|e| pred(e)).count()
+}
+
+fn click_center(window: &mut HeadlessWindow, handle: &WidgetHandle) {
+    let r = screen_rect(window.root(), handle).expect("on screen");
+    let (x, y) = (r.x + r.width / 2.0, r.y + r.height / 2.0);
+    window.on_mouse_down(x, y, MouseButton::Left, 1);
+    window.on_mouse_up(x, y, MouseButton::Left);
+}
+
+fn child(window: &HeadlessWindow, handle: &WidgetHandle) -> bool {
+    handle
+        .widget(window.root())
+        .expect("attached")
+        .has_active_modal()
+}
+
+#[test]
+fn deactivating_the_window_closes_an_open_menu() {
+    let mut window = HeadlessWindow::new(600.0, 400.0);
+    let font = Arc::new(agg_gui::fonts::standard_ui_font());
+    let mut bar = MenuBar::new(
+        font,
+        vec![TopMenu::new(
+            "Anchor",
+            vec![MenuEntry::Item(MenuItem::action("One", "one"))],
+        )],
+        |_| {},
+    );
+    bar.set_bounds(Rect::new(10.0, 370.0, 300.0, 24.0));
+    let bar = window.add_child(Box::new(bar)).expect("added");
+    window.draw();
+    let title = window.handle("Anchor Menu").expect("the menu title");
+    click_center(&mut window, &title);
+    assert!(child(&window, &bar), "the menu opened");
+
+    window.on_deactivated();
+
+    assert!(!child(&window, &bar), "the menu closed");
+    window.on_activated();
+}
+
+#[test]
+fn deactivating_the_window_closes_an_open_popup_widget() {
+    // The other popup path: a popup panel with its own placement (MatterCAD's PopupButton).
+    let mut window = HeadlessWindow::new(600.0, 400.0);
+    let font = Arc::new(agg_gui::fonts::standard_ui_font());
+    let cell = Rc::new(Cell::new(Color::rgba(1.0, 0.0, 0.0, 1.0)));
+    let mut picker = ColorPicker::new(cell, font).with_round_popup_swatch(20.0);
+    picker.set_bounds(Rect::new(10.0, 200.0, 20.0, 20.0));
+    let picker = window.add_child(Box::new(picker)).expect("added");
+    window.draw();
+    window.on_mouse_down(20.0, 210.0, MouseButton::Left, 1);
+    window.on_mouse_up(20.0, 210.0, MouseButton::Left);
+    let open = |w: &HeadlessWindow| {
+        picker
+            .downcast::<ColorPicker>(w.root())
+            .expect("a picker")
+            .is_open()
+    };
+    assert!(open(&window), "the popup opened");
+
+    window.on_deactivated();
+
+    assert!(!open(&window), "the popup closed");
+    window.on_activated();
+}
+
+#[test]
+fn rust_only_deactivating_the_window_closes_an_open_combo_box_list() {
+    // agg-sharp's DropDownList shows its list through the same PopupPlacement path as a menu.
+    let mut window = HeadlessWindow::new(600.0, 400.0);
+    let font = Arc::new(agg_gui::fonts::standard_ui_font());
+    let mut combo = ComboBox::new(vec!["One", "Two"], 0, font);
+    combo.set_bounds(Rect::new(10.0, 200.0, 120.0, 24.0));
+    let combo = window.add_child(Box::new(combo)).expect("added");
+    window.draw();
+    window.on_mouse_down(60.0, 212.0, MouseButton::Left, 1);
+    window.on_mouse_up(60.0, 212.0, MouseButton::Left);
+    let open = |w: &HeadlessWindow| {
+        combo
+            .downcast::<ComboBox>(w.root())
+            .expect("a combo")
+            .is_open()
+    };
+    assert!(open(&window), "the list opened");
+
+    window.on_deactivated();
+
+    assert!(!open(&window), "the list closed");
+    window.on_activated();
 }
 
 #[test]

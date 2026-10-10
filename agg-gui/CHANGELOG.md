@@ -10,6 +10,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Popups close when the window deactivates, as agg-sharp's `PopupMenu` and
+  `PopupWidget` close on `SystemWindow.Deactivated`: `PopupMenuState` closes
+  on `Event::WindowDeactivated` and answers `MenuResponse::Closed` (so
+  `MenuBar` drop-downs, text and markdown context menus and every other
+  `PopupMenu` host that forwards events tear down as for any dismissal), as
+  do `ComboBox`'s list and `ColorPicker`'s popup panel (keeping the working
+  colour, as clicking away does). `Popup::on_window_deactivated()` closes a
+  `Popup` controller for its host unless it is `IgnoreClicks` (C#'s
+  `AlwaysKeepOpen`). Text suggestion lists stay open, as agg-sharp's do.
+- Drag widgets end their drag on `Event::MouseCaptureLost` (the window
+  deactivated mid-drag) where it was, as if released there: `Splitter`,
+  `ScrollView` thumb and middle-button drags, `Window` title-bar moves and
+  edge resizes (clearing snap guides), `Resize`, `DragValue` (a press that
+  never became a drag does not enter edit mode), `TextField` and `TextArea`
+  selection drags (a pending click-to-select-all is dropped), `MarkdownView`
+  selection and code-block scroll-bar drags, and `ComboBox` list scroll-bar
+  drags. Before, each kept dragging until its next `MouseUp`.
+
 - An enabled state for `ComboBox`: `ComboBox::with_enabled_fn(|| ...)` (the
   same live-predicate convention as `Button` and `SegmentedControl`). While
   the predicate is `false`, `is_enabled()` and `is_focusable()` are false, the
