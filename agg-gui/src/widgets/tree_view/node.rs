@@ -31,6 +31,9 @@ pub struct TreeNode {
     /// Small horizontal bar at the row's trailing edge, filled to this
     /// fraction (clamped to `0..=1`) — e.g. a share of the parent's size.
     pub fraction: Option<f32>,
+    /// Hover help for this node's row (set with `TreeView::set_node_tooltip`).
+    /// Shown under the full name when the name is elided.
+    pub tooltip: Option<String>,
     /// Show the expand arrow even though no children have been added yet —
     /// for lazily populated trees, which add the children on
     /// [`TreeViewEvent::Expanded`](super::TreeViewEvent::Expanded).
@@ -57,6 +60,7 @@ impl TreeNode {
             icon_glyph: None,
             secondary_text: None,
             fraction: None,
+            tooltip: None,
             may_have_children: false,
             parent,
             is_expanded: false,

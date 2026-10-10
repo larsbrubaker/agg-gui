@@ -126,6 +126,7 @@ mod tree_view;
 mod tree_view_api;
 mod tree_view_ellipsis;
 mod tree_view_perf;
+mod tree_view_tooltip;
 mod under_mouse_state;
 mod widget_cursors;
 mod widget_enabled;

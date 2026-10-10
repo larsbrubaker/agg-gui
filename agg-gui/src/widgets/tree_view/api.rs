@@ -299,6 +299,16 @@ impl TreeView {
             n.fraction = fraction;
         }
     }
+
+    /// Tooltip shown while the pointer is over `idx`'s row (`None` clears
+    /// it).  Keyed by node, so moving to another row re-arms the tooltip;
+    /// while the row's name is elided the tip is the full name with this
+    /// text on the next line.
+    pub fn set_node_tooltip(&mut self, idx: usize, tooltip: Option<String>) {
+        if let Some(n) = self.nodes.get_mut(idx) {
+            n.tooltip = tooltip;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

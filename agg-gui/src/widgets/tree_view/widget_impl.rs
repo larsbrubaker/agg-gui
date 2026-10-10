@@ -44,6 +44,7 @@ fn row_signature(tree: &TreeView, node: &TreeNode, flat: &FlatRow) -> u64 {
     }
     node.secondary_text.hash(&mut h);
     node.fraction.map(f32::to_bits).hash(&mut h);
+    node.tooltip.hash(&mut h);
     Arc::as_ptr(&tree.font).hash(&mut h);
     tree.icon_font.as_ref().map(Arc::as_ptr).hash(&mut h);
     tree.font_size.to_bits().hash(&mut h);
@@ -76,6 +77,7 @@ impl TreeView {
         .with_icon_glyph(node.icon_glyph.map(|g| (g, Arc::clone(glyph_font))))
         .with_trailing(node.secondary_text.clone(), node.fraction)
         .with_name_ellipsis(self.name_ellipsis)
+        .with_node_tooltip(node.tooltip.clone())
     }
 
     /// The hovered row's widget and node, unless a drag is under way.
@@ -88,7 +90,8 @@ impl TreeView {
         Some((node, self.row_widgets.get(k)?.as_ref()))
     }
 
-    /// The hovered row's tip — its full name while elided.
+    /// The hovered row's tip — its node's tooltip and / or its full name
+    /// while elided (see `TreeRow::tooltip_text`).
     fn hovered_row_tip(&self) -> Option<(usize, &str)> {
         let (node, row) = self.hovered_row_widget()?;
         Some((node, row.tooltip_text()?))
@@ -150,8 +153,9 @@ impl Widget for TreeView {
             && local_pos.y <= b.height
     }
 
-    /// The hovered row's elided name (see [`TreeView::name_ellipsis`]),
-    /// else the tree's own tip.
+    /// The hovered row's tip — its node's tooltip
+    /// ([`TreeView::set_node_tooltip`]) and / or its elided name (see
+    /// [`TreeView::name_ellipsis`]) — else the tree's own tip.
     fn tooltip_text(&self) -> Option<&str> {
         match self.hovered_row_tip() {
             Some((_, tip)) => Some(tip),
@@ -159,8 +163,8 @@ impl Widget for TreeView {
         }
     }
 
-    /// The hovered node while its row tips, so moving to another elided row
-    /// re-arms the tooltip.
+    /// The hovered node while its row tips, so moving to another row with a
+    /// tip re-arms the tooltip.
     fn tooltip_key(&self) -> Option<u64> {
         self.hovered_row_tip().map(|(node, _)| node as u64)
     }

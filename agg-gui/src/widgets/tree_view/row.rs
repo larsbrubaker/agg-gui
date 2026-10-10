@@ -6,9 +6,10 @@
 //! procedural shape, an image, or a font glyph), label — plus optional
 //! trailing parts at the right edge: dimmed secondary text and a fraction
 //! bar (`row_trailing.rs`).  The label gives the trailing parts the room
-//! they need and ellipsizes (`TreeView::name_ellipsis`); while it is elided
-//! the row's tooltip is the full name, which `TreeView` reports for the
-//! hovered row.
+//! they need and ellipsizes (`TreeView::name_ellipsis`).  The row's tooltip
+//! is its node's tooltip (`TreeView::set_node_tooltip`) and, while the name
+//! is elided, the full name above it; `TreeView` reports it for the hovered
+//! row.
 
 use std::sync::Arc;
 
@@ -323,6 +324,11 @@ pub struct TreeRow {
     /// Font and size of the main label, reused for the secondary text.
     font: Arc<Font>,
     font_size: f64,
+    /// The node's own tooltip (`TreeNode::tooltip`).
+    node_tooltip: Option<String>,
+    /// What the row tips, rebuilt each `layout()`: the full name while it
+    /// is elided, then `node_tooltip` on the next line.
+    tip: Option<String>,
     children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
 }
@@ -366,6 +372,8 @@ impl TreeRow {
             fraction_idx: None,
             font,
             font_size,
+            node_tooltip: None,
+            tip: None,
             children,
             base: WidgetBase::new(),
         }
@@ -396,6 +404,12 @@ impl TreeRow {
         {
             label.set_ellipsis_mode(mode);
         }
+        self
+    }
+
+    /// The node's own tooltip; an empty string counts as none.
+    pub fn with_node_tooltip(mut self, tooltip: Option<String>) -> Self {
+        self.node_tooltip = tooltip.filter(|t| !t.is_empty());
         self
     }
 
@@ -458,12 +472,12 @@ impl Widget for TreeRow {
         self.base.max_size
     }
 
-    /// The row's own tip, else the full name while it is elided (the name
-    /// label's tip).
+    /// The row's own tip, else its node's tooltip, with the full name above
+    /// it while the name is elided (the name label's tip).
     fn tooltip_text(&self) -> Option<&str> {
         match self.base.tooltip.as_deref() {
             Some(tip) if !tip.is_empty() => Some(tip),
-            _ => self.children[3].tooltip_text(),
+            _ => self.tip.as_deref(),
         }
     }
 
@@ -507,6 +521,10 @@ impl Widget for TreeRow {
         let label_w = (right - x).max(0.0);
         let s3 = self.children[3].layout(Size::new(label_w, h));
         self.children[3].set_bounds(Rect::new(x, 0.0, s3.width, h));
+        self.tip = row_tip(
+            self.children[3].tooltip_text(),
+            self.node_tooltip.as_deref(),
+        );
 
         Size::new(total_w, h)
     }
@@ -534,6 +552,15 @@ impl Widget for TreeRow {
 
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+/// A row's tip: the elided name's tip (the full name) and the node's
+/// tooltip, one per line, whichever apply.
+fn row_tip(name_tip: Option<&str>, node_tip: Option<&str>) -> Option<String> {
+    match (name_tip, node_tip) {
+        (Some(name), Some(tip)) => Some(format!("{name}\n{tip}")),
+        (name, tip) => name.or(tip).map(str::to_string),
     }
 }
 
