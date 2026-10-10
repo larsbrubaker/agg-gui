@@ -14,7 +14,6 @@ use super::*;
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::text::{measure_text_metrics, TextMetrics};
 use agg_gui::CompOp;
-use agg_rust::arc::Arc as AggArc;
 use agg_rust::basics::PATH_FLAGS_NONE;
 use agg_rust::rounded_rect::RoundedRect;
 
@@ -191,13 +190,19 @@ impl DrawCtx for WgpuGfxCtx {
     }
 
     fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool) {
-        let mut arc = AggArc::new(cx, cy, r, r, start_angle, end_angle, ccw);
-        self.path.concat_path(&mut arc, 0);
+        agg_gui::draw_ctx::defaults::append_arc(
+            &mut self.path,
+            cx,
+            cy,
+            r,
+            start_angle,
+            end_angle,
+            ccw,
+        );
     }
 
     fn circle(&mut self, cx: f64, cy: f64, r: f64) {
-        self.arc_to(cx, cy, r, 0.0, std::f64::consts::TAU, true);
-        self.path.close_polygon(PATH_FLAGS_NONE);
+        agg_gui::draw_ctx::defaults::append_circle(&mut self.path, cx, cy, r);
     }
 
     fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {

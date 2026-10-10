@@ -33,10 +33,8 @@
 //! marked `// TODO step 2c` and will land before any widget actually
 //! paints into an `LcdGfxCtx`.
 
-use std::f64::consts::PI;
 use std::sync::Arc;
 
-use agg_rust::arc::Arc as AggArc;
 use agg_rust::basics::{VertexSource, PATH_FLAGS_NONE};
 use agg_rust::comp_op::CompOp;
 use agg_rust::conv_curve::ConvCurve;
@@ -369,12 +367,18 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         self.path.curve3(cx, cy, x, y);
     }
     fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool) {
-        let mut arc = AggArc::new(cx, cy, r, r, start_angle, end_angle, ccw);
-        self.path.concat_path(&mut arc, 0);
+        crate::draw_ctx::defaults::append_arc(
+            &mut self.path,
+            cx,
+            cy,
+            r,
+            start_angle,
+            end_angle,
+            ccw,
+        );
     }
     fn circle(&mut self, cx: f64, cy: f64, r: f64) {
-        self.arc_to(cx, cy, r, 0.0, 2.0 * PI, true);
-        self.path.close_polygon(PATH_FLAGS_NONE);
+        crate::draw_ctx::defaults::append_circle(&mut self.path, cx, cy, r);
     }
     fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
         self.path.move_to(x, y);

@@ -6,11 +6,60 @@
 //! as plain functions, and the trait defaults are thin adapters that replay
 //! the result through the backend's own primitives.
 //!
+//! It also holds the `PathStorage` helpers behind `arc_to` / `circle`
+//! ([`append_arc`], [`append_circle`]), shared by every `PathStorage`-backed
+//! context (`GfxCtx`, `LcdGfxCtx`, agg-gui-wgpu's `WgpuGfxCtx`) so their
+//! subpath semantics cannot drift apart.
+//!
 //! Splitting them out keeps `draw_ctx.rs` — which is primarily an interface
 //! definition plus its documentation — inside the project's file-length
 //! budget, and makes the maths unit-testable without a rendering backend.
 
+use agg_rust::arc::Arc as AggArc;
+use agg_rust::basics::is_vertex;
+use agg_rust::path_storage::PathStorage;
 use agg_rust::trans_affine::TransAffine;
+
+// ---------------------------------------------------------------------------
+// Circular arcs on a PathStorage
+// ---------------------------------------------------------------------------
+
+/// Append a circular arc to `path` with the pen down — the body of every
+/// `PathStorage`-backed [`crate::draw_ctx::DrawCtx::arc_to`].
+///
+/// When the path's last command is a vertex (an open subpath), the arc
+/// continues that subpath: its start point is reached with a `line_to`
+/// (dropped when it coincides with the pen), as HTML canvas `arc()` does.
+/// On an empty path, or after `close_path`, the arc begins a new subpath
+/// with a `move_to`.  agg's `join_path` alone would also turn the move into
+/// a line after a close, drawing a chord from the closed contour's start, so
+/// that case uses `concat_path`.
+pub fn append_arc(
+    path: &mut PathStorage,
+    cx: f64,
+    cy: f64,
+    r: f64,
+    start_angle: f64,
+    end_angle: f64,
+    ccw: bool,
+) {
+    let mut arc = AggArc::new(cx, cy, r, r, start_angle, end_angle, ccw);
+    let (mut x, mut y) = (0.0, 0.0);
+    if is_vertex(path.last_vertex_xy(&mut x, &mut y)) {
+        path.join_path(&mut arc, 0);
+    } else {
+        path.concat_path(&mut arc, 0);
+    }
+}
+
+/// Append a full circle to `path` as its own closed subpath — the body of
+/// every `PathStorage`-backed [`crate::draw_ctx::DrawCtx::circle`].  Unlike
+/// [`append_arc`] it never joins the current subpath.
+pub fn append_circle(path: &mut PathStorage, cx: f64, cy: f64, r: f64) {
+    let mut arc = AggArc::new(cx, cy, r, r, 0.0, std::f64::consts::TAU, true);
+    path.concat_path(&mut arc, 0);
+    path.close_polygon(agg_rust::basics::PATH_FLAGS_NONE);
+}
 
 // ---------------------------------------------------------------------------
 // Elliptical arcs

@@ -138,9 +138,22 @@ pub trait DrawCtx {
     fn line_to(&mut self, x: f64, y: f64);
     fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64);
     fn quad_to(&mut self, cx: f64, cy: f64, x: f64, y: f64);
+
+    /// Append a circular arc with the pen down, like HTML canvas `arc()`.
+    ///
+    /// After an open subpath (a `move_to` or any later segment) the arc
+    /// continues it: a straight line runs from the current point to the arc's
+    /// start, then the arc follows, so `move_to` / `line_to` / `arc_to` /
+    /// `close_path` builds one contour (a rounded corner fills and strokes as
+    /// part of its outline).  On an empty path or right after `close_path` the
+    /// arc starts a new subpath at its start point.  Angles are radians from
+    /// +x; `ccw == true` sweeps towards increasing angle (counter-clockwise in
+    /// Y-up space).
     fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool);
 
-    /// Add a full circle contour to the current path.
+    /// Add a full circle contour to the current path.  It is always its own
+    /// closed subpath: unlike [`DrawCtx::arc_to`] it never joins an open
+    /// subpath that precedes it.
     fn circle(&mut self, cx: f64, cy: f64, r: f64);
 
     /// Append an elliptical arc to the current path, mirroring canvas-2D

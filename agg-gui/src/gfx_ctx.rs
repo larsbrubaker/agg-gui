@@ -8,10 +8,8 @@
 //! All coordinates are **first-quadrant (Y-up)**. Origin is the bottom-left
 //! corner of the framebuffer. Positive X goes right, positive Y goes up.
 
-use std::f64::consts::PI;
 use std::sync::Arc;
 
-use agg_rust::arc::Arc as AggArc;
 use agg_rust::basics::FillingRule;
 use agg_rust::basics::VertexSource;
 use agg_rust::basics::PATH_FLAGS_NONE;
@@ -449,14 +447,20 @@ impl<'a> GfxCtx<'a> {
         end_angle: f64,
         ccw: bool,
     ) {
-        let mut arc = AggArc::new(cx, cy, r, r, start_angle, end_angle, ccw);
-        self.path.concat_path(&mut arc, 0);
+        crate::draw_ctx::defaults::append_arc(
+            &mut self.path,
+            cx,
+            cy,
+            r,
+            start_angle,
+            end_angle,
+            ccw,
+        );
     }
 
     /// Full circle at `(cx, cy)` with radius `r`.
     pub fn circle(&mut self, cx: f64, cy: f64, r: f64) {
-        self.arc_to(cx, cy, r, 0.0, 2.0 * PI, true);
-        self.path.close_polygon(PATH_FLAGS_NONE);
+        crate::draw_ctx::defaults::append_circle(&mut self.path, cx, cy, r);
     }
 
     /// Axis-aligned rectangle — bottom-left `(x, y)`, size `w × h`.
