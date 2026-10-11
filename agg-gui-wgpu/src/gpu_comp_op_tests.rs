@@ -27,7 +27,7 @@ use agg_rust::basics::{is_stop, VertexSource};
 use agg_rust::color::Rgba8;
 use agg_rust::comp_op::PixfmtRgba32CompOp;
 use agg_rust::ellipse::Ellipse;
-use agg_rust::pixfmt_rgba::PixelFormat;
+use agg_rust::pixfmt_rgba::{PixelFormat, PixfmtRgba32Pre};
 use agg_rust::rendering_buffer::RowAccessor;
 
 use crate::layer_text_readback_tests::try_device;
@@ -219,9 +219,14 @@ fn add_ellipse(ctx: &mut WgpuGfxCtx, x: f64, y: f64, r: f64, steps: u32, cw: boo
 
 /// The destination: a translucent rectangle on whole pixels, covering x 0-120.
 fn draw_destination(ctx: &mut WgpuGfxCtx) {
+    fill_destination(ctx, destination());
+}
+
+/// The destination rectangle (x 0-120) in `color`.
+fn fill_destination(ctx: &mut WgpuGfxCtx, color: Color) {
     ctx.begin_path();
     ctx.rect(0.0, 0.0, 120.0, HEIGHT as f64);
-    ctx.set_fill_color(destination());
+    ctx.set_fill_color(color);
     ctx.fill();
 }
 
@@ -278,12 +283,26 @@ fn assert_matches_software(
     rows: &[u32],
     failures: &mut Vec<String>,
 ) {
+    let over = destination();
+    assert_matches_software_over(capture, op, over, source, draw_source, rows, failures);
+}
+
+/// [`assert_matches_software`] over a destination rectangle in `over`.
+fn assert_matches_software_over(
+    capture: &Capture,
+    op: CompOp,
+    over: Color,
+    source: Color,
+    draw_source: &dyn Fn(&mut WgpuGfxCtx, Color),
+    rows: &[u32],
+    failures: &mut Vec<String>,
+) {
     let cover = capture.capture(|ctx| draw_source(ctx, Color::white()));
     // The destination as the device draws it: its anti-aliased rim is the
     // device's, not AGG's.
-    let dest = capture.capture(draw_destination);
+    let dest = capture.capture(|ctx| fill_destination(ctx, over));
     let image = capture.capture(|ctx| {
-        draw_destination(ctx);
+        fill_destination(ctx, over);
         ctx.set_blend_mode(op);
         draw_source(ctx, source);
         ctx.set_blend_mode(CompOp::SrcOver);
@@ -292,11 +311,8 @@ fn assert_matches_software(
         for x in 0..WIDTH {
             let c = at(&cover, x, y)[3];
             // The software renderer never visits a pixel the shape does not
-            // cover (its spans hold covered cells only).  C#'s blender is the
-            // identity at cover 0 for every operator, so C# can call it there;
-            // agg-rust's src-atop keeps C++'s blue-from-green typo, which
-            // changes the pixel even at cover 0 — so ask the blender only
-            // where the shape reaches, as the renderer does.
+            // cover (its spans hold covered cells only), so ask the blender
+            // only where the shape reaches, as the renderer does.
             let want = if c == 0 {
                 at(&dest, x, y)
             } else {
@@ -335,6 +351,99 @@ fn operator_matches_software_blender_at_every_cover() {
     let mut failures = Vec::new();
     for op in ALL_OPERATORS {
         assert_matches_software(&capture, op, source(), &shape, &[50, 70, 89], &mut failures);
+    }
+    report(failures);
+}
+
+/// Black colour-burned over white leaves white, at every cover, as
+/// agg-rust's corrected `color_burn_calc` (`dca >= da`) computes it; C++
+/// AGG's `dca > da` never fired and burned the white to black.
+#[test]
+fn rust_only_color_burn_black_over_white_stays_white() {
+    let Some((device, queue)) = try_device() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let capture = Capture::new(&device, &queue);
+    let white = Color::from_rgba8(255, 255, 255, 255);
+    let shape = |ctx: &mut WgpuGfxCtx, color: Color| {
+        ctx.begin_path();
+        add_ellipse(ctx, 120.0, 50.0, 40.3, 100, false);
+        ctx.set_fill_color(color);
+        ctx.fill();
+    };
+    let mut failures = Vec::new();
+    for black in [
+        Color::from_rgba8(0, 0, 0, 255),
+        Color::from_rgba8(0, 0, 0, 120),
+    ] {
+        assert_matches_software_over(
+            &capture,
+            CompOp::ColorBurn,
+            white,
+            black,
+            &shape,
+            &[50, 70, 89],
+            &mut failures,
+        );
+        let image = capture.capture(|ctx| {
+            fill_destination(ctx, white);
+            ctx.set_blend_mode(CompOp::ColorBurn);
+            shape(ctx, black);
+        });
+        let place = format!("{black:?} burned over white, inside the shape");
+        assert_near(&image, 100, 50, [255; 4], &place, &mut failures);
+    }
+    report(failures);
+}
+
+/// A source whose colour exceeds its alpha (straight alpha handed in as
+/// premultiplied) saturates source-over's `prelerp` at 255, as agg-rust's
+/// `Rgba8::prelerp` does, where C++ AGG wrapped the byte to a dark value.
+/// The public API always premultiplies, so the composite is driven directly.
+#[test]
+fn rust_only_straight_alpha_source_over_saturates() {
+    let Some((device, queue)) = try_device() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let capture = Capture::new(&device, &queue);
+    let straight = [255u8, 128, 40, 64];
+    let shape = |ctx: &mut WgpuGfxCtx, color: Color| {
+        ctx.begin_path();
+        add_ellipse(ctx, 120.0, 50.0, 40.3, 100, false);
+        ctx.set_fill_color(color);
+        ctx.fill();
+    };
+    let cover = capture.capture(|ctx| shape(ctx, Color::white()));
+    let dest = capture.capture(draw_destination);
+    let image = capture.capture(|ctx| {
+        draw_destination(ctx);
+        ctx.composite_premultiplied(CompOp::SrcOver, straight, shape);
+    });
+    let mut failures = Vec::new();
+    for y in [50, 70, 89] {
+        for x in 0..WIDTH {
+            let c = at(&cover, x, y)[3];
+            let mut want = at(&dest, x, y);
+            if c > 0 {
+                // blender_rgba_pre: the colour bytes as they are, prelerp'd.
+                let mut ra = RowAccessor::new();
+                // SAFETY: `want` is a live 4-byte, 1x1 RGBA buffer that
+                // outlives `ra`.
+                unsafe { ra.attach(want.as_mut_ptr(), 1, 1, 4) };
+                let mut pf = PixfmtRgba32Pre::new(&mut ra);
+                let [r, g, b, a] = straight;
+                pf.blend_pixel(0, 0, &Rgba8::new(r as u32, g as u32, b as u32, a as u32), c);
+            }
+            let place = format!("straight source-over at ({x}, {y}), cover {c}");
+            assert_near(&image, x, y, want, &place, &mut failures);
+        }
+    }
+    // Inside the shape, over the destination, red saturates.
+    let inside = at(&image, 100, 50);
+    if inside[0] != 255 {
+        failures.push(format!("red at (100, 50) is {inside:?}, not saturated"));
     }
     report(failures);
 }

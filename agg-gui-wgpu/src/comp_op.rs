@@ -4,8 +4,8 @@
 //! The software renderer blends a solid shape's span pixel by pixel through
 //! `agg_rust::comp_op` at each pixel's cover.  A GPU blend state cannot do
 //! that: most operators need the destination in the maths, and the ones that
-//! lerp the destination by the cover (clear, src, src-in, ...) or carry AGG's
-//! quirks (src-atop's blue) have no fixed-function form.  So a draw under any
+//! lerp the destination by the cover (clear, src, src-in, ...) or round
+//! through AGG's 8-bit arithmetic have no fixed-function form.  So a draw under any
 //! mode other than source-over (which keeps the ordinary pipelines) and dst
 //! (which draws nothing, as software leaves the pixel) runs as:
 //!
@@ -187,31 +187,43 @@ impl WgpuGfxCtx {
             CompOp::Dst => {}
             _ => {
                 let source = premultiplied_source(color, self.global_alpha);
-                let (w, h) = (
-                    self.viewport.0.max(1.0) as u32,
-                    self.viewport.1.max(1.0) as u32,
-                );
-                let (texture, view) = self.alloc_layer_texture(w, h);
-                self.commands.push(DrawCommand::CompOpBegin {
-                    texture: Arc::clone(&texture),
-                    view: view.clone(),
-                    width: w,
-                    height: h,
-                });
-                let global_alpha = std::mem::replace(&mut self.global_alpha, 1.0);
-                self.coverage_pass = true;
-                draw(self, Color::white());
-                self.coverage_pass = false;
-                self.global_alpha = global_alpha;
-                self.commands.push(DrawCommand::CompOpEnd {
-                    texture,
-                    view,
-                    op,
-                    source,
-                    clip: self.current_clip(),
-                });
+                self.composite_premultiplied(op, source, draw);
             }
         }
+    }
+
+    /// Composite the bytes `source` (taken as premultiplied, as the software
+    /// blender takes the colour it is handed) through `op`, at the cover of
+    /// the shape `draw` pushes when given opaque white.
+    pub(crate) fn composite_premultiplied(
+        &mut self,
+        op: CompOp,
+        source: [u8; 4],
+        draw: impl FnOnce(&mut Self, Color),
+    ) {
+        let (w, h) = (
+            self.viewport.0.max(1.0) as u32,
+            self.viewport.1.max(1.0) as u32,
+        );
+        let (texture, view) = self.alloc_layer_texture(w, h);
+        self.commands.push(DrawCommand::CompOpBegin {
+            texture: Arc::clone(&texture),
+            view: view.clone(),
+            width: w,
+            height: h,
+        });
+        let global_alpha = std::mem::replace(&mut self.global_alpha, 1.0);
+        self.coverage_pass = true;
+        draw(self, Color::white());
+        self.coverage_pass = false;
+        self.global_alpha = global_alpha;
+        self.commands.push(DrawCommand::CompOpEnd {
+            texture,
+            view,
+            op,
+            source,
+            clip: self.current_clip(),
+        });
     }
 }
 

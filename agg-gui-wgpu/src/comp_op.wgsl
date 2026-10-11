@@ -65,9 +65,11 @@ fn mul8(a: u32, b: u32) -> u32 {
     return ((t >> 8u) + t) >> 8u;
 }
 
-// Rgba8::prelerp — p + q - p * a, in bytes.
+// Rgba8::prelerp — p + q - p * a, in bytes, saturating at 255 as agg-rust
+// does (C++ AGG truncated the sum to a byte, so an out-of-range source
+// wrapped to a dark value).
 fn prelerp8(p: u32, q: u32, a: u32) -> u32 {
-    return (p + q - mul8(p, a)) & 255u;
+    return min(p + q - mul8(p, a), 255u);
 }
 
 fn overlay_calc(dca: f32, sca: f32, da: f32, sa: f32, sada: f32, d1a: f32, s1a: f32) -> f32 {
@@ -94,12 +96,13 @@ fn color_dodge_calc(dca: f32, sca: f32, da: f32, sa: f32, sada: f32, d1a: f32, s
     return sca * d1a;
 }
 
-// agg-rust keeps C++'s `dca > da` test for the black-source case.
+// The black-source case tests `dca >= da` as agg-rust does (C++ AGG's
+// `dca > da` never fired, so black over white burned to black).
 fn color_burn_calc(dca: f32, sca: f32, da: f32, sa: f32, sada: f32, d1a: f32, s1a: f32) -> f32 {
     if (sca > 0.0) {
         return sada * (1.0 - min(1.0, (1.0 - dca / da) * sa / sca)) + sca * d1a + dca * s1a;
     }
-    if (dca > da) {
+    if (dca >= da) {
         return sada + dca * s1a;
     }
     return dca * s1a;
@@ -183,11 +186,12 @@ fn blend(op: u32, sb: vec4<f32>, db: vec4<f32>, cover: f32) -> vec4<f32> {
         case 8u: {
             return get_cover(db, 255.0 - cover) + get_cover(db, cover) * (1.0 - sb.a / 255.0);
         }
-        // SrcAtop — agg-rust keeps C++'s typo: blue mixes the just-written green.
+        // SrcAtop — each channel mixes its own destination, as agg-rust does
+        // (C++ AGG's typo mixed blue with the just-written green).
         case 9u: {
             let r = s.r * d.a + d.r * s1a;
             let g = s.g * d.a + d.g * s1a;
-            let b = s.b * d.a + g * s1a;
+            let b = s.b * d.a + d.b * s1a;
             return vec4<f32>(r, g, b, d.a);
         }
         // DstAtop
