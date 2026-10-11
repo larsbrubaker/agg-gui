@@ -26,9 +26,9 @@ fn svg_icon_rasterises_at_physical_size() {
 fn svg_icon_raster_is_straight_alpha() {
     let icon = IconImage::from_svg_data(RED_SQUARE, Size::new(4.0, 4.0)).expect("parse");
     let (data, _, _) = icon.raster_at_scale(1.0).expect("raster");
-    // Half-transparent pure red (the rasteriser maps opacity 0.5 to alpha
-    // 127): straight alpha keeps R at 255.
-    assert_eq!(&data[0..4], &[255, 0, 0, 127]);
+    // Half-transparent pure red (SVG opacity 0.5 rounds to alpha 128, as
+    // resvg and agg-sharp quantise it): straight alpha keeps R at 255.
+    assert_eq!(&data[0..4], &[255, 0, 0, 128]);
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn pixel_filter_runs_on_straight_alpha_rasters() {
             }
         }));
     let (data, _, _) = icon.raster_at_scale(1.0).expect("raster");
-    assert_eq!(&data[0..4], &[0, 0, 255, 127]);
+    assert_eq!(&data[0..4], &[0, 0, 255, 128]);
 }
 
 #[test]

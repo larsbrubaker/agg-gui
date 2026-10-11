@@ -120,12 +120,19 @@ fn solid_paint(paint: &usvg::Paint, opacity: f32) -> Option<Color> {
             color.red as f32 / 255.0,
             color.green as f32 / 255.0,
             color.blue as f32 / 255.0,
-            opacity,
+            quantized_alpha(opacity),
         )),
         usvg::Paint::LinearGradient(_)
         | usvg::Paint::RadialGradient(_)
         | usvg::Paint::Pattern(_) => None,
     }
+}
+
+/// `opacity` rounded to the nearest 8-bit level, as resvg (tiny-skia's
+/// `to_color_u8`) and agg-sharp quantise an SVG colour: `Color::to_rgba8`
+/// truncates, which would draw `fill-opacity=".5"` at 127 instead of 128.
+fn quantized_alpha(opacity: f32) -> f32 {
+    (opacity.clamp(0.0, 1.0) * 255.0).round() / 255.0
 }
 
 fn gradient_stops(stops: &[usvg::Stop], opacity: f32) -> Vec<GradientStop> {

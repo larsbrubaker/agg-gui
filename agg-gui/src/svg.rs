@@ -640,6 +640,7 @@ mod opacity_tests;
 mod text_tests;
 
 mod font_defaults;
+mod clip;
 mod mask;
 #[cfg(test)]
 mod mask_tests;

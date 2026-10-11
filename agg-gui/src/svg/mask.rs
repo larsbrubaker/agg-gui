@@ -1,11 +1,12 @@
-//! SVG `<mask>` support for the tree visitor in `render_tree.rs`.
+//! SVG `<mask>` and `clip-path` support for the tree visitor in `render_tree.rs`.
 //!
-//! A masked group is an isolated compositing step: the group's content is
-//! rendered into an offscreen software [`Framebuffer`], the mask's content is
-//! rendered into a second buffer of the same size, the mask buffer is turned
-//! into per-pixel coverage (luminance × alpha for `mask-type="luminance"`, the
-//! SVG default; plain alpha for `mask-type="alpha"`), and the content is
-//! multiplied by that coverage and by the group opacity.  The result is drawn
+//! A masked or clipped group is an isolated compositing step: the group's
+//! content is rendered into an offscreen software [`Framebuffer`], the mask's
+//! content is rendered into a second buffer of the same size, the mask buffer
+//! is turned into per-pixel coverage (luminance × alpha for
+//! `mask-type="luminance"`, the SVG default; plain alpha for
+//! `mask-type="alpha"`), the clip path's coverage (`clip.rs`) multiplies in,
+//! and the content is multiplied by that coverage and by the group opacity.  The result is drawn
 //! back into the caller's [`DrawCtx`] with `draw_image_rgba`, so masking works
 //! identically on every backend (software RGBA, LCD, wgpu) without any backend
 //! needing a mask primitive of its own.
@@ -46,23 +47,26 @@ struct MaskRegion {
     device_to_offscreen: TransAffine,
 }
 
-/// Render `group` (whose `mask()` is `Some`) through an offscreen mask
-/// composite.  `parent_state.opacity` and the group opacity are folded into
-/// the composite, after masking, as SVG specifies.
-pub(super) fn render_masked_group(
+/// Render `group` (whose `mask()` or `clip_path()` is `Some`) through an
+/// offscreen composite.  `parent_state.opacity` and the group opacity are
+/// folded into the composite, after masking and clipping, as SVG specifies.
+pub(super) fn render_composited_group(
     group: &usvg::Group,
-    mask: &usvg::Mask,
     ctx: &mut dyn DrawCtx,
     parent_state: SvgRenderState,
 ) -> Result<(), SvgRenderError> {
     let alpha = parent_state.opacity * group.opacity().get();
-    if alpha <= 0.0 || mask.root().children().is_empty() {
+    if alpha <= 0.0
+        || group
+            .mask()
+            .is_some_and(|mask| mask.root().children().is_empty())
+    {
         // An empty mask masks the whole element out.
         return Ok(());
     }
 
     let canvas = ctx.transform();
-    let Some(region) = mask_region(group, mask, &canvas) else {
+    let Some(region) = composite_region(group, group.mask(), &canvas) else {
         return Ok(());
     };
 
@@ -86,7 +90,16 @@ pub(super) fn render_masked_group(
     // Mask content lives in the masked element's user space.
     let mut user_space = offscreen_canvas;
     user_space.premultiply(&to_trans_affine(group.abs_transform()));
-    let coverage = mask_coverage(mask, &user_space, region.px_w, region.px_h)?;
+    let mut coverage = match group.mask() {
+        Some(mask) => mask_coverage(mask, &user_space, region.px_w, region.px_h)?,
+        None => vec![1.0; region.px_w as usize * region.px_h as usize],
+    };
+    if let Some(clip) = group.clip_path() {
+        let clip = super::clip::clip_coverage(clip, &user_space, region.px_w, region.px_h)?;
+        for (c, k) in coverage.iter_mut().zip(clip) {
+            *c *= k;
+        }
+    }
 
     let pixels = content.pixels_mut();
     for (px, cov) in pixels.chunks_exact_mut(4).zip(coverage.iter()) {
@@ -188,14 +201,21 @@ fn pixel_coverage(p: &[u8], kind: usvg::MaskType) -> f32 {
 }
 
 /// Device-space rectangle covering the group's content intersected with the
-/// mask rectangle (nothing outside the mask rectangle can show), snapped
-/// outward to whole pixels.
-fn mask_region(group: &usvg::Group, mask: &usvg::Mask, canvas: &TransAffine) -> Option<MaskRegion> {
+/// mask rectangle, if any (nothing outside the mask rectangle can show),
+/// snapped outward to whole pixels.
+fn composite_region(
+    group: &usvg::Group,
+    mask: Option<&usvg::Mask>,
+    canvas: &TransAffine,
+) -> Option<MaskRegion> {
     let content = device_bounds(canvas, group.abs_layer_bounding_box().to_rect())?;
 
     let mut user_space = *canvas;
     user_space.premultiply(&to_trans_affine(group.abs_transform()));
-    let mask_rect = device_bounds(&user_space, mask.rect().to_rect())?;
+    let mask_rect = match mask {
+        Some(mask) => device_bounds(&user_space, mask.rect().to_rect())?,
+        None => content,
+    };
 
     let x0 = content.0.max(mask_rect.0).floor();
     let y0 = content.1.max(mask_rect.1).floor();

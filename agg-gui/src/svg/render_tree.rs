@@ -8,8 +8,8 @@
 //!
 //! Re-entry points exposed back to the parent: [`render_group`] is the
 //! top-level entry the public `render_svg_tree_*` functions call.  Groups
-//! with a `mask` are handed to `mask.rs`, which renders them offscreen and
-//! re-enters through [`render_group`] / [`render_children`].
+//! with a `mask` or `clip-path` are handed to `mask.rs`, which renders them
+//! offscreen and re-enters through [`render_group`] / [`render_children`].
 
 use crate::draw_ctx::DrawCtx;
 use crate::framebuffer::unpremultiply_rgba_inplace;
@@ -34,8 +34,8 @@ pub(super) fn render_group(
         return Ok(());
     }
 
-    if let Some(mask) = group.mask() {
-        return super::mask::render_masked_group(group, mask, ctx, parent_state);
+    if group.mask().is_some() || group.clip_path().is_some() {
+        return super::mask::render_composited_group(group, ctx, parent_state);
     }
 
     let group_opacity = group.opacity().get();
@@ -50,15 +50,14 @@ pub(super) fn render_group(
     render_children(group, ctx, state)
 }
 
-/// Render `group`'s clip and children with `state`, ignoring the group's own
-/// opacity and mask (callers that isolate the group apply those themselves).
+/// Render `group`'s children with `state`, ignoring the group's own opacity,
+/// mask and clip path (`mask.rs` composites groups that have them).
 pub(super) fn render_children(
     group: &usvg::Group,
     ctx: &mut dyn DrawCtx,
     state: SvgRenderState,
 ) -> Result<(), SvgRenderError> {
     ctx.save();
-    apply_group_clip(ctx, group);
     let result = group.children().iter().try_for_each(|node| match node {
         usvg::Node::Group(group) => render_group(group, ctx, state),
         usvg::Node::Path(path) => {
@@ -97,29 +96,6 @@ fn render_isolated_group_with_opacity(
     ctx.pop_layer();
     ctx.restore();
     Ok(())
-}
-
-fn apply_group_clip(ctx: &mut dyn DrawCtx, group: &usvg::Group) {
-    if let Some(clip) = group.clip_path() {
-        apply_clip_path(ctx, clip);
-    }
-}
-
-fn apply_clip_path(ctx: &mut dyn DrawCtx, clip: &usvg::ClipPath) {
-    // The bridge currently exposes rectangular clipping only.  This still
-    // covers the common SVG badge pattern and provides a conservative fallback
-    // until arbitrary path masks are wired through the draw backends.
-    let bbox = clip.root().bounding_box();
-    ctx.clip_rect(
-        bbox.x() as f64,
-        bbox.y() as f64,
-        bbox.width() as f64,
-        bbox.height() as f64,
-    );
-
-    if let Some(clip) = clip.clip_path() {
-        apply_clip_path(ctx, clip);
-    }
 }
 
 fn render_text(
@@ -183,12 +159,7 @@ fn fill_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
     };
 
     emit_path(path, ctx);
-    if !apply_fill_paint(
-        ctx,
-        fill.paint(),
-        state.opacity * fill.opacity().get(),
-        Some(path.bounding_box()),
-    ) {
+    if !apply_fill_paint(ctx, fill.paint(), state.opacity * fill.opacity().get()) {
         return;
     }
     ctx.set_fill_rule(map_fill_rule(fill.rule()));
@@ -199,12 +170,7 @@ fn stroke_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
     let Some(stroke) = path.stroke() else {
         return;
     };
-    if !apply_stroke_paint(
-        ctx,
-        stroke.paint(),
-        state.opacity * stroke.opacity().get(),
-        Some(path.stroke_bounding_box()),
-    ) {
+    if !apply_stroke_paint(ctx, stroke.paint(), state.opacity * stroke.opacity().get()) {
         return;
     }
 
@@ -221,17 +187,12 @@ fn stroke_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
     ctx.stroke();
 }
 
-fn apply_fill_paint(
-    ctx: &mut dyn DrawCtx,
-    paint: &usvg::Paint,
-    opacity: f32,
-    object_bbox: Option<usvg::Rect>,
-) -> bool {
+fn apply_fill_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) -> bool {
     if let usvg::Paint::Pattern(pattern) = paint {
         if !ctx.supports_fill_pattern() {
             return false;
         }
-        if let Some(pattern) = super::pattern::render_pattern_paint(pattern, opacity, object_bbox) {
+        if let Some(pattern) = super::pattern::render_pattern_paint(pattern, opacity) {
             ctx.set_fill_pattern(pattern);
             return true;
         }
@@ -241,17 +202,12 @@ fn apply_fill_paint(
     super::paint::apply_fill_paint(ctx, paint, opacity)
 }
 
-fn apply_stroke_paint(
-    ctx: &mut dyn DrawCtx,
-    paint: &usvg::Paint,
-    opacity: f32,
-    object_bbox: Option<usvg::Rect>,
-) -> bool {
+fn apply_stroke_paint(ctx: &mut dyn DrawCtx, paint: &usvg::Paint, opacity: f32) -> bool {
     if let usvg::Paint::Pattern(pattern) = paint {
         if !ctx.supports_stroke_pattern() {
             return false;
         }
-        if let Some(pattern) = super::pattern::render_pattern_paint(pattern, opacity, object_bbox) {
+        if let Some(pattern) = super::pattern::render_pattern_paint(pattern, opacity) {
             ctx.set_stroke_pattern(pattern);
             return true;
         }
