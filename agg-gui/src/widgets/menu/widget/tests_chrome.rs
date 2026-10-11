@@ -10,10 +10,15 @@
 //!
 //! `MenuRowsAreTheThemeRowHeight` duplicates
 //! `tests_style.rs::row_height_option_sets_item_rows_and_panel_height` (every
-//! item row is exactly the style's `row_h`). `APopupHostingAMenuWearsTheMenuCorners`
-//! and `AScrolledPopupCarriesTheRoundedFillItsBorderTraces` exercise C#'s
-//! `PopupWidget` scroll host, which agg-gui's popups do not have yet (menu
-//! overflow scrolling, `PopupMenuOverflowScrollTests`).
+//! item row is exactly the style's `row_h`).
+//!
+//! `APopupHostingAMenuWearsTheMenuCorners` and
+//! `AScrolledPopupCarriesTheRoundedFillItsBorderTraces` check C#'s
+//! `PopupWidget` scroll host. agg-gui's scrolling panel is one painted shape,
+//! scroll bar strip included, so both are checked on the pixels of a scrolled
+//! menu: its corners stay rounded, and the panel fill reaches across the
+//! strip it gained. C#'s two-row `maxHeight` is a bar menu with 196 px of
+//! room (`overflow.rs`) for 224 px of rows.
 
 use std::sync::Arc;
 
@@ -138,5 +143,86 @@ fn row_highlight_is_inset_from_the_panel_and_rounded_itself() {
         px(&fb, last.x + last.width * 0.5, last.y + 0.5),
         bg,
         "the bottom row's highlight must not reach the bottom edge of a rounded panel"
+    );
+}
+
+/// An eight row menu opened from a bar title with too little room, so it
+/// scrolls; painted as [`paint`] paints. Returns the framebuffer, the panel
+/// rect and the row width.
+fn paint_scrolled() -> (Framebuffer, Rect, f64) {
+    let _guard = crate::input_profile::profile_test_lock();
+    crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
+    crate::touch_state::clear_last_touch_event_for_testing();
+    crate::ux_scale::set_ux_scale(1.0);
+    crate::device_scale::set_device_scale(1.0);
+    let style = MenuStyle {
+        row_h: 28.0,
+        background: Some(Color::from_rgb8(0xf1, 0xf1, 0xf1)),
+        border_width: 0.0,
+        shadow: false,
+        ..MenuStyle::default()
+    };
+    let items: Vec<MenuEntry> = (0..8)
+        .map(|i| MenuItem::action(format!("Item {i}"), format!("{i}")).into())
+        .collect();
+    let mut menu = PopupMenu::new(items).with_style(style);
+    menu.state.open_at(
+        Point::new(20.0, 200.0),
+        super::super::state::MenuAnchorKind::Bar,
+    );
+    menu.state.set_anchor_span(20.0);
+    menu.state.set_space_origin(Some(Point::ORIGIN));
+    let layout = menu.state.layouts(&menu.items, VIEWPORT)[0].clone();
+    assert!(layout.scroll.is_some(), "the fixture scrolls");
+    let row_w = layout.rows[0].rect.width;
+    let mut fb = Framebuffer::new(VIEWPORT.width as u32, VIEWPORT.height as u32);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::black());
+        menu.paint(&mut ctx, test_font(), 14.0, VIEWPORT);
+    }
+    (fb, layout.rect, row_w)
+}
+
+#[test]
+fn a_popup_hosting_a_menu_wears_the_menu_corners() {
+    let (fb, panel, _) = paint_scrolled();
+    let top = panel.y + panel.height;
+    let right = panel.x + panel.width;
+    // The scrolling panel rounds the same corners an unscrolled menu does
+    for (x, y) in [
+        (panel.x + 0.5, top - 0.5),
+        (right - 0.5, top - 0.5),
+        (panel.x + 0.5, panel.y + 0.5),
+        (right - 0.5, panel.y + 0.5),
+    ] {
+        assert_eq!(px(&fb, x, y), [0, 0, 0], "corner pixel at ({x}, {y})");
+    }
+}
+
+#[test]
+fn a_scrolled_popup_carries_the_rounded_fill_its_border_traces() {
+    let (fb, panel, row_w) = paint_scrolled();
+    // The condition the fix is about: the panel is wider than the menu rows
+    assert!(
+        panel.width > row_w,
+        "scrolling widens the panel by a scroll bar"
+    );
+    // The fill reaches across the strip, just right of the rows, top and
+    // bottom (clear of the scroll bar's track inside its margins)
+    let strip_x = panel.x + row_w + 0.5;
+    assert_eq!(px(&fb, strip_x, panel.y + 1.5), [0xf1, 0xf1, 0xf1]);
+    assert_eq!(
+        px(&fb, strip_x, panel.y + panel.height - 1.5),
+        [0xf1, 0xf1, 0xf1]
+    );
+    // and nothing is painted past the panel's right edge
+    assert_eq!(
+        px(
+            &fb,
+            panel.x + panel.width + 1.5,
+            panel.y + panel.height * 0.5
+        ),
+        [0, 0, 0]
     );
 }

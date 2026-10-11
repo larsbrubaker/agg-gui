@@ -6,6 +6,7 @@
 pub mod fit_width;
 pub mod geometry;
 pub mod model;
+pub mod overflow;
 pub mod paint;
 mod row_widgets;
 mod shortcut_text;
@@ -22,6 +23,7 @@ pub use geometry::{
 pub use model::{
     MenuEntry, MenuIconSlot, MenuItem, MenuSelection, MenuShortcut, MenuWidgetRow, ShortcutKey,
 };
+pub use overflow::PopupScroll;
 pub use paint::MenuStyle;
 pub use state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 pub use strip::MenuBarStrip;

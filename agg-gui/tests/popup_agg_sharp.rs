@@ -7,5 +7,13 @@
 mod anchored_popup_tests;
 #[path = "popup_agg_sharp/narrow_sub_menu_placement_tests.rs"]
 mod narrow_sub_menu_placement_tests;
+#[path = "popup_agg_sharp/popup_direction_flip_tests.rs"]
+mod popup_direction_flip_tests;
 #[path = "popup_agg_sharp/popup_horizontal_clamp_tests.rs"]
 mod popup_horizontal_clamp_tests;
+#[path = "popup_agg_sharp/popup_menu_keyboard_scroll_tests.rs"]
+mod popup_menu_keyboard_scroll_tests;
+#[path = "popup_agg_sharp/popup_menu_overflow_scroll_tests.rs"]
+mod popup_menu_overflow_scroll_tests;
+#[path = "popup_agg_sharp/popup_sub_menu_scroll_tests.rs"]
+mod popup_sub_menu_scroll_tests;

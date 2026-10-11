@@ -277,6 +277,13 @@ impl MenuBar {
         };
         self.sync_popup_measure();
         self.popup.state.open_at(anchor, kind);
+        // A horizontal bar's title reaches the bar's height past the
+        // anchor, so a menu that flips to the other side clears it.
+        let span = match self.orientation {
+            MenuOrientation::Vertical => 0.0,
+            _ => rect.height,
+        };
+        self.popup.state.set_anchor_span(span);
         self.open_index = Some(idx);
         self.hover_index = Some(idx);
         self.cache.invalidate();
@@ -650,6 +657,12 @@ impl Widget for MenuBar {
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let font = self.active_font();
         let font_size = self.effective_font_size();
+        // The popup runs bar-local; knowing where the bar sits in root space
+        // lets its menus flip and scroll against the window
+        // (`overflow.rs`).  The overlay ctx is positioned at the bar's (0, 0).
+        let (mut ox, mut oy) = (0.0, 0.0);
+        crate::widget::logical_root_transform(ctx).transform(&mut ox, &mut oy);
+        self.popup.state.set_space_origin(Some(Point::new(ox, oy)));
         self.popup.paint(ctx, font, font_size, current_viewport());
     }
 }

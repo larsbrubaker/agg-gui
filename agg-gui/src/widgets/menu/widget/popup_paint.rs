@@ -11,6 +11,9 @@
 //! [`super::super::geometry::stack_layout`], so it automatically paints at
 //! whatever (possibly touch-grown) metrics that layout used.
 //!
+//! `paint_scroll_bar` draws an overflowing panel's themed scroll bar in its
+//! strip, always shown as agg-sharp's popup scroll bar is.
+//!
 //! `offer_hovered_row_tooltip` hands the pointer-hovered row's
 //! `MenuItem::tooltip` to the central tooltip controller each frame the
 //! popup paints, so a closed popup (which does not paint) offers nothing.
@@ -27,6 +30,7 @@ use crate::geometry::{Point, Rect};
 
 use super::super::geometry::{hit_test, item_at_path, MenuHit, PopupLayout};
 use super::super::model::{MenuEntry, MenuSelection};
+use super::super::overflow::PopupScroll;
 use super::super::paint::{
     paint_check_mark, paint_item_row_bg, paint_radio_mark, paint_separator, paint_submenu_chevron,
     popup_row_text_color, MenuStyle,
@@ -34,6 +38,11 @@ use super::super::paint::{
 use super::super::state::PopupMenuState;
 use super::super::style::{row_icon_x, row_label_right, row_label_x, row_selection_column};
 use super::labels::PopupLabels;
+use crate::widgets::scroll_view::current_scroll_style;
+use crate::widgets::scrollbar::{
+    paint_prepared_scrollbar, PreparedScrollbar, ScrollbarAxis, ScrollbarGeometry,
+    ScrollbarOrientation, DEFAULT_GRAB_MARGIN,
+};
 
 /// Opacity of an image icon on a disabled row (glyph icons dim through the
 /// disabled text colour instead).
@@ -199,6 +208,47 @@ pub(super) fn paint_popup_level(
             open && item.enabled,
         );
     }
+}
+
+/// Paint the scroll bar of the panel `rect` scrolled by `scroll`, in the
+/// strip `scroll.bar`, with the theme's scroll bar style and colours.
+pub(super) fn paint_scroll_bar(ctx: &mut dyn DrawCtx, rect: Rect, scroll: PopupScroll) {
+    let style = current_scroll_style();
+    let axis = ScrollbarAxis {
+        enabled: true,
+        offset: scroll.offset,
+        content: scroll.content_height,
+        ..ScrollbarAxis::default()
+    };
+    let geom = ScrollbarGeometry {
+        orientation: ScrollbarOrientation::Vertical,
+        track_start: rect.y + style.inner_margin,
+        track_end: rect.y + rect.height - style.inner_margin,
+        cross_end: scroll.bar.x + scroll.bar.width - style.outer_margin,
+        hit_margin: DEFAULT_GRAB_MARGIN,
+    };
+    let Some((thumb_start, thumb_len)) = axis.thumb_metrics(rect.height, style, geom) else {
+        return;
+    };
+    let bar_w = style.bar_width;
+    let bar_x = geom.cross_end - bar_w;
+    paint_prepared_scrollbar(
+        ctx,
+        PreparedScrollbar {
+            track: Rect::new(
+                bar_x,
+                geom.track_start,
+                bar_w,
+                geom.track_end - geom.track_start,
+            ),
+            thumb: Rect::new(bar_x, thumb_start, bar_w, thumb_len),
+            radius: bar_w * 0.5,
+            alpha: 1.0,
+            color: style.color,
+            hovered_thumb: false,
+            dragging: false,
+        },
+    );
 }
 
 /// `offset` (logical px) truncated to a whole number of device pixels, as

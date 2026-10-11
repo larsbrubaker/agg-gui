@@ -8,10 +8,11 @@ use crate::geometry::{Point, Size};
 
 use super::fit_width::{FitMeasure, MenuWidth, FIT_MIN_W};
 use super::geometry::{
-    hit_test, item_at_path, metrics_with_row_h, stack_layout_with_metrics, MenuHit, MenuMetrics,
+    hit_test, item_at_path, metrics_with_row_h, stack_layout_placed, MenuHit, MenuMetrics,
     PopupLayout, ROW_H,
 };
 use super::model::{MenuEntry, MenuSelection};
+use super::overflow::StackPlacement;
 
 /// Wall-clock window during which a touch event still classifies follow-up
 /// mouse events as touch-synthesised.  Mirrors the constant in the menu
@@ -58,6 +59,17 @@ pub struct PopupMenuState {
     min_width: f64,
     /// Desktop item-row height (logical px); see [`super::MenuStyle::row_h`].
     row_h: f64,
+    /// Height of the bar title the menu opened from (`0.0` for a point), so
+    /// a menu that flips upward clears it; see [`Self::set_anchor_span`].
+    anchor_span: f64,
+    /// Root position of the space this menu's geometry is in, when known;
+    /// see [`Self::set_space_origin`].
+    space_origin: Option<Point>,
+    /// Scroll offset of each scrolling level, keyed by its path prefix
+    /// (`state_scroll.rs`).  Cleared on open and close.
+    pub(super) scroll_offsets: Vec<(Vec<usize>, f64)>,
+    /// A scroll bar drag in progress (`state_scroll.rs`).
+    scroll_drag: Option<scroll::ScrollDrag>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,6 +93,10 @@ impl Default for PopupMenuState {
             fit_measure: None,
             min_width: FIT_MIN_W,
             row_h: ROW_H,
+            anchor_span: 0.0,
+            space_origin: None,
+            scroll_offsets: Vec::new(),
+            scroll_drag: None,
         }
     }
 }
@@ -91,6 +107,8 @@ impl PopupMenuState {
         self.anchor_kind = anchor_kind;
         self.open = true;
         self.open_path.clear();
+        self.scroll_offsets.clear();
+        self.scroll_drag = None;
         self.hover_path = None;
         self.suppress_next_mouse_up = false;
         self.activate_on_mouse_up = false;
@@ -99,6 +117,8 @@ impl PopupMenuState {
     pub fn close(&mut self) {
         self.open = false;
         self.open_path.clear();
+        self.scroll_offsets.clear();
+        self.scroll_drag = None;
         self.hover_path = None;
         self.activate_on_mouse_up = false;
     }
@@ -185,8 +205,14 @@ impl PopupMenuState {
             return Vec::new();
         }
         let m = metrics_with_row_h(self.row_h);
+        let scroll = |prefix: &[usize]| self.scroll_offset(prefix);
+        let placement = StackPlacement {
+            anchor_span: self.anchor_span,
+            space_origin: self.space_origin,
+            scroll: &scroll,
+        };
         match (self.width, &self.fit_measure) {
-            (MenuWidth::FitContent, Some(measure)) => stack_layout_with_metrics(
+            (MenuWidth::FitContent, Some(measure)) => stack_layout_placed(
                 items,
                 self.anchor,
                 self.anchor_kind,
@@ -194,8 +220,9 @@ impl PopupMenuState {
                 viewport,
                 &|level, m| measure.popup_width_with_min(level, m, self.min_width),
                 m,
+                &placement,
             ),
-            _ => stack_layout_with_metrics(
+            _ => stack_layout_placed(
                 items,
                 self.anchor,
                 self.anchor_kind,
@@ -203,8 +230,29 @@ impl PopupMenuState {
                 viewport,
                 &|_, m: &MenuMetrics| m.menu_w,
                 m,
+                &placement,
             ),
         }
+    }
+
+    /// Set the height of the bar title the menu opens from, so a bar menu
+    /// with no room on its preferred side flips past the title rather than
+    /// over it.  `0.0` (the default) anchors at a point.
+    pub fn set_anchor_span(&mut self, span: f64) {
+        self.anchor_span = span;
+    }
+
+    /// Tell the menu where the space its anchor and events are given in sits
+    /// in root logical coordinates.  With it the window can be mapped into
+    /// that space, so a bar menu ([`MenuAnchorKind::Bar`]) flips upward or
+    /// scrolls instead of hanging off the bottom.  [`super::MenuBar`] keeps
+    /// it current from its overlay paint.
+    pub fn set_space_origin(&mut self, origin: Option<Point>) {
+        self.space_origin = origin;
+    }
+
+    pub fn space_origin(&self) -> Option<Point> {
+        self.space_origin
     }
 
     pub fn handle_event(
@@ -215,6 +263,9 @@ impl PopupMenuState {
     ) -> (EventResult, MenuResponse) {
         if !self.open {
             return (EventResult::Ignored, MenuResponse::None);
+        }
+        if let Some(result) = self.handle_scroll_bar(items, event, viewport) {
+            return (result, MenuResponse::None);
         }
         match event {
             Event::MouseMove { pos } => {
@@ -266,9 +317,17 @@ impl PopupMenuState {
                 if response != MenuResponse::None {
                     (EventResult::Consumed, response)
                 } else {
-                    self.handle_key(items, key.clone())
+                    let result = self.handle_key(items, key.clone());
+                    if matches!(key, Key::ArrowDown | Key::ArrowUp) {
+                        self.reveal_hover(items, viewport);
+                    }
+                    result
                 }
             }
+            Event::MouseWheel { pos, delta_y, .. } => (
+                self.handle_wheel(items, *pos, *delta_y, viewport),
+                MenuResponse::None,
+            ),
             _ => (EventResult::Ignored, MenuResponse::None),
         }
     }
@@ -619,6 +678,9 @@ fn shortcut_path(items: &[MenuEntry], key: &Key, modifiers: Modifiers) -> Option
     }
     None
 }
+
+#[path = "state_scroll.rs"]
+mod scroll;
 
 #[cfg(test)]
 #[path = "state_keyboard_tests.rs"]

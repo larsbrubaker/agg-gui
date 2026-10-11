@@ -13,6 +13,7 @@
 use crate::geometry::{Point, Rect, Size};
 
 use super::model::{MenuEntry, MenuItem};
+use super::overflow::{current_scroll_gutter, place_vertical, PopupScroll, StackPlacement};
 use super::state::MenuAnchorKind;
 
 pub const ROW_H: f64 = 24.0;
@@ -30,7 +31,8 @@ pub const DEFAULT_FONT_SIZE: f64 = 14.0;
 /// interactive menu target on a touch device.  44 px is the long-standing
 /// Apple HIG / Material touch-target floor.
 pub const TOUCH_MIN: f64 = 44.0;
-const MARGIN: f64 = 4.0;
+/// Gap every popup keeps from the window edge (agg-sharp sits flush).
+pub(crate) const MARGIN: f64 = 4.0;
 
 /// The concrete menu metrics for the current frame.  Desktop values are the
 /// bare constants; on a touch device they grow so every interactive target
@@ -117,6 +119,10 @@ pub struct PopupLayout {
     pub rect: Rect,
     pub rows: Vec<RowLayout>,
     pub path_prefix: Vec<usize>,
+    /// Set when the panel is too tall for its room and scrolls; see
+    /// [`super::overflow`].  Its rows then extend past `rect` and are
+    /// clipped to it.
+    pub scroll: Option<PopupScroll>,
 }
 
 #[derive(Clone, Debug)]
@@ -198,23 +204,90 @@ pub fn stack_layout_with_metrics(
     width: &dyn Fn(&[MenuEntry], &MenuMetrics) -> f64,
     m: MenuMetrics,
 ) -> Vec<PopupLayout> {
+    stack_layout_placed(
+        root_items,
+        anchor,
+        anchor_kind,
+        open_path,
+        viewport,
+        width,
+        m,
+        &StackPlacement::unscrolled(),
+    )
+}
+
+/// [`stack_layout_with_metrics`] with the opener's span, the menu space's
+/// root origin and each level's scroll offset (see [`StackPlacement`]).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stack_layout_placed(
+    root_items: &[MenuEntry],
+    anchor: Point,
+    anchor_kind: MenuAnchorKind,
+    open_path: &[usize],
+    viewport: Size,
+    width: &dyn Fn(&[MenuEntry], &MenuMetrics) -> f64,
+    m: MenuMetrics,
+    placement: &StackPlacement<'_>,
+) -> Vec<PopupLayout> {
     // One source of truth for every popup dimension this frame — paint and
     // hit-test both flow through here, so they can never diverge.
     let mut layouts = Vec::new();
     let mut items = root_items;
-    let vis = crate::widget::visible_root_rect(viewport);
+    let root_vis = crate::widget::visible_root_rect(viewport);
+    // The window in the menu's own space, when that space's root origin is
+    // known (a `MenuBar` runs its popup bar-local).
+    let vis = match placement.space_origin {
+        Some(o) => Rect::new(
+            root_vis.x - o.x,
+            root_vis.y - o.y,
+            root_vis.width,
+            root_vis.height,
+        ),
+        None => root_vis,
+    };
+    let bar_legacy = placement.space_origin.is_none();
     let mut x = anchor.x;
     let mut y_top = anchor.y;
     let mut prefix = Vec::new();
 
     loop {
         let w = width(items, &m);
-        let rect = popup_rect(items, Point::new(x, y_top), anchor_kind, vis, w, &m);
-        let rows = row_layouts(items, rect, &m);
+        let content_h = popup_height(items, &m);
+        let (y, h) = place_vertical(
+            content_h,
+            y_top,
+            anchor_kind,
+            vis,
+            prefix.is_empty(),
+            placement.anchor_span,
+            bar_legacy,
+        );
+        let scrolls = h < content_h - 1e-9;
+        let gutter = if scrolls {
+            current_scroll_gutter()
+        } else {
+            0.0
+        };
+        let left = vis.x + MARGIN;
+        let panel_w = w + gutter;
+        let px = x.clamp(left, (vis.x + vis.width - panel_w - MARGIN).max(left));
+        let rect = Rect::new(px, y, panel_w, h);
+        let scroll = scrolls.then(|| {
+            let mut s = PopupScroll {
+                content_height: content_h,
+                offset: 0.0,
+                bar: Rect::new(px + w, y, gutter, h),
+            };
+            s.offset = (placement.scroll)(&prefix).clamp(0.0, s.max_offset(h));
+            s
+        });
+        let offset = scroll.map_or(0.0, |s| s.offset);
+        let rows = row_layouts(items, Rect::new(px, y + offset, w, h), &m);
         layouts.push(PopupLayout {
             rect,
             rows,
             path_prefix: prefix.clone(),
+            scroll,
         });
 
         let Some(next_idx) = open_path.get(prefix.len()).copied() else {
@@ -242,6 +315,9 @@ pub fn stack_layout_with_metrics(
         let fits_right = cascade_x + sub_w <= vis.x + vis.width - MARGIN;
         let fits_left = rect.x - sub_w >= vis.x + MARGIN;
         x = cascade_x.min(vis.x + vis.width - sub_w - MARGIN);
+        // A row scrolled partly out of its panel cascades from the part
+        // that shows.
+        let row_rect = clip_to(row.rect, rect);
         // For top/context popups (open downward) the cascade
         // anchors at the row's TOP so the submenu's top edge
         // aligns with the parent row's top. For BottomBar popups
@@ -249,8 +325,8 @@ pub fn stack_layout_with_metrics(
         // so the submenu's bottom edge aligns with the parent
         // row's bottom — visually symmetric.
         y_top = match anchor_kind {
-            MenuAnchorKind::BottomBar => row.rect.y,
-            _ => row.rect.y + row.rect.height,
+            MenuAnchorKind::BottomBar => row_rect.y,
+            _ => row_rect.y + row_rect.height,
         };
         // On a phone-width viewport the submenu fits on neither side of
         // its parent, and clamping it back on screen would lay it right
@@ -259,13 +335,20 @@ pub fn stack_layout_with_metrics(
         // below it when the menu opens downward, above it when upward.
         if !fits_right && !fits_left {
             y_top = match anchor_kind {
-                MenuAnchorKind::BottomBar => row.rect.y + row.rect.height,
-                _ => row.rect.y,
+                MenuAnchorKind::BottomBar => row_rect.y + row_rect.height,
+                _ => row_rect.y,
             };
         }
     }
 
     layouts
+}
+
+/// `r` cut vertically to `panel` (unchanged when it lies inside).
+fn clip_to(r: Rect, panel: Rect) -> Rect {
+    let bottom = r.y.max(panel.y);
+    let top = (r.y + r.height).min(panel.y + panel.height).max(bottom);
+    Rect::new(r.x, bottom, r.width, top - bottom)
 }
 
 pub fn hit_test(layouts: &[PopupLayout], pos: Point) -> Option<MenuHit> {
@@ -344,36 +427,6 @@ pub fn contains(rect: Rect, pos: Point) -> bool {
         && pos.x <= rect.x + rect.width
         && pos.y >= rect.y
         && pos.y <= rect.y + rect.height
-}
-
-/// One popup panel's rect for `anchor`, kept inside `vis` — the on-screen
-/// part of root space ([`visible_root_rect`](crate::widget::visible_root_rect)).
-fn popup_rect(
-    items: &[MenuEntry],
-    anchor: Point,
-    anchor_kind: MenuAnchorKind,
-    vis: Rect,
-    w: f64,
-    m: &MenuMetrics,
-) -> Rect {
-    let h = popup_height(items, m);
-    let left = vis.x + MARGIN;
-    let x = anchor
-        .x
-        .clamp(left, (vis.x + vis.width - w - MARGIN).max(left));
-    let (min_y, raw_y) = match anchor_kind {
-        // Top bar — popup hangs below the anchor (extends toward
-        // smaller y in Y-up). `Bar` allows negative-y clamp so a
-        // bar pushed flush against the viewport edge still places
-        // a popup correctly.
-        MenuAnchorKind::Bar => (vis.y - vis.height, anchor.y - h),
-        // Bottom bar — popup rises ABOVE the anchor (extends
-        // toward larger y in Y-up). Popup rect's bottom = anchor.y.
-        MenuAnchorKind::BottomBar => (vis.y + MARGIN, anchor.y),
-        MenuAnchorKind::Context => (vis.y + MARGIN, anchor.y - h),
-    };
-    let y = raw_y.clamp(min_y, (vis.y + vis.height - h - MARGIN).max(min_y));
-    Rect::new(x, y, w, h)
 }
 
 fn row_layouts(items: &[MenuEntry], rect: Rect, m: &MenuMetrics) -> Vec<RowLayout> {

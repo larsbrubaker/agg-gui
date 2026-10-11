@@ -211,7 +211,16 @@ impl PopupMenu {
         ctx.set_font_size(font_size);
 
         for (level_idx, layout) in layouts.iter().enumerate() {
+            // One panel, scroll bar strip included, so its fill and border
+            // trace the same rounded shape (agg-sharp
+            // `AScrolledPopupCarriesTheRoundedFillItsBorderTraces`).
             paint_panel(ctx, layout.rect, &self.style);
+            if layout.scroll.is_some() {
+                // Rows scrolled past the panel are clipped to it.
+                ctx.save();
+                let r = layout.rect;
+                ctx.clip_rect(r.x, r.y, r.width, r.height);
+            }
             popup_paint::paint_popup_level(
                 ctx,
                 level_idx,
@@ -222,6 +231,10 @@ impl PopupMenu {
                 &mut self.labels,
             );
             self.row_widgets.paint_level(ctx, &self.items, layout);
+            if let Some(scroll) = layout.scroll {
+                ctx.restore();
+                popup_paint::paint_scroll_bar(ctx, layout.rect, scroll);
+            }
         }
         popup_paint::offer_hovered_row_tooltip(ctx, &self.items, &self.state, &layouts);
     }
@@ -233,6 +246,8 @@ mod tests_1;
 mod tests_2;
 #[cfg(test)]
 mod tests_bar_children;
+#[cfg(test)]
+mod tests_bar_flip;
 #[cfg(test)]
 mod tests_chrome;
 #[cfg(test)]
