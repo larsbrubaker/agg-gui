@@ -316,6 +316,11 @@ impl Widget for PopupsDemo {
         self.popup.is_open() || self.context_menu.is_open()
     }
 
+    /// The demo is a menu host: choosing from its popups keeps focus.
+    fn keeps_focus_on_press(&self) -> bool {
+        true
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         self.sync_popup();
         let viewport = agg_gui::widget::current_viewport();

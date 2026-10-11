@@ -580,6 +580,13 @@ impl Widget for NodeEditor {
         Some(self.id)
     }
 
+    /// While its context or add-node menu is up, a press is a choice from
+    /// it and leaves keyboard focus where it was; a press on the bare canvas
+    /// still clears focus.
+    fn keeps_focus_on_press(&self) -> bool {
+        self.popup.is_open() || self.add_menu_overlay_open()
+    }
+
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor
     }

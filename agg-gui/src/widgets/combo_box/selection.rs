@@ -14,8 +14,8 @@ use super::*;
 
 impl ComboBox {
     /// Start with nothing selected, showing `placeholder` in the closed box.
-    /// The selection returns once an option is picked (click, arrow key or
-    /// [`ComboBox::set_selected`]).
+    /// The selection returns once an option is picked (click, Enter on the
+    /// highlighted row or [`ComboBox::set_selected`]).
     pub fn with_no_selection(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = placeholder.into();
         self.clear_selection();
@@ -50,17 +50,6 @@ impl ComboBox {
     /// The text shown in the closed box while nothing is selected.
     pub fn placeholder(&self) -> &str {
         &self.placeholder
-    }
-
-    /// An arrow key with nothing selected selects the first option.
-    pub(super) fn select_first_from_none(&mut self) {
-        if self.options.is_empty() {
-            return;
-        }
-        self.set_selected(0);
-        self.ensure_selected_visible();
-        self.fire();
-        crate::animation::request_draw();
     }
 
     /// Track keyboard focus for [`super::ComboBoxStateStyle::focus_border`].

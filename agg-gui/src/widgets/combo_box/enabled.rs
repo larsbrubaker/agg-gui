@@ -82,9 +82,11 @@ impl ComboBox {
         }
     }
 
-    /// Close the list and drop its hover / drag state (focus loss, window
+    /// Close the list and drop its hover / drag state and any type-ahead
+    /// text (a pick, Escape, a press outside, focus loss, window
     /// deactivation).
     pub(super) fn close_list(&mut self) {
+        self.end_type_ahead();
         let was_open = self.open;
         self.open = false;
         self.hovered_item = None;
@@ -103,6 +105,7 @@ impl ComboBox {
         if self.enabled_now() {
             return false;
         }
+        self.end_type_ahead();
         let was_open = self.open;
         self.open = false;
         self.hovered_item = None;

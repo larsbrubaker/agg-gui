@@ -2,10 +2,16 @@
 //! pinned by `tests_1.rs` / `tests_2.rs`: a press in the bar's neutral
 //! space, a press on a sibling title with no move before it, a drag
 //! across titles that ends on a row, and the bar-level submenu cases (Right
-//! and Left inside File, a drag released on a submenu row). Events go straight to the bar in its
-//! own space, as those files drive it.
+//! and Left inside File, a drag released on a submenu row), and a title whose
+//! menu comes back empty. Events go straight to the bar in its own space, as
+//! those files drive it.
+//!
+//! C# bug fixed here: `MenuBarWidget.SwitchOpenMenu` stops at a title that
+//! declines to open, so Left / Right can never reach the titles past an
+//! empty menu; the bar steps past it
+//! (`rust_only_arrow_keys_step_past_a_title_that_opens_nothing`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::event::{Event, Key, Modifiers, MouseButton};
@@ -25,6 +31,12 @@ const VIEWPORT: Size = Size {
 /// C# `MenuBarHarness`: File (New, Recent > Report) and Edit (Copy),
 /// recording actions.
 fn bar() -> (MenuBar, Rc<RefCell<Vec<String>>>) {
+    bar_with(Vec::new())
+}
+
+/// The harness bar with `extra` titles after File and Edit (C#
+/// `MenuBarHarness.Show(params MenuItemModel[])`).
+fn bar_with(extra: Vec<TopMenu>) -> (MenuBar, Rc<RefCell<Vec<String>>>) {
     crate::widget::set_current_viewport(VIEWPORT);
     let actions = Rc::new(RefCell::new(Vec::new()));
     let fired = Rc::clone(&actions);
@@ -40,7 +52,10 @@ fn bar() -> (MenuBar, Rc<RefCell<Vec<String>>>) {
                 ],
             ),
             TopMenu::new("Edit", vec![MenuItem::action("Copy", "Copy").into()]),
-        ],
+        ]
+        .into_iter()
+        .chain(extra)
+        .collect(),
         move |action| fired.borrow_mut().push(action.to_string()),
     );
     bar.layout(Size::new(VIEWPORT.width, BAR_H));
@@ -249,5 +264,109 @@ fn dragging_across_titles_while_pressed_switches_the_menu() {
         *actions.borrow(),
         vec!["Copy".to_string()],
         "the switch has to leave the release still able to choose a row"
+    );
+}
+
+/// An `Empty` title whose items provider counts its runs and returns nothing.
+fn bar_with_empty_title() -> (MenuBar, Rc<Cell<usize>>) {
+    let builds = Rc::new(Cell::new(0));
+    let counted = Rc::clone(&builds);
+    let empty = TopMenu::new("Empty", Vec::new()).with_items_provider(move || {
+        counted.set(counted.get() + 1);
+        Vec::new()
+    });
+    let (bar, _) = bar_with(vec![empty]);
+    (bar, builds)
+}
+
+#[test]
+fn hovering_a_title_that_opens_nothing_builds_its_model_only_once() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let (mut bar, model_builds) = bar_with_empty_title();
+
+    // Something has to be open for hover switching to run at all
+    let file = title_center(&bar, 0);
+    click(&mut bar, file);
+    assert_eq!(bar.open_index, Some(0));
+
+    let empty = bar.children()[2].bounds();
+    let center_y = empty.y + empty.height * 0.5;
+    for i in 0..4 {
+        let pos = Point::new(empty.x + 2.0 + i as f64, center_y);
+        bar.on_event(&Event::MouseMove { pos });
+    }
+
+    assert_eq!(
+        model_builds.get(),
+        1,
+        "a title that declined to open must not be re-attempted on every move over it"
+    );
+    assert_eq!(
+        bar.open_index,
+        Some(0),
+        "an empty menu leaves whatever was open alone"
+    );
+
+    // Leaving and coming back is a fresh ask - the model may have something in it by then
+    bar.on_event(&Event::MouseMove { pos: file });
+    let center = Point::new(empty.x + empty.width * 0.5, center_y);
+    bar.on_event(&Event::MouseMove { pos: center });
+
+    assert_eq!(
+        model_builds.get(),
+        2,
+        "the decline is remembered only while the cursor stays on that title"
+    );
+}
+
+#[test]
+fn rust_only_pressing_a_title_that_opens_nothing_opens_nothing() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let (mut bar, model_builds) = bar_with_empty_title();
+    let empty = title_center(&bar, 2);
+
+    mouse(&mut bar, empty, true);
+    assert!(!bar.popup.is_open(), "no empty panel");
+    assert_eq!(bar.open_index, None);
+    assert!(!bar.popup.state.is_mouse_up_activation_armed());
+    mouse(&mut bar, empty, false);
+    assert_eq!(model_builds.get(), 1);
+
+    // with File open, the press closes File rather than leaving it up
+    let file = title_center(&bar, 0);
+    click(&mut bar, file);
+    assert_eq!(bar.open_index, Some(0));
+    click(&mut bar, empty);
+    assert!(!bar.popup.is_open());
+    assert_eq!(bar.open_index, None);
+}
+
+#[test]
+fn rust_only_arrow_keys_step_past_a_title_that_opens_nothing() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let (mut bar, _) = bar_with_empty_title();
+    let edit = title_center(&bar, 1);
+    click(&mut bar, edit);
+    assert_eq!(bar.open_index, Some(1));
+
+    key(&mut bar, Key::ArrowRight);
+    assert_eq!(
+        bar.open_index,
+        Some(0),
+        "Right from Edit wraps past Empty to File"
+    );
+    assert_eq!(
+        open_labels(&bar),
+        vec!["New".to_string(), "Recent".to_string()]
+    );
+
+    key(&mut bar, Key::ArrowLeft);
+    assert_eq!(
+        bar.open_index,
+        Some(1),
+        "Left from File wraps past Empty to Edit"
     );
 }

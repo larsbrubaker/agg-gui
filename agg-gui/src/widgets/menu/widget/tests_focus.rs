@@ -12,7 +12,9 @@
 //!
 //! Fix pinned here: `App`'s click-to-focus rule cleared focus on every press
 //! that landed on a non-focusable widget, menu hosts included, so choosing
-//! a menu row unfocused the text field the row was meant to act on.
+//! a menu row unfocused the text field the row was meant to act on. Each kind
+//! of host is checked: a widget-hosted `PopupMenu` (the harness), the menu
+//! bar, and `MarkdownView`'s right-click menu.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -20,7 +22,7 @@ use std::rc::Rc;
 use crate::event::MouseButton;
 use crate::geometry::{Point, Rect};
 use crate::widget::{App, Widget};
-use crate::widgets::TextField;
+use crate::widgets::{MarkdownView, TextField};
 
 use super::super::geometry::BAR_H;
 use super::super::model::MenuItem;
@@ -124,4 +126,53 @@ fn rust_only_a_press_on_a_plain_widget_still_clears_focus() {
     // the window background is neither focusable nor a menu host
     click(&mut app, Point::new(400.0, 50.0), MouseButton::Left);
     assert_eq!(app.focused_path(), None, "empty space defocuses the field");
+}
+
+#[test]
+fn rust_only_choosing_from_a_markdown_menu_keeps_the_text_field_focused() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let field_rect = Rect::new(20.0, 360.0, 200.0, 24.0);
+    let view_rect = Rect::new(20.0, 40.0, 400.0, 260.0);
+    let mut view = MarkdownView::new("Help text to select.", test_font());
+    // A view that does not take click focus itself, so its menu host rule is
+    // what decides.
+    if let Some(base) = view.widget_base_mut() {
+        base.focus_on_click = false;
+    }
+    let children: Vec<Box<dyn Widget>> =
+        vec![Box::new(TextField::new(test_font())), Box::new(view)];
+    let mut app = App::new(Box::new(Window {
+        bounds: Rect::default(),
+        children,
+        rects: vec![field_rect, view_rect],
+    }));
+    app.layout(VIEWPORT);
+    let field: &[usize] = &[0];
+    let markdown = |app: &App| -> Option<Point> {
+        let view = app.root().children()[1]
+            .as_any()?
+            .downcast_ref::<MarkdownView>()?;
+        let local = view.context_menu_item_center("Select All")?;
+        Some(Point::new(local.x + view_rect.x, local.y + view_rect.y))
+    };
+
+    click(&mut app, center(field_rect), MouseButton::Left);
+    assert_eq!(app.focused_path(), Some(field), "the field took focus");
+
+    click(&mut app, Point::new(120.0, 250.0), MouseButton::Right);
+    let row = markdown(&app).expect("the right-click opened the menu");
+    assert_eq!(
+        app.focused_path(),
+        Some(field),
+        "opening the menu keeps focus"
+    );
+
+    click(&mut app, row, MouseButton::Left);
+    assert!(markdown(&app).is_none(), "choosing a row closes the menu");
+    assert_eq!(
+        app.focused_path(),
+        Some(field),
+        "choosing Select All keeps the field focused"
+    );
 }

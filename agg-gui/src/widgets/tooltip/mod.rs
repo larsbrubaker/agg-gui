@@ -444,6 +444,13 @@ impl Widget for Tooltip {
             .unwrap_or(false)
     }
 
+    /// A transparent wrapper: a wrapped menu host keeps its focus rule.
+    fn keeps_focus_on_press(&self) -> bool {
+        self.children
+            .first()
+            .is_some_and(|c| c.keeps_focus_on_press())
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         let s = if let Some(child) = self.children.first_mut() {
             let cs = child.layout(available);

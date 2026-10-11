@@ -41,6 +41,13 @@ pub struct MenuBar {
     on_action: Box<dyn FnMut(&str)>,
     /// Top-menu index whose hover highlight is suppressed until cursor exit.
     pub(super) suppress_hover_for: Option<usize>,
+    /// The title whose menu [`MenuBar::open_menu`] last declined to open
+    /// because its items came back empty (C# `declinedHoverIndex`).  The
+    /// hover switch skips it while the cursor stays on it, so an app's items
+    /// provider (which may walk the whole scene) runs once per visit rather
+    /// than once per mouse move; [`MenuBar::set_hover_index`] forgets it when
+    /// the cursor leaves that title.
+    declined_hover: Option<usize>,
     /// When `true`, [`Widget::layout`] returns the tight content width
     /// (sum of menu-button widths) instead of the full available width.
     /// Set via [`MenuBar::with_fit_width`] when the bar shares a FlexRow
@@ -79,6 +86,7 @@ impl MenuBar {
             popup: PopupMenu::new(Vec::new()),
             on_action: Box::new(on_action),
             suppress_hover_for: None,
+            declined_hover: None,
             fit_width: false,
             orientation: MenuOrientation::Horizontal,
             cache: BackbufferCache::new(),
@@ -250,9 +258,16 @@ impl MenuBar {
         self.menus.iter().position(|menu| contains(menu.rect, pos))
     }
 
-    pub(super) fn open_menu(&mut self, idx: usize) {
+    /// Open title `idx`'s menu, replacing whatever was open, and report
+    /// whether it opened.  A menu whose items come back empty declines, as
+    /// C#'s `MenuBarWidget.OpenMenu` does: nothing changes, so whatever was
+    /// open stays open rather than being swapped for an empty panel.
+    pub(super) fn open_menu(&mut self, idx: usize) -> bool {
         let rect = self.menus[idx].rect;
         self.menus[idx].refresh_items();
+        if self.menus[idx].items.is_empty() {
+            return false;
+        }
         self.popup.items = self.menus[idx].items.clone();
         // Horizontal: anchor at the BAR'S bottom-left (rect.x, rect.y)
         // — popup opens straight DOWN under the bar item, allowed to
@@ -288,11 +303,27 @@ impl MenuBar {
         self.hover_index = Some(idx);
         self.cache.invalidate();
         crate::animation::request_draw();
+        true
     }
 
-    fn open_menu_for_drag_release(&mut self, idx: usize) {
-        self.open_menu(idx);
-        self.popup.state.arm_mouse_up_activation();
+    /// A press on a title opens its menu and starts the press-drag-release
+    /// gesture — only when the menu really opened (C# `activateOnRelease =
+    /// openIndex == pressed`).
+    fn open_menu_for_drag_release(&mut self, idx: usize) -> bool {
+        let opened = self.open_menu(idx);
+        if opened {
+            self.popup.state.arm_mouse_up_activation();
+        }
+        opened
+    }
+
+    /// Close the open menu from the bar's side (a press on a title that
+    /// declined to open, a drag released in neutral space).
+    fn close_open_menu(&mut self) {
+        self.popup.close();
+        self.open_index = None;
+        self.cache.invalidate();
+        crate::animation::request_draw();
     }
 
     fn switch_open_menu(&mut self, delta: isize) -> EventResult {
@@ -302,9 +333,18 @@ impl MenuBar {
         if self.menus.is_empty() {
             return EventResult::Ignored;
         }
+        // Step past titles whose menus decline (empty), so the arrows still
+        // reach the menus beyond one.  C# stops at the first decline and
+        // leaves the current menu open, stranding every title past an empty
+        // one from the keyboard; stepping all the way round lands back on
+        // the open menu, which stays as it is.
         let len = self.menus.len() as isize;
-        let next = (current as isize + delta).rem_euclid(len) as usize;
-        self.open_menu(next);
+        for step in 1..len {
+            let next = (current as isize + delta * step).rem_euclid(len) as usize;
+            if self.open_menu(next) {
+                break;
+            }
+        }
         EventResult::Consumed
     }
 
@@ -334,6 +374,9 @@ impl MenuBar {
         // window so a tap-to-open / tap-to-close cycle leaves no residue.
         let hover = if is_touch_synthesized() { None } else { hover };
         if self.hover_index != hover {
+            // The cursor has left the title that declined, so the next
+            // visit asks its items again.
+            self.declined_hover = None;
             self.hover_index = hover;
             // `request_draw()` (NOT `_without_invalidation`) — the bar's
             // hover paint lives inside the parent Window's retained
@@ -516,10 +559,13 @@ impl Widget for MenuBar {
             let from_touch = is_touch_synthesized();
             if self.popup.is_open() && !from_touch {
                 if let Some(idx) = hovered {
-                    if self.open_index != Some(idx) {
+                    if self.open_index != Some(idx) && self.declined_hover != Some(idx) {
                         let activate_on_release = self.popup.state.is_mouse_up_activation_armed();
-                        self.open_menu(idx);
-                        if activate_on_release {
+                        if !self.open_menu(idx) {
+                            // An empty menu leaves the open one alone; remember
+                            // the decline while the cursor stays here.
+                            self.declined_hover = Some(idx);
+                        } else if activate_on_release {
                             self.popup.state.arm_mouse_up_activation();
                         }
                     }
@@ -553,7 +599,12 @@ impl Widget for MenuBar {
             {
                 if let Some(idx) = self.menu_at(*pos) {
                     if self.open_index != Some(idx) {
-                        self.open_menu(idx);
+                        // A title that declines (empty) still takes the
+                        // press: the open menu closes, as C#'s press moves
+                        // focus to the bar and the outgoing popup closes on it.
+                        if !self.open_menu(idx) {
+                            self.close_open_menu();
+                        }
                         return EventResult::Consumed;
                     }
                 }
@@ -576,10 +627,7 @@ impl Widget for MenuBar {
                     && self.menu_at(*pos).is_none()
                     && !self.popup.body_contains(*pos, current_viewport())
                 {
-                    self.popup.close();
-                    self.open_index = None;
-                    self.cache.invalidate();
-                    crate::animation::request_draw();
+                    self.close_open_menu();
                     return EventResult::Consumed;
                 }
             }
@@ -614,6 +662,7 @@ impl Widget for MenuBar {
                 ..
             } => {
                 if let Some(idx) = self.menu_at(*pos) {
+                    // The press is the bar's whether or not the menu opened.
                     self.open_menu_for_drag_release(idx);
                     EventResult::Consumed
                 } else {

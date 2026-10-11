@@ -4,7 +4,8 @@
 //! are painted as a floating panel below the button in `paint_overlay()` so
 //! sibling widgets are not pushed down by the dropdown.  While open the combo
 //! is modal: a press outside the list closes it and goes no further
-//! (`combo_box/press.rs`).
+//! (`combo_box/press.rs`).  The keyboard follows agg-sharp's `DropDownList`
+//! (`combo_box/keyboard.rs`).
 //!
 //! Text for the selected value and dropdown items is rendered through
 //! backbuffered [`Label`] children maintained in `selected_label` and
@@ -98,6 +99,12 @@ pub struct ComboBox {
     open: bool,
     /// Index of the item the cursor is currently over (only meaningful when open).
     hovered_item: Option<usize>,
+    /// The open list's keyboard highlight (C# `highLightedIndex`): the row
+    /// Enter picks (`combo_box/keyboard.rs`).
+    key_highlight: usize,
+    /// The type-ahead filter typed since the list opened; `None` until a
+    /// character is typed.  While `Some`, the closed box shows it.
+    type_ahead: Option<String>,
 
     font: Arc<Font>,
     font_size: f64,
@@ -189,6 +196,8 @@ impl ComboBox {
             selected: sel,
             open: false,
             hovered_item: None,
+            key_highlight: 0,
+            type_ahead: None,
             font,
             font_size,
             on_change: None,
@@ -388,6 +397,7 @@ impl ComboBox {
 mod enabled;
 mod fit;
 mod geometry;
+mod keyboard;
 mod lazy_fonts;
 mod press;
 mod selection;
@@ -623,6 +633,10 @@ impl Widget for ComboBox {
                     }
                 }
                 let hovered_item = self.item_for_pos(*pos);
+                if let Some(idx) = hovered_item {
+                    // The row under the mouse is the one Enter picks.
+                    self.key_highlight = idx;
+                }
                 let style = self.popup_scroll_style();
                 let viewport = self.popup_scroll_viewport();
                 let geom = self.scrollbar_geometry(style);
@@ -652,59 +666,8 @@ impl Widget for ComboBox {
                     EventResult::Ignored
                 }
             }
-            Event::KeyDown { key, .. } => {
-                let n = self.options.len();
-                match key {
-                    Key::Enter | Key::Char(' ') => {
-                        self.open = !self.open;
-                        self.scrollbar.hovered_bar = false;
-                        self.scrollbar.hovered_thumb = false;
-                        self.scrollbar.dragging = false;
-                        self.middle_dragging = false;
-                        if self.open {
-                            self.ensure_selected_visible();
-                        }
-                        crate::animation::request_draw();
-                        EventResult::Consumed
-                    }
-                    Key::Escape => {
-                        if self.open {
-                            self.open = false;
-                            self.scrollbar.hovered_bar = false;
-                            self.scrollbar.hovered_thumb = false;
-                            self.scrollbar.dragging = false;
-                            self.middle_dragging = false;
-                            crate::animation::request_draw();
-                            EventResult::Consumed
-                        } else {
-                            EventResult::Ignored
-                        }
-                    }
-                    Key::ArrowDown | Key::ArrowUp if !self.has_selection => {
-                        self.select_first_from_none();
-                        EventResult::Consumed
-                    }
-                    Key::ArrowDown => {
-                        if self.selected + 1 < n {
-                            self.set_selected(self.selected + 1);
-                            self.ensure_selected_visible();
-                            self.fire();
-                            crate::animation::request_draw();
-                        }
-                        EventResult::Consumed
-                    }
-                    Key::ArrowUp => {
-                        if self.selected > 0 {
-                            self.set_selected(self.selected - 1);
-                            self.ensure_selected_visible();
-                            self.fire();
-                            crate::animation::request_draw();
-                        }
-                        EventResult::Consumed
-                    }
-                    _ => EventResult::Ignored,
-                }
-            }
+            Event::KeyDown { key, .. } => self.on_key_down(key),
+            Event::KeyUp { key, .. } => self.on_key_up(key),
             Event::FocusGained => {
                 self.set_focused(true);
                 EventResult::Ignored

@@ -12,16 +12,11 @@ use super::*;
 impl ComboBox {
     pub(super) fn on_left_press(&mut self, pos: Point) -> EventResult {
         if self.in_button(pos) {
-            self.open = !self.open;
-            self.hovered_item = None;
-            self.scrollbar.hovered_bar = false;
-            self.scrollbar.hovered_thumb = false;
-            self.scrollbar.dragging = false;
-            self.middle_dragging = false;
             if self.open {
-                self.ensure_selected_visible();
+                self.close_list();
+            } else {
+                self.open_list(false);
             }
-            crate::animation::request_draw();
             return EventResult::Consumed;
         }
         if self.open {
@@ -51,26 +46,14 @@ impl ComboBox {
                 // when the System window's font picker showed
                 // e.g. "Bangers" in Cascadia Code.
                 self.set_selected(i);
-                self.open = false;
-                self.hovered_item = None;
-                self.scrollbar.hovered_bar = false;
-                self.scrollbar.hovered_thumb = false;
-                self.scrollbar.dragging = false;
-                self.middle_dragging = false;
+                self.close_list();
                 self.fire();
-                crate::animation::request_draw();
                 return EventResult::Consumed;
             }
             // Press outside the dropdown — close it, and consume the
             // press so the widget beneath sees nothing (native drop-down
             // lists do the same).
-            self.open = false;
-            self.hovered_item = None;
-            self.scrollbar.hovered_bar = false;
-            self.scrollbar.hovered_thumb = false;
-            self.scrollbar.dragging = false;
-            self.middle_dragging = false;
-            crate::animation::request_draw();
+            self.close_list();
             return EventResult::Consumed;
         }
         EventResult::Ignored
@@ -91,13 +74,7 @@ impl ComboBox {
         if !self.open {
             return EventResult::Ignored;
         }
-        self.open = false;
-        self.hovered_item = None;
-        self.scrollbar.hovered_bar = false;
-        self.scrollbar.hovered_thumb = false;
-        self.scrollbar.dragging = false;
-        self.middle_dragging = false;
-        crate::animation::request_draw();
+        self.close_list();
         EventResult::Consumed
     }
 }

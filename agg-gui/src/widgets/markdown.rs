@@ -682,4 +682,12 @@ impl Widget for MarkdownView {
     fn is_focusable(&self) -> bool {
         true
     }
+
+    /// A press on the view opens and chooses from its right-click menu
+    /// (`markdown/image_context.rs`), so when an app turns off its click
+    /// focus ([`WidgetBase::focus_on_click`]) the press leaves keyboard
+    /// focus where it was rather than clearing it.
+    fn keeps_focus_on_press(&self) -> bool {
+        true
+    }
 }

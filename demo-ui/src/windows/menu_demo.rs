@@ -143,6 +143,11 @@ impl Widget for MenuDemo {
         self.context_menu.is_open()
     }
 
+    /// The demo is a menu host: choosing from its menus keeps focus.
+    fn keeps_focus_on_press(&self) -> bool {
+        true
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         if self.context_menu.is_open() {
             let (result, response) = self

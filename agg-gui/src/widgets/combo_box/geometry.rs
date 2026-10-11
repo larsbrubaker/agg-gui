@@ -67,16 +67,21 @@ impl ComboBox {
     }
 
     pub(super) fn ensure_selected_visible(&mut self) {
+        self.ensure_index_visible(self.selected);
+    }
+
+    /// Scroll the open list the least that brings row `index` into view.
+    pub(super) fn ensure_index_visible(&mut self, index: usize) {
         let n = self.options.len();
         if n == 0 {
             self.scroll_offset = 0;
             return;
         }
         let visible = self.popup_visible_count.max(1).min(n);
-        if self.selected < self.scroll_offset {
-            self.scroll_offset = self.selected;
-        } else if self.selected >= self.scroll_offset + visible {
-            self.scroll_offset = self.selected + 1 - visible;
+        if index < self.scroll_offset {
+            self.scroll_offset = index;
+        } else if index >= self.scroll_offset + visible {
+            self.scroll_offset = index + 1 - visible;
         }
         self.scroll_offset = self.scroll_offset.min(n.saturating_sub(visible));
         self.sync_scrollbar_from_rows();

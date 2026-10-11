@@ -230,10 +230,22 @@ fn combo_no_selection_until_picked() {
     let text_px = (8..60).any(|x| sample(&fb, x, 12).iter().any(|ch| *ch > 150));
     assert!(text_px, "placeholder text painted");
 
-    // An arrow key selects the first option.
+    // Down opens the list (on its release, as agg-sharp's `DropDownList`)
+    // with the first row highlighted, and Enter picks it.
+    let modifiers = Modifiers::default();
     c.on_event(&Event::KeyDown {
         key: Key::ArrowDown,
-        modifiers: Modifiers::default(),
+        modifiers,
+    });
+    c.on_event(&Event::KeyUp {
+        key: Key::ArrowDown,
+        modifiers,
+    });
+    assert!(c.is_open());
+    assert_eq!(c.selected_index(), None, "opening is not choosing");
+    c.on_event(&Event::KeyDown {
+        key: Key::Enter,
+        modifiers,
     });
     assert_eq!(c.selected_index(), Some(0));
     assert_eq!(fired.get(), Some(0));
@@ -250,10 +262,18 @@ fn combo_no_selection_until_picked() {
     assert_eq!(combo().selected_index(), Some(0));
     let mut empty = ComboBox::new(Vec::<String>::new(), 0, font()).with_no_selection("Nothing yet");
     render(&mut empty);
-    empty.on_event(&Event::KeyDown {
-        key: Key::ArrowDown,
-        modifiers: Modifiers::default(),
-    });
+    for event in [
+        Event::KeyUp {
+            key: Key::ArrowDown,
+            modifiers: Modifiers::default(),
+        },
+        Event::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::default(),
+        },
+    ] {
+        empty.on_event(&event);
+    }
     assert_eq!(empty.selected_index(), None);
 }
 
