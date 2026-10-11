@@ -251,6 +251,8 @@ mod tests_bar_children;
 #[cfg(test)]
 mod tests_bar_flip;
 #[cfg(test)]
+mod tests_bar_widget;
+#[cfg(test)]
 mod tests_chrome;
 #[cfg(test)]
 mod tests_conformance;
