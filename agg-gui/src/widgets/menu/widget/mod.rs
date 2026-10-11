@@ -253,7 +253,11 @@ mod tests_chrome;
 #[cfg(test)]
 mod tests_conformance;
 #[cfg(test)]
+mod tests_conformance_2;
+#[cfg(test)]
 mod tests_fit;
+#[cfg(test)]
+mod tests_hover;
 #[cfg(test)]
 mod tests_image_icon;
 #[cfg(test)]

@@ -30,19 +30,19 @@ use super::super::model::{MenuEntry, MenuItem};
 use super::super::state::MenuResponse;
 use super::{MenuBar, PopupMenu, TopMenu};
 
-const VIEWPORT: Size = Size {
+pub(super) const VIEWPORT: Size = Size {
     width: 600.0,
     height: 400.0,
 };
 
-fn test_font() -> Arc<Font> {
+pub(super) fn test_font() -> Arc<Font> {
     const FONT_BYTES: &[u8] = include_bytes!("../../../../../demo/assets/CascadiaCode.ttf");
     Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
 }
 
 /// Desktop input baseline (other test files flip the shared profile, the
 /// touch latch and the scales).
-fn reset_env() {
+pub(super) fn reset_env() {
     crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
     crate::touch_state::clear_last_touch_event_for_testing();
     crate::ux_scale::set_ux_scale(1.0);
@@ -52,10 +52,10 @@ fn reset_env() {
 
 /// C# `MenuHarness`'s window: children at fixed window-space rects, later
 /// children over earlier ones.
-struct Window {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-    rects: Vec<Rect>,
+pub(super) struct Window {
+    pub(super) bounds: Rect,
+    pub(super) children: Vec<Box<dyn Widget>>,
+    pub(super) rects: Vec<Rect>,
 }
 
 impl Widget for Window {
@@ -131,15 +131,15 @@ impl Widget for Anchor {
 /// C# `ClickCountingWidget` on a real [`Button`]: what the button received
 /// (through an event observer) and how many times it fired.
 #[derive(Default)]
-struct Counts {
-    mouse_downs: Cell<u32>,
-    mouse_ups: Cell<u32>,
-    focus_gains: Cell<u32>,
-    clicks: Cell<u32>,
+pub(super) struct Counts {
+    pub(super) mouse_downs: Cell<u32>,
+    pub(super) mouse_ups: Cell<u32>,
+    pub(super) focus_gains: Cell<u32>,
+    pub(super) clicks: Cell<u32>,
 }
 
 /// A real button that counts its traffic, and the observer that watches it.
-fn counting_button(name: &str) -> (Box<dyn Widget>, Rc<Counts>, EventObserver) {
+pub(super) fn counting_button(name: &str) -> (Box<dyn Widget>, Rc<Counts>, EventObserver) {
     let counts = Rc::new(Counts::default());
     let clicked = Rc::clone(&counts);
     let button: Box<dyn Widget> = Box::new(
@@ -156,7 +156,7 @@ fn counting_button(name: &str) -> (Box<dyn Widget>, Rc<Counts>, EventObserver) {
     (button, counts, observer)
 }
 
-fn assert_got_nothing(counts: &Counts, what: &str) {
+pub(super) fn assert_got_nothing(counts: &Counts, what: &str) {
     assert_eq!(counts.mouse_downs.get(), 0, "{what} must see no press");
     assert_eq!(counts.mouse_ups.get(), 0, "{what} must see no release");
     assert_eq!(counts.clicks.get(), 0, "{what} must not click");
@@ -164,40 +164,57 @@ fn assert_got_nothing(counts: &Counts, what: &str) {
 }
 
 /// Press and release at window point `p` (Y-up), as a shell delivers them.
-fn click(app: &mut App, p: Point, button: MouseButton) {
+pub(super) fn click(app: &mut App, p: Point, button: MouseButton) {
     let y = VIEWPORT.height - p.y;
     app.on_mouse_down(p.x, y, button, Modifiers::default());
     app.on_mouse_up(p.x, y, button, Modifiers::default());
 }
 
+/// C# `MenuHarness`'s default anchor position.
+const ANCHOR: Point = Point { x: 10.0, y: 370.0 };
+
 /// C# `MenuHarness`: a full-window counting backdrop, an anchor at (10, 370)
 /// and a menu shown from it.
-struct Harness {
-    app: App,
-    menu: Rc<RefCell<PopupMenu>>,
-    actions: Rc<RefCell<Vec<String>>>,
-    beneath: Rc<Counts>,
+pub(super) struct Harness {
+    pub(super) app: App,
+    pub(super) menu: Rc<RefCell<PopupMenu>>,
+    pub(super) actions: Rc<RefCell<Vec<String>>>,
+    pub(super) beneath: Rc<Counts>,
     /// C# `AddWidgetUnderMenu`: a counting button exactly under a row.
     buried: Option<Rc<Counts>>,
     _observers: Vec<EventObserver>,
 }
 
 impl Harness {
-    fn show(items: Vec<MenuEntry>) -> Self {
-        Self::build(items, None)
+    pub(super) fn show(items: Vec<MenuEntry>) -> Self {
+        Self::build(items, None, ANCHOR, true)
+    }
+
+    /// [`Harness::show`] with the anchor's bottom-left corner at `anchor`
+    /// (C# `MenuHarness.Show(..., anchorPosition)`).
+    pub(super) fn show_at(items: Vec<MenuEntry>, anchor: Point) -> Self {
+        Self::build(items, None, anchor, true)
+    }
+
+    /// The harness with its menu built but never shown: the window as it is
+    /// before any menu opens.
+    pub(super) fn closed(items: Vec<MenuEntry>) -> Self {
+        Self::build(items, None, ANCHOR, false)
     }
 
     /// [`Harness::show`] with a counting button exactly where top-level row
     /// `row` is, under the menu in the window's child order.
     fn show_with_button_under_row(items: Vec<MenuEntry>, row: usize) -> Self {
-        Self::build(items, Some(row))
+        Self::build(items, Some(row), ANCHOR, true)
     }
 
-    fn build(items: Vec<MenuEntry>, buried_row: Option<usize>) -> Self {
-        let anchor_rect = Rect::new(10.0, 370.0, 50.0, 20.0);
+    fn build(items: Vec<MenuEntry>, buried_row: Option<usize>, anchor: Point, open: bool) -> Self {
+        let anchor_rect = Rect::new(anchor.x, anchor.y, 50.0, 20.0);
         let mut popup = PopupMenu::new(items);
         popup.set_root_origin(Point::new(anchor_rect.x, anchor_rect.y));
-        popup.open_at_local(Point::ORIGIN);
+        if open {
+            popup.open_at_local(Point::ORIGIN);
+        }
         let menu = Rc::new(RefCell::new(popup));
         let actions = Rc::new(RefCell::new(Vec::new()));
 
@@ -239,7 +256,7 @@ impl Harness {
     }
 
     /// Window-space rects of the open menu's panels.
-    fn panels(&self) -> Vec<Rect> {
+    pub(super) fn panels(&self) -> Vec<Rect> {
         let menu = self.menu.borrow();
         menu.state
             .layouts(&menu.items, VIEWPORT)
@@ -249,7 +266,7 @@ impl Harness {
     }
 
     /// C# `PointOutsideMenu`: right of the widest panel, below the lowest.
-    fn point_outside_menu(&self) -> Point {
+    pub(super) fn point_outside_menu(&self) -> Point {
         let panels = self.panels();
         let right = panels
             .iter()
@@ -259,24 +276,24 @@ impl Harness {
         Point::new(right + 20.0, bottom - 20.0)
     }
 
-    fn menu_contains(&self, p: Point) -> bool {
+    pub(super) fn menu_contains(&self, p: Point) -> bool {
         self.panels()
             .iter()
             .any(|r| p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height)
     }
 
     /// Centre of top-level row `row`, in window space (C# `CenterOf`).
-    fn center_of_row(&self, row: usize) -> Point {
+    pub(super) fn center_of_row(&self, row: usize) -> Point {
         center(row_rect(&self.menu.borrow(), row))
     }
 
-    fn is_open(&self) -> bool {
+    pub(super) fn is_open(&self) -> bool {
         self.menu.borrow().is_open()
     }
 }
 
 /// The window-space rect of `menu`'s top-level row `row`.
-fn row_rect(menu: &PopupMenu, row: usize) -> Rect {
+pub(super) fn row_rect(menu: &PopupMenu, row: usize) -> Rect {
     let layouts = menu.state.layouts(&menu.items, VIEWPORT);
     layouts[0]
         .rows
@@ -286,11 +303,11 @@ fn row_rect(menu: &PopupMenu, row: usize) -> Rect {
         .expect("row is laid out")
 }
 
-fn center(rect: Rect) -> Point {
+pub(super) fn center(rect: Rect) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5)
 }
 
-fn open_close_items() -> Vec<MenuEntry> {
+pub(super) fn open_close_items() -> Vec<MenuEntry> {
     vec![
         MenuItem::action("Open", "open").into(),
         MenuItem::action("Close", "close").into(),

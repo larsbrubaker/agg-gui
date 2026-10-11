@@ -314,7 +314,15 @@ pub(crate) fn stack_layout_placed(
         let cascade_x = rect.x + rect.width - 2.0;
         let fits_right = cascade_x + sub_w <= vis.x + vis.width - MARGIN;
         let fits_left = rect.x - sub_w >= vis.x + MARGIN;
-        x = cascade_x.min(vis.x + vis.width - sub_w - MARGIN);
+        // agg-sharp `PopupMenu` (its `AltMate`): a submenu with no room
+        // to the right of its parent opens to its left, overlapping the
+        // parent's left edge by the same 2 px the right cascade does,
+        // rather than being clamped back over the parent.
+        x = if !fits_right && fits_left {
+            rect.x - sub_w + 2.0
+        } else {
+            cascade_x.min(vis.x + vis.width - sub_w - MARGIN)
+        };
         // A row scrolled partly out of its panel cascades from the part
         // that shows.
         let row_rect = clip_to(row.rect, rect);

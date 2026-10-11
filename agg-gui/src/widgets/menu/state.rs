@@ -70,6 +70,8 @@ pub struct PopupMenuState {
     pub(super) scroll_offsets: Vec<(Vec<usize>, f64)>,
     /// A scroll bar drag in progress (`state_scroll.rs`).
     scroll_drag: Option<scroll::ScrollDrag>,
+    /// Each level's safe triangle toward its open submenu (`state_aim.rs`).
+    aim: aim::AimWedges,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,6 +99,7 @@ impl Default for PopupMenuState {
             space_origin: None,
             scroll_offsets: Vec::new(),
             scroll_drag: None,
+            aim: aim::AimWedges::default(),
         }
     }
 }
@@ -109,6 +112,7 @@ impl PopupMenuState {
         self.open_path.clear();
         self.scroll_offsets.clear();
         self.scroll_drag = None;
+        self.aim.clear();
         self.hover_path = None;
         self.suppress_next_mouse_up = false;
         self.activate_on_mouse_up = false;
@@ -119,6 +123,7 @@ impl PopupMenuState {
         self.open_path.clear();
         self.scroll_offsets.clear();
         self.scroll_drag = None;
+        self.aim.clear();
         self.hover_path = None;
         self.activate_on_mouse_up = false;
     }
@@ -349,17 +354,21 @@ impl PopupMenuState {
             Some(MenuHit::Item(path)) => {
                 if let Some(item) = item_at_path(items, &path) {
                     // Widget rows take their own hover; the menu does not
-                    // highlight them (same bookkeeping as a disabled row).
-                    if !item.enabled || item.widget_row.is_some() {
+                    // highlight them.
+                    if item.widget_row.is_some() {
                         if !self.open_path.starts_with(&path) {
                             self.open_path.truncate(path.len().saturating_sub(1));
                         }
                         return self.set_hover_path(None);
                     }
-                    if item.enabled && item.has_submenu() {
-                        self.open_path = path.clone();
-                    } else if !self.open_path.starts_with(&path) {
-                        self.open_path.truncate(path.len().saturating_sub(1));
+                    // agg-sharp routes no hover to a disabled row, so the
+                    // highlight and any open submenu stay where they were
+                    // (`PopupMenuHoverTests.HoveringADisabledRowDoesNotMoveTheHighlight`).
+                    if !item.enabled {
+                        return false;
+                    }
+                    if !self.hover_row(&layouts, &path, item.has_submenu(), pos) {
+                        return false;
                     }
                 }
                 Some(path)
@@ -374,6 +383,47 @@ impl PopupMenuState {
         } else {
             false
         }
+    }
+
+    /// agg-sharp `PopupMenu.OnRowHover` for the enabled row at `path`:
+    /// opens its submenu or closes the one a sibling had open, unless the
+    /// pointer is crossing the row on its way into that open submenu
+    /// (`state_aim.rs`).  Returns false when the row is only crossed, and
+    /// the highlight must stay put.
+    fn hover_row(
+        &mut self,
+        layouts: &[PopupLayout],
+        path: &[usize],
+        has_submenu: bool,
+        pos: Point,
+    ) -> bool {
+        let level = &path[..path.len() - 1];
+        // The pointer has arrived in this level, so the wedge the level
+        // above was holding open for it is spent.
+        if let Some((_, parent)) = level.split_last() {
+            self.aim.forget(parent);
+        }
+        let open_row = (self.open_path.len() > level.len() && self.open_path.starts_with(level))
+            .then(|| self.open_path[..=level.len()].to_vec());
+        if open_row.as_deref() == Some(path) {
+            // Back on the row whose submenu is up (on the way out of it):
+            // leave the chain below it open.
+            self.aim.remember(level, pos);
+            return true;
+        }
+        if let Some(open_row) = &open_row {
+            let sub = layouts.iter().find(|l| &l.path_prefix == open_row);
+            if sub.is_some_and(|sub| self.aim.aiming_at(level, pos, sub.rect)) {
+                return false;
+            }
+        }
+        self.aim.remember(level, pos);
+        if has_submenu {
+            self.open_path = path.to_vec();
+        } else {
+            self.open_path.truncate(level.len());
+        }
+        true
     }
 
     fn set_hover_path(&mut self, hover_path: Option<Vec<usize>>) -> bool {
@@ -464,6 +514,20 @@ impl PopupMenuState {
         close_on_activate: bool,
         suppress_mouse_up: bool,
     ) -> (EventResult, MenuResponse) {
+        // agg-sharp `RadioMenuItem`: choosing the row that is already the
+        // selected radio does nothing at all (no setter call, no state
+        // change).  The row still closes a menu it would close.
+        let reselects_radio = item_at_path(items, path)
+            .is_some_and(|item| item.selection == MenuSelection::Radio { selected: true });
+        if reselects_radio {
+            if !close_on_activate || !self.open {
+                return (EventResult::Consumed, MenuResponse::None);
+            }
+            self.close();
+            self.suppress_next_mouse_up = suppress_mouse_up;
+            crate::animation::request_draw();
+            return (EventResult::Consumed, MenuResponse::Closed);
+        }
         toggle_selection_at_path(items, path);
         if close_on_activate {
             self.close();
@@ -679,6 +743,8 @@ fn shortcut_path(items: &[MenuEntry], key: &Key, modifiers: Modifiers) -> Option
     None
 }
 
+#[path = "state_aim.rs"]
+mod aim;
 #[path = "state_scroll.rs"]
 mod scroll;
 
