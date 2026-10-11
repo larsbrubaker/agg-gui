@@ -15,10 +15,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Checks agg-gui out into `agg-gui/` with its path-dependency siblings
+  # (agg-rust, tess2-rust) next to it, as ci.yml does.
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agg-gui
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout agg-gui
+        uses: actions/checkout@v4
+        with:
+          path: agg-gui
+
+      - name: Checkout agg-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/agg-rust
+          path: agg-rust
+
+      - name: Checkout tess2-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/tess2-rust
+          path: tess2-rust
 
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite
@@ -47,13 +67,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: demo-dist
-          path: demo/dist
+          path: agg-gui/demo/dist
           retention-days: 1
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: demo/dist
+          path: agg-gui/demo/dist
 
   # Browser smoke test — boots the built WASM demo in headless Chrome and
   # asserts a real, non-blank canvas paints (screenshot) plus that desktop

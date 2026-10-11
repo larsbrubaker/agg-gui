@@ -23,11 +23,16 @@ exclude = [
 ]
 
 [dependencies]
-agg-rust = "1.1.0"
+# agg-rust and tess2-rust are sibling checkouts next to agg-gui
+# (github.com/larsbrubaker/<name>). Cargo builds from the `path` locally and
+# in CI, so a sibling fix is usable at once; `cargo publish` drops the path and
+# depends on the crates.io `version`, so a release that needs a newer sibling
+# waits for that sibling's release.
+agg-rust = { version = "1.1.0", path = "../../agg-rust" }
 clipper2-rust = "1.1.0"
 ttf-parser = "0.25"
 rustybuzz = "0.20"
-tess2-rust = "1.1.8"
+tess2-rust = { version = "1.1.8", path = "../../tess2-rust" }
 arboard  = { version = "3", optional = true, features = ["image-data"] }
 winit    = { version = "0.30", optional = true }
 bevy_reflect = { version = "0.18", optional = true }

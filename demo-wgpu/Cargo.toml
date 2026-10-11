@@ -17,7 +17,7 @@ reflect = ["agg-gui/reflect", "agg-gui-wgpu/reflect"]
 [dependencies]
 agg-gui  = { path = "../agg-gui" }
 agg-gui-wgpu = { path = "../agg-gui-wgpu" }
-agg-rust = "1.1.0"
+agg-rust = { version = "1.1.0", path = "../../agg-rust" }
 bytemuck = { version = "1", features = ["derive"] }
 web-time = "1"
 # wgsl is enabled by default in wgpu; native backends are enabled per target below.

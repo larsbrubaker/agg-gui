@@ -34,7 +34,7 @@ Check `cargo`'s own exit code, not the tail of the output — piping through
 `tail`/`head` masks the failure, and a passing-looking excerpt can hide a
 failed target earlier in the run.
 
-If the change touched formatting, also confirm `cargo fmt --all --check` is
+If the change touched formatting, also confirm `cargo fmt --check` (not `--all`, which also formats the sibling path dependencies) is
 clean, and remember that reflow can push a file past the 800-line limit that
 `agg-gui/tests/file_line_count.rs` enforces.
 

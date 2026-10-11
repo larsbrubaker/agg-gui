@@ -1,3 +1,8 @@
+# agg-rust and tess2-rust are `{ version, path }` dependencies
+# on sibling checkouts (`../../agg-rust` from each crate). Every job that runs
+# cargo therefore checks agg-gui out into `agg-gui/` and the siblings next to
+# it, matching a dev machine's `rust-apps/` layout, and runs from `agg-gui/`.
+# The siblings are public repos, so the default token covers every checkout.
 name: CI
 
 on:
@@ -12,8 +17,26 @@ jobs:
   # because demo-ui embeds sample files from them at compile time.
   lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agg-gui
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout agg-gui
+        uses: actions/checkout@v4
+        with:
+          path: agg-gui
+
+      - name: Checkout agg-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/agg-rust
+          path: agg-rust
+
+      - name: Checkout tess2-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/tess2-rust
+          path: tess2-rust
 
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite
@@ -27,19 +50,40 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.toml', 'rust-toolchain.toml') }}
+            agg-gui/target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('agg-gui/**/Cargo.toml', 'agg-gui/rust-toolchain.toml') }}
 
+      # Not `--all`: that also formats local path dependencies, i.e. the
+      # sibling checkouts. In this virtual workspace plain `cargo fmt` covers
+      # exactly our members.
       - name: Check formatting
-        run: cargo fmt --all --check
+        run: cargo fmt --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agg-gui
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout agg-gui
+        uses: actions/checkout@v4
+        with:
+          path: agg-gui
+
+      - name: Checkout agg-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/agg-rust
+          path: agg-rust
+
+      - name: Checkout tess2-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/tess2-rust
+          path: tess2-rust
 
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite
@@ -53,8 +97,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+            agg-gui/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('agg-gui/**/Cargo.toml') }}
 
       - name: Build library
         run: cargo build -p agg-gui
@@ -91,8 +135,26 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: agg-gui
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout agg-gui
+        uses: actions/checkout@v4
+        with:
+          path: agg-gui
+
+      - name: Checkout agg-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/agg-rust
+          path: agg-rust
+
+      - name: Checkout tess2-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/tess2-rust
+          path: tess2-rust
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -103,16 +165,34 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-clipboard-${{ hashFiles('**/Cargo.toml') }}
+            agg-gui/target
+          key: ${{ runner.os }}-cargo-clipboard-${{ hashFiles('agg-gui/**/Cargo.toml') }}
 
       - name: Check clipboard feature
         run: cargo check -p agg-gui --features clipboard
 
   build-wasm:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agg-gui
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout agg-gui
+        uses: actions/checkout@v4
+        with:
+          path: agg-gui
+
+      - name: Checkout agg-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/agg-rust
+          path: agg-rust
+
+      - name: Checkout tess2-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/tess2-rust
+          path: tess2-rust
 
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite

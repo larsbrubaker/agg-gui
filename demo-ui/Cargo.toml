@@ -11,7 +11,7 @@ reflect = ["agg-gui/reflect"]
 
 [dependencies]
 agg-gui    = { path = "../agg-gui" }
-agg-rust   = "1.1.0"
+agg-rust   = { version = "1.1.0", path = "../../agg-rust" }
 png        = "0.17"
 dark-light = "1"
 web-time   = "1"

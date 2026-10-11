@@ -6,6 +6,14 @@
 #
 # Requires the repository secret CARGO_REGISTRY_TOKEN (a crates.io token
 # with publish-new and publish-update scopes).
+#
+# agg-rust and tess2-rust are `{ version, path }` dependencies.
+# Cargo needs the sibling checkouts to load the workspace, so they are checked
+# out next to agg-gui as in ci.yml; the published manifest keeps only the
+# `version`, and cargo's verify build resolves those crates from crates.io.
+# So whenever agg-gui needs a newer agg-rust (or tess2-rust),
+# publish that crate first, then raise the `version` requirement in the
+# member Cargo.toml files to the new release.
 name: publish
 
 on:
@@ -19,8 +27,26 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agg-gui
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout agg-gui
+        uses: actions/checkout@v4
+        with:
+          path: agg-gui
+
+      - name: Checkout agg-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/agg-rust
+          path: agg-rust
+
+      - name: Checkout tess2-rust
+        uses: actions/checkout@v4
+        with:
+          repository: larsbrubaker/tess2-rust
+          path: tess2-rust
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo publish
         env:

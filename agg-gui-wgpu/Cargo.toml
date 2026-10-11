@@ -27,7 +27,9 @@ reflect = ["agg-gui/reflect"]
 # features (reflect, clipboard, winit-adapter), so depending on them would
 # force `bevy_reflect` on every consumer of this crate.
 agg-gui  = { path = "../agg-gui", version = "0.5.1", default-features = false }
-agg-rust = "1.1.0"
+# Sibling checkout locally and in CI, crates.io `version` when published
+# (see agg-gui/Cargo.toml).
+agg-rust = { version = "1.1.0", path = "../../agg-rust" }
 bytemuck = { version = "1", features = ["derive"] }
 # Logging facade only: a library must not print (no eprintln!/println!) —
 # the embedding app chooses the logger.  Used for one-shot misuse warnings
