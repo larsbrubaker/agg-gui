@@ -4,6 +4,8 @@
 //! intermediate model consumed by the layout pass in the parent widget module.
 //! Emphasis and paired HTML style tags set the style of the text between
 //! them (`emphasis.rs`), so text is flushed into a new item at each change.
+//! Pipe tables are the ones Markdig finds (`markdown_editing::pipe_tables`
+//! rewrites the source before pulldown-cmark reads it).
 
 use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 
@@ -19,7 +21,9 @@ impl MarkdownView {
 fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut out = Vec::new();
     let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
-    let events: Vec<MdEvent<'_>> = Parser::new_ext(markdown, opts).collect();
+    // Pipe tables as Markdig finds them, so a file reads as the same tables it did in MarkdigAgg.
+    let markdown = crate::widgets::markdown_editing::pipe_tables::markdig_source(markdown);
+    let events: Vec<MdEvent<'_>> = Parser::new_ext(&markdown, opts).collect();
     let paired_tags = pair_style_tags(&events);
     let mut styles = StyleStack::default();
     // Whether the text flushed last ended in whitespace (see `glue`).
@@ -124,10 +128,14 @@ fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
             text.push(' ');
             return text.push_str(value.trim_start());
         }
-        if !text.is_empty() && !text.ends_with(' ') && !text.ends_with('\n') {
-            text.push(' ');
+        // pulldown-cmark splits one run of text into several events (at an escape such as
+        // `a\|b`, at an entity), so the pieces join as written; only whitespace already
+        // pushed collapses with the next piece's.
+        if text.ends_with(char::is_whitespace) {
+            text.push_str(value.trim_start());
+        } else {
+            text.push_str(value);
         }
-        text.push_str(value.trim_start());
     }
 
     for (idx, ev) in events.into_iter().enumerate() {
@@ -569,5 +577,52 @@ mod tests {
         });
 
         assert_eq!(first_text, Some("• Alpha"));
+    }
+
+    fn tables(items: &[ParagraphItem]) -> Vec<Vec<Vec<String>>> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                ParagraphItem::Table { rows, .. } => Some(rows.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rust_only_pipe_tables_are_the_ones_markdig_finds() {
+        // A pipe in a code span keeps its cell (GFM would split it and refuse the table).
+        let items = parse_markdown("| a\\|b | `c|d` |\n|---|---|\n| x | `y|z` |");
+        assert_eq!(
+            tables(&items),
+            [vec![
+                vec!["a|b".to_string(), "c|d".to_string()],
+                vec!["x".to_string(), "y|z".to_string()],
+            ]]
+        );
+
+        // Header and delimiter rows of different widths, and a wider body row.
+        let items = parse_markdown("| a |\n|---|---|\n\n| a | b |\n|---|\n| c | d | e |");
+        assert_eq!(
+            tables(&items),
+            [
+                vec![vec!["a".to_string()]],
+                vec![
+                    vec!["a".to_string(), "b".to_string(), String::new()],
+                    vec!["c".to_string(), "d".to_string(), "e".to_string()],
+                ],
+            ]
+        );
+
+        // A line without a pipe after the header makes the whole paragraph text.
+        let items = parse_markdown("| a | b |\n|---|---|\nplain");
+        assert!(tables(&items).is_empty());
+        let ParagraphItem::Flow { items: inline, .. } = &items[0] else {
+            panic!("expected a paragraph");
+        };
+        let InlineItem::Text { text, .. } = &inline[0] else {
+            panic!("expected text");
+        };
+        assert_eq!(text, "| a | b | |---|---| plain");
     }
 }

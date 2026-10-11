@@ -4,15 +4,17 @@
 //!
 //! Markdig keeps a pipe inside a code span in its cell (`` `c|d` ``) where
 //! pulldown-cmark, following GFM, splits the cell there and drops cells past
-//! the header's count.  So a table's rows are split here from its source the
-//! way Markdig splits them, and each cell's text is read as inline markdown on
-//! its own ([`super::parser_inlines`]), exactly as a paragraph is.
+//! the header's count.  So whether a block is a table at all is Markdig's
+//! verdict ([`super::pipe_tables`]), a table's rows are split from its source
+//! the way Markdig splits them, and each cell's text is read as inline
+//! markdown on its own ([`super::parser_inlines`]), exactly as a paragraph is.
 
 use pulldown_cmark::Alignment;
 
 use super::block::{RichAlignment, RichBlock, RichBlockKind, RichTableCell};
 use super::parse_tree::{self, Node, NodeKind};
 use super::parser_inlines::InlineReader;
+use super::pipe_tables;
 
 /// Where a code block's source starts: the start of its line, so the fence's
 /// indentation is part of the block.  Markdig strips up to that much
@@ -92,18 +94,17 @@ pub(super) fn read_code(code: &Node, body: &str, start: usize, end: usize, resul
     result.code_fence = fence;
 }
 
-/// Fills a pipe table's rows and column alignments, or leaves it Raw: rows
-/// wider than the header and cells holding anything but one paragraph are not
-/// tables the rich view edits.
-pub(super) fn read_table(table: &Node, result: &mut RichBlock, soft_breaks_are_hard: bool) {
-    let NodeKind::Table(alignments) = &table.kind else {
-        return;
-    };
-    let lines: Vec<&str> = result
-        .original_source
-        .split('\n')
-        .map(|line| line.strip_suffix('\r').unwrap_or(line))
-        .collect();
+/// Fills a pipe table's rows and column alignments from its source, or
+/// leaves it Raw: rows wider than the header and cells holding anything but
+/// one paragraph are not tables the rich view edits.  The caller has checked
+/// that Markdig reads the source as a table starting at its first line
+/// ([`pipe_tables::find`]).
+pub(super) fn read_table(
+    alignments: &[Alignment],
+    result: &mut RichBlock,
+    soft_breaks_are_hard: bool,
+) {
+    let lines = pipe_tables::lines_of(&result.original_source);
     // The header, then the delimiter row, then the body rows.
     if lines.len() < 2 {
         return;
@@ -115,7 +116,7 @@ pub(super) fn read_table(table: &Node, result: &mut RichBlock, soft_breaks_are_h
             continue;
         }
         let mut cells = Vec::new();
-        for cell in split_row(line) {
+        for cell in pipe_tables::split_row(line) {
             let Some(cell) = read_cell(cell.trim(), soft_breaks_are_hard) else {
                 return;
             };
@@ -144,49 +145,6 @@ pub(super) fn read_table(table: &Node, result: &mut RichBlock, soft_breaks_are_h
             Alignment::None => None,
         })
         .collect();
-}
-
-/// A row's cells as written, split at each pipe outside a code span and not
-/// escaped; the outer pipes are optional.
-fn split_row(line: &str) -> Vec<&str> {
-    let row = line.trim();
-    let row = row.strip_prefix('|').unwrap_or(row);
-    let bytes = row.as_bytes();
-    let mut cells = Vec::new();
-    let mut cell_start = 0;
-    let mut at = 0;
-    while at < bytes.len() {
-        match bytes[at] {
-            b'\\' => at += 2,
-            b'`' => {
-                let run = bytes[at..].iter().take_while(|&&b| b == b'`').count();
-                let ticks = &row[at..at + run];
-                at += run;
-                // A code span runs to the next backtick run of the same length; without one the
-                // backticks are text.
-                let mut search = at;
-                while let Some(found) = row[search..].find(ticks).map(|i| i + search) {
-                    let close_run = bytes[found..].iter().take_while(|&&b| b == b'`').count();
-                    if close_run == run {
-                        at = found + run;
-                        break;
-                    }
-                    search = found + close_run;
-                }
-            }
-            b'|' => {
-                cells.push(&row[cell_start..at]);
-                at += 1;
-                cell_start = at;
-            }
-            _ => at += 1,
-        }
-    }
-    let at = at.min(bytes.len());
-    if !row[cell_start..at].trim().is_empty() || cells.is_empty() {
-        cells.push(&row[cell_start..at]);
-    }
-    cells
 }
 
 /// A cell's inlines (an empty cell when written empty), or `None` when its

@@ -22,7 +22,8 @@
 //!   the source exactly (`RichMarkdownParser.cs`), on pulldown-cmark's source
 //!   ranges (`parse_tree`); `parser_inlines` reads inlines,
 //!   `code_and_tables` code blocks and pipe tables (`RichCodeAndTables.cs`),
-//!   `align_groups` folds `<div align>` wrappers (`RichAlignGroups.cs`).
+//!   `align_groups` folds `<div align>` wrappers (`RichAlignGroups.cs`), and
+//!   `pipe_tables` finds pipe tables as Markdig does (the viewer uses it too).
 //! * [`markdown_writer`] — the document back to markdown: unedited blocks and
 //!   groups verbatim, edited ones regenerated (`RichMarkdownWriter.cs`).
 //! * [`group_writer`] — changed lists, quotes and `<div align>` wrappers
@@ -56,6 +57,7 @@ pub mod markdown_parser;
 pub mod markdown_writer;
 mod parse_tree;
 mod parser_inlines;
+pub(crate) mod pipe_tables;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
 pub use document::{DocPosition, RichDocument};

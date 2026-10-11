@@ -4,7 +4,8 @@
 //!
 //! Paragraphs, headings, single-paragraph list items, plain-paragraph quotes,
 //! `<div align>` groups ([`super::align_groups`]), code blocks and pipe tables
-//! ([`super::code_and_tables`]) are modelled; every other block is Raw (shown
+//! ([`super::code_and_tables`], found as Markdig finds them by
+//! [`super::pipe_tables`]) are modelled; every other block is Raw (shown
 //! rendered, edited in the Markdown tab).
 //!
 //! agg-sharp builds the partition from Markdig's precise spans; this port
@@ -24,6 +25,7 @@ use super::group_writer::EMPTY_ITEM_COMMENT;
 use super::groups::{shared, RichListGroup, RichQuoteGroup};
 use super::parse_tree::{self, Node, NodeKind};
 use super::parser_inlines::InlineReader;
+use super::pipe_tables;
 
 /// Reads `markdown` into a document.
 pub fn parse(markdown: &str) -> RichDocument {
@@ -104,12 +106,48 @@ impl<'a> Reader<'a> {
                 range.start = code_and_tables::code_start(block, self.body, range.start, cursor);
             }
             self.add_gap(cursor, range.start);
+            if block.is_paragraph() {
+                range.start = self.add_paragraph_before_table(block, range.clone());
+            }
             let built = self.build_block(Some(block), range.start, range.end);
             self.document.blocks.push(built);
             cursor = range.end;
         }
         self.add_gap(cursor, self.body.len());
         self.document.trailing_text = std::mem::take(&mut self.pending_separator);
+    }
+
+    /// Where a paragraph's table starts when Markdig finds one below its
+    /// first line (`foo` above a table whose rows GFM refuses): the lines
+    /// above it are added as a paragraph of their own, the line break after
+    /// them as separator.  `range.start` when there is no such table.
+    fn add_paragraph_before_table(&mut self, paragraph: &Node, range: Range<usize>) -> usize {
+        let source = &self.body[range.clone()];
+        let Some(found) = pipe_tables::find(source).filter(|found| found.header_line > 0) else {
+            return range.start;
+        };
+        let table_start = range.start
+            + source
+                .match_indices('\n')
+                .nth(found.header_line - 1)
+                .map_or(0, |(i, _)| i + 1);
+        let mut above = paragraph.clone();
+        above.children.retain(|child| child.range.end < table_start);
+        while above
+            .children
+            .last()
+            .is_some_and(|c| matches!(c.kind, NodeKind::SoftBreak | NodeKind::HardBreak))
+        {
+            above.children.pop();
+        }
+        if above.children.is_empty() {
+            return range.start;
+        }
+        above.range = above.inline_extent(self.body);
+        let built = self.build_block(Some(&above), above.range.start, above.range.end);
+        self.document.blocks.push(built);
+        self.add_gap(above.range.end, table_start);
+        table_start
     }
 
     /// A block's source as Markdig spans it: a paragraph from its first inline
@@ -397,10 +435,6 @@ impl<'a> Reader<'a> {
             // A grid table, which the viewer reads and pulldown-cmark takes for a paragraph,
             // stays Raw.
             NodeKind::Paragraph if code_and_tables::is_grid_table(&result.original_source) => {}
-            NodeKind::Paragraph => {
-                result.inlines = self.reader.inlines_of(node);
-                result.kind = RichBlockKind::Paragraph;
-            }
             NodeKind::Heading(level) => {
                 result.inlines = self.reader.inlines_of(node);
                 result.kind = RichBlockKind::Heading;
@@ -409,8 +443,22 @@ impl<'a> Reader<'a> {
             NodeKind::CodeBlock { .. } => {
                 code_and_tables::read_code(node, self.body, start, end, &mut result)
             }
-            NodeKind::Table(_) => {
-                code_and_tables::read_table(node, &mut result, self.reader.soft_breaks_are_hard)
+            // A pipe table is Markdig's verdict on the source, whichever block pulldown-cmark
+            // read: a paragraph GFM refused (a pipe in a code span, header and delimiter rows
+            // of different widths) can be a table, and a GFM table can be text.
+            NodeKind::Paragraph | NodeKind::Table(_) => {
+                if let Some(found) = pipe_tables::find(&result.original_source)
+                    .filter(|found| found.header_line == 0)
+                {
+                    code_and_tables::read_table(
+                        &found.alignments,
+                        &mut result,
+                        self.reader.soft_breaks_are_hard,
+                    );
+                } else if node.is_paragraph() {
+                    result.inlines = self.reader.inlines_of(node);
+                    result.kind = RichBlockKind::Paragraph;
+                }
             }
             _ => {}
         }

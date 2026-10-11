@@ -3,13 +3,9 @@
 //! 1:1 against `markdown_editing::markdown_writer`.
 //!
 //! Waiting for the HTML judge (rendering with the viewer's extensions), and
-//! ported with it: `RewrittenCodeAndTablesRenderTheSame`.  Waiting for pipe
-//! tables to be found the way Markdig finds them: the parse-back half of
-//! `TableWritesPipeRowsWithAlignments`.  The written header
-//! ``| a\|b | `c|d` |`` has three cells under GFM, which splits at a pipe
-//! inside a code span, so pulldown-cmark (the reader and the viewer) reads a
-//! paragraph where Markdig reads a two-column table.
+//! ported with it: `RewrittenCodeAndTablesRenderTheSame`.
 
+use agg_gui::widgets::markdown_editing::markdown_parser;
 use agg_gui::widgets::markdown_editing::markdown_writer;
 use agg_gui::widgets::markdown_editing::{
     InlineAtomKind, RichAlignment, RichBlock, RichBlockKind, RichDocument, RichInline,
@@ -69,4 +65,18 @@ fn table_writes_pipe_rows_with_alignments() {
 
     let written = markdown_writer::write(&document);
     assert_eq!(written, "| a\\|b | `c|d` |\n| :---: | --- |\n| x y |  |");
+
+    let read = markdown_parser::parse(&written);
+    let [read] = read.blocks.as_slice() else {
+        panic!("expected one block, got {}", read.blocks.len());
+    };
+    assert_eq!(read.kind, RichBlockKind::Table);
+    let [inline] = read.table_rows[0][0].inlines.as_slice() else {
+        panic!(
+            "expected one inline, got {:?}",
+            read.table_rows[0][0].inlines
+        );
+    };
+    let run = inline.as_run().expect("a run");
+    assert_eq!(run.text, "a|b");
 }
