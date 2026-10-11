@@ -23,7 +23,7 @@
 use crate::geometry::{Point, Rect};
 use crate::widgets::text_caret_navigation::{index_of_next_token, index_of_previous_token};
 
-use super::block::RichBlockKind;
+use super::block::{RichBlock, RichBlockKind};
 use super::block_layout::{find_stop, hit_test_lines, RichBlockGeometry};
 use super::block_painter::RichLayout;
 use super::document::{DocPosition, RichDocument};
@@ -397,13 +397,22 @@ fn has_layout(view: &RichDocumentView, document: &RichDocument, block_index: usi
 
 /// The container's caret text for word stepping: one placeholder character
 /// per atom, as offsets count.
-fn text_of(document: &RichDocument, position: DocPosition) -> String {
-    let block = &document.blocks[position.block_index];
+pub(super) fn text_of(document: &RichDocument, position: DocPosition) -> String {
+    block_text(
+        &document.blocks[position.block_index],
+        position.row,
+        position.column,
+    )
+}
+
+/// A block's (or table cell's) caret text: code as written, runs as their
+/// text, each atom as one placeholder (the mouse's word rule reads it too).
+pub(super) fn block_text(block: &RichBlock, row: usize, column: usize) -> String {
     match block.kind {
         RichBlockKind::CodeBlock => block.code_text.clone(),
         RichBlockKind::Raw => OBJECT_REPLACEMENT.to_string(),
         _ => block
-            .inlines_at(position.row, position.column)
+            .inlines_at(row, column)
             .map(|inlines| {
                 inlines
                     .iter()

@@ -1,9 +1,9 @@
 //! `rust_only_*` tests for `markdown_editing::document_view`,
 //! `caret_navigator` and `caret_blink` (agg-sharp's `RichDocumentView`,
 //! `RichCaretNavigator`, `RichCaretBlink`).  agg-sharp exercises these through
-//! the edit widget (`RichMarkdownEditWidgetTests`, `RichEditorKeyboardTests`),
-//! which is not ported yet; these drive them over a bare document, and pin the
-//! C# crash the navigator port fixes.
+//! the edit widget (`RichMarkdownEditWidgetTests`, `RichEditorKeyboardTests`);
+//! these drive them over a bare document, and pin the C# crash the navigator
+//! port fixes.
 
 use std::sync::Arc;
 use std::time::Duration;

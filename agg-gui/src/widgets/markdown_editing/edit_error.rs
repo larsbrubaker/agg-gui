@@ -7,13 +7,14 @@
 //! indexer's `ArgumentOutOfRangeException` on a position the document does
 //! not have, `InvalidOperationException` for a table operation on a non-table
 //! block, `ArgumentException` for a code/table range across two blocks, a history
-//! asked to keep no steps (`RichEditHistory.cs`) — the
+//! asked to keep no steps (`RichEditHistory.cs`), a layout's refusal — the
 //! Rust operations return one of these variants and leave the document
 //! unchanged.  Library code never panics on bad input.
 
 use std::fmt;
 
 use super::block::RichBlockKind;
+use super::block_layout::RichLayoutError;
 use super::document::{DocPosition, RichDocument};
 
 /// Why an edit operation refused its input.  The document is unchanged.
@@ -36,6 +37,15 @@ pub enum RichEditError {
     /// A [`super::edit_history::RichEditHistory`] asked to keep no steps
     /// (C#'s `ArgumentOutOfRangeException` from its constructor).
     MaxStepsOutOfRange,
+    /// The editor could not lay out a block after an edit
+    /// (`editor_state`'s relayout; C# threw from the layout).
+    Layout(RichLayoutError),
+}
+
+impl From<RichLayoutError> for RichEditError {
+    fn from(e: RichLayoutError) -> Self {
+        Self::Layout(e)
+    }
 }
 
 impl fmt::Display for RichEditError {
@@ -52,6 +62,7 @@ impl fmt::Display for RichEditError {
                 write!(f, "heading level {level}: 0 (Normal) or a heading level 1-6.")
             }
             Self::MaxStepsOutOfRange => f.write_str("The history must keep at least one step."),
+            Self::Layout(e) => write!(f, "a block could not be laid out: {e:?}"),
         }
     }
 }

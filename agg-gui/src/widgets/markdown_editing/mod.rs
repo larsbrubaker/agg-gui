@@ -78,6 +78,13 @@
 //!   laid-out lines, cells and blocks (`RichCaretNavigator.cs`).
 //! * [`caret_blink`] — the caret's 0.6 s on / 0.6 s off blink on the UI
 //!   clock (`RichCaretBlink.cs`).
+//! * [`editor_state`] — [`RichEditorState`], the editor without its widget:
+//!   document, selection, history, pending style, view, scroll and the one
+//!   edit pipeline (`RichMarkdownEditWidget.cs`'s state,
+//!   `RichEditorKeyboard.Apply`); `editor_keyboard` its keys
+//!   (`RichEditorKeyboard.cs`), [`editor_mouse`] its mouse
+//!   (`RichEditorMouse.cs`) and `editor_clipboard` cut, copy and paste
+//!   (`RichEditorClipboard.cs`).
 //!
 //! # Offsets
 //!
@@ -103,6 +110,10 @@ pub mod edit_commands;
 pub mod edit_error;
 pub mod edit_history;
 pub mod edit_operations;
+mod editor_clipboard;
+mod editor_keyboard;
+pub mod editor_mouse;
+pub mod editor_state;
 mod escaping;
 mod group_repair;
 pub mod group_writer;
@@ -138,6 +149,7 @@ pub use document_view::{RichDocumentView, RichViewPaint, RichViewSync};
 pub use edit_commands::{RichDocumentCommands, RichEdit, RichEditCommands};
 pub use edit_error::RichEditError;
 pub use edit_history::{RichEditHistory, RichEditKind};
+pub use editor_state::{RichEditorState, RichRawLinkLookup, RichStyleBuilder, SCROLL_BAR_ROOM};
 pub use groups::shared as shared_group;
 pub use groups::{
     RichAlignGroup, RichAlignGroupRef, RichListGroup, RichListGroupRef, RichQuoteGroup,

@@ -12,6 +12,12 @@ mod rich_document_tests;
 mod rich_edit_history_tests;
 #[path = "markdown_editing/rich_edit_operations_tests.rs"]
 mod rich_edit_operations_tests;
+#[path = "markdown_editing/rich_editor_clipboard_tests.rs"]
+mod rich_editor_clipboard_tests;
+#[path = "markdown_editing/rich_editor_keyboard_tests.rs"]
+mod rich_editor_keyboard_tests;
+#[path = "markdown_editing/rich_editor_mouse_tests.rs"]
+mod rich_editor_mouse_tests;
 #[path = "markdown_editing/rich_editor_polish_tests.rs"]
 mod rich_editor_polish_tests;
 #[path = "markdown_editing/rich_inline_round_trip_tests.rs"]
