@@ -41,6 +41,8 @@ pub mod inspector;
 mod inspector_props;
 pub mod label;
 pub mod markdown;
+/// The rich Markdown editor's document model (agg-sharp's `Markdig.Agg.Editing`).
+pub mod markdown_editing;
 pub mod menu;
 pub mod modal_sheet;
 pub mod multi_click;
