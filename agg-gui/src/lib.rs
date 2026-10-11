@@ -117,6 +117,7 @@ pub mod wasm_clipboard;
 /// Wheel-delta normalization for shells: OS / DOM scroll deltas → the
 /// *notch* count `Event::MouseWheel` carries.
 pub mod wheel;
+pub mod wheel_axes;
 pub mod widget;
 pub mod widgets;
 

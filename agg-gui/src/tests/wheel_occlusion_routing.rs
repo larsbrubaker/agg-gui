@@ -4,6 +4,10 @@
 //! [`App::on_mouse_wheel_xy_mods`] (screen y down; the canvas is y-up as in
 //! agg-sharp). agg-sharp's `WheelDown = -120` is one notch, `delta_y = -1`.
 //!
+//! `ANestedScrollViewAtItsLimitBubblesToTheOuterOne` lays the inner view out
+//! in a [`Fixed`] host, agg-gui's equivalent of the C# fixed-size
+//! `ScrollableWidget(150, 100)`.
+//!
 //! `ANonSelectableOverlayDoesNotBlockTheWheel` duplicates
 //! `a_widget_that_declines_the_point_lets_the_wheel_through`: agg-gui has one
 //! click-through mechanism, `Widget::hit_test` returning `false`, where
@@ -15,7 +19,9 @@ use std::rc::Rc;
 use crate::geometry::Point;
 use crate::{App, DrawCtx, Event, EventResult, Modifiers, Rect, ScrollView, Size, Widget};
 
+use super::scroll_fixtures::Fixed;
 use super::SizedBox;
+use crate::FlexColumn;
 
 /// A fixed-size plain widget; `transparent` declines every point.
 struct Plain {
@@ -170,4 +176,35 @@ fn a_widget_that_declines_the_point_lets_the_wheel_through() {
     let start = back.get();
     wheel_down(&mut app, 120.0, 120.0);
     assert_ne!(back.get(), start);
+}
+
+#[test]
+fn a_nested_scroll_view_at_its_limit_bubbles_to_the_outer_one() {
+    let inner_offset = Rc::new(Cell::new(0.0));
+    let mut inner = ScrollView::new(Box::new(
+        SizedBox::new().with_width(100.0).with_height(400.0),
+    ))
+    .with_offset_cell(Rc::clone(&inner_offset));
+    inner.set_scroll_offset(100_000.0);
+    let column = FlexColumn::new()
+        .add(Box::new(Fixed::new(150.0, 100.0, Some(Box::new(inner)))))
+        .add(Box::new(
+            SizedBox::new().with_width(150.0).with_height(600.0),
+        ));
+    let outer_offset = Rc::new(Cell::new(0.0));
+    let outer = ScrollView::new(Box::new(column)).with_offset_cell(Rc::clone(&outer_offset));
+    let mut app = App::new(Box::new(outer));
+    app.layout(Size::new(200.0, 200.0));
+    let inner_at_end = inner_offset.get();
+    let outer_start = outer_offset.get();
+    assert!(
+        inner_at_end > 0.0 && inner_at_end < 100_000.0,
+        "{inner_at_end}"
+    );
+
+    // the pointer over the inner view: the column's first 100 rows, at the top
+    wheel_down(&mut app, 75.0, 150.0);
+
+    assert_eq!(inner_offset.get(), inner_at_end);
+    assert_ne!(outer_offset.get(), outer_start);
 }

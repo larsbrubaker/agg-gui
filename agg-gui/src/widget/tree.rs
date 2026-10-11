@@ -228,6 +228,9 @@ pub fn dispatch_event(
     event: &Event,
     pos_in_root: Point,
 ) -> EventResult {
+    if matches!(event, Event::MouseWheel { .. }) {
+        crate::wheel_axes::reset_wheel_axes();
+    }
     let result = dispatch_event_dyn(root.as_mut(), path, event, pos_in_root);
     crate::widgets::radio_button::settle_pending_check_at_root(root.as_mut());
     result
@@ -311,7 +314,14 @@ fn dispatch_path(
     if child_result.is_consumed() {
         return child_result;
     }
-    // Bubble: deliver to this widget too (with original pos_in_root coords).
+    // Bubble: deliver to this widget too (with original pos_in_root coords),
+    // less any wheel axis a descendant took (`crate::wheel_axes`).
+    let remaining = crate::wheel_axes::remaining_wheel(event);
+    let event = match &remaining {
+        None => event,
+        Some(None) => return EventResult::Consumed,
+        Some(Some(rest)) => rest,
+    };
     let before_self = crate::animation::invalidation_epoch();
     let result = deliver(root, event);
     if result.requests_redraw() || before_self != crate::animation::invalidation_epoch() {

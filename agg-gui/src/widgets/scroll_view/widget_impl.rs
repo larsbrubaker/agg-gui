@@ -303,28 +303,33 @@ impl Widget for ScrollView {
                 // Convention: positive delta_y = user wants to see
                 // content ABOVE = DECREASE offset (offset 0 = top of
                 // content). Same sign for horizontal.
-                let mut consumed = false;
+                //
+                // As agg-sharp's `ScrollableWidget.OnMouseWheel`, an axis is
+                // taken only if it actually moved the content: at either end
+                // of the travel (or with nothing hidden on that axis) it is
+                // left for an ancestor that may still have somewhere to go.
+                self.clamp_offsets();
+                let (old_v, old_h) = (self.v.offset, self.h.offset);
                 if self.v.enabled {
-                    self.v.offset -= delta_y * 40.0;
-                    consumed = true;
+                    self.v.offset -= delta_y * crate::wheel::PIXELS_PER_NOTCH;
                 }
                 if self.h.enabled {
-                    self.h.offset -= delta_x * 40.0;
-                    consumed = true;
+                    self.h.offset -= delta_x * crate::wheel::PIXELS_PER_NOTCH;
                 }
                 self.clamp_offsets();
+                let used_y = *delta_y != 0.0 && self.v.offset != old_v;
+                let used_x = *delta_x != 0.0 && self.h.offset != old_h;
                 let (_, vh) = self.viewport();
                 self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
-                if let Some(c) = &self.offset_cell {
-                    c.set(self.v.offset);
+                self.publish_offsets();
+                if !used_x && !used_y {
+                    return EventResult::Ignored;
                 }
-                if let Some(c) = &self.h_offset_cell {
-                    c.set(self.h.offset);
-                }
-                if consumed {
-                    crate::animation::request_draw();
+                crate::animation::request_draw();
+                if (used_y || *delta_y == 0.0) && (used_x || *delta_x == 0.0) {
                     EventResult::Consumed
                 } else {
+                    crate::wheel_axes::take_wheel_axes(used_x, used_y);
                     EventResult::Ignored
                 }
             }
