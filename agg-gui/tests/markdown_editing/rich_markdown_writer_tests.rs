@@ -2,11 +2,11 @@
 //! (`Tests/Agg.Tests/MarkdigAgg/RichMarkdownWriterTests.cs`), ported 1:1
 //! against `markdown_editing::inline_writer` and `markdown_writer`.
 //!
-//! Waiting for the HTML judge (rendering with the viewer's extensions), and
-//! ported with it: `RewrittenTextBlocksAndGroupsRenderTheSame`,
-//! `StyleEdgesRenderTheSame` and the HTML read-back loop at the end of
-//! `LiteralSyntaxIsEscaped`.
+//! "Renders the same" compares the viewer's HTML form of the two sources
+//! (`widgets::markdown::markdown_html`, normalised as C#'s `Html()`), where
+//! C# compares Markdig's HTML with MarkdigAgg's pipeline.
 
+use agg_gui::widgets::markdown::markdown_html;
 use agg_gui::widgets::markdown_editing::inline_writer;
 use agg_gui::widgets::markdown_editing::{markdown_parser, markdown_writer};
 use agg_gui::widgets::markdown_editing::{
@@ -157,6 +157,96 @@ fn literal_syntax_is_escaped() {
         "\\&lt; stays text, & too"
     );
     assert_eq!(write(&[run("a < b")]), "a < b");
+
+    // Each of these must read back as the text itself.
+    for text in [
+        "<b>x</b>",
+        "&lt;",
+        "*a* _b_ **c**",
+        "[l](u)",
+        "~s~ ^p^ ==m== ++i++",
+        "http://x.com www.y.com",
+        "a\\b",
+        "C#",
+        "!",
+        "---",
+        "===",
+    ] {
+        assert_eq!(
+            html(&write(&[run(text)])),
+            html(&plain_html_of(text)),
+            "{text}"
+        );
+    }
+}
+
+/// The HTML a paragraph of exactly this text renders as, built without going through markdown.
+fn plain_html_of(text: &str) -> String {
+    // C# enumerates UTF-16 code units; the texts here are ASCII.
+    text.chars().map(|c| format!("&#{};", c as u32)).collect()
+}
+
+/// Rendered HTML with whitespace runs collapsed: a rewrite joins soft-wrapped lines with a space, which
+/// renders the same as the line break it replaces.
+fn html(markdown: &str) -> String {
+    // A rewrite may write <b> as ** (and ** as <strong> where ** cannot flank): the same rendering.
+    markdown_html(markdown)
+}
+
+/// The judge: rewriting every paragraph, heading, list item and quote, with every list, quote and alignment
+/// group forced to regenerate (as if each had been edited), must not change the rendered HTML.
+fn rewritten_renders_the_same(markdown: &str) {
+    let mut document = markdown_parser::parse(markdown);
+    for block in &mut document.blocks {
+        block.dirty |= block.is_text_block();
+        if let Some(group) = &block.align_group {
+            group.borrow_mut().original_member_count = 0;
+        }
+        if let Some(group) = &block.quote_group {
+            group.borrow_mut().original_member_count = 0;
+        }
+        if let Some(group) = &block.list_group {
+            group.borrow_mut().original_member_count = 0;
+        }
+    }
+    let rewritten = markdown_writer::write(&document);
+    assert_eq!(
+        html(&rewritten),
+        html(markdown),
+        "{markdown:?} rewritten as {rewritten:?}"
+    );
+}
+
+#[test]
+fn rewritten_text_blocks_and_groups_render_the_same() {
+    for markdown in crate::rich_markdown_parser_tests::corpus() {
+        rewritten_renders_the_same(markdown);
+    }
+}
+
+// Style boundaries that CommonMark's delimiter rules make easy to get wrong.
+const STYLE_EDGES: [&str; 13] = [
+    "*a***b**\n",
+    "**a***b*\n",
+    "*a*~~b~~**c**\n",
+    // A style covering exactly one link writes inside it ([**y**](v)): the model cannot tell that from **[y](v)**, and both look the same.
+    "[**x**](u) **[y](v) z** [a *b*](w) *w [c](x)*\n",
+    "`a`**b**`c` **`d`**\n",
+    "**a *b***c\n",
+    "a**b**c *d* e\n",
+    "x **\"q\"** y a**\"b\"**c a*`d`*e\n",
+    "**^b^** **![i](a.png) text** *text <b>x</b>* [![i](a.png)](u)\n",
+    "# Heading with **bold** and `code` #\n",
+    "Line one  \n**bold line**\\\n1. item-like\n",
+    "[t](</a b> \"ti\\\"tle\") [e](<>) [p](/a\\(b\\))\n",
+    "&amp;lt; &#42; \\_ \\\\ \\# and *it\\*s*\n",
+];
+
+#[test]
+fn style_edges_render_the_same() {
+    for markdown in STYLE_EDGES {
+        rewritten_renders_the_same(markdown);
+    }
 }
 
 #[test]

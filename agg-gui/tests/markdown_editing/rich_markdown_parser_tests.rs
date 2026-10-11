@@ -11,7 +11,7 @@ use agg_gui::widgets::markdown_editing::{
 use crate::rich_markdown_parser_code_table_tests::SAMPLES;
 
 // Each string stresses one way the block partition or span arithmetic could drift by a byte.
-fn corpus() -> Vec<&'static str> {
+pub(crate) fn corpus() -> Vec<&'static str> {
     let mut corpus = vec![
         "",
         "\n",

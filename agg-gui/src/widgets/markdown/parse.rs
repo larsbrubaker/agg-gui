@@ -22,18 +22,26 @@ impl MarkdownView {
     }
 }
 
+/// The pulldown-cmark options the viewer reads with.
+pub(super) const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_TABLES);
+
+/// The source pulldown-cmark reads for `markdown`, with pipe tables as
+/// Markdig finds them and grid tables as Markdig reads them (as pipe
+/// tables), so a file reads as the same tables it did in MarkdigAgg; and the
+/// byte offsets of its tables that have no header row.
+pub(super) fn viewer_source(markdown: &str) -> (String, Vec<usize>) {
+    let markdown = crate::widgets::markdown_editing::pipe_tables::markdig_source(markdown);
+    let grid = super::grid_tables::markdig_grid_source(&markdown, OPTIONS);
+    (grid.source.into_owned(), grid.headerless)
+}
+
 pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut out = Vec::new();
-    let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
-    // Pipe tables as Markdig finds them, so a file reads as the same tables it did in MarkdigAgg.
-    let markdown = crate::widgets::markdown_editing::pipe_tables::markdig_source(markdown);
-    // Grid tables as Markdig reads them, as pipe tables pulldown-cmark reads.
-    let grid = super::grid_tables::markdig_grid_source(&markdown, opts);
-    let (events, event_starts): (Vec<MdEvent<'_>>, Vec<usize>) =
-        Parser::new_ext(&grid.source, opts)
-            .into_offset_iter()
-            .map(|(event, range)| (event, range.start))
-            .unzip();
+    let (source, headerless) = viewer_source(markdown);
+    let (events, event_ranges): (Vec<MdEvent<'_>>, Vec<std::ops::Range<usize>>) =
+        Parser::new_ext(&source, OPTIONS).into_offset_iter().unzip();
     let paired_tags = pair_style_tags(&events);
     let mut styles = StyleStack::default();
     // Whether the text flushed last ended in whitespace (see `glue`).
@@ -167,15 +175,17 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
         if let Some(cell) = table_cell.as_mut() {
             // Each piece of the event with its style: an extension span (`==x==`) is bold.
             let segments: Vec<(String, MarkdownRunStyle)> = match &ev {
-                MdEvent::Text(t) => extensions::pieces(t, styles.style(), None)
-                    .into_iter()
-                    .map(|piece| {
-                        let style = piece
-                            .extension
-                            .map_or(styles.style(), |extension| extension.style);
-                        (piece.text, style)
-                    })
-                    .collect(),
+                MdEvent::Text(t) => {
+                    extensions::pieces(t, &source, event_ranges[idx].clone(), styles.style(), None)
+                        .into_iter()
+                        .map(|piece| {
+                            let style = piece
+                                .extension
+                                .map_or(styles.style(), |extension| extension.style);
+                            (piece.text, style)
+                        })
+                        .collect()
+                }
                 MdEvent::Code(t) => vec![(t.to_string(), styles.style())],
                 MdEvent::SoftBreak | MdEvent::HardBreak => {
                     cell.push(' ');
@@ -307,7 +317,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 );
                 table = Some(Vec::new());
                 table_styles = Some(Vec::new());
-                table_header = !grid.headerless.contains(&event_starts[idx]);
+                table_header = !headerless.contains(&event_ranges[idx].start);
             }
             MdEvent::End(TagEnd::Table) => {
                 if let Some(rows) = table.take() {
@@ -515,7 +525,13 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 out.push(ParagraphItem::Rule);
             }
             MdEvent::Text(t) => {
-                for piece in extensions::pieces(&t, styles.style(), link.as_deref()) {
+                for piece in extensions::pieces(
+                    &t,
+                    &source,
+                    event_ranges[idx].clone(),
+                    styles.style(),
+                    link.as_deref(),
+                ) {
                     let Some(extension) = piece.extension else {
                         append_text(&mut cur_text, &piece.text);
                         continue;

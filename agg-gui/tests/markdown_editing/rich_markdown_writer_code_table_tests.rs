@@ -2,9 +2,10 @@
 //! (`Tests/Agg.Tests/MarkdigAgg/RichMarkdownWriterCodeTableTests.cs`), ported
 //! 1:1 against `markdown_editing::markdown_writer`.
 //!
-//! Waiting for the HTML judge (rendering with the viewer's extensions), and
-//! ported with it: `RewrittenCodeAndTablesRenderTheSame`.
+//! "Renders the same" compares the viewer's HTML form of the two sources
+//! (`widgets::markdown::markdown_html`), where C# compares Markdig's HTML.
 
+use agg_gui::widgets::markdown::markdown_html_collapsed;
 use agg_gui::widgets::markdown_editing::markdown_parser;
 use agg_gui::widgets::markdown_editing::markdown_writer;
 use agg_gui::widgets::markdown_editing::{
@@ -25,6 +26,38 @@ fn write_code(fence: &str, info: &str, code: &str) -> String {
 
 fn cell(inlines: Vec<RichInline>) -> RichTableCell {
     RichTableCell { inlines }
+}
+
+const CODE_AND_TABLES: [&str; 7] = [
+    "Text\n\n```cs title=x\nvar a = 1;\n\nb();\n```\n",
+    "~~~~\n```\ninside\n```\n~~~~\n",
+    "Text\n\n    indented\n      more\n\nafter\n",
+    "```\n```\n",
+    "| Left | Center | Right | None |\n|:-----|:------:|------:|------|\n| **b** | *i* | [l](http://x) | `c` |\n",
+    "| a\\|b | `c|d` |\n|---|---|\n| <span>x</span> | ![i](a.png) |\n",
+    "| a |\r\n|---|\r\n| **b** |\r\n",
+];
+
+/// The judge for code blocks and tables: rewriting every one must not change the rendered HTML.
+#[test]
+fn rewritten_code_and_tables_render_the_same() {
+    for markdown in CODE_AND_TABLES {
+        let mut document = markdown_parser::parse(markdown);
+        let mut edited = 0;
+        for block in &mut document.blocks {
+            if matches!(block.kind, RichBlockKind::CodeBlock | RichBlockKind::Table) {
+                block.dirty = true;
+                edited += 1;
+            }
+        }
+        assert!(edited > 0, "{markdown:?}");
+        let written = markdown_writer::write(&document);
+        assert_eq!(
+            markdown_html_collapsed(&written),
+            markdown_html_collapsed(markdown),
+            "{markdown:?} rewritten as {written:?}"
+        );
+    }
 }
 
 #[test]

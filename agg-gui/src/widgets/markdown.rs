@@ -58,6 +58,9 @@ mod feature_rendering_tests;
 #[cfg(test)]
 mod grid_table_tests;
 mod grid_tables;
+mod html_form;
+#[cfg(test)]
+mod html_form_tests;
 mod image_context;
 mod image_loader;
 mod layout;
@@ -75,6 +78,7 @@ use block_scroll::{
     clamp_block_offset, scrollbar_rect, scrollbar_thumb, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
 pub use emphasis::MarkdownRunStyle;
+pub use html_form::{markdown_html, markdown_html_collapsed};
 
 // ── Styled line representation ─────────────────────────────────────────────────
 

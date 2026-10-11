@@ -116,3 +116,14 @@ fn rust_only_superscripts_with_spaces_render_bold() {
         .collect();
     assert_eq!(styled, [("x", PLAIN), ("a b", BOLD), ("y", PLAIN)]);
 }
+
+#[test]
+fn rust_only_escaped_delimiters_stay_text() {
+    // Markdig reads `\^a^` and `\==b==` as text: an escaped delimiter opens nothing.
+    let runs = runs("\\^a^ \\==b== &#94;c^");
+    assert!(
+        runs.iter().all(|(_, style, _, _)| *style == PLAIN),
+        "{:?}",
+        runs.iter().map(|r| &r.0).collect::<Vec<_>>()
+    );
+}
