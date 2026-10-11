@@ -8,6 +8,8 @@
 //! arithmetic lives in [`super::inlines`]; the groups a block may share with
 //! its neighbours in [`super::groups`].
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use super::groups::{RichAlignGroupRef, RichListGroupRef, RichQuoteGroupRef};
 use super::inline::RichInline;
 use super::inlines;
@@ -88,12 +90,26 @@ pub struct RichTableCell {
     pub inlines: Vec<RichInline>,
 }
 
+/// A block's identity: C#'s object reference, which `RichDocumentView` keys
+/// its cached layouts on.  Every new block gets a fresh one, a clone included
+/// (C#'s `Clone` makes a new object); editing a block in place keeps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RichBlockId(u64);
+
+impl RichBlockId {
+    fn fresh() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 /// One top-level unit of a document.
 ///
 /// `Clone` is C#'s `RichBlock.Clone`: a deep copy of the block's own content
 /// that keeps its group references, so the copy is still a member of the same
 /// groups; [`super::RichDocument::deep_clone`] remaps them to cloned groups.
-#[derive(Clone, Debug)]
+/// The copy is a new block, with its own [`RichBlockId`].
+#[derive(Debug)]
 pub struct RichBlock {
     /// What the block is.
     pub kind: RichBlockKind,
@@ -160,6 +176,33 @@ pub struct RichBlock {
     /// True once an edit touched this block; the writer regenerates dirty
     /// blocks and copies the rest verbatim.
     pub dirty: bool,
+    /// The block's identity (see [`RichBlock::id`]).
+    pub(crate) id: RichBlockId,
+}
+
+impl Clone for RichBlock {
+    fn clone(&self) -> Self {
+        Self {
+            kind: self.kind,
+            heading_level: self.heading_level,
+            list: self.list.clone(),
+            alignment: self.alignment,
+            inlines: self.inlines.clone(),
+            code_text: self.code_text.clone(),
+            code_language: self.code_language.clone(),
+            code_info: self.code_info.clone(),
+            code_fence: self.code_fence.clone(),
+            table_rows: self.table_rows.clone(),
+            column_alignments: self.column_alignments.clone(),
+            original_source: self.original_source.clone(),
+            separator_before: self.separator_before.clone(),
+            align_group: self.align_group.clone(),
+            quote_group: self.quote_group.clone(),
+            list_group: self.list_group.clone(),
+            dirty: self.dirty,
+            id: RichBlockId::fresh(),
+        }
+    }
 }
 
 impl Default for RichBlock {
@@ -182,6 +225,7 @@ impl Default for RichBlock {
             quote_group: None,
             list_group: None,
             dirty: false,
+            id: RichBlockId::fresh(),
         }
     }
 }
@@ -193,6 +237,12 @@ impl RichBlock {
             kind,
             ..Self::default()
         }
+    }
+
+    /// This block's identity: the same while it is edited in place, new for
+    /// every new block or clone.
+    pub fn id(&self) -> RichBlockId {
+        self.id
     }
 
     /// True for the kinds that hold inlines directly: Paragraph, Heading,

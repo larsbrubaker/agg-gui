@@ -626,7 +626,7 @@ fn draw_image(
 
 // C# `new TypeFacePrinter(text, face, (x, baseline)).Render(...)`: the face's
 // underline (a link) is a bar under the text's whole advance.
-fn draw_text(
+pub(crate) fn draw_text(
     ctx: &mut dyn DrawCtx,
     text: &str,
     face: &RichFace,

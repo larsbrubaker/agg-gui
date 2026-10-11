@@ -71,6 +71,13 @@
 //! * [`block_painter`] — paints a laid-out text block or table through a
 //!   `DrawCtx`: backgrounds, quote bar, list marker, grid, text, images,
 //!   selection and caret (`RichBlockPainter.cs`).
+//! * [`document_view`] — every block's cached layout stacked top to bottom,
+//!   list numbers and list ends, relayout of only what an edit changed, and
+//!   painting of the blocks in view (`RichDocumentView.cs`).
+//! * [`caret_navigator`] — where the caret keys take the caret through the
+//!   laid-out lines, cells and blocks (`RichCaretNavigator.cs`).
+//! * [`caret_blink`] — the caret's 0.6 s on / 0.6 s off blink on the UI
+//!   clock (`RichCaretBlink.cs`).
 //!
 //! # Offsets
 //!
@@ -85,10 +92,13 @@ mod block_containers;
 pub mod block_layout;
 pub mod block_operations;
 pub mod block_painter;
+pub mod caret_blink;
+pub mod caret_navigator;
 mod char_class;
 mod code_and_tables;
 pub mod code_block_operations;
 pub mod document;
+pub mod document_view;
 pub mod edit_commands;
 pub mod edit_error;
 pub mod edit_history;
@@ -117,11 +127,14 @@ pub mod style_operations;
 pub mod table_code_operations;
 pub mod table_layout;
 
-pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
+pub use block::{
+    RichAlignment, RichBlock, RichBlockId, RichBlockKind, RichListInfo, RichTableCell,
+};
 pub use block_layout::{RichBlockGeometry, RichBlockLayout, RichLayoutError};
 pub use block_operations::{RichBlockState, RichListKind};
 pub use block_painter::{RichBlockPainter, RichEditColors, RichImage, RichLayout, RichPaintInputs};
 pub use document::{DocPosition, RichDocument};
+pub use document_view::{RichDocumentView, RichViewPaint, RichViewSync};
 pub use edit_commands::{RichDocumentCommands, RichEdit, RichEditCommands};
 pub use edit_error::RichEditError;
 pub use edit_history::{RichEditHistory, RichEditKind};
