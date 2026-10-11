@@ -8,17 +8,20 @@
 //! ([`super::markdown_writer`], [`super::group_writer`]), so a rewrite never
 //! changes what renders.
 //!
-//! agg-sharp's `Write` ends with a read-back check (`ReadsBackAs`): it parses
-//! the result with `RichMarkdownParser` and, when the styles differ (cases the
-//! flanking pass below does not model: the rule of three, runs that both open
-//! and close), writes every span as HTML tags.  That check needs the reader,
-//! which is not in this module yet; until it is, the flanking pass's output is
-//! the result.
+//! The write ends with a read-back check (C#'s `ReadsBackAs`): it parses the
+//! result with [`super::markdown_parser::parse`] and, when the styles differ
+//! (cases the flanking pass below does not model: the rule of three, runs that
+//! both open and close), writes every span as HTML tags.  Where the parse
+//! reads other characters, agg-sharp trusts the flanking pass; here the tags
+//! are used when they read back exactly, because pulldown-cmark applies
+//! CommonMark's rule of three to a delimiter run as written where Markdig
+//! applies it to what is left of the run (see `write_counted`).
 
 use super::char_class::is_punctuation_or_symbol;
 use super::escaping;
 use super::inline::{InlineAtomKind, RichInline, RichInlineContent};
 use super::inlines;
+use super::markdown_parser;
 
 /// Where a list of inlines is written, which changes what its markdown may
 /// contain.
@@ -153,6 +156,29 @@ pub fn write_counted(
     let (mut output, mut ranges) = serialize(&tokens, &uses, &prefix, table_cell);
     while mark_unflanked(&tokens, &mut uses, &ranges, &output) {
         (output, ranges) = serialize(&tokens, &uses, &prefix, table_cell);
+    }
+
+    // Flanking is not the whole of CommonMark's delimiter matching (the rule of three, runs that
+    // both open and close); if the result still reads back with different styles, every span
+    // uses tags.
+    match read_back(&output[prefix.len()..], &written) {
+        ReadBack::Same => {}
+        ReadBack::StylesDiffer => {
+            uses.iter_mut().for_each(|flag| *flag = true);
+            (output, _) = serialize(&tokens, &uses, &prefix, table_cell);
+        }
+        ReadBack::TextDiffers => {
+            // agg-sharp trusts the flanking pass here, because Markdig applies the rule of three
+            // to the delimiters a run has left; pulldown-cmark (like the CommonMark reference)
+            // applies it to the run as written, so `**a***a**a***` leaves `**` as literal text.
+            // The tags win when they read back exactly.
+            let mut tagged = uses.clone();
+            tagged.iter_mut().for_each(|flag| *flag = true);
+            let (html, _) = serialize(&tokens, &tagged, &prefix, table_cell);
+            if read_back(&html[prefix.len()..], &written) == ReadBack::Same {
+                output = html;
+            }
+        }
     }
 
     markdown.push_str(&output[prefix.len()..]);
@@ -493,4 +519,73 @@ fn ends_with_unescaped(markdown: &str, c: char) -> bool {
 
     let backslashes = stripped.chars().rev().take_while(|&b| b == '\\').count();
     backslashes % 2 == 0
+}
+
+/// How the markdown parses back compared with the inlines it was written from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReadBack {
+    /// The same characters with the same styles, or not one text block.
+    Same,
+    /// The same characters, some with other styles.
+    StylesDiffer,
+    /// Other characters: a reference link whose definition is elsewhere, or
+    /// delimiters that read as literal text.
+    TextDiffers,
+}
+
+/// Compares the markdown's parse with the inlines character by character.
+/// Whitespace is not compared (it moves out of delimiters on purpose).  When
+/// the parse is not one text block there is nothing to compare, so this
+/// trusts the flanking pass.
+fn read_back(markdown: &str, expected: &[RichInline]) -> ReadBack {
+    let document = markdown_parser::parse(markdown);
+    if document.blocks.len() != 1 || !document.blocks[0].is_text_block() {
+        return ReadBack::Same;
+    }
+
+    let wanted = styled_characters(expected);
+    let found = styled_characters(&document.blocks[0].inlines);
+    if !wanted
+        .iter()
+        .map(|item| &item.0)
+        .eq(found.iter().map(|item| &item.0))
+    {
+        return ReadBack::TextDiffers;
+    }
+
+    if wanted == found {
+        ReadBack::Same
+    } else {
+        ReadBack::StylesDiffer
+    }
+}
+
+/// Each non-whitespace character (or atom) with its bold, italic and strike.
+fn styled_characters(inlines: &[RichInline]) -> Vec<(String, bool, bool, bool)> {
+    let mut items = Vec::new();
+    for inline in inlines {
+        let style = (inline.bold, inline.italic, inline.strike);
+        match &inline.content {
+            RichInlineContent::Atom(atom) => {
+                items.push((
+                    format!("atom:{}", atom.raw_markdown),
+                    style.0,
+                    style.1,
+                    style.2,
+                ));
+            }
+            RichInlineContent::Run(run) => {
+                for c in run.text.chars().filter(|c| !c.is_whitespace()) {
+                    let key = if run.code {
+                        format!("`{c}")
+                    } else {
+                        c.to_string()
+                    };
+                    items.push((key, style.0, style.1, style.2));
+                }
+            }
+        }
+    }
+
+    items
 }

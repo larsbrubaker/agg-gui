@@ -2,16 +2,13 @@
 //! (`Tests/Agg.Tests/MarkdigAgg/RichMarkdownWriterTests.cs`), ported 1:1
 //! against `markdown_editing::inline_writer` and `markdown_writer`.
 //!
-//! Waiting for the reader (`RichMarkdownParser`) and the HTML judge (Markdig's
-//! rendering with the viewer's extensions), and ported with it:
-//! `RewrittenTextBlocksAndGroupsRenderTheSame`, `StyleEdgesRenderTheSame`,
-//! `HeadingsAreAtx`, the HTML read-back loop at the end of
-//! `LiteralSyntaxIsEscaped`, the parse-back halves of
-//! `LinkUrlAndTitleKeepEntitiesAndLines` and
-//! `MultiLineHeadingContentStaysOneHeading`.
+//! Waiting for the HTML judge (rendering with the viewer's extensions), and
+//! ported with it: `RewrittenTextBlocksAndGroupsRenderTheSame`,
+//! `StyleEdgesRenderTheSame` and the HTML read-back loop at the end of
+//! `LiteralSyntaxIsEscaped`.
 
 use agg_gui::widgets::markdown_editing::inline_writer;
-use agg_gui::widgets::markdown_editing::markdown_writer;
+use agg_gui::widgets::markdown_editing::{markdown_parser, markdown_writer};
 use agg_gui::widgets::markdown_editing::{
     InlineAtomKind, RichBlock, RichBlockKind, RichDocument, RichInline, RichInlineContext,
 };
@@ -205,6 +202,11 @@ fn link_url_and_title_keep_entities_and_lines() {
     link.link_title = Some("x &copy;\ny".to_string());
     let written = write(&[link]);
     assert_eq!(written, "[t](/a&amp;amp;b%0Ac \"x &amp;copy; y\")");
+
+    let read = &markdown_parser::parse(&written).blocks[0].inlines[0];
+    assert!(read.is_run());
+    assert_eq!(read.link_url.as_deref(), Some("/a&amp;b%0Ac"));
+    assert_eq!(read.link_title.as_deref(), Some("x &copy; y"));
 }
 
 #[test]
@@ -233,7 +235,22 @@ fn multi_line_heading_content_stays_one_heading() {
         document.blocks.push(heading);
         let written = markdown_writer::write(&document);
         assert_eq!(written, expected);
+
+        let blocks = markdown_parser::parse(&written).blocks;
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].kind, RichBlockKind::Heading);
+        assert_eq!(blocks[0].heading_level, level);
     }
+}
+
+#[test]
+fn headings_are_atx() {
+    let mut document = markdown_parser::parse("Title\n=====\n\nText\n");
+    document.blocks[0].dirty = true;
+    assert_eq!(markdown_writer::write(&document), "# Title\n\nText\n");
+
+    document.blocks[0].inlines = vec![run("C #")];
+    assert_eq!(markdown_writer::write(&document), "# C \\#\n\nText\n");
 }
 
 #[test]

@@ -2,9 +2,13 @@
 //! (`Tests/Agg.Tests/MarkdigAgg/RichMarkdownWriterCodeTableTests.cs`), ported
 //! 1:1 against `markdown_editing::markdown_writer`.
 //!
-//! Waiting for the reader (`RichMarkdownParser`) and the HTML judge, and
-//! ported with it: `RewrittenCodeAndTablesRenderTheSame` and the parse-back
-//! half of `TableWritesPipeRowsWithAlignments`.
+//! Waiting for the HTML judge (rendering with the viewer's extensions), and
+//! ported with it: `RewrittenCodeAndTablesRenderTheSame`.  Waiting for pipe
+//! tables to be found the way Markdig finds them: the parse-back half of
+//! `TableWritesPipeRowsWithAlignments`.  The written header
+//! ``| a\|b | `c|d` |`` has three cells under GFM, which splits at a pipe
+//! inside a code span, so pulldown-cmark (the reader and the viewer) reads a
+//! paragraph where Markdig reads a two-column table.
 
 use agg_gui::widgets::markdown_editing::markdown_writer;
 use agg_gui::widgets::markdown_editing::{
