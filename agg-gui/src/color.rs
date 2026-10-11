@@ -1,9 +1,13 @@
 //! Color type for agg-gui.
 //!
 //! Colors are stored as f32 RGBA in linear space. Conversion to AGG's `Rgba8`
-//! happens at the rasterizer boundary.
+//! happens at the rasterizer boundary.  The contrast, luminance and HSL
+//! helpers (`with_contrast`, `contrast`, ...) live in `color/contrast.rs`.
 
 use agg_rust::color::Rgba8;
+
+// WCAG contrast, luminance and HSL helpers (agg-sharp's ColorExtensionMethods).
+mod contrast;
 
 /// An RGBA color with f32 components in [0.0, 1.0].
 #[derive(Clone, Copy, Debug, PartialEq)]
