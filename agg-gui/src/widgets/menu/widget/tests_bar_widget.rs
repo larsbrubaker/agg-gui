@@ -1,13 +1,14 @@
 //! agg-sharp `MenuBarWidgetTests` (Tests/Agg.Tests/Agg.UI) not already
 //! pinned by `tests_1.rs` / `tests_2.rs`: a press in the bar's neutral
-//! space, a press on a sibling title with no move before it, and a drag
-//! across titles that ends on a row. Events go straight to the bar in its
+//! space, a press on a sibling title with no move before it, a drag
+//! across titles that ends on a row, and the bar-level submenu cases (Right
+//! and Left inside File, a drag released on a submenu row). Events go straight to the bar in its
 //! own space, as those files drive it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::event::{Event, Modifiers, MouseButton};
+use crate::event::{Event, Key, Modifiers, MouseButton};
 use crate::geometry::{Point, Size};
 use crate::widget::Widget;
 
@@ -21,7 +22,8 @@ const VIEWPORT: Size = Size {
     height: 180.0,
 };
 
-/// C# `MenuBarHarness`: File (New) and Edit (Copy), recording actions.
+/// C# `MenuBarHarness`: File (New, Recent > Report) and Edit (Copy),
+/// recording actions.
 fn bar() -> (MenuBar, Rc<RefCell<Vec<String>>>) {
     crate::widget::set_current_viewport(VIEWPORT);
     let actions = Rc::new(RefCell::new(Vec::new()));
@@ -29,7 +31,14 @@ fn bar() -> (MenuBar, Rc<RefCell<Vec<String>>>) {
     let mut bar = MenuBar::new(
         test_font(),
         vec![
-            TopMenu::new("File", vec![MenuItem::action("New", "New").into()]),
+            TopMenu::new(
+                "File",
+                vec![
+                    MenuItem::action("New", "New").into(),
+                    MenuItem::submenu("Recent", vec![MenuItem::action("Report", "Report").into()])
+                        .into(),
+                ],
+            ),
             TopMenu::new("Edit", vec![MenuItem::action("Copy", "Copy").into()]),
         ],
         move |action| fired.borrow_mut().push(action.to_string()),
@@ -119,6 +128,97 @@ fn pressing_a_sibling_title_switches_without_a_mouse_move() {
         "pressing a different title must open it, not just close the one that was open"
     );
     assert_eq!(open_labels(&bar), vec!["Copy".to_string()]);
+}
+
+fn key(bar: &mut MenuBar, key: Key) {
+    bar.on_event(&Event::KeyDown {
+        key,
+        modifiers: Modifiers::default(),
+    });
+}
+
+/// File is open with its `Recent` row (index 1) highlighted.
+fn file_open_on_recent() -> MenuBar {
+    let (mut bar, _) = bar();
+    let t = title_center(&bar, 0);
+    click(&mut bar, t);
+    bar.popup.state.hover_path = Some(vec![1]);
+    bar
+}
+
+#[test]
+fn arrow_right_on_a_submenu_row_opens_the_submenu_not_the_next_menu() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let mut bar = file_open_on_recent();
+
+    key(&mut bar, Key::ArrowRight);
+
+    assert_eq!(
+        bar.open_index,
+        Some(0),
+        "Right on a row that opens a sub menu must not walk the bar as well"
+    );
+    assert_eq!(bar.popup.state.open_path, vec![1], "Recent's submenu is up");
+}
+
+#[test]
+fn arrow_left_inside_a_submenu_backs_out_one_level_only() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let mut bar = file_open_on_recent();
+    key(&mut bar, Key::ArrowRight);
+    assert_eq!(bar.popup.state.open_path, vec![1]);
+
+    key(&mut bar, Key::ArrowLeft);
+
+    assert!(
+        bar.popup.state.open_path.is_empty(),
+        "Left in a sub menu backs out of it"
+    );
+    assert_eq!(
+        bar.open_index,
+        Some(0),
+        "backing out of a sub menu is not a request to change top level menu"
+    );
+    assert!(bar.popup.is_open(), "the menu it hung off is still up");
+    assert_eq!(
+        bar.popup.state.hover_path,
+        Some(vec![1]),
+        "the row that opened the sub menu takes the highlight back"
+    );
+}
+
+#[test]
+fn releasing_a_drag_on_a_submenu_row_opens_the_submenu() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let (mut bar, actions) = bar();
+    let t = title_center(&bar, 0);
+    mouse(&mut bar, t, true);
+    assert_eq!(bar.open_index, Some(0));
+
+    let rect = bar.popup.state.layouts(&bar.popup.items, VIEWPORT)[0]
+        .rows
+        .iter()
+        .find(|r| r.item_index == Some(1))
+        .expect("Recent is laid out")
+        .rect;
+    let row = Point::new(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
+    bar.on_event(&Event::MouseMove { pos: row });
+    mouse(&mut bar, row, false);
+
+    assert_eq!(
+        bar.popup.state.open_path,
+        vec![1],
+        "releasing on a sub menu row opens its sub menu"
+    );
+    assert_eq!(
+        bar.open_index,
+        Some(0),
+        "opening a sub menu is not choosing an action, so nothing is dismissed"
+    );
+    assert!(actions.borrow().is_empty());
 }
 
 #[test]
