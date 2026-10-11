@@ -47,3 +47,32 @@ fn a_nonsense_delta_is_no_scroll() {
     assert_eq!(scrolling_delta_to_wheel_delta(f64::NAN, true, 1.0), 0);
     assert_eq!(scrolling_delta_to_wheel_delta(f64::INFINITY, false, 1.0), 0);
 }
+
+/// The web shell's half of `AFingerDragMovesTheContentTheSameDistanceOnEveryDisplay`:
+/// a DOM pixel delta is CSS pixels (already free of the device pixel ratio),
+/// so at a `ux_scale` of 2 the same finger travel is half as many logical
+/// pixels, and half as many notches. Line deltas and pinches carry no size.
+#[test]
+fn rust_only_a_browser_trackpad_scroll_is_divided_by_ux_scale() {
+    use crate::trackpad_pinch::{browser_wheel_notches, browser_wheel_notches_at_ux_scale};
+    use crate::wheel::WheelDeltaMode;
+
+    let at_one = browser_wheel_notches_at_ux_scale(20.0, 80.0, WheelDeltaMode::Pixel, false, 1.0);
+    let at_two = browser_wheel_notches_at_ux_scale(20.0, 80.0, WheelDeltaMode::Pixel, false, 2.0);
+    assert_eq!(at_two, (at_one.0 / 2.0, at_one.1 / 2.0));
+    assert!(at_one.1 < 0.0, "DOM scroll-down is a backward wheel");
+    assert_eq!(
+        browser_wheel_notches(20.0, 80.0, WheelDeltaMode::Pixel, false),
+        at_one
+    );
+
+    let lines = browser_wheel_notches_at_ux_scale(0.0, 3.0, WheelDeltaMode::Line, false, 2.0);
+    assert_eq!(lines, (0.0, -3.0));
+    let pinch = |ux| browser_wheel_notches_at_ux_scale(0.0, 10.0, WheelDeltaMode::Pixel, true, ux);
+    assert_eq!(pinch(2.0), pinch(1.0));
+    // A broken scale is no scale.
+    assert_eq!(
+        browser_wheel_notches_at_ux_scale(20.0, 80.0, WheelDeltaMode::Pixel, false, 0.0),
+        at_one
+    );
+}

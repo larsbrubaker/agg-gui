@@ -146,17 +146,45 @@ pub fn browser_pinch_notches(delta_y: f64, mode: WheelDeltaMode) -> f64 {
 /// pinch ([`browser_pinch_notches`], one axis only); anything else is a
 /// scroll through [`crate::wheel::to_notches`], with the DOM's
 /// positive-scroll-down signs flipped to agg-gui's positive = forward wheel.
+///
+/// Pixel deltas are taken as logical units; a shell whose App runs at a
+/// `ux_scale` other than 1 uses [`browser_wheel_notches_at_ux_scale`].
 pub fn browser_wheel_notches(
     delta_x: f64,
     delta_y: f64,
     mode: WheelDeltaMode,
     ctrl_key: bool,
 ) -> (f64, f64) {
+    browser_wheel_notches_at_ux_scale(delta_x, delta_y, mode, ctrl_key, 1.0)
+}
+
+/// [`browser_wheel_notches`] for an App laid out at `ux_scale`. A DOM pixel
+/// delta is CSS pixels of finger travel: the device pixel ratio is already
+/// out of it, but the App's logical unit is `ux_scale` CSS pixels, so the
+/// delta is divided by `ux_scale` first and the content travels exactly as
+/// far as the fingers whatever the UI size (the native shell divides by
+/// window scale x `ux_scale` for the same reason). Line and page deltas are
+/// detents and carry no size; a pinch is zoom steps, not distance. A
+/// non-finite or non-positive `ux_scale` is taken as 1.
+pub fn browser_wheel_notches_at_ux_scale(
+    delta_x: f64,
+    delta_y: f64,
+    mode: WheelDeltaMode,
+    ctrl_key: bool,
+    ux_scale: f64,
+) -> (f64, f64) {
     if ctrl_key {
-        (0.0, browser_pinch_notches(delta_y, mode))
-    } else {
-        (to_notches(-delta_x, mode), to_notches(-delta_y, mode))
+        return (0.0, browser_pinch_notches(delta_y, mode));
     }
+    let scale = if mode == WheelDeltaMode::Pixel && ux_scale.is_finite() && ux_scale > 0.0 {
+        ux_scale
+    } else {
+        1.0
+    };
+    (
+        to_notches(-delta_x / scale, mode),
+        to_notches(-delta_y / scale, mode),
+    )
 }
 
 thread_local! {

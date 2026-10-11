@@ -10,7 +10,7 @@
 //! in [`crate::dom_math`], unit tested natively.
 
 use agg_gui::shell_input::{ClickCount, ForwarderEvent};
-use agg_gui::trackpad_pinch::browser_wheel_notches;
+use agg_gui::trackpad_pinch::browser_wheel_notches_at_ux_scale;
 use agg_gui::wheel::WheelDeltaMode;
 use agg_gui::TouchPhase;
 use wasm_bindgen::closure::Closure;
@@ -209,11 +209,14 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
             // DOM deltaY is positive-scroll-DOWN; App wants positive =
             // wheel rotated forward (winit convention). A ctrl+wheel is a
             // trackpad pinch and zooms as the native pinch does.
-            let (dx, dy) = browser_wheel_notches(
+            // CSS pixels are DPR-free; dividing by ux_scale makes them the
+            // App's logical units, so a trackpad scrolls with the fingers.
+            let (dx, dy) = browser_wheel_notches_at_ux_scale(
                 e.delta_x(),
                 e.delta_y(),
                 WheelDeltaMode::from_dom(e.delta_mode()),
                 e.ctrl_key(),
+                agg_gui::ux_scale::ux_scale(),
             );
             if dx == 0.0 && dy == 0.0 {
                 return;
