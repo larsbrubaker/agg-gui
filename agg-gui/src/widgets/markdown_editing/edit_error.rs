@@ -6,7 +6,8 @@
 //! `RichTableCodeOperations.cs`, `RichBlockOperations.cs`, ...) throw — an
 //! indexer's `ArgumentOutOfRangeException` on a position the document does
 //! not have, `InvalidOperationException` for a table operation on a non-table
-//! block, `ArgumentException` for a code/table range across two blocks — the
+//! block, `ArgumentException` for a code/table range across two blocks, a history
+//! asked to keep no steps (`RichEditHistory.cs`) — the
 //! Rust operations return one of these variants and leave the document
 //! unchanged.  Library code never panics on bad input.
 
@@ -32,6 +33,9 @@ pub enum RichEditError {
     /// A heading level other than 0 (Normal) or 1-6 (C#'s
     /// `ArgumentOutOfRangeException` from `SetBlockKind`).
     HeadingLevelOutOfRange(u8),
+    /// A [`super::edit_history::RichEditHistory`] asked to keep no steps
+    /// (C#'s `ArgumentOutOfRangeException` from its constructor).
+    MaxStepsOutOfRange,
 }
 
 impl fmt::Display for RichEditError {
@@ -47,6 +51,7 @@ impl fmt::Display for RichEditError {
             Self::HeadingLevelOutOfRange(level) => {
                 write!(f, "heading level {level}: 0 (Normal) or a heading level 1-6.")
             }
+            Self::MaxStepsOutOfRange => f.write_str("The history must keep at least one step."),
         }
     }
 }

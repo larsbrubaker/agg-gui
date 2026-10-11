@@ -47,6 +47,16 @@
 //!   indent/outdent and the line-start shortcuts (`RichBlockOperations.cs`);
 //!   `block_containers` turns blocks into list items or quotes and joins the
 //!   groups they touch.
+//! * [`code_block_operations`] — the Code block button: text blocks into one
+//!   fenced code block and back (`RichCodeBlockOperations.cs`).
+//! * [`paste_operations`] — copy and paste without a clipboard: a selection
+//!   sliced out as a fragment document, its visible text, clipboard text read
+//!   as a fragment, and `paste_insert` pasting one at a caret
+//!   (`RichPasteOperations.cs`).
+//! * [`edit_history`] — undo/redo snapshots and which edits merge into one
+//!   step (`RichEditHistory.cs`).
+//! * [`edit_commands`] — the toolbar's view of the document's owner, and a
+//!   widget-free implementation (`IRichEditCommands.cs`).
 //! * `char_class` — .NET's character classes, as the writer sees them.
 //!
 //! # Offsets
@@ -62,8 +72,11 @@ mod block_containers;
 pub mod block_operations;
 mod char_class;
 mod code_and_tables;
+pub mod code_block_operations;
 pub mod document;
+pub mod edit_commands;
 pub mod edit_error;
+pub mod edit_history;
 pub mod edit_operations;
 mod escaping;
 mod group_repair;
@@ -77,6 +90,8 @@ pub mod markdown_parser;
 pub mod markdown_writer;
 mod parse_tree;
 pub(crate) mod parser_inlines;
+mod paste_insert;
+pub mod paste_operations;
 pub(crate) mod pipe_tables;
 pub mod selection;
 pub mod style_operations;
@@ -85,7 +100,9 @@ pub mod table_code_operations;
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
 pub use block_operations::{RichBlockState, RichListKind};
 pub use document::{DocPosition, RichDocument};
+pub use edit_commands::{RichDocumentCommands, RichEdit, RichEditCommands};
 pub use edit_error::RichEditError;
+pub use edit_history::{RichEditHistory, RichEditKind};
 pub use groups::shared as shared_group;
 pub use groups::{
     RichAlignGroup, RichAlignGroupRef, RichListGroup, RichListGroupRef, RichQuoteGroup,
