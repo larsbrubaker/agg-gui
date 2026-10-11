@@ -677,6 +677,12 @@ mod fill_path_bbox_tests;
 mod filter;
 #[cfg(test)]
 mod ink_diag_tests;
+#[cfg(test)]
+mod lcd_buffer_tests;
+#[cfg(test)]
+mod lcd_composite_tests;
+#[cfg(test)]
+mod lcd_coverage_tests;
 mod mask;
 #[cfg(test)]
 mod tests;

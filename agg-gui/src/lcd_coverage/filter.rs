@@ -32,8 +32,8 @@ const FILTER_SUM: u32 = 9;
 /// sample by the corresponding weight.  At the default `primary = 1/3`
 /// the output is identical (up to rounding) to the legacy integer
 /// `[1, 2, 3, 2, 1] / 9` filter.
-fn lcd_filter_weights() -> [f64; 5] {
-    let p_units = crate::font_settings::current_primary_weight() * 9.0;
+fn lcd_filter_weights(primary: f64) -> [f64; 5] {
+    let p_units = primary * 9.0;
     let weights = [1.0, 2.0, p_units, 2.0, 1.0];
     let sum = weights.iter().sum::<f64>().max(1e-9);
     [
@@ -45,10 +45,50 @@ fn lcd_filter_weights() -> [f64; 5] {
     ]
 }
 
+/// Panic unless `gray` holds `mask_h` rows of `gray_w` bytes and each row
+/// covers the mask's own `mask_w * 3` subpixel footprint.  A narrower row
+/// is a caller bug that fails quietly otherwise: the gray collapse would
+/// fold the next row's coverage into the right-hand pixels, and the
+/// bounds-checked 5-tap paths would just drop it.  (Rows *longer* than the
+/// footprint are legal: the bbox padding the outer taps reach.)
+fn validate_gray(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) {
+    let footprint = (mask_w as usize) * 3;
+    assert!(
+        (gray_w as usize) >= footprint,
+        "gray row width {gray_w} is narrower than the mask footprint {footprint} (mask width {mask_w} * 3)"
+    );
+    let needed = (gray_w as usize) * (mask_h as usize);
+    assert!(
+        gray.len() >= needed,
+        "gray buffer holds {} bytes, but {mask_h} rows of {gray_w} need {needed}",
+        gray.len()
+    );
+}
+
 /// Run the 5-tap low-pass filter over `gray` and produce the packed
-/// `(R,G,B)` mask.  See the `lcd_coverage` module docs for the per-channel
-/// formula and phase shift.
+/// `(R,G,B)` mask with the current Primary Weight and Gamma globals.  See
+/// the `lcd_coverage` module docs for the per-channel formula and phase
+/// shift.
 pub(super) fn apply_5_tap_filter(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec<u8> {
+    apply_5_tap_filter_with(
+        gray,
+        gray_w,
+        mask_w,
+        mask_h,
+        crate::font_settings::current_primary_weight(),
+        crate::font_settings::current_gamma(),
+    )
+}
+
+/// [`apply_5_tap_filter`] with explicit `primary` weight and `gamma`.
+pub(super) fn apply_5_tap_filter_with(
+    gray: &[u8],
+    gray_w: u32,
+    mask_w: u32,
+    mask_h: u32,
+    primary: f64,
+    gamma: f64,
+) -> Vec<u8> {
     // Decide once whether the current parameters reproduce the legacy
     // integer filter exactly.  When they do (primary = 1/3, gamma = 1),
     // run the original byte-for-byte path so every label cached before
@@ -59,20 +99,19 @@ pub(super) fn apply_5_tap_filter(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: 
     // version gives a clean 128.  Sub-u8 drift on cached masks is
     // invisible in isolation but accumulates into a faint "fade"
     // across a paragraph of text, so we keep the old path exact.
-    let primary = crate::font_settings::current_primary_weight();
-    let gamma = crate::font_settings::current_gamma();
     let is_default_primary = ((primary - 1.0 / 3.0).abs()) < 1e-6;
     let is_default_gamma = ((gamma - 1.0).abs()) < 1e-6;
     if is_default_primary && is_default_gamma {
         return apply_5_tap_filter_legacy(gray, gray_w, mask_w, mask_h);
     }
+    validate_gray(gray, gray_w, mask_w, mask_h);
 
     let mut data = vec![0u8; (mask_w as usize) * (mask_h as usize) * 3];
     let gw = gray_w as i32;
     // Parameterised path — f64 weights driven by Primary Weight, plus
     // a gamma curve applied to the per-channel coverage AFTER the
     // filter sum so light AA edges strengthen or weaken uniformly.
-    let w = lcd_filter_weights();
+    let w = lcd_filter_weights(primary);
     let inv_g = 1.0 / gamma.max(1e-3);
     let need_gamma = !is_default_gamma;
     let apply_gamma = |c: f64| -> f64 {
@@ -127,7 +166,13 @@ pub(super) fn apply_5_tap_filter(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: 
 /// Byte-exact legacy 5-tap filter — preserved for the
 /// primary-weight = 1/3, gamma = 1 default path so cached text
 /// rasterised before phase 3 matches what we produce now.
-fn apply_5_tap_filter_legacy(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec<u8> {
+pub(super) fn apply_5_tap_filter_legacy(
+    gray: &[u8],
+    gray_w: u32,
+    mask_w: u32,
+    mask_h: u32,
+) -> Vec<u8> {
+    validate_gray(gray, gray_w, mask_w, mask_h);
     let mut data = vec![0u8; (mask_w as usize) * (mask_h as usize) * 3];
     let gw = gray_w as i32;
     for py in 0..mask_h {
@@ -176,13 +221,14 @@ fn apply_5_tap_filter_legacy(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32)
 /// coverage already supplies vertical AA — so the plain average is the
 /// correct downsample, no low-pass phase filter needed.
 pub(super) fn apply_gray_collapse(gray: &[u8], gray_w: u32, mask_w: u32, mask_h: u32) -> Vec<u8> {
+    validate_gray(gray, gray_w, mask_w, mask_h);
     let mut data = vec![0u8; (mask_w as usize) * (mask_h as usize) * 3];
     for py in 0..mask_h as usize {
         let row_start = py * gray_w as usize;
         let out_row = py * mask_w as usize * 3;
         for px in 0..mask_w as usize {
             let g = row_start + px * 3;
-            // gray_w == mask_w * 3, so all three subpixels are in-bounds.
+            // gray_w >= mask_w * 3 (validated), so all three subpixels are in-bounds.
             let cov = ((gray[g] as u32 + gray[g + 1] as u32 + gray[g + 2] as u32 + 1) / 3) as u8;
             let o = out_row + px * 3;
             data[o] = cov;
