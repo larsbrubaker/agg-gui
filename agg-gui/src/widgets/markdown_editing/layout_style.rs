@@ -1,4 +1,4 @@
-//! The fonts and spacing the rich editor lays text out with — the layout half
+//! The fonts, colours and spacing the rich editor lays text out with — a port
 //! of agg-sharp's `RichLayoutStyle` (`MarkdigAgg/Editing/RichLayoutStyle.cs`).
 //!
 //! The numbers copy the markdown viewer's renderers (TextWordX, HeadingRowX,
@@ -16,12 +16,19 @@
 //! ([`Font::variant_with_faux_style`], `StyledTypeFace.FauxItalic`), which
 //! keeps every advance.
 //!
-//! [`super::block_layout`] measures with the [`RichFace`]s this hands out.
+//! C#'s constructor reads the text, accent and background colours from an
+//! optional `ThemeConfig`; agg-gui has no ThemeConfig, so the host hands in a
+//! [`RichThemeColors`] (or `None` for C#'s defaults: black text, a #7AD7F0
+//! accent on white).
+//!
+//! [`super::block_layout`] measures with the [`RichFace`]s this hands out;
+//! [`super::block_painter`] paints with its colours.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::color::Color;
 use crate::geometry::Size;
 use crate::text::{measure_advance, Font};
 
@@ -104,6 +111,12 @@ impl RichFace {
         self.font.x_height_px(self.em_px)
     }
 
+    /// The underline's `(position, thickness)` in pixels (C#
+    /// `UnderlinePositionInPixels`, `UnderlineThicknessInPixels`).
+    pub fn underline_metrics_px(&self) -> (f64, f64) {
+        self.font.underline_metrics_px(self.em_px)
+    }
+
     /// One character's advance (C# `GetAdvanceForCharacter`).  The faces do
     /// no kerning, so summing these gives a string's width.
     pub fn advance(&self, c: char) -> f64 {
@@ -125,6 +138,18 @@ enum FaceKind {
     Mono,
 }
 
+/// The theme colours a style is built from (the parts of C#'s `ThemeConfig`
+/// `RichLayoutStyle` reads).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RichThemeColors {
+    /// Body text (C# `ThemeConfig.TextColor`).
+    pub text: Color,
+    /// The accent links are drawn in (C# `ThemeConfig.PrimaryAccentColor`).
+    pub accent: Color,
+    /// What the text is drawn on (C# `ThemeConfig.BackgroundColor`).
+    pub background: Color,
+}
+
 /// A callback giving an image atom's size.
 pub type RichImageSize = Box<dyn Fn(&InlineAtom) -> Size>;
 /// A callback giving a Raw block's size from the block and the available width.
@@ -136,6 +161,10 @@ pub struct RichLayoutStyle {
     faces: RefCell<HashMap<(FaceKind, u64, bool, bool), RichFace>>,
     scale: f64,
     font_scale: f64,
+    /// The text colour.
+    pub text_color: Color,
+    /// The link colour: the theme's accent pushed to body-text contrast.
+    pub link_color: Color,
     /// Body text size in points.
     pub body_point_size: f64,
     /// Code text size in points.
@@ -154,18 +183,67 @@ impl RichLayoutStyle {
     /// A style over `fonts` at `device_scale` (the process device scale when
     /// `None`), with the text size setting
     /// ([`crate::font_settings::current_font_size_scale`]) applied.
+    /// C#'s default colours (no theme); see [`Self::with_theme`].
     pub fn new(fonts: RichLayoutFonts, device_scale: Option<f64>) -> Self {
+        Self::with_theme(fonts, None, device_scale)
+    }
+
+    /// A style over `fonts` with `theme`'s colours (C#'s defaults when
+    /// `None`) at `device_scale` (the process device scale when `None`).
+    pub fn with_theme(
+        fonts: RichLayoutFonts,
+        theme: Option<&RichThemeColors>,
+        device_scale: Option<f64>,
+    ) -> Self {
         let scale = device_scale.unwrap_or_else(crate::device_scale::device_scale);
+        let text_color = theme.map_or(Color::black(), |t| t.text);
+        // A link reads as a link, as in any editor: the theme's accent pushed
+        // to body-text contrast (4.5) on the background, so it stays readable
+        // on light and dark themes alike (Hyperlink's rule, at text contrast).
+        let accent = theme.map_or(Color::from_rgb8(0x7A, 0xD7, 0xF0), |t| t.accent);
+        let background = theme.map_or(Color::white(), |t| t.background);
         Self {
             fonts,
             faces: RefCell::new(HashMap::new()),
             scale,
             font_scale: scale * crate::font_settings::current_font_size_scale(),
+            text_color,
+            link_color: accent.with_contrast(background, 4.5),
             body_point_size: 10.0,
             code_point_size: 10.0,
             image_size: None,
             raw_block_size: None,
         }
+    }
+
+    /// The alpha (of 255) of the text colour that shades code blocks, inline
+    /// code and striped table rows.  Derived from the text colour rather than
+    /// a fixed grey, so the shading shows on a dark background as well as a
+    /// light one.
+    pub const SHADE_ALPHA: u8 = 24;
+
+    /// The text colour at `alpha` of 255 (C# `new Color(TextColor, alpha)`).
+    fn text_at_alpha(&self, alpha: u8) -> Color {
+        self.text_color.with_alpha(f32::from(alpha) / 255.0)
+    }
+
+    /// The shading behind code blocks and inline code: the text colour at
+    /// [`Self::SHADE_ALPHA`].
+    pub fn code_background_color(&self) -> Color {
+        self.text_at_alpha(Self::SHADE_ALPHA)
+    }
+
+    /// A table's grid lines: the text colour at the viewer's TableBorderAlpha
+    /// (150).
+    pub fn table_grid_color(&self) -> Color {
+        self.text_at_alpha(150)
+    }
+
+    /// The shading of a table's striped body rows: the text colour at
+    /// [`Self::SHADE_ALPHA`], the code shading (the viewer's
+    /// ZebraStripeAlpha matches it, so Help and Edit stripe alike).
+    pub fn table_stripe_color(&self) -> Color {
+        self.text_at_alpha(Self::SHADE_ALPHA)
     }
 
     /// The device scale every spacing value below is already multiplied by.

@@ -63,11 +63,14 @@
 //!   (`RichBlockLayout.cs`, `IRichBlockLayout.cs`), over [`layout_line`]'s
 //!   lines, fragments and caret stops (`RichLayoutLine.cs`), `layout_items`'
 //!   items and line breaking (`RichLayoutItems.cs`, with `mark_class`'s
-//!   combining marks) and [`layout_style`]'s fonts and spacing
+//!   combining marks) and [`layout_style`]'s fonts, colours and spacing
 //!   (`RichLayoutStyle.cs`).
 //! * [`table_layout`] — a Table block laid out to a width: the grid, padded
 //!   cells laid out like paragraphs, header and stripe boxes, hit testing and
 //!   pixel-snapped grid lines (`RichTableLayout.cs`).
+//! * [`block_painter`] — paints a laid-out text block or table through a
+//!   `DrawCtx`: backgrounds, quote bar, list marker, grid, text, images,
+//!   selection and caret (`RichBlockPainter.cs`).
 //!
 //! # Offsets
 //!
@@ -81,6 +84,7 @@ pub mod block;
 mod block_containers;
 pub mod block_layout;
 pub mod block_operations;
+pub mod block_painter;
 mod char_class;
 mod code_and_tables;
 pub mod code_block_operations;
@@ -116,6 +120,7 @@ pub mod table_layout;
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
 pub use block_layout::{RichBlockGeometry, RichBlockLayout, RichLayoutError};
 pub use block_operations::{RichBlockState, RichListKind};
+pub use block_painter::{RichBlockPainter, RichEditColors, RichImage, RichLayout, RichPaintInputs};
 pub use document::{DocPosition, RichDocument};
 pub use edit_commands::{RichDocumentCommands, RichEdit, RichEditCommands};
 pub use edit_error::RichEditError;
@@ -130,6 +135,6 @@ pub use inline_style::{RichInlineStyle, RichPendingStyle, RichStyleCoverage, Ric
 pub use inline_writer::RichInlineContext;
 pub use inlines::OffsetOutOfRange;
 pub use layout_line::{RichCaret, RichCaretStop, RichLayoutFragment, RichLayoutLine};
-pub use layout_style::{RichFace, RichLayoutFonts, RichLayoutStyle};
+pub use layout_style::{RichFace, RichLayoutFonts, RichLayoutStyle, RichThemeColors};
 pub use selection::RichSelection;
 pub use table_layout::{RichTableCellLayout, RichTableGridSnap, RichTableLayout};

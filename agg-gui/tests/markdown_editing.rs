@@ -12,6 +12,8 @@ mod rich_document_tests;
 mod rich_edit_history_tests;
 #[path = "markdown_editing/rich_edit_operations_tests.rs"]
 mod rich_edit_operations_tests;
+#[path = "markdown_editing/rich_editor_polish_tests.rs"]
+mod rich_editor_polish_tests;
 #[path = "markdown_editing/rich_inline_round_trip_tests.rs"]
 mod rich_inline_round_trip_tests;
 #[path = "markdown_editing/rich_markdown_parser_block_tests.rs"]
@@ -34,6 +36,8 @@ mod rich_style_operations_tests;
 mod rich_table_code_operations_tests;
 #[path = "markdown_editing/rich_table_layout_tests.rs"]
 mod rich_table_layout_tests;
+#[path = "markdown_editing/rust_only_block_painter_tests.rs"]
+mod rust_only_block_painter_tests;
 #[path = "markdown_editing/rust_only_code_block_and_commands_tests.rs"]
 mod rust_only_code_block_and_commands_tests;
 #[path = "markdown_editing/rust_only_edit_error_tests.rs"]

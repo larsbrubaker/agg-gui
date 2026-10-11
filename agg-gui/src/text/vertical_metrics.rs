@@ -86,6 +86,19 @@ impl Font {
         }
     }
 
+    /// The underline's `(position, thickness)` in pixels at `size`: the
+    /// position is the underline's bottom edge, negative below the baseline
+    /// (agg-sharp's `UnderlinePositionInPixels` and
+    /// `UnderlineThicknessInPixels`, from the `post` table).  `(0, 0)` for a
+    /// face without one, as agg-sharp's TypeFace reads it.
+    pub fn underline_metrics_px(&self, size: f64) -> (f64, f64) {
+        let scale = size / self.units_per_em as f64;
+        self.with_ttf_face(|face| face.underline_metrics())
+            .map_or((0.0, 0.0), |m| {
+                (m.position as f64 * scale, m.thickness as f64 * scale)
+            })
+    }
+
     /// How far `(above, below)` the baseline this font's ink can reach, in
     /// pixels (both positive): the larger of the metrics in force and the
     /// face's own ascender and descender. An override may describe a line box
