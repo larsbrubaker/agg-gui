@@ -59,6 +59,7 @@ use crate::geometry::{Point, Rect};
 use crate::text::measure_advance;
 
 use super::events::{dispatch_pending, queue, TooltipEvent};
+use super::placement::{place_on_widget, tooltip_placement, TooltipPlacement};
 use super::render::{
     current_tooltip_viewport, panel_size, place_panel, submit_tooltip, TooltipRequest,
 };
@@ -96,6 +97,10 @@ struct Controller {
     /// coords — exposed to tests to assert edge clamping without paint
     /// introspection. On screen it sits `keyboard lift` higher.
     last_rect: Option<Rect>,
+    /// Root logical bounds of the widget supplying the tip, when known: the
+    /// [`TooltipPlacement::Widget`] policy centres the tip on it. `None` for
+    /// overlay offers (popup rows), which keep the pointer placement.
+    owner: Option<Rect>,
 }
 
 thread_local! {
@@ -112,7 +117,12 @@ impl Controller {
 
     /// Adopt `target` as the hovered tipped widget for this frame (or clear it),
     /// re-arming the hover timer on a target change.
-    fn set_target(&mut self, target: Option<(Vec<usize>, String)>, anchor: Option<Point>) {
+    fn set_target(
+        &mut self,
+        target: Option<(Vec<usize>, String)>,
+        owner: Option<Rect>,
+        anchor: Option<Point>,
+    ) {
         if let Some(a) = anchor {
             self.anchor = a;
         }
@@ -133,8 +143,10 @@ impl Controller {
                     );
                 }
                 self.text = text;
+                self.owner = owner;
             }
             None => {
+                self.owner = None;
                 if self.target.is_some() {
                     self.target = None;
                     self.hover_started_at = None;
@@ -253,7 +265,7 @@ impl Controller {
         let viewport = current_tooltip_viewport();
         if viewport.width > 0.0 && viewport.height > 0.0 {
             let visible = crate::widget::visible_root_rect(viewport);
-            self.last_rect = Some(place_panel(self.anchor, size, visible, true));
+            self.last_rect = Some(self.place(size, visible));
         }
         submit_tooltip(TooltipRequest {
             font,
@@ -261,6 +273,16 @@ impl Controller {
             anchor: self.anchor,
             at_pointer: true,
         });
+    }
+
+    /// Where a tip panel of `size` goes under the current placement policy.
+    fn place(&self, size: crate::geometry::Size, visible: Rect) -> Rect {
+        match (tooltip_placement(), self.owner) {
+            (TooltipPlacement::Widget, Some(owner)) => {
+                place_on_widget(self.anchor, owner, size, visible)
+            }
+            _ => place_panel(self.anchor, size, visible, true),
+        }
     }
 
     /// The factory path of [`Self::submit`]: build (or, after a text change,
@@ -279,7 +301,7 @@ impl Controller {
             return;
         };
         let visible = crate::widget::visible_root_rect(viewport);
-        let rect = place_panel(self.anchor, size, visible, true);
+        let rect = self.place(size, visible);
         self.last_rect = Some(rect);
         super::content::submit(rect);
     }
@@ -290,9 +312,19 @@ impl Controller {
 /// `None` when nothing tipped is hovered. `anchor` is the pointer position
 /// in root logical (unlifted) coords. Runs the state machine and, if a tip is visible, submits it.
 pub(crate) fn drive(target: Option<(Vec<usize>, String)>, anchor: Option<Point>) {
+    drive_with_owner(target, None, anchor);
+}
+
+/// [`drive`] with the root logical bounds of the widget supplying the tip,
+/// for the [`TooltipPlacement::Widget`] policy.
+pub(crate) fn drive_with_owner(
+    target: Option<(Vec<usize>, String)>,
+    owner: Option<Rect>,
+    anchor: Option<Point>,
+) {
     CONTROLLER.with(|c| {
         let mut c = c.borrow_mut();
-        c.set_target(target, anchor);
+        c.set_target(target, owner, anchor);
         if c.update_visibility() {
             c.submit();
         }
@@ -311,6 +343,8 @@ pub(crate) fn drive(target: Option<(Vec<usize>, String)>, anchor: Option<Point>)
 struct FrameInputs {
     open: bool,
     widget: Option<(Vec<usize>, String)>,
+    /// Root logical bounds of the widget behind `widget`.
+    widget_owner: Option<Rect>,
     overlay: Option<(Vec<usize>, String)>,
     anchor: Option<Point>,
 }
@@ -327,11 +361,17 @@ const OVERLAY_IDENTITY_MARKER: usize = usize::MAX;
 /// Start a frame: record the hovered widget's tip (if any) and the pointer,
 /// and clear the overlay offers from the previous frame. Called by the App
 /// before it paints the tree; [`finish_frame`] resolves after the paint.
-pub(crate) fn begin_frame(widget_target: Option<(Vec<usize>, String)>, anchor: Option<Point>) {
+/// `widget_owner` is the tipped widget's root logical bounds, when known.
+pub(crate) fn begin_frame(
+    widget_target: Option<(Vec<usize>, String)>,
+    widget_owner: Option<Rect>,
+    anchor: Option<Point>,
+) {
     FRAME.with(|f| {
         *f.borrow_mut() = FrameInputs {
             open: true,
             widget: widget_target,
+            widget_owner,
             overlay: None,
             anchor,
         };
@@ -364,7 +404,10 @@ pub(crate) fn finish_frame() {
     if !inputs.open {
         return;
     }
-    drive(inputs.overlay.or(inputs.widget), inputs.anchor);
+    match inputs.overlay {
+        Some(overlay) => drive(Some(overlay), inputs.anchor),
+        None => drive_with_owner(inputs.widget, inputs.widget_owner, inputs.anchor),
+    }
 }
 
 /// A press hides any visible tip and keeps it hidden until the pointer leaves

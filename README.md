@@ -90,7 +90,7 @@ wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
 | `TreeView` | Virtualised hierarchical list: expand/collapse (lazy children), selection and scroll API with change events, glyph icons, trailing text and fraction bars, drag-and-drop |
 | `Container` | Border + background decorator |
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
-| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; popup rows can host any widget (`MenuItem::widget_row` + `PopupMenu::set_row_widget` / `push_widget_row`), and a host widget can open a `PopupMenu` at a local anchor (`open_at_local`, `handle_local_event`, `paint_local`); any widget also gets a hover tooltip via `with_tooltip(...)` |
+| `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; popup rows can host any widget (`MenuItem::widget_row` + `PopupMenu::set_row_widget` / `push_widget_row`), and a host widget can open a `PopupMenu` at a local anchor (`open_at_local`, `handle_local_event`, `paint_local`); any widget also gets a hover tooltip via `with_tooltip(...)`, placed below-right of the pointer or, with `set_tooltip_placement(TooltipPlacement::Widget)`, centred on the hovered widget as agg-sharp's `ToolTipManager` places it |
 | `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
 | `Rebuilder` | Regenerates a child subtree from a builder closure when a shared version cell changes — for dynamic content sets (option lists, variable row counts) |
 | `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |

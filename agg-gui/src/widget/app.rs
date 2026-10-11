@@ -629,10 +629,14 @@ impl App {
     /// `Some` supplies the widget tip (its index-path identity + text),
     /// anchored at the pointer.
     fn begin_tooltip_controller_frame(&self) {
-        let target = self.hovered.as_deref().and_then(|path| {
+        let found = self.hovered.as_deref().and_then(|path| {
             tooltip_target::deepest_tipped(self.root.as_ref(), path, current_mouse_world())
         });
-        crate::widgets::tooltip::controller::begin_frame(target, current_mouse_world());
+        let (target, owner) = match found {
+            Some((identity, text, owner)) => (Some((identity, text)), owner),
+            None => (None, None),
+        };
+        crate::widgets::tooltip::controller::begin_frame(target, owner, current_mouse_world());
     }
 
     /// Test hook: run the central tooltip pass without a full paint (no

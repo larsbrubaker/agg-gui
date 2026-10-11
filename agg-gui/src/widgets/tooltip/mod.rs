@@ -28,6 +28,7 @@ mod content;
 pub mod controller;
 mod events;
 mod interactive;
+mod placement;
 mod render;
 mod timings;
 
@@ -35,6 +36,9 @@ pub use content::{
     has_content_factory, set_content_factory, with_active_content, TooltipContentFactory,
 };
 pub use events::{observe_tooltips, TooltipEvent, TooltipObserver};
+pub use placement::{
+    set_tooltip_placement, tooltip_placement, TooltipPlacement, CURSOR_CLEARANCE, EDGE_INSET,
+};
 pub(crate) use render::{begin_tooltip_frame, paint_global_tooltips};
 #[doc(hidden)]
 pub use timings::{advance_tooltip_test_clock, reset_tooltip_test_state, set_tooltip_test_clock};
