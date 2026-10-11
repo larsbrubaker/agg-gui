@@ -132,3 +132,45 @@ impl Widget for Recorder {
         p.x >= 0.0 && p.y >= 0.0 && p.x <= self.bounds.width && p.y <= self.bounds.height
     }
 }
+
+/// Content whose size a test changes between layouts (a C# `GuiWidget`
+/// whose `Width`/`Height` is assigned).
+pub(super) struct Resizable {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    size: Rc<Cell<Size>>,
+}
+
+impl Resizable {
+    pub(super) fn new(width: f64, height: f64) -> (Self, Rc<Cell<Size>>) {
+        let size = Rc::new(Cell::new(Size::new(width, height)));
+        let w = Self {
+            bounds: Rect::default(),
+            children: Vec::new(),
+            size: Rc::clone(&size),
+        };
+        (w, size)
+    }
+}
+
+impl Widget for Resizable {
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, _available: Size) -> Size {
+        self.size.get()
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _e: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}

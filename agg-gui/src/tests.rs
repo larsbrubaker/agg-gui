@@ -117,6 +117,7 @@ mod scroll_fixtures;
 mod scroll_offsets;
 mod scroll_relayout;
 mod scroll_view;
+mod scrollable_widget_options;
 mod shell_input;
 mod stack_aligned;
 mod text_defaults;

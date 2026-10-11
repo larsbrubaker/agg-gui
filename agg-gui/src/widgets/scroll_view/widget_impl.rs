@@ -298,8 +298,24 @@ impl Widget for ScrollView {
         match event {
             // ── Mouse wheel ───────────────────────────────────────────────────
             Event::MouseWheel {
-                delta_y, delta_x, ..
+                delta_y,
+                delta_x,
+                modifiers,
+                ..
             } => {
+                // Shift turns a wheel sideways, where the view scrolls
+                // horizontally and something is off the sides (otherwise the
+                // wheel scrolls as it always did): agg-sharp's
+                // `ScrollableWidget.OnMouseWheel`. Wheel down (negative)
+                // moves the view right, as it moves the view down.
+                let (vw, _) = self.viewport();
+                let sideways =
+                    self.h.enabled && *delta_x == 0.0 && modifiers.shift && self.h.content > vw;
+                let (delta_x, delta_y) = if sideways {
+                    (delta_y, &0.0)
+                } else {
+                    (delta_x, delta_y)
+                };
                 // Convention: positive delta_y = user wants to see
                 // content ABOVE = DECREASE offset (offset 0 = top of
                 // content). Same sign for horizontal.
@@ -329,7 +345,14 @@ impl Widget for ScrollView {
                 if (used_y || *delta_y == 0.0) && (used_x || *delta_x == 0.0) {
                     EventResult::Consumed
                 } else {
-                    crate::wheel_axes::take_wheel_axes(used_x, used_y);
+                    // A shifted wheel's horizontal travel is the event's
+                    // vertical axis.
+                    let (take_x, take_y) = if sideways {
+                        (false, used_x)
+                    } else {
+                        (used_x, used_y)
+                    };
+                    crate::wheel_axes::take_wheel_axes(take_x, take_y);
                     EventResult::Ignored
                 }
             }

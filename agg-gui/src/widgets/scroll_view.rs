@@ -381,6 +381,12 @@ impl ScrollView {
 
     pub fn set_scroll_offset(&mut self, offset: f64) {
         self.v.offset = offset;
+        // A request away from the bottom stops stick-to-bottom following
+        // growing content until the view is back at the end (agg-sharp's
+        // `ScrollableWidgetOptionsTests.StickToBottomFollowsGrowingContent
+        // UntilScrolledAway`).
+        let (_, vh) = self.viewport();
+        self.was_at_bottom = offset >= self.v.max_scroll(vh) - 0.5;
         if let Some(c) = &self.offset_cell {
             c.set(offset);
         }
