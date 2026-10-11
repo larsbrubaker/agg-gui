@@ -651,9 +651,9 @@ mod clip;
 mod font_defaults;
 mod image_resample;
 mod mask;
-mod nested_image;
 #[cfg(test)]
 mod mask_tests;
+mod nested_image;
 mod paint;
 mod pattern;
 mod render_tree;
