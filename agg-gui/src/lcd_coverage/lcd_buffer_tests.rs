@@ -266,9 +266,9 @@ fn collapse_weights_alpha_by_rec709_and_lifts_for_light_ink() {
     let straight = collapse_lcd_pixel([200, 60, 150], [200, 60, 150]);
     assert_eq!(straight, [255, 77, 191, 200], "straight-alpha collapse");
     let a = straight[3] as f64 / 255.0;
-    assert_eq!((straight[0] as f64 * a).round_ties_even() as i32, 200);
-    assert_eq!((straight[1] as f64 * a).round_ties_even() as i32, 60);
-    assert_eq!((straight[2] as f64 * a).round_ties_even() as i32, 150);
+    assert_eq!((straight[0] as f64 * a).round() as i32, 200);
+    assert_eq!((straight[1] as f64 * a).round() as i32, 60);
+    assert_eq!((straight[2] as f64 * a).round() as i32, 150);
 
     let mut dark = LcdBuffer::new(1, 1);
     dark.composite_mask(&mask1([200, 60, 150]), c8(0, 0, 0, 255), 0, 0, None);

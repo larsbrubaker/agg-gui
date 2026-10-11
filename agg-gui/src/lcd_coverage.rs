@@ -683,12 +683,16 @@ mod lcd_buffer_tests;
 mod lcd_composite_tests;
 #[cfg(test)]
 mod lcd_coverage_tests;
+#[cfg(test)]
+mod lcd_mask_builder_tests;
 mod mask;
+mod mask_builder;
 #[cfg(test)]
 mod tests;
 
 pub use mask::{
     build_bounded_mask, composite_lcd_mask, identity_xform, rasterize_gray_mask,
     rasterize_lcd_mask, rasterize_lcd_mask_multi, rasterize_text_gray_cached,
-    rasterize_text_lcd_cached, rect_to_pixel_clip, CachedLcdText, LcdMask, LcdMaskBuilder,
+    rasterize_text_lcd_cached, rect_to_pixel_clip, CachedLcdText, LcdMask,
 };
+pub use mask_builder::LcdMaskBuilder;
