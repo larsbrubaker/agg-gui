@@ -25,5 +25,7 @@ mod svg_parsing_tests;
 mod svg_pattern_tests;
 #[path = "svg_agg_sharp/svg_robustness_tests.rs"]
 mod svg_robustness_tests;
+#[path = "svg_agg_sharp/svg_shape_geometry_tests.rs"]
+mod svg_shape_geometry_tests;
 #[path = "svg_agg_sharp/svg_structure_tests.rs"]
 mod svg_structure_tests;

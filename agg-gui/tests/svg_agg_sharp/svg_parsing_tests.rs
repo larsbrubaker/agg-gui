@@ -1,16 +1,10 @@
 //! agg-sharp's `SvgParsingTests` (agg/Svg's reading of a document: the XML
-//! around the SVG and the value syntaxes it parses), ported 1:1 where they
-//! render: the gzip-compressed (svgz) image cases.
-//!
-//! The parse-only tests (`AnInternalEntityExpandsInAnAttributeValue`,
-//! `AnInternalEntityExpandsToElementsEachTimeItIsUsed`,
-//! `ColoursParseAsResvgRendersThem`,
-//! `AnRgbColourMixingNumbersAfterANumberWithPercentagesIsInvalid`) exercise
-//! agg-sharp's own document model and `SvgColor`; agg-gui parses with usvg,
-//! so they have no counterpart here. C#'s `ResourceResolver` is usvg's
-//! `resources_dir`.
+//! around the SVG and the value syntaxes it parses), ported as render tests.
+//! C# reads agg-sharp's own document model and `SvgColor`; agg-gui parses with
+//! usvg, so the entity and colour cases draw the parsed value and assert its
+//! pixels. C#'s `ResourceResolver` is usvg's `resources_dir`.
 
-use super::common::{data_url, Color};
+use super::common::{data_url, render, render_document, Color};
 use agg_gui::framebuffer::unpremultiply_rgba_inplace;
 
 const BLUE_SQUARE: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><rect width=\"10\" height=\"10\" fill=\"blue\"/></svg>";
@@ -90,4 +84,66 @@ fn an_svg_image_that_is_not_xml_draws_nothing() {
         centre(&data_url("image/svg+xml", b"<svg><rect></svg>"), None).alpha,
         0
     );
+}
+
+const DOCTYPE: &str = "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1 Basic//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11-basic.dtd\" [\n";
+
+#[test]
+fn an_internal_entity_expands_in_an_attribute_value() {
+    // structure/svg/attribute-value-via-ENTITY-reference
+    let image = render_document(
+        &format!("{DOCTYPE}<!ENTITY fill_value \"green\">\n]>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect id=\"r\" width=\"100\" height=\"100\" fill=\"&fill_value;\"/></svg>"),
+        100,
+        100,
+    );
+    assert_eq!(image.at(50, 50), Color::new(0, 128, 0, 255));
+}
+
+#[test]
+fn an_internal_entity_expands_to_elements_each_time_it_is_used() {
+    // structure/svg/elements-via-ENTITY-reference-2, with the geometry a render needs: each use
+    // draws the 20 wide rect and the circle, in its own group.
+    let image = render_document(
+        &format!("{DOCTYPE}<!ENTITY Rect \"\n<rect width='20' height='20'/>\n<circle cx='35' cy='10' r='5'/>\n\">\n]>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><g id=\"g1\">&Rect;</g><g id=\"g2\" transform=\"translate(50 50)\">&Rect;</g></svg>"),
+        100,
+        100,
+    );
+    for (dx, dy) in [(0, 0), (50, 50)] {
+        assert_eq!(image.at(dx + 10, dy + 10).alpha, 255, "rect at +{dx}");
+        assert_eq!(image.at(dx + 19, dy + 10).alpha, 255, "rect width at +{dx}");
+        assert_eq!(image.at(dx + 25, dy + 10).alpha, 0, "gap at +{dx}");
+        assert_eq!(image.at(dx + 35, dy + 10).alpha, 255, "circle at +{dx}");
+    }
+}
+
+/// `fill` drawn over the whole 100x100 render, its centre pixel.
+fn fill(colour: &str) -> Color {
+    render(&format!(
+        "<rect width=\"100\" height=\"100\" fill=\"{colour}\"/>"
+    ))
+    .at(50, 50)
+}
+
+#[test]
+fn colours_parse_as_resvg_renders_them() {
+    // C# expects 127 for every 50% channel, as resvg-test-suite's reference PNGs hold; usvg's
+    // svgtypes rounds 127.5 half up to 128 (its own rgb_percentage test pins 128), as CSS Color 4's
+    // rounding toward +infinity does; resvg passes those references within its tolerance.
+    for (text, expected) in [
+        ("rgb(0%, 50%, 0%)", Color::new(0, 128, 0, 255)), // painting/fill/rgb-color-with-percentage-values
+        ("RGB(0%, 50%, 0%)", Color::new(0, 128, 0, 255)), // painting/fill/uppercase-rgb-color
+        ("rgb(-10%, 50%, 120%)", Color::new(0, 128, 255, 255)), // painting/fill/rgb-color-with-percentage-overflow
+        ("rgb(0%, 45.5%, 0%)", Color::new(0, 116, 0, 255)),
+    ] {
+        assert_eq!(fill(text), expected, "{text}");
+    }
+    // painting/fill/transparent: nothing is drawn.
+    assert_eq!(fill("transparent").alpha, 0);
+}
+
+#[test]
+fn an_rgb_colour_mixing_numbers_after_a_number_with_percentages_is_invalid() {
+    // painting/fill/rgba-0-50percent-0-0.5: the first channel being a number makes the rest numbers,
+    // so the fill is invalid and the rect takes the initial fill, opaque black, as resvg's reference does.
+    assert_eq!(fill("rgba(0, 50%, 0, 0.5)"), Color::new(0, 0, 0, 255));
 }
