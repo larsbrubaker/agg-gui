@@ -30,6 +30,13 @@
 //! hide-on-leave. It reuses [`super::timings`] wholesale rather than
 //! duplicating the delays.
 //!
+//! # Content
+//!
+//! By default a tip paints as plain text lines. A host can install a content
+//! factory ([`super::set_content_factory`], C# `ToolTipManager.CreateToolTip`)
+//! that turns the tip text into a widget; the controller then sizes and paints
+//! that widget instead, with the same placement and timing ([`super::content`]).
+//!
 //! # Font — host contract (required)
 //!
 //! The tip text is painted with the crate-wide font override
@@ -164,6 +171,8 @@ impl Controller {
         self.visible = false;
         self.tip_shown_at = None;
         self.last_rect = None;
+        // A new show builds fresh host content, as C# creates a new widget.
+        super::content::clear();
     }
 
     /// Advance the state machine; returns whether the tip is visible now.
@@ -217,6 +226,12 @@ impl Controller {
     /// When visible, compute the placed panel rect (for tests) and submit the
     /// tip to the shared render queue so it paints in the global-overlay pass.
     fn submit(&mut self) {
+        // A host content factory (C# `ToolTipManager.CreateToolTip`) draws
+        // the tip as a widget sized by its own layout; see `super::content`.
+        if super::content::has_content_factory() {
+            self.submit_content();
+            return;
+        }
         // Host contract: a system font MUST be installed via
         // `font_settings::set_system_font` before a tip can paint (this library
         // ships no bundled fallback — see the module docs). Re-read live every
@@ -246,6 +261,27 @@ impl Controller {
             anchor: self.anchor,
             at_pointer: true,
         });
+    }
+
+    /// The factory path of [`Self::submit`]: build (or, after a text change,
+    /// rebuild) the host's content widget, lay it out at the viewport, place
+    /// a panel of its size with the same policy as text tips, and queue it
+    /// for the tooltip drain. Without a viewport there is nothing to lay out
+    /// into, so nothing paints this frame.
+    fn submit_content(&mut self) {
+        let viewport = current_tooltip_viewport();
+        if viewport.width <= 0.0 || viewport.height <= 0.0 {
+            self.last_rect = None;
+            return;
+        }
+        let Some(size) = super::content::prepare(&self.text, viewport) else {
+            self.last_rect = None;
+            return;
+        };
+        let visible = crate::widget::visible_root_rect(viewport);
+        let rect = place_panel(self.anchor, size, visible, true);
+        self.last_rect = Some(rect);
+        super::content::submit(rect);
     }
 }
 
@@ -397,6 +433,7 @@ pub fn visible_rect() -> Option<Rect> {
 #[doc(hidden)]
 pub fn reset() {
     CONTROLLER.with(|c| *c.borrow_mut() = Controller::default());
+    super::content::clear();
     dispatch_pending();
     FRAME.with(|f| *f.borrow_mut() = FrameInputs::default());
 }

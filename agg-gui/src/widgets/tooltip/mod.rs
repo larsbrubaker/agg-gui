@@ -24,12 +24,14 @@
 //! )
 //! ```
 
+mod content;
 pub mod controller;
 mod events;
 mod interactive;
 mod render;
 mod timings;
 
+pub use content::{has_content_factory, set_content_factory, TooltipContentFactory};
 pub use events::{observe_tooltips, TooltipEvent, TooltipObserver};
 pub(crate) use render::{begin_tooltip_frame, paint_global_tooltips};
 #[doc(hidden)]

@@ -16,6 +16,9 @@
 //! tooltip hosted inside their content, which is why
 //! [`paint_global_tooltips`] is drained a second time after the global
 //! overlay pass (see `keyboard_scroll::paint_lifted_tree`).
+//!
+//! The drain also paints the central controller's tip when the host installed
+//! a content factory ([`super::content`]); that tip is a widget, not lines.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -136,6 +139,7 @@ pub(super) fn current_tooltip_viewport() -> Size {
 
 pub(crate) fn begin_tooltip_frame(viewport: Size) {
     TOOLTIP_QUEUE.with(|q| q.borrow_mut().clear());
+    super::content::begin_frame();
     TOOLTIP_VIEWPORT.with(|v| *v.borrow_mut() = viewport);
 }
 
@@ -144,6 +148,8 @@ pub(crate) fn paint_global_tooltips(ctx: &mut dyn DrawCtx, viewport: Size) {
     for request in requests {
         paint_request(ctx, viewport, request);
     }
+    // The controller's tip, when a host content factory built it.
+    super::content::paint_pending(ctx);
 }
 
 fn paint_request(ctx: &mut dyn DrawCtx, viewport: Size, request: TooltipRequest) {
