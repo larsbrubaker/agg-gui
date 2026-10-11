@@ -648,6 +648,7 @@ mod text_tests;
 
 mod clip;
 mod font_defaults;
+mod image_resample;
 mod mask;
 #[cfg(test)]
 mod mask_tests;

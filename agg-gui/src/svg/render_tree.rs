@@ -264,7 +264,31 @@ fn render_image(
             let (dst_x, dst_y, dst_w, dst_h) =
                 transformed_rect(&t, size.width() as f64, size.height() as f64);
             ctx.reset_transform();
-            ctx.draw_image_rgba(&pixels, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
+            // Smoothed modes are resampled to the device size here, then
+            // blitted 1:1; the others draw nearest-neighbour.
+            let smoothed = super::image_resample::is_smooth(image.rendering_mode())
+                .then(|| {
+                    let (out_w, out_h) = (dst_w.round(), dst_h.round());
+                    (out_w >= 1.0 && out_h >= 1.0)
+                        .then(|| {
+                            super::image_resample::resample_bilinear(
+                                &pixels,
+                                img_w,
+                                img_h,
+                                out_w as u32,
+                                out_h as u32,
+                            )
+                            .map(|data| (data, out_w as u32, out_h as u32))
+                        })
+                        .flatten()
+                })
+                .flatten();
+            match smoothed {
+                Some((data, out_w, out_h)) => {
+                    ctx.draw_image_rgba(&data, out_w, out_h, dst_x, dst_y, dst_w, dst_h)
+                }
+                None => ctx.draw_image_rgba(&pixels, img_w, img_h, dst_x, dst_y, dst_w, dst_h),
+            }
             ctx.restore();
         }
         usvg::ImageKind::SVG(tree) => {

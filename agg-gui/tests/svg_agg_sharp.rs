@@ -9,13 +9,21 @@ mod common;
 mod svg_clip_mask_tests;
 #[path = "svg_agg_sharp/svg_context_paint_tests.rs"]
 mod svg_context_paint_tests;
+#[path = "svg_agg_sharp/svg_css_tests.rs"]
+mod svg_css_tests;
 #[path = "svg_agg_sharp/svg_gradient_tests.rs"]
 mod svg_gradient_tests;
+#[path = "svg_agg_sharp/svg_image_tests.rs"]
+mod svg_image_tests;
 #[path = "svg_agg_sharp/svg_marker_tests.rs"]
 mod svg_marker_tests;
 #[path = "svg_agg_sharp/svg_module_tests.rs"]
 mod svg_module_tests;
+#[path = "svg_agg_sharp/svg_parsing_tests.rs"]
+mod svg_parsing_tests;
 #[path = "svg_agg_sharp/svg_pattern_tests.rs"]
 mod svg_pattern_tests;
+#[path = "svg_agg_sharp/svg_robustness_tests.rs"]
+mod svg_robustness_tests;
 #[path = "svg_agg_sharp/svg_structure_tests.rs"]
 mod svg_structure_tests;

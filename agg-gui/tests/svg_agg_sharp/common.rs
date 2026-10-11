@@ -109,3 +109,25 @@ pub fn try_render_root(
 pub fn render_root(body: &str, root_attributes: &str) -> Image {
     try_render_root(body, root_attributes).expect("the SVG renders")
 }
+
+/// PNG bytes of a `width` x `height` RGBA raster, rows top first.
+pub fn png_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("the PNG header encodes");
+        writer.write_image_data(rgba).expect("the PNG data encodes");
+    }
+    bytes
+}
+
+/// A `data:` URL carrying `bytes` base64-encoded as `mime`.
+pub fn data_url(mime: &str, bytes: &[u8]) -> String {
+    use base64::Engine;
+    format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
