@@ -60,6 +60,4 @@ opt-level = 2
 # agg-rust and tess2-rust are `{ version, path }` dependencies on the
 # checkouts next to this repo (../agg-rust, ../tess2-rust), so no
 # [patch.crates-io] is needed: local builds and CI use the sibling sources,
-# `cargo publish` uses the crates.io versions. clipper2-rust stays a crates.io
-# dependency because manifold-rust, which every consumer also uses, takes it
-# from crates.io; a path copy here would give consumers two clipper2-rusts.
+# `cargo publish` uses the crates.io versions.

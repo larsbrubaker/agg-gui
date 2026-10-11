@@ -29,7 +29,6 @@ exclude = [
 # depends on the crates.io `version`, so a release that needs a newer sibling
 # waits for that sibling's release.
 agg-rust = { version = "1.1.0", path = "../../agg-rust" }
-clipper2-rust = "1.1.0"
 ttf-parser = "0.25"
 rustybuzz = "0.20"
 tess2-rust = { version = "1.1.8", path = "../../tess2-rust" }

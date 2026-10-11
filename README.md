@@ -251,12 +251,13 @@ cargo test -p agg-gui
 
 ## Development
 
-Local path overrides for underlying libraries (uncomment in workspace `Cargo.toml`):
+agg-rust and tess2-rust are `{ version, path }` dependencies on sibling checkouts next to this
+repo (`../agg-rust`, `../tess2-rust`). Local builds and CI use the sibling sources; `cargo publish`
+uses the crates.io versions:
 
 ```toml
-[patch.crates-io]
-agg-rust       = { path = "../../agg-rust" }
-clipper2-rust  = { path = "../../clipper2-rust" }
+agg-rust   = { version = "1.1.0", path = "../../agg-rust" }
+tess2-rust = { version = "1.1.8", path = "../../tess2-rust" }
 ```
 
 ## License
