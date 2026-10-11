@@ -22,6 +22,8 @@ use crate::geometry::Size;
 use crate::widget::{paint_subtree, Widget};
 use crate::widgets::scrollbar::paint_prepared_scrollbar;
 
+use super::lazy_fonts::swap_row_font;
+
 pub(crate) fn submit_combo_popup(request: ComboPopupRequest) {
     submit_combo_popup_internal(request);
 }
@@ -110,6 +112,15 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
         }
 
         let label = &mut labels[idx];
+        // The first paint of a row is what asks for its own font, so rows
+        // never scrolled into view never cost one (`combo_box/lazy_fonts.rs`).
+        if let Some(font) = request
+            .lazy_fonts
+            .as_ref()
+            .and_then(|l| l.resolve_first(idx))
+        {
+            swap_row_font(label, font, request.font_size, request.label_w);
+        }
         let item_text = st.item_text.unwrap_or(v.text_color);
         label.set_color(if is_selected {
             Color::white()

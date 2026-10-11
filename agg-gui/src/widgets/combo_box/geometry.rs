@@ -155,8 +155,17 @@ impl ComboBox {
         self.popup_opens_up = below < desired_h && above > below;
         let available_h = if self.popup_opens_up { above } else { below };
         let fit_count = (available_h / ITEM_H).floor().max(1.0) as usize;
-        self.popup_visible_count = fit_count.clamp(MIN_VISIBLE_ITEMS.min(n), n);
-        self.ensure_selected_visible();
+        let visible = fit_count.clamp(MIN_VISIBLE_ITEMS.min(n), n);
+        // This runs every frame the list is open. Re-reveal the selection
+        // only when the room changed (opening already revealed it for the
+        // last room); otherwise a wheel or scroll-bar scroll away from the
+        // selected row would snap back on the next paint.
+        if visible != self.popup_visible_count {
+            self.popup_visible_count = visible;
+            self.ensure_selected_visible();
+        } else {
+            self.scroll_offset = self.scroll_offset.min(n.saturating_sub(visible));
+        }
         self.sync_scrollbar_from_rows();
     }
 }
