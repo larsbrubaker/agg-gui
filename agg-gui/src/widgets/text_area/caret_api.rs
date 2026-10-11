@@ -12,7 +12,7 @@
 use super::*;
 
 /// Byte offset of character `char_index` in `text`, clamped to its end.
-fn byte_of_char(text: &str, char_index: usize) -> usize {
+pub(super) fn byte_of_char(text: &str, char_index: usize) -> usize {
     text.char_indices()
         .nth(char_index)
         .map_or(text.len(), |(byte, _)| byte)

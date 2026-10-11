@@ -4,7 +4,7 @@
 //! TextEdit") — a widget that **fills its available area** and lets
 //! the user edit a paragraph of text across many wrapped visual
 //! lines.  Shares the underlying `TextEditState` with `TextField` so
-//! the same keyboard shortcuts / undo semantics are in reach later.
+//! the same keyboard shortcuts are in reach.
 //!
 //! # Scope (Stage 4)
 //!
@@ -40,8 +40,12 @@
 //!   * a frameless mode ([`with_frame`](TextArea::with_frame), `frame.rs`): no
 //!     background and no border, for a host that draws its own field frame.
 //!
+//!   * undo / redo (`undo.rs`, agg-sharp's `TextEditUndoHistory`): every
+//!     edit one step, Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z and Ctrl+Y, and
+//!     [`set_text_as_undo_baseline`](TextArea::set_text_as_undo_baseline) so
+//!     loading a document is not a step; text holds only `'\n'` line ends.
+//!
 //! Deferred (known gaps, filed for later polish):
-//!   * undo / redo;
 //!   * input-method composition;
 //!   * BiDi and RTL layout.
 
@@ -221,6 +225,8 @@ pub struct TextArea {
     /// Live edit state.  Shared with future undo / clipboard wiring, and with
     /// external callers via [`with_edit_state`](Self::with_edit_state).
     edit: Rc<RefCell<TextEditState>>,
+    /// Undo / redo history (`undo.rs`).
+    undo: undo::TextAreaUndoHistory,
 
     /// Cached layout — invalidated when text / font / width changes.
     cached_wrap_width: f64,
@@ -338,6 +344,7 @@ impl TextArea {
             on_edit_complete: None,
             text_on_focus: String::new(),
             edit: Rc::new(RefCell::new(TextEditState::default())),
+            undo: undo::TextAreaUndoHistory::new(&TextEditState::default()),
             cached_wrap_width: -1.0,
             cached_lines: Vec::new(),
             cached_line_h: 0.0,
@@ -397,8 +404,10 @@ impl TextArea {
         }
     }
 
-    pub fn with_text(self, text: impl Into<String>) -> Self {
-        let t: String = text.into();
+    /// Start with `text` (line ends normalised to `'\n'`), the caret at its
+    /// end. The initial text is where undo stops.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        let (t, _) = normalize_line_endings(&text.into(), 0);
         let cursor = t.len();
         let epoch = self.edit.borrow().epoch.wrapping_add(1);
         *self.edit.borrow_mut() = TextEditState {
@@ -407,6 +416,7 @@ impl TextArea {
             anchor: cursor,
             epoch,
         };
+        self.clear_undo_history();
         self
     }
 
@@ -444,6 +454,7 @@ impl TextArea {
     pub fn with_edit_state(mut self, state: Rc<RefCell<TextEditState>>) -> Self {
         self.edit = state;
         self.cached_wrap_width = -1.0;
+        self.clear_undo_history();
         self
     }
 
@@ -672,6 +683,7 @@ impl TextArea {
 }
 
 pub use scroll::TextAreaScrollInfo;
+pub use undo::normalize_line_endings;
 
 mod band;
 mod callbacks;
@@ -682,6 +694,7 @@ mod frame;
 mod geometry;
 mod highlight;
 mod scroll;
+mod undo;
 mod widget_impl;
 mod wrap;
 
@@ -705,3 +718,5 @@ mod segment_highlight_tests;
 mod selection_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod undo_tests;

@@ -3,7 +3,7 @@
 //!
 //! These are the low-level funnels the widget's key/mouse handlers call:
 //! `insert_str`/`delete` mutate the buffer (and fire `on_change` — see
-//! `callbacks.rs`), while `move_cursor_to`/`move_char`/`move_line` reposition
+//! `callbacks.rs` — and record one undo step each — see `undo.rs`), while `move_cursor_to`/`move_char`/`move_line` reposition
 //! the caret without touching the text. They are `pub(super)` so the sibling
 //! `widget_impl` and `scroll` modules can drive them.
 
@@ -11,7 +11,12 @@ use super::*;
 
 impl TextArea {
     /// Insert a string at the cursor, replacing any active selection.
+    /// Line ends are normalised to `'\n'` (C#'s paste and typed `'\r'`), and
+    /// the edit is one undo step (`undo.rs`).
     pub(super) fn insert_str(&mut self, s: &str) {
+        let (normalized, _) = normalize_line_endings(s, 0);
+        let s = normalized.as_str();
+        self.begin_undoable_edit();
         let mut st = self.edit.borrow_mut();
         let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
         // Make sure we slice at grapheme boundaries.
@@ -22,6 +27,7 @@ impl TextArea {
         st.anchor = st.cursor;
         st.note_text_change();
         drop(st);
+        self.record_edit();
         self.mark_dirty();
         self.notify_change();
     }
@@ -30,6 +36,7 @@ impl TextArea {
     /// the supplied side.  `-1` = backspace, `+1` = delete, `0` = just
     /// collapse the selection (cut path).
     pub(super) fn delete(&mut self, dir: i32) {
+        self.begin_undoable_edit();
         let mut st = self.edit.borrow_mut();
         let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
         if lo != hi {
@@ -49,6 +56,7 @@ impl TextArea {
         }
         st.note_text_change();
         drop(st);
+        self.record_edit();
         self.mark_dirty();
         self.notify_change();
     }
@@ -74,6 +82,7 @@ impl TextArea {
     /// matching every mainstream editor; only when the selection is empty does
     /// the word-boundary deletion kick in.
     pub(super) fn delete_word(&mut self, dir: i32) {
+        self.begin_undoable_edit();
         let mut st = self.edit.borrow_mut();
         let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
         if lo != hi {
@@ -93,6 +102,7 @@ impl TextArea {
         }
         st.note_text_change();
         drop(st);
+        self.record_edit();
         self.mark_dirty();
         self.notify_change();
     }
@@ -141,6 +151,7 @@ impl TextArea {
     /// line start does not move, so the fresh indent falls *inside* the
     /// selection (matching common code editors). Drives the multi-line Tab.
     pub(super) fn indent_selection(&mut self) {
+        self.begin_undoable_edit();
         let mut st = self.edit.borrow_mut();
         let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
         let starts = touched_line_starts(&st.text, lo, hi);
@@ -156,6 +167,7 @@ impl TextArea {
         st.anchor = shift(st.anchor);
         st.note_text_change();
         drop(st);
+        self.record_edit();
         self.mark_dirty();
         self.notify_change();
     }
@@ -168,6 +180,7 @@ impl TextArea {
     /// a position inside a removed run clamps to its line start. Drives
     /// Shift+Tab.
     pub(super) fn outdent_selection(&mut self) {
+        self.begin_undoable_edit();
         let mut st = self.edit.borrow_mut();
         let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
         let starts = touched_line_starts(&st.text, lo, hi);
@@ -209,6 +222,7 @@ impl TextArea {
         st.anchor = adjust(st.anchor);
         st.note_text_change();
         drop(st);
+        self.record_edit();
         self.mark_dirty();
         self.notify_change();
     }

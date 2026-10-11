@@ -80,6 +80,23 @@ impl TextArea {
         self.vbar.offset
     }
 
+    /// Scroll to `offset` px from the top (0 shows the first line), clamped
+    /// to the scrollable range at the last layout, as C#'s
+    /// `TextEditWidget.TopLeftOffset` setter scrolls. `set_scroll_offset(0.0)`
+    /// resets the view to the top.
+    pub fn set_scroll_offset(&mut self, offset: f64) {
+        let target = if offset.is_finite() {
+            offset.clamp(0.0, self.max_scroll_y())
+        } else {
+            0.0
+        };
+        if target != self.vbar.offset {
+            self.vbar.offset = target;
+            self.publish_scroll_offset();
+            crate::animation::request_draw();
+        }
+    }
+
     /// Publish this widget's live scroll state into a shared
     /// [`TextAreaScrollInfo`] whenever it changes, so a *sibling* widget outside
     /// the editor's subtree can mirror the viewport — the Code Editor demo's

@@ -535,6 +535,7 @@ impl Widget for TextArea {
                 // built-in handling. Cloned out of `self` so the callback can
                 // freely borrow the shared edit state we also hold.
                 if let Some(cb) = self.on_key_chord.clone() {
+                    self.begin_undoable_edit();
                     let epoch_before = self.edit.borrow().epoch;
                     if (cb.borrow_mut())(key, modifiers) {
                         // An interceptor that edits text advances the content
@@ -542,6 +543,7 @@ impl Widget for TextArea {
                         // funnels by re-wrapping, firing `on_change`, and
                         // scrolling the (possibly moved) caret back into view.
                         if self.edit.borrow().epoch != epoch_before {
+                            self.record_edit();
                             self.mark_dirty();
                             self.notify_change();
                             self.ensure_cursor_visible();
@@ -672,6 +674,14 @@ impl Widget for TextArea {
                     }
                     Key::Char('v') | Key::Char('V') if cmd => {
                         self.clipboard_paste();
+                    }
+                    // C#'s InternalTextEditWidget: Ctrl+Z undoes,
+                    // Ctrl+Shift+Z and Ctrl+Y redo (Cmd on macOS).
+                    Key::Char('z') | Key::Char('Z') if cmd && !shift => {
+                        self.undo();
+                    }
+                    Key::Char('z') | Key::Char('Z') | Key::Char('y') | Key::Char('Y') if cmd => {
+                        self.redo();
                     }
                     Key::Char(c) if !cmd => {
                         let mut s = [0u8; 4];
