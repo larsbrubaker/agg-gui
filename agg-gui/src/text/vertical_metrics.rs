@@ -72,6 +72,20 @@ impl Font {
         self.cap_height as f64 * size / self.units_per_em as f64
     }
 
+    /// x-height in pixels at the given font size: the face's `OS/2`
+    /// `sxHeight` (agg-sharp's `TypeFace.X_height`), or, for a face without
+    /// one, the top of its `x` glyph (0 when it has neither).  Read from the
+    /// face, never from a [`VerticalMetrics`] override.
+    pub fn x_height_px(&self, size: f64) -> f64 {
+        let units = self.with_ttf_face(|face| face.x_height());
+        match units {
+            Some(units) if units > 0 => units as f64 * size / self.units_per_em as f64,
+            _ => self
+                .glyph_visual_bounds('x', size)
+                .map_or(0.0, |(_, top)| top.max(0.0)),
+        }
+    }
+
     /// How far `(above, below)` the baseline this font's ink can reach, in
     /// pixels (both positive): the larger of the metrics in force and the
     /// face's own ascender and descender. An override may describe a line box

@@ -2,6 +2,8 @@
 //! ported 1:1 against `agg_gui::widgets::markdown_editing`, one file per C#
 //! test class.
 
+#[path = "markdown_editing/rich_block_layout_tests.rs"]
+mod rich_block_layout_tests;
 #[path = "markdown_editing/rich_block_operations_tests.rs"]
 mod rich_block_operations_tests;
 #[path = "markdown_editing/rich_document_tests.rs"]

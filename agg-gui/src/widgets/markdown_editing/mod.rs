@@ -58,6 +58,13 @@
 //! * [`edit_commands`] — the toolbar's view of the document's owner, and a
 //!   widget-free implementation (`IRichEditCommands.cs`).
 //! * `char_class` — .NET's character classes, as the writer sees them.
+//! * [`block_layout`] — one block laid out to a width: wrapped lines, the
+//!   list marker, quote bar and code background, hit testing and caret boxes
+//!   (`RichBlockLayout.cs`, `IRichBlockLayout.cs`), over [`layout_line`]'s
+//!   lines, fragments and caret stops (`RichLayoutLine.cs`), `layout_items`'
+//!   items and line breaking (`RichLayoutItems.cs`, with `mark_class`'s
+//!   combining marks) and [`layout_style`]'s fonts and spacing
+//!   (`RichLayoutStyle.cs`).
 //!
 //! # Offsets
 //!
@@ -69,6 +76,7 @@
 mod align_groups;
 pub mod block;
 mod block_containers;
+pub mod block_layout;
 pub mod block_operations;
 mod char_class;
 mod code_and_tables;
@@ -86,6 +94,10 @@ pub mod inline;
 pub mod inline_style;
 pub mod inline_writer;
 pub mod inlines;
+mod layout_items;
+pub mod layout_line;
+pub mod layout_style;
+mod mark_class;
 pub mod markdown_parser;
 pub mod markdown_writer;
 mod parse_tree;
@@ -98,6 +110,7 @@ pub mod style_operations;
 pub mod table_code_operations;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
+pub use block_layout::{RichBlockGeometry, RichBlockLayout, RichLayoutError};
 pub use block_operations::{RichBlockState, RichListKind};
 pub use document::{DocPosition, RichDocument};
 pub use edit_commands::{RichDocumentCommands, RichEdit, RichEditCommands};
@@ -112,4 +125,6 @@ pub use inline::{InlineAtom, InlineAtomKind, RichInline, RichInlineContent, Rich
 pub use inline_style::{RichInlineStyle, RichPendingStyle, RichStyleCoverage, RichStyleState};
 pub use inline_writer::RichInlineContext;
 pub use inlines::OffsetOutOfRange;
+pub use layout_line::{RichCaret, RichCaretStop, RichLayoutFragment, RichLayoutLine};
+pub use layout_style::{RichFace, RichLayoutFonts, RichLayoutStyle};
 pub use selection::RichSelection;
