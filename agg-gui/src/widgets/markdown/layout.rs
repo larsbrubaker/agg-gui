@@ -10,6 +10,7 @@ use crate::text::measure_text_metrics;
 use super::alignment::{self, MarkdownAlign};
 use super::cell_images;
 use super::matching::{self, MATCH_PAD};
+use super::table_style::{header_bold, CELL_INSET};
 use super::{
     clamp_block_offset, emphasis, ImageState, InlineItem, LayoutItem, LineRun, LineStyle,
     MarkdownRunStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
@@ -86,7 +87,9 @@ impl MarkdownView {
                     cell_styles,
                     cell_images,
                     header,
+                    aligns,
                 } => {
+                    let cell_styles = &header_bold(rows, cell_styles, *header);
                     let cell_images = self.layout_cell_images(cell_images, max_w);
                     let (col_widths, row_heights) =
                         self.layout_table(rows, cell_styles, &cell_images);
@@ -108,6 +111,7 @@ impl MarkdownView {
                         cell_styles: cell_styles.clone(),
                         cell_images,
                         header: *header,
+                        aligns: aligns.clone(),
                         y: 0.0,
                         height,
                         row_heights,
@@ -452,7 +456,7 @@ impl MarkdownView {
                 let spans = emphasis::cell_spans(cell_styles, ri, col);
                 let images = cell_images::images_of(cell_images, ri, col);
                 let content_w = self.cell_content_width(text, spans, images);
-                widths[col] = widths[col].max(content_w + 24.0);
+                widths[col] = widths[col].max(content_w + CELL_INSET * 2.0);
                 for image in images {
                     row_h = row_h.max(image.height + cell_images::CELL_IMAGE_PAD_Y * 2.0);
                 }

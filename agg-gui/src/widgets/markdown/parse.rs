@@ -68,6 +68,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut quote_depth = 0u32;
     let mut table: Option<Vec<Vec<String>>> = None;
     let mut table_header = true;
+    let mut table_aligns: Vec<MarkdownAlign> = Vec::new();
     let mut table_row: Option<Vec<String>> = None;
     let mut table_cell: Option<String> = None;
     let mut code_block: Option<String> = None;
@@ -338,7 +339,8 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 cur_indent = (cur_indent - 16.0).max(0.0);
                 add_spacer(&mut out);
             }
-            MdEvent::Start(Tag::Table(_)) => {
+            MdEvent::Start(Tag::Table(column_aligns)) => {
+                table_aligns = column_aligns.iter().map(|a| column_align(*a)).collect();
                 flush_flow(
                     &mut out,
                     &mut cur_items,
@@ -362,6 +364,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                         cell_styles: table_styles.take().unwrap_or_default(),
                         cell_images: table_images.take().unwrap_or_default(),
                         header: table_header,
+                        aligns: std::mem::take(&mut table_aligns),
                     });
                     add_spacer(&mut out);
                 }
@@ -635,6 +638,16 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     );
     alignment::stamp(&mut out[stamped..], aligns.current());
     out
+}
+
+/// A table column's alignment: MarkdigAgg's `AggTableRenderer` leaves a
+/// column without a marker left-aligned.
+fn column_align(align: pulldown_cmark::Alignment) -> MarkdownAlign {
+    match align {
+        pulldown_cmark::Alignment::Center => MarkdownAlign::Center,
+        pulldown_cmark::Alignment::Right => MarkdownAlign::Right,
+        pulldown_cmark::Alignment::Left | pulldown_cmark::Alignment::None => MarkdownAlign::Left,
+    }
 }
 
 /// The style an event opens or closes: an emphasis span, or an inline HTML

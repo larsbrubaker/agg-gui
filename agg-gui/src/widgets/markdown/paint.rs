@@ -12,6 +12,8 @@ use crate::draw_ctx::DrawCtx;
 use crate::text::measure_text_metrics;
 
 use super::cell_images::{self, LaidCellImage};
+use super::table_style;
+use super::table_style::cell_content_x;
 use super::{
     emphasis, matching, scrollbar_rect, scrollbar_thumb, LayoutItem, LineRun, LineStyle,
     MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
@@ -182,6 +184,7 @@ impl MarkdownView {
                     cell_styles,
                     cell_images,
                     header,
+                    aligns,
                     y,
                     height: _,
                     row_heights,
@@ -203,12 +206,14 @@ impl MarkdownView {
                     ctx.clip_rect(pad, content_y, *viewport_width, table_h);
                     ctx.translate(-scroll_x, 0.0);
                     let mut cy = content_y + table_h;
+                    let grid = table_style::grid_color(&v);
                     ctx.set_font_size(self.font_size);
                     for (ri, row) in rows.iter().enumerate() {
                         let row_h = row_heights.get(ri).copied().unwrap_or(text_row_h);
                         cy -= row_h;
-                        if ri == 0 && *header {
-                            ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.10));
+                        let stripe = table_style::stripe_color(&v, ri, *header);
+                        if stripe.a > 0.0 {
+                            ctx.set_fill_color(stripe);
                             ctx.begin_path();
                             ctx.rect(pad, cy, table_w, row_h);
                             ctx.fill();
@@ -217,7 +222,7 @@ impl MarkdownView {
                         let text_cy = cy + (row_h - text_row_h) * 0.5;
                         let mut cx = pad;
                         for (ci, width) in col_widths.iter().enumerate() {
-                            ctx.set_fill_color(v.separator);
+                            ctx.set_fill_color(grid);
                             ctx.begin_path();
                             ctx.rect(cx, cy, 1.0, row_h);
                             ctx.rect(cx, cy, *width, 1.0);
@@ -225,10 +230,13 @@ impl MarkdownView {
                             if let Some(text) = row.get(ci) {
                                 let spans = emphasis::cell_spans(cell_styles, ri, ci);
                                 let images = cell_images::images_of(cell_images, ri, ci);
+                                let align = aligns.get(ci).copied().unwrap_or_default();
+                                let content_w = self.cell_content_width(text, spans, images);
+                                let tx = cx + cell_content_x(*width, content_w, align);
                                 self.paint_cell_matches(
                                     ctx,
                                     (text, spans, images),
-                                    cx + 8.0,
+                                    tx,
                                     cy,
                                     row_h,
                                     v.accent,
@@ -237,12 +245,12 @@ impl MarkdownView {
                                 self.paint_cell_text(
                                     ctx,
                                     (text, spans, images),
-                                    cx + 8.0,
+                                    tx,
                                     text_cy + text_row_h * 0.36,
                                 );
                                 ctx.set_font(Arc::clone(&font));
                                 for (k, image) in images.iter().enumerate() {
-                                    let ix = cx + 8.0 + self.cell_image_x(text, spans, images, k);
+                                    let ix = tx + self.cell_image_x(text, spans, images, k);
                                     let iy = cy + (row_h - image.height) * 0.5;
                                     self.paint_inline_image(
                                         ctx,
@@ -258,12 +266,12 @@ impl MarkdownView {
                             }
                             cx += width;
                         }
-                        ctx.set_fill_color(v.separator);
+                        ctx.set_fill_color(grid);
                         ctx.begin_path();
                         ctx.rect(pad + table_w, cy, 1.0, row_h);
                         ctx.fill();
                     }
-                    ctx.set_fill_color(v.separator);
+                    ctx.set_fill_color(grid);
                     ctx.begin_path();
                     ctx.rect(pad, content_y + table_h, table_w, 1.0);
                     ctx.fill();

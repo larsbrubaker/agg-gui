@@ -22,6 +22,7 @@ use crate::text::{measure_advance, Font};
 
 use super::cell_images::{images_of, LaidCellImage};
 use super::styled_html::{style_html_fragment, to_styled_html};
+use super::table_style::cell_content_x;
 use super::{
     emphasis, LayoutItem, LineRun, LineStyle, MarkdownRunStyle, MarkdownView, BLOCK_SCROLLBAR_GAP,
     BLOCK_SCROLLBAR_H,
@@ -282,6 +283,7 @@ impl MarkdownView {
                     rows,
                     cell_styles,
                     cell_images,
+                    aligns,
                     y,
                     row_heights,
                     col_widths,
@@ -317,11 +319,15 @@ impl MarkdownView {
                                 self.push_selection_gap("\t");
                             }
                             if let Some(text) = row.get(ci) {
+                                let spans = emphasis::cell_spans(cell_styles, ri, ci);
+                                let images = images_of(cell_images, ri, ci);
+                                let align = aligns.get(ci).copied().unwrap_or_default();
+                                let content_w = self.cell_content_width(text, spans, images);
                                 let cell = TableCellPlace {
                                     text,
-                                    spans: emphasis::cell_spans(cell_styles, ri, ci),
-                                    images: images_of(cell_images, ri, ci),
-                                    x: cx + 8.0,
+                                    spans,
+                                    images,
+                                    x: cx + cell_content_x(*width, content_w, align),
                                     y: cy,
                                     height: row_h,
                                     clip,

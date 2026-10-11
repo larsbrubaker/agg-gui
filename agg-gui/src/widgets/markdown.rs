@@ -94,6 +94,9 @@ mod styled_html;
 mod styled_html_tests;
 #[cfg(test)]
 mod table_image_tests;
+mod table_style;
+#[cfg(test)]
+mod table_tests;
 #[cfg(test)]
 mod update_tests;
 
@@ -161,8 +164,10 @@ enum LayoutItem {
         cell_styles: emphasis::CellStyles,
         /// Each cell's inline images, sized (see `cell_images.rs`).
         cell_images: cell_images::LaidCellImages,
-        /// Whether the first row is a header row, drawn shaded.
+        /// Whether the first row is a header row, drawn bold.
         header: bool,
+        /// Each column's alignment, from its `:---:` marker.
+        aligns: Vec<MarkdownAlign>,
         y: f64,
         height: f64,
         /// Each row's height, top row first: a text row's height, or more
@@ -250,6 +255,8 @@ enum ParagraphItem {
         cell_images: cell_images::CellImages,
         /// Whether the first row is a header row (a grid table may have none).
         header: bool,
+        /// Each column's alignment, from its `:---:` marker.
+        aligns: Vec<MarkdownAlign>,
     },
     CodeBlock(Vec<String>),
     Spacer,

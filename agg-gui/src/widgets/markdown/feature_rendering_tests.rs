@@ -1,6 +1,9 @@
-//! Emphasis tests ported 1:1 from agg-sharp
+//! Tests ported 1:1 from agg-sharp
 //! `Tests/Agg.Tests/MarkdigAgg/MarkdownFeatureRenderingTests.cs`
-//! (`EmphasisRendersItalicBoldAndBoth`, `PairedHtmlStyleTagsStyleTheWordsBetween`,
+//! (`HeadingLevelsUseDistinctSizes`, `OrderedListsRenderNumberMarkers`,
+//! `NestedListsIndentNestedItems`, `BlockQuotesRenderContainedText`,
+//! `FencedCodeBlocksRenderCodeBlockWidget`, `HorizontalRulesRenderVisibleLine`,
+//! `EmphasisRendersItalicBoldAndBoth`, `PairedHtmlStyleTagsStyleTheWordsBetween`,
 //! `UnpairedAttributedOrCrossedHtmlStyleTagsAreDropped`,
 //! `ItalicWordsDrawSlantedGlyphs`), plus `rust_only_*` tests for the places
 //! emphasis has to reach in this port: headings, list items, links, table
@@ -21,7 +24,7 @@ use crate::geometry::Size;
 use crate::text::{measure_advance, shape_text, Font};
 use crate::widget::Widget;
 
-use super::{LayoutItem, LineRun, MarkdownRunStyle, MarkdownView};
+use super::{LayoutItem, LineRun, MarkdownBlockKind, MarkdownRunStyle, MarkdownView};
 
 // Liberation Sans, agg-sharp's default face, whose plain 'l' stem the slant test relies on.
 const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/LiberationSans-Regular.ttf");
@@ -50,6 +53,79 @@ fn style(italic: bool, bold: bool, strikethrough: bool) -> MarkdownRunStyle {
         italic,
         strikethrough,
     }
+}
+
+#[test]
+fn heading_levels_use_distinct_sizes() {
+    let view = render_markdown("# Heading 1\n## Heading 2\n### Heading 3\n");
+
+    let headings: Vec<_> = view
+        .text_blocks()
+        .into_iter()
+        .filter(|block| block.level > 0)
+        .collect();
+    assert_eq!(headings.len(), 3);
+
+    let sizes: Vec<f64> = headings.iter().map(|heading| heading.font_size).collect();
+
+    assert!(sizes[0] > sizes[1], "{sizes:?}");
+    assert!(sizes[1] > sizes[2], "{sizes:?}");
+}
+
+#[test]
+fn ordered_lists_render_number_markers() {
+    let (_, words) = render_words("1. First step\n2. Second step\n3. Third step\n");
+
+    assert!(words.contains_key("1."));
+    assert!(words.contains_key("2."));
+    assert!(words.contains_key("3."));
+}
+
+#[test]
+fn nested_lists_indent_nested_items() {
+    let view = render_markdown("- First bullet\n- Second bullet\n  - Nested bullet\n");
+
+    // C# finds more than one ListX and checks the nested one's left margin; here the
+    // nested item sits further in than the outer ones.
+    let blocks = view.text_blocks();
+    let indent_of = |word: &str| {
+        blocks
+            .iter()
+            .find(|block| block.words.iter().any(|w| w.text == word))
+            .map(|block| block.indent)
+            .expect(word)
+    };
+    assert!(indent_of("Nested") > indent_of("First"));
+}
+
+#[test]
+fn block_quotes_render_contained_text() {
+    let view = render_markdown("> Keep help articles short, practical, and easy to scan.\n");
+
+    assert!(view.blocks().contains(&MarkdownBlockKind::Quote));
+    let quoted = view.text_blocks().into_iter().find(|block| block.quote);
+    let quoted = quoted.expect("a quote block");
+    assert!(quoted.words.iter().any(|w| w.text == "Keep"));
+}
+
+#[test]
+fn fenced_code_blocks_render_code_block_widget() {
+    let view = render_markdown("```cs\nvar settings = LoadSettings();\nsettings.Save();\n```\n");
+
+    assert!(view.blocks().contains(&MarkdownBlockKind::Code));
+    let lines = view.code_block_lines();
+    assert!(lines
+        .first()
+        .expect("a code block")
+        .iter()
+        .any(|line| line == "settings.Save();"));
+}
+
+#[test]
+fn horizontal_rules_render_visible_line() {
+    let view = render_markdown("Top\n\n---\n\nBottom\n");
+
+    assert!(view.blocks().contains(&MarkdownBlockKind::Rule));
 }
 
 #[test]

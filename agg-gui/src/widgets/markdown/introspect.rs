@@ -10,7 +10,10 @@
 //! (`layout.rs`) and the selectable text model (`selection.rs`).
 
 use super::cell_images::images_of;
+use super::table_style;
+use super::table_style::cell_content_x;
 use super::{LayoutItem, LineRun, MarkdownAlign, MarkdownView};
+use crate::color::Color;
 
 /// A block-level element of the laid-out document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +24,8 @@ pub enum MarkdownBlockKind {
     Code,
     /// A pipe or grid table (C#'s `AggTable`).
     Table,
+    /// A horizontal rule (C#'s `HorizontalLine`).
+    Rule,
 }
 
 /// One laid-out table cell.
@@ -38,6 +43,18 @@ pub struct MarkdownTableCell {
     /// The laid-out width of each image in the cell, in order (C#'s
     /// `ImageLinkSimpleX.Width` of the cell's images).
     pub image_widths: Vec<f64>,
+    /// Whether the cell is in the header row (C#'s `AggTableRow.IsHeadingRow`).
+    pub header: bool,
+    /// The cell's alignment, from its column's `:---:` marker (C#'s
+    /// `AggTableCell.FlowHAnchor`).
+    pub align: MarkdownAlign,
+    /// Where the cell's content starts, from the cell's left edge.
+    pub content_x: f64,
+    /// The width of the cell's text and images (C#'s `cell.ContentWidth`).
+    pub content_width: f64,
+    /// The stripe behind the cell's row (C#'s `AggTableRow.StripeColor`),
+    /// in the current theme.
+    pub stripe: Color,
 }
 
 /// One laid-out paragraph, heading or list item (C#'s `ParagraphX` /
@@ -50,6 +67,13 @@ pub struct MarkdownTextBlock {
     pub align: MarkdownAlign,
     /// Its words in order, each with where it starts.
     pub words: Vec<MarkdownWord>,
+    /// The size its text draws at (C#'s `TextWidget.PointSize`).
+    pub font_size: f64,
+    /// How far its rows sit in from the view's padding (a list's nesting,
+    /// a quote's bar; C#'s `ListX.Margin.Left`).
+    pub indent: f64,
+    /// Whether it is inside a block quote (C#'s `QuoteBlockX`).
+    pub quote: bool,
 }
 
 /// A laid-out word of a [`MarkdownTextBlock`].
@@ -74,6 +98,7 @@ impl MarkdownView {
                 continues,
                 align,
                 level,
+                quote,
                 ..
             } = item
             else {
@@ -108,6 +133,9 @@ impl MarkdownView {
                     level: *level,
                     align: *align,
                     words,
+                    font_size: style.font_size(self.font_size),
+                    indent: *indent,
+                    quote: *quote,
                 }),
             }
         }
@@ -157,7 +185,10 @@ impl MarkdownView {
         let mut in_quote = false;
         for item in &self.items {
             match item {
-                LayoutItem::Line { quote, .. } => {
+                LayoutItem::Line { quote, style, .. } => {
+                    if matches!(style, super::LineStyle::Rule) {
+                        blocks.push(MarkdownBlockKind::Rule);
+                    }
                     if *quote && !in_quote {
                         blocks.push(MarkdownBlockKind::Quote);
                     }
@@ -176,6 +207,18 @@ impl MarkdownView {
         blocks
     }
 
+    /// Each code block of the last layout, in document order, as its lines
+    /// (C#'s `CodeBlockX` text widgets), leading spaces kept.
+    pub fn code_block_lines(&self) -> Vec<Vec<String>> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::CodeBlock { lines, .. } => Some(lines.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Every table of the last layout, in document order, each as its cells
     /// row by row.
     pub fn table_cells(&self) -> Vec<Vec<MarkdownTableCell>> {
@@ -184,7 +227,10 @@ impl MarkdownView {
             let LayoutItem::Table {
                 block_idx,
                 rows,
+                cell_styles,
                 cell_images,
+                header,
+                aligns,
                 col_widths,
                 viewport_width,
                 ..
@@ -192,22 +238,30 @@ impl MarkdownView {
             else {
                 continue;
             };
+            let visuals = crate::theme::current_visuals();
             let scroll_x = self.block_scroll_offset(*block_idx);
             let mut cells = Vec::new();
             for (ri, row) in rows.iter().enumerate() {
                 let mut x = -scroll_x;
                 for (ci, width) in col_widths.iter().enumerate() {
                     let visible = (x + width).min(*viewport_width) - x.max(0.0);
+                    let text = row.get(ci).map_or("", String::as_str);
+                    let images = images_of(cell_images, ri, ci);
+                    let spans = super::emphasis::cell_spans(cell_styles, ri, ci);
+                    let content_width = self.cell_content_width(text, spans, images);
+                    let align = aligns.get(ci).copied().unwrap_or_default();
                     cells.push(MarkdownTableCell {
                         row: ri,
                         column: ci,
                         text: row.get(ci).cloned().unwrap_or_default(),
                         width: *width,
                         visible_width: visible.max(0.0),
-                        image_widths: images_of(cell_images, ri, ci)
-                            .iter()
-                            .map(|image| image.width)
-                            .collect(),
+                        image_widths: images.iter().map(|image| image.width).collect(),
+                        header: *header && ri == 0,
+                        align,
+                        content_x: cell_content_x(*width, content_width, align),
+                        content_width,
+                        stripe: table_style::stripe_color(&visuals, ri, *header),
                     });
                     x += width;
                 }
@@ -215,6 +269,65 @@ impl MarkdownView {
             tables.push(cells);
         }
         tables
+    }
+
+    /// Each table's laid-out size, in document order: it stretches across
+    /// the view's content width (C#'s `AggTable.HAnchor = Stretch`), its
+    /// columns scrolling inside when wider, and is as tall as its rows.
+    pub fn table_sizes(&self) -> Vec<crate::geometry::Size> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Table {
+                    viewport_width,
+                    height,
+                    ..
+                } => Some(crate::geometry::Size::new(*viewport_width, *height)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Each table's row tops, top row first, in the view's Y-up
+    /// coordinates (C#'s `row.TransformToParentSpace(...).Top`): the top
+    /// of each row is the grid line above it.
+    pub fn table_row_tops(&self) -> Vec<Vec<f64>> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Table {
+                    y,
+                    row_heights,
+                    viewport_width,
+                    content_width,
+                    ..
+                } => {
+                    let scrollbar_h = if content_width > viewport_width {
+                        super::BLOCK_SCROLLBAR_H + super::BLOCK_SCROLLBAR_GAP
+                    } else {
+                        0.0
+                    };
+                    let mut top = y + scrollbar_h + row_heights.iter().sum::<f64>();
+                    Some(
+                        row_heights
+                            .iter()
+                            .map(|h| {
+                                let row_top = top;
+                                top -= h;
+                                row_top
+                            })
+                            .collect(),
+                    )
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The colour the tables' grid lines draw in, in the current theme
+    /// (C#'s `AggTable.GridColor`).
+    pub fn table_grid_color(&self) -> Color {
+        table_style::grid_color(&crate::theme::current_visuals())
     }
 
     /// The laid-out width of every image of the last layout, in document
