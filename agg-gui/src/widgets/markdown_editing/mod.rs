@@ -65,6 +65,9 @@
 //!   items and line breaking (`RichLayoutItems.cs`, with `mark_class`'s
 //!   combining marks) and [`layout_style`]'s fonts and spacing
 //!   (`RichLayoutStyle.cs`).
+//! * [`table_layout`] — a Table block laid out to a width: the grid, padded
+//!   cells laid out like paragraphs, header and stripe boxes, hit testing and
+//!   pixel-snapped grid lines (`RichTableLayout.cs`).
 //!
 //! # Offsets
 //!
@@ -108,6 +111,7 @@ pub(crate) mod pipe_tables;
 pub mod selection;
 pub mod style_operations;
 pub mod table_code_operations;
+pub mod table_layout;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
 pub use block_layout::{RichBlockGeometry, RichBlockLayout, RichLayoutError};
@@ -128,3 +132,4 @@ pub use inlines::OffsetOutOfRange;
 pub use layout_line::{RichCaret, RichCaretStop, RichLayoutFragment, RichLayoutLine};
 pub use layout_style::{RichFace, RichLayoutFonts, RichLayoutStyle};
 pub use selection::RichSelection;
+pub use table_layout::{RichTableCellLayout, RichTableGridSnap, RichTableLayout};

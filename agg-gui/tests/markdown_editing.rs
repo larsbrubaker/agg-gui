@@ -32,6 +32,8 @@ mod rich_paste_operations_tests;
 mod rich_style_operations_tests;
 #[path = "markdown_editing/rich_table_code_operations_tests.rs"]
 mod rich_table_code_operations_tests;
+#[path = "markdown_editing/rich_table_layout_tests.rs"]
+mod rich_table_layout_tests;
 #[path = "markdown_editing/rust_only_code_block_and_commands_tests.rs"]
 mod rust_only_code_block_and_commands_tests;
 #[path = "markdown_editing/rust_only_edit_error_tests.rs"]

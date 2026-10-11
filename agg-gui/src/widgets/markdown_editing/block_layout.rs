@@ -12,7 +12,8 @@
 //! [`super::layout_line`]s.  The line building, flipping, hit testing and stop
 //! finding are shared with a table's cells (crate-visible).  Where C# throws
 //! (a Table block given to [`RichBlockLayout::layout`], an offset outside the
-//! block) these return a [`RichLayoutError`].
+//! block) these return a [`RichLayoutError`].  [`super::table_layout`] lays a
+//! Table block out over the same line helpers.
 
 use std::fmt;
 
@@ -30,6 +31,16 @@ pub enum RichLayoutError {
     /// A Table block, which `RichTableLayout` lays out (C#'s
     /// `NotSupportedException`).
     TableBlock,
+    /// A block that is not a Table given to `RichTableLayout` (C#'s
+    /// `ArgumentException`).
+    NotTableBlock,
+    /// A table cell that is not in the layout (C#'s index exception).
+    CellOutOfRange {
+        /// The row asked for.
+        row: usize,
+        /// The column asked for.
+        column: usize,
+    },
     /// An offset past the block's end (C#'s `ArgumentOutOfRangeException`).
     OffsetOutOfRange {
         /// The offset asked for.
@@ -44,6 +55,10 @@ impl fmt::Display for RichLayoutError {
         match self {
             Self::TableBlock => {
                 f.write_str("Table blocks are laid out by RichTableLayout, not RichBlockLayout.")
+            }
+            Self::NotTableBlock => f.write_str("Only Table blocks have a table layout."),
+            Self::CellOutOfRange { row, column } => {
+                write!(f, "the table has no cell at row {row}, column {column}")
             }
             Self::OffsetOutOfRange { offset, length } => {
                 write!(f, "offset {offset} is outside the block (length {length})")

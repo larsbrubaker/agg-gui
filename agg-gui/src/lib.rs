@@ -81,6 +81,7 @@ pub mod gamepad;
 pub mod geometry;
 pub mod gfx_ctx;
 pub mod gl_renderer;
+pub mod grid_pixels;
 mod http_fetch;
 pub mod icon_image;
 pub mod input_profile;

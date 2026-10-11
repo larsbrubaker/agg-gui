@@ -320,6 +320,33 @@ impl RichLayoutStyle {
         )
     }
 
+    /// Space between a table cell's text and its left and right grid lines
+    /// (the viewer's 10 cell padding).
+    pub fn table_cell_padding_x(&self) -> f64 {
+        10.0 * self.scale
+    }
+
+    /// Space between a table cell's text and its top and bottom grid lines
+    /// (the viewer's 2 cell padding); each line's own [`Self::line_gap`] adds
+    /// to it, as in the viewer, whose rows hold padded text widgets.
+    pub fn table_cell_padding_y(&self) -> f64 {
+        2.0 * self.scale
+    }
+
+    /// A table grid line's thickness: whole device pixels
+    /// ([`crate::grid_pixels::line_thickness`]), as the viewer's grid draws,
+    /// so a line never lands half on a pixel.
+    pub fn table_grid_line_width(&self) -> f64 {
+        f64::from(crate::grid_pixels::line_thickness(self.scale))
+    }
+
+    /// The narrowest a table column's text gets when the table is squeezed to
+    /// fit (a column whose text is narrower keeps its own width), so a
+    /// squeezed column still shows a few characters rather than one.
+    pub fn table_min_column_text_width(&self) -> f64 {
+        40.0 * self.scale
+    }
+
     fn face(&self, kind: FaceKind, points: f64, italic: bool, underline: bool) -> RichFace {
         let key = (kind, points.to_bits(), italic, underline);
         self.faces
