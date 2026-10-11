@@ -10,8 +10,8 @@ use crate::draw_ctx::DrawCtx;
 use crate::text::measure_text_metrics;
 
 use super::{
-    image_loader, is_rect_visible_in_root, scrollbar_rect, scrollbar_thumb, ImageState, LayoutItem,
-    LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
+    image_loader, is_rect_visible_in_root, matching, scrollbar_rect, scrollbar_thumb, ImageState,
+    LayoutItem, LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
 
 impl MarkdownView {
@@ -74,9 +74,18 @@ impl MarkdownView {
                                         text,
                                         link,
                                         code,
+                                        highlight,
+                                        lead,
                                         x,
                                         width,
+                                        ..
                                     } => {
+                                        if *highlight {
+                                            ctx.set_fill_color(matching::match_fill(v.accent));
+                                            ctx.begin_path();
+                                            ctx.rect(tx + x, *y, *width, *height);
+                                            ctx.fill();
+                                        }
                                         if *code {
                                             ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.14));
                                             ctx.begin_path();
@@ -97,7 +106,7 @@ impl MarkdownView {
                                         let text_x = if *code {
                                             tx + x + self.font_size * 0.35
                                         } else {
-                                            tx + x
+                                            tx + x + lead
                                         };
                                         ctx.fill_text(text, text_x, text_y);
                                         if link.is_some() {
@@ -231,6 +240,7 @@ impl MarkdownView {
                             ctx.rect(cx, cy, *width, 1.0);
                             ctx.fill();
                             if let Some(text) = row.get(ci) {
+                                self.paint_cell_matches(ctx, text, cx + 8.0, cy, *row_h, v.accent);
                                 ctx.set_fill_color(v.text_color);
                                 ctx.fill_text(text, cx + 8.0, cy + row_h * 0.36);
                             }
@@ -308,6 +318,38 @@ impl MarkdownView {
                     }
                 }
             }
+        }
+    }
+
+    /// Fill a match box behind each matching-text occurrence in a table cell
+    /// whose text starts at `text_x`. Cells keep their measured widths, so the
+    /// box's padding extends into the cell's own 8 px inset rather than
+    /// shifting the text.
+    fn paint_cell_matches(
+        &self,
+        ctx: &mut dyn DrawCtx,
+        text: &str,
+        text_x: f64,
+        cy: f64,
+        row_h: f64,
+        accent: Color,
+    ) {
+        let Some(needle) = self.active_matching_text() else {
+            return;
+        };
+        let font = self.active_font();
+        for range in matching::match_ranges(text, needle) {
+            let x0 = measure_text_metrics(&font, &text[..range.start], self.font_size).width;
+            let w = measure_text_metrics(&font, &text[range.clone()], self.font_size).width;
+            ctx.set_fill_color(matching::match_fill(accent));
+            ctx.begin_path();
+            ctx.rect(
+                text_x + x0 - matching::MATCH_PAD,
+                cy,
+                w + matching::MATCH_PAD * 2.0,
+                row_h,
+            );
+            ctx.fill();
         }
     }
 

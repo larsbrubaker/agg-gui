@@ -26,6 +26,7 @@
 //! - Horizontal rules (thin separator line)
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
 //! - Links (coloured text, URL is not opened — add `on_link_click` if needed)
+//! - Matching-text highlight boxes ([`MarkdownView::set_matching_text`])
 //!
 //! # Updating in place
 //!
@@ -48,6 +49,7 @@ mod event;
 mod image_context;
 mod image_loader;
 mod layout;
+mod matching;
 mod paint;
 mod parse;
 mod rich_html;
@@ -123,6 +125,12 @@ enum LineRun {
         text: String,
         link: Option<String>,
         code: bool,
+        /// Part of a matching-text box (see `matching.rs`).
+        highlight: bool,
+        /// Box padding before the text (the run begins a match).
+        lead: f64,
+        /// Box padding after the text (the run ends a match).
+        trail: f64,
         x: f64,
         width: f64,
     },
@@ -239,6 +247,8 @@ pub struct MarkdownView {
     selectable_fragments: Vec<selection::SelectableFragment>,
     context_menu: Option<image_context::MarkdownContextMenuState>,
     suppress_next_left_mouse_up: bool,
+    /// Text whose occurrences are highlighted (`MarkdownWidget.MatchingText`).
+    matching_text: Option<String>,
 }
 
 impl MarkdownView {
@@ -268,6 +278,7 @@ impl MarkdownView {
             selectable_fragments: Vec::new(),
             context_menu: None,
             suppress_next_left_mouse_up: false,
+            matching_text: None,
         }
     }
 
@@ -295,6 +306,29 @@ impl MarkdownView {
         }
         self.markdown = markdown.to_string();
         crate::animation::request_layout();
+    }
+
+    /// Highlight every occurrence of `text` (agg-sharp's
+    /// `MarkdownWidget.MatchingText`; rules in `matching.rs`).
+    pub fn with_matching_text(mut self, text: impl Into<String>) -> Self {
+        self.matching_text = Some(text.into());
+        self
+    }
+
+    /// Set or clear the highlighted matching text on a live view, e.g. when a
+    /// help search result opens an article. Setting the same value does
+    /// nothing; `None` or whitespace-only text highlights nothing.
+    pub fn set_matching_text(&mut self, text: Option<&str>) {
+        if self.matching_text.as_deref() == text {
+            return;
+        }
+        self.matching_text = text.map(str::to_string);
+        crate::animation::request_layout();
+    }
+
+    /// The matching text set by [`set_matching_text`](Self::set_matching_text).
+    pub fn matching_text(&self) -> Option<&str> {
+        self.matching_text.as_deref()
     }
 
     /// Currently-active font — honours the thread-local system-font override

@@ -80,15 +80,17 @@ impl MarkdownView {
                                 text,
                                 link,
                                 code,
+                                lead,
                                 x,
                                 width,
+                                ..
                             } => {
                                 let text_x = if matches!(style, LineStyle::Code) {
                                     tx + x + 4.0
                                 } else if *code {
                                     tx + x + self.font_size * 0.35
                                 } else {
-                                    tx + x
+                                    tx + x + lead
                                 };
                                 let prefix = if first_text {
                                     heading_prefix(*style)

@@ -6,10 +6,21 @@
 use crate::geometry::Size;
 use crate::text::measure_text_metrics;
 
+use super::matching::{self, MATCH_PAD};
 use super::{
     clamp_block_offset, ImageState, InlineItem, LayoutItem, LineRun, LineStyle, MarkdownView,
     BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
+
+/// The style of a text run before it is positioned.
+struct TextRun {
+    text: String,
+    link: Option<String>,
+    code: bool,
+    highlight: bool,
+    lead: f64,
+    trail: f64,
+}
 
 impl MarkdownView {
     pub(super) fn layout_markdown(&mut self, available: Size) -> Size {
@@ -112,12 +123,15 @@ impl MarkdownView {
                     for inline in items {
                         match inline {
                             InlineItem::Text { text, link, code } => {
-                                for word in text.split_whitespace() {
-                                    let mut value = word.to_string();
-                                    if used > 0.0 {
-                                        value.insert(0, ' ');
-                                    }
-                                    let mut w = self.run_width(&value, *style, *code);
+                                // Markdig never inline-parses code, so it is never matched.
+                                let ranges = match self.active_matching_text() {
+                                    Some(needle) if !*code => matching::match_ranges(text, needle),
+                                    _ => Vec::new(),
+                                };
+                                for (offset, word) in matching::words_with_offsets(text) {
+                                    let mut segs =
+                                        Self::word_segments(word, offset, &ranges, used > 0.0);
+                                    let w = self.segments_width(&segs, *style, *code);
                                     if used > 0.0 && used + w > avail {
                                         Self::push_line(
                                             &mut laid_out,
@@ -129,18 +143,29 @@ impl MarkdownView {
                                         );
                                         used = 0.0;
                                         row_h = line_h;
-                                        value = word.to_string();
-                                        w = self.run_width(&value, *style, *code);
+                                        segs = Self::word_segments(word, offset, &ranges, false);
                                     }
-                                    Self::push_text_run(
-                                        &mut runs,
-                                        value,
-                                        link.clone(),
-                                        *code,
-                                        used,
-                                        w,
-                                    );
-                                    used += w;
+                                    for seg in segs {
+                                        let sw = self.segment_width(&seg, *style, *code);
+                                        Self::push_text_run(
+                                            &mut runs,
+                                            TextRun {
+                                                text: seg.text,
+                                                link: link.clone(),
+                                                code: *code,
+                                                highlight: seg.highlight,
+                                                lead: if seg.starts_match {
+                                                    MATCH_PAD
+                                                } else {
+                                                    0.0
+                                                },
+                                                trail: if seg.ends_match { MATCH_PAD } else { 0.0 },
+                                            },
+                                            used,
+                                            sw,
+                                        );
+                                        used += sw;
+                                    }
                                 }
                             }
                             InlineItem::Image { url, alt, link } => {
@@ -243,32 +268,57 @@ impl MarkdownView {
         }
     }
 
-    fn push_text_run(
-        runs: &mut Vec<LineRun>,
-        text: String,
-        link: Option<String>,
-        code: bool,
-        x: f64,
-        width: f64,
-    ) {
+    /// Width of one word segment: its text plus code or match-box padding.
+    fn segment_width(&self, seg: &matching::Segment, style: LineStyle, code: bool) -> f64 {
+        let mut w = self.run_width(&seg.text, style, code);
+        if seg.starts_match {
+            w += MATCH_PAD;
+        }
+        if seg.ends_match {
+            w += MATCH_PAD;
+        }
+        w
+    }
+
+    fn segments_width(&self, segs: &[matching::Segment], style: LineStyle, code: bool) -> f64 {
+        segs.iter()
+            .map(|seg| self.segment_width(seg, style, code))
+            .sum()
+    }
+
+    /// Append a run, merging it into the previous one when they look the same.
+    /// A run that starts a match box never merges into the box before it, and
+    /// nothing merges after a box's end, so each box keeps its own padding.
+    fn push_text_run(runs: &mut Vec<LineRun>, run: TextRun, x: f64, width: f64) {
         if let Some(LineRun::Text {
             text: last,
             width: last_w,
             link: last_link,
             code: last_code,
+            highlight: last_highlight,
+            trail: last_trail,
             ..
         }) = runs.last_mut()
         {
-            if *last_link == link && *last_code == code {
-                last.push_str(&text);
+            let box_edge = run.highlight && (run.lead > 0.0 || *last_trail > 0.0);
+            if *last_link == run.link
+                && *last_code == run.code
+                && *last_highlight == run.highlight
+                && !box_edge
+            {
+                last.push_str(&run.text);
                 *last_w += width;
+                *last_trail = run.trail;
                 return;
             }
         }
         runs.push(LineRun::Text {
-            text,
-            link,
-            code,
+            text: run.text,
+            link: run.link,
+            code: run.code,
+            highlight: run.highlight,
+            lead: run.lead,
+            trail: run.trail,
             x,
             width,
         });
