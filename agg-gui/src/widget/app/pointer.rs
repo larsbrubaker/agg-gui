@@ -19,6 +19,19 @@ fn takes_click_focus(w: &dyn Widget) -> bool {
 }
 
 impl App {
+    /// Apply the click-to-focus rule to a press that landed on `hit`: a
+    /// focusable widget takes focus, a widget that
+    /// [keeps focus on press](Widget::keeps_focus_on_press) (a menu host)
+    /// leaves it alone, and anything else — or no widget — clears it.
+    fn focus_for_press(&mut self, hit: Option<&[usize]>) {
+        let widget = hit.and_then(|path| widget_at_path_ref(self.root.as_ref(), path));
+        match (hit, widget) {
+            (Some(path), Some(w)) if takes_click_focus(w) => self.set_focus(Some(path.to_vec())),
+            (Some(_), Some(w)) if w.keeps_focus_on_press() => {}
+            _ => self.set_focus(None),
+        }
+    }
+
     /// Extend the active modal widget's path by hit-testing inside its
     /// subtree at `pos_in_root`, so the modal's own children (buttons,
     /// fields, scroll views) receive pointer events. Falls back to the
@@ -162,11 +175,7 @@ impl App {
             // (text fields in dialogs need focus to type).
             let path = self.extend_modal_path(&path, pos);
             self.update_hover_chain(Some(&path), None);
-            if widget_at_path_ref(self.root.as_ref(), &path).is_some_and(takes_click_focus) {
-                self.set_focus(Some(path.clone()));
-            } else {
-                self.set_focus(None);
-            }
+            self.focus_for_press(Some(&path));
             if dispatch_event(&mut self.root, &path, &event, pos).is_consumed() {
                 self.store_captured(Some(path));
             }
@@ -178,17 +187,9 @@ impl App {
         // still enters and leaves the widgets it lands on and leaves.
         self.update_hover_chain(hit.as_deref(), Some(pos));
 
-        // Click-to-focus: if the hit widget is focusable (and accepts focus
-        // from a click), give it focus.
-        if let Some(ref path) = hit {
-            if widget_at_path_ref(self.root.as_ref(), path).is_some_and(takes_click_focus) {
-                self.set_focus(Some(path.clone()));
-            } else {
-                self.set_focus(None);
-            }
-        } else {
-            self.set_focus(None);
-        }
+        // Click-to-focus: a focusable hit widget (one that accepts focus
+        // from a click) takes focus; a menu host leaves it where it is.
+        self.focus_for_press(hit.as_deref());
 
         if let Some(mut path) = hit {
             let result = dispatch_event(&mut self.root, &path, &event, pos);

@@ -24,6 +24,10 @@
 //!    nothing, as with native menus (`tests_conformance.rs`).  A host that
 //!    claims only the menu body lets an outside press through to the widget
 //!    beneath and never tells the menu to close.
+//! 5. return true from
+//!    [`keeps_focus_on_press`](crate::widget::Widget::keeps_focus_on_press)
+//!    (unless the host takes focus itself), so the presses that open the
+//!    menu and choose a row leave keyboard focus where it was.
 //!
 //! A menu opened at a local anchor follows its host: when the root origin
 //! changes the anchor is re-applied.

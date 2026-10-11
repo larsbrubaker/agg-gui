@@ -493,6 +493,12 @@ impl Widget for MenuBar {
         self.popup.is_open()
     }
 
+    /// Opening a menu from the bar and choosing a row leave keyboard focus
+    /// on the field that had it, so Edit > Paste pastes there.
+    fn keeps_focus_on_press(&self) -> bool {
+        true
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         if let Event::MouseMove { pos } = event {
             let hovered = self.menu_at(*pos);

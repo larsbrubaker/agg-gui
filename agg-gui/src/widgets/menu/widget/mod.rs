@@ -245,6 +245,8 @@ mod tests_1;
 #[cfg(test)]
 mod tests_2;
 #[cfg(test)]
+mod tests_anchor_edges;
+#[cfg(test)]
 mod tests_bar_children;
 #[cfg(test)]
 mod tests_bar_flip;
@@ -257,9 +259,13 @@ mod tests_conformance_2;
 #[cfg(test)]
 mod tests_fit;
 #[cfg(test)]
+mod tests_focus;
+#[cfg(test)]
 mod tests_hover;
 #[cfg(test)]
 mod tests_image_icon;
+#[cfg(test)]
+mod tests_keyboard;
 #[cfg(test)]
 mod tests_item_slot;
 #[cfg(test)]

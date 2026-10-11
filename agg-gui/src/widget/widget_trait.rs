@@ -184,6 +184,21 @@ pub trait Widget {
         false
     }
 
+    /// Whether a pointer press that lands on this widget leaves keyboard
+    /// focus where it is. Default: false.
+    ///
+    /// A press on a widget that cannot take focus normally clears it
+    /// (clicking empty space defocuses a text field). A menu host — a menu
+    /// bar, a button that opens a [`PopupMenu`](crate::widgets::PopupMenu) —
+    /// returns true: opening the menu and choosing a row must leave the
+    /// focused field focused, or Edit > Paste would have nowhere to paste
+    /// (agg-sharp's `PopupMenu` hands focus back to whatever had it when it
+    /// closes). A focusable widget takes focus on a press whatever this
+    /// returns; only the widget the press lands on is asked.
+    fn keeps_focus_on_press(&self) -> bool {
+        false
+    }
+
     /// Stable identifier for the programmatic focus channel
     /// ([`crate::focus::request_focus`]).
     ///

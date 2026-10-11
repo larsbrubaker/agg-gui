@@ -87,8 +87,8 @@ impl Widget for Window {
 
 /// C# `MenuHarness.Anchor` with the menu shown from it: hosts a `PopupMenu`
 /// opened at its own top-left corner, modal and claiming the pointer while the
-/// menu is open (the contract in `popup_local.rs`), and counts the actions the
-/// menu fires.
+/// menu is open and leaving keyboard focus alone (the contract in
+/// `popup_local.rs`), and counts the actions the menu fires.
 struct Anchor {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
@@ -118,6 +118,9 @@ impl Widget for Anchor {
     }
     fn has_active_modal(&self) -> bool {
         self.menu.borrow().is_open()
+    }
+    fn keeps_focus_on_press(&self) -> bool {
+        true
     }
     fn on_event(&mut self, event: &Event) -> EventResult {
         let (result, response) = self.menu.borrow_mut().handle_local_event(event, VIEWPORT);
