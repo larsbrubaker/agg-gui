@@ -1,0 +1,11 @@
+//! agg-sharp's popup and menu tests (`Tests/Agg.Tests/Agg.UI/Popup*Tests.cs`,
+//! `Menu*Tests.cs`), ported against agg-gui's popup controller
+//! (`widgets/popup`) and menu system (`widgets/menu`). One file per C# test
+//! class, same test names, expected values and tolerances.
+
+#[path = "popup_agg_sharp/anchored_popup_tests.rs"]
+mod anchored_popup_tests;
+#[path = "popup_agg_sharp/narrow_sub_menu_placement_tests.rs"]
+mod narrow_sub_menu_placement_tests;
+#[path = "popup_agg_sharp/popup_horizontal_clamp_tests.rs"]
+mod popup_horizontal_clamp_tests;

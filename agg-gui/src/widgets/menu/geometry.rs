@@ -238,7 +238,10 @@ pub fn stack_layout_with_metrics(
         prefix.push(next_idx);
         items = &item.submenu;
         let sub_w = width(items, &m);
-        x = (rect.x + rect.width - 2.0).min(vis.x + vis.width - sub_w - MARGIN);
+        let cascade_x = rect.x + rect.width - 2.0;
+        let fits_right = cascade_x + sub_w <= vis.x + vis.width - MARGIN;
+        let fits_left = rect.x - sub_w >= vis.x + MARGIN;
+        x = cascade_x.min(vis.x + vis.width - sub_w - MARGIN);
         // For top/context popups (open downward) the cascade
         // anchors at the row's TOP so the submenu's top edge
         // aligns with the parent row's top. For BottomBar popups
@@ -249,6 +252,17 @@ pub fn stack_layout_with_metrics(
             MenuAnchorKind::BottomBar => row.rect.y,
             _ => row.rect.y + row.rect.height,
         };
+        // On a phone-width viewport the submenu fits on neither side of
+        // its parent, and clamping it back on screen would lay it right
+        // over the row that opened it (agg-sharp
+        // `NarrowSubMenuPlacementTests`). Hang it from the row instead:
+        // below it when the menu opens downward, above it when upward.
+        if !fits_right && !fits_left {
+            y_top = match anchor_kind {
+                MenuAnchorKind::BottomBar => row.rect.y + row.rect.height,
+                _ => row.rect.y,
+            };
+        }
     }
 
     layouts
