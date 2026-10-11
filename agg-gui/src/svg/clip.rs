@@ -42,6 +42,7 @@ pub(super) fn clip_coverage(
                 layer_width: px_w as f64,
                 layer_height: px_h as f64,
                 source_cull: None,
+                node_to_root: usvg::Transform::identity(),
             },
         )?;
     }

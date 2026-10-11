@@ -146,6 +146,7 @@ impl GfxCtx<'_> {
                 None,
                 fill_rule,
                 &local,
+                true,
             );
             mask_fb.pixels().chunks_exact(4).map(|p| p[3]).collect()
         };

@@ -36,6 +36,8 @@ pub(super) fn active_fb<'a>(
 // edges far outside the visible area never generate cells.
 // ---------------------------------------------------------------------------
 
+// Each argument is a distinct drawing/geometry input; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rasterize_fill(
     fb: &mut Framebuffer,
     path: &mut PathStorage,
@@ -44,6 +46,7 @@ pub(crate) fn rasterize_fill(
     clip: Option<(f64, f64, f64, f64)>,
     fill_rule: FillRule,
     transform: &TransAffine,
+    anti_alias: bool,
 ) {
     let w = fb.width();
     let h = fb.height();
@@ -62,7 +65,7 @@ pub(crate) fn rasterize_fill(
     curves.set_approximation_scale(curve_approximation_scale(transform));
     let mut transformed = ConvTransform::new(&mut curves, *transform);
     ras.add_path(&mut transformed, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+    super::aliased::render_scanlines_solid(&mut ras, &mut sl, &mut rb, color, anti_alias);
 }
 
 fn to_agg_fill_rule(rule: FillRule) -> FillingRule {
@@ -87,6 +90,7 @@ pub(crate) fn rasterize_stroke(
     mode: CompOp,
     clip: Option<(f64, f64, f64, f64)>,
     transform: &TransAffine,
+    anti_alias: bool,
 ) {
     let mut curves = ConvCurve::new(path);
     curves.set_approximation_scale(curve_approximation_scale(transform));
@@ -102,6 +106,7 @@ pub(crate) fn rasterize_stroke(
             mode,
             clip,
             transform,
+            anti_alias,
         );
     } else {
         let mut dash = ConvDash::new(&mut curves);
@@ -117,6 +122,7 @@ pub(crate) fn rasterize_stroke(
             mode,
             clip,
             transform,
+            anti_alias,
         );
     }
 }
@@ -134,6 +140,7 @@ fn rasterize_stroke_source<VS: VertexSource>(
     mode: CompOp,
     clip: Option<(f64, f64, f64, f64)>,
     transform: &TransAffine,
+    anti_alias: bool,
 ) {
     let w = fb.width();
     let h = fb.height();
@@ -154,7 +161,7 @@ fn rasterize_stroke_source<VS: VertexSource>(
     stroke.set_miter_limit(miter_limit);
     let mut transformed = ConvTransform::new(&mut stroke, *transform);
     ras.add_path(&mut transformed, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+    super::aliased::render_scanlines_solid(&mut ras, &mut sl, &mut rb, color, anti_alias);
 }
 
 fn configure_dashes<VS: VertexSource>(dash: &mut ConvDash<VS>, dashes: &[f64], dash_offset: f64) {
@@ -232,6 +239,9 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     }
     fn set_fill_rule(&mut self, rule: crate::draw_ctx::FillRule) {
         self.set_fill_rule(rule)
+    }
+    fn set_anti_alias(&mut self, anti_alias: bool) {
+        self.set_anti_alias(anti_alias)
     }
     fn set_blend_mode(&mut self, m: agg_rust::comp_op::CompOp) {
         self.set_blend_mode(m)

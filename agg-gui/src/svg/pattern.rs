@@ -48,6 +48,7 @@ pub(super) fn render_pattern_paint(
                 layer_width: pixel_width as f64,
                 layer_height: pixel_height as f64,
                 source_cull: None,
+                node_to_root: usvg::Transform::identity(),
             },
         )
         .ok()?;

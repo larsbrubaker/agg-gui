@@ -28,7 +28,7 @@ use crate::framebuffer::{unpremultiply_rgba_inplace, Framebuffer};
 use crate::gfx_ctx::GfxCtx;
 
 use super::render_tree::{render_children, render_group};
-use super::{to_trans_affine, SvgRenderError, SvgRenderState};
+use super::{SvgRenderError, SvgRenderState};
 
 /// Largest offscreen edge, in pixels, a mask composite allocates.  Larger
 /// device-space regions are rendered at reduced resolution and stretched, so a
@@ -78,6 +78,7 @@ pub(super) fn render_composited_group(
         layer_width: region.px_w as f64,
         layer_height: region.px_h as f64,
         source_cull: None,
+        node_to_root: usvg::Transform::identity(),
     };
 
     let mut content = Framebuffer::new(region.px_w, region.px_h);
@@ -87,9 +88,9 @@ pub(super) fn render_composited_group(
         render_children(group, &mut octx, offscreen_state)?;
     }
 
-    // Mask content lives in the masked element's user space.
-    let mut user_space = offscreen_canvas;
-    user_space.premultiply(&to_trans_affine(group.abs_transform()));
+    // Mask content lives in the masked element's user space, which the
+    // context already holds (`render_group` applied the group's transform).
+    let user_space = offscreen_canvas;
     let mut coverage = match group.mask() {
         Some(mask) => mask_coverage(mask, &user_space, region.px_w, region.px_h)?,
         None => vec![1.0; region.px_w as usize * region.px_h as usize],
@@ -160,6 +161,7 @@ fn mask_coverage(
                 layer_width: px_w as f64,
                 layer_height: px_h as f64,
                 source_cull: None,
+                node_to_root: usvg::Transform::identity(),
             },
         )?;
         mctx.restore();
@@ -208,12 +210,11 @@ fn composite_region(
     mask: Option<&usvg::Mask>,
     canvas: &TransAffine,
 ) -> Option<MaskRegion> {
-    let content = device_bounds(canvas, group.abs_layer_bounding_box().to_rect())?;
+    // `canvas` is the group's user space, in which its layer box lies.
+    let content = device_bounds(canvas, group.layer_bounding_box().to_rect())?;
 
-    let mut user_space = *canvas;
-    user_space.premultiply(&to_trans_affine(group.abs_transform()));
     let mask_rect = match mask {
-        Some(mask) => device_bounds(&user_space, mask.rect().to_rect())?,
+        Some(mask) => device_bounds(canvas, mask.rect().to_rect())?,
         None => content,
     };
 

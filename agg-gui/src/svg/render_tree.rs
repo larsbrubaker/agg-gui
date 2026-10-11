@@ -25,15 +25,32 @@ pub(super) fn render_group(
     ctx: &mut dyn DrawCtx,
     parent_state: SvgRenderState,
 ) -> Result<(), SvgRenderError> {
+    // Each group composes its own `transform()` onto the context, as resvg
+    // does; paths, images and text draw in their group's user space.
+    let node_to_root = parent_state.node_to_root.pre_concat(group.transform());
     if parent_state.source_cull.is_some_and(|cull| {
-        !cull.intersects(transformed_svg_rect(
-            group.bounding_box(),
-            group.abs_transform(),
-        ))
+        !cull.intersects(transformed_svg_rect(group.bounding_box(), node_to_root))
     }) {
         return Ok(());
     }
+    let parent_state = SvgRenderState {
+        node_to_root,
+        ..parent_state
+    };
 
+    ctx.save();
+    apply_transform(ctx, group.transform());
+    let result = render_group_in_user_space(group, ctx, parent_state);
+    ctx.restore();
+    result
+}
+
+/// [`render_group`] once the context holds the group's user space.
+fn render_group_in_user_space(
+    group: &usvg::Group,
+    ctx: &mut dyn DrawCtx,
+    parent_state: SvgRenderState,
+) -> Result<(), SvgRenderError> {
     if group.mask().is_some() || group.clip_path().is_some() {
         return super::mask::render_composited_group(group, ctx, parent_state);
     }
@@ -107,11 +124,7 @@ fn render_text(
         return Ok(());
     }
 
-    ctx.save();
-    apply_transform(ctx, text.abs_transform());
-    let result = render_group(text.flattened(), ctx, state);
-    ctx.restore();
-    result
+    render_group(text.flattened(), ctx, state)
 }
 
 fn render_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) {
@@ -122,13 +135,13 @@ fn render_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
         let fill_intersects = path.fill().is_some_and(|_| {
             cull.intersects(transformed_svg_rect(
                 path.bounding_box(),
-                path.abs_transform(),
+                state.node_to_root,
             ))
         });
         let stroke_intersects = path.stroke().is_some_and(|_| {
             cull.intersects(transformed_svg_rect(
                 path.stroke_bounding_box(),
-                path.abs_transform(),
+                state.node_to_root,
             ))
         });
         !fill_intersects && !stroke_intersects
@@ -137,7 +150,8 @@ fn render_path(path: &usvg::Path, ctx: &mut dyn DrawCtx, state: SvgRenderState) 
     }
 
     ctx.save();
-    apply_transform(ctx, path.abs_transform());
+    // crispEdges and optimizeSpeed draw whole pixels, as resvg draws them.
+    ctx.set_anti_alias(path.rendering_mode().use_shape_antialiasing());
 
     match path.paint_order() {
         usvg::PaintOrder::FillAndStroke => {
@@ -246,7 +260,6 @@ fn render_image(
 
             let size = image.size();
             ctx.save();
-            apply_transform(ctx, image.abs_transform());
             let t = ctx.transform();
             let (dst_x, dst_y, dst_w, dst_h) =
                 transformed_rect(&t, size.width() as f64, size.height() as f64);
@@ -260,7 +273,6 @@ fn render_image(
             unpremultiply_rgba_inplace(&mut pixels);
             let size = image.size();
             ctx.save();
-            apply_transform(ctx, image.abs_transform());
             let t = ctx.transform();
             let (dst_x, dst_y, dst_w, dst_h) =
                 transformed_rect(&t, size.width() as f64, size.height() as f64);

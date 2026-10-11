@@ -33,6 +33,12 @@ struct SvgRenderState {
     layer_width: f64,
     layer_height: f64,
     source_cull: Option<SvgSourceRect>,
+    /// The current node's user space to the document's root, composed from
+    /// each group's own `transform()` (as resvg does); used only to test
+    /// `source_cull`. usvg's `abs_transform()` is not used: it can disagree
+    /// with the chain of `transform()`s (a `<symbol>`'s SVG 2 `transform`
+    /// reaches `abs_transform()` but not the tree resvg renders).
+    node_to_root: usvg::Transform,
 }
 
 impl Default for SvgRenderState {
@@ -42,6 +48,7 @@ impl Default for SvgRenderState {
             layer_width: 1.0,
             layer_height: 1.0,
             source_cull: None,
+            node_to_root: usvg::Transform::identity(),
         }
     }
 }
@@ -639,8 +646,8 @@ mod opacity_tests;
 #[cfg(test)]
 mod text_tests;
 
-mod font_defaults;
 mod clip;
+mod font_defaults;
 mod mask;
 #[cfg(test)]
 mod mask_tests;

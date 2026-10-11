@@ -11,6 +11,7 @@ pub(crate) fn rasterize_linear_gradient_fill(
     clip: Option<(f64, f64, f64, f64)>,
     fill_rule: FillRule,
     transform: &TransAffine,
+    anti_alias: bool,
 ) {
     rasterize_sampled_fill(
         fb,
@@ -21,6 +22,7 @@ pub(crate) fn rasterize_linear_gradient_fill(
         clip,
         fill_rule,
         transform,
+        anti_alias,
     );
 }
 
@@ -35,6 +37,7 @@ pub(crate) fn rasterize_radial_gradient_fill(
     clip: Option<(f64, f64, f64, f64)>,
     fill_rule: FillRule,
     transform: &TransAffine,
+    anti_alias: bool,
 ) {
     rasterize_sampled_fill(
         fb,
@@ -45,6 +48,7 @@ pub(crate) fn rasterize_radial_gradient_fill(
         clip,
         fill_rule,
         transform,
+        anti_alias,
     );
 }
 
@@ -59,6 +63,7 @@ pub(crate) fn rasterize_pattern_fill(
     clip: Option<(f64, f64, f64, f64)>,
     fill_rule: FillRule,
     transform: &TransAffine,
+    anti_alias: bool,
 ) {
     rasterize_sampled_fill(
         fb,
@@ -69,6 +74,7 @@ pub(crate) fn rasterize_pattern_fill(
         clip,
         fill_rule,
         transform,
+        anti_alias,
     );
 }
 
@@ -83,6 +89,7 @@ fn rasterize_sampled_fill<F>(
     clip: Option<(f64, f64, f64, f64)>,
     fill_rule: FillRule,
     transform: &TransAffine,
+    anti_alias: bool,
 ) where
     F: FnMut(f64, f64) -> Color,
 {
@@ -96,6 +103,7 @@ fn rasterize_sampled_fill<F>(
         clip,
         fill_rule,
         transform,
+        anti_alias,
     );
 
     let width = fb.width() as usize;

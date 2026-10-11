@@ -96,6 +96,13 @@ pub trait DrawCtx {
     fn set_global_alpha(&mut self, alpha: f64);
     fn set_fill_rule(&mut self, rule: FillRule);
 
+    /// Anti-alias the edges of filled and stroked shapes (`true`, the
+    /// default) or draw only whole pixels, those at least half covered.
+    /// Saved and restored with the rest of the state. A rendering hint, as
+    /// SVG's `shape-rendering` is: the software `GfxCtx` honours it; a
+    /// backend without an aliased path keeps anti-aliasing.
+    fn set_anti_alias(&mut self, _anti_alias: bool) {}
+
     // ── Font ──────────────────────────────────────────────────────────────────
 
     fn set_font(&mut self, font: Arc<Font>);

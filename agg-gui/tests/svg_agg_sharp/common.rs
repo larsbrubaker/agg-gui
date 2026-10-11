@@ -85,3 +85,27 @@ pub fn assert_within(actual: i32, expected: i32, tolerance: i32) {
         "expected {expected} within {tolerance}, got {actual}"
     );
 }
+
+/// The C# classes' `Render(body, rootAttributes)`: `body` in a document with xlink
+/// and `root_attributes` on the root, at 100x100. `Err` when usvg rejects the document.
+pub fn try_render_root(
+    body: &str,
+    root_attributes: &str,
+) -> Result<Image, agg_gui::SvgRenderError> {
+    let svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" {root_attributes}>{body}</svg>"
+    );
+    let fb = render_svg_to_framebuffer_at_size(svg.as_bytes(), 100, 100)?;
+    let mut pixels = fb.pixels().to_vec();
+    unpremultiply_rgba_inplace(&mut pixels);
+    Ok(Image {
+        width: fb.width(),
+        height: fb.height(),
+        pixels,
+    })
+}
+
+/// [`try_render_root`] for a document that renders.
+pub fn render_root(body: &str, root_attributes: &str) -> Image {
+    try_render_root(body, root_attributes).expect("the SVG renders")
+}
