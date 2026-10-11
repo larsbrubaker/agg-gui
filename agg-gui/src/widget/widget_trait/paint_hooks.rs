@@ -11,6 +11,18 @@
 /// The paint-pipeline methods of `Widget`; expanded once, inside the trait.
 macro_rules! widget_paint_hooks {
     () => {
+        /// Paint this widget after every sibling that does not set this, so it
+        /// renders above them (C# `GuiWidget.DrawOnTopOfSiblings`). It changes
+        /// only paint order, never the child list's order, which flow layout
+        /// and hit testing depend on.
+        ///
+        /// Default: the [`WidgetBase::draw_on_top_of_siblings`] flag of a
+        /// widget that embeds a `WidgetBase`, else `false`.
+        fn draw_on_top_of_siblings(&self) -> bool {
+            self.widget_base()
+                .map_or(false, |b| b.draw_on_top_of_siblings)
+        }
+
         /// Whether this widget renders into its own offscreen buffer before
         /// compositing into the parent.
         ///

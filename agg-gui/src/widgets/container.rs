@@ -5,6 +5,10 @@
 //! the top of the padding area, each later one below the previous. Each child
 //! is measured against the room left, then laid out again at the box it
 //! actually gets when that differs.
+//!
+//! A border is either a uniform stroke (`with_border`) or, like C#
+//! `GuiWidget.Border`, a rectangular band per side (`with_border_sides`)
+//! that insets the children as padding does.
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
@@ -27,6 +31,11 @@ pub struct ContainerProps {
     /// backward compatibility (callers that used `Container` as a fill-
     /// parent decoration still work).  Match egui's `Frame` by opting in.
     pub fit_height: bool,
+    /// Per-side rectangular border bands (C# `GuiWidget.Border`, drawn in
+    /// `BorderColor`), painted inside the bounds in `border_color`. When any
+    /// side is non-zero they replace the uniform `border_width` stroke and
+    /// inset the children on top of `inner_padding`.
+    pub border_sides: Insets,
 }
 
 impl Default for ContainerProps {
@@ -38,6 +47,7 @@ impl Default for ContainerProps {
             corner_radius: 0.0,
             inner_padding: Insets::ZERO,
             fit_height: false,
+            border_sides: Insets::ZERO,
         }
     }
 }
@@ -95,6 +105,33 @@ impl Container {
         self.props.border_color = Some(color);
         self.props.border_width = width;
         self
+    }
+
+    /// A rectangular border band on each side of the given width (C#
+    /// `Border = new BorderDouble(left: 1)` with `BorderColor`); see
+    /// [`ContainerProps::border_sides`].
+    pub fn with_border_sides(mut self, color: Color, sides: Insets) -> Self {
+        self.props.border_color = Some(color);
+        self.props.border_sides = sides;
+        self
+    }
+
+    /// Whether the per-side border bands are in use.
+    fn has_border_sides(&self) -> bool {
+        let b = self.props.border_sides;
+        b.left > 0.0 || b.right > 0.0 || b.top > 0.0 || b.bottom > 0.0
+    }
+
+    /// Children's inset from the edges: padding plus any border bands.
+    fn content_insets(&self) -> Insets {
+        let p = self.props.inner_padding;
+        let b = self.props.border_sides;
+        Insets::from_sides(
+            p.left + b.left,
+            p.right + b.right,
+            p.top + b.top,
+            p.bottom + b.bottom,
+        )
     }
 
     pub fn with_corner_radius(mut self, r: f64) -> Self {
@@ -194,10 +231,11 @@ impl Widget for Container {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let pad_l = self.props.inner_padding.left;
-        let pad_r = self.props.inner_padding.right;
-        let pad_t = self.props.inner_padding.top;
-        let pad_b = self.props.inner_padding.bottom;
+        let insets = self.content_insets();
+        let pad_l = insets.left;
+        let pad_r = insets.right;
+        let pad_t = insets.top;
+        let pad_b = insets.bottom;
         let inner_w = (available.width - pad_l - pad_r).max(0.0);
 
         fn layout_children(
@@ -294,8 +332,24 @@ impl Widget for Container {
             ctx.fill();
         }
 
-        // Border
-        if let Some(bc) = self.props.border_color {
+        // Border: per-side bands (C# `DrawBorder` fills each side's band),
+        // else a uniform stroke.
+        if let (Some(bc), true) = (self.props.border_color, self.has_border_sides()) {
+            let b = self.props.border_sides;
+            ctx.set_fill_color(bc);
+            for (x, y, bw, bh) in [
+                (0.0, 0.0, b.left, h),
+                (w - b.right, 0.0, b.right, h),
+                (0.0, 0.0, w, b.bottom),
+                (0.0, h - b.top, w, b.top),
+            ] {
+                if bw > 0.0 && bh > 0.0 {
+                    ctx.begin_path();
+                    ctx.rect(x, y, bw, bh);
+                    ctx.fill();
+                }
+            }
+        } else if let Some(bc) = self.props.border_color {
             ctx.set_stroke_color(bc);
             ctx.set_line_width(self.props.border_width);
             ctx.begin_path();

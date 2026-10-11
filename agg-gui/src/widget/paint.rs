@@ -256,31 +256,26 @@ fn paint_subtree_direct_inner(
         ctx.set_transform(m);
     }
 
+    // C# `GuiWidget.OnDraw`: children flagged `draw_on_top_of_siblings` are
+    // held back and painted after the rest, in list order, so they render
+    // above their siblings without changing child order (which flow layout
+    // and hit testing depend on).
     let n = widget.children().len();
+    let mut have_on_top = false;
     for i in 0..n {
-        let child_bounds = widget.children()[i].bounds();
-        let snap_to_pixel = widget.children()[i].enforce_integer_bounds();
-        ctx.save();
-        // A per-child clip (a `FlexRow` slot) applies before the child's own
-        // translation, in the space its bounds live in.
-        let slot_clip = widget.child_paint_clip(i);
-        if let Some(r) = slot_clip {
-            ctx.clip_rect(r.x, r.y, r.width, r.height);
-            push_paint_clip(root_rect_from_local(ctx, r.x, r.y, r.width, r.height));
+        if widget.children()[i].draw_on_top_of_siblings() {
+            have_on_top = true;
+            continue;
         }
-        if snap_to_pixel {
-            ctx.translate(child_bounds.x.round(), child_bounds.y.round());
-        } else {
-            ctx.translate(child_bounds.x, child_bounds.y);
+        paint_child(widget, ctx, i);
+    }
+    // Only walk the children a second time when something draws on top.
+    if have_on_top {
+        for i in 0..n {
+            if widget.children()[i].draw_on_top_of_siblings() {
+                paint_child(widget, ctx, i);
+            }
         }
-        let child = &mut widget.children_mut()[i];
-        paint_subtree(child.as_mut(), ctx);
-        if slot_clip.is_some() {
-            PAINT_CLIP_STACK.with(|stack| {
-                stack.borrow_mut().pop();
-            });
-        }
-        ctx.restore();
     }
 
     PAINT_CLIP_STACK.with(|stack| {
@@ -295,6 +290,34 @@ fn paint_subtree_direct_inner(
     if snap_this {
         ctx.restore();
     }
+}
+
+/// Paint child `i` of `widget` at its bounds, under its slot clip (one step
+/// of [`paint_subtree_direct_inner`]'s child traversal).
+fn paint_child(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx, i: usize) {
+    let child_bounds = widget.children()[i].bounds();
+    let snap_to_pixel = widget.children()[i].enforce_integer_bounds();
+    ctx.save();
+    // A per-child clip (a `FlexRow` slot) applies before the child's own
+    // translation, in the space its bounds live in.
+    let slot_clip = widget.child_paint_clip(i);
+    if let Some(r) = slot_clip {
+        ctx.clip_rect(r.x, r.y, r.width, r.height);
+        push_paint_clip(root_rect_from_local(ctx, r.x, r.y, r.width, r.height));
+    }
+    if snap_to_pixel {
+        ctx.translate(child_bounds.x.round(), child_bounds.y.round());
+    } else {
+        ctx.translate(child_bounds.x, child_bounds.y);
+    }
+    let child = &mut widget.children_mut()[i];
+    paint_subtree(child.as_mut(), ctx);
+    if slot_clip.is_some() {
+        PAINT_CLIP_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+    ctx.restore();
 }
 
 /// Push `clip` (root coordinates), intersected with the clip in effect, onto

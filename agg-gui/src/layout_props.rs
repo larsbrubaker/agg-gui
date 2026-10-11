@@ -440,6 +440,10 @@ pub struct WidgetBase {
     /// this scope's plain layout passes.
     #[cfg_attr(feature = "reflect", reflect(ignore))]
     pub shared_size_pass: bool,
+    /// Paint after the siblings that do not set it (C#
+    /// `GuiWidget.DrawOnTopOfSiblings`); read by the default
+    /// [`Widget::draw_on_top_of_siblings`](crate::widget::Widget::draw_on_top_of_siblings).
+    pub draw_on_top_of_siblings: bool,
 }
 
 impl WidgetBase {
@@ -464,6 +468,7 @@ impl WidgetBase {
             shared_size_scope: false,
             shared_size_raise: None,
             shared_size_pass: false,
+            draw_on_top_of_siblings: false,
         }
     }
 

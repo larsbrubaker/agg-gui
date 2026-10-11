@@ -385,6 +385,14 @@ impl Widget for Button {
     }
     fn set_bounds(&mut self, bounds: Rect) {
         self.bounds = bounds;
+        // A parent may give the button a box other than the size `layout`
+        // reported (a BOTTOM|TOP anchor stretches it to the parent's height,
+        // C# `AnchorTests.BottomAndTop`); centre the label in the box it
+        // actually got, as a C# Button does.
+        if let Some(label) = self.children.first() {
+            let label_size = Size::new(label.bounds().width, label.bounds().height);
+            self.position_label(Size::new(bounds.width, bounds.height), label_size);
+        }
     }
 
     fn children(&self) -> &[Box<dyn Widget>] {

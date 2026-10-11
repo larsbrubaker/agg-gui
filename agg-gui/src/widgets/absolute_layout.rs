@@ -179,15 +179,22 @@ impl AbsoluteLayout {
     }
 
     /// The far edges of the visible children, margins and padding included
-    /// (C# `GetMinimumBoundsToEncloseChildren(true)` measured from 0).
+    /// (C# `GetMinimumBoundsToEncloseChildren(true)` measured from 0). As in
+    /// C#, a child that stretches on an axis (anchor exactly `STRETCH`) does
+    /// not count on it: it takes the parent's size rather than giving one,
+    /// so counting it would hold a fitted parent at its last stretched size.
     fn enclosing_size(&self) -> Size {
         let mut right: f64 = 0.0;
         let mut top: f64 = 0.0;
         for child in self.children.iter().filter(|c| c.is_visible()) {
             let b = child.bounds();
             let m = child.margin();
-            right = right.max(b.x + b.width + m.right);
-            top = top.max(b.y + b.height + m.top);
+            if child.h_anchor() != HAnchor::STRETCH {
+                right = right.max(b.x + b.width + m.right);
+            }
+            if child.v_anchor() != VAnchor::STRETCH {
+                top = top.max(b.y + b.height + m.top);
+            }
         }
         Size::new(right + self.padding.right, top + self.padding.top)
     }
@@ -304,21 +311,27 @@ impl Widget for AbsoluteLayout {
         self.place_children(available);
         let fit_w = self.base.h_anchor.contains(HAnchor::FIT) && !self.base.h_anchor.is_stretch();
         let fit_h = self.base.v_anchor.contains(VAnchor::FIT) && !self.base.v_anchor.is_stretch();
-        if !fit_w && !fit_h {
+        // FIT | STRETCH (`MAX_FIT_OR_STRETCH`): the larger of the two, so the
+        // parent's size when it has room and the children's when it does not
+        // (C# `ParentStretchAndFitToChildren`).
+        let max_w = self.base.h_anchor == HAnchor::MAX_FIT_OR_STRETCH;
+        let max_h = self.base.v_anchor == VAnchor::MAX_FIT_OR_STRETCH;
+        if !fit_w && !fit_h && !max_w && !max_h {
             return available;
         }
         let enclosing = self.enclosing_size();
+        let axis = |fit: bool, max: bool, enclosing: f64, available: f64| {
+            if fit {
+                enclosing
+            } else if max {
+                enclosing.max(available)
+            } else {
+                available
+            }
+        };
         let size = self.base.clamp_size(Size::new(
-            if fit_w {
-                enclosing.width
-            } else {
-                available.width
-            },
-            if fit_h {
-                enclosing.height
-            } else {
-                available.height
-            },
+            axis(fit_w, max_w, enclosing.width, available.width),
+            axis(fit_h, max_h, enclosing.height, available.height),
         ));
         if size != available {
             // C# re-anchors the children when fitting changed the parent's
