@@ -1,7 +1,7 @@
 //! Layout-property and tooltip hooks of the [`Widget`](super::Widget)
 //! trait: margin, padding, anchors, size constraints, the embedded
-//! `WidgetBase`, tooltips, integer-bounds snapping, height measuring and
-//! raise requests.
+//! `WidgetBase`, tooltips, integer-bounds snapping, height measuring, raise
+//! requests and shared size groups.
 //!
 //! A trait's items cannot be spread over several files, so this module holds
 //! them as a macro that `widget_trait.rs` expands inside `pub trait Widget`;
@@ -206,6 +206,43 @@ macro_rules! widget_layout_hooks {
         /// window to the front.
         fn take_raise_request(&mut self) -> bool {
             false
+        }
+
+        /// Builder sugar: join the shared size group `name` (C#
+        /// `GuiWidget.SharedSizeGroupName`), so this widget takes the width of
+        /// the widest visible widget naming the same group in the nearest
+        /// shared size scope above it.  Writes
+        /// [`WidgetBase::shared_size_group`]; a no-op without a `WidgetBase`.
+        fn with_shared_size_group(mut self, name: impl Into<String>) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_shared_size_group(Some(name.into()));
+            self
+        }
+
+        /// Object-safe setter counterpart of
+        /// [`with_shared_size_group`](Self::with_shared_size_group).  Pass
+        /// `None` to leave the group.
+        fn set_shared_size_group(&mut self, name: Option<String>) {
+            if let Some(base) = self.widget_base_mut() {
+                base.shared_size_group = name;
+            }
+        }
+
+        /// Builder sugar: make this widget a shared size scope (C#
+        /// `GuiWidget.IsSharedSizeScope`), the boundary of the groups below
+        /// it.  Writes [`WidgetBase::shared_size_scope`]; only containers that
+        /// call [`layout_as_scope`](crate::shared_size_group::layout_as_scope)
+        /// act on it.
+        fn with_shared_size_scope(mut self, scope: bool) -> Self
+        where
+            Self: Sized,
+        {
+            if let Some(base) = self.widget_base_mut() {
+                base.shared_size_scope = scope;
+            }
+            self
         }
     };
 }

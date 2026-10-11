@@ -252,6 +252,9 @@ impl Widget for FlexRow {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        if let Some(size) = crate::shared_size_group::layout_as_scope(self, available) {
+            return size;
+        }
         let pad_l = self.inner_padding.left;
         let pad_r = self.inner_padding.right;
         let pad_t = self.inner_padding.top;

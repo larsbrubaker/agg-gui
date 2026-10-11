@@ -95,6 +95,7 @@ pub mod persistence;
 pub mod pixel_bounds;
 pub mod platform;
 pub mod screenshot;
+pub mod shared_size_group;
 pub mod shell_input;
 pub mod snap;
 pub mod svg;

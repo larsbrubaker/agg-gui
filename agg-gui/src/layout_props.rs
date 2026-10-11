@@ -421,6 +421,25 @@ pub struct WidgetBase {
     /// [`AbsoluteLayout`](crate::widgets::AbsoluteLayout); flow and stack
     /// containers compute positions themselves.
     pub origin: Point,
+    /// The shared size group this widget belongs to (C#
+    /// `GuiWidget.SharedSizeGroupName`): every visible widget naming the
+    /// same group below the nearest [`shared_size_scope`](Self::shared_size_scope)
+    /// ancestor takes the width of the widest of them.  See
+    /// [`crate::shared_size_group`].
+    pub shared_size_group: Option<String>,
+    /// Whether this widget bounds the shared size groups below it (C#
+    /// `GuiWidget.IsSharedSizeScope`).  Only containers whose `layout`
+    /// calls [`crate::shared_size_group::layout_as_scope`] act on it
+    /// (`FlexColumn`, `FlexRow`, `AbsoluteLayout`).
+    pub shared_size_scope: bool,
+    /// Set by the enclosing scope while it has raised this member's minimum
+    /// width, so its next layout can restore the member's own minimum.
+    #[cfg_attr(feature = "reflect", reflect(ignore))]
+    pub shared_size_raise: Option<crate::shared_size_group::SharedSizeRaise>,
+    /// Set by [`crate::shared_size_group::layout_as_scope`] while it runs
+    /// this scope's plain layout passes.
+    #[cfg_attr(feature = "reflect", reflect(ignore))]
+    pub shared_size_pass: bool,
 }
 
 impl WidgetBase {
@@ -441,6 +460,10 @@ impl WidgetBase {
             focus_on_click: true,
             name: None,
             origin: Point::new(0.0, 0.0),
+            shared_size_group: None,
+            shared_size_scope: false,
+            shared_size_raise: None,
+            shared_size_pass: false,
         }
     }
 

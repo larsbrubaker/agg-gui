@@ -298,6 +298,9 @@ impl Widget for AbsoluteLayout {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        if let Some(size) = crate::shared_size_group::layout_as_scope(self, available) {
+            return size;
+        }
         self.place_children(available);
         let fit_w = self.base.h_anchor.contains(HAnchor::FIT) && !self.base.h_anchor.is_stretch();
         let fit_h = self.base.v_anchor.contains(VAnchor::FIT) && !self.base.v_anchor.is_stretch();

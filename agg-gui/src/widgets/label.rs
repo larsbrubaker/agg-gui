@@ -5,6 +5,10 @@
 //! transparent overlay children inside interactive parents like `Button` — the
 //! parent retains full hit-test and focus ownership.
 //!
+//! Wrapped text breaks at word boundaries to the available width; its lines
+//! advance by the label's line spacing (`label/line_spacing.rs`), and the
+//! ellipsis modes for clipped single lines live in `label/ellipsis.rs`.
+//!
 //! # Backbuffer
 //!
 //! When `buffered` is `true` AND the active `DrawCtx` supports image blitting
@@ -30,6 +34,7 @@ use crate::text::{EllipsisMode, Font};
 use crate::widget::Widget;
 
 mod ellipsis;
+mod line_spacing;
 
 /// Break `text` into lines that each fit within `max_width` pixels at the given
 /// font size.  Explicit `\n` characters always produce a new line.  Returns at
@@ -146,6 +151,9 @@ pub struct Label {
     /// Per-instance line box; `None` follows
     /// [`font_settings::current_line_box`](crate::font_settings::current_line_box).
     line_box: Option<crate::font_settings::LineBox>,
+    /// Advance between wrapped lines in line heights (agg-sharp
+    /// `TextWidget.LineSpacing`); see `label/line_spacing.rs`.
+    line_spacing: f64,
 
     // ── Layout measurement cache ──────────────────────────────────────────────
     /// Cached text advance width from last `measure_advance()` call.
@@ -200,6 +208,7 @@ impl Label {
             ignore_system_font: false,
             lcd_pref: None,
             line_box: None,
+            line_spacing: 1.0,
             layout_text: String::new(),
             layout_font_size: 0.0,
             layout_width: 0.0,
@@ -421,9 +430,10 @@ impl Label {
         let m = crate::text::measure_text_metrics(&font, "", size);
         let (ink_ascent, ink_descent) = font.ink_extent_px(size);
         let (lowest, highest) = if self.wrap && !self.wrapped_lines.is_empty() {
-            // Line i is centred at total_h - (i + 0.5) * line_h (see `paint`).
+            // Line i is centred at total_h - line_offset(i) (see `paint`), so the
+            // top line's box is the top `line_h` of the text.
             let line_h = self.line_height(size);
-            let total_h = self.wrapped_lines.len() as f64 * line_h;
+            let total_h = self.wrapped_height(self.wrapped_lines.len(), line_h);
             let baseline = m.centered_baseline_y(line_h);
             (baseline, total_h - line_h + baseline)
         } else {
@@ -560,7 +570,7 @@ impl Widget for Label {
                     self.cache.invalidate();
                 }
             }
-            let total_h = self.wrapped_lines.len() as f64 * line_h;
+            let total_h = self.wrapped_height(self.wrapped_lines.len(), line_h);
             Size::new(available.width, total_h)
         } else {
             // Single-line path: tight bounds matching rendered text width.
@@ -626,13 +636,13 @@ impl Widget for Label {
         ctx.set_fill_color(color);
         if is_wrapped {
             let line_h = self.line_height(size);
-            let total_h = self.wrapped_lines.len() as f64 * line_h;
+            let total_h = self.wrapped_height(self.wrapped_lines.len(), line_h);
             for (i, line) in self.wrapped_lines.iter().enumerate() {
                 if line.is_empty() {
                     continue;
                 }
                 if let Some(m) = ctx.measure_text(line) {
-                    let line_center_y = total_h - (i as f64 + 0.5) * line_h;
+                    let line_center_y = total_h - self.line_offset(i, line_h);
                     let ty = line_center_y - line_h * 0.5 + m.centered_baseline_y(line_h);
                     let tx = match self.align {
                         LabelAlign::Left => 0.0,
@@ -715,7 +725,7 @@ impl Widget for Label {
         let line_h = self.line_height(size);
         if self.wrap && available_w > 0.0 {
             let lines = wrap_text(&font, &self.text, size, available_w);
-            (lines.len().max(1) as f64) * line_h
+            self.wrapped_height(lines.len().max(1), line_h)
         } else {
             line_h
         }
