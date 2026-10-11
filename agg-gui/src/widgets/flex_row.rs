@@ -5,7 +5,10 @@
 //! [`crate::widgets::flex`]; `FlexColumn` lives there.
 //!
 //! `FlexRow` reads each child's `v_anchor()` to place it vertically within
-//! the row's inner height (see [`place_cross_v`]).
+//! the row's inner height (see [`place_cross_v`]).  A child whose
+//! `h_anchor()` stretches is a flex child of factor 1 on the main axis
+//! (agg-sharp's `FlowLayoutWidget`), unless it was added with a factor of its
+//! own.
 //!
 //! Siblings never overlap and nothing runs past the row: when the fixed
 //! children together are wider than the row, the shrink pass
@@ -102,8 +105,10 @@ pub struct FlexRow {
     pub inner_padding: Insets,
     pub background: Color,
     /// When `true`, `layout` reports the row's natural content width
-    /// (sum of fixed children + gaps + horizontal padding) instead of the
-    /// full `available.width`. Mirrors [`crate::widgets::FlexColumn`]'s
+    /// (fixed children, flex children at their minimum width, margins, gaps
+    /// and horizontal padding) instead of the full `available.width`; with a
+    /// `MIN_FIT_OR_STRETCH` / `MAX_FIT_OR_STRETCH` anchor, the smaller /
+    /// larger of that and `available.width`. Mirrors [`crate::widgets::FlexColumn`]'s
     /// `fit_width` — needed when the row is floated by an auto-sized
     /// ancestor (e.g. a `Stack` `add_aligned` overlay) that must hug the
     /// content rather than span the whole stack. Off by default for
@@ -200,6 +205,19 @@ impl FlexRow {
         self.children.push(child);
         self.flex_factors.push(flex.max(0.0));
     }
+
+    /// The width a content-fit row reports for `content`: the content
+    /// itself, or for a fit-or-stretch anchor the smaller (`MIN_FIT_OR_STRETCH`)
+    /// or larger (`MAX_FIT_OR_STRETCH`) of the content and the `available`
+    /// width, as agg-sharp's `DoFitToChildrenHorizontal` sizes such a flow.
+    fn resolve_fit_width(&self, content: f64, available: f64) -> f64 {
+        let anchor = self.base.h_anchor;
+        if anchor == HAnchor::MIN_FIT_OR_STRETCH || anchor == HAnchor::MAX_FIT_OR_STRETCH {
+            resolve_fit_or_stretch(content, available, anchor == HAnchor::MAX_FIT_OR_STRETCH)
+        } else {
+            content
+        }
+    }
 }
 
 impl Default for FlexRow {
@@ -266,7 +284,7 @@ impl Widget for FlexRow {
             // empty row (e.g. built by a `Rebuilder` with nothing to show)
             // doesn't claim the whole slot.  Mirrors `FlexColumn`.
             let w = if self.fit_width {
-                pad_l + pad_r
+                self.resolve_fit_width(pad_l + pad_r, available.width)
             } else {
                 available.width
             };
@@ -279,15 +297,36 @@ impl Widget for FlexRow {
         // Child margins (logical units end-to-end; DPI applied at paint).
         let margins: Vec<Insets> = self.children.iter().map(|c| c.margin()).collect();
 
+        // A child anchored to stretch horizontally takes a share of the free width like a flex
+        // child of factor 1 (agg-sharp's left-to-right `FlowLayoutWidget` gives every
+        // `HAnchor.Stretch` child an equal share), unless it was added with its own factor.
+        // Mirrors `FlexColumn`'s rule for `VAnchor` stretch.
+        let flex_factors: Vec<f64> = self
+            .children
+            .iter()
+            .zip(&self.flex_factors)
+            .map(|(child, &flex)| {
+                if flex == 0.0 && child.h_anchor().is_stretch() {
+                    1.0
+                } else {
+                    flex
+                }
+            })
+            .collect();
+
         // -------------------------------------------------------------------
         // Step 1: measure fixed children on the main (horizontal) axis.
         // -------------------------------------------------------------------
         let mut content_widths = vec![0.0f64; n];
         let mut total_fixed_with_margins = 0.0f64;
         let mut total_flex_margin_h = 0.0f64;
+        // The narrowest the flex children can be: what a content-fit row
+        // leaves them (agg-sharp gives a stretched child of a fitting flow no
+        // more than its minimum size).
+        let mut total_flex_min_w = 0.0f64;
 
         for i in 0..n {
-            if self.flex_factors[i] == 0.0 {
+            if flex_factors[i] == 0.0 {
                 let m = &margins[i];
                 let slot_h = (inner_h - m.bottom - m.top).max(0.0);
                 // Pass inner_w as available width so the child can report its
@@ -317,10 +356,11 @@ impl Widget for FlexRow {
                 continue;
             }
             let m = &margins[i];
-            if self.flex_factors[i] == 0.0 {
+            if flex_factors[i] == 0.0 {
                 total_fixed_with_margins += content_widths[i] + m.horizontal();
             } else {
                 total_flex_margin_h += m.horizontal();
+                total_flex_min_w += self.children[i].min_size().width;
             }
         }
 
@@ -332,7 +372,7 @@ impl Widget for FlexRow {
         if overflow > 0.0 {
             let floors: Vec<Option<f64>> = (0..n)
                 .map(|i| {
-                    if visible[i] && self.flex_factors[i] == 0.0 {
+                    if visible[i] && flex_factors[i] == 0.0 {
                         self.children[i].shrink_min_width()
                     } else {
                         None
@@ -351,11 +391,7 @@ impl Widget for FlexRow {
         // to the other flex children (see `flex_share`).
         let items: Vec<FlexItem> = (0..n)
             .map(|i| FlexItem {
-                flex: if visible[i] {
-                    self.flex_factors[i]
-                } else {
-                    0.0
-                },
+                flex: if visible[i] { flex_factors[i] } else { 0.0 },
                 min: self.children[i].min_size().width,
                 max: self.children[i].max_size().width,
             })
@@ -424,7 +460,13 @@ impl Widget for FlexRow {
         // Width: full available by default (legacy). `fit_width` reports the
         // content extent so an auto-sized parent can hug the row.
         let reported_w = if self.fit_width {
-            pad_l + pad_r + total_fixed_with_margins + total_gap
+            let content = pad_l
+                + pad_r
+                + total_fixed_with_margins
+                + total_gap
+                + total_flex_margin_h
+                + total_flex_min_w;
+            self.resolve_fit_width(content, available.width)
         } else {
             available.width
         };

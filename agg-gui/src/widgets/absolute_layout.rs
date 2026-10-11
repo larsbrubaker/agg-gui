@@ -11,7 +11,9 @@
 //! hold the child to the padded edge, RIGHT/TOP to the far edge, CENTER
 //! centres it, LEFT|RIGHT stretches it, and LEFT|CENTER or CENTER|RIGHT give
 //! it the matching half.  An axis with none of those bits (FIT, ABSOLUTE)
-//! uses the origin.  Margins are kept on anchored edges, as in C#.
+//! uses the origin.  Margins are kept on anchored edges, as in C#.  A
+//! horizontally fit-or-stretch child (`FIT | STRETCH`) stretches but never
+//! below the width it reports.
 //!
 //! Siblings: [`Stack`](super::Stack) overlays children at the same place,
 //! [`FlexColumn`](super::FlexColumn)/[`FlexRow`](super::FlexRow) flow them.
@@ -151,6 +153,14 @@ impl AbsoluteLayout {
                     natural: natural.height.clamp(min.height, max.height),
                 },
             );
+            // A fit-or-stretch child (C# `HAnchor.Fit | Stretch`) never
+            // shrinks below its content: C#'s `DoFitToChildrenHorizontal`
+            // takes the larger of the parent's width and the children's.
+            let w = if ha.contains(HAnchor::FIT) && ha.is_stretch() {
+                w.max(natural.width)
+            } else {
+                w
+            };
             let w = w.clamp(min.width, max.width).max(0.0);
             let h = h.clamp(min.height, max.height).max(0.0);
             if w != room.width || h != room.height {
