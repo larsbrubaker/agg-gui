@@ -125,6 +125,7 @@ mod tooltip_window_hover;
 mod touch_scroll;
 mod trackpad_pinch;
 mod trackpad_pinch_fingers;
+mod trackpad_scroll_axis;
 mod tree_view;
 mod tree_view_api;
 mod tree_view_ellipsis;

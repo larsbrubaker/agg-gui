@@ -234,7 +234,12 @@ impl<H: ShellHost> ShellLoop<H> {
 
             WindowEvent::MouseWheel { delta, .. } => {
                 self.input_since_frame = true;
-                let (delta_x, delta_y) = wheel_delta(delta, shift_held(self.input.modifiers()));
+                let (delta_x, delta_y) = wheel_delta(
+                    delta,
+                    shift_held(self.input.modifiers()),
+                    self.window.scale_factor() * agg_gui::ux_scale::ux_scale(),
+                    cfg!(target_os = "macos"),
+                );
                 self.forward(ForwarderEvent::Wheel {
                     at: None,
                     delta_x,

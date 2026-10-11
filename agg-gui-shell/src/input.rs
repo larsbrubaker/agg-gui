@@ -27,15 +27,38 @@ use winit::event::{MouseScrollDelta, Touch, TouchPhase};
 /// `shift` remaps a pure-vertical wheel to horizontal, the convention every
 /// desktop toolkit uses for a mouse with no tilt wheel. A device that already
 /// reports a horizontal component is left alone.
-pub(crate) fn wheel_delta(delta: MouseScrollDelta, shift: bool) -> (f64, f64) {
+///
+/// `physical_per_logical` is the App's total scale (window scale factor x
+/// `ux_scale`). A trackpad's `PixelDelta` is physical pixels of finger travel;
+/// dividing it by that scale first makes the content travel exactly as far as
+/// the fingers on every display, whatever the user's UI size (agg-sharp's
+/// `TrackpadScrollAxisTests.AFingerDragMovesTheContentTheSameDistanceOnEveryDisplay`).
+/// Forwarding raw physical pixels scrolled a Retina trackpad at twice the
+/// fingers. A wheel's `LineDelta` is detents and carries no size;
+/// `accelerated_lines` (macOS) makes each one signed notch, see
+/// [`line_delta_notches`].
+pub(crate) fn wheel_delta(
+    delta: MouseScrollDelta,
+    shift: bool,
+    physical_per_logical: f64,
+    accelerated_lines: bool,
+) -> (f64, f64) {
+    let scale = if physical_per_logical.is_finite() && physical_per_logical > 0.0 {
+        physical_per_logical
+    } else {
+        1.0
+    };
     let (mut dx, mut dy) = match delta {
-        MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
-        // Trackpads / precision wheels: the same pixel → notch conversion
-        // the web shells use (`agg_gui::wheel`), forwarded fractionally so
-        // scrolling stays continuous.
+        MouseScrollDelta::LineDelta(x, y) => (
+            line_delta_notches(x as f64, accelerated_lines),
+            line_delta_notches(y as f64, accelerated_lines),
+        ),
+        // Trackpads / precision wheels: logical pixels, then the same pixel →
+        // notch conversion the web shells use (`agg_gui::wheel`), forwarded
+        // fractionally so scrolling stays continuous.
         MouseScrollDelta::PixelDelta(p) => (
-            to_notches(p.x, WheelDeltaMode::Pixel),
-            to_notches(p.y, WheelDeltaMode::Pixel),
+            to_notches(p.x / scale, WheelDeltaMode::Pixel),
+            to_notches(p.y / scale, WheelDeltaMode::Pixel),
         ),
     };
     if shift && dx == 0.0 {
@@ -43,6 +66,27 @@ pub(crate) fn wheel_delta(delta: MouseScrollDelta, shift: bool) -> (f64, f64) {
         dy = 0.0;
     }
     (dx, dy)
+}
+
+/// One axis of a wheel's `LineDelta` in notches.
+///
+/// macOS accelerates line deltas (one physical notch reports about 0.1 lines
+/// turned slowly and many lines turned fast) and offers no notch count, so
+/// there (`accelerated`) one event is one signed notch, as agg-sharp's
+/// `WheelDeltaMath.ScrollingDeltaToWheelDelta` does for a non-precise device;
+/// letting the acceleration through turned one fast notch into a huge zoom
+/// jump. Elsewhere winit's line delta is already unaccelerated notches
+/// (fractional for a high-resolution wheel) and passes through. A non-finite
+/// delta is no scroll.
+pub(crate) fn line_delta_notches(lines: f64, accelerated: bool) -> f64 {
+    if !lines.is_finite() {
+        0.0
+    } else if accelerated {
+        agg_gui::trackpad_pinch::scrolling_delta_to_wheel_delta(lines, false, 1.0) as f64
+            / agg_gui::trackpad_pinch::WHEEL_DELTA_PER_NOTCH
+    } else {
+        lines
+    }
 }
 
 /// A raw touch as the forwarder event the shell hands its `InputForwarder`.
@@ -115,11 +159,11 @@ mod tests {
         // The OS preference (natural scroll / FlipFlopWheel) is already baked
         // into the sign; a flip here would fight it.
         assert_eq!(
-            wheel_delta(MouseScrollDelta::LineDelta(0.0, 3.0), false),
+            wheel_delta(MouseScrollDelta::LineDelta(0.0, 3.0), false, 1.0, false),
             (0.0, 3.0)
         );
         assert_eq!(
-            wheel_delta(MouseScrollDelta::LineDelta(0.0, -3.0), false),
+            wheel_delta(MouseScrollDelta::LineDelta(0.0, -3.0), false, 1.0, false),
             (0.0, -3.0)
         );
     }
@@ -129,6 +173,8 @@ mod tests {
         assert_eq!(
             wheel_delta(
                 MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 40.0)),
+                false,
+                1.0,
                 false
             ),
             (0.0, 1.0)
@@ -138,7 +184,7 @@ mod tests {
     #[test]
     fn shift_remaps_a_vertical_wheel_to_horizontal() {
         assert_eq!(
-            wheel_delta(MouseScrollDelta::LineDelta(0.0, 2.0), true),
+            wheel_delta(MouseScrollDelta::LineDelta(0.0, 2.0), true, 1.0, false),
             (2.0, 0.0)
         );
     }
@@ -148,8 +194,81 @@ mod tests {
         // A tilt wheel / trackpad reporting both axes must not have its
         // vertical component stolen.
         assert_eq!(
-            wheel_delta(MouseScrollDelta::LineDelta(1.0, 2.0), true),
+            wheel_delta(MouseScrollDelta::LineDelta(1.0, 2.0), true, 1.0, false),
             (1.0, 2.0)
         );
+    }
+
+    /// agg-sharp `TrackpadScrollAxisTests.AFingerDragMovesTheContentTheSameDistanceOnEveryDisplay`:
+    /// 10 points of finger travel is 10 points of content travel - 10 device
+    /// pixels at 1x, 20 at 2x - and the user's UI size (1.6) does not enter.
+    /// winit's `PixelDelta` is physical, so a 2x display reports 20 for 10
+    /// points; a `ScrollView` scrolls `PIXELS_PER_NOTCH` logical units per notch.
+    #[test]
+    fn a_finger_drag_moves_the_content_the_same_distance_on_every_display() {
+        use agg_gui::wheel::PIXELS_PER_NOTCH;
+        for (backing, ux) in [(1.0, 1.6), (2.0, 1.6), (2.0, 1.0)] {
+            let total = backing * ux;
+            let finger_px = 10.0 * backing;
+            let (_, notches) = wheel_delta(
+                MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, finger_px)),
+                false,
+                total,
+                false,
+            );
+            let device_px = notches * PIXELS_PER_NOTCH * total;
+            assert!(
+                (device_px - 10.0 * backing).abs() < 0.001,
+                "backing {backing} ux {ux}: {device_px}"
+            );
+        }
+    }
+
+    /// A wheel's detents carry no size: the display scale leaves them alone.
+    #[test]
+    fn rust_only_line_deltas_ignore_the_display_scale() {
+        assert_eq!(
+            wheel_delta(MouseScrollDelta::LineDelta(0.0, 1.0), false, 2.0, false),
+            (0.0, 1.0)
+        );
+    }
+
+    /// agg-sharp `TrackpadScrollAxisTests.EveryWheelNotchIsOneDetentNoMatterHowFastItIsTurned`,
+    /// as the macOS shell sees it: an accelerated line delta is one signed notch.
+    #[test]
+    fn every_wheel_notch_is_one_detent_no_matter_how_fast_it_is_turned() {
+        assert_eq!(line_delta_notches(6.0, true), 1.0);
+        assert_eq!(line_delta_notches(0.1, true), 1.0);
+        assert_eq!(line_delta_notches(-0.1, true), -1.0);
+        assert_eq!(line_delta_notches(0.0, true), 0.0);
+        assert_eq!(line_delta_notches(f64::INFINITY, true), 0.0);
+        // Unaccelerated platforms keep a high-resolution wheel's fractions.
+        assert_eq!(line_delta_notches(0.25, false), 0.25);
+    }
+
+    /// agg-sharp `TrackpadScrollAxisTests.ADiagonalScrollFillsBothAxes`: both
+    /// axes go through the same scale, so a diagonal gesture keeps its angle.
+    #[test]
+    fn a_diagonal_scroll_fills_both_axes() {
+        let (dx, dy) = wheel_delta(
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(-4.0, 10.0)),
+            false,
+            1.0,
+            false,
+        );
+        assert_eq!((dx * 40.0, dy * 40.0), (-4.0, 10.0));
+    }
+
+    /// agg-sharp `TrackpadScrollAxisTests.APurelyVerticalScrollLeavesTheHorizontalAxisAtZero`.
+    #[test]
+    fn a_purely_vertical_scroll_leaves_the_horizontal_axis_at_zero() {
+        let (dx, dy) = wheel_delta(
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 10.0)),
+            false,
+            2.0,
+            false,
+        );
+        assert_eq!(dx, 0.0);
+        assert_eq!(dy * 40.0, 5.0);
     }
 }
