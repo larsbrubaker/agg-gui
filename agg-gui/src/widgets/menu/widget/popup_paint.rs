@@ -3,7 +3,8 @@
 //!
 //! `paint_popup_level` draws one open popup panel — hover / open
 //! backgrounds, separators, inline icon / check / radio glyphs (in their
-//! own leading column under a `MenuStyle::selection_column`), submenu
+//! own leading column under a `MenuStyle::selection_column`, or in a row's
+//! own `MenuIconSlot`), submenu
 //! chevrons — and delegates the row text to the shared [`PopupLabels`]
 //! cache so every glyph flows through the framework's backbuffer + LCD
 //! path.  It consumes the row rects produced by
@@ -22,7 +23,7 @@
 //! (e.g. `Scene`'s), so a menu hosted under one would mismatch.
 
 use crate::draw_ctx::DrawCtx;
-use crate::geometry::Point;
+use crate::geometry::{Point, Rect};
 
 use super::super::geometry::{hit_test, item_at_path, MenuHit, PopupLayout};
 use super::super::model::{MenuEntry, MenuSelection};
@@ -31,7 +32,7 @@ use super::super::paint::{
     popup_row_text_color, MenuStyle,
 };
 use super::super::state::PopupMenuState;
-use super::super::style::{row_icon_x, row_label_x, row_selection_column};
+use super::super::style::{row_icon_x, row_label_right, row_label_x, row_selection_column};
 use super::labels::PopupLabels;
 
 /// Opacity of an image icon on a disabled row (glyph icons dim through the
@@ -106,6 +107,23 @@ pub(super) fn paint_popup_level(
                 ctx.rounded_rect(sx - 2.0, sy - 2.0, size + 4.0, size + 4.0, 4.0);
                 ctx.stroke();
             }
+        } else if let (Some(image), Some(slot)) = (&item.icon_image, item.icon_slot) {
+            // The row's own slot: the image at the slot's size, centred in
+            // its gutter and on the row.  agg-sharp `MenuItem.OnDraw` renders
+            // at `(int)x, (int)y`, so the offsets snap down to whole device
+            // pixels and the picture is never resampled between pixels.
+            let size = slot.image_size;
+            let ix = row_layout.rect.x + snap_to_device_px(row_icon_x(style, item));
+            let iy =
+                row_layout.rect.y + snap_to_device_px((row_layout.rect.height - size.height) * 0.5);
+            if !item.enabled {
+                ctx.save();
+                ctx.set_global_alpha(DISABLED_IMAGE_ALPHA);
+            }
+            image.draw_in(ctx, Rect::new(ix, iy, size.width, size.height));
+            if !item.enabled {
+                ctx.restore();
+            }
         } else if let Some(image) = &item.icon_image {
             // Artwork icon: left edge at the glyph column, centred on the
             // row.  Disabled rows fade it like they fade glyph text.
@@ -176,10 +194,21 @@ pub(super) fn paint_popup_level(
             row_idx,
             row_layout.rect,
             row_label_x(style.label_x, style.selection_column, item),
-            style.shortcut_right,
+            row_label_right(style.shortcut_right, item),
             item.enabled,
             open && item.enabled,
         );
+    }
+}
+
+/// `offset` (logical px) truncated to a whole number of device pixels, as
+/// agg-sharp's `(int)` casts of device-pixel positions do.
+fn snap_to_device_px(offset: f64) -> f64 {
+    let scale = crate::device_scale::device_scale();
+    if scale > 0.0 && scale.is_finite() {
+        (offset * scale).trunc() / scale
+    } else {
+        offset
     }
 }
 

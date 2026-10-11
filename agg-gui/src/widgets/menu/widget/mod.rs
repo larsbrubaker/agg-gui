@@ -240,6 +240,8 @@ mod tests_fit;
 #[cfg(test)]
 mod tests_image_icon;
 #[cfg(test)]
+mod tests_item_slot;
+#[cfg(test)]
 mod tests_rows;
 #[cfg(test)]
 mod tests_selection_column;

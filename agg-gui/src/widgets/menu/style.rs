@@ -15,7 +15,9 @@
 //! [`SelectionColumn`] is the opt-in agg-sharp check / radio layout: the mark
 //! in its own leading column and the row's icon beside it.  [`row_icon_x`] and
 //! [`row_label_x`] resolve where a given row's icon and label go, for the
-//! painter (`widget/popup_paint.rs`) and the fitted width (`fit_width.rs`).
+//! painter (`widget/popup_paint.rs`) and the fitted width (`fit_width.rs`);
+//! a row's own [`super::MenuIconSlot`] overrides both, and
+//! [`row_label_right`] the room on its right.
 
 use std::cell::RefCell;
 
@@ -117,18 +119,34 @@ pub fn row_selection_column(
     column.filter(|_| item.selection != MenuSelection::None && item.swatch.is_none())
 }
 
-/// Left edge of `item`'s icon under `style`.
+/// Left edge of `item`'s icon under `style`: centred in the row's own
+/// [`super::MenuIconSlot`] when it has one.
 pub fn row_icon_x(style: &MenuStyle, item: &MenuItem) -> f64 {
+    if let Some(slot) = item.icon_slot {
+        return slot.image_x();
+    }
     row_selection_column(style.selection_column, item).map_or(style.icon_x, |c| c.icon_x)
 }
 
 /// Left edge of `item`'s label for a menu whose default label edge is
-/// `label_x` and whose selection column is `column`.
+/// `label_x` and whose selection column is `column`; the row's own
+/// [`super::MenuIconSlot::label_x`] when it has one.
 pub fn row_label_x(label_x: f64, column: Option<SelectionColumn>, item: &MenuItem) -> f64 {
+    if let Some(slot) = item.icon_slot {
+        return slot.label_x;
+    }
     match row_selection_column(column, item) {
         Some(c) if item.has_leading_icon() => c.icon_label_x,
         _ => label_x,
     }
+}
+
+/// Room between `item`'s text and the row's right edge for a menu whose
+/// default is `shortcut_right`; the row's own
+/// [`super::MenuIconSlot::label_right`] when it has one.
+pub fn row_label_right(shortcut_right: f64, item: &MenuItem) -> f64 {
+    item.icon_slot
+        .map_or(shortcut_right, |slot| slot.label_right)
 }
 
 impl Default for MenuStyle {

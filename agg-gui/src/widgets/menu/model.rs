@@ -7,12 +7,24 @@
 //! model carries only the row's id and height (so the model stays plain,
 //! `Send` data), and the widget itself is registered on the owning
 //! [`super::PopupMenu`] with `set_row_widget` (see `menu/row_widgets.rs`).
+//!
+//! An ordinary row can also carry its own height ([`MenuItem::row_height`])
+//! and its own icon slot ([`MenuIconSlot`]): a taller row with a larger
+//! picture in a wider gutter (agg-sharp's `MenuItem.Height` /
+//! `MenuItem.GutterWidth`, e.g. a recent-files row with a thumbnail).  It
+//! stays an ordinary row: hovered, keyboard-selected, activated and
+//! tooltipped like any other.
 
 use crate::color::Color;
 use crate::event::{Key, Modifiers};
+use crate::geometry::Size;
 use crate::icon_image::IconImage;
 use crate::platform;
 
+// Nearly every entry is an `Item`, so boxing it would add an allocation and
+// an indirection per row without saving memory: the size gap is only to the
+// rare data-less `Separator`.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum MenuEntry {
     Item(MenuItem),
@@ -59,6 +71,41 @@ pub struct MenuItem {
     /// appears after the normal hover delay, anchored at the pointer like
     /// every other tooltip.  Set with [`MenuItem::tooltip()`].
     pub tooltip: Option<String>,
+    /// This row's height (logical px) in place of the style's
+    /// [`super::MenuStyle::row_h`].  Touch devices still floor it at the
+    /// touch minimum, as they do the style's.  `None` (the default) keeps
+    /// the style's row height.  Ignored on a widget row, which has its own.
+    /// Set with [`MenuItem::row_height()`].
+    pub row_height: Option<f64>,
+    /// This row's icon gutter and label edge in place of the style's icon
+    /// column and `label_x`.  `None` (the default) keeps the style's.  Set
+    /// with [`MenuItem::icon_slot()`].
+    pub icon_slot: Option<MenuIconSlot>,
+}
+
+/// A row's own icon slot: a gutter of `gutter_width` starting `gutter_x`
+/// from the row's left edge, with the row's image (or glyph) centred in it
+/// at `image_size`, and the label starting at `label_x`.  Mirrors agg-sharp
+/// `PopupMenu.MenuItem`, which centres its `Image` in its `GutterWidth`
+/// and starts its content at its left `Padding`.  All values are logical px
+/// from the row's left edge, except `label_right`: the room kept between
+/// the label (or shortcut) and the row's right edge, in place of the
+/// style's `shortcut_right`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MenuIconSlot {
+    pub gutter_x: f64,
+    pub gutter_width: f64,
+    pub image_size: Size,
+    pub label_x: f64,
+    pub label_right: f64,
+}
+
+impl MenuIconSlot {
+    /// Left edge of an `image_size` picture centred in the gutter, from the
+    /// row's left edge.
+    pub fn image_x(&self) -> f64 {
+        self.gutter_x + (self.gutter_width - self.image_size.width) * 0.5
+    }
 }
 
 /// A menu row that hosts a widget: the id it is registered under on the
@@ -92,6 +139,8 @@ impl MenuItem {
             close_on_activate: true,
             widget_row: None,
             tooltip: None,
+            row_height: None,
+            icon_slot: None,
         }
     }
 
@@ -110,6 +159,8 @@ impl MenuItem {
             close_on_activate: false,
             widget_row: None,
             tooltip: None,
+            row_height: None,
+            icon_slot: None,
         }
     }
 
@@ -133,6 +184,8 @@ impl MenuItem {
                 height: height.max(0.0),
             }),
             tooltip: None,
+            row_height: None,
+            icon_slot: None,
         }
     }
 
@@ -196,6 +249,19 @@ impl MenuItem {
     pub fn accelerator(mut self, accelerator: MenuShortcut) -> Self {
         self.shortcut = Some(accelerator.display_text());
         self.accelerator = Some(accelerator);
+        self
+    }
+
+    /// Give this row its own height (see the `row_height` field).
+    pub fn row_height(mut self, height: f64) -> Self {
+        self.row_height = Some(height);
+        self
+    }
+
+    /// Give this row its own icon gutter and label edge (see
+    /// [`MenuIconSlot`]).
+    pub fn icon_slot(mut self, slot: MenuIconSlot) -> Self {
+        self.icon_slot = Some(slot);
         self
     }
 

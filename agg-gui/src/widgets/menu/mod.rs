@@ -19,7 +19,9 @@ pub use geometry::{
     effective_metrics, menu_bar_height, menu_vertical_row_height, MenuMetrics, BAR_H as MENU_BAR_H,
     MENU_W, ROW_H, TOUCH_MIN, VERTICAL_ROW_H,
 };
-pub use model::{MenuEntry, MenuItem, MenuSelection, MenuShortcut, MenuWidgetRow, ShortcutKey};
+pub use model::{
+    MenuEntry, MenuIconSlot, MenuItem, MenuSelection, MenuShortcut, MenuWidgetRow, ShortcutKey,
+};
 pub use paint::MenuStyle;
 pub use state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 pub use strip::MenuBarStrip;

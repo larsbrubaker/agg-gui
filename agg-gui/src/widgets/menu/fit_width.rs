@@ -20,6 +20,8 @@
 //! * a row without a shortcut still keeps `style.shortcut_right` on the
 //!   right, which is where the submenu chevron and right-edge check marks
 //!   paint;
+//! * a row with its own [`super::MenuIconSlot`] starts its label at the
+//!   slot's `label_x` and keeps the slot's `label_right` on the right;
 //! * no row is narrower than [`FIT_MIN_W`] — agg-sharp's 150 px
 //!   `MenuItem.MinimumSize` plus its 3 px `MenuRowInset` on both sides — grown
 //!   in lock-step with the touch metrics like the fixed width is.  A host can
@@ -45,7 +47,7 @@ use crate::text::{measure_advance, Font};
 use super::geometry::{MenuMetrics, MENU_W};
 use super::model::{MenuEntry, MenuItem};
 use super::paint::MenuStyle;
-use super::style::{row_label_x, SelectionColumn, ShortcutFormat};
+use super::style::{row_label_right, row_label_x, SelectionColumn, ShortcutFormat};
 
 /// Gap between a row's label and its shortcut in a fitted popup (logical px).
 pub const SHORTCUT_GAP: f64 = 20.0;
@@ -120,7 +122,7 @@ impl FitMeasure {
         row_label_x(self.label_x, self.selection_column, item)
             + label_w
             + shortcut_w
-            + self.shortcut_right
+            + row_label_right(self.shortcut_right, item)
     }
 
     /// Width of a fitted popup holding `items`: the widest row's natural

@@ -292,11 +292,28 @@ pub fn item_at(items: &[MenuEntry], idx: usize) -> Option<&MenuItem> {
 }
 
 /// Height of one entry's row: separators are thin, widget rows take their
-/// own height, every other item takes the (possibly touch-grown) row height.
+/// own height, an item with a [`MenuItem::row_height`] takes that (floored
+/// at the touch minimum on touch), every other item takes the (possibly
+/// touch-grown) row height.
 pub fn entry_height(entry: &MenuEntry, m: &MenuMetrics) -> f64 {
     match entry {
-        MenuEntry::Item(item) => item.widget_row.map_or(m.row_h, |w| w.height),
+        MenuEntry::Item(item) => match (item.widget_row, item.row_height) {
+            (Some(w), _) => w.height,
+            (None, Some(h)) if h.is_finite() && h > 0.0 => item_row_height(h),
+            _ => m.row_h,
+        },
         MenuEntry::Separator => m.sep_h,
+    }
+}
+
+/// An item's own row height `h` for this frame: `h` on desktop, floored at
+/// the touch minimum (in logical px) on touch, as [`metrics_with_row_h`]
+/// floors the style's.
+fn item_row_height(h: f64) -> f64 {
+    if crate::input_profile::touch_ui_active() {
+        h.max(TOUCH_MIN / crate::ux_scale::ux_scale().max(0.01))
+    } else {
+        h
     }
 }
 
