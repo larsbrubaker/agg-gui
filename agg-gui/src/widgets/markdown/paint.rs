@@ -1,7 +1,8 @@
 //! Painting for `MarkdownView`.
 //!
 //! All drawing in this module uses the already laid-out Y-up row positions
-//! produced by `layout.rs`.
+//! produced by `layout.rs`. Each text run draws in the face of its emphasis
+//! (`MarkdownView::run_font`, `emphasis.rs`), struck through when it is.
 
 use std::sync::Arc;
 
@@ -10,8 +11,9 @@ use crate::draw_ctx::DrawCtx;
 use crate::text::measure_text_metrics;
 
 use super::{
-    image_loader, is_rect_visible_in_root, matching, scrollbar_rect, scrollbar_thumb, ImageState,
-    LayoutItem, LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
+    emphasis, image_loader, is_rect_visible_in_root, matching, scrollbar_rect, scrollbar_thumb,
+    ImageState, LayoutItem, LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP,
+    BLOCK_SCROLLBAR_H,
 };
 
 impl MarkdownView {
@@ -74,11 +76,12 @@ impl MarkdownView {
                                         text,
                                         link,
                                         code,
+                                        style: run_style,
                                         highlight,
                                         lead,
+                                        trail,
                                         x,
                                         width,
-                                        ..
                                     } => {
                                         if *highlight {
                                             ctx.set_fill_color(matching::match_fill(v.accent));
@@ -108,7 +111,27 @@ impl MarkdownView {
                                         } else {
                                             tx + x + lead
                                         };
+                                        ctx.set_font(self.run_font(*run_style));
                                         ctx.fill_text(text, text_x, text_y);
+                                        if run_style.strikethrough {
+                                            // Past the run's lead space, as C# strikes
+                                            // each word's own text.
+                                            let space = text.len() - text.trim_start().len();
+                                            let skip = self.styled_text_width(
+                                                &text[..space],
+                                                *style,
+                                                *run_style,
+                                            );
+                                            let pad = if *code { 0.0 } else { *lead + *trail };
+                                            self.paint_strike(
+                                                ctx,
+                                                fs,
+                                                text_x + skip,
+                                                text_y,
+                                                (*width - pad - skip).max(0.0),
+                                            );
+                                        }
+                                        ctx.set_font(Arc::clone(&font));
                                         if link.is_some() {
                                             ctx.begin_path();
                                             ctx.rect(tx + x, text_y - 2.0, *width, 1.0);
@@ -204,6 +227,7 @@ impl MarkdownView {
                 LayoutItem::Table {
                     block_idx,
                     rows,
+                    cell_styles,
                     y,
                     height: _,
                     row_h,
@@ -240,9 +264,19 @@ impl MarkdownView {
                             ctx.rect(cx, cy, *width, 1.0);
                             ctx.fill();
                             if let Some(text) = row.get(ci) {
-                                self.paint_cell_matches(ctx, text, cx + 8.0, cy, *row_h, v.accent);
+                                let spans = emphasis::cell_spans(cell_styles, ri, ci);
+                                self.paint_cell_matches(
+                                    ctx,
+                                    text,
+                                    spans,
+                                    cx + 8.0,
+                                    cy,
+                                    *row_h,
+                                    v.accent,
+                                );
                                 ctx.set_fill_color(v.text_color);
-                                ctx.fill_text(text, cx + 8.0, cy + row_h * 0.36);
+                                self.paint_cell_text(ctx, text, spans, cx + 8.0, cy + row_h * 0.36);
+                                ctx.set_font(Arc::clone(&font));
                             }
                             cx += width;
                         }
@@ -325,10 +359,12 @@ impl MarkdownView {
     /// whose text starts at `text_x`. Cells keep their measured widths, so the
     /// box's padding extends into the cell's own 8 px inset rather than
     /// shifting the text.
+    #[allow(clippy::too_many_arguments)]
     fn paint_cell_matches(
         &self,
         ctx: &mut dyn DrawCtx,
         text: &str,
+        spans: &[emphasis::CellSpan],
         text_x: f64,
         cy: f64,
         row_h: f64,
@@ -337,10 +373,9 @@ impl MarkdownView {
         let Some(needle) = self.active_matching_text() else {
             return;
         };
-        let font = self.active_font();
         for range in matching::match_ranges(text, needle) {
-            let x0 = measure_text_metrics(&font, &text[..range.start], self.font_size).width;
-            let w = measure_text_metrics(&font, &text[range.clone()], self.font_size).width;
+            let x0 = self.cell_prefix_width(text, spans, range.start);
+            let w = self.cell_prefix_width(text, spans, range.end) - x0;
             ctx.set_fill_color(matching::match_fill(accent));
             ctx.begin_path();
             ctx.rect(
@@ -351,6 +386,44 @@ impl MarkdownView {
             );
             ctx.fill();
         }
+    }
+
+    /// Draw a table cell's text piece by piece, each in its emphasis face,
+    /// from baseline-left `(x, y)`. The caller restores the font.
+    fn paint_cell_text(
+        &self,
+        ctx: &mut dyn DrawCtx,
+        text: &str,
+        spans: &[emphasis::CellSpan],
+        x: f64,
+        y: f64,
+    ) {
+        let mut pen = x;
+        for (range, style) in emphasis::cell_pieces(text, spans) {
+            let piece = &text[range];
+            let w = self.styled_text_width(piece, LineStyle::Body, style);
+            ctx.set_font(self.run_font(style));
+            ctx.fill_text(piece, pen, y);
+            if style.strikethrough {
+                let space = piece.len() - piece.trim_start().len();
+                let skip = self.styled_text_width(&piece[..space], LineStyle::Body, style);
+                let ink = piece.trim_end();
+                let ink_w = self.styled_text_width(ink, LineStyle::Body, style);
+                self.paint_strike(ctx, self.font_size, pen + skip, y, ink_w - skip);
+            }
+            pen += w;
+        }
+    }
+
+    /// agg-sharp `TextWidget`'s strikethrough: a 1 px line in the text colour
+    /// at the vertical centre of the text's bounds (ascent above the baseline
+    /// down to descent below it).
+    fn paint_strike(&self, ctx: &mut dyn DrawCtx, font_size: f64, x: f64, baseline: f64, w: f64) {
+        let metrics = measure_text_metrics(&self.active_font(), "", font_size);
+        let center = baseline + (metrics.ascent - metrics.descent) * 0.5;
+        ctx.begin_path();
+        ctx.rect(x, center - 0.5, w, 1.0);
+        ctx.fill();
     }
 
     fn paint_block_scrollbar(

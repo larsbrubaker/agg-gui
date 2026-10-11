@@ -27,11 +27,13 @@ mod elide;
 #[cfg(test)]
 mod elide_tests;
 mod ellipsis;
+mod faux_style;
 mod shape_cache;
 mod vertical_metrics;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
 pub use elide::{elide_text, elide_to_width, EllipsisMode, ELLIPSIS};
 pub use ellipsis::{ellipsize_to_width, ellipsize_with};
+pub use faux_style::{FAUX_BOLD_WEIGHT, FAUX_ITALIC_SHEAR};
 pub use shape_cache::shape_glyphs;
 pub use vertical_metrics::VerticalMetrics;
 
@@ -97,6 +99,12 @@ pub struct Font {
     /// Apply the OpenType `tnum` (tabular figures) feature when shaping
     /// with this font — see [`Font::with_tabular_digits`].
     tabular_digits: bool,
+    /// Slant every glyph by [`FAUX_ITALIC_SHEAR`] — see
+    /// [`Font::variant_with_faux_style`].
+    pub(crate) faux_italic: bool,
+    /// Thicken every glyph by [`FAUX_BOLD_WEIGHT`] — see
+    /// [`Font::variant_with_faux_style`].
+    pub(crate) faux_bold: bool,
 }
 
 impl Font {
@@ -117,6 +125,8 @@ impl Font {
             index: 0,
             fallback: None,
             tabular_digits: false,
+            faux_italic: false,
+            faux_bold: false,
         })
     }
 
@@ -181,6 +191,8 @@ impl Font {
             face_descender: self.face_descender,
             fallback: self.fallback.clone(),
             tabular_digits: true,
+            faux_italic: self.faux_italic,
+            faux_bold: self.faux_bold,
         }
     }
 
@@ -496,7 +508,9 @@ pub(crate) fn shape_text(
     // - `interval_px`  → extra pen advance in pixels per glyph,
     //                    proportional to em size
     let width_scale = crate::font_settings::current_width();
-    let italic_shear = crate::font_settings::current_faux_italic() / 3.0;
+    // The font's own faux style (a markdown italic or bold run) stacks on
+    // the global typography settings, as agg-sharp's StyledTypeFace does.
+    let italic_shear = crate::font_settings::current_faux_italic() / 3.0 + font.faux_italic_shear();
     let hint_y = crate::font_settings::hinting_enabled();
     let interval_em = crate::font_settings::current_interval();
     let interval_px = interval_em * size;
@@ -504,7 +518,7 @@ pub(crate) fn shape_text(
     // thickens (contour width negative expands outward for a CCW
     // outline), -faux_weight thins.  The `/15.0` denominator reproduces
     // the reference demo's slider-to-pixels conversion.
-    let faux_weight = crate::font_settings::current_faux_weight();
+    let faux_weight = crate::font_settings::current_faux_weight() + font.faux_bold_weight();
     let weight_px = if faux_weight.abs() < 0.05 {
         0.0 // dead zone near 0, matches reference — avoids zero-width noise
     } else {

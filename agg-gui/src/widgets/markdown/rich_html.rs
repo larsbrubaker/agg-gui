@@ -290,7 +290,19 @@ fn push_fragment_html(fragment: &SelectableFragment, selected: &str, out: &mut S
                 out.push_str("<span style=\"");
                 push_text_style(*style, fragment.font_size, out);
                 out.push_str("\">");
-                out.push_str(&escape_html(selected));
+                // C# `EmphasisInlineX.WrapHtml`: <em>, <strong>, <del>.
+                let mut inner = escape_html(selected);
+                let run = fragment.run_style;
+                if run.italic {
+                    inner = format!("<em>{inner}</em>");
+                }
+                if run.bold {
+                    inner = format!("<strong>{inner}</strong>");
+                }
+                if run.strikethrough {
+                    inner = format!("<del>{inner}</del>");
+                }
+                out.push_str(&inner);
                 out.push_str("</span>");
             }
         }

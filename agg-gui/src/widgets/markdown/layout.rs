@@ -9,8 +9,8 @@ use crate::text::measure_text_metrics;
 
 use super::matching::{self, MATCH_PAD};
 use super::{
-    clamp_block_offset, ImageState, InlineItem, LayoutItem, LineRun, LineStyle, MarkdownView,
-    BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
+    clamp_block_offset, emphasis, ImageState, InlineItem, LayoutItem, LineRun, LineStyle,
+    MarkdownRunStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
 
 /// The style of a text run before it is positioned.
@@ -18,6 +18,7 @@ struct TextRun {
     text: String,
     link: Option<String>,
     code: bool,
+    style: MarkdownRunStyle,
     highlight: bool,
     lead: f64,
     trail: f64,
@@ -72,8 +73,8 @@ impl MarkdownView {
                         height: metrics.line_height * 0.65,
                     });
                 }
-                super::ParagraphItem::Table(rows) => {
-                    let (col_widths, row_h, mut height) = self.layout_table(rows);
+                super::ParagraphItem::Table { rows, cell_styles } => {
+                    let (col_widths, row_h, mut height) = self.layout_table(rows, cell_styles);
                     let content_width = col_widths.iter().sum::<f64>();
                     let viewport_width = max_w;
                     if content_width > viewport_width {
@@ -88,6 +89,7 @@ impl MarkdownView {
                     laid_out.push(LayoutItem::Table {
                         block_idx,
                         rows: rows.clone(),
+                        cell_styles: cell_styles.clone(),
                         y: 0.0,
                         height,
                         row_h,
@@ -138,16 +140,27 @@ impl MarkdownView {
 
                     for inline in items {
                         match inline {
-                            InlineItem::Text { text, link, code } => {
+                            InlineItem::Text {
+                                text,
+                                link,
+                                code,
+                                style: run_style,
+                                glue,
+                            } => {
                                 // Markdig never inline-parses code, so it is never matched.
                                 let ranges = match self.active_matching_text() {
                                     Some(needle) if !*code => matching::match_ranges(text, needle),
                                     _ => Vec::new(),
                                 };
-                                for (offset, word) in matching::words_with_offsets(text) {
+                                for (wi, (offset, word)) in
+                                    matching::words_with_offsets(text).into_iter().enumerate()
+                                {
+                                    // A glued item's first word follows the
+                                    // previous item with no space.
+                                    let spaced = used > 0.0 && !(*glue && wi == 0);
                                     let mut segs =
-                                        Self::word_segments(word, offset, &ranges, used > 0.0);
-                                    let w = self.segments_width(&segs, *style, *code);
+                                        Self::word_segments(word, offset, &ranges, spaced);
+                                    let w = self.segments_width(&segs, *style, *code, *run_style);
                                     if used > 0.0 && used + w > avail {
                                         max_line_w = max_line_w.max(indent + line_end);
                                         line_end = 0.0;
@@ -164,13 +177,15 @@ impl MarkdownView {
                                         segs = Self::word_segments(word, offset, &ranges, false);
                                     }
                                     for seg in segs {
-                                        let sw = self.segment_width(&seg, *style, *code);
+                                        let sw =
+                                            self.segment_width(&seg, *style, *code, *run_style);
                                         Self::push_text_run(
                                             &mut runs,
                                             TextRun {
                                                 text: seg.text,
                                                 link: link.clone(),
                                                 code: *code,
+                                                style: *run_style,
                                                 highlight: seg.highlight,
                                                 lead: if seg.starts_match {
                                                     MATCH_PAD
@@ -266,8 +281,26 @@ impl MarkdownView {
         measure_text_metrics(&self.active_font(), text, font_size).width
     }
 
-    fn run_width(&self, text: &str, style: LineStyle, code: bool) -> f64 {
-        let width = self.text_width(text, style);
+    /// Width of `text` in the face of `run_style` (a bold face measures
+    /// wider; the italic shear keeps every advance).
+    pub(super) fn styled_text_width(
+        &self,
+        text: &str,
+        style: LineStyle,
+        run_style: MarkdownRunStyle,
+    ) -> f64 {
+        let font_size = style.font_size(self.font_size);
+        measure_text_metrics(&self.run_font(run_style), text, font_size).width
+    }
+
+    fn run_width(
+        &self,
+        text: &str,
+        style: LineStyle,
+        code: bool,
+        run_style: MarkdownRunStyle,
+    ) -> f64 {
+        let width = self.styled_text_width(text, style, run_style);
         if code {
             width + self.font_size * 0.75
         } else {
@@ -292,8 +325,14 @@ impl MarkdownView {
     }
 
     /// Width of one word segment: its text plus code or match-box padding.
-    fn segment_width(&self, seg: &matching::Segment, style: LineStyle, code: bool) -> f64 {
-        let mut w = self.run_width(&seg.text, style, code);
+    fn segment_width(
+        &self,
+        seg: &matching::Segment,
+        style: LineStyle,
+        code: bool,
+        run_style: MarkdownRunStyle,
+    ) -> f64 {
+        let mut w = self.run_width(&seg.text, style, code, run_style);
         if seg.starts_match {
             w += MATCH_PAD;
         }
@@ -303,9 +342,15 @@ impl MarkdownView {
         w
     }
 
-    fn segments_width(&self, segs: &[matching::Segment], style: LineStyle, code: bool) -> f64 {
+    fn segments_width(
+        &self,
+        segs: &[matching::Segment],
+        style: LineStyle,
+        code: bool,
+        run_style: MarkdownRunStyle,
+    ) -> f64 {
         segs.iter()
-            .map(|seg| self.segment_width(seg, style, code))
+            .map(|seg| self.segment_width(seg, style, code, run_style))
             .sum()
     }
 
@@ -318,6 +363,7 @@ impl MarkdownView {
             width: last_w,
             link: last_link,
             code: last_code,
+            style: last_style,
             highlight: last_highlight,
             trail: last_trail,
             ..
@@ -326,6 +372,7 @@ impl MarkdownView {
             let box_edge = run.highlight && (run.lead > 0.0 || *last_trail > 0.0);
             if *last_link == run.link
                 && *last_code == run.code
+                && *last_style == run.style
                 && *last_highlight == run.highlight
                 && !box_edge
             {
@@ -339,6 +386,7 @@ impl MarkdownView {
             text: run.text,
             link: run.link,
             code: run.code,
+            style: run.style,
             highlight: run.highlight,
             lead: run.lead,
             trail: run.trail,
@@ -347,16 +395,40 @@ impl MarkdownView {
         });
     }
 
-    fn layout_table(&self, rows: &[Vec<String>]) -> (Vec<f64>, f64, f64) {
+    fn layout_table(
+        &self,
+        rows: &[Vec<String>],
+        cell_styles: &emphasis::CellStyles,
+    ) -> (Vec<f64>, f64, f64) {
         let row_h = measure_text_metrics(&self.active_font(), "", self.font_size).line_height * 1.6;
         let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
         let mut widths = vec![0.0_f64; cols];
-        for row in rows {
+        for (ri, row) in rows.iter().enumerate() {
             for (col, text) in row.iter().enumerate() {
-                widths[col] = widths[col].max(self.text_width(text, LineStyle::Body) + 24.0);
+                let spans = emphasis::cell_spans(cell_styles, ri, col);
+                let text_w = self.cell_prefix_width(text, spans, text.len());
+                widths[col] = widths[col].max(text_w + 24.0);
             }
         }
         (widths, row_h, row_h * rows.len() as f64)
+    }
+
+    /// Width of a table cell's text up to byte `end`, each styled piece in
+    /// its own face.
+    pub(super) fn cell_prefix_width(
+        &self,
+        text: &str,
+        spans: &[emphasis::CellSpan],
+        end: usize,
+    ) -> f64 {
+        emphasis::cell_pieces(text, spans)
+            .into_iter()
+            .filter(|(range, _)| range.start < end)
+            .map(|(range, style)| {
+                let piece = &text[range.start..range.end.min(end)];
+                self.styled_text_width(piece, LineStyle::Body, style)
+            })
+            .sum()
     }
 
     fn layout_code_block(&self, lines: &[String], max_w: f64) -> (f64, f64, f64) {

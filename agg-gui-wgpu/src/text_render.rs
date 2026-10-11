@@ -96,7 +96,8 @@ impl WgpuGfxCtx {
         let shaped = shape_glyphs(&font, text, self.font_size);
         let font_size = self.font_size;
         let width_scale = agg_gui::font_settings::current_width();
-        let italic_shear = agg_gui::font_settings::current_faux_italic() / 3.0;
+        let italic_shear =
+            agg_gui::font_settings::current_faux_italic() / 3.0 + font.faux_italic_shear();
         let hint_y = agg_gui::font_settings::hinting_enabled();
         let interval_px = agg_gui::font_settings::current_interval() * font_size;
         let tess_size = font_size * ctm_scale;

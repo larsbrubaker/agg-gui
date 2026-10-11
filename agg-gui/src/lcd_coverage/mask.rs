@@ -70,6 +70,9 @@ struct LcdMaskKey {
     interval_bits: u64,
     hint_y: bool,
     faux_weight_bits: u64,
+    /// The font handle's own faux style (`Font::variant_with_faux_style`),
+    /// so a recycled `Arc` address can never serve another style's mask.
+    font_faux: (bool, bool),
     primary_weight_bits: u64,
     gamma_bits: u64,
     /// `true` for the grayscale (whole-pixel coverage) variant, `false`
@@ -141,6 +144,7 @@ fn rasterize_text_mask_cached(
         interval_bits: interval_now.to_bits(),
         hint_y: hint_y_now,
         faux_weight_bits: fweight_now.to_bits(),
+        font_faux: (font.faux_italic(), font.faux_bold()),
         primary_weight_bits: pweight_now.to_bits(),
         gamma_bits: gamma_now.to_bits(),
         gray,
@@ -175,8 +179,11 @@ fn rasterize_text_mask_cached(
     // a slider drag past 1.0/0 would crop glyph stems at the mask
     // edges.
     let width_slack = (width_now - 1.0).abs() * size;
-    let italic_slack = (italic_now.abs() / 3.0) * (m.ascent + m.descent);
-    let extra_pad = (width_slack + italic_slack).ceil();
+    // A faux-italic or faux-bold font handle (`Font::variant_with_faux_style`)
+    // shears / grows its outlines past the advance column the same way.
+    let italic_slack = (italic_now.abs() / 3.0 + font.faux_italic_shear()) * (m.ascent + m.descent);
+    let bold_slack = font.faux_bold_weight() * size / 15.0;
+    let extra_pad = (width_slack + italic_slack + bold_slack).ceil();
     let pad_x = MASK_PAD + extra_pad;
     // Music and icon fonts deliberately overflow their ascender/descender
     // (a SMuFL treble clef spans staff spaces far past the em box), so a

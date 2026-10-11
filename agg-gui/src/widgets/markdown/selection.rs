@@ -12,7 +12,10 @@ use crate::draw_ctx::DrawCtx;
 use crate::geometry::{Point, Rect};
 use crate::text::{measure_advance, Font};
 
-use super::{LayoutItem, LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H};
+use super::{
+    LayoutItem, LineRun, LineStyle, MarkdownRunStyle, MarkdownView, BLOCK_SCROLLBAR_GAP,
+    BLOCK_SCROLLBAR_H,
+};
 
 #[derive(Clone)]
 pub(super) struct SelectableFragment {
@@ -24,6 +27,8 @@ pub(super) struct SelectableFragment {
     pub(super) height: f64,
     pub(super) width: f64,
     pub(super) font_size: f64,
+    /// The emphasis a text run draws with, so selection measures in its face.
+    pub(super) run_style: MarkdownRunStyle,
     pub(super) clip: Option<Rect>,
     pub(super) line_prefix: Option<&'static str>,
 }
@@ -83,6 +88,7 @@ impl MarkdownView {
                                 lead,
                                 x,
                                 width,
+                                style: run_style,
                                 ..
                             } => {
                                 let text_x = if matches!(style, LineStyle::Code) {
@@ -111,6 +117,7 @@ impl MarkdownView {
                                     height: *height,
                                     width: *width,
                                     font_size: fs,
+                                    run_style: *run_style,
                                     clip: None,
                                     line_prefix: prefix,
                                 });
@@ -140,6 +147,7 @@ impl MarkdownView {
                                     height: *image_h,
                                     width: *width,
                                     font_size: self.font_size,
+                                    run_style: MarkdownRunStyle::default(),
                                     clip: None,
                                     line_prefix: None,
                                 });
@@ -184,6 +192,7 @@ impl MarkdownView {
                                 LineStyle::Code.font_size(self.font_size),
                             ),
                             font_size: LineStyle::Code.font_size(self.font_size),
+                            run_style: MarkdownRunStyle::default(),
                             clip: Some(Rect::new(pad, content_y, *viewport_width, content_h)),
                             line_prefix: None,
                         });
@@ -230,6 +239,7 @@ impl MarkdownView {
                                     height: *row_h,
                                     width: measure_advance(&font, text, self.font_size),
                                     font_size: self.font_size,
+                                    run_style: MarkdownRunStyle::default(),
                                     clip: Some(clip),
                                     line_prefix: None,
                                 });
@@ -323,7 +333,7 @@ impl MarkdownView {
                     0.0,
                     fragment.range.start
                         + byte_at_x(
-                            &self.active_font(),
+                            &self.run_font(fragment.run_style),
                             &fragment.text,
                             fragment.font_size,
                             pos.x - x0,
@@ -429,10 +439,10 @@ impl MarkdownView {
                 ctx.set_font_size(fragment.font_size);
                 let before = &fragment.text[..start];
                 let selected = &fragment.text[start..end];
+                let face = self.run_font(fragment.run_style);
                 (
-                    fragment.text_x
-                        + measure_advance(&self.active_font(), before, fragment.font_size),
-                    measure_advance(&self.active_font(), selected, fragment.font_size),
+                    fragment.text_x + measure_advance(&face, before, fragment.font_size),
+                    measure_advance(&face, selected, fragment.font_size),
                 )
             };
 
