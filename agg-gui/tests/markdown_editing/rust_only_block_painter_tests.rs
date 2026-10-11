@@ -1,6 +1,6 @@
 //! `rust_only_*` tests for `markdown_editing::block_painter` (agg-sharp's
 //! `RichBlockPainter`).  agg-sharp's painter tests (`RichTableGridPixelTests`)
-//! drive the edit widget, which is not ported yet; these paint layouts
+//! drive the edit widget; these paint layouts
 //! straight into a software framebuffer and read its pixels, and pin the two
 //! C# crashes the port fixes.
 

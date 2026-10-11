@@ -5,7 +5,7 @@
 //! `RichMarkdownEditWidget.cs` (selection, `SetDocument`, `Relayout`,
 //! `Markdown`, the events) and `RichEditorKeyboard.Apply`.
 //!
-//! `RichMarkdownEditWidget` (the widget step) owns a [`RichEditorState`],
+//! `RichMarkdownEditWidget` (`edit_widget`) owns a [`RichEditorState`],
 //! forwards its key and mouse events to `editor_keyboard`, `editor_mouse` and
 //! `editor_clipboard` (all `impl RichEditorState` blocks), paints its
 //! [`RichDocumentView`] and scrolls to [`RichEditorState::scroll_offset_from_top`].

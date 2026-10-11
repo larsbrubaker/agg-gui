@@ -15,7 +15,7 @@ use crate::framebuffer::unpremultiply_rgba_inplace;
 
 use super::{ImagePixels, ImageState};
 
-pub(super) fn load_remote_image(url: String, state: Arc<Mutex<ImageState>>) {
+pub(crate) fn load_remote_image(url: String, state: Arc<Mutex<ImageState>>) {
     // Captured on the calling (painting) UI thread: the native completion runs
     // on an unbound worker, whose own `current_queue()` is the process's main
     // queue — the wrong thread for an App on a UI thread bound to a queue of

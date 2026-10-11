@@ -22,6 +22,8 @@ mod rich_editor_mouse_tests;
 mod rich_editor_polish_tests;
 #[path = "markdown_editing/rich_inline_round_trip_tests.rs"]
 mod rich_inline_round_trip_tests;
+#[path = "markdown_editing/rich_markdown_edit_widget_tests.rs"]
+mod rich_markdown_edit_widget_tests;
 #[path = "markdown_editing/rich_markdown_parser_block_tests.rs"]
 mod rich_markdown_parser_block_tests;
 #[path = "markdown_editing/rich_markdown_parser_code_table_tests.rs"]

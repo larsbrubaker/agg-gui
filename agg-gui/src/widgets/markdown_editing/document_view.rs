@@ -213,6 +213,12 @@ impl RichDocumentView {
         self.entries.get(index).map(|e| &e.layout)
     }
 
+    /// The block block `index`'s layout was built from (C# compared the
+    /// layout's `Block` by reference).
+    pub fn block_id_of(&self, index: usize) -> Option<RichBlockId> {
+        self.entries.get(index).map(|e| e.block)
+    }
+
     /// Where block `index`'s layout bottom sits in view coordinates.
     pub fn origin_of(&self, index: usize) -> Option<f64> {
         let entry = self.entries.get(index)?;

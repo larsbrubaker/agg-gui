@@ -6,7 +6,8 @@
 //! `current_click_count` hands the widget.
 //!
 //! `AModifierClickOnALinkInARawBlockRaisesLinkClicked` needs the Raw block's
-//! rendered host widget and its link; it ports with the widget.
+//! rendered host, so it drives the widget (`RichMarkdownEditWidget`) with
+//! agg-gui mouse events.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -362,4 +363,69 @@ fn a_shift_click_on_a_raw_block_extends_from_the_anchor() {
     h.click(h.block_center(1));
 
     assert_eq!(h.editor.selection(), span((0, 2), (1, 1)));
+}
+
+#[test]
+fn a_modifier_click_on_a_link_in_a_raw_block_raises_link_clicked() {
+    use agg_gui::event::Event;
+    use agg_gui::Widget;
+
+    let mut h = crate::rich_markdown_edit_widget_tests::Container::new(
+        "Before\n\n> > see [here](https://raw.test/y)\n\nAfter\n",
+        400.0,
+        300.0,
+    );
+    h.draw();
+    h.editor.set_use_mac_key_bindings(false);
+    assert_eq!(
+        h.editor.document().blocks[1].kind,
+        agg_gui::widgets::markdown_editing::RichBlockKind::Raw
+    );
+    let urls = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen = Rc::clone(&urls);
+    h.editor
+        .on_link_clicked(Box::new(move |url| seen.borrow_mut().push(url.to_string())));
+
+    // The middle of the link the viewer drew in the Raw block's host.
+    let host = h.editor.raw_block_widget(1).expect("a host");
+    let area = host.bounds_in_view();
+    let mut on_link = Vec::new();
+    let mut y = area.y;
+    while y < area.y + area.height {
+        let mut x = area.x;
+        while x < area.x + area.width {
+            if host.link_at(Point::new(x, y)).is_some() {
+                on_link.push(Point::new(x, y));
+            }
+            x += 1.0;
+        }
+        y += 1.0;
+    }
+    assert!(!on_link.is_empty());
+    let center = on_link[on_link.len() / 2];
+    let on_link = h.editor.view_to_editor(center);
+
+    let click = |editor: &mut agg_gui::widgets::markdown_editing::RichMarkdownEditWidget,
+                 modifiers: Modifiers| {
+        editor.on_event(&Event::MouseDown {
+            pos: on_link,
+            button: MouseButton::Left,
+            modifiers,
+        });
+        editor.on_event(&Event::MouseUp {
+            pos: on_link,
+            button: MouseButton::Left,
+            modifiers,
+        });
+    };
+    click(&mut h.editor, Modifiers::default());
+    assert_eq!(urls.borrow().len(), 0);
+    assert_eq!(h.editor.selection(), whole_block(h.editor.document(), 1));
+
+    let held = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    click(&mut h.editor, held);
+    assert_eq!(*urls.borrow(), vec!["https://raw.test/y".to_string()]);
 }

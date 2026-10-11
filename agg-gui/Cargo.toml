@@ -33,7 +33,7 @@ clipper2-rust = "1.1.0"
 ttf-parser = "0.25"
 rustybuzz = "0.20"
 tess2-rust = { version = "1.1.8", path = "../../tess2-rust" }
-arboard  = { version = "3", optional = true, features = ["image-data"] }
+arboard  = { version = "3.5", optional = true, features = ["image-data"] }
 winit    = { version = "0.30", optional = true }
 bevy_reflect = { version = "0.18", optional = true }
 web-time = "1"

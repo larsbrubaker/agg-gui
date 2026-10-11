@@ -85,6 +85,11 @@
 //!   (`RichEditorKeyboard.cs`), [`editor_mouse`] its mouse
 //!   (`RichEditorMouse.cs`) and `editor_clipboard` cut, copy and paste
 //!   (`RichEditorClipboard.cs`).
+//! * [`edit_widget`] — [`RichMarkdownEditWidget`], the editor as an agg-gui
+//!   widget over the state (`RichMarkdownEditWidget.cs`); `edit_widget_events`
+//!   its events, scroll bar, auto-scroll and painting, [`raw_hosts`] the Raw
+//!   blocks' rendered hosts and [`image_cache`] its images
+//!   (`RichImageCache.cs`).
 //!
 //! # Offsets
 //!
@@ -110,6 +115,8 @@ pub mod edit_commands;
 pub mod edit_error;
 pub mod edit_history;
 pub mod edit_operations;
+pub mod edit_widget;
+mod edit_widget_events;
 mod editor_clipboard;
 mod editor_keyboard;
 pub mod editor_mouse;
@@ -118,6 +125,7 @@ mod escaping;
 mod group_repair;
 pub mod group_writer;
 pub mod groups;
+pub mod image_cache;
 pub mod inline;
 pub mod inline_style;
 pub mod inline_writer;
@@ -133,6 +141,7 @@ pub(crate) mod parser_inlines;
 mod paste_insert;
 pub mod paste_operations;
 pub(crate) mod pipe_tables;
+pub mod raw_hosts;
 pub mod selection;
 pub mod style_operations;
 pub mod table_code_operations;
@@ -149,17 +158,20 @@ pub use document_view::{RichDocumentView, RichViewPaint, RichViewSync};
 pub use edit_commands::{RichDocumentCommands, RichEdit, RichEditCommands};
 pub use edit_error::RichEditError;
 pub use edit_history::{RichEditHistory, RichEditKind};
+pub use edit_widget::{colors_for, RichMarkdownEditWidget};
 pub use editor_state::{RichEditorState, RichRawLinkLookup, RichStyleBuilder, SCROLL_BAR_ROOM};
 pub use groups::shared as shared_group;
 pub use groups::{
     RichAlignGroup, RichAlignGroupRef, RichListGroup, RichListGroupRef, RichQuoteGroup,
     RichQuoteGroupRef,
 };
+pub use image_cache::{RichImageCache, RichImageProvider, RichResolveUrl};
 pub use inline::{InlineAtom, InlineAtomKind, RichInline, RichInlineContent, RichRun};
 pub use inline_style::{RichInlineStyle, RichPendingStyle, RichStyleCoverage, RichStyleState};
 pub use inline_writer::RichInlineContext;
 pub use inlines::OffsetOutOfRange;
 pub use layout_line::{RichCaret, RichCaretStop, RichLayoutFragment, RichLayoutLine};
 pub use layout_style::{RichFace, RichLayoutFonts, RichLayoutStyle, RichThemeColors};
+pub use raw_hosts::{RichRawHost, RichRawHosts};
 pub use selection::RichSelection;
 pub use table_layout::{RichTableCellLayout, RichTableGridSnap, RichTableLayout};

@@ -65,7 +65,7 @@ mod html_form;
 mod html_form_tests;
 mod html_rewriter;
 mod image_context;
-mod image_loader;
+pub(crate) mod image_loader;
 mod layout;
 #[cfg(test)]
 mod line_width_tests;
@@ -235,13 +235,15 @@ struct BlockScroll {
 }
 
 #[derive(Clone)]
-struct ImagePixels {
-    data: Arc<Vec<u8>>,
-    width: u32,
-    height: u32,
+pub(crate) struct ImagePixels {
+    pub(crate) data: Arc<Vec<u8>>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
-enum ImageState {
+/// An image's load state, shared with the rich editor's image cache
+/// (`markdown_editing::image_cache`), which loads through the same fetcher.
+pub(crate) enum ImageState {
     RemotePending,
     Loading,
     Ready { image: ImagePixels, seen: bool },
@@ -461,6 +463,13 @@ impl MarkdownView {
         idx
     }
 
+    /// The url of the link drawn under `pos` (this view's coordinates), as a
+    /// click would follow it; the rich editor reads links in its Raw blocks'
+    /// rendered hosts through it (agg-sharp's `RichEditorMouse.RawLinkAt`).
+    pub fn link_at_point(&self, pos: Point) -> Option<&str> {
+        self.link_at(pos)
+    }
+
     fn link_at(&self, pos: Point) -> Option<&str> {
         let pad = self.padding;
         for item in &self.items {
@@ -547,7 +556,7 @@ fn is_rect_visible_in_root(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) ->
     }
 }
 
-fn is_fetchable_url(url: &str) -> bool {
+pub(crate) fn is_fetchable_url(url: &str) -> bool {
     !url.is_empty()
         && !url.starts_with('#')
         && !url.starts_with("file://")
