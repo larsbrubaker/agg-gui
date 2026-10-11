@@ -31,7 +31,13 @@
 //! * [`inline_writer`] — a list of inlines as markdown (`RichInlineWriter.cs`).
 //! * `escaping` — escaped text, code spans and link tails
 //!   (`RichMarkdownEscaping.cs`).
-//! * `edit_operations` — editing operations (`RichEditOperations.cs`).
+//! * [`selection`] — [`RichSelection`], what an edit returns to show next
+//!   (`RichSelection.cs`).
+//! * [`edit_operations`] — typing, range deletes, Enter, Backspace and Delete
+//!   (`RichEditOperations.cs`); [`table_code_operations`] the same inside a
+//!   code block or table, plus the table's row/column operations
+//!   (`RichTableCodeOperations.cs`); `group_repair` restores the group
+//!   invariants after an edit (`RichGroupRepair.cs`).
 //! * `char_class` — .NET's character classes, as the writer sees them.
 //!
 //! # Offsets
@@ -46,8 +52,9 @@ pub mod block;
 mod char_class;
 mod code_and_tables;
 pub mod document;
-mod edit_operations;
+pub mod edit_operations;
 mod escaping;
+mod group_repair;
 pub mod group_writer;
 pub mod groups;
 pub mod inline;
@@ -58,6 +65,8 @@ pub mod markdown_writer;
 mod parse_tree;
 pub(crate) mod parser_inlines;
 pub(crate) mod pipe_tables;
+pub mod selection;
+pub mod table_code_operations;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
 pub use document::{DocPosition, RichDocument};
@@ -69,3 +78,4 @@ pub use groups::{
 pub use inline::{InlineAtom, InlineAtomKind, RichInline, RichInlineContent, RichRun};
 pub use inline_writer::RichInlineContext;
 pub use inlines::OffsetOutOfRange;
+pub use selection::RichSelection;

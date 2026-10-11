@@ -32,6 +32,8 @@ mod shape_cache;
 mod vertical_metrics;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
 pub use elide::{elide_text, elide_to_width, EllipsisMode, ELLIPSIS};
+// The rich Markdown editor steps its caret over the same grapheme clusters.
+pub(crate) use elide::cluster_bounds;
 pub use ellipsis::{ellipsize_to_width, ellipsize_with};
 pub use faux_style::{FAUX_BOLD_WEIGHT, FAUX_ITALIC_SHEAR};
 pub use shape_cache::shape_glyphs;
