@@ -42,6 +42,7 @@ mod backbuffer_scale;
 mod button_click_focus;
 mod button_click_semantics;
 mod capture_reorder;
+mod captured_drag;
 mod caret_deadline;
 mod clickable;
 mod clip_path_software;

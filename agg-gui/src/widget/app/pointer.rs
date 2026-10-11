@@ -70,7 +70,12 @@ impl App {
             let path = self.extend_modal_path(&path, pos);
             self.update_hover_chain(Some(&path), None);
             let event = Event::MouseMove { pos };
-            dispatch_event(&mut self.root, &path, &event, pos);
+            // A widget holding the capture (a slider thumb, a resize edge)
+            // gets every move until the release, wherever the pointer is,
+            // as on the non-modal path (`dispatch_mouse_move`); the hit
+            // path only decides hover.
+            let target = self.captured.clone().unwrap_or_else(|| path.clone());
+            dispatch_event(&mut self.root, &target, &event, pos);
             self.store_hovered(Some(path));
             return;
         }
