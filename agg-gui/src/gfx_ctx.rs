@@ -112,8 +112,9 @@ impl Default for GfxState {
             stroke_pattern: None,
             fill_rule: FillRule::NonZero,
             line_width: 1.0,
-            line_join: LineJoin::Round,
-            line_cap: LineCap::Round,
+            // agg-sharp StrokeMath defaults, which the wgpu backend shares.
+            line_join: LineJoin::Miter,
+            line_cap: LineCap::Butt,
             miter_limit: 4.0,
             line_dash: Vec::new(),
             dash_offset: 0.0,
@@ -646,6 +647,7 @@ mod draw_impl;
 mod draw_path;
 mod layers;
 mod raster_clip;
+mod rotated_blit;
 mod sampled;
 mod stroke;
 

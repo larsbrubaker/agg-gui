@@ -38,11 +38,11 @@ enum Op {
     Stroke(Vec<(f64, f64)>, f64, Vec<f64>),
 }
 
-/// `GfxCtx`'s default stroke style (round joins and caps, miter limit 4).
+/// `GfxCtx`'s default stroke style (miter joins, butt caps, miter limit 4).
 fn style_stroke<VS: agg_rust::basics::VertexSource>(s: &mut ConvStroke<VS>, width: f64) {
     s.set_width(width);
-    s.set_line_join(LineJoin::Round);
-    s.set_line_cap(LineCap::Round);
+    s.set_line_join(LineJoin::Miter);
+    s.set_line_cap(LineCap::Butt);
     s.set_miter_limit(4.0);
 }
 

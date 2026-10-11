@@ -632,26 +632,30 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         // blit must land texel-for-pixel.  Resampling to the bare logical size
         // (as this used to) shrank every CPU backbuffer — Labels, TextFields —
         // to 1x ink size under a scaled CTM.  Axis-aligned transforms (the
-        // HiDPI / ux-zoom case) map exactly, including mirroring; for rotated
-        // or skewed CTMs the image keeps its transformed origin and is sized
-        // by the CTM's scale magnitudes (the software blit is axis-aligned).
+        // HiDPI / ux-zoom case) map exactly, including mirroring; rotated or
+        // skewed CTMs blit the transformed quad (`rotated_blit.rs`).
         if img_w == 0 || img_h == 0 {
             return;
         }
         let t = self.transform();
         let axis_aligned = t.shx.abs() < 1e-9 && t.shy.abs() < 1e-9;
-        let (x_a, x_b, y_a, y_b, flip_x, flip_y) = if axis_aligned {
-            let x_a = dst_x * t.sx + t.tx;
-            let x_b = (dst_x + dst_w) * t.sx + t.tx;
-            let y_a = dst_y * t.sy + t.ty;
-            let y_b = (dst_y + dst_h) * t.sy + t.ty;
-            (x_a, x_b, y_a, y_b, x_b < x_a, y_b < y_a)
-        } else {
-            let (sx, sy) = t.scaling_abs();
-            let ox = dst_x * t.sx + dst_y * t.shx + t.tx;
-            let oy = dst_x * t.shy + dst_y * t.sy + t.ty;
-            (ox, ox + dst_w * sx, oy, oy + dst_h * sy, false, false)
-        };
+        if !axis_aligned {
+            let quad = super::rotated_blit::render_rotated(
+                &t, data, img_w, img_h, dst_x, dst_y, dst_w, dst_h,
+            );
+            if let Some((quad, x0, y0)) = quad {
+                let ga = self.state.global_alpha;
+                let clip = self.state.clip;
+                let fb = active_fb(self.base_fb, &mut self.layer_stack);
+                composite_framebuffers(fb, &quad, x0, y0, ga, clip);
+            }
+            return;
+        }
+        let x_a = dst_x * t.sx + t.tx;
+        let x_b = (dst_x + dst_w) * t.sx + t.tx;
+        let y_a = dst_y * t.sy + t.ty;
+        let y_b = (dst_y + dst_h) * t.sy + t.ty;
+        let (flip_x, flip_y) = (x_b < x_a, y_b < y_a);
         let (left, right) = (x_a.min(x_b), x_a.max(x_b));
         let (bottom, top) = (y_a.min(y_b), y_a.max(y_b));
         let out_w = (right - left).round();
@@ -701,9 +705,12 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
             }
         }
 
-        // Screen-space (device-pixel) origin of the transformed dst rect.
-        let screen_x = left.round() as i32;
-        let screen_y = bottom.round() as i32;
+        // Screen-space (device-pixel) origin of the transformed dst rect: the
+        // first pixel whose centre lies inside it, the half-open rule the GPU
+        // rasterizer uses (a rect starting at 40.5 covers pixel 40, whose
+        // centre is on its edge; `round` put it at 41).
+        let screen_x = (left - 0.5).ceil() as i32;
+        let screen_y = (bottom - 0.5).ceil() as i32;
         // Honor the active `global_alpha` so backbuffered widgets (Labels,
         // buttons) inside a faded subtree fade uniformly with the rest of the
         // group — without this the blit composited at full opacity regardless

@@ -156,6 +156,8 @@ mod clip_path_readback_tests;
 #[cfg(test)]
 mod frame_release_tests;
 #[cfg(test)]
+mod golden;
+#[cfg(test)]
 mod gpu_comp_op_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod headless_tests;
