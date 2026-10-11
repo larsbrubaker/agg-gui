@@ -7,7 +7,8 @@
 //! Markdig's extensions pulldown-cmark leaves as text (`^sup^`, bare links)
 //! are split out of each text event by `extensions.rs`.  Pipe tables are the
 //! ones Markdig finds (`markdown_editing::pipe_tables`
-//! rewrites the source before pulldown-cmark reads it).
+//! rewrites the source before pulldown-cmark reads it), and grid tables are
+//! read as Markdig reads them (`grid_tables.rs`, rewriting them as pipe tables).
 
 use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 
@@ -26,7 +27,13 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
     // Pipe tables as Markdig finds them, so a file reads as the same tables it did in MarkdigAgg.
     let markdown = crate::widgets::markdown_editing::pipe_tables::markdig_source(markdown);
-    let events: Vec<MdEvent<'_>> = Parser::new_ext(&markdown, opts).collect();
+    // Grid tables as Markdig reads them, as pipe tables pulldown-cmark reads.
+    let grid = super::grid_tables::markdig_grid_source(&markdown, opts);
+    let (events, event_starts): (Vec<MdEvent<'_>>, Vec<usize>) =
+        Parser::new_ext(&grid.source, opts)
+            .into_offset_iter()
+            .map(|(event, range)| (event, range.start))
+            .unzip();
     let paired_tags = pair_style_tags(&events);
     let mut styles = StyleStack::default();
     // Whether the text flushed last ended in whitespace (see `glue`).
@@ -45,6 +52,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut link_stack: Vec<String> = Vec::new();
     let mut quote_depth = 0u32;
     let mut table: Option<Vec<Vec<String>>> = None;
+    let mut table_header = true;
     let mut table_row: Option<Vec<String>> = None;
     let mut table_cell: Option<String> = None;
     let mut code_block: Option<String> = None;
@@ -299,12 +307,14 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 );
                 table = Some(Vec::new());
                 table_styles = Some(Vec::new());
+                table_header = !grid.headerless.contains(&event_starts[idx]);
             }
             MdEvent::End(TagEnd::Table) => {
                 if let Some(rows) = table.take() {
                     out.push(ParagraphItem::Table {
                         rows,
                         cell_styles: table_styles.take().unwrap_or_default(),
+                        header: table_header,
                     });
                     add_spacer(&mut out);
                 }

@@ -228,6 +228,7 @@ impl MarkdownView {
                     block_idx,
                     rows,
                     cell_styles,
+                    header,
                     y,
                     height: _,
                     row_h,
@@ -250,7 +251,7 @@ impl MarkdownView {
                     ctx.set_font_size(self.font_size);
                     for (ri, row) in rows.iter().enumerate() {
                         cy -= row_h;
-                        if ri == 0 {
+                        if ri == 0 && *header {
                             ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.10));
                             ctx.begin_path();
                             ctx.rect(pad, cy, table_w, *row_h);

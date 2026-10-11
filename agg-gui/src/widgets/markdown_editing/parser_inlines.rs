@@ -320,7 +320,9 @@ pub(crate) fn scan_extensions(
 
 /// The end of a `delim`-wrapped span starting at `at`: the opener is not
 /// followed by whitespace (or a third delimiter character), the closer not
-/// preceded by whitespace, and the content is not empty.
+/// preceded by whitespace, and the content is not empty.  The content may
+/// hold spaces: Markdig reads `x^a b^` as `x<sup>a b</sup>`, its `^` being
+/// an emphasis delimiter like `==` and `++`.
 fn delimited(bytes: &[u8], at: usize, end: usize, delim: &[u8]) -> Option<usize> {
     let n = delim.len();
     if at + n >= end || &bytes[at..at + n] != delim || (at > 0 && bytes[at - 1] == delim[0]) {
@@ -335,10 +337,6 @@ fn delimited(bytes: &[u8], at: usize, end: usize, delim: &[u8]) -> Option<usize>
         if &bytes[close..close + n] == delim && !bytes[close - 1].is_ascii_whitespace() {
             let after = close + n;
             if after < end && bytes[after] == delim[0] {
-                return None;
-            }
-            // A superscript holds no spaces (Markdig's `^` reads only a word).
-            if n == 1 && bytes[at + 1..close].iter().any(u8::is_ascii_whitespace) {
                 return None;
             }
             return Some(after);

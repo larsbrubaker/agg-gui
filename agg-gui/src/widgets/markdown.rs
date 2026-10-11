@@ -55,6 +55,9 @@ mod extension_tests;
 mod extensions;
 #[cfg(test)]
 mod feature_rendering_tests;
+#[cfg(test)]
+mod grid_table_tests;
+mod grid_tables;
 mod image_context;
 mod image_loader;
 mod layout;
@@ -119,6 +122,8 @@ enum LayoutItem {
         rows: Vec<Vec<String>>,
         /// Each cell's emphasis spans (see `emphasis.rs`).
         cell_styles: emphasis::CellStyles,
+        /// Whether the first row is a header row, drawn shaded.
+        header: bool,
         y: f64,
         height: f64,
         row_h: f64,
@@ -196,6 +201,8 @@ enum ParagraphItem {
     Table {
         rows: Vec<Vec<String>>,
         cell_styles: emphasis::CellStyles,
+        /// Whether the first row is a header row (a grid table may have none).
+        header: bool,
     },
     CodeBlock(Vec<String>),
     Spacer,

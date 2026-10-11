@@ -73,7 +73,11 @@ impl MarkdownView {
                         height: metrics.line_height * 0.65,
                     });
                 }
-                super::ParagraphItem::Table { rows, cell_styles } => {
+                super::ParagraphItem::Table {
+                    rows,
+                    cell_styles,
+                    header,
+                } => {
                     let (col_widths, row_h, mut height) = self.layout_table(rows, cell_styles);
                     let content_width = col_widths.iter().sum::<f64>();
                     let viewport_width = max_w;
@@ -90,6 +94,7 @@ impl MarkdownView {
                         block_idx,
                         rows: rows.clone(),
                         cell_styles: cell_styles.clone(),
+                        header: *header,
                         y: 0.0,
                         height,
                         row_h,

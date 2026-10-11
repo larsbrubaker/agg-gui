@@ -19,3 +19,24 @@ fn rust_only_text_with_multibyte_characters_scans_for_bare_links() {
     assert_eq!(atoms, ["www.x.com"]);
     assert_eq!(markdown_writer::write(&document), source);
 }
+
+#[test]
+fn rust_only_superscripts_may_hold_spaces() {
+    // Markdig: `x^a b^` is `x<sup>a b</sup>`; `x^ a^` and `x^a ^` stay text.
+    let raw_atoms = |source: &str| -> Vec<String> {
+        parse(source).blocks[0]
+            .inlines
+            .iter()
+            .filter_map(|inline| inline.as_atom())
+            .filter(|atom| atom.kind == InlineAtomKind::Raw)
+            .map(|atom| atom.raw_markdown.clone())
+            .collect()
+    };
+    assert_eq!(raw_atoms("x^a b^"), ["^a b^"]);
+    assert_eq!(raw_atoms("x ^a  b^ y"), ["^a  b^"]);
+    assert_eq!(raw_atoms("x^a^b^"), ["^a^"]);
+    assert!(raw_atoms("x^ a^").is_empty());
+    assert!(raw_atoms("x^a ^").is_empty());
+    assert!(raw_atoms("a^b^^c").is_empty());
+    assert_eq!(markdown_writer::write(&parse("x^a b^")), "x^a b^");
+}

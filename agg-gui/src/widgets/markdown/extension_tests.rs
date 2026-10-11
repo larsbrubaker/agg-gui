@@ -105,3 +105,14 @@ fn rust_only_emphasis_extras_are_bold_in_table_cells() {
     assert_eq!(spans.len(), 1);
     assert_eq!((spans[0].start, spans[0].end, spans[0].style), (2, 3, BOLD));
 }
+
+#[test]
+fn rust_only_superscripts_with_spaces_render_bold() {
+    // Markdig reads `x^a b^` as `x<sup>a b</sup>`.
+    let runs = runs("x^a b^ y");
+    let styled: Vec<(&str, MarkdownRunStyle)> = runs
+        .iter()
+        .map(|(text, style, _, _)| (text.as_str(), *style))
+        .collect();
+    assert_eq!(styled, [("x", PLAIN), ("a b", BOLD), ("y", PLAIN)]);
+}

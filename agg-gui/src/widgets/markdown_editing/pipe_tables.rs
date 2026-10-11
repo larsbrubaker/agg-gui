@@ -234,7 +234,7 @@ fn rewrite_line(line: &str, content: &str) -> String {
 
 /// A cell with every pipe left in it (one inside a code span, since the cell
 /// was split at the rest) escaped, as GFM wants it.
-fn escape_code_pipes(cell: &str) -> String {
+pub(crate) fn escape_code_pipes(cell: &str) -> String {
     let mut out = String::with_capacity(cell.len());
     let mut escaped = false;
     for c in cell.chars() {
