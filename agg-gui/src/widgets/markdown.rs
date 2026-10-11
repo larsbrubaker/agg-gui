@@ -66,12 +66,15 @@ mod html_form_tests;
 mod html_rewriter;
 mod image_context;
 pub(crate) mod image_loader;
+mod introspect;
 mod layout;
 #[cfg(test)]
 mod line_width_tests;
 mod matching;
 mod paint;
 mod parse;
+#[cfg(test)]
+mod plain_text_tests;
 mod rich_html;
 mod selection;
 mod styled_html;
@@ -85,6 +88,7 @@ use block_scroll::{
 };
 pub use emphasis::MarkdownRunStyle;
 pub use html_form::{markdown_html, markdown_html_collapsed};
+pub use introspect::{MarkdownBlockKind, MarkdownTableCell};
 pub use styled_html::{css_color, style_html_fragment, to_styled_html, HtmlStyleTheme};
 
 // ── Styled line representation ─────────────────────────────────────────────────
@@ -125,6 +129,9 @@ enum LayoutItem {
         style: LineStyle,
         indent: f64,
         quote: bool,
+        /// The row continues the previous row's paragraph (a soft wrap), so
+        /// the plain text joins the two with a space rather than a newline.
+        continues: bool,
         y: f64,
         height: f64,
     },

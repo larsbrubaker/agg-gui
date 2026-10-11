@@ -112,7 +112,7 @@ pub use hyperlink::Hyperlink;
 pub use image_view::ImageView;
 pub use inspector::{InspectorPanel, InspectorSavedState};
 pub use label::{Label, LabelAlign};
-pub use markdown::MarkdownView;
+pub use markdown::{MarkdownBlockKind, MarkdownTableCell, MarkdownView};
 pub use menu::{
     MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
     PopupMenu, ShortcutKey, TopMenu,

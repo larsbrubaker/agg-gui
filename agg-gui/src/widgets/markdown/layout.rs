@@ -59,6 +59,7 @@ impl MarkdownView {
                     style: LineStyle::Rule,
                     indent: 0.0,
                     quote: false,
+                    continues: false,
                     y: 0.0,
                     height: 8.0,
                 }),
@@ -69,6 +70,7 @@ impl MarkdownView {
                         style: LineStyle::Body,
                         indent: 0.0,
                         quote: false,
+                        continues: false,
                         y: 0.0,
                         height: metrics.line_height * 0.65,
                     });
@@ -133,6 +135,7 @@ impl MarkdownView {
                     indent,
                     quote,
                 } => {
+                    let flow_start = laid_out.len();
                     let font_size = style.font_size(self.font_size);
                     let metrics = measure_text_metrics(&self.active_font(), "", font_size);
                     let line_h = metrics.line_height * 1.3;
@@ -242,6 +245,12 @@ impl MarkdownView {
                     if !runs.is_empty() {
                         max_line_w = max_line_w.max(indent + line_end);
                         Self::push_line(&mut laid_out, &mut runs, *style, *indent, *quote, row_h);
+                    }
+                    // Every row after a paragraph's first is a soft wrap of it.
+                    for item in laid_out.iter_mut().skip(flow_start + 1) {
+                        if let LayoutItem::Line { continues, .. } = item {
+                            *continues = true;
+                        }
                     }
                 }
             }
@@ -475,6 +484,7 @@ impl MarkdownView {
             style,
             indent,
             quote,
+            continues: false,
             y: 0.0,
             height,
         });

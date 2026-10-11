@@ -34,6 +34,7 @@ impl MarkdownView {
                     quote,
                     y,
                     height,
+                    ..
                 } => {
                     let fs = style.font_size(self.font_size);
                     ctx.set_font_size(fs);

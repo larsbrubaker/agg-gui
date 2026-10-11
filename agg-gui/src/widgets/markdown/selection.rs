@@ -63,6 +63,7 @@ impl MarkdownView {
                     runs,
                     style,
                     indent,
+                    continues,
                     y,
                     height,
                     ..
@@ -70,6 +71,14 @@ impl MarkdownView {
                     if runs.is_empty() {
                         self.push_selection_gap("\n");
                         continue;
+                    }
+                    // A soft-wrapped row joins its paragraph's previous row
+                    // with the space the wrap replaced; a new paragraph (a
+                    // list item, a heading right after text) starts a line.
+                    if *continues {
+                        self.push_word_gap();
+                    } else {
+                        self.push_block_gap();
                     }
 
                     let fs = style.font_size(self.font_size);
@@ -164,6 +173,7 @@ impl MarkdownView {
                     viewport_width,
                     content_width,
                 } => {
+                    self.push_block_gap();
                     let scroll_x = self.block_scroll_offset(*block_idx);
                     let scrollbar_h = if content_width > viewport_width {
                         BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP
@@ -209,6 +219,7 @@ impl MarkdownView {
                     content_width,
                     ..
                 } => {
+                    self.push_block_gap();
                     let scroll_x = self.block_scroll_offset(*block_idx);
                     let scrollbar_h = if content_width > viewport_width {
                         BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP
@@ -254,6 +265,22 @@ impl MarkdownView {
         self.clamp_selection_to_text();
     }
 
+    /// Separate a soft-wrapped row from the row before it with one space,
+    /// unless the text already ends in whitespace.
+    fn push_word_gap(&mut self) {
+        if !self.selectable_text.is_empty() && !self.selectable_text.ends_with(char::is_whitespace)
+        {
+            self.selectable_text.push(' ');
+        }
+    }
+
+    /// Start a new block (paragraph, table, code block) on its own line.
+    fn push_block_gap(&mut self) {
+        if !self.selectable_text.is_empty() {
+            self.push_selection_gap("\n");
+        }
+    }
+
     fn push_selection_gap(&mut self, gap: &str) {
         if !self.selectable_text.ends_with(gap) {
             self.selectable_text.push_str(gap);
@@ -274,7 +301,7 @@ impl MarkdownView {
     /// after [`set_markdown`](MarkdownView::set_markdown) the old byte offsets
     /// may sit past the end or inside a character that changed, and slicing
     /// there (copy, highlight) would panic.
-    fn clamp_selection_to_text(&mut self) {
+    pub(super) fn clamp_selection_to_text(&mut self) {
         let text = &self.selectable_text;
         let clamp = |pos: usize| {
             let mut pos = pos.min(text.len());

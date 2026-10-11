@@ -157,7 +157,10 @@ fn normalize_line_endings_matches_csharp_text_line_endings() {
     assert_eq!(normalize_line_endings("", 3), (String::new(), 0));
     assert_eq!(normalize_line_endings("a\r\nb", 4), ("a\nb".to_string(), 3));
     assert_eq!(normalize_line_endings("a\r\nb", 2), ("a\nb".to_string(), 2));
-    assert_eq!(normalize_line_endings("a\r\rb", 3), ("a\n\nb".to_string(), 3));
+    assert_eq!(
+        normalize_line_endings("a\r\rb", 3),
+        ("a\n\nb".to_string(), 3)
+    );
 }
 
 #[test]
