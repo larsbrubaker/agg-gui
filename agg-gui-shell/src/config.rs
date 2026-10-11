@@ -138,6 +138,12 @@ pub struct ShellConfig {
     /// `SPI_GETMOUSEHOVERTIME`). On by default; other platforms keep the
     /// library defaults regardless.
     pub os_tooltip_timings: bool,
+    /// Count double clicks with the OS's double-click time and distance
+    /// (macOS: `NSEvent.doubleClickInterval`; Windows: `GetDoubleClickTime`
+    /// and `SM_CXDOUBLECLK`/`SM_CYDOUBLECLK`), re-read when the window regains
+    /// focus. On by default; other platforms keep agg-gui's `ClickPolicy`
+    /// default regardless.
+    pub os_click_policy: bool,
     /// Where the window size / maximized state is restored from and saved to.
     /// `None` = no persistence.
     pub bounds_store: Option<Box<dyn WindowBoundsStore>>,
@@ -160,6 +166,7 @@ impl Default for ShellConfig {
             force_fallback_adapter: false,
             screenshot: None,
             os_tooltip_timings: true,
+            os_click_policy: true,
             bounds_store: None,
         }
     }
@@ -275,6 +282,11 @@ impl ShellConfig {
         self
     }
 
+    pub fn with_os_click_policy(mut self, enabled: bool) -> Self {
+        self.os_click_policy = enabled;
+        self
+    }
+
     /// Restore the window size / maximized state from `store` at startup and
     /// save it back as it changes. See [`WindowBoundsStore`].
     pub fn with_bounds_store(mut self, store: impl WindowBoundsStore + 'static) -> Self {
@@ -294,6 +306,7 @@ mod tests {
         assert_eq!(cfg.size, WindowSize::Logical(1280.0, 720.0));
         assert_eq!(cfg.redraw_policy, RedrawPolicy::Reactive);
         assert!(cfg.os_tooltip_timings);
+        assert!(cfg.os_click_policy);
         assert!(!cfg.force_fallback_adapter, "the GPU is the default");
 
         let cfg = cfg

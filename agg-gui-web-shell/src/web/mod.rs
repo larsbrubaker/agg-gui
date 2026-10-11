@@ -56,6 +56,10 @@ thread_local! {
     /// Cursor, modifiers, click counting and the real-input gate between DOM
     /// events and the app (`agg_gui::shell_input`). The idle guard stays on
     /// [`POINTERS`], which resyncs from the DOM `buttons` bitmask.
+    /// Browsers expose no double-click time or distance (the DOM's `detail`
+    /// click count is the browser's own and arrives only on `click`), so the
+    /// forwarder keeps agg-gui's default `ClickPolicy`; the native shell is
+    /// the one that reads the OS setting (`agg-gui-shell`'s `click_policy`).
     static INPUT: RefCell<InputForwarder> = RefCell::new(InputForwarder::new());
     static FIRST_PAINT: FirstPaintGate = const { FirstPaintGate::new() };
     /// Latched once any frame has been presented since boot (unlike the

@@ -78,6 +78,7 @@
 //! `WebShellHost` mirrors [`ShellHost`] method for method.
 
 mod bounds;
+mod click_policy;
 mod config;
 mod host;
 mod input;

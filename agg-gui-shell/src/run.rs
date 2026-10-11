@@ -141,6 +141,9 @@ where
         screenshot_done: false,
         screenshot_last_paint: Instant::now(),
         input: agg_gui::shell_input::InputForwarder::new(),
+        click_policy_reader: config
+            .os_click_policy
+            .then_some(crate::click_policy::read_os_double_click as _),
         hovered_files: Vec::new(),
         input_since_frame: false,
         pending_resize: None,
@@ -154,6 +157,7 @@ where
         finished: false,
         _waker_guard: waker_guard,
     };
+    shell.refresh_click_policy();
 
     // First frame into the hidden window: after this the surface holds the
     // fully-styled first frame, so `set_visible(true)` never flashes an

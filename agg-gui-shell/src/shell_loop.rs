@@ -56,6 +56,10 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     /// Cursor position, held modifiers and buttons, click counting, and the
     /// real-input gate (`agg_gui::shell_input`).
     pub(crate) input: InputForwarder,
+    /// Where the forwarder's click policy comes from: the OS setting
+    /// (`click_policy::read_os_double_click`), or `None` to keep agg-gui's
+    /// default (`ShellConfig::os_click_policy` off).
+    pub(crate) click_policy_reader: Option<crate::click_policy::OsDoubleClickReader>,
     /// Paths of the file drag over the window (winit sends one
     /// `HoveredFile` per file); empty when no file drag is in progress.
     pub(crate) hovered_files: Vec<std::path::PathBuf>,
@@ -149,6 +153,8 @@ impl<H: ShellHost> ShellLoop<H> {
 
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 agg_gui::set_device_scale(scale_factor);
+                // The OS double-click distance is in physical pixels.
+                self.refresh_click_policy();
                 self.notify_geometry();
                 self.window.request_redraw();
             }
@@ -179,6 +185,11 @@ impl<H: ShellHost> ShellLoop<H> {
             // the desktop handing focus around mid-run (agg-sharp's
             // `ForwardPlatformDeactivation`).
             WindowEvent::Focused(focused) => {
+                if focused {
+                    // The user may have changed the OS double-click setting
+                    // while another app had focus; the read is a cheap query.
+                    self.refresh_click_policy();
+                }
                 self.forward(if focused {
                     ForwarderEvent::WindowActivated
                 } else {
@@ -440,6 +451,15 @@ impl<H: ShellHost> ShellLoop<H> {
 
         if self.exit.get().is_some() {
             elwt.exit();
+        }
+    }
+
+    /// Re-read the OS double-click setting into the forwarder's click policy
+    /// (a no-op when the shell keeps agg-gui's default).
+    pub(crate) fn refresh_click_policy(&mut self) {
+        if let Some(read) = self.click_policy_reader {
+            let policy = crate::click_policy::os_click_policy(read, self.window.scale_factor());
+            self.input.set_click_policy(policy);
         }
     }
 
