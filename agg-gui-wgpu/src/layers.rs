@@ -98,7 +98,7 @@ impl WgpuGfxCtx {
             dash_offset: self.dash_offset,
             global_alpha: self.global_alpha,
             blend_mode: self.blend_mode,
-            blend_mode_stack: self.blend_mode_stack.clone(),
+            paint_state_stack: self.paint_state_stack.clone(),
             state_stack: self.state_stack.clone(),
             font: self.font.clone(),
             font_size: self.font_size,
@@ -123,7 +123,7 @@ impl WgpuGfxCtx {
         self.dash_offset = s.dash_offset;
         self.global_alpha = s.global_alpha;
         self.blend_mode = s.blend_mode;
-        self.blend_mode_stack = s.blend_mode_stack;
+        self.paint_state_stack = s.paint_state_stack;
         self.state_stack = s.state_stack;
         self.font = s.font;
         self.font_size = s.font_size;
@@ -267,9 +267,9 @@ impl WgpuGfxCtx {
         // Reset draw state for the layer's local coordinate system.
         self.viewport = (w as f32, h as f32);
         self.state_stack = vec![(TransAffine::new_scaling(scale_x, scale_y), None)];
-        // The blend mode carries into the layer (as in the software
+        // The paint state carries into the layer (as in the software
         // `GfxCtx`); its save/restore stack starts afresh with `state_stack`.
-        self.blend_mode_stack.clear();
+        self.paint_state_stack.clear();
         self.path = PathStorage::new();
 
         self.commands.push(DrawCommand::PushLayer {

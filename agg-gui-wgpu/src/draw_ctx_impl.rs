@@ -396,7 +396,8 @@ impl DrawCtx for WgpuGfxCtx {
     fn save(&mut self) {
         let top = *self.state_stack.last().unwrap();
         self.state_stack.push(top);
-        self.blend_mode_stack.push(self.blend_mode);
+        let paint = self.paint_state();
+        self.paint_state_stack.push(paint);
     }
 
     fn restore(&mut self) {
@@ -413,8 +414,8 @@ impl DrawCtx for WgpuGfxCtx {
         }
         if self.state_stack.len() > 1 {
             self.state_stack.pop();
-            if let Some(mode) = self.blend_mode_stack.pop() {
-                self.blend_mode = mode;
+            if let Some(paint) = self.paint_state_stack.pop() {
+                self.set_paint_state(paint);
             }
             // Scissor is deferred; no GPU state to restore immediately.
             self.apply_scissor();

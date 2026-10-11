@@ -142,6 +142,7 @@ mod layer_mask;
 mod layers;
 pub mod pipelines;
 mod primitives;
+mod saved_paint_state;
 mod screenshot_capture;
 /// Scaled / region capture readback — small-output companion to
 /// `screenshot_capture`'s full-surface readbacks.
@@ -170,6 +171,8 @@ mod lcd_gpu_composite_tests;
 mod radial_gradient_readback_tests;
 #[cfg(test)]
 mod root_transform_readback_tests;
+#[cfg(test)]
+mod save_restore_readback_tests;
 #[cfg(test)]
 mod screenshot_scaled_tests;
 
@@ -252,7 +255,7 @@ pub(crate) struct SavedWgpuDrawState {
     pub(crate) dash_offset: f64,
     pub(crate) global_alpha: f64,
     pub(crate) blend_mode: CompOp,
-    pub(crate) blend_mode_stack: Vec<CompOp>,
+    pub(crate) paint_state_stack: Vec<saved_paint_state::SavedPaintState>,
     pub(crate) state_stack: Vec<(TransAffine, Option<[i32; 4]>)>,
     pub(crate) font: Option<Arc<Font>>,
     pub(crate) font_size: f64,
@@ -391,9 +394,10 @@ pub struct WgpuGfxCtx {
     /// The `DrawCtx::set_blend_mode` operator for solid fills, strokes and
     /// grayscale text — see `comp_op.rs`.
     pub(crate) blend_mode: CompOp,
-    /// `blend_mode` as each `save()` left it, popped by `restore()` — the
-    /// software `GfxCtx` saves the mode with the rest of its state.
-    pub(crate) blend_mode_stack: Vec<CompOp>,
+    /// The paint state (alpha, colours, line, font, blend mode) as each
+    /// `save()` left it, popped by `restore()` — the software `GfxCtx` saves
+    /// its whole state; the transform and clip are in `state_stack`.
+    pub(crate) paint_state_stack: Vec<saved_paint_state::SavedPaintState>,
     /// True while a blend-mode draw renders its cover into a coverage layer:
     /// text then takes the alpha-writing grayscale path.
     pub(crate) coverage_pass: bool,
@@ -581,7 +585,7 @@ impl WgpuGfxCtx {
             dash_offset: 0.0,
             global_alpha: 1.0,
             blend_mode: CompOp::SrcOver,
-            blend_mode_stack: Vec::new(),
+            paint_state_stack: Vec::new(),
             coverage_pass: false,
             state_stack: vec![(TransAffine::new(), None)],
             path: PathStorage::new(),
@@ -630,7 +634,7 @@ impl WgpuGfxCtx {
         self.dash_offset = 0.0;
         self.global_alpha = 1.0;
         self.blend_mode = CompOp::SrcOver;
-        self.blend_mode_stack.clear();
+        self.paint_state_stack.clear();
         self.coverage_pass = false;
         self.state_stack = vec![(TransAffine::new(), None)];
         self.path = PathStorage::new();
