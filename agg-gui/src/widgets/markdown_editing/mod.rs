@@ -18,6 +18,15 @@
 //! * [`groups`] — the shared `<div align>` / blockquote / list groups
 //!   (`RichBlockGroups.cs`).
 //! * [`document`] — [`RichDocument`] and [`DocPosition`] (`RichDocument.cs`).
+//! * [`markdown_writer`] — the document back to markdown: unedited blocks and
+//!   groups verbatim, edited ones regenerated (`RichMarkdownWriter.cs`).
+//! * [`group_writer`] — changed lists, quotes and `<div align>` wrappers
+//!   rebuilt whole (`RichGroupWriter.cs`).
+//! * [`inline_writer`] — a list of inlines as markdown (`RichInlineWriter.cs`).
+//! * `escaping` — escaped text, code spans and link tails
+//!   (`RichMarkdownEscaping.cs`).
+//! * `edit_operations` — editing operations (`RichEditOperations.cs`).
+//! * `char_class` — .NET's character classes, as the writer sees them.
 //!
 //! # Offsets
 //!
@@ -27,10 +36,16 @@
 //! position here and two there; the two agree on all BMP text.
 
 pub mod block;
+mod char_class;
 pub mod document;
+mod edit_operations;
+mod escaping;
+pub mod group_writer;
 pub mod groups;
 pub mod inline;
+pub mod inline_writer;
 pub mod inlines;
+pub mod markdown_writer;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
 pub use document::{DocPosition, RichDocument};
@@ -40,4 +55,5 @@ pub use groups::{
     RichQuoteGroupRef,
 };
 pub use inline::{InlineAtom, InlineAtomKind, RichInline, RichInlineContent, RichRun};
+pub use inline_writer::RichInlineContext;
 pub use inlines::OffsetOutOfRange;

@@ -4,3 +4,11 @@
 
 #[path = "markdown_editing/rich_document_tests.rs"]
 mod rich_document_tests;
+#[path = "markdown_editing/rich_inline_round_trip_tests.rs"]
+mod rich_inline_round_trip_tests;
+#[path = "markdown_editing/rich_markdown_writer_code_table_tests.rs"]
+mod rich_markdown_writer_code_table_tests;
+#[path = "markdown_editing/rich_markdown_writer_tests.rs"]
+mod rich_markdown_writer_tests;
+#[path = "markdown_editing/rust_only_writer_group_tests.rs"]
+mod rust_only_writer_group_tests;
