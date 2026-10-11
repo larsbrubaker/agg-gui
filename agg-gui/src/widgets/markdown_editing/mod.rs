@@ -18,6 +18,11 @@
 //! * [`groups`] — the shared `<div align>` / blockquote / list groups
 //!   (`RichBlockGroups.cs`).
 //! * [`document`] — [`RichDocument`] and [`DocPosition`] (`RichDocument.cs`).
+//! * [`markdown_parser`] — markdown into the document, its blocks partitioning
+//!   the source exactly (`RichMarkdownParser.cs`), on pulldown-cmark's source
+//!   ranges (`parse_tree`); `parser_inlines` reads inlines,
+//!   `code_and_tables` code blocks and pipe tables (`RichCodeAndTables.cs`),
+//!   `align_groups` folds `<div align>` wrappers (`RichAlignGroups.cs`).
 //! * [`markdown_writer`] — the document back to markdown: unedited blocks and
 //!   groups verbatim, edited ones regenerated (`RichMarkdownWriter.cs`).
 //! * [`group_writer`] — changed lists, quotes and `<div align>` wrappers
@@ -35,8 +40,10 @@
 //! character outside the Basic Multilingual Plane (most emoji) is one caret
 //! position here and two there; the two agree on all BMP text.
 
+mod align_groups;
 pub mod block;
 mod char_class;
+mod code_and_tables;
 pub mod document;
 mod edit_operations;
 mod escaping;
@@ -45,7 +52,10 @@ pub mod groups;
 pub mod inline;
 pub mod inline_writer;
 pub mod inlines;
+pub mod markdown_parser;
 pub mod markdown_writer;
+mod parse_tree;
+mod parser_inlines;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
 pub use document::{DocPosition, RichDocument};

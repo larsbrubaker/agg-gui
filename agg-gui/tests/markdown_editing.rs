@@ -6,6 +6,12 @@
 mod rich_document_tests;
 #[path = "markdown_editing/rich_inline_round_trip_tests.rs"]
 mod rich_inline_round_trip_tests;
+#[path = "markdown_editing/rich_markdown_parser_block_tests.rs"]
+mod rich_markdown_parser_block_tests;
+#[path = "markdown_editing/rich_markdown_parser_code_table_tests.rs"]
+mod rich_markdown_parser_code_table_tests;
+#[path = "markdown_editing/rich_markdown_parser_tests.rs"]
+mod rich_markdown_parser_tests;
 #[path = "markdown_editing/rich_markdown_writer_code_table_tests.rs"]
 mod rich_markdown_writer_code_table_tests;
 #[path = "markdown_editing/rich_markdown_writer_tests.rs"]
