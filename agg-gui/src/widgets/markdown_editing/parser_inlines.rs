@@ -284,7 +284,7 @@ fn styled(mut inline: RichInline, style: &Style) -> RichInline {
 /// extensions pulldown-cmark leaves as text: `^sup^`, `==mark==`, `++ins++`
 /// (Raw) and bare `www.`, `http://`, `https://`, `ftp://` and `mailto:` links
 /// (Autolink).  Each piece is `(text, Some(atom kind))` or `(text, None)`.
-pub(super) fn scan_extensions(
+pub(crate) fn scan_extensions(
     source: &str,
     range: std::ops::Range<usize>,
 ) -> Vec<(String, Option<InlineAtomKind>)> {
@@ -359,7 +359,12 @@ fn bare_link(source: &str, at: usize, end: usize) -> Option<usize> {
     let rest = &source[at..end];
     let prefix = ["www.", "http://", "https://", "ftp://", "mailto:"]
         .into_iter()
-        .find(|p| rest.len() > p.len() && rest[..p.len()].eq_ignore_ascii_case(p))?;
+        .find(|p| {
+            rest.len() > p.len()
+                && rest
+                    .get(..p.len())
+                    .is_some_and(|s| s.eq_ignore_ascii_case(p))
+        })?;
     let mut stop = rest
         .find(|c: char| c.is_whitespace() || c == '<')
         .unwrap_or(rest.len());

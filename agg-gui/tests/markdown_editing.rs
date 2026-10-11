@@ -16,6 +16,8 @@ mod rich_markdown_parser_tests;
 mod rich_markdown_writer_code_table_tests;
 #[path = "markdown_editing/rich_markdown_writer_tests.rs"]
 mod rich_markdown_writer_tests;
+#[path = "markdown_editing/rust_only_parser_inline_tests.rs"]
+mod rust_only_parser_inline_tests;
 #[path = "markdown_editing/rust_only_pipe_table_tests.rs"]
 mod rust_only_pipe_table_tests;
 #[path = "markdown_editing/rust_only_writer_group_tests.rs"]

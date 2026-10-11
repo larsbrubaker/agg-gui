@@ -56,7 +56,7 @@ pub mod inlines;
 pub mod markdown_parser;
 pub mod markdown_writer;
 mod parse_tree;
-mod parser_inlines;
+pub(crate) mod parser_inlines;
 pub(crate) mod pipe_tables;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};

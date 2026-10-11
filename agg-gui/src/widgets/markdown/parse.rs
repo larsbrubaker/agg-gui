@@ -4,12 +4,15 @@
 //! intermediate model consumed by the layout pass in the parent widget module.
 //! Emphasis and paired HTML style tags set the style of the text between
 //! them (`emphasis.rs`), so text is flushed into a new item at each change.
-//! Pipe tables are the ones Markdig finds (`markdown_editing::pipe_tables`
+//! Markdig's extensions pulldown-cmark leaves as text (`^sup^`, bare links)
+//! are split out of each text event by `extensions.rs`.  Pipe tables are the
+//! ones Markdig finds (`markdown_editing::pipe_tables`
 //! rewrites the source before pulldown-cmark reads it).
 
 use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 
 use super::emphasis::{pair_style_tags, CellSpan, CellStyles, HtmlStyle, StyleStack};
+use super::extensions;
 use super::{InlineItem, LineStyle, MarkdownRunStyle, MarkdownView, ParagraphItem};
 
 impl MarkdownView {
@@ -18,7 +21,7 @@ impl MarkdownView {
     }
 }
 
-fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
+pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut out = Vec::new();
     let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
     // Pipe tables as Markdig finds them, so a file reads as the same tables it did in MarkdigAgg.
@@ -154,21 +157,35 @@ fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
         }
 
         if let Some(cell) = table_cell.as_mut() {
-            let before = cell.len();
-            match &ev {
-                MdEvent::Text(t) => append_text(cell, t),
-                MdEvent::Code(t) => append_text(cell, t),
-                MdEvent::SoftBreak | MdEvent::HardBreak => cell.push(' '),
-                _ => {}
-            }
-            let style = styles.style();
-            if cell.len() > before && style != MarkdownRunStyle::default() {
-                let start = before + (cell.len() - before - cell[before..].trim_start().len());
-                cell_spans.push(CellSpan {
-                    start,
-                    end: cell.len(),
-                    style,
-                });
+            // Each piece of the event with its style: an extension span (`==x==`) is bold.
+            let segments: Vec<(String, MarkdownRunStyle)> = match &ev {
+                MdEvent::Text(t) => extensions::pieces(t, styles.style(), None)
+                    .into_iter()
+                    .map(|piece| {
+                        let style = piece
+                            .extension
+                            .map_or(styles.style(), |extension| extension.style);
+                        (piece.text, style)
+                    })
+                    .collect(),
+                MdEvent::Code(t) => vec![(t.to_string(), styles.style())],
+                MdEvent::SoftBreak | MdEvent::HardBreak => {
+                    cell.push(' ');
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            };
+            for (text, style) in segments {
+                let before = cell.len();
+                append_text(cell, &text);
+                if cell.len() > before && style != MarkdownRunStyle::default() {
+                    let start = before + (cell.len() - before - cell[before..].trim_start().len());
+                    cell_spans.push(CellSpan {
+                        start,
+                        end: cell.len(),
+                        style,
+                    });
+                }
             }
             if matches!(
                 ev,
@@ -487,7 +504,29 @@ fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 );
                 out.push(ParagraphItem::Rule);
             }
-            MdEvent::Text(t) => append_text(&mut cur_text, &t),
+            MdEvent::Text(t) => {
+                for piece in extensions::pieces(&t, styles.style(), link.as_deref()) {
+                    let Some(extension) = piece.extension else {
+                        append_text(&mut cur_text, &piece.text);
+                        continue;
+                    };
+                    flush_text(
+                        &mut cur_items,
+                        &mut cur_text,
+                        link.clone(),
+                        styles.style(),
+                        &mut prev_trail,
+                    );
+                    cur_text.push_str(&piece.text);
+                    flush_text(
+                        &mut cur_items,
+                        &mut cur_text,
+                        extension.link,
+                        extension.style,
+                        &mut prev_trail,
+                    );
+                }
+            }
             MdEvent::Code(t) => flush_code(
                 &mut cur_items,
                 &mut cur_text,

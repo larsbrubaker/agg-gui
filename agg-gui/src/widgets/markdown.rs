@@ -51,6 +51,9 @@ mod block_scroll;
 mod emphasis;
 mod event;
 #[cfg(test)]
+mod extension_tests;
+mod extensions;
+#[cfg(test)]
 mod feature_rendering_tests;
 mod image_context;
 mod image_loader;
