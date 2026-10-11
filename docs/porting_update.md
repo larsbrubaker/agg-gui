@@ -65,7 +65,7 @@ Notes:
 - The unified acquire policy is a strict superset of the old copies: `Lost`/`Outdated` reconfigure and retry once, then fall back to a requested redraw; `Timeout` skips the frame **and requests a redraw**; `Occluded`/`Validation` skip without spinning. Surface sizes are clamped to `max_texture_dimension_2d` on every configure.
 - Public config/enum types are `#[non_exhaustive]` — construct via `GpuConfig::new(..)` + `with_*` builders, and put a `_ =>` arm in matches over `SurfaceAcquire` / `GpuInitError`.
 - **`reflect` is opt-in.** If you use the inspector's typed editors, enable `features = ["reflect"]`; otherwise you just lost the `bevy_reflect` compile time for free.
-- **MSRV is 1.87** (wgpu 29's requirement).
+- **MSRV is 1.88** (agg-rust's requirement; wgpu 29 alone needs 1.87).
 
 ### 3. Copy the dev-profile settings (once per workspace)
 

@@ -2,7 +2,8 @@
 name = "agg-gui"
 version = "0.5.1"
 edition = "2021"
-rust-version = "1.70"
+# agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
+rust-version = "1.88"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 license = "MIT"
 description = "Immediate-mode Rust GUI library with AGG rendering, Y-up layout, widgets, text, SVG, and native/WASM adapters"
@@ -39,7 +40,7 @@ web-time = "1"
 pulldown-cmark = "0.11"
 png = "0.17"
 qrcodegen = "1.8"
-usvg = "0.45.1"
+usvg = "0.48.1"
 image = "0.24"
 base64 = "0.22.1"
 
@@ -118,3 +119,13 @@ web-sys = { version = "0.3.82", features = [
     "OffscreenCanvas",
     "OffscreenCanvasRenderingContext2d",
 ] }
+
+# Lints that only fire once rust-version reaches the release that stabilised
+# their suggestion (Option::is_none_or 1.82, is_multiple_of 1.87, as_chunks
+# 1.88). Raising the MSRV from 1.70 to 1.88 surfaced ~90 such sites across the
+# crate; adopting the suggestions is a crate-wide mechanical sweep left to its
+# own step so it does not collide with concurrent widget branches.
+[lints.clippy]
+chunks_exact_to_as_chunks = "allow"
+unnecessary_map_or = "allow"
+manual_is_multiple_of = "allow"

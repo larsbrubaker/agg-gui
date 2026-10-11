@@ -86,6 +86,9 @@ pub struct RadialGradientPaint {
     pub r: f64,
     pub fx: f64,
     pub fy: f64,
+    /// SVG 2's focal radius: the ramp starts (t = 0) on the circle of this
+    /// radius around (fx, fy) rather than at the focal point. 0 for SVG 1.1.
+    pub fr: f64,
     pub transform: TransAffine,
     pub spread: GradientSpread,
     pub stops: Vec<GradientStop>,
@@ -101,6 +104,7 @@ impl RadialGradientPaint {
             r,
             fx: cx,
             fy: cy,
+            fr: 0.0,
             transform: TransAffine::default(),
             spread: GradientSpread::Pad,
             stops: stops
@@ -124,10 +128,11 @@ impl RadialGradientPaint {
         let dy = y - self.fy;
         let fx = self.fx - self.cx;
         let fy = self.fy - self.cy;
-        if self.r > f64::EPSILON && fx * fx + fy * fy >= self.r * self.r {
-            // A focus on or outside the circle: draw the two-point cone, leaving
-            // what no circle of it reaches unpainted (see `focal_cone_t`).
-            return match focal_cone_t(dx, dy, -fx, -fy, self.r) {
+        if self.r > f64::EPSILON && (self.fr > 0.0 || fx * fx + fy * fy >= self.r * self.r) {
+            // A focal circle, or a focus on or outside the circle: draw the
+            // two-point cone, leaving what no circle of it reaches unpainted
+            // (see `focal_cone_t`).
+            return match focal_cone_t(dx, dy, -fx, -fy, self.r, self.fr) {
                 Some(t) => sample_stops(&self.stops, apply_spread(t, self.spread)),
                 None => Color::transparent(),
             };
@@ -150,21 +155,24 @@ impl RadialGradientPaint {
     }
 }
 
-/// The gradient position of a point of a radial gradient whose focus lies on
-/// or outside its circle, drawn as the two-point cone resvg (and canvas) draw:
-/// the circles grow from the focus (radius 0 at t = 0) to the gradient circle
-/// (t = 1), and a point takes the largest t whose circle, with a radius not
-/// below 0, passes through it. `None` where no circle reaches the point, which
-/// stays unpainted rather than the focus being pulled inside the circle. Ports
-/// agg-sharp's `SvgFocalCone.Solve` with fr = 0 (usvg 0.45 has no `fr`):
-/// q = p - f, e = c - f, solving a t^2 - 2 b t + k = 0 where a = e.e - r^2,
-/// b = q.e and k = q.q.
-fn focal_cone_t(qx: f64, qy: f64, ex: f64, ey: f64, r: f64) -> Option<f64> {
-    let a = ex * ex + ey * ey - r * r;
-    let b = qx * ex + qy * ey;
-    let k = qx * qx + qy * qy;
+/// The gradient position of a point of a radial gradient drawn as the
+/// two-point cone resvg (and canvas) draw, used when the focus is on or
+/// outside the circle or SVG 2's `fr` gives the focus a circle of its own: the
+/// circles grow from the focal circle (radius fr at t = 0) to the gradient
+/// circle (radius r at t = 1), and a point takes the largest t whose circle,
+/// with a radius not below 0, passes through it. `None` where no circle
+/// reaches the point, which stays unpainted rather than the focus being pulled
+/// inside the circle. Ports agg-sharp's `SvgFocalCone.Solve`: it solves
+/// |q - t e| = fr + t dr with q = p - f, e = c - f and dr = r - fr, i.e.
+/// a t^2 - 2 b t + k = 0 where a = e.e - dr^2, b = q.e + fr dr and
+/// k = q.q - fr^2.
+fn focal_cone_t(qx: f64, qy: f64, ex: f64, ey: f64, r: f64, fr: f64) -> Option<f64> {
+    let dr = r - fr;
+    let a = ex * ex + ey * ey - dr * dr;
+    let b = qx * ex + qy * ey + fr * dr;
+    let k = qx * qx + qy * qy - fr * fr;
     if a.abs() <= 1e-9 * r * r {
-        // The focus sits on the circle: one root.
+        // The focal circle touches the gradient circle from inside: one root.
         if k == 0.0 {
             return Some(0.0);
         }
@@ -172,7 +180,7 @@ fn focal_cone_t(qx: f64, qy: f64, ex: f64, ey: f64, r: f64) -> Option<f64> {
             return None;
         }
         let t = k / (2.0 * b);
-        return if t * r >= 0.0 { Some(t) } else { None };
+        return if fr + t * dr >= 0.0 { Some(t) } else { None };
     }
     let discriminant = b * b - a * k;
     if discriminant < 0.0 {
@@ -181,11 +189,11 @@ fn focal_cone_t(qx: f64, qy: f64, ex: f64, ey: f64, r: f64) -> Option<f64> {
     let root = discriminant.sqrt();
     let (t1, t2) = ((b + root) / a, (b - root) / a);
     let t = t1.max(t2);
-    if t * r >= 0.0 {
+    if fr + t * dr >= 0.0 {
         return Some(t);
     }
     let t = t1.min(t2);
-    if t * r >= 0.0 {
+    if fr + t * dr >= 0.0 {
         Some(t)
     } else {
         None

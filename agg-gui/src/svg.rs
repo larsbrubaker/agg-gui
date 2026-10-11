@@ -197,6 +197,7 @@ fn parse_svg_tree(data: &[u8], resources_dir: Option<&Path>) -> Result<usvg::Tre
 pub fn parse_svg(data: &[u8], svg_options: &SvgParseOptions) -> Result<usvg::Tree, SvgRenderError> {
     let mut options = usvg::Options {
         resources_dir: svg_options.resources_dir.clone(),
+        image_href_resolver: nested_image::image_href_resolver(),
         ..Default::default()
     };
     if let Some(font_family) = &svg_options.font_family {
@@ -650,6 +651,7 @@ mod clip;
 mod font_defaults;
 mod image_resample;
 mod mask;
+mod nested_image;
 #[cfg(test)]
 mod mask_tests;
 mod paint;

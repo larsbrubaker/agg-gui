@@ -357,13 +357,7 @@ fn geometry_crossing_the_buffer_edge_is_rasterized_as_if_unclipped() {
 }
 
 /// An extreme coordinate clips rather than overflowing the rasterizer.
-///
-/// agg-rust workaround: ignored until agg-rust's `RasterizerSlClipInt`
-/// computes its clip differences (`x2 - x1`, `y2 - y1`) without `i32`
-/// overflow; a 1e12 coordinate upscales to a saturated `i32::MIN/MAX` and
-/// the subtraction panics in an overflow-checked build.
 #[test]
-#[ignore = "agg-rust: rasterizer_sl_clip overflows i32 on saturated coordinates (upstream fix pending)"]
 fn extreme_coordinates_clip_instead_of_overflowing_the_rasterizer() {
     let huge = 1e12;
     let mut everywhere = LcdMaskBuilder::new(4, 3);

@@ -123,7 +123,7 @@ fn missing_size_is_the_images_own() {
 }
 
 #[test]
-#[ignore = "usvg 0.45 drops image-rendering's CSS values (smooth, high-quality, crisp-edges, pixelated) given as an XML attribute (svgtree/parse.rs), so the image arrives as optimizeQuality; rust_only_pixelated_image_rendering_in_a_style_is_not_smoothed covers the renderer"]
+#[ignore = "usvg (0.45 through 0.48) drops image-rendering's CSS values (smooth, high-quality, crisp-edges, pixelated) given as an XML attribute (svgtree/parse.rs), so the image arrives as optimizeQuality; rust_only_pixelated_image_rendering_in_a_style_is_not_smoothed covers the renderer"]
 fn pixelated_image_rendering_is_not_smoothed() {
     // 2x2 over 100x100: x 45 is inside the red texel but near enough blue that smoothing blends it.
     let smooth = render(&format!(

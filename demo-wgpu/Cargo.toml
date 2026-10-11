@@ -2,6 +2,8 @@
 name = "demo-wgpu"
 version = "0.1.0"
 edition = "2021"
+# agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
+rust-version = "1.88"
 description = "Platform shells (winit / browser canvas) and wgpu demo widgets on top of the agg-gui-wgpu renderer"
 publish = false
 

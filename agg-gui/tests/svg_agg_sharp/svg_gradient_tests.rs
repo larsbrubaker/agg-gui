@@ -149,7 +149,6 @@ fn equal_offsets_at_the_start_keep_the_first_stop_for_the_padded_area() {
 }
 
 #[test]
-#[ignore = "SVG 2's fr reaches the renderer only from usvg 0.48, whose MSRV (1.85) is above agg-gui's (1.70)"]
 fn a_focal_radius_starts_the_ramp_at_its_circle() {
     // SVG 2's fr: the ramp runs from the focal circle (radius 20) out to r (50); inside it is the first stop.
     let gradient = |fr: &str| {

@@ -2,8 +2,8 @@
 name = "agg-gui-wgpu"
 version = "0.5.3"
 edition = "2021"
-# wgpu 29 requires 1.87, and this crate uses `u32::div_ceil` (stable 1.73).
-rust-version = "1.87"
+# agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
+rust-version = "1.88"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 license = "MIT"
 description = "Hardware-accelerated wgpu renderer for agg-gui — DrawCtx via Vulkan/DX12/Metal/WebGL2, with SSAA, screenshot capture, and a custom render-pass hook"
@@ -51,3 +51,9 @@ pollster = "0.3"
 [target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
 version = "29"
 features = ["webgl"]
+
+# as_chunks (stable 1.88) became suggestable when rust-version reached 1.88;
+# adopting it is left to the same crate-wide sweep as agg-gui's (see its
+# [lints.clippy]).
+[lints.clippy]
+chunks_exact_to_as_chunks = "allow"

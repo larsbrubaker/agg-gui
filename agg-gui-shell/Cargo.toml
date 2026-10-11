@@ -2,8 +2,8 @@
 name = "agg-gui-shell"
 version = "0.5.2"
 edition = "2021"
-# Matches agg-gui-wgpu: wgpu 29 requires 1.87.
-rust-version = "1.87"
+# agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
+rust-version = "1.88"
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 license = "MIT"
 description = "Turn-key native shell for agg-gui — winit event loop, wgpu present, input forwarding, window-bounds persistence, and device-loss recovery"
