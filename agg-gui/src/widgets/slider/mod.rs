@@ -380,7 +380,9 @@ impl Slider {
         if v.is_nan() {
             return;
         }
-        self.props.value = self.commit(v);
+        // A value set in code is not an edit: `Edits` clamping leaves it
+        // intact (the thumb pins to the end), as `SliderClamping::Edits` says.
+        self.props.value = self.commit_with(v, self.clamping == SliderClamping::Always);
         if let Some(cell) = &self.value_cell {
             cell.set(self.props.value);
         }
@@ -460,11 +462,17 @@ impl Slider {
     /// Rejects `NaN` outright (returning the current value) so a single bad
     /// input can never poison the stored state — see also `set_value` and the
     /// value-cell read in `layout`.
-    fn commit(&self, mut value: f64) -> f64 {
+    fn commit(&self, value: f64) -> f64 {
+        self.commit_with(value, self.clamping != SliderClamping::Never)
+    }
+
+    /// [`Self::commit`] with the clamp decided by the caller: interactive
+    /// edits clamp unless `Never`, values set in code only under `Always`.
+    fn commit_with(&self, mut value: f64, clamp: bool) -> f64 {
         if value.is_nan() {
             return self.props.value;
         }
-        if self.clamping != SliderClamping::Never {
+        if clamp {
             value = clamp_value_to_range(value, self.props.min, self.props.max);
         }
         // Step-snapping only makes sense with a finite step *and* a finite
@@ -716,8 +724,11 @@ impl Widget for Slider {
                     _ => 0.0,
                 };
                 if dir != 0.0 {
+                    // A key step is a whole edit: a change and then a release,
+                    // so apps that commit on release (an undo step) see it.
                     self.props.value = self.nudge(dir);
                     self.fire();
+                    self.fire_release();
                     crate::animation::request_draw();
                     EventResult::Consumed
                 } else {
@@ -759,3 +770,6 @@ mod tests;
 
 #[cfg(test)]
 mod style_tests;
+
+#[cfg(test)]
+mod slider_math_tests;
