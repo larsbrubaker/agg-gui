@@ -71,6 +71,9 @@ pub struct RichMarkdownEditWidget {
     pub(super) auto_scroll_due: Option<Instant>,
     /// Set by the state's focus requests (a press, the toolbar's `FocusText`).
     pub(super) focus_wanted: Rc<Cell<bool>>,
+    /// The widget's id on agg-gui's focus channel: a focus request asks the
+    /// `App` to focus it at its next layout (C#'s `Focus()`).
+    pub(super) focus_id: crate::focus::FocusId,
 }
 
 impl RichMarkdownEditWidget {
@@ -96,7 +99,11 @@ impl RichMarkdownEditWidget {
         }));
         let focus_wanted = Rc::new(Cell::new(false));
         let wanted = Rc::clone(&focus_wanted);
-        state.on_focus_requested(Box::new(move || wanted.set(true)));
+        let focus_id = super::format_toolbar::next_focus_id();
+        state.on_focus_requested(Box::new(move || {
+            wanted.set(true);
+            crate::focus::request_focus(focus_id);
+        }));
         let mut base = WidgetBase::new();
         base.h_anchor = HAnchor::STRETCH;
         base.v_anchor = VAnchor::STRETCH;
@@ -115,6 +122,7 @@ impl RichMarkdownEditWidget {
             seen_placements,
             auto_scroll_due: None,
             focus_wanted,
+            focus_id,
         }
     }
 
@@ -296,7 +304,9 @@ impl RichMarkdownEditWidget {
     }
 
     /// Whether a press or the toolbar has asked for focus since the last
-    /// call (C#'s `Focus()`); the host focuses the editor when it has.
+    /// call (C#'s `Focus()`).  Each request also goes to agg-gui's focus
+    /// channel ([`crate::focus::request_focus`] with [`Widget::focus_id`]),
+    /// so the `App` focuses the editor at its next layout.
     pub fn take_focus_request(&self) -> bool {
         self.focus_wanted.replace(false)
     }

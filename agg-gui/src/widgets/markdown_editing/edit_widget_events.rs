@@ -338,6 +338,10 @@ impl Widget for RichMarkdownEditWidget {
         true
     }
 
+    fn focus_id(&self) -> Option<crate::focus::FocusId> {
+        Some(self.focus_id)
+    }
+
     fn accepts_text_input(&self) -> bool {
         true
     }

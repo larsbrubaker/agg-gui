@@ -90,6 +90,13 @@
 //!   its events, scroll bar, auto-scroll and painting, [`raw_hosts`] the Raw
 //!   blocks' rendered hosts and [`image_cache`] its images
 //!   (`RichImageCache.cs`).
+//! * [`format_toolbar`] — [`MarkdownFormatToolbar`], the formatting strip
+//!   acting through [`RichEditCommands`] (`MarkdownFormatToolbar.cs`), with
+//!   `format_toolbar_widgets` its buttons, groups and size list
+//!   (`MarkdownFormatButton.cs`, `MarkdownFormatGroup.cs`) and [`link_editor`]
+//!   its link row (`MarkdownLinkEditor.cs`).
+//! * [`rich_markdown_editor`] — [`RichMarkdownEditor`], the toolbar over the
+//!   editing widget (`RichMarkdownEditor.cs`).
 //!
 //! # Offsets
 //!
@@ -122,6 +129,8 @@ mod editor_keyboard;
 pub mod editor_mouse;
 pub mod editor_state;
 mod escaping;
+pub mod format_toolbar;
+mod format_toolbar_widgets;
 mod group_repair;
 pub mod group_writer;
 pub mod groups;
@@ -133,6 +142,7 @@ pub mod inlines;
 mod layout_items;
 pub mod layout_line;
 pub mod layout_style;
+pub mod link_editor;
 mod mark_class;
 pub mod markdown_parser;
 pub mod markdown_writer;
@@ -142,6 +152,7 @@ mod paste_insert;
 pub mod paste_operations;
 pub(crate) mod pipe_tables;
 pub mod raw_hosts;
+pub mod rich_markdown_editor;
 pub mod selection;
 pub mod style_operations;
 pub mod table_code_operations;
@@ -160,6 +171,11 @@ pub use edit_error::RichEditError;
 pub use edit_history::{RichEditHistory, RichEditKind};
 pub use edit_widget::{colors_for, RichMarkdownEditWidget};
 pub use editor_state::{RichEditorState, RichRawLinkLookup, RichStyleBuilder, SCROLL_BAR_ROOM};
+pub use format_toolbar::{
+    MarkdownFormatButtonKind, MarkdownFormatButtonState, MarkdownFormatToolbar,
+    MarkdownLinkRequestHandler,
+};
+pub use format_toolbar_widgets::{MarkdownFormatButton, MarkdownFormatGroup};
 pub use groups::shared as shared_group;
 pub use groups::{
     RichAlignGroup, RichAlignGroupRef, RichListGroup, RichListGroupRef, RichQuoteGroup,
@@ -172,6 +188,8 @@ pub use inline_writer::RichInlineContext;
 pub use inlines::OffsetOutOfRange;
 pub use layout_line::{RichCaret, RichCaretStop, RichLayoutFragment, RichLayoutLine};
 pub use layout_style::{RichFace, RichLayoutFonts, RichLayoutStyle, RichThemeColors};
+pub use link_editor::{with_scheme, MarkdownLinkEditor};
 pub use raw_hosts::{RichRawHost, RichRawHosts};
+pub use rich_markdown_editor::RichMarkdownEditor;
 pub use selection::RichSelection;
 pub use table_layout::{RichTableCellLayout, RichTableGridSnap, RichTableLayout};
