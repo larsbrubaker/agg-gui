@@ -133,6 +133,7 @@ mod tree_view_ellipsis;
 mod tree_view_perf;
 mod tree_view_tooltip;
 mod under_mouse_state;
+mod wheel_occlusion_routing;
 mod widget_cursors;
 mod widget_enabled;
 mod widget_names;
