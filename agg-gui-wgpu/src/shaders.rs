@@ -126,7 +126,7 @@ struct GradientUniforms {
     line: vec4<f32>,
     radial: vec4<f32>,
     focal: vec2<f32>,
-    pad1: vec2<f32>,
+    cone: vec2<f32>,
     screen_inv_a: vec4<f32>,
     screen_inv_b: vec2<f32>,
     pad2: vec2<f32>,
@@ -179,27 +179,75 @@ fn linear_t(p: vec2<f32>) -> f32 {
     return dot(p - a, d) / len2;
 }
 
+// Mirrors agg-gui's `RadialGradientPaint::sample` (paints.rs) term for term.
+// u.radial = [cx, cy, r, fr]; u.cone = [a, mode], both decided on the CPU in
+// f64 (`gradient::radial_cone_mode`): mode 0 = focus inside the circle with
+// no fr (the classic focal solve), 1 = the two-point cone, 2 = the cone whose
+// focal circle touches the gradient circle (a ~ 0, one root).
+const F64_EPSILON: f32 = 2.220446049250313e-16;
+
 fn radial_t(p: vec2<f32>) -> f32 {
     let c = u.radial.xy;
-    let r = max(u.radial.z, 0.000001);
+    let r = u.radial.z;
     let f = u.focal;
     let dv = p - f;
     let fc = f - c;
     let A = dot(dv, dv);
-    if A <= 0.000001 { return 0.0; }
-    let B = 2.0 * dot(fc, dv);
-    let C = dot(fc, fc) - r * r;
-    let disc = max(B*B - 4.0*A*C, 0.0);
+    if A <= F64_EPSILON || r <= F64_EPSILON { return 0.0; }
+    let B = 2.0 * (fc.x * dv.x + fc.y * dv.y);
+    let C = fc.x * fc.x + fc.y * fc.y - r * r;
+    let disc = max(B * B - 4.0 * A * C, 0.0);
     let k = (-B + sqrt(disc)) / (2.0 * A);
-    if k > 0.000001 { return 1.0 / k; }
+    if k > F64_EPSILON { return 1.0 / k; }
     return 0.0;
+}
+
+// `focal_cone_t`: |q - t e| = fr + t dr with q = p - f, e = c - f and
+// dr = r - fr. Returns (t, 1) or (0, 0) where no circle reaches the point.
+fn focal_cone_t(p: vec2<f32>) -> vec2<f32> {
+    let r = u.radial.z;
+    let fr = u.radial.w;
+    let q = p - u.focal;
+    let e = u.radial.xy - u.focal;
+    let dr = r - fr;
+    let a = u.cone.x;
+    let b = q.x * e.x + q.y * e.y + fr * dr;
+    let k = q.x * q.x + q.y * q.y - fr * fr;
+    if u.cone.y > 1.5 {
+        if k == 0.0 { return vec2<f32>(0.0, 1.0); }
+        if b == 0.0 { return vec2<f32>(0.0, 0.0); }
+        let t = k / (2.0 * b);
+        if fr + t * dr >= 0.0 { return vec2<f32>(t, 1.0); }
+        return vec2<f32>(0.0, 0.0);
+    }
+    let discriminant = b * b - a * k;
+    if discriminant < 0.0 { return vec2<f32>(0.0, 0.0); }
+    let root = sqrt(discriminant);
+    let t1 = (b + root) / a;
+    let t2 = (b - root) / a;
+    let hi = max(t1, t2);
+    if fr + hi * dr >= 0.0 { return vec2<f32>(hi, 1.0); }
+    let lo = min(t1, t2);
+    if fr + lo * dr >= 0.0 { return vec2<f32>(lo, 1.0); }
+    return vec2<f32>(0.0, 0.0);
 }
 
 @fragment fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     var p = aff(u.screen_inv_a, u.screen_inv_b, in.v_pos);
     p = aff(u.gradient_inv_a, u.gradient_inv_b, p);
     var t: f32;
-    if u.kind == 1u { t = radial_t(p); } else { t = linear_t(p); }
+    if u.kind == 1u {
+        if u.cone.y > 0.5 {
+            let solved = focal_cone_t(p);
+            // No circle of the cone reaches this point: leave it unpainted.
+            if solved.y < 0.5 { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+            t = solved.x;
+        } else {
+            t = radial_t(p);
+        }
+    } else {
+        t = linear_t(p);
+    }
     let tc = apply_spread(t);
     let c = textureSample(u_ramp, u_sampler, vec2<f32>(tc, 0.5));
     return vec4<f32>(c.rgb, c.a * in.v_alpha * u.global_alpha);

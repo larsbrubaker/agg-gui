@@ -117,6 +117,28 @@ impl RadialGradientPaint {
         }
     }
 
+    /// Whether [`sample`](Self::sample) draws this gradient as the two-point
+    /// cone (`focal_cone_t`): a focal circle (`fr > 0`) or a focus on or
+    /// outside the circle. Otherwise it takes the classic focal solve.
+    pub fn uses_focal_cone(&self) -> bool {
+        let fx = self.fx - self.cx;
+        let fy = self.fy - self.cy;
+        self.r > f64::EPSILON && (self.fr > 0.0 || fx * fx + fy * fy >= self.r * self.r)
+    }
+
+    /// The cone quadratic's leading coefficient `a = e.e - dr^2` (see
+    /// `focal_cone_t`) and whether it counts as zero (the focal circle
+    /// touching the gradient circle from inside, one root), when the gradient
+    /// draws as the cone. Computed in f64 so a GPU backend solving the
+    /// per-pixel terms in f32 makes the same branch choice as `sample`.
+    pub fn focal_cone_coefficient(&self) -> Option<(f64, bool)> {
+        if !self.uses_focal_cone() {
+            return None;
+        }
+        let a = focal_cone_a(self.cx - self.fx, self.cy - self.fy, self.r, self.fr);
+        Some((a, focal_cone_touches(a, self.r)))
+    }
+
     pub fn sample(&self, mut x: f64, mut y: f64) -> Color {
         if self.stops.is_empty() {
             return Color::transparent();
@@ -128,7 +150,7 @@ impl RadialGradientPaint {
         let dy = y - self.fy;
         let fx = self.fx - self.cx;
         let fy = self.fy - self.cy;
-        if self.r > f64::EPSILON && (self.fr > 0.0 || fx * fx + fy * fy >= self.r * self.r) {
+        if self.uses_focal_cone() {
             // A focal circle, or a focus on or outside the circle: draw the
             // two-point cone, leaving what no circle of it reaches unpainted
             // (see `focal_cone_t`).
@@ -168,10 +190,10 @@ impl RadialGradientPaint {
 /// k = q.q - fr^2.
 fn focal_cone_t(qx: f64, qy: f64, ex: f64, ey: f64, r: f64, fr: f64) -> Option<f64> {
     let dr = r - fr;
-    let a = ex * ex + ey * ey - dr * dr;
+    let a = focal_cone_a(ex, ey, r, fr);
     let b = qx * ex + qy * ey + fr * dr;
     let k = qx * qx + qy * qy - fr * fr;
-    if a.abs() <= 1e-9 * r * r {
+    if focal_cone_touches(a, r) {
         // The focal circle touches the gradient circle from inside: one root.
         if k == 0.0 {
             return Some(0.0);
@@ -198,6 +220,19 @@ fn focal_cone_t(qx: f64, qy: f64, ex: f64, ey: f64, r: f64, fr: f64) -> Option<f
     } else {
         None
     }
+}
+
+/// `a = e.e - dr^2` of `focal_cone_t`'s quadratic, with e = c - f and
+/// dr = r - fr.
+fn focal_cone_a(ex: f64, ey: f64, r: f64, fr: f64) -> f64 {
+    let dr = r - fr;
+    ex * ex + ey * ey - dr * dr
+}
+
+/// Whether `a` counts as zero: the focal circle touches the gradient circle
+/// from inside and the quadratic degenerates to one root.
+fn focal_cone_touches(a: f64, r: f64) -> bool {
+    a.abs() <= 1e-9 * r * r
 }
 
 /// Repeating raster pattern paint expressed in SVG/user drawing coordinates.

@@ -2,7 +2,9 @@
 //!
 //! Mirrors `demo-gl/src/gradient.rs`:  builds the 1-D ramp texture from SVG
 //! gradient stops and packs the affine/gradient uniforms into `GradientUniforms`
-//! for the `GradientPipeline` WGSL shader.
+//! for the `GradientPipeline` WGSL shader. The radial uniforms carry SVG 2's
+//! `fr` and the focal-cone branch `RadialGradientPaint::sample` takes, so the
+//! shader draws the same gradient as the software path.
 
 use bytemuck::{Pod, Zeroable};
 
@@ -20,9 +22,13 @@ pub(crate) struct GradientUniforms {
     pub resolution: [f32; 2],
     pub _pad0: [f32; 2],
     pub line: [f32; 4],   // [x1, y1, x2, y2]
-    pub radial: [f32; 4], // [cx, cy, r, 0]
+    pub radial: [f32; 4], // [cx, cy, r, fr]
     pub focal: [f32; 2],  // [fx, fy]
-    pub _pad1: [f32; 2],
+    /// `[a, mode]` of the radial solve, decided in f64 by
+    /// [`RadialGradientPaint::focal_cone_coefficient`]: mode 0 = the classic
+    /// focal solve, 1 = the two-point cone with leading coefficient `a`,
+    /// 2 = the cone whose `a` counts as zero (one root).
+    pub cone: [f32; 2],
     pub screen_inv_a: [f32; 4], // affine [sx, shy, shx, sy]
     pub screen_inv_b: [f32; 2], // affine [tx, ty]
     pub _pad2: [f32; 2],
@@ -120,7 +126,7 @@ pub(crate) fn build_linear_gradient_uniforms(
         ],
         radial: [0.0; 4],
         focal: [0.0; 2],
-        _pad1: [0.0; 2],
+        cone: [0.0; 2],
         screen_inv_a: si_a,
         screen_inv_b: si_b,
         _pad2: [0.0; 2],
@@ -130,6 +136,15 @@ pub(crate) fn build_linear_gradient_uniforms(
         spread: spread_to_u32(gradient.spread),
         global_alpha,
         _pad3: [0.0; 3],
+    }
+}
+
+/// The `cone` uniform pair for `gradient` (see [`GradientUniforms::cone`]).
+fn radial_cone(gradient: &RadialGradientPaint) -> [f32; 2] {
+    match gradient.focal_cone_coefficient() {
+        None => [0.0, 0.0],
+        Some((a, false)) => [a as f32, 1.0],
+        Some((_, true)) => [0.0, 2.0],
     }
 }
 
@@ -156,10 +171,10 @@ pub(crate) fn build_radial_gradient_uniforms(
             gradient.cx as f32,
             gradient.cy as f32,
             gradient.r as f32,
-            0.0,
+            gradient.fr as f32,
         ],
         focal: [gradient.fx as f32, gradient.fy as f32],
-        _pad1: [0.0; 2],
+        cone: radial_cone(gradient),
         screen_inv_a: si_a,
         screen_inv_b: si_b,
         _pad2: [0.0; 2],
