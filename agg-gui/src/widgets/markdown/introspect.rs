@@ -9,6 +9,7 @@
 //! widgets, so these answer from the items of the last `layout()` pass
 //! (`layout.rs`) and the selectable text model (`selection.rs`).
 
+use super::cell_images::images_of;
 use super::{LayoutItem, LineRun, MarkdownView};
 
 /// A block-level element of the laid-out document.
@@ -34,6 +35,9 @@ pub struct MarkdownTableCell {
     /// How much of that width shows inside the table's viewport at its
     /// current horizontal scroll (0 for a cell scrolled out of view).
     pub visible_width: f64,
+    /// The laid-out width of each image in the cell, in order (C#'s
+    /// `ImageLinkSimpleX.Width` of the cell's images).
+    pub image_widths: Vec<f64>,
 }
 
 impl MarkdownView {
@@ -107,6 +111,7 @@ impl MarkdownView {
             let LayoutItem::Table {
                 block_idx,
                 rows,
+                cell_images,
                 col_widths,
                 viewport_width,
                 ..
@@ -126,6 +131,10 @@ impl MarkdownView {
                         text: row.get(ci).cloned().unwrap_or_default(),
                         width: *width,
                         visible_width: visible.max(0.0),
+                        image_widths: images_of(cell_images, ri, ci)
+                            .iter()
+                            .map(|image| image.width)
+                            .collect(),
                     });
                     x += width;
                 }
@@ -136,16 +145,25 @@ impl MarkdownView {
     }
 
     /// The laid-out width of every image of the last layout, in document
-    /// order (a loaded image scaled to fit, or its placeholder).
+    /// order (a loaded image scaled to fit, or its placeholder), table cells'
+    /// images included, row by row.
     pub fn image_widths(&self) -> Vec<f64> {
         let mut widths = Vec::new();
         for item in &self.items {
-            if let LayoutItem::Line { runs, .. } = item {
-                for run in runs {
-                    if let LineRun::Image { width, .. } = run {
-                        widths.push(*width);
+            match item {
+                LayoutItem::Line { runs, .. } => {
+                    for run in runs {
+                        if let LineRun::Image { width, .. } = run {
+                            widths.push(*width);
+                        }
                     }
                 }
+                LayoutItem::Table { cell_images, .. } => {
+                    for image in cell_images.iter().flatten().flatten() {
+                        widths.push(image.width);
+                    }
+                }
+                LayoutItem::CodeBlock { .. } => {}
             }
         }
         widths

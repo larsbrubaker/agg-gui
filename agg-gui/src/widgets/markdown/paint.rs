@@ -3,6 +3,7 @@
 //! All drawing in this module uses the already laid-out Y-up row positions
 //! produced by `layout.rs`. Each text run draws in the face of its emphasis
 //! (`MarkdownView::run_font`, `emphasis.rs`), struck through when it is.
+//! Images, in a row or a table cell, draw through `cell_images.rs`.
 
 use std::sync::Arc;
 
@@ -10,11 +11,14 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::text::measure_text_metrics;
 
+use super::cell_images::{self, LaidCellImage};
 use super::{
-    emphasis, image_loader, is_rect_visible_in_root, matching, scrollbar_rect, scrollbar_thumb,
-    ImageState, LayoutItem, LineRun, LineStyle, MarkdownView, BLOCK_SCROLLBAR_GAP,
-    BLOCK_SCROLLBAR_H,
+    emphasis, matching, scrollbar_rect, scrollbar_thumb, LayoutItem, LineRun, LineStyle,
+    MarkdownView, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
+
+/// A table cell's text, emphasis spans and images.
+type CellContent<'a> = (&'a str, &'a [emphasis::CellSpan], &'a [LaidCellImage]);
 
 impl MarkdownView {
     pub(super) fn paint_markdown(&mut self, ctx: &mut dyn DrawCtx) {
@@ -149,69 +153,16 @@ impl MarkdownView {
                                         width,
                                         height,
                                     } => {
-                                        let rx = tx + x;
-                                        let ry = y + y_offset;
-                                        if let Some(entry) = self.image_cache.get(*cache_idx) {
-                                            if is_rect_visible_in_root(ctx, rx, ry, *width, *height)
-                                            {
-                                                let should_load = if let Ok(mut state) =
-                                                    entry.state.lock()
-                                                {
-                                                    if matches!(*state, ImageState::RemotePending) {
-                                                        *state = ImageState::Loading;
-                                                        true
-                                                    } else {
-                                                        false
-                                                    }
-                                                } else {
-                                                    false
-                                                };
-                                                if should_load {
-                                                    image_loader::load_remote_image(
-                                                        entry.url.clone(),
-                                                        std::sync::Arc::clone(&entry.state),
-                                                    );
-                                                }
-                                            }
-                                            let ready =
-                                                entry.state.lock().ok().and_then(|mut state| {
-                                                    match &mut *state {
-                                                        ImageState::Ready { image, seen } => {
-                                                            *seen = true;
-                                                            Some(image.clone())
-                                                        }
-                                                        _ => None,
-                                                    }
-                                                });
-                                            if let Some(image) = ready {
-                                                ctx.draw_image_rgba(
-                                                    image.data.as_slice(),
-                                                    image.width,
-                                                    image.height,
-                                                    rx,
-                                                    ry,
-                                                    *width,
-                                                    *height,
-                                                );
-                                            } else {
-                                                ctx.set_fill_color(Color::rgba(
-                                                    0.5, 0.5, 0.5, 0.15,
-                                                ));
-                                                ctx.begin_path();
-                                                ctx.rounded_rect(rx, ry, *width, *height, 3.0);
-                                                ctx.fill();
-                                                ctx.set_fill_color(v.text_dim);
-                                                ctx.set_font_size(self.font_size * 0.85);
-                                                let label = if alt.is_empty() {
-                                                    "image".to_string()
-                                                } else {
-                                                    alt.clone()
-                                                };
-                                                ctx.fill_text(&label, rx + 8.0, ry + height * 0.5);
-                                                ctx.set_font_size(fs);
-                                                ctx.set_fill_color(v.text_color);
-                                            }
-                                        }
+                                        self.paint_inline_image(
+                                            ctx,
+                                            *cache_idx,
+                                            alt,
+                                            tx + x,
+                                            y + y_offset,
+                                            *width,
+                                            *height,
+                                            fs,
+                                        );
                                     }
                                 }
                             }
@@ -229,15 +180,18 @@ impl MarkdownView {
                     block_idx,
                     rows,
                     cell_styles,
+                    cell_images,
                     header,
                     y,
                     height: _,
-                    row_h,
+                    row_heights,
                     col_widths,
                     viewport_width,
                     content_width,
                 } => {
                     let table_w: f64 = col_widths.iter().sum();
+                    let table_h: f64 = row_heights.iter().sum();
+                    let text_row_h = self.table_text_row_height();
                     let scroll_x = self.block_scroll_offset(*block_idx);
                     let scrollbar_h = if content_width > viewport_width {
                         BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP
@@ -246,50 +200,72 @@ impl MarkdownView {
                     };
                     let content_y = y + scrollbar_h;
                     ctx.save();
-                    ctx.clip_rect(pad, content_y, *viewport_width, row_h * rows.len() as f64);
+                    ctx.clip_rect(pad, content_y, *viewport_width, table_h);
                     ctx.translate(-scroll_x, 0.0);
-                    let mut cy = content_y + row_h * rows.len() as f64;
+                    let mut cy = content_y + table_h;
                     ctx.set_font_size(self.font_size);
                     for (ri, row) in rows.iter().enumerate() {
+                        let row_h = row_heights.get(ri).copied().unwrap_or(text_row_h);
                         cy -= row_h;
                         if ri == 0 && *header {
                             ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.10));
                             ctx.begin_path();
-                            ctx.rect(pad, cy, table_w, *row_h);
+                            ctx.rect(pad, cy, table_w, row_h);
                             ctx.fill();
                         }
+                        // The text row sits in the middle of a taller row.
+                        let text_cy = cy + (row_h - text_row_h) * 0.5;
                         let mut cx = pad;
                         for (ci, width) in col_widths.iter().enumerate() {
                             ctx.set_fill_color(v.separator);
                             ctx.begin_path();
-                            ctx.rect(cx, cy, 1.0, *row_h);
+                            ctx.rect(cx, cy, 1.0, row_h);
                             ctx.rect(cx, cy, *width, 1.0);
                             ctx.fill();
                             if let Some(text) = row.get(ci) {
                                 let spans = emphasis::cell_spans(cell_styles, ri, ci);
+                                let images = cell_images::images_of(cell_images, ri, ci);
                                 self.paint_cell_matches(
                                     ctx,
-                                    text,
-                                    spans,
+                                    (text, spans, images),
                                     cx + 8.0,
                                     cy,
-                                    *row_h,
+                                    row_h,
                                     v.accent,
                                 );
                                 ctx.set_fill_color(v.text_color);
-                                self.paint_cell_text(ctx, text, spans, cx + 8.0, cy + row_h * 0.36);
+                                self.paint_cell_text(
+                                    ctx,
+                                    (text, spans, images),
+                                    cx + 8.0,
+                                    text_cy + text_row_h * 0.36,
+                                );
                                 ctx.set_font(Arc::clone(&font));
+                                for (k, image) in images.iter().enumerate() {
+                                    let ix = cx + 8.0 + self.cell_image_x(text, spans, images, k);
+                                    let iy = cy + (row_h - image.height) * 0.5;
+                                    self.paint_inline_image(
+                                        ctx,
+                                        image.cache_idx,
+                                        &image.image.alt,
+                                        ix,
+                                        iy,
+                                        image.width,
+                                        image.height,
+                                        self.font_size,
+                                    );
+                                }
                             }
                             cx += width;
                         }
                         ctx.set_fill_color(v.separator);
                         ctx.begin_path();
-                        ctx.rect(pad + table_w, cy, 1.0, *row_h);
+                        ctx.rect(pad + table_w, cy, 1.0, row_h);
                         ctx.fill();
                     }
                     ctx.set_fill_color(v.separator);
                     ctx.begin_path();
-                    ctx.rect(pad, content_y + row_h * rows.len() as f64, table_w, 1.0);
+                    ctx.rect(pad, content_y + table_h, table_w, 1.0);
                     ctx.fill();
                     ctx.restore();
 
@@ -361,12 +337,10 @@ impl MarkdownView {
     /// whose text starts at `text_x`. Cells keep their measured widths, so the
     /// box's padding extends into the cell's own 8 px inset rather than
     /// shifting the text.
-    #[allow(clippy::too_many_arguments)]
     fn paint_cell_matches(
         &self,
         ctx: &mut dyn DrawCtx,
-        text: &str,
-        spans: &[emphasis::CellSpan],
+        (text, spans, images): CellContent<'_>,
         text_x: f64,
         cy: f64,
         row_h: f64,
@@ -376,8 +350,9 @@ impl MarkdownView {
             return;
         };
         for range in matching::match_ranges(text, needle) {
-            let x0 = self.cell_prefix_width(text, spans, range.start);
-            let w = self.cell_prefix_width(text, spans, range.end) - x0;
+            let x0 = self.cell_text_x(text, spans, images, range.start);
+            let w = self.cell_prefix_width(text, spans, range.end)
+                - self.cell_prefix_width(text, spans, range.start);
             ctx.set_fill_color(matching::match_fill(accent));
             ctx.begin_path();
             ctx.rect(
@@ -391,29 +366,34 @@ impl MarkdownView {
     }
 
     /// Draw a table cell's text piece by piece, each in its emphasis face,
-    /// from baseline-left `(x, y)`. The caller restores the font.
+    /// from baseline-left `(x, y)`, stepping over the cell's images. The
+    /// caller restores the font.
     fn paint_cell_text(
         &self,
         ctx: &mut dyn DrawCtx,
-        text: &str,
-        spans: &[emphasis::CellSpan],
+        (text, spans, images): CellContent<'_>,
         x: f64,
         y: f64,
     ) {
-        let mut pen = x;
-        for (range, style) in emphasis::cell_pieces(text, spans) {
-            let piece = &text[range];
-            let w = self.styled_text_width(piece, LineStyle::Body, style);
-            ctx.set_font(self.run_font(style));
-            ctx.fill_text(piece, pen, y);
-            if style.strikethrough {
-                let space = piece.len() - piece.trim_start().len();
-                let skip = self.styled_text_width(&piece[..space], LineStyle::Body, style);
-                let ink = piece.trim_end();
-                let ink_w = self.styled_text_width(ink, LineStyle::Body, style);
-                self.paint_strike(ctx, self.font_size, pen + skip, y, ink_w - skip);
+        for between in MarkdownView::cell_text_pieces(text, images) {
+            for (range, style) in emphasis::cell_pieces(text, spans) {
+                let start = range.start.max(between.start);
+                let end = range.end.min(between.end);
+                if start >= end {
+                    continue;
+                }
+                let piece = &text[start..end];
+                let pen = x + self.cell_text_x(text, spans, images, start);
+                ctx.set_font(self.run_font(style));
+                ctx.fill_text(piece, pen, y);
+                if style.strikethrough {
+                    let space = piece.len() - piece.trim_start().len();
+                    let skip = self.styled_text_width(&piece[..space], LineStyle::Body, style);
+                    let ink = piece.trim_end();
+                    let ink_w = self.styled_text_width(ink, LineStyle::Body, style);
+                    self.paint_strike(ctx, self.font_size, pen + skip, y, ink_w - skip);
+                }
             }
-            pen += w;
         }
     }
 

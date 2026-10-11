@@ -9,9 +9,12 @@
 //! ones Markdig finds (`markdown_editing::pipe_tables`
 //! rewrites the source before pulldown-cmark reads it), and grid tables are
 //! read as Markdig reads them (`grid_tables.rs`, rewriting them as pipe tables).
+//! An image in a table cell stays in its cell, at its place in the cell's
+//! text (`cell_images.rs`), as in MarkdigAgg's `AggTableCell`.
 
 use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 
+use super::cell_images::{CellImage, CellImages};
 use super::emphasis::{pair_style_tags, CellSpan, CellStyles, HtmlStyle, StyleStack};
 use super::extensions;
 use super::{InlineItem, LineStyle, MarkdownRunStyle, MarkdownView, ParagraphItem};
@@ -49,6 +52,9 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut table_styles: Option<CellStyles> = None;
     let mut row_styles: Option<Vec<Vec<CellSpan>>> = None;
     let mut cell_spans: Vec<CellSpan> = Vec::new();
+    let mut table_images: Option<CellImages> = None;
+    let mut row_images: Option<Vec<Vec<CellImage>>> = None;
+    let mut cell_images: Vec<CellImage> = Vec::new();
 
     let mut cur_items = Vec::new();
     let mut cur_text = String::new();
@@ -172,7 +178,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
             }
         }
 
-        if let Some(cell) = table_cell.as_mut() {
+        if let Some(cell) = table_cell.as_mut().filter(|_| in_image.is_none()) {
             // Each piece of the event with its style: an extension span (`==x==`) is bold.
             let segments: Vec<(String, MarkdownRunStyle)> = match &ev {
                 MdEvent::Text(t) => {
@@ -243,12 +249,22 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 if let Some(url) = in_image.take() {
                     let alt = cur_text.trim().to_string();
                     cur_text.clear();
-                    cur_items.push(InlineItem::Image {
-                        url,
-                        alt,
-                        link: link.clone(),
-                    });
-                    prev_trail = true;
+                    if let Some(cell) = table_cell.as_ref() {
+                        // A cell keeps its images where they sit in its text.
+                        cell_images.push(CellImage {
+                            at: cell.len(),
+                            url,
+                            alt,
+                            link: link.clone(),
+                        });
+                    } else {
+                        cur_items.push(InlineItem::Image {
+                            url,
+                            alt,
+                            link: link.clone(),
+                        });
+                        prev_trail = true;
+                    }
                 }
             }
             MdEvent::Text(t) if in_image.is_some() => cur_text.push_str(&t),
@@ -317,6 +333,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 );
                 table = Some(Vec::new());
                 table_styles = Some(Vec::new());
+                table_images = Some(Vec::new());
                 table_header = !headerless.contains(&event_ranges[idx].start);
             }
             MdEvent::End(TagEnd::Table) => {
@@ -324,6 +341,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                     out.push(ParagraphItem::Table {
                         rows,
                         cell_styles: table_styles.take().unwrap_or_default(),
+                        cell_images: table_images.take().unwrap_or_default(),
                         header: table_header,
                     });
                     add_spacer(&mut out);
@@ -334,6 +352,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
             MdEvent::Start(Tag::TableRow | Tag::TableHead) => {
                 table_row = Some(Vec::new());
                 row_styles = Some(Vec::new());
+                row_images = Some(Vec::new());
             }
             MdEvent::End(TagEnd::TableRow | TagEnd::TableHead) => {
                 if let (Some(rows), Some(row)) = (table.as_mut(), table_row.take()) {
@@ -341,11 +360,15 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                     if let Some(all) = table_styles.as_mut() {
                         all.push(row_styles.take().unwrap_or_default());
                     }
+                    if let Some(all) = table_images.as_mut() {
+                        all.push(row_images.take().unwrap_or_default());
+                    }
                 }
             }
             MdEvent::Start(Tag::TableCell) => {
                 table_cell = Some(String::new());
                 cell_spans.clear();
+                cell_images.clear();
             }
             MdEvent::End(TagEnd::TableCell) => {
                 if let (Some(row), Some(cell)) = (table_row.as_mut(), table_cell.take()) {
@@ -359,9 +382,19 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                             (end > start).then_some(CellSpan { start, end, ..span })
                         })
                         .collect();
+                    let images = std::mem::take(&mut cell_images)
+                        .into_iter()
+                        .map(|image| CellImage {
+                            at: image.at.saturating_sub(cut).min(trimmed.len()),
+                            ..image
+                        })
+                        .collect();
                     row.push(trimmed);
                     if let Some(styles_row) = row_styles.as_mut() {
                         styles_row.push(spans);
+                    }
+                    if let Some(images_row) = row_images.as_mut() {
+                        images_row.push(images);
                     }
                 }
             }

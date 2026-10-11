@@ -91,7 +91,7 @@ impl MarkdownView {
                 button: MouseButton::Right,
                 ..
             } => {
-                if self.open_image_context_menu(*pos) {
+                if self.open_context_menu(*pos) {
                     crate::animation::request_draw();
                     EventResult::Consumed
                 } else {

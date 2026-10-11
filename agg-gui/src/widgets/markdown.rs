@@ -29,8 +29,12 @@
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
 //! - Links (coloured text, URL is not opened — add `on_link_click` if needed)
 //! - Matching-text highlight boxes ([`MarkdownView::set_matching_text`])
+//! - Pipe and grid tables, whose cells hold inline images (`cell_images.rs`)
 //! - Markdown as inline-styled HTML for the clipboard ([`to_styled_html`],
 //!   `styled_html.rs`), which the rich editor's copy writes
+//! - Copy (MarkdigAgg `GetSelectionClipboardData`): the selected words as
+//!   plain text plus their styled HTML (`rich_html.rs`, styled with
+//!   [`MarkdownView::with_html_theme`])
 //!
 //! # Updating in place
 //!
@@ -50,6 +54,9 @@ use crate::text::Font;
 use crate::widget::Widget;
 
 mod block_scroll;
+mod cell_images;
+#[cfg(test)]
+mod clipboard_selection_tests;
 mod emphasis;
 mod event;
 #[cfg(test)]
@@ -77,9 +84,13 @@ mod parse;
 mod plain_text_tests;
 mod rich_html;
 mod selection;
+#[cfg(test)]
+mod selection_tests;
 mod styled_html;
 #[cfg(test)]
 mod styled_html_tests;
+#[cfg(test)]
+mod table_image_tests;
 #[cfg(test)]
 mod update_tests;
 
@@ -140,11 +151,15 @@ enum LayoutItem {
         rows: Vec<Vec<String>>,
         /// Each cell's emphasis spans (see `emphasis.rs`).
         cell_styles: emphasis::CellStyles,
+        /// Each cell's inline images, sized (see `cell_images.rs`).
+        cell_images: cell_images::LaidCellImages,
         /// Whether the first row is a header row, drawn shaded.
         header: bool,
         y: f64,
         height: f64,
-        row_h: f64,
+        /// Each row's height, top row first: a text row's height, or more
+        /// for a row whose images are taller.
+        row_heights: Vec<f64>,
         col_widths: Vec<f64>,
         viewport_width: f64,
         content_width: f64,
@@ -219,6 +234,8 @@ enum ParagraphItem {
     Table {
         rows: Vec<Vec<String>>,
         cell_styles: emphasis::CellStyles,
+        /// Each cell's inline images, where they sit in its text.
+        cell_images: cell_images::CellImages,
         /// Whether the first row is a header row (a grid table may have none).
         header: bool,
     },
@@ -309,6 +326,8 @@ pub struct MarkdownView {
     suppress_next_left_mouse_up: bool,
     /// Text whose occurrences are highlighted (`MarkdownWidget.MatchingText`).
     matching_text: Option<String>,
+    /// The look copied HTML carries (C#'s `MarkdownWidget.Theme`).
+    html_theme: HtmlStyleTheme,
 }
 
 impl MarkdownView {
@@ -342,7 +361,21 @@ impl MarkdownView {
             context_menu: None,
             suppress_next_left_mouse_up: false,
             matching_text: None,
+            html_theme: HtmlStyleTheme::default(),
         }
+    }
+
+    /// The theme copied HTML is styled with (C#'s `MarkdownWidget.Theme`,
+    /// which `StyleHtmlFragment` reads); [`HtmlStyleTheme::default`] when
+    /// not set.
+    pub fn with_html_theme(mut self, theme: HtmlStyleTheme) -> Self {
+        self.html_theme = theme;
+        self
+    }
+
+    /// Change the theme copied HTML is styled with.
+    pub fn set_html_theme(&mut self, theme: HtmlStyleTheme) {
+        self.html_theme = theme;
     }
 
     pub fn with_font_size(mut self, size: f64) -> Self {

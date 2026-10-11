@@ -4,9 +4,8 @@
 //! selection model used to join wrapped rows and consecutive paragraphs with
 //! nothing, so select-all copied "Thiseditorshows"); `set_selection` selects
 //! a range of it for Ctrl+C; blocks, table cells and image widths answer what
-//! C#'s tests read off MarkdigAgg's child widgets. Ctrl+C copies a selection
-//! as Markdown (a selected heading word comes with its "# "), where C# copies
-//! the bare words as text.
+//! C#'s tests read off MarkdigAgg's child widgets. Ctrl+C copies the
+//! selected words as text, as C# does.
 
 use std::sync::Arc;
 
@@ -87,9 +86,7 @@ fn set_selection_selects_plain_text_and_ctrl_c_copies_it() {
             ..Modifiers::default()
         },
     });
-    // The view copies its selection as Markdown, so a heading's words come
-    // with their "# " (C# copies the bare words; see the module header).
-    assert_eq!(crate::clipboard::get_text().as_deref(), Some("# Markdown"));
+    assert_eq!(crate::clipboard::get_text().as_deref(), Some("Markdown"));
 }
 
 #[test]

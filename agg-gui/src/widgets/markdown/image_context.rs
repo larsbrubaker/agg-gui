@@ -1,7 +1,10 @@
-//! Right-click image actions for `MarkdownView`.
+//! Right-click menus for `MarkdownView`: image actions on an image, and
+//! elsewhere MarkdigAgg's read-only text menu (`MarkdownWidget.ShowRightClickMenu`:
+//! Cut and Paste disabled, Copy enabled with a selection, Select All enabled
+//! when there is text).
 //!
-//! This module adapts image-specific actions onto the shared menu
-//! infrastructure so Markdown context menus match the rest of the UI.
+//! This module adapts the actions onto the shared menu infrastructure so
+//! Markdown context menus match the rest of the UI.
 
 use crate::clipboard;
 use crate::draw_ctx::DrawCtx;
@@ -14,7 +17,8 @@ use super::{ImageState, MarkdownView};
 
 #[derive(Clone)]
 pub(super) struct MarkdownContextMenuState {
-    image: ImageContextTarget,
+    /// The image right-clicked, `None` for the text menu.
+    image: Option<ImageContextTarget>,
     menu: PopupMenu,
 }
 
@@ -30,6 +34,10 @@ enum ImageContextAction {
     CopyImage,
     CopyImageUrl,
     OpenImage,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
 }
 
 impl ImageContextAction {
@@ -38,6 +46,10 @@ impl ImageContextAction {
             ImageContextAction::CopyImage => "Copy Image",
             ImageContextAction::CopyImageUrl => "Copy Image URL",
             ImageContextAction::OpenImage => "Open Image",
+            ImageContextAction::Cut => "Cut",
+            ImageContextAction::Copy => "Copy",
+            ImageContextAction::Paste => "Paste",
+            ImageContextAction::SelectAll => "Select All",
         }
     }
 
@@ -46,6 +58,10 @@ impl ImageContextAction {
             ImageContextAction::CopyImage => "copy-image",
             ImageContextAction::CopyImageUrl => "copy-image-url",
             ImageContextAction::OpenImage => "open-image",
+            ImageContextAction::Cut => "cut",
+            ImageContextAction::Copy => "copy",
+            ImageContextAction::Paste => "paste",
+            ImageContextAction::SelectAll => "select-all",
         }
     }
 
@@ -54,13 +70,42 @@ impl ImageContextAction {
             "copy-image" => Some(Self::CopyImage),
             "copy-image-url" => Some(Self::CopyImageUrl),
             "open-image" => Some(Self::OpenImage),
+            "cut" => Some(Self::Cut),
+            "copy" => Some(Self::Copy),
+            "paste" => Some(Self::Paste),
+            "select-all" => Some(Self::SelectAll),
             _ => None,
         }
     }
 }
 
 impl MarkdownView {
-    pub(super) fn open_image_context_menu(&mut self, pos: Point) -> bool {
+    /// Open the image menu on an image, else the text menu.
+    pub(super) fn open_context_menu(&mut self, pos: Point) -> bool {
+        if self.open_image_context_menu(pos) {
+            return true;
+        }
+        let action = |action: ImageContextAction, enabled: bool| -> MenuEntry {
+            let item = MenuItem::action(action.label(), action.id());
+            if enabled { item } else { item.disabled() }.into()
+        };
+        let items = vec![
+            action(ImageContextAction::Cut, false),
+            action(ImageContextAction::Copy, self.has_selection()),
+            action(ImageContextAction::Paste, false),
+            MenuEntry::Separator,
+            action(
+                ImageContextAction::SelectAll,
+                !self.selectable_text.is_empty(),
+            ),
+        ];
+        let mut menu = PopupMenu::new(items);
+        menu.open_at(pos);
+        self.context_menu = Some(MarkdownContextMenuState { image: None, menu });
+        true
+    }
+
+    fn open_image_context_menu(&mut self, pos: Point) -> bool {
         let Some((url, alt, cache_idx)) = self.hit_image(pos) else {
             self.context_menu = None;
             return false;
@@ -79,11 +124,11 @@ impl MarkdownView {
         let mut menu = PopupMenu::new(items);
         menu.open_at(pos);
         self.context_menu = Some(MarkdownContextMenuState {
-            image: ImageContextTarget {
+            image: Some(ImageContextTarget {
                 url,
                 alt,
                 cache_idx,
-            },
+            }),
             menu,
         });
         true
@@ -121,7 +166,7 @@ impl MarkdownView {
                 self.context_menu = None;
                 self.suppress_next_left_mouse_up = true;
                 if let Some(action) = ImageContextAction::from_id(&action_id) {
-                    self.run_image_action(action, &image);
+                    self.run_menu_action(action, image.as_ref());
                 }
             }
             MenuResponse::Closed => {
@@ -133,7 +178,23 @@ impl MarkdownView {
         result.is_consumed()
     }
 
-    fn run_image_action(&mut self, action: ImageContextAction, image: &ImageContextTarget) {
+    fn run_menu_action(&mut self, action: ImageContextAction, image: Option<&ImageContextTarget>) {
+        match action {
+            ImageContextAction::Copy => {
+                self.try_copy_selection_to_clipboard();
+                return;
+            }
+            ImageContextAction::SelectAll => {
+                self.select_all_text();
+                crate::animation::request_draw();
+                return;
+            }
+            ImageContextAction::Cut | ImageContextAction::Paste => return,
+            _ => {}
+        }
+        let Some(image) = image else {
+            return;
+        };
         match action {
             ImageContextAction::CopyImage => {
                 if !self.copy_image_pixels(image.cache_idx) {
@@ -150,7 +211,36 @@ impl MarkdownView {
                     cb(&image.url);
                 }
             }
+            _ => {}
         }
+    }
+
+    /// Whether the open context menu's item `label` is enabled (`None` when
+    /// no menu is open or it has no such item).
+    pub fn context_menu_item_enabled(&self, label: &str) -> Option<bool> {
+        let menu = &self.context_menu.as_ref()?.menu;
+        menu.items.iter().find_map(|entry| match entry {
+            MenuEntry::Item(item) if item.label == label => Some(item.enabled),
+            _ => None,
+        })
+    }
+
+    /// The centre of the open context menu's row `label`, where a click
+    /// chooses it (`None` when no menu is open or it has no such item).
+    pub fn context_menu_item_center(&self, label: &str) -> Option<Point> {
+        let menu = &self.context_menu.as_ref()?.menu;
+        let layouts = menu.state.layouts(&menu.items, current_viewport());
+        let panel = layouts.first()?;
+        panel.rows.iter().find_map(|row| {
+            let idx = row.item_index?;
+            match menu.items.get(idx) {
+                Some(MenuEntry::Item(item)) if item.label == label => Some(Point::new(
+                    row.rect.x + row.rect.width * 0.5,
+                    row.rect.y + row.rect.height * 0.5,
+                )),
+                _ => None,
+            }
+        })
     }
 
     fn copy_image_pixels(&self, cache_idx: usize) -> bool {

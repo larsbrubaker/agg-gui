@@ -1,8 +1,16 @@
-//! Selection, hit-testing, highlighting, and rich-copy for `MarkdownView`.
+//! Selection, hit-testing, highlighting, and copy for `MarkdownView`.
 //!
 //! The renderer lays out Markdown into visual fragments. This module builds a
 //! parallel selectable model from those fragments so hit-testing, highlighting,
-//! and clipboard output all agree with the painted geometry.
+//! and clipboard output all agree with the painted geometry.  A table cell
+//! with images becomes text fragments between image fragments
+//! (`cell_images.rs`).
+//!
+//! Copy follows MarkdigAgg's `MarkdownWidget.GetSelectionClipboardData`: the
+//! plain text is the selected words as laid out, and the HTML is the
+//! selection's markup (`rich_html.rs`) styled by `StyleHtmlFragment`
+//! (`styled_html.rs`), or the whole document's `ToStyledHtml` when
+//! everything is selected.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -12,10 +20,24 @@ use crate::draw_ctx::DrawCtx;
 use crate::geometry::{Point, Rect};
 use crate::text::{measure_advance, Font};
 
+use super::cell_images::{images_of, LaidCellImage};
+use super::styled_html::{style_html_fragment, to_styled_html};
 use super::{
-    LayoutItem, LineRun, LineStyle, MarkdownRunStyle, MarkdownView, BLOCK_SCROLLBAR_GAP,
+    emphasis, LayoutItem, LineRun, LineStyle, MarkdownRunStyle, MarkdownView, BLOCK_SCROLLBAR_GAP,
     BLOCK_SCROLLBAR_H,
 };
+
+/// Where a table cell's content is laid out, for its fragments.
+struct TableCellPlace<'a> {
+    text: &'a str,
+    spans: &'a [emphasis::CellSpan],
+    images: &'a [LaidCellImage],
+    /// The cell's content start (inside its inset).
+    x: f64,
+    y: f64,
+    height: f64,
+    clip: Rect,
+}
 
 #[derive(Clone)]
 pub(super) struct SelectableFragment {
@@ -30,7 +52,20 @@ pub(super) struct SelectableFragment {
     /// The emphasis a text run draws with, so selection measures in its face.
     pub(super) run_style: MarkdownRunStyle,
     pub(super) clip: Option<Rect>,
-    pub(super) line_prefix: Option<&'static str>,
+    /// Where the fragment sits in the document's blocks.
+    pub(super) place: FragmentPlace,
+}
+
+/// The block a fragment belongs to, for building its copied HTML.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct FragmentPlace {
+    /// Counts the document's blocks (paragraph, heading, list item, code
+    /// block, table) in order: fragments of one block share it.
+    pub(super) block: usize,
+    /// The block is quoted.
+    pub(super) quote: bool,
+    /// For a table cell's fragment: the table's index in the layout items.
+    pub(super) table: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -42,6 +77,9 @@ pub(super) enum SelectableKind {
     },
     CodeBlock,
     TableCell,
+    /// A horizontal rule: no text, it only marks where the rule sits so a
+    /// selection across it copies `<hr />`.
+    Rule,
     Image {
         url: String,
         alt: String,
@@ -57,20 +95,51 @@ impl MarkdownView {
         let pad = self.padding;
         let font = self.active_font();
         let items = self.items.clone();
-        for item in &items {
+        let mut place = FragmentPlace::default();
+        for (item_idx, item) in items.iter().enumerate() {
             match item {
                 LayoutItem::Line {
                     runs,
                     style,
                     indent,
+                    quote,
                     continues,
                     y,
                     height,
-                    ..
                 } => {
+                    if matches!(style, LineStyle::Rule) {
+                        self.push_block_gap();
+                        place = FragmentPlace {
+                            block: place.block + 1,
+                            quote: *quote,
+                            table: None,
+                        };
+                        let at = self.selectable_text.len();
+                        self.selectable_fragments.push(SelectableFragment {
+                            range: at..at,
+                            text: String::new(),
+                            kind: SelectableKind::Rule,
+                            text_x: pad + indent,
+                            y: *y,
+                            height: 0.0,
+                            width: 0.0,
+                            font_size: self.font_size,
+                            run_style: MarkdownRunStyle::default(),
+                            clip: None,
+                            place,
+                        });
+                        continue;
+                    }
                     if runs.is_empty() {
                         self.push_selection_gap("\n");
                         continue;
+                    }
+                    if !*continues {
+                        place = FragmentPlace {
+                            block: place.block + 1,
+                            quote: *quote,
+                            table: None,
+                        };
                     }
                     // A soft-wrapped row joins its paragraph's previous row
                     // with the space the wrap replaced; a new paragraph (a
@@ -86,7 +155,6 @@ impl MarkdownView {
                     let ty = y + height * 0.5;
                     let text_y = ty - (metrics.ascent - metrics.descent) * 0.5;
                     let tx = pad + indent;
-                    let mut first_text = true;
 
                     for run in runs {
                         match run {
@@ -107,12 +175,6 @@ impl MarkdownView {
                                 } else {
                                     tx + x + lead
                                 };
-                                let prefix = if first_text {
-                                    heading_prefix(*style)
-                                } else {
-                                    None
-                                };
-                                first_text = false;
                                 self.push_fragment(SelectableFragment {
                                     range: 0..0,
                                     text: text.clone(),
@@ -128,7 +190,7 @@ impl MarkdownView {
                                     font_size: fs,
                                     run_style: *run_style,
                                     clip: None,
-                                    line_prefix: prefix,
+                                    place,
                                 });
                                 let _ = text_y;
                             }
@@ -158,7 +220,7 @@ impl MarkdownView {
                                     font_size: self.font_size,
                                     run_style: MarkdownRunStyle::default(),
                                     clip: None,
-                                    line_prefix: None,
+                                    place,
                                 });
                             }
                         }
@@ -174,6 +236,11 @@ impl MarkdownView {
                     content_width,
                 } => {
                     self.push_block_gap();
+                    place = FragmentPlace {
+                        block: place.block + 1,
+                        quote: false,
+                        table: None,
+                    };
                     let scroll_x = self.block_scroll_offset(*block_idx);
                     let scrollbar_h = if content_width > viewport_width {
                         BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP
@@ -204,7 +271,7 @@ impl MarkdownView {
                             font_size: LineStyle::Code.font_size(self.font_size),
                             run_style: MarkdownRunStyle::default(),
                             clip: Some(Rect::new(pad, content_y, *viewport_width, content_h)),
-                            line_prefix: None,
+                            place,
                         });
                         line_top -= line_h;
                     }
@@ -212,14 +279,21 @@ impl MarkdownView {
                 LayoutItem::Table {
                     block_idx,
                     rows,
+                    cell_styles,
+                    cell_images,
                     y,
-                    row_h,
+                    row_heights,
                     col_widths,
                     viewport_width,
                     content_width,
                     ..
                 } => {
                     self.push_block_gap();
+                    place = FragmentPlace {
+                        block: place.block + 1,
+                        quote: false,
+                        table: Some(item_idx),
+                    };
                     let scroll_x = self.block_scroll_offset(*block_idx);
                     let scrollbar_h = if content_width > viewport_width {
                         BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP
@@ -227,13 +301,14 @@ impl MarkdownView {
                         0.0
                     };
                     let content_y = y + scrollbar_h;
-                    let clip =
-                        Rect::new(pad, content_y, *viewport_width, row_h * rows.len() as f64);
-                    let mut cy = content_y + row_h * rows.len() as f64;
+                    let table_h: f64 = row_heights.iter().sum();
+                    let clip = Rect::new(pad, content_y, *viewport_width, table_h);
+                    let mut cy = content_y + table_h;
                     for (ri, row) in rows.iter().enumerate() {
                         if ri > 0 {
                             self.push_selection_gap("\n");
                         }
+                        let row_h = row_heights.get(ri).copied().unwrap_or_default();
                         cy -= row_h;
                         let mut cx = pad - scroll_x;
                         for (ci, width) in col_widths.iter().enumerate() {
@@ -241,19 +316,16 @@ impl MarkdownView {
                                 self.push_selection_gap("\t");
                             }
                             if let Some(text) = row.get(ci) {
-                                self.push_fragment(SelectableFragment {
-                                    range: 0..0,
-                                    text: text.clone(),
-                                    kind: SelectableKind::TableCell,
-                                    text_x: cx + 8.0,
+                                let cell = TableCellPlace {
+                                    text,
+                                    spans: emphasis::cell_spans(cell_styles, ri, ci),
+                                    images: images_of(cell_images, ri, ci),
+                                    x: cx + 8.0,
                                     y: cy,
-                                    height: *row_h,
-                                    width: measure_advance(&font, text, self.font_size),
-                                    font_size: self.font_size,
-                                    run_style: MarkdownRunStyle::default(),
-                                    clip: Some(clip),
-                                    line_prefix: None,
-                                });
+                                    height: row_h,
+                                    clip,
+                                };
+                                self.push_table_cell(&cell, place);
                             }
                             cx += width;
                         }
@@ -263,6 +335,72 @@ impl MarkdownView {
         }
 
         self.clamp_selection_to_text();
+    }
+
+    /// A table cell's selectable fragments: its text between its images
+    /// and the images, separated by a space where the text has none.
+    fn push_table_cell(&mut self, cell: &TableCellPlace<'_>, place: FragmentPlace) {
+        let mut pieces: Vec<(usize, Option<usize>)> = Vec::new();
+        for range in MarkdownView::cell_text_pieces(cell.text, cell.images) {
+            pieces.push((range.start, None));
+        }
+        for (k, image) in cell.images.iter().enumerate() {
+            pieces.push((image.image.at, Some(k)));
+        }
+        // An image sits before the text at its offset.
+        pieces.sort_by_key(|(at, image)| (*at, image.is_none()));
+        let text_pieces = MarkdownView::cell_text_pieces(cell.text, cell.images);
+        let mut first = true;
+        for (at, image) in pieces {
+            if !first {
+                self.push_word_gap();
+            }
+            first = false;
+            match image {
+                Some(k) => {
+                    let image = &cell.images[k];
+                    let alt = &image.image.alt;
+                    let label = if alt.is_empty() { "image" } else { alt };
+                    self.push_fragment(SelectableFragment {
+                        range: 0..0,
+                        text: label.to_string(),
+                        kind: SelectableKind::Image {
+                            url: image.image.url.clone(),
+                            alt: alt.clone(),
+                            cache_idx: image.cache_idx,
+                        },
+                        text_x: cell.x + self.cell_image_x(cell.text, cell.spans, cell.images, k),
+                        y: cell.y + (cell.height - image.height) * 0.5,
+                        height: image.height,
+                        width: image.width,
+                        font_size: self.font_size,
+                        run_style: MarkdownRunStyle::default(),
+                        clip: Some(cell.clip),
+                        place,
+                    });
+                }
+                None => {
+                    let Some(range) = text_pieces.iter().find(|r| r.start == at) else {
+                        continue;
+                    };
+                    let text = &cell.text[range.clone()];
+                    self.push_fragment(SelectableFragment {
+                        range: 0..0,
+                        text: text.to_string(),
+                        kind: SelectableKind::TableCell,
+                        text_x: cell.x
+                            + self.cell_text_x(cell.text, cell.spans, cell.images, range.start),
+                        y: cell.y,
+                        height: cell.height,
+                        width: measure_advance(&self.active_font(), text, self.font_size),
+                        font_size: self.font_size,
+                        run_style: MarkdownRunStyle::default(),
+                        clip: Some(cell.clip),
+                        place,
+                    });
+                }
+            }
+        }
     }
 
     /// Separate a soft-wrapped row from the row before it with one space,
@@ -329,6 +467,9 @@ impl MarkdownView {
     pub(super) fn text_pos_at(&self, pos: Point) -> Option<usize> {
         let mut best: Option<(f64, usize)> = None;
         for fragment in &self.selectable_fragments {
+            if matches!(fragment.kind, SelectableKind::Rule) {
+                continue;
+            }
             if pos.y < fragment.y || pos.y > fragment.y + fragment.height {
                 continue;
             }
@@ -396,49 +537,50 @@ impl MarkdownView {
     }
 
     pub(super) fn copy_selection(&self) {
-        if let Some(range) = self.selection_range() {
-            let (markdown, html) = self.copy_payloads(range);
-            clipboard::set_rich_text(&markdown, &html);
-        }
+        self.try_copy_selection_to_clipboard();
     }
 
+    /// Copy the selection (MarkdigAgg's `TryCopySelectionToClipboard`): its
+    /// plain text, with its styled HTML when there is any.  `false` when
+    /// nothing is selected.
+    pub fn try_copy_selection_to_clipboard(&self) -> bool {
+        let Some(range) = self.selection_range() else {
+            return false;
+        };
+        let (plain, html) = self.copy_payloads(range);
+        if plain.is_empty() {
+            return false;
+        }
+        if html.trim().is_empty() {
+            clipboard::set_text(&plain);
+        } else {
+            clipboard::set_rich_text(&plain, &html);
+        }
+        true
+    }
+
+    /// The plain text and styled HTML a copy of `range` writes (MarkdigAgg's
+    /// `GetSelectionClipboardData`): the selected words, and their markup
+    /// styled with the view's HTML theme, or the whole document as styled
+    /// HTML when the selection covers all of it.
     pub(super) fn copy_payloads(&self, range: Range<usize>) -> (String, String) {
-        let mut markdown = String::new();
-        let mut cursor = range.start;
-
-        for fragment in &self.selectable_fragments {
-            if fragment.range.end <= range.start {
-                continue;
-            }
-            if fragment.range.start >= range.end {
-                break;
-            }
-
-            let gap_end = fragment.range.start.min(range.end);
-            if cursor < gap_end {
-                let gap = &self.selectable_text[cursor..gap_end];
-                markdown.push_str(gap);
-            }
-
-            let start = range.start.max(fragment.range.start);
-            let end = range.end.min(fragment.range.end);
-            if start < end {
-                let local_start = start - fragment.range.start;
-                let local_end = end - fragment.range.start;
-                let selected = &fragment.text[local_start..local_end];
-                fragment.push_markdown(selected, start == fragment.range.start, &mut markdown);
-            }
-            cursor = end;
-        }
-
-        if cursor < range.end {
-            let gap = &self.selectable_text[cursor..range.end];
-            markdown.push_str(gap);
-        }
-
-        let html =
-            super::rich_html::copy_html(&self.selectable_fragments, &self.selectable_text, range);
-        (markdown, html)
+        let plain = self
+            .selectable_text
+            .get(range.clone())
+            .unwrap_or_default()
+            .to_string();
+        let html = if range.start == 0
+            && range.end == self.selectable_text.len()
+            && !self.markdown.trim().is_empty()
+        {
+            to_styled_html(&self.markdown, &self.html_theme)
+        } else {
+            style_html_fragment(
+                &super::rich_html::selection_html(self, range),
+                &self.html_theme,
+            )
+        };
+        (plain, html)
     }
 
     pub(super) fn paint_selection(&self, ctx: &mut dyn DrawCtx) {
@@ -498,6 +640,9 @@ impl MarkdownView {
             else {
                 continue;
             };
+            if fragment.clip.is_some_and(|clip| !clip.contains(pos)) {
+                continue;
+            }
             if pos.x >= fragment.text_x
                 && pos.x <= fragment.text_x + fragment.width
                 && pos.y >= fragment.y
@@ -507,49 +652,6 @@ impl MarkdownView {
             }
         }
         None
-    }
-}
-
-impl SelectableFragment {
-    fn push_markdown(&self, selected: &str, starts_at_fragment: bool, out: &mut String) {
-        match &self.kind {
-            SelectableKind::Text {
-                style: _,
-                link,
-                code,
-            } => {
-                if starts_at_fragment {
-                    if let Some(prefix) = self.line_prefix {
-                        out.push_str(prefix);
-                    }
-                }
-                if let Some(url) = link {
-                    push_wrapped_markdown(selected, out, |inner, out| {
-                        out.push('[');
-                        out.push_str(inner);
-                        out.push_str("](");
-                        out.push_str(url);
-                        out.push(')');
-                    });
-                } else if *code {
-                    push_wrapped_markdown(selected, out, |inner, out| {
-                        out.push('`');
-                        out.push_str(inner);
-                        out.push('`');
-                    });
-                } else {
-                    out.push_str(selected);
-                }
-            }
-            SelectableKind::CodeBlock | SelectableKind::TableCell => out.push_str(selected),
-            SelectableKind::Image { url, alt, .. } => {
-                out.push_str("![");
-                out.push_str(if alt.is_empty() { selected } else { alt });
-                out.push_str("](");
-                out.push_str(url);
-                out.push(')');
-            }
-        }
     }
 }
 
@@ -576,16 +678,6 @@ fn fill_highlight(ctx: &mut dyn DrawCtx, x: f64, y: f64, w: f64, h: f64) {
     ctx.fill();
 }
 
-fn heading_prefix(style: LineStyle) -> Option<&'static str> {
-    match style {
-        LineStyle::H1 => Some("# "),
-        LineStyle::H2 => Some("## "),
-        LineStyle::H3 => Some("### "),
-        LineStyle::H4 => Some("#### "),
-        _ => None,
-    }
-}
-
 pub(super) fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -594,134 +686,4 @@ pub(super) fn escape_html(text: &str) -> String {
 
 pub(super) fn escape_attr(text: &str) -> String {
     escape_html(text).replace('"', "&quot;")
-}
-
-fn push_wrapped_markdown(selected: &str, out: &mut String, wrap: impl FnOnce(&str, &mut String)) {
-    let leading_len = selected.len() - selected.trim_start().len();
-    let trailing_len = selected.len() - selected.trim_end().len();
-    let content_start = leading_len;
-    let content_end = selected.len().saturating_sub(trailing_len);
-    out.push_str(&selected[..content_start]);
-    if content_start < content_end {
-        wrap(&selected[content_start..content_end], out);
-    }
-    out.push_str(&selected[content_end..]);
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use crate::geometry::Size;
-    use crate::text::Font;
-
-    use super::*;
-
-    const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
-
-    fn test_font() -> Arc<Font> {
-        Arc::new(Font::from_slice(TEST_FONT).expect("test font"))
-    }
-
-    #[test]
-    fn html_escapes_text_and_gaps() {
-        assert_eq!(escape_html("<a&b>"), "&lt;a&amp;b&gt;");
-    }
-
-    #[test]
-    fn copy_payloads_include_markdown_and_rendered_html() {
-        crate::widget::set_current_viewport(Size::new(480.0, 320.0));
-        let mut view = MarkdownView::new(
-            "# Title\n\nParagraph with [link](https://example.com) and `code`.\n\n```text\nlet x = 1;\n```\n\n| A | B |\n| --- | --- |\n| C | D |\n\n![Alt](image.png)",
-            test_font(),
-        );
-        view.layout_markdown(Size::new(480.0, 2000.0));
-        view.select_all_text();
-
-        let (markdown, html) = view.copy_payloads(view.selection_range().expect("selection"));
-
-        assert!(markdown.contains("# Title"));
-        assert!(markdown.contains("[link](https://example.com)"));
-        assert!(markdown.contains("`code`"));
-        assert!(markdown.contains("let x = 1;"));
-        assert!(markdown.contains("C\tD"));
-        assert!(markdown.contains("![Alt](image.png)"));
-        assert!(!html.contains("<h1>"));
-        assert!(html.contains("font-size:"));
-        assert!(html.contains("<table"));
-        assert!(html.contains("<th"));
-        assert!(!html.contains("<!--StartFragment-->"));
-        assert!(html.contains("<a href=\"https://example.com\""));
-        assert!(html.contains(">link</a>"));
-        assert!(html.contains(">code</code>"));
-        assert!(html.contains("<pre style="));
-        assert!(html.contains("let x = 1;"));
-        assert!(html.contains("<img src=\"image.png\" alt=\"Alt\""));
-    }
-
-    #[test]
-    fn hit_testing_clamps_to_fragment_edges() {
-        crate::widget::set_current_viewport(Size::new(320.0, 200.0));
-        let mut view = MarkdownView::new("café", test_font());
-        view.layout_markdown(Size::new(320.0, 1000.0));
-        let fragment = view
-            .selectable_fragments
-            .iter()
-            .find(|fragment| fragment.text.contains("café"))
-            .expect("text fragment")
-            .clone();
-
-        let y = fragment.y + fragment.height * 0.5;
-        assert_eq!(
-            view.text_pos_at(Point::new(fragment.text_x - 20.0, y)),
-            Some(fragment.range.start)
-        );
-        assert_eq!(
-            view.text_pos_at(Point::new(fragment.text_x + fragment.width + 20.0, y)),
-            Some(fragment.range.end)
-        );
-    }
-
-    #[test]
-    fn image_hit_test_targets_inline_images() {
-        crate::widget::set_current_viewport(Size::new(320.0, 200.0));
-        let mut view = MarkdownView::new("![Alt](image.png)", test_font());
-        view.layout_markdown(Size::new(320.0, 1000.0));
-        let fragment = view
-            .selectable_fragments
-            .iter()
-            .find(|fragment| matches!(fragment.kind, SelectableKind::Image { .. }))
-            .expect("image fragment")
-            .clone();
-        let hit = view.hit_image(Point::new(
-            fragment.text_x + fragment.width * 0.5,
-            fragment.y + fragment.height * 0.5,
-        ));
-
-        assert_eq!(hit, Some(("image.png".to_string(), "Alt".to_string(), 0)));
-    }
-
-    #[test]
-    fn copy_payloads_render_ordered_and_bullet_lists_as_html_lists() {
-        crate::widget::set_current_viewport(Size::new(480.0, 320.0));
-        let mut view = MarkdownView::new(
-            "1. First item\n2. Second item with [link](https://example.com)\n\n- Alpha\n- Beta",
-            test_font(),
-        );
-        view.layout_markdown(Size::new(480.0, 2000.0));
-        view.select_all_text();
-
-        let (_, html) = view.copy_payloads(view.selection_range().expect("selection"));
-
-        assert!(html.contains("<ol"));
-        assert!(html.contains("<li"));
-        assert!(html.contains(">First item"));
-        assert!(html.contains(">Second item"));
-        assert!(html.contains("<a href=\"https://example.com\""));
-        assert!(html.contains("<ul"));
-        assert!(html.contains(">Alpha"));
-        assert!(html.contains(">Beta"));
-        assert!(!html.contains(">1. First item"));
-        assert!(!html.contains(">• Alpha"));
-    }
 }

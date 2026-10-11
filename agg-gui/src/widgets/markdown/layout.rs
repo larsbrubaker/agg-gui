@@ -7,6 +7,7 @@
 use crate::geometry::Size;
 use crate::text::measure_text_metrics;
 
+use super::cell_images;
 use super::matching::{self, MATCH_PAD};
 use super::{
     clamp_block_offset, emphasis, ImageState, InlineItem, LayoutItem, LineRun, LineStyle,
@@ -78,9 +79,13 @@ impl MarkdownView {
                 super::ParagraphItem::Table {
                     rows,
                     cell_styles,
+                    cell_images,
                     header,
                 } => {
-                    let (col_widths, row_h, mut height) = self.layout_table(rows, cell_styles);
+                    let cell_images = self.layout_cell_images(cell_images, max_w);
+                    let (col_widths, row_heights) =
+                        self.layout_table(rows, cell_styles, &cell_images);
+                    let mut height: f64 = row_heights.iter().sum();
                     let content_width = col_widths.iter().sum::<f64>();
                     let viewport_width = max_w;
                     if content_width > viewport_width {
@@ -96,10 +101,11 @@ impl MarkdownView {
                         block_idx,
                         rows: rows.clone(),
                         cell_styles: cell_styles.clone(),
+                        cell_images,
                         header: *header,
                         y: 0.0,
                         height,
-                        row_h,
+                        row_heights,
                         col_widths,
                         viewport_width,
                         content_width,
@@ -322,7 +328,7 @@ impl MarkdownView {
         }
     }
 
-    fn inline_image_size(&self, cache_idx: usize, alt: &str, max_w: f64) -> (f64, f64) {
+    pub(super) fn inline_image_size(&self, cache_idx: usize, alt: &str, max_w: f64) -> (f64, f64) {
         if let Some((iw, ih)) = self.image_cache.get(cache_idx).and_then(|entry| {
             entry.state.lock().ok().and_then(|state| match &*state {
                 ImageState::Ready { image, .. } => Some((image.width, image.height)),
@@ -409,22 +415,38 @@ impl MarkdownView {
         });
     }
 
+    /// The height of a table row of text.
+    pub(super) fn table_text_row_height(&self) -> f64 {
+        measure_text_metrics(&self.active_font(), "", self.font_size).line_height * 1.6
+    }
+
+    /// Each column's width (its widest cell's text and images, plus the
+    /// cell inset) and each row's height (a row of text, or its tallest
+    /// image with padding above and below).
     fn layout_table(
         &self,
         rows: &[Vec<String>],
         cell_styles: &emphasis::CellStyles,
-    ) -> (Vec<f64>, f64, f64) {
-        let row_h = measure_text_metrics(&self.active_font(), "", self.font_size).line_height * 1.6;
+        cell_images: &cell_images::LaidCellImages,
+    ) -> (Vec<f64>, Vec<f64>) {
+        let text_row_h = self.table_text_row_height();
         let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
         let mut widths = vec![0.0_f64; cols];
+        let mut heights = Vec::with_capacity(rows.len());
         for (ri, row) in rows.iter().enumerate() {
+            let mut row_h = text_row_h;
             for (col, text) in row.iter().enumerate() {
                 let spans = emphasis::cell_spans(cell_styles, ri, col);
-                let text_w = self.cell_prefix_width(text, spans, text.len());
-                widths[col] = widths[col].max(text_w + 24.0);
+                let images = cell_images::images_of(cell_images, ri, col);
+                let content_w = self.cell_content_width(text, spans, images);
+                widths[col] = widths[col].max(content_w + 24.0);
+                for image in images {
+                    row_h = row_h.max(image.height + cell_images::CELL_IMAGE_PAD_Y * 2.0);
+                }
             }
+            heights.push(row_h);
         }
-        (widths, row_h, row_h * rows.len() as f64)
+        (widths, heights)
     }
 
     /// Width of a table cell's text up to byte `end`, each styled piece in
