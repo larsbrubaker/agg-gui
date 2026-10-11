@@ -37,7 +37,16 @@
 //!   (`RichEditOperations.cs`); [`table_code_operations`] the same inside a
 //!   code block or table, plus the table's row/column operations
 //!   (`RichTableCodeOperations.cs`); `group_repair` restores the group
-//!   invariants after an edit (`RichGroupRepair.cs`).
+//!   invariants after an edit (`RichGroupRepair.cs`).  Where C# throws on a
+//!   caller's mistake the operations return a [`RichEditError`]
+//!   ([`edit_error`]).
+//! * [`style_operations`] — bold, italic, code, strike and links over a
+//!   selection, and the style the toolbar shows (`RichStyleOperations.cs`),
+//!   with the style types in [`inline_style`].
+//! * [`block_operations`] — Normal/Heading, lists, quotes, alignment,
+//!   indent/outdent and the line-start shortcuts (`RichBlockOperations.cs`);
+//!   `block_containers` turns blocks into list items or quotes and joins the
+//!   groups they touch.
 //! * `char_class` — .NET's character classes, as the writer sees them.
 //!
 //! # Offsets
@@ -49,15 +58,19 @@
 
 mod align_groups;
 pub mod block;
+mod block_containers;
+pub mod block_operations;
 mod char_class;
 mod code_and_tables;
 pub mod document;
+pub mod edit_error;
 pub mod edit_operations;
 mod escaping;
 mod group_repair;
 pub mod group_writer;
 pub mod groups;
 pub mod inline;
+pub mod inline_style;
 pub mod inline_writer;
 pub mod inlines;
 pub mod markdown_parser;
@@ -66,16 +79,20 @@ mod parse_tree;
 pub(crate) mod parser_inlines;
 pub(crate) mod pipe_tables;
 pub mod selection;
+pub mod style_operations;
 pub mod table_code_operations;
 
 pub use block::{RichAlignment, RichBlock, RichBlockKind, RichListInfo, RichTableCell};
+pub use block_operations::{RichBlockState, RichListKind};
 pub use document::{DocPosition, RichDocument};
+pub use edit_error::RichEditError;
 pub use groups::shared as shared_group;
 pub use groups::{
     RichAlignGroup, RichAlignGroupRef, RichListGroup, RichListGroupRef, RichQuoteGroup,
     RichQuoteGroupRef,
 };
 pub use inline::{InlineAtom, InlineAtomKind, RichInline, RichInlineContent, RichRun};
+pub use inline_style::{RichInlineStyle, RichPendingStyle, RichStyleCoverage, RichStyleState};
 pub use inline_writer::RichInlineContext;
 pub use inlines::OffsetOutOfRange;
 pub use selection::RichSelection;

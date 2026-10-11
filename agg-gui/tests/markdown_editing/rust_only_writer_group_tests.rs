@@ -1,8 +1,8 @@
 //! Rust-only checks of `markdown_editing::markdown_writer`'s group paths
 //! (verbatim copy, regenerated lists, quotes and alignment wrappers, source
-//! offsets) on hand-built documents.  agg-sharp's `RichMarkdownWriterGroupTests`
-//! build the same documents through the reader and the edit operations, so
-//! they port with those; the expected markdown here is theirs.
+//! offsets) on hand-built documents.  `rich_markdown_writer_group_tests` (agg-sharp's
+//! `RichMarkdownWriterGroupTests`) builds the same documents through the reader
+//! and the edit operations; the expected markdown here is theirs.
 
 use agg_gui::widgets::markdown_editing::markdown_writer;
 use agg_gui::widgets::markdown_editing::{

@@ -2,6 +2,8 @@
 //! ported 1:1 against `agg_gui::widgets::markdown_editing`, one file per C#
 //! test class.
 
+#[path = "markdown_editing/rich_block_operations_tests.rs"]
+mod rich_block_operations_tests;
 #[path = "markdown_editing/rich_document_tests.rs"]
 mod rich_document_tests;
 #[path = "markdown_editing/rich_edit_operations_tests.rs"]
@@ -16,10 +18,16 @@ mod rich_markdown_parser_code_table_tests;
 mod rich_markdown_parser_tests;
 #[path = "markdown_editing/rich_markdown_writer_code_table_tests.rs"]
 mod rich_markdown_writer_code_table_tests;
+#[path = "markdown_editing/rich_markdown_writer_group_tests.rs"]
+mod rich_markdown_writer_group_tests;
 #[path = "markdown_editing/rich_markdown_writer_tests.rs"]
 mod rich_markdown_writer_tests;
+#[path = "markdown_editing/rich_style_operations_tests.rs"]
+mod rich_style_operations_tests;
 #[path = "markdown_editing/rich_table_code_operations_tests.rs"]
 mod rich_table_code_operations_tests;
+#[path = "markdown_editing/rust_only_edit_error_tests.rs"]
+mod rust_only_edit_error_tests;
 #[path = "markdown_editing/rust_only_parser_inline_tests.rs"]
 mod rust_only_parser_inline_tests;
 #[path = "markdown_editing/rust_only_pipe_table_tests.rs"]

@@ -14,12 +14,17 @@
 //! a row instead, and Backspace/Delete never cross a cell's edge, so the
 //! grid's shape changes only through the row and column operations.
 //!
-//! The table operations panic when the position's block is not a table (C#'s
-//! `InvalidOperationException`), and [`delete_range`] when its positions are
-//! in different blocks (C#'s `ArgumentException`): both are caller errors.
+//! Where C# throws, an operation returns a [`RichEditError`] and changes
+//! nothing: [`RichEditError::NotATable`] when the position's block is not a
+//! table (or code block, for the operations that take both) — C#'s
+//! `InvalidOperationException` — [`RichEditError::RangeSpansBlocks`] when
+//! [`delete_range`]'s positions are in different blocks (`ArgumentException`),
+//! and [`RichEditError::PositionOutOfRange`] for a position the document does
+//! not have.
 
 use super::block::{RichBlock, RichBlockKind, RichTableCell};
 use super::document::{DocPosition, RichDocument};
+use super::edit_error::{check_block, check_position, check_range, RichEditError};
 use super::edit_operations::{self as edit, blank_line};
 use super::inline::RichInline;
 use super::inlines;
@@ -40,10 +45,11 @@ pub fn insert_text(
     position: DocPosition,
     text: &str,
     style: Option<&RichInline>,
-) -> RichSelection {
+) -> Result<RichSelection, RichEditError> {
+    check_position(document, position)?;
     let index = position.block_index;
     if text.is_empty() {
-        return RichSelection::at(position);
+        return Ok(RichSelection::at(position));
     }
 
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
@@ -56,10 +62,10 @@ pub fn insert_text(
             offset: position.offset + text.chars().count(),
             ..position
         };
-        return RichSelection::at(caret);
+        return Ok(RichSelection::at(caret));
     }
 
-    require_table(block);
+    require_table(block)?;
     let style = match style {
         Some(style) => style.clone(),
         None => edit::style_at(
@@ -71,7 +77,7 @@ pub fn insert_text(
     let mut caret = position;
     for (i, line) in lines.iter().enumerate() {
         if i > 0 {
-            caret = split_block(document, caret).caret;
+            caret = split_block(document, caret)?.caret;
             if caret.block_index != index {
                 // Enter on the last row left the table; the rest is ordinary text below it.
                 let rest = lines[i..].join("\n");
@@ -90,7 +96,7 @@ pub fn insert_text(
         }
     }
 
-    RichSelection::at(caret)
+    Ok(RichSelection::at(caret))
 }
 
 /// Removes the text between two positions of one code block or table, never
@@ -99,21 +105,25 @@ pub fn insert_text(
 /// cells it clears the selected text of each cell in reading order and leaves
 /// the grid intact; removing rows or columns is what [`delete_row`] and
 /// [`delete_column`] are for.
-pub fn delete_range(document: &mut RichDocument, a: DocPosition, b: DocPosition) -> RichSelection {
+pub fn delete_range(
+    document: &mut RichDocument,
+    a: DocPosition,
+    b: DocPosition,
+) -> Result<RichSelection, RichEditError> {
     let start = a.min(b);
     let end = a.max(b);
-    assert!(
-        start.block_index == end.block_index,
-        "Both positions must be in one block; edit_operations::delete_range handles ranges across blocks."
-    );
+    if start.block_index != end.block_index {
+        return Err(RichEditError::RangeSpansBlocks);
+    }
 
+    check_range(document, start, end)?;
     let block = &mut document.blocks[start.block_index];
     if block.kind == RichBlockKind::CodeBlock {
         remove_code(block, start.offset, end.offset);
-        return RichSelection::at(start);
+        return Ok(RichSelection::at(start));
     }
 
-    require_table(block);
+    require_table(block)?;
     let columns = block.table_rows[0].len();
     for cell in start.row * columns + start.column..=end.row * columns + end.column {
         let row = cell / columns;
@@ -131,7 +141,7 @@ pub fn delete_range(document: &mut RichDocument, a: DocPosition, b: DocPosition)
         remove_inlines(block, row, column, from, to);
     }
 
-    RichSelection::at(start)
+    Ok(RichSelection::at(start))
 }
 
 /// Enter.  In code it inserts a newline, except on an empty last line (the
@@ -141,25 +151,34 @@ pub fn delete_range(document: &mut RichDocument, a: DocPosition, b: DocPosition)
 /// same column one row down; from the last row it leaves the table into a new
 /// empty paragraph after it, as code does, so a table at the end of a document
 /// has a way out below it and a paste never runs into the block after.
-pub fn split_block(document: &mut RichDocument, position: DocPosition) -> RichSelection {
+pub fn split_block(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    check_position(document, position)?;
     let index = position.block_index;
     let block = &mut document.blocks[index];
     if block.kind == RichBlockKind::CodeBlock {
         if position.offset == block.code_text.chars().count() && block.code_text.ends_with('\n') {
             block.code_text.pop();
             block.dirty = true;
-            return RichSelection::at(insert_paragraph_after(document, index));
+            return Ok(RichSelection::at(insert_paragraph_after(document, index)));
         }
 
         return insert_text(document, position, "\n", None);
     }
 
-    require_table(block);
+    require_table(block)?;
     if position.row + 1 < block.table_rows.len() {
-        return RichSelection::at(cell_end(block, index, position.row + 1, position.column));
+        return Ok(RichSelection::at(cell_end(
+            block,
+            index,
+            position.row + 1,
+            position.column,
+        )));
     }
 
-    RichSelection::at(insert_paragraph_after(document, index))
+    Ok(RichSelection::at(insert_paragraph_after(document, index)))
 }
 
 /// Backspace with a collapsed caret: removes one character (a whole emoji or
@@ -168,8 +187,11 @@ pub fn split_block(document: &mut RichDocument, position: DocPosition) -> RichSe
 /// happens either, unless the block is empty: then it becomes an empty
 /// paragraph, the way a novice expects to take back a code block they just
 /// made.
-pub fn backspace(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    backspace_changed(document, position).0
+pub fn backspace(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    Ok(backspace_changed(document, position)?.0)
 }
 
 /// [`backspace`], also saying whether it changed the document (false at a
@@ -177,7 +199,8 @@ pub fn backspace(document: &mut RichDocument, position: DocPosition) -> RichSele
 pub fn backspace_changed(
     document: &mut RichDocument,
     position: DocPosition,
-) -> (RichSelection, bool) {
+) -> Result<(RichSelection, bool), RichEditError> {
+    check_position(document, position)?;
     let block = &mut document.blocks[position.block_index];
     if block.kind == RichBlockKind::CodeBlock {
         if position.offset > 0 {
@@ -187,7 +210,7 @@ pub fn backspace_changed(
                 offset: previous,
                 ..position
             };
-            return (RichSelection::at(caret), true);
+            return Ok((RichSelection::at(caret), true));
         }
 
         if block.code_text.is_empty() {
@@ -199,15 +222,15 @@ pub fn backspace_changed(
             block.code_info.clear();
             block.code_language.clear();
             block.dirty = true;
-            return (RichSelection::at(position), true);
+            return Ok((RichSelection::at(position), true));
         }
 
-        return (RichSelection::at(position), false);
+        return Ok((RichSelection::at(position), false));
     }
 
-    require_table(block);
+    require_table(block)?;
     if position.offset == 0 {
-        return (RichSelection::at(position), false);
+        return Ok((RichSelection::at(position), false));
     }
 
     let stop = edit::previous_stop(
@@ -219,17 +242,24 @@ pub fn backspace_changed(
         offset: stop,
         ..position
     };
-    (RichSelection::at(caret), true)
+    Ok((RichSelection::at(caret), true))
 }
 
 /// Forward Delete with a collapsed caret: removes the next character or atom;
 /// at the end of a cell or a code block nothing happens.
-pub fn delete(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    delete_changed(document, position).0
+pub fn delete(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    Ok(delete_changed(document, position)?.0)
 }
 
 /// [`delete`], also saying whether it changed the document.
-pub fn delete_changed(document: &mut RichDocument, position: DocPosition) -> (RichSelection, bool) {
+pub fn delete_changed(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<(RichSelection, bool), RichEditError> {
+    check_position(document, position)?;
     let block = &mut document.blocks[position.block_index];
     if block.kind == RichBlockKind::CodeBlock {
         let changed = position.offset < block.code_text.chars().count();
@@ -238,10 +268,10 @@ pub fn delete_changed(document: &mut RichDocument, position: DocPosition) -> (Ri
             remove_code(block, position.offset, next);
         }
 
-        return (RichSelection::at(position), changed);
+        return Ok((RichSelection::at(position), changed));
     }
 
-    require_table(block);
+    require_table(block)?;
     let cell = cell_inlines(block, position.row, position.column);
     let changed = position.offset < inlines::length(cell);
     if changed {
@@ -249,14 +279,17 @@ pub fn delete_changed(document: &mut RichDocument, position: DocPosition) -> (Ri
         remove_inlines(block, position.row, position.column, position.offset, next);
     }
 
-    (RichSelection::at(position), changed)
+    Ok((RichSelection::at(position), changed))
 }
 
 /// Tab in a table: the caret goes to the end of the next cell in reading
 /// order.  Tab in the last cell adds a body row and goes to its first cell, as
 /// in a word processor, so a table grows by typing.
-pub fn next_cell(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    next_cell_added_row(document, position).0
+pub fn next_cell(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    Ok(next_cell_added_row(document, position)?.0)
 }
 
 /// [`next_cell`], also saying whether it added a row (otherwise it only moved
@@ -264,9 +297,9 @@ pub fn next_cell(document: &mut RichDocument, position: DocPosition) -> RichSele
 pub fn next_cell_added_row(
     document: &mut RichDocument,
     position: DocPosition,
-) -> (RichSelection, bool) {
+) -> Result<(RichSelection, bool), RichEditError> {
     let mut added_row = false;
-    let block = require_table(&mut document.blocks[position.block_index]);
+    let block = table_at(document, position)?;
     let columns = block.table_rows[0].len();
     let mut row = position.row;
     let mut column = position.column + 1;
@@ -280,24 +313,27 @@ pub fn next_cell_added_row(
         }
     }
 
-    (
+    Ok((
         RichSelection::at(cell_end(block, position.block_index, row, column)),
         added_row,
-    )
+    ))
 }
 
 /// Shift-Tab in a table: the caret goes to the end of the previous cell; in
 /// the first cell, to that cell's end.
-pub fn previous_cell(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    let block = require_table(&mut document.blocks[position.block_index]);
+pub fn previous_cell(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    let block = table_at(document, position)?;
     let columns = block.table_rows[0].len();
     let cell = (position.row * columns + position.column).saturating_sub(1);
-    RichSelection::at(cell_end(
+    Ok(RichSelection::at(cell_end(
         block,
         position.block_index,
         cell / columns,
         cell % columns,
-    ))
+    )))
 }
 
 /// Adds an empty body row above or below the caret's row; the caret goes to
@@ -307,8 +343,8 @@ pub fn insert_row(
     document: &mut RichDocument,
     position: DocPosition,
     below: bool,
-) -> RichSelection {
-    let block = require_table(&mut document.blocks[position.block_index]);
+) -> Result<RichSelection, RichEditError> {
+    let block = table_at(document, position)?;
     let row = if below {
         position.row + 1
     } else {
@@ -318,28 +354,36 @@ pub fn insert_row(
     let columns = block.table_rows[0].len();
     block.table_rows.insert(row, new_row(columns));
     block.dirty = true;
-    RichSelection::at(DocPosition::in_cell(
+    Ok(RichSelection::at(DocPosition::in_cell(
         position.block_index,
         0,
         row,
         position.column,
-    ))
+    )))
 }
 
 /// Removes the caret's row; the caret goes to the end of the same column in
 /// the row now there, or the row above when it was the last.  The header row
 /// is refused (nothing changes): a markdown table cannot exist without one,
 /// while a table with only a header is valid, so the last body row may go.
-pub fn delete_row(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    let block = require_table(&mut document.blocks[position.block_index]);
+pub fn delete_row(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    let block = table_at(document, position)?;
     if position.row == 0 {
-        return RichSelection::at(position);
+        return Ok(RichSelection::at(position));
     }
 
     block.table_rows.remove(position.row);
     block.dirty = true;
     let row = position.row.min(block.table_rows.len() - 1);
-    RichSelection::at(cell_end(block, position.block_index, row, position.column))
+    Ok(RichSelection::at(cell_end(
+        block,
+        position.block_index,
+        row,
+        position.column,
+    )))
 }
 
 /// Adds an empty column left or right of the caret's column, with no
@@ -349,8 +393,8 @@ pub fn insert_column(
     document: &mut RichDocument,
     position: DocPosition,
     right: bool,
-) -> RichSelection {
-    let block = require_table(&mut document.blocks[position.block_index]);
+) -> Result<RichSelection, RichEditError> {
+    let block = table_at(document, position)?;
     let column = if right {
         position.column + 1
     } else {
@@ -363,23 +407,26 @@ pub fn insert_column(
     let at = column.min(block.column_alignments.len());
     block.column_alignments.insert(at, None);
     block.dirty = true;
-    RichSelection::at(DocPosition::in_cell(
+    Ok(RichSelection::at(DocPosition::in_cell(
         position.block_index,
         0,
         position.row,
         column,
-    ))
+    )))
 }
 
 /// Removes the caret's column and its alignment; the caret goes to the end of
 /// the cell now in that column (or the one left of it).  The only column is
 /// refused (nothing changes): removing a whole table is a selection delete,
 /// not a column operation.
-pub fn delete_column(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    let block = require_table(&mut document.blocks[position.block_index]);
+pub fn delete_column(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    let block = table_at(document, position)?;
     let columns = block.table_rows[0].len();
     if columns <= 1 {
-        return RichSelection::at(position);
+        return Ok(RichSelection::at(position));
     }
 
     for row in &mut block.table_rows {
@@ -392,7 +439,12 @@ pub fn delete_column(document: &mut RichDocument, position: DocPosition) -> Rich
 
     block.dirty = true;
     let column = position.column.min(columns - 2);
-    RichSelection::at(cell_end(block, position.block_index, position.row, column))
+    Ok(RichSelection::at(cell_end(
+        block,
+        position.block_index,
+        position.row,
+        column,
+    )))
 }
 
 /// Adds a new table of empty cells — a header row plus `body_rows` body rows,
@@ -406,7 +458,10 @@ pub fn insert_table(
     position: DocPosition,
     body_rows: usize,
     columns: usize,
-) -> RichSelection {
+) -> Result<RichSelection, RichEditError> {
+    // An empty document has no block to put the table after (C# throws on its indexer).
+    check_block(document, position.block_index)?;
+    check_position(document, position)?;
     let columns = columns.max(1);
     let blocks = &document.blocks;
     let current = &blocks[position.block_index];
@@ -426,7 +481,7 @@ pub fn insert_table(
     table.column_alignments = vec![None; columns];
 
     document.blocks.insert(after + 1, table);
-    RichSelection::at(DocPosition::in_cell(after + 1, 0, 0, 0))
+    Ok(RichSelection::at(DocPosition::in_cell(after + 1, 0, 0, 0)))
 }
 
 fn shares_group(block: &RichBlock, other: &RichBlock) -> bool {
@@ -438,13 +493,24 @@ fn shares_group(block: &RichBlock, other: &RichBlock) -> bool {
         || same(&block.align_group, &other.align_group)
 }
 
-fn require_table(block: &mut RichBlock) -> &mut RichBlock {
-    assert!(
-        block.kind == RichBlockKind::Table,
-        "A {:?} block is not a table.",
-        block.kind
-    );
-    block
+fn require_table(block: &mut RichBlock) -> Result<&mut RichBlock, RichEditError> {
+    if block.kind != RichBlockKind::Table {
+        return Err(RichEditError::NotATable(block.kind));
+    }
+    Ok(block)
+}
+
+/// The table a table operation's position is in, after checking the position
+/// is one the document has.
+fn table_at(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<&mut RichBlock, RichEditError> {
+    check_position(document, position)?;
+    match document.blocks.get_mut(position.block_index) {
+        Some(block) => require_table(block),
+        None => Err(RichEditError::PositionOutOfRange(position)),
+    }
 }
 
 fn cell_inlines(block: &RichBlock, row: usize, column: usize) -> &Vec<RichInline> {

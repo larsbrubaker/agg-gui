@@ -21,13 +21,15 @@
 //! range, selected whole rather than merged into).
 //!
 //! Positions passed in must be caret positions the document has (a block that
-//! exists, an offset within it): like C#'s indexers, an operation panics on
-//! one that is not.  This file also holds the document's line-ending rule
+//! exists, an offset within it): where C#'s indexers throw, an operation
+//! returns [`RichEditError::PositionOutOfRange`] and changes nothing
+//! ([`super::edit_error`]).  This file also holds the document's line-ending rule
 //! ([`blank_line`]), which [`super::markdown_writer`] writes regenerated
 //! separators with, and the caret's character stops.
 
 use super::block::{RichBlock, RichBlockKind};
 use super::document::{DocPosition, RichDocument};
+use super::edit_error::{check_block, check_position, check_range, RichEditError};
 use super::group_repair;
 use super::inline::RichInline;
 use super::inlines;
@@ -47,9 +49,10 @@ pub fn insert_text(
     position: DocPosition,
     text: &str,
     style: Option<&RichInline>,
-) -> RichSelection {
+) -> Result<RichSelection, RichEditError> {
+    check_position(document, position)?;
     if text.is_empty() {
-        return RichSelection::at(position);
+        return Ok(RichSelection::at(position));
     }
 
     add_paragraph_if_empty(document);
@@ -65,7 +68,7 @@ pub fn insert_text(
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     for (i, line) in text.split('\n').enumerate() {
         if i > 0 {
-            caret = split_block(document, caret).caret;
+            caret = split_block(document, caret)?.caret;
         }
 
         if !line.is_empty() {
@@ -78,20 +81,24 @@ pub fn insert_text(
         }
     }
 
-    RichSelection::at(caret)
+    Ok(RichSelection::at(caret))
 }
 
 /// Deletes a selection: a [`RichSelection::whole_block`] selection removes its
 /// block, any other is a [`delete_range`].  This is what Delete, Backspace and
 /// typing over a selection call.
-pub fn delete_selection(document: &mut RichDocument, selection: RichSelection) -> RichSelection {
+pub fn delete_selection(
+    document: &mut RichDocument,
+    selection: RichSelection,
+) -> Result<RichSelection, RichEditError> {
     if document.blocks.is_empty() {
-        return RichSelection::default();
+        return Ok(RichSelection::default());
     }
 
     if selection.whole_block {
         let index = selection.anchor.block_index;
-        return remove_blocks(document, index, index);
+        check_block(document, index)?;
+        return Ok(remove_blocks(document, index, index));
     }
 
     delete_range(document, selection.anchor, selection.caret)
@@ -106,29 +113,38 @@ pub fn delete_selection(document: &mut RichDocument, selection: RichSelection) -
 /// only the covered text goes ([`table_code_operations::delete_range`]), even
 /// when that is all of it; removing such a block on its own takes
 /// [`delete_selection`] with a [`RichSelection::whole_block`] selection.
-pub fn delete_range(document: &mut RichDocument, a: DocPosition, b: DocPosition) -> RichSelection {
+pub fn delete_range(
+    document: &mut RichDocument,
+    a: DocPosition,
+    b: DocPosition,
+) -> Result<RichSelection, RichEditError> {
     let start = a.min(b);
     let end = a.max(b);
     if document.blocks.is_empty() {
-        return RichSelection::default();
+        return Ok(RichSelection::default());
     }
 
+    check_range(document, start, end)?;
     if start == end {
-        return RichSelection::at(start);
+        return Ok(RichSelection::at(start));
     }
 
     if start.block_index == end.block_index {
         let block = &mut document.blocks[start.block_index];
         if block.is_text_block() {
             remove_text(block, start.offset, end.offset);
-            return RichSelection::at(start);
+            return Ok(RichSelection::at(start));
         }
 
         if is_code_or_table(block) {
             return table_code_operations::delete_range(document, start, end);
         }
 
-        return remove_blocks(document, start.block_index, start.block_index);
+        return Ok(remove_blocks(
+            document,
+            start.block_index,
+            start.block_index,
+        ));
     }
 
     let first = start.block_index;
@@ -141,7 +157,7 @@ pub fn delete_range(document: &mut RichDocument, a: DocPosition, b: DocPosition)
         remove_text(&mut document.blocks[last], 0, end.offset);
         append_inlines(document, first, last);
         remove_block_range(document, first + 1, last - first);
-        return RichSelection::at(start);
+        return Ok(RichSelection::at(start));
     }
 
     // A non-text end is kept only when the range merely touches it (starts at its end or ends at its start).
@@ -160,15 +176,15 @@ pub fn delete_range(document: &mut RichDocument, a: DocPosition, b: DocPosition)
     // `last` is after `first`, so it is at least 1 and `last - 1` cannot underflow.
     let remove_to = if keep_last { last - 1 } else { last };
     if remove_from > remove_to {
-        return RichSelection::at(start);
+        return Ok(RichSelection::at(start));
     }
 
     let after_removal = remove_blocks(document, remove_from, remove_to);
-    if keep_first {
+    Ok(if keep_first {
         RichSelection::at(start)
     } else {
         after_removal
-    }
+    })
 }
 
 /// Enter at `position`.  Normally splits the block in two: the new block below
@@ -179,12 +195,18 @@ pub fn delete_range(document: &mut RichDocument, a: DocPosition, b: DocPosition)
 /// heading adds an empty paragraph above it; Enter at the end of a heading
 /// starts a paragraph, not another heading.  At a Raw block it adds an empty
 /// paragraph above (caret before the block) or below (caret after it).
-pub fn split_block(document: &mut RichDocument, position: DocPosition) -> RichSelection {
+pub fn split_block(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    check_position(document, position)?;
     add_paragraph_if_empty(document);
     let index = position.block_index;
     let kind = document.blocks[index].kind;
     if kind == RichBlockKind::Raw {
-        return RichSelection::at(insert_paragraph_beside_raw(document, position));
+        return Ok(RichSelection::at(insert_paragraph_beside_raw(
+            document, position,
+        )));
     }
 
     if is_code_or_table(&document.blocks[index]) {
@@ -194,12 +216,12 @@ pub fn split_block(document: &mut RichDocument, position: DocPosition) -> RichSe
     let length = document.blocks[index].text_length(0, 0);
     if length == 0 && kind == RichBlockKind::ListItem {
         outdent_or_leave_list(document, index);
-        return RichSelection::at(position);
+        return Ok(RichSelection::at(position));
     }
 
     if length == 0 && kind == RichBlockKind::Quote {
         leave_quote(document, index);
-        return RichSelection::at(position);
+        return Ok(RichSelection::at(position));
     }
 
     if kind == RichBlockKind::Heading && position.offset == 0 && length > 0 {
@@ -210,7 +232,7 @@ pub fn split_block(document: &mut RichDocument, position: DocPosition) -> RichSe
         let block = &mut document.blocks[index];
         above.separator_before = std::mem::replace(&mut block.separator_before, gap);
         document.blocks.insert(index, above);
-        return RichSelection::at(DocPosition::new(index + 1, 0));
+        return Ok(RichSelection::at(DocPosition::new(index + 1, 0)));
     }
 
     let kind = if kind == RichBlockKind::Heading && position.offset == length {
@@ -224,7 +246,7 @@ pub fn split_block(document: &mut RichDocument, position: DocPosition) -> RichSe
     below.inlines = block.inlines.split_off(split);
     block.dirty = true;
     document.blocks.insert(index + 1, below);
-    RichSelection::at(DocPosition::new(index + 1, 0))
+    Ok(RichSelection::at(DocPosition::new(index + 1, 0)))
 }
 
 /// Backspace with a collapsed caret.  Inside text it removes one character (a
@@ -235,8 +257,11 @@ pub fn split_block(document: &mut RichDocument, position: DocPosition) -> RichSe
 /// the caret is selected whole instead, so the next Backspace deletes it
 /// knowingly.  Just after a Raw block's own caret stop it selects that block;
 /// at its start the caret moves to the end of a text block before it.
-pub fn backspace(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    backspace_changed(document, position).0
+pub fn backspace(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    Ok(backspace_changed(document, position)?.0)
 }
 
 /// [`backspace`], also saying whether it changed the document (false when it
@@ -245,11 +270,12 @@ pub fn backspace(document: &mut RichDocument, position: DocPosition) -> RichSele
 pub fn backspace_changed(
     document: &mut RichDocument,
     position: DocPosition,
-) -> (RichSelection, bool) {
+) -> Result<(RichSelection, bool), RichEditError> {
     if document.blocks.is_empty() {
-        return (RichSelection::default(), false);
+        return Ok((RichSelection::default(), false));
     }
 
+    check_position(document, position)?;
     let index = position.block_index;
     if is_code_or_table(&document.blocks[index]) {
         return table_code_operations::backspace_changed(document, position);
@@ -257,11 +283,11 @@ pub fn backspace_changed(
 
     if document.blocks[index].kind == RichBlockKind::Raw {
         if position.offset > 0 {
-            return (whole_block(document, index), false);
+            return Ok((whole_block(document, index), false));
         }
 
         if index == 0 {
-            return (RichSelection::at(position), false);
+            return Ok((RichSelection::at(position), false));
         }
 
         // Nothing merges into a Raw block, so the caret steps back to the end of the block before it.
@@ -270,7 +296,7 @@ pub fn backspace_changed(
         } else {
             whole_block(document, index - 1)
         };
-        return (selection, false);
+        return Ok((selection, false));
     }
 
     if position.offset > 0 {
@@ -281,17 +307,17 @@ pub fn backspace_changed(
             offset: previous,
             ..position
         };
-        return (RichSelection::at(caret), true);
+        return Ok((RichSelection::at(caret), true));
     }
 
     match document.blocks[index].kind {
         RichBlockKind::ListItem => {
             outdent_or_leave_list(document, index);
-            return (RichSelection::at(position), true);
+            return Ok((RichSelection::at(position), true));
         }
         RichBlockKind::Quote => {
             leave_quote(document, index);
-            return (RichSelection::at(position), true);
+            return Ok((RichSelection::at(position), true));
         }
         RichBlockKind::Heading => {
             // The block keeps its alignment group: it is still a paragraph or heading, which the wrapper holds.
@@ -299,23 +325,23 @@ pub fn backspace_changed(
             block.kind = RichBlockKind::Paragraph;
             block.heading_level = 0;
             block.dirty = true;
-            return (RichSelection::at(position), true);
+            return Ok((RichSelection::at(position), true));
         }
         _ => {}
     }
 
     if index == 0 {
-        return (RichSelection::at(position), false);
+        return Ok((RichSelection::at(position), false));
     }
 
     if !document.blocks[index - 1].is_text_block() {
-        return (whole_block(document, index - 1), false);
+        return Ok((whole_block(document, index - 1), false));
     }
 
     let caret = DocPosition::new(index - 1, document.blocks[index - 1].text_length(0, 0));
     append_inlines(document, index - 1, index);
     remove_block_range(document, index, 1);
-    (RichSelection::at(caret), true)
+    Ok((RichSelection::at(caret), true))
 }
 
 /// Forward Delete with a collapsed caret: the mirror of [`backspace`].  Inside
@@ -323,16 +349,23 @@ pub fn backspace_changed(
 /// text block joins this one (this block keeps its kind and groups); a Raw (or
 /// code/table) block after the caret is selected whole instead.  Before a Raw
 /// block's own caret stop it selects that block.
-pub fn delete(document: &mut RichDocument, position: DocPosition) -> RichSelection {
-    delete_changed(document, position).0
+pub fn delete(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<RichSelection, RichEditError> {
+    Ok(delete_changed(document, position)?.0)
 }
 
 /// [`delete`], also saying whether it changed the document.
-pub fn delete_changed(document: &mut RichDocument, position: DocPosition) -> (RichSelection, bool) {
+pub fn delete_changed(
+    document: &mut RichDocument,
+    position: DocPosition,
+) -> Result<(RichSelection, bool), RichEditError> {
     if document.blocks.is_empty() {
-        return (RichSelection::default(), false);
+        return Ok((RichSelection::default(), false));
     }
 
+    check_position(document, position)?;
     let index = position.block_index;
     let block = &mut document.blocks[index];
     if is_code_or_table(block) {
@@ -340,32 +373,32 @@ pub fn delete_changed(document: &mut RichDocument, position: DocPosition) -> (Ri
     }
 
     if block.kind == RichBlockKind::Raw && position.offset == 0 {
-        return (whole_block(document, index), false);
+        return Ok((whole_block(document, index), false));
     }
 
     let length = block.text_length(0, 0);
     if position.offset < length {
         let next = next_stop(&block.inlines, position.offset);
         remove_text(block, position.offset, next);
-        return (RichSelection::at(position), true);
+        return Ok((RichSelection::at(position), true));
     }
 
     if index == document.blocks.len() - 1 {
-        return (RichSelection::at(position), false);
+        return Ok((RichSelection::at(position), false));
     }
 
     if !document.blocks[index + 1].is_text_block() {
-        return (whole_block(document, index + 1), false);
+        return Ok((whole_block(document, index + 1), false));
     }
 
     if !document.blocks[index].is_text_block() {
         // Text cannot join a Raw block; the caret simply stays after it.
-        return (RichSelection::at(position), false);
+        return Ok((RichSelection::at(position), false));
     }
 
     append_inlines(document, index, index + 1);
     remove_block_range(document, index + 1, 1);
-    (RichSelection::at(position), true)
+    Ok((RichSelection::at(position), true))
 }
 
 /// A selection of a block as an object, from its first caret stop to its last

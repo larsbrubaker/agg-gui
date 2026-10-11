@@ -35,12 +35,13 @@ impl MemberCount for RichListGroup {
     }
 }
 
-type Group<T> = Option<Rc<RefCell<T>>>;
+pub(super) type Group<T> = Option<Rc<RefCell<T>>>;
 
 /// `starts_run(run's first block, block)`: whether `block` breaks its run.
 type StartsRun<'a> = &'a dyn Fn(&RichBlock, &RichBlock) -> bool;
 
-fn same<T>(a: &Group<T>, b: &Group<T>) -> bool {
+/// Reference equality of two group slots (C#'s `==` on group objects: two empty slots are equal).
+pub(super) fn same<T>(a: &Group<T>, b: &Group<T>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
         (None, None) => true,
