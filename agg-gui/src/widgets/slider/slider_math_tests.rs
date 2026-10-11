@@ -99,6 +99,8 @@ fn commit_clamps_steps_and_rounds() {
     assert_eq!(slider(0.0, 10.0).with_integer(true).commit(2.5), 3.0);
 }
 
+// 3.14159 is agg-sharp's test value, not an approximation of pi.
+#[allow(clippy::approx_constant)]
 #[test]
 fn auto_decimals_follow_step_then_magnitude() {
     let at = |v: f64, step: f64, integer: bool| {
