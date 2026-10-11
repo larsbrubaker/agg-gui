@@ -249,3 +249,5 @@ mod tests_selection_column;
 mod tests_style;
 #[cfg(test)]
 mod tests_tooltip;
+#[cfg(test)]
+mod tests_touch_tap;
