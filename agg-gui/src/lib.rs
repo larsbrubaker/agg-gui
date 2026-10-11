@@ -65,6 +65,7 @@ pub mod clock;
 pub mod color;
 pub mod confetti;
 pub mod cursor;
+mod curve_flattening;
 pub mod device_scale;
 pub mod draw_cell;
 pub mod draw_ctx;

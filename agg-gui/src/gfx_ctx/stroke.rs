@@ -5,17 +5,15 @@
 
 use super::*;
 
-pub(super) fn materialize_stroke_outline(
-    path: &mut PathStorage,
-    width: f64,
-    join: LineJoin,
-    cap: LineCap,
-    miter_limit: f64,
-    dashes: &[f64],
-    dash_offset: f64,
-) -> PathStorage {
+/// The stroked outline of `path` (user space) under `state`'s line style,
+/// its curves flattened finely enough for `state`'s transform.
+pub(super) fn materialize_stroke_outline(path: &mut PathStorage, state: &GfxState) -> PathStorage {
+    let (width, join, cap) = (state.line_width, state.line_join, state.line_cap);
+    let (miter_limit, dashes, dash_offset) =
+        (state.miter_limit, &state.line_dash, state.dash_offset);
     let mut materialized = PathStorage::new();
     let mut curves = ConvCurve::new(path);
+    curves.set_approximation_scale(curve_approximation_scale(&state.transform));
     if dashes.is_empty() {
         let mut stroke = ConvStroke::new(&mut curves);
         configure_stroke(&mut stroke, width, join, cap, miter_limit);

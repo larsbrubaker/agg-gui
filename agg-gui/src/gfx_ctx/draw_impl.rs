@@ -59,6 +59,7 @@ pub(crate) fn rasterize_fill(
     ras.filling_rule(to_agg_fill_rule(fill_rule));
     let mut sl = ScanlineU8::new();
     let mut curves = ConvCurve::new(path);
+    curves.set_approximation_scale(curve_approximation_scale(transform));
     let mut transformed = ConvTransform::new(&mut curves, *transform);
     ras.add_path(&mut transformed, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
@@ -88,6 +89,7 @@ pub(crate) fn rasterize_stroke(
     transform: &TransAffine,
 ) {
     let mut curves = ConvCurve::new(path);
+    curves.set_approximation_scale(curve_approximation_scale(transform));
     if dashes.is_empty() {
         rasterize_stroke_source(
             fb,

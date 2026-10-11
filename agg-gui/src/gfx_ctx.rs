@@ -31,6 +31,7 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::color::Color;
+use crate::curve_flattening::curve_approximation_scale;
 use crate::draw_ctx::{FillRule, LinearGradientPaint, PatternPaint, RadialGradientPaint};
 use crate::framebuffer::Framebuffer;
 use crate::text::{measure_advance, shape_text, Font, TextMetrics};
@@ -552,15 +553,7 @@ impl<'a> GfxCtx<'a> {
         let transform = self.state.transform;
         let fb = active_fb(self.base_fb, &mut self.layer_stack);
         if let Some(gradient) = self.state.stroke_linear_gradient.clone() {
-            let mut outline = stroke::materialize_stroke_outline(
-                &mut self.path,
-                width,
-                join,
-                cap,
-                miter_limit,
-                &dashes,
-                dash_offset,
-            );
+            let mut outline = stroke::materialize_stroke_outline(&mut self.path, &self.state);
             sampled::rasterize_linear_gradient_fill(
                 fb,
                 &mut outline,
@@ -572,15 +565,7 @@ impl<'a> GfxCtx<'a> {
                 &transform,
             );
         } else if let Some(gradient) = self.state.stroke_radial_gradient.clone() {
-            let mut outline = stroke::materialize_stroke_outline(
-                &mut self.path,
-                width,
-                join,
-                cap,
-                miter_limit,
-                &dashes,
-                dash_offset,
-            );
+            let mut outline = stroke::materialize_stroke_outline(&mut self.path, &self.state);
             sampled::rasterize_radial_gradient_fill(
                 fb,
                 &mut outline,
@@ -592,15 +577,7 @@ impl<'a> GfxCtx<'a> {
                 &transform,
             );
         } else if let Some(pattern) = self.state.stroke_pattern.clone() {
-            let mut outline = stroke::materialize_stroke_outline(
-                &mut self.path,
-                width,
-                join,
-                cap,
-                miter_limit,
-                &dashes,
-                dash_offset,
-            );
+            let mut outline = stroke::materialize_stroke_outline(&mut self.path, &self.state);
             sampled::rasterize_pattern_fill(
                 fb,
                 &mut outline,

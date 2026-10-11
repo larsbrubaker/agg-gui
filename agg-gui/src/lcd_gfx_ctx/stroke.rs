@@ -4,6 +4,7 @@
 //! can share the same LCD coverage mask pipeline as ordinary path fills.
 
 use super::*;
+use crate::curve_flattening::curve_approximation_scale;
 
 pub(super) fn stroke(ctx: &mut LcdGfxCtx<'_>) {
     let mut color = ctx.state.stroke_color;
@@ -11,6 +12,7 @@ pub(super) fn stroke(ctx: &mut LcdGfxCtx<'_>) {
     let mut materialized = PathStorage::new();
     {
         let mut curves = ConvCurve::new(&mut ctx.path);
+        curves.set_approximation_scale(curve_approximation_scale(&ctx.state.transform));
         if ctx.state.line_dash.is_empty() {
             let mut stroke = ConvStroke::new(&mut curves);
             configure_stroke(

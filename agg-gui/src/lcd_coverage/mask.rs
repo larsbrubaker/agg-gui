@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use crate::curve_flattening::curve_approximation_scale;
 use agg_rust::basics::{is_vertex, FillingRule};
 use agg_rust::color::Gray8;
 use agg_rust::conv_curve::ConvCurve;
@@ -679,6 +680,9 @@ fn rasterize_paths_into_gray<F>(
 
     let mut add = |path: &mut PathStorage| {
         let mut curves = ConvCurve::new(path);
+        // Flattened for the supersampled transform, so the 3x-wide coverage
+        // has the same half-pixel curve tolerance the RGBA fill gets.
+        curves.set_approximation_scale(curve_approximation_scale(&xform));
         let mut tx = ConvTransform::new(&mut curves, xform);
         ras.reset();
         ras.add_path(&mut tx, 0);

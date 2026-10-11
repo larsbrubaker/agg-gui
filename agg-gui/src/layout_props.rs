@@ -56,6 +56,17 @@ pub struct Insets {
     pub bottom: f64,
 }
 
+/// Equal insets hash equal (`-0.0` and `0.0` alike), so `Insets` can key a
+/// hash map or set.
+impl std::hash::Hash for Insets {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        crate::geometry::hash_f64(self.left, state);
+        crate::geometry::hash_f64(self.right, state);
+        crate::geometry::hash_f64(self.top, state);
+        crate::geometry::hash_f64(self.bottom, state);
+    }
+}
+
 impl Insets {
     /// All sides zero.
     pub const ZERO: Self = Self {

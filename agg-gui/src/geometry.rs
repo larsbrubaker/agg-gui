@@ -11,6 +11,23 @@ pub struct Point {
     pub y: f64,
 }
 
+/// Feeds `value` to `state` so that values comparing equal hash equal: `-0.0`
+/// is folded into `0.0` (they are `==`).  NaN never equals anything, so how
+/// it hashes cannot break `Hash`'s contract.
+pub(crate) fn hash_f64<H: std::hash::Hasher>(value: f64, state: &mut H) {
+    let value = if value == 0.0 { 0.0 } else { value };
+    state.write_u64(value.to_bits());
+}
+
+/// Equal points hash equal (`-0.0` and `0.0` alike), so a `Point` can key a
+/// hash map or set.
+impl std::hash::Hash for Point {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        hash_f64(self.x, state);
+        hash_f64(self.y, state);
+    }
+}
+
 impl Point {
     pub const ORIGIN: Self = Self { x: 0.0, y: 0.0 };
 
