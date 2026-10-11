@@ -16,6 +16,8 @@ pub(super) trait SystemBackend {
     /// Write HTML with a plain-text fallback; a clipboard that can't take
     /// HTML gets the plain text.
     fn set_rich_text(&mut self, plain_text: &str, html_text: &str);
+    /// The clipboard's HTML flavour, `None` when it has none.
+    fn get_html(&mut self) -> Option<String>;
     fn get_image(&mut self) -> Option<ClipboardImage>;
     /// Whether a picture is on the clipboard, ideally without reading it.
     fn has_image(&mut self) -> bool;
@@ -49,6 +51,7 @@ impl<S: SystemBackend> Router<S> {
             system: None,
             local: Contents {
                 text: None,
+                html: None,
                 image: None,
             },
         }
@@ -96,12 +99,20 @@ impl<S: SystemBackend> Router<S> {
         }
     }
 
-    /// The in-process clipboard has no HTML flavour, so it keeps the plain
-    /// text, as a system clipboard read through [`Router::get_text`] would.
+    /// The in-process clipboard keeps both flavours, as a system clipboard
+    /// does: [`Router::get_text`] reads the plain text, [`Router::get_html`]
+    /// the HTML.
     pub(super) fn set_rich_text(&mut self, plain_text: &str, html_text: &str) {
         match self.system() {
             Some(system) => system.set_rich_text(plain_text, html_text),
-            None => self.local.put_text(plain_text),
+            None => self.local.put_rich_text(plain_text, html_text),
+        }
+    }
+
+    pub(super) fn get_html(&mut self) -> Option<String> {
+        match self.system() {
+            Some(system) => system.get_html(),
+            None => self.local.html.clone(),
         }
     }
 
@@ -178,6 +189,10 @@ pub(super) mod tests {
             self.set_text(plain_text);
             self.html = Some(html_text.to_string());
         }
+        fn get_html(&mut self) -> Option<String> {
+            self.calls += 1;
+            self.html.clone()
+        }
         fn get_image(&mut self) -> Option<ClipboardImage> {
             self.calls += 1;
             self.image.clone()
@@ -211,11 +226,13 @@ pub(super) mod tests {
         assert_eq!(router.get_text().as_deref(), Some("hello"));
         router.set_rich_text("plain", "<b>plain</b>");
         assert_eq!(router.get_text().as_deref(), Some("plain"));
+        assert_eq!(router.get_html().as_deref(), Some("<b>plain</b>"));
         assert!(!router.has_image());
         assert!(router.set_image(picture()));
         assert!(router.has_image());
         assert_eq!(router.get_image(), Some(picture()));
         assert_eq!(router.get_text(), None, "a picture replaces the text");
+        assert_eq!(router.get_html(), None, "and the HTML");
         router.set_text("again");
         assert_eq!(router.get_image(), None, "text replaces the picture");
         assert!(!router.has_image());
@@ -232,16 +249,16 @@ pub(super) mod tests {
         assert_eq!(router.get_text(), None, "the system clipboard is empty");
         router.set_text("system");
         router.set_rich_text("rich", "<i>rich</i>");
+        assert_eq!(router.get_html().as_deref(), Some("<i>rich</i>"));
         assert!(router.set_image(picture()));
         assert!(router.has_image());
         assert_eq!(router.get_image(), Some(picture()));
         assert_eq!(connects() - before, 1, "the connection is kept, not remade");
         let system = router.system.as_ref().expect("connected");
         assert_eq!(
-            system.calls, 6,
-            "get, set, rich set, picture set, picture check, picture get"
+            system.calls, 7,
+            "get, set, rich set, HTML get, picture set, picture check, picture get"
         );
-        assert_eq!(system.html.as_deref(), Some("<i>rich</i>"));
         assert_eq!(router.local.text.as_deref(), Some("local"));
     }
 

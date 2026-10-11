@@ -54,6 +54,10 @@ mod system {
             }
         }
 
+        fn get_html(&mut self) -> Option<String> {
+            self.0.get().html().ok()
+        }
+
         fn get_image(&mut self) -> Option<ClipboardImage> {
             let image = self.0.get_image().ok()?;
             ClipboardImage::new(
@@ -168,6 +172,10 @@ mod routed {
         with_router(|r| r.set_rich_text(plain_text, html_text));
     }
 
+    pub(in crate::clipboard) fn get_html() -> Option<String> {
+        with_router(|r| r.get_html())
+    }
+
     pub(in crate::clipboard) fn get_image() -> Option<ClipboardImage> {
         with_router(|r| r.get_image())
     }
@@ -201,6 +209,10 @@ mod absent {
     pub(in crate::clipboard) fn set_text(_: &str) {}
 
     pub(in crate::clipboard) fn set_rich_text(_: &str, _: &str) {}
+
+    pub(in crate::clipboard) fn get_html() -> Option<String> {
+        None
+    }
 
     pub(in crate::clipboard) fn get_image() -> Option<ClipboardImage> {
         None
@@ -241,6 +253,12 @@ mod browser {
         crate::wasm_clipboard::set_rich(plain_text, html_text);
     }
 
+    /// The HTML of this page's latest copy (a paste carries text and
+    /// pictures only, and clears it).
+    pub(in crate::clipboard) fn get_html() -> Option<String> {
+        crate::wasm_clipboard::get_html()
+    }
+
     pub(in crate::clipboard) fn get_image() -> Option<ClipboardImage> {
         crate::wasm_clipboard::get_image()
     }
@@ -262,14 +280,22 @@ pub(super) use browser::*;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::with_router;
-    use crate::clipboard::{get_text, set_rich_text, set_text};
+    use crate::clipboard::{get_html, get_text, set_rich_text, set_text};
 
     #[test]
     fn without_opting_in_the_api_round_trips_in_process() {
         set_text("copied");
         assert_eq!(get_text().as_deref(), Some("copied"));
+        assert_eq!(get_html(), None);
         set_rich_text("plain", "<b>plain</b>");
         assert_eq!(get_text().as_deref(), Some("plain"));
+        assert_eq!(
+            get_html().as_deref(),
+            Some("<!--StartFragment--><b>plain</b><!--EndFragment-->"),
+            "the in-process clipboard keeps the HTML as the system one gets it"
+        );
+        set_text("plain again");
+        assert_eq!(get_html(), None, "plain text drops the HTML");
         assert!(
             with_router(|r| !r.is_connected()),
             "no system clipboard connection was made"

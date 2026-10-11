@@ -1,11 +1,6 @@
 //! agg-sharp's `RichEditorClipboardTests.cs`, ported 1:1 over
 //! `RichEditorState` on agg-gui's simulated clipboard
 //! (`clipboard::simulate`, C#'s `SimulatedClipboard`).
-//!
-//! `CopyThenPasteKeepsBoldAndLink` and `DarkThemeCopyPastesWithALightBackground`
-//! assert the styled HTML a copy puts on the clipboard
-//! (`AggMarkdownDocument.ToStyledHtml`), which is not ported yet; they port
-//! with it.
 
 use std::sync::Arc;
 
@@ -14,24 +9,34 @@ use agg_gui::event::{Key, Modifiers};
 use agg_gui::text::Font;
 use agg_gui::widgets::markdown_editing::{
     DocPosition, RichBlockKind, RichEditorState, RichLayoutFonts, RichLayoutStyle, RichSelection,
+    RichThemeColors,
 };
+use agg_gui::Color;
 
 static REGULAR: &[u8] = include_bytes!("../../../demo/assets/Nunito_Regular.ttf");
 
+fn fonts() -> RichLayoutFonts {
+    RichLayoutFonts {
+        regular: Arc::new(Font::from_slice(REGULAR).expect("demo font")),
+        bold: None,
+        mono: None,
+    }
+}
+
 fn style() -> RichLayoutStyle {
-    RichLayoutStyle::new(
-        RichLayoutFonts {
-            regular: Arc::new(Font::from_slice(REGULAR).expect("demo font")),
-            bold: None,
-            mono: None,
-        },
-        Some(1.0),
-    )
+    RichLayoutStyle::new(fonts(), Some(1.0))
 }
 
 fn make(markdown: &str) -> (RichEditorState, clipboard::SimulatedClipboard) {
+    make_styled(markdown, Box::new(style))
+}
+
+fn make_styled(
+    markdown: &str,
+    build_style: Box<dyn FnMut() -> RichLayoutStyle>,
+) -> (RichEditorState, clipboard::SimulatedClipboard) {
     let simulated = clipboard::simulate();
-    let mut editor = RichEditorState::new(Box::new(style));
+    let mut editor = RichEditorState::new(build_style);
     editor.use_mac_key_bindings = false;
     editor.set_markdown(markdown).unwrap();
     editor.set_viewport(400.0, 300.0).unwrap();
@@ -55,6 +60,24 @@ fn select(editor: &mut RichEditorState, block: usize, from: usize, to: usize) {
         DocPosition::new(block, from),
         DocPosition::new(block, to),
     ));
+}
+
+#[test]
+fn copy_then_paste_keeps_bold_and_link() {
+    let (mut editor, _clipboard) = make("A **bold** [link](https://x.com) end\n");
+    select(&mut editor, 0, 2, 11);
+    ctrl(&mut editor, 'c');
+    assert_eq!(clipboard::get_text().as_deref(), Some("bold link"));
+    let html = clipboard::get_html().unwrap_or_default();
+    assert!(html.contains("<strong"), "{html}");
+    assert!(html.contains("href=\"https://x.com\""), "{html}");
+
+    editor.select(RichSelection::at(DocPosition::new(0, 15)));
+    ctrl(&mut editor, 'v');
+    assert_eq!(
+        editor.markdown(),
+        "A **bold** [link](https://x.com) end**bold** [link](https://x.com)\n"
+    );
 }
 
 #[test]
@@ -145,6 +168,25 @@ fn shift_down_copy_pastes_no_empty_item() {
     editor.select(RichSelection::at(DocPosition::new(2, 3)));
     ctrl(&mut editor, 'v');
     assert_eq!(editor.markdown(), "- a\n- b\n\nEnd\n\n- a\n");
+}
+
+#[test]
+fn dark_theme_copy_pastes_with_a_light_background() {
+    let dark = RichThemeColors {
+        background: Color::from_rgb8(0x10, 0x10, 0x10),
+        text: Color::from_rgb8(0xEE, 0xEE, 0xEE),
+        accent: Color::from_rgb8(0x7A, 0xD7, 0xF0),
+    };
+    let (mut editor, _clipboard) = make_styled(
+        "Some text\n",
+        Box::new(move || RichLayoutStyle::with_theme(fonts(), Some(&dark), Some(1.0))),
+    );
+    ctrl(&mut editor, 'a');
+    ctrl(&mut editor, 'c');
+    let html = clipboard::get_html().unwrap_or_default().to_lowercase();
+    assert!(!html.is_empty(), "the copy put HTML on the clipboard");
+    assert!(!html.contains("101010"), "{html}");
+    assert!(!html.contains("eeeeee"), "{html}");
 }
 
 #[test]

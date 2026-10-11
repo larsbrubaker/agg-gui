@@ -68,6 +68,10 @@ pub struct RichEditorState {
     /// Mac (Option word steps, Cmd+arrows to line and document ends) or
     /// Windows/Linux key bindings; defaults to [`platform::use_mac_key_bindings`].
     pub use_mac_key_bindings: bool,
+    /// The body text size, in points, of the styled HTML a copy puts on the
+    /// clipboard (C#'s `editor.Theme.DefaultFontSize`); the host sets it from
+    /// its theme.  Defaults to C#'s 11.
+    pub copy_font_size: f64,
     pub(super) keyboard: super::editor_keyboard::KeyboardState,
     pub(super) mouse: super::editor_mouse::MouseState,
     selection_changed: Handlers,
@@ -99,6 +103,7 @@ impl RichEditorState {
             viewport_height: 0.0,
             placements: 0,
             use_mac_key_bindings: platform::use_mac_key_bindings(),
+            copy_font_size: 11.0,
             keyboard: Default::default(),
             mouse: Default::default(),
             selection_changed: Vec::new(),

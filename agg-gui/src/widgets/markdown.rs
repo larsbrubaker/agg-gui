@@ -29,6 +29,8 @@
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
 //! - Links (coloured text, URL is not opened — add `on_link_click` if needed)
 //! - Matching-text highlight boxes ([`MarkdownView::set_matching_text`])
+//! - Markdown as inline-styled HTML for the clipboard ([`to_styled_html`],
+//!   `styled_html.rs`), which the rich editor's copy writes
 //!
 //! # Updating in place
 //!
@@ -61,6 +63,7 @@ mod grid_tables;
 mod html_form;
 #[cfg(test)]
 mod html_form_tests;
+mod html_rewriter;
 mod image_context;
 mod image_loader;
 mod layout;
@@ -71,6 +74,9 @@ mod paint;
 mod parse;
 mod rich_html;
 mod selection;
+mod styled_html;
+#[cfg(test)]
+mod styled_html_tests;
 #[cfg(test)]
 mod update_tests;
 
@@ -79,6 +85,7 @@ use block_scroll::{
 };
 pub use emphasis::MarkdownRunStyle;
 pub use html_form::{markdown_html, markdown_html_collapsed};
+pub use styled_html::{css_color, style_html_fragment, to_styled_html, HtmlStyleTheme};
 
 // ── Styled line representation ─────────────────────────────────────────────────
 

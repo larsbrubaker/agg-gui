@@ -1,26 +1,24 @@
 //! Cut, copy and paste between the rich editor and the clipboard — a port of
 //! agg-sharp's `RichEditorClipboard.cs`, over agg-gui's [`crate::clipboard`].
 //!
-//! Copy puts the text a reader sees on the clipboard — pasting into a plain
-//! field anywhere else gives the words, not markdown punctuation.  The
-//! clipboard holds only text, so the editor also keeps the copied fragment
-//! itself: a paste whose clipboard text is still that copy's text inserts the
-//! fragment, styles and all.  Any other clipboard text is read as markdown,
+//! Copy puts the text a reader sees on the clipboard as the plain text —
+//! pasting into a plain field anywhere else gives the words, not markdown
+//! punctuation — and the selection's markdown rendered as styled HTML for
+//! rich targets (mail, documents), through the viewer's
+//! [`crate::widgets::markdown::to_styled_html`] in a light, default theme.
+//! The clipboard holds only text and HTML, so the editor also keeps the
+//! copied fragment itself: a paste whose clipboard text is still that copy's
+//! text inserts the fragment, styles and all.  Any other clipboard text is read as markdown,
 //! so text written with **bold**, lists or headings pastes formatted, except
 //! that a single line break stays a line break.  A single plain line goes in
 //! as typing would, in the caret's style.  A code block takes only plain text
 //! and a table cell one line.  A paste is never merged with typing in the
 //! undo history.
-//!
-//! Not yet ported: C# also put the selection's markdown on the clipboard as
-//! styled HTML for rich targets (mail, documents), through
-//! `AggMarkdownDocument.ToStyledHtml` / `StyleHtmlFragment`, which agg-gui's
-//! markdown viewer does not have yet; until it does, Copy writes the plain
-//! text alone (C#'s own path when the HTML came out empty).
 
 use std::cell::RefCell;
 
 use crate::clipboard;
+use crate::widgets::markdown::{to_styled_html, HtmlStyleTheme};
 
 use super::block::RichBlockKind;
 use super::document::RichDocument;
@@ -57,12 +55,25 @@ impl RichEditorState {
             return Ok(false);
         }
 
+        let markdown = markdown_writer::write(&fragment);
         let mut text = visible_text(&fragment);
         if text.is_empty() {
             // An image alone has no visible text; its markdown still says what was copied.
-            text = markdown_writer::write(&fragment).trim().to_string();
+            text = markdown.trim().to_string();
         }
-        clipboard::set_text(&text);
+
+        // A light, default theme rather than the editor's: a copy from a dark theme would otherwise carry its
+        // dark background and light text into the mail or document it is pasted into.
+        let neutral = HtmlStyleTheme {
+            default_font_size: self.copy_font_size,
+            ..HtmlStyleTheme::default()
+        };
+        let html = to_styled_html(&markdown, &neutral);
+        if html.trim().is_empty() {
+            clipboard::set_text(&text);
+        } else {
+            clipboard::set_rich_text(&text, &html);
+        }
         let text = text.replace("\r\n", "\n");
         COPIED.with(|slot| *slot.borrow_mut() = Some(Copied { fragment, text }));
         Ok(true)

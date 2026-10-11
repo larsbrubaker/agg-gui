@@ -18,8 +18,15 @@
 //!
 //! [`simulate`] swaps in an in-process clipboard for the calling thread (C#
 //! agg-sharp's `Clipboard.SetSystemClipboard(new SimulatedClipboard())`), so
-//! a test can copy and paste text and pictures in isolation; it takes
-//! precedence over both the in-process and the system clipboard.
+//! a test can copy and paste text, HTML and pictures in isolation, and read
+//! back what a copy wrote ([`get_text`], [`get_html`], [`get_image_rgba`]);
+//! it takes precedence over both the in-process and the system clipboard.
+//!
+//! Rich text ([`set_rich_text`]) is plain text plus an HTML flavour: the
+//! native system clipboard gets both (`arboard`'s HTML format, with the plain
+//! text as its fallback), the browser's `copy` / `cut` events put both on the
+//! page's clipboard (`text/plain` and `text/html`), and the in-process and
+//! simulated clipboards keep both, so [`get_html`] reads the HTML back.
 //!
 //! `router.rs` decides between the in-process and the system clipboard;
 //! `backend.rs` holds the per-build instance it runs on.
@@ -77,22 +84,31 @@ impl ClipboardImage {
 }
 
 /// What an in-process clipboard holds. Like a system clipboard it holds one
-/// thing at a time: writing text drops the picture and writing a picture
-/// drops the text.
+/// copy at a time: writing text drops the HTML and the picture, writing rich
+/// text drops the picture, and writing a picture drops the text and HTML.
 #[derive(Clone, Debug, Default)]
 struct Contents {
     text: Option<String>,
+    html: Option<String>,
     image: Option<ClipboardImage>,
 }
 
 impl Contents {
     fn put_text(&mut self, text: &str) {
         self.text = Some(text.to_string());
+        self.html = None;
+        self.image = None;
+    }
+
+    fn put_rich_text(&mut self, plain_text: &str, html_text: &str) {
+        self.text = Some(plain_text.to_string());
+        self.html = Some(html_text.to_string());
         self.image = None;
     }
 
     fn put_image(&mut self, image: ClipboardImage) {
         self.text = None;
+        self.html = None;
         self.image = Some(image);
     }
 }
@@ -183,13 +199,37 @@ fn set_simulated(text: &str) -> bool {
     })
 }
 
-/// Write HTML plus a plain-text fallback to the clipboard.
+/// Write HTML plus a plain-text fallback to the clipboard.  A paste target
+/// that takes HTML (mail, documents) gets the HTML, any other the plain text.
+/// The system, browser and in-process clipboards get the HTML wrapped in
+/// fragment markers ([`html_fragment_for_clipboard`]), as a paste from the
+/// system clipboard would read it; a [`simulate`]d one keeps it as given (C#'s
+/// `SimulatedClipboard.SetTextAndHtml`).
 pub fn set_rich_text(plain_text: &str, html_text: &str) {
-    if set_simulated(plain_text) {
+    let simulated = SIMULATED.with(|slot| match slot.borrow_mut().as_mut() {
+        Some(simulated) => {
+            simulated.put_rich_text(plain_text, html_text);
+            true
+        }
+        None => false,
+    });
+    if simulated {
         return;
     }
-    let html = html_fragment_for_clipboard(html_text);
-    backend::set_rich_text(plain_text, &html);
+    backend::set_rich_text(plain_text, &html_fragment_for_clipboard(html_text));
+}
+
+/// Read the HTML flavour of the clipboard: what the last rich-text copy
+/// ([`set_rich_text`]) wrote, `None` when the clipboard holds plain text only,
+/// a picture, or nothing.  Natively, after [`use_system_clipboard`], this is
+/// the system clipboard's HTML (whatever program copied it); in the browser,
+/// the HTML of this page's latest copy (a paste delivers only text and
+/// pictures).
+pub fn get_html() -> Option<String> {
+    if let Some(html) = SIMULATED.with(|slot| slot.borrow().as_ref().map(|c| c.html.clone())) {
+        return html;
+    }
+    backend::get_html()
 }
 
 /// Mark the selected HTML fragment explicitly for rich-text paste targets.
@@ -261,8 +301,8 @@ pub fn has_image() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        get_image_rgba, get_text, has_image, html_fragment_for_clipboard, set_image_rgba, set_text,
-        simulate, ClipboardImage,
+        get_html, get_image_rgba, get_text, has_image, html_fragment_for_clipboard, set_image_rgba,
+        set_rich_text, set_text, simulate, ClipboardImage,
     };
 
     const RED_THEN_CLEAR: [u8; 8] = [255, 0, 0, 255, 0, 0, 0, 0];
@@ -365,6 +405,21 @@ mod tests {
             assert_eq!(get_text().as_deref(), Some("inner"));
         }
         assert_eq!(get_text().as_deref(), Some("outer"));
+    }
+
+    #[test]
+    fn simulated_clipboard_reads_rich_text_back_in_both_flavours() {
+        let _clipboard = simulate();
+        assert_eq!(get_html(), None);
+        set_rich_text("bold", "<strong>bold</strong>");
+        assert_eq!(get_text().as_deref(), Some("bold"));
+        assert_eq!(get_html().as_deref(), Some("<strong>bold</strong>"));
+        assert!(set_image_rgba(&RED_THEN_CLEAR, 2, 1));
+        assert_eq!(get_html(), None, "a picture replaces the HTML");
+        set_rich_text("again", "<em>again</em>");
+        assert_eq!(get_image_rgba(), None, "rich text replaces the picture");
+        set_text("plain");
+        assert_eq!(get_html(), None, "plain text replaces the HTML");
     }
 
     #[test]

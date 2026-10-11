@@ -34,8 +34,9 @@ pub fn markdown_html_collapsed(markdown: &str) -> String {
     collapse_whitespace(&raw_html(markdown))
 }
 
-/// The viewer's parse of `markdown` as HTML, before normalising.
-fn raw_html(markdown: &str) -> String {
+/// The viewer's parse of `markdown` as HTML, before normalising (what
+/// `styled_html.rs` styles for the clipboard).
+pub(super) fn raw_html(markdown: &str) -> String {
     let (source, headerless) = viewer_source(markdown);
     let mut events: Vec<Event<'_>> = Vec::new();
     let mut code_depth = 0;
