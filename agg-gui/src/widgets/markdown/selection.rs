@@ -106,6 +106,7 @@ impl MarkdownView {
                     continues,
                     y,
                     height,
+                    ..
                 } => {
                     if matches!(style, LineStyle::Rule) {
                         self.push_block_gap();

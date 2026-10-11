@@ -10,7 +10,7 @@
 //! (`layout.rs`) and the selectable text model (`selection.rs`).
 
 use super::cell_images::images_of;
-use super::{LayoutItem, LineRun, MarkdownView};
+use super::{LayoutItem, LineRun, MarkdownAlign, MarkdownView};
 
 /// A block-level element of the laid-out document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,7 +40,80 @@ pub struct MarkdownTableCell {
     pub image_widths: Vec<f64>,
 }
 
+/// One laid-out paragraph, heading or list item (C#'s `ParagraphX` /
+/// `HeadingRowX`), all its wrapped rows together.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkdownTextBlock {
+    /// The heading level (1-6), 0 for a paragraph (C#'s `HeadingRowX.Level`).
+    pub level: u8,
+    /// How its rows sit across the view (C#'s `ContentHAnchor`).
+    pub align: MarkdownAlign,
+    /// Its words in order, each with where it starts.
+    pub words: Vec<MarkdownWord>,
+}
+
+/// A laid-out word of a [`MarkdownTextBlock`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkdownWord {
+    pub text: String,
+    /// The word's left edge, from the view's left edge (C#'s
+    /// `TransformToParentSpace(root, Vector2.Zero).X` of its `TextWidget`).
+    pub x: f64,
+}
+
 impl MarkdownView {
+    /// The paragraphs, headings and list items of the last layout, in
+    /// document order (table cells and code blocks are not among them).
+    pub fn text_blocks(&self) -> Vec<MarkdownTextBlock> {
+        let mut blocks: Vec<MarkdownTextBlock> = Vec::new();
+        for item in &self.items {
+            let LayoutItem::Line {
+                runs,
+                style,
+                indent,
+                continues,
+                align,
+                level,
+                ..
+            } = item
+            else {
+                continue;
+            };
+            let mut words = Vec::new();
+            for run in runs {
+                let LineRun::Text {
+                    text,
+                    style: run_style,
+                    lead,
+                    x,
+                    ..
+                } = run
+                else {
+                    continue;
+                };
+                for (offset, word) in super::matching::words_with_offsets(text) {
+                    let before = self.styled_text_width(&text[..offset], *style, *run_style);
+                    words.push(MarkdownWord {
+                        text: word.to_string(),
+                        x: self.padding + indent + x + lead + before,
+                    });
+                }
+            }
+            if words.is_empty() {
+                continue;
+            }
+            match blocks.last_mut() {
+                Some(block) if *continues => block.words.extend(words),
+                _ => blocks.push(MarkdownTextBlock {
+                    level: *level,
+                    align: *align,
+                    words,
+                }),
+            }
+        }
+        blocks
+    }
+
     /// The laid-out document as plain text (MarkdigAgg's `PlainText`): the
     /// rendered words without markdown syntax, a space where a row wraps, a
     /// newline between blocks, tabs between table cells. The offsets

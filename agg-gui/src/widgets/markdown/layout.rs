@@ -7,6 +7,7 @@
 use crate::geometry::Size;
 use crate::text::measure_text_metrics;
 
+use super::alignment::{self, MarkdownAlign};
 use super::cell_images;
 use super::matching::{self, MATCH_PAD};
 use super::{
@@ -61,6 +62,8 @@ impl MarkdownView {
                     indent: 0.0,
                     quote: false,
                     continues: false,
+                    align: MarkdownAlign::Left,
+                    level: 0,
                     y: 0.0,
                     height: 8.0,
                 }),
@@ -72,6 +75,8 @@ impl MarkdownView {
                         indent: 0.0,
                         quote: false,
                         continues: false,
+                        align: MarkdownAlign::Left,
+                        level: 0,
                         y: 0.0,
                         height: metrics.line_height * 0.65,
                     });
@@ -140,6 +145,8 @@ impl MarkdownView {
                     style,
                     indent,
                     quote,
+                    align,
+                    level,
                 } => {
                     let flow_start = laid_out.len();
                     let font_size = style.font_size(self.font_size);
@@ -258,6 +265,12 @@ impl MarkdownView {
                             *continues = true;
                         }
                     }
+                    for item in laid_out.iter_mut().skip(flow_start) {
+                        if let LayoutItem::Line { level: l, .. } = item {
+                            *l = *level;
+                        }
+                    }
+                    alignment::align_rows(&mut laid_out[flow_start..], avail, *align);
                 }
             }
         }
@@ -507,6 +520,8 @@ impl MarkdownView {
             indent,
             quote,
             continues: false,
+            align: MarkdownAlign::Left,
+            level: 0,
             y: 0.0,
             height,
         });

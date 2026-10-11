@@ -53,6 +53,9 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 
+mod alignment;
+#[cfg(test)]
+mod alignment_tests;
 mod block_scroll;
 mod cell_images;
 #[cfg(test)]
@@ -94,12 +97,13 @@ mod table_image_tests;
 #[cfg(test)]
 mod update_tests;
 
+pub use alignment::MarkdownAlign;
 use block_scroll::{
     clamp_block_offset, scrollbar_rect, scrollbar_thumb, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
 pub use emphasis::MarkdownRunStyle;
 pub use html_form::{markdown_html, markdown_html_collapsed};
-pub use introspect::{MarkdownBlockKind, MarkdownTableCell};
+pub use introspect::{MarkdownBlockKind, MarkdownTableCell, MarkdownTextBlock, MarkdownWord};
 pub use styled_html::{css_color, style_html_fragment, to_styled_html, HtmlStyleTheme};
 
 // ── Styled line representation ─────────────────────────────────────────────────
@@ -143,6 +147,10 @@ enum LayoutItem {
         /// The row continues the previous row's paragraph (a soft wrap), so
         /// the plain text joins the two with a space rather than a newline.
         continues: bool,
+        /// The row's paragraph or heading alignment (`alignment.rs`).
+        align: MarkdownAlign,
+        /// The heading level of the row's block, 0 for a paragraph.
+        level: u8,
         y: f64,
         height: f64,
     },
@@ -230,6 +238,10 @@ enum ParagraphItem {
         style: LineStyle,
         indent: f64,
         quote: bool,
+        /// Set by the `<div align>` around it or its own aligned element (`alignment.rs`).
+        align: MarkdownAlign,
+        /// The heading level (1-6), 0 for a paragraph or list item.
+        level: u8,
     },
     Table {
         rows: Vec<Vec<String>>,

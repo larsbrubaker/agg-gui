@@ -14,6 +14,7 @@
 
 use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 
+use super::alignment::{self, AlignStack, HtmlBlocks, HtmlFeed, MarkdownAlign};
 use super::cell_images::{CellImage, CellImages};
 use super::emphasis::{pair_style_tags, CellSpan, CellStyles, HtmlStyle, StyleStack};
 use super::extensions;
@@ -70,6 +71,11 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut table_row: Option<Vec<String>> = None;
     let mut table_cell: Option<String> = None;
     let mut code_block: Option<String> = None;
+    // `<div align>` blocks open around the flows emitted (`alignment.rs`); flows
+    // before `stamped` already carry their alignment.
+    let mut aligns = AlignStack::default();
+    let mut html_blocks = HtmlBlocks::default();
+    let mut stamped = 0usize;
 
     /// Push the pending text as one item of `style`. An item glues onto the
     /// one before it when no whitespace separates them in the source.
@@ -136,6 +142,8 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 style,
                 indent,
                 quote,
+                align: MarkdownAlign::Left,
+                level: 0,
             });
         }
     }
@@ -221,6 +229,17 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
 
         let quote = quote_depth > 0;
         let link = link_stack.last().cloned();
+        alignment::stamp(&mut out[stamped..], aligns.current());
+        stamped = out.len();
+        match html_blocks.feed(&ev) {
+            HtmlFeed::Pass => {}
+            HtmlFeed::Consumed => continue,
+            HtmlFeed::Block(html) => {
+                alignment::write_html_block(&html, &mut aligns, &mut out, cur_indent, quote);
+                stamped = out.len();
+                continue;
+            }
+        }
         if let Some((kind, open)) = emphasis_change(&ev, idx, &paired_tags) {
             if table_cell.is_none() && in_image.is_none() {
                 flush_text(
@@ -418,7 +437,8 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 };
                 cur_indent = if quote { 16.0 } else { 0.0 };
             }
-            MdEvent::End(TagEnd::Heading(_)) => {
+            MdEvent::End(TagEnd::Heading(level)) => {
+                let before = out.len();
                 flush_flow(
                     &mut out,
                     &mut cur_items,
@@ -430,6 +450,9 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                     quote,
                     link,
                 );
+                if let Some(ParagraphItem::Flow { level: l, .. }) = out.get_mut(before) {
+                    *l = level as u8;
+                }
                 add_spacer(&mut out);
                 cur_style = LineStyle::Body;
                 cur_indent = if quote { 16.0 } else { 0.0 };
@@ -610,6 +633,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
         quote_depth > 0,
         link_stack.last().cloned(),
     );
+    alignment::stamp(&mut out[stamped..], aligns.current());
     out
 }
 
