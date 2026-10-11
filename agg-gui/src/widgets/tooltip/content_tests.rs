@@ -232,3 +232,19 @@ fn default_tip_path_unchanged_without_factory() {
     );
     assert_eq!(visible_rect(), Some(expected));
 }
+
+#[test]
+fn active_content_is_readable_while_the_tip_shows() {
+    let _g = pin();
+    let (_builds, _paints) = install_swatch_factory();
+    assert_eq!(with_active_content(|w| w.bounds()), None);
+    show("Fillet");
+    let rect = visible_rect().expect("factory tip has a placed rect");
+    assert_eq!(
+        with_active_content(|w| (w.bounds().width, w.bounds().height)),
+        Some((rect.width, rect.height)),
+        "the content is laid out at the panel size"
+    );
+    frame(None);
+    assert_eq!(with_active_content(|w| w.bounds()), None, "hidden: nothing");
+}

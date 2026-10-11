@@ -277,6 +277,12 @@ impl MarkdownView {
         self.selection_cursor = self.selection_cursor.map(clamp);
     }
 
+    /// The laid-out document as plain text (what select-all copies): the
+    /// rendered words without their markdown syntax.
+    pub fn laid_out_text(&self) -> &str {
+        &self.selectable_text
+    }
+
     /// Whether any text is selected (a drag across the words, a double-click
     /// or Select All).
     pub fn has_selection(&self) -> bool {

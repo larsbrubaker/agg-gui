@@ -140,6 +140,14 @@ pub(super) fn paint_pending(ctx: &mut dyn DrawCtx) {
     });
 }
 
+/// Run `f` on the visible tip's content widget, laid out at the tip panel's
+/// size; `None` when no factory content is showing. GUI automation and host
+/// tests read what the tip shows through it (C#'s
+/// `ToolTipManager.CurrentToolTip`), e.g. downcasting via `as_any`.
+pub fn with_active_content<R>(f: impl FnOnce(&dyn Widget) -> R) -> Option<R> {
+    ACTIVE.with(|a| a.borrow().as_ref().map(|active| f(active.widget.as_ref())))
+}
+
 /// Text the current content was built from, for tests.
 #[cfg(test)]
 pub(super) fn active_text() -> Option<String> {

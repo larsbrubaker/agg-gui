@@ -49,6 +49,8 @@ mod event;
 mod image_context;
 mod image_loader;
 mod layout;
+#[cfg(test)]
+mod line_width_tests;
 mod matching;
 mod paint;
 mod parse;
@@ -234,6 +236,8 @@ pub struct MarkdownView {
     items: Vec<LayoutItem>,
     /// Total content height from the last layout pass.
     content_h: f64,
+    /// Widest text row from the last layout pass (see [`MarkdownView::max_line_width`]).
+    max_line_w: f64,
     on_link_click: Option<UrlCallback>,
     on_image_open: Option<UrlCallback>,
     block_scrolls: Vec<BlockScroll>,
@@ -265,6 +269,7 @@ impl MarkdownView {
             image_cache: Vec::new(),
             items: Vec::new(),
             content_h: 0.0,
+            max_line_w: 0.0,
             on_link_click: None,
             on_image_open: None,
             block_scrolls: Vec::new(),

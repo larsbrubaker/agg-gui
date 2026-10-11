@@ -1,7 +1,8 @@
 //! Layout pass for `MarkdownView`.
 //!
 //! Converts parsed markdown flow items into positioned rows in the framework's
-//! Y-up coordinate system.
+//! Y-up coordinate system, and records the widest text row for
+//! [`MarkdownView::max_line_width`].
 
 use crate::geometry::Size;
 use crate::text::measure_text_metrics;
@@ -23,6 +24,17 @@ struct TextRun {
 }
 
 impl MarkdownView {
+    /// The widest text row of the last layout, from the row's left text edge
+    /// (its indent included, the view's padding not) to the end of its last
+    /// word or image: agg-sharp's `ParagraphX.MaxLineWidth`, the largest over
+    /// the document. Paragraphs, headings and list items count; tables and
+    /// code blocks, which scroll inside their own box, do not (C# measures
+    /// only `ParagraphX`). A host shrinks a view to its text with it, as
+    /// MatterCAD's tooltip lays out at 350 and re-lays at this width + 15.
+    pub fn max_line_width(&self) -> f64 {
+        self.max_line_w
+    }
+
     pub(super) fn layout_markdown(&mut self, available: Size) -> Size {
         let pad = self.padding;
         let viewport_w = crate::widget::current_viewport().width;
@@ -36,6 +48,8 @@ impl MarkdownView {
         let paragraphs = self.parse_paragraphs();
         let mut laid_out = Vec::new();
         let mut block_idx = 0usize;
+        // Widest text row (indent + its content), C#'s `ParagraphX.MaxLineWidth`.
+        let mut max_line_w = 0.0_f64;
 
         for item in &paragraphs {
             match item {
@@ -118,6 +132,8 @@ impl MarkdownView {
                     let avail = (max_w - indent).max(1.0);
                     let mut runs = Vec::new();
                     let mut used = 0.0;
+                    // Where the row's content ends: `used` minus an image's trailing gap.
+                    let mut line_end = 0.0_f64;
                     let mut row_h = line_h;
 
                     for inline in items {
@@ -133,6 +149,8 @@ impl MarkdownView {
                                         Self::word_segments(word, offset, &ranges, used > 0.0);
                                     let w = self.segments_width(&segs, *style, *code);
                                     if used > 0.0 && used + w > avail {
+                                        max_line_w = max_line_w.max(indent + line_end);
+                                        line_end = 0.0;
                                         Self::push_line(
                                             &mut laid_out,
                                             &mut runs,
@@ -165,6 +183,7 @@ impl MarkdownView {
                                             sw,
                                         );
                                         used += sw;
+                                        line_end = used;
                                     }
                                 }
                             }
@@ -172,6 +191,7 @@ impl MarkdownView {
                                 let cache_idx = self.get_or_load_image(url);
                                 let (iw, ih) = self.inline_image_size(cache_idx, alt, avail);
                                 if used > 0.0 && used + iw > avail {
+                                    max_line_w = max_line_w.max(indent + line_end);
                                     Self::push_line(
                                         &mut laid_out,
                                         &mut runs,
@@ -193,12 +213,14 @@ impl MarkdownView {
                                     width: iw,
                                     height: ih,
                                 });
+                                line_end = used + iw;
                                 used += iw + 4.0;
                                 row_h = row_h.max(ih);
                             }
                         }
                     }
                     if !runs.is_empty() {
+                        max_line_w = max_line_w.max(indent + line_end);
                         Self::push_line(&mut laid_out, &mut runs, *style, *indent, *quote, row_h);
                     }
                 }
@@ -233,6 +255,7 @@ impl MarkdownView {
         }
 
         self.content_h = total_h;
+        self.max_line_w = max_line_w;
         self.bounds = crate::geometry::Rect::new(0.0, 0.0, wrap_w, total_h);
         self.rebuild_selection_model();
         Size::new(wrap_w, total_h)
