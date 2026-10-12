@@ -14,8 +14,8 @@
 //! - [`typed_key_parser`] — `TypedKeyParser`: the `^`, `^+`, `{Token}` spelling.
 //! - [`search_region`] — `ScreenRectangle` / `SearchRegion`.
 //! - [`waits`] — `StaticDelay`, the wall-clock condition wait.
-//! - [`driver`] — `HeadlessDriver` (an `App` on a software framebuffer and a
-//!   virtual clock) and `HeadlessWindow` (C#'s `SystemWindow` for runner-less
+//! - [`driver`] — `HeadlessDriver` (an `App` on a pluggable painter, a
+//!   software framebuffer by default, and a virtual clock) and `HeadlessWindow` (C#'s `SystemWindow` for runner-less
 //!   tests).
 //! - [`probe`] — `ProbeWidget`, the stand-in for a plain C# `GuiWidget`.
 //! - [`execute`] — `show_window_and_execute_tests`: one run on its own UI
@@ -23,7 +23,7 @@
 //!   `close_window` callback, veto, close budget, forced close), `AutomationWindow`, and `AutomationError`.
 //! - [`runner`] — `AutomationRunner`, what a test body drives: its
 //!   configuration (`AutomationConfig` with C#'s defaults), its waits
-//!   (`delay`, `wait_for`, `assert`, `wait_for_draw`) and its name lookups
+//!   (`delay`, `wait_for`, `assert`, `wait_for_draw`, `wait_for_idle`) and its name lookups
 //!   (`get_widget_by_name`, `wait_for_name`, `wait_for_widget_enabled`, ...)
 //!   and its pointer gestures (`click_by_name`, `double_click_by_name`, `right_click_by_name`,
 //!   `move_to_by_name`, `set_mouse_cursor_position`, ...) and drags
@@ -62,7 +62,10 @@ pub mod tree_query;
 pub mod typed_key_parser;
 pub mod waits;
 
-pub use driver::{ClockPolicy, FrameKind, HeadlessDriver, HeadlessWindow, UiDriver};
+pub use driver::{
+    BackgroundBusy, ClockPolicy, FrameKind, HeadlessDriver, HeadlessPainter, HeadlessWindow,
+    SoftwarePainter, UiDriver,
+};
 pub use execute::{show_window_and_execute_tests, AutomationError, AutomationWindow, RunOptions};
 pub use image_match::{find_least_squares_match, LeastSquaresMatch};
 pub use image_source::{decode_needle, DirectoryImageSource, ImageNeedle, ImageSource};

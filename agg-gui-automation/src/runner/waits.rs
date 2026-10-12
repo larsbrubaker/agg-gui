@@ -9,7 +9,7 @@
 //!
 //! | C# | here |
 //! |---|---|
-//! | `WaitForPendingUiWork(max)` | one frame (its idle drain is the sentinel); `max <= 0` is false |
+//! | `WaitForPendingUiWork(max)` | one frame (its idle drain is the sentinel), then more while background work runs, up to `max`; `max <= 0` is false |
 //! | `WaitforDraw` | one forced layout + paint frame |
 //! | `Delay(s)` | frames until `s` of UI time has passed (`ceil(s / 10 ms)` on the virtual clock) |
 //! | `WaitFor` / `Assert` | look; while under `max`, pump frames worth `interval` and look again; the answer is the last look |
@@ -20,6 +20,13 @@
 //! interval, as a shell's frame loop would be. Every pumped frame first
 //! checks the run's timeout, so a long wait stops as soon as its run is
 //! cancelled. The name-polling waits are in the sibling `named.rs`.
+//!
+//! [`AutomationRunner::wait_for_idle`] has no C# counterpart: C# tests wait on
+//! a named widget or a condition, but an application's own harness (MatterCAD's
+//! `settle`) needs "pump until nothing is left to do". Idle is
+//! [`HeadlessDriver::is_idle`](crate::HeadlessDriver::is_idle) after a frame
+//! that did not paint, and work reported by the driver's background-busy hook
+//! keeps it from being idle.
 
 use std::thread;
 
@@ -81,16 +88,46 @@ impl AutomationRunner {
 
     /// C# `WaitForPendingUiWork`: return once the UI thread has run
     /// everything queued before this call. The test body is the UI thread,
-    /// so one pumped frame (whose idle drain runs that queue) is the whole
-    /// wait, and the answer is true. `max_milliseconds <= 0` gives up at
-    /// once and reports false, as C# does.
+    /// so one pumped frame (whose idle drain runs that queue) is the wait,
+    /// and the answer is true — unless the driver's background-busy hook
+    /// ([`HeadlessDriver::set_background_busy`](crate::HeadlessDriver::set_background_busy))
+    /// reports work still running: then frames keep coming until it is done
+    /// (true) or `max_milliseconds` of UI time has passed (false).
+    /// `max_milliseconds <= 0` gives up at once and reports false, as C# does.
     pub fn wait_for_pending_ui_work(&mut self, max_milliseconds: i32) -> bool {
         self.check_not_timed_out();
         if max_milliseconds <= 0 {
             return false;
         }
+        let started = clock::now();
+        let max = f64::from(max_milliseconds) / 1000.0;
         self.pump_frame(FrameKind::Reactive);
+        while self.driver.background_busy() {
+            if clock::since(started).as_secs_f64() >= max {
+                return false;
+            }
+            self.pump_frame(FrameKind::Reactive);
+        }
         true
+    }
+
+    /// Pump frames until the UI is idle — a frame that did not paint, after
+    /// which [`HeadlessDriver::is_idle`](crate::HeadlessDriver::is_idle)
+    /// holds (no background work, no due idle work, no draw requested) — or
+    /// until `max_seconds` of UI time has passed. Returns whether it got
+    /// idle. Always pumps at least one frame.
+    pub fn wait_for_idle(&mut self, max_seconds: f64) -> bool {
+        self.check_not_timed_out();
+        let started = clock::now();
+        loop {
+            let painted = self.pump_frame(FrameKind::Reactive);
+            if !painted && self.driver.is_idle() {
+                return true;
+            }
+            if clock::since(started).as_secs_f64() >= max_seconds {
+                return false;
+            }
+        }
     }
 
     /// C# `StaticDelay` as the runner runs it: look at `check_condition_satisfied`;

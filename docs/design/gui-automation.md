@@ -7,7 +7,7 @@
 - **New crate:** `agg-gui-automation` in the agg-gui workspace, the counterpart of C#'s separate `GuiAutomation` assembly.
 - **The simulated mouse is real input.** Mouse and keyboard go through the same `App::on_*` entry points the native and web shells call. The mouse moves in `MouseMoveSteps` (5) eased steps (Cubic.Out). Presses and releases follow C#'s exact event shapes, including explicit click counts.
 - **Threading:** C# runs the test on one thread and the UI on another, joined by `RunOnIdle` and reset events. Rust instead runs the test body on the UI thread, and every runner call pumps frames itself.
-  - **Headless:** `HeadlessDriver` owns the `App`, a software framebuffer and a virtual clock. It is deterministic and needs no window or GPU.
+  - **Headless:** `HeadlessDriver` owns the `App`, a painter (a software framebuffer by default) and a virtual clock. It is deterministic and needs no window or GPU.
   - **Live window:** `LiveDriver` pumps a real `agg-gui-shell` window with winit's `pump_app_events`.
 - **Two clocks:**
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
@@ -61,7 +61,7 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`); the other modules and members below are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessPainter`, `SoftwarePainter`, `BackgroundBusy`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `attach`/`into_driver`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`); the other modules and members below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
 - Features, each added with the slice whose code uses it (none exist yet; headless is the default):
@@ -85,6 +85,8 @@ src/tree_query.rs          (exists) WidgetHandle, NamedHit (GetByNameResults; it
 src/image_match.rs         (exists) FindLeastSquaresMatch over agg_gui::Framebuffer
 src/driver/mod.rs          (exists) UiDriver trait, FrameKind, ClockPolicy
 src/driver/headless.rs     (exists) HeadlessDriver
+src/driver/painter.rs      (exists) HeadlessPainter, SoftwarePainter
+src/driver/thread_clock.rs (exists) the clock shared by a thread's drivers
 src/driver/window.rs       (exists) HeadlessWindow (the "SystemWindow" for tests that use no runner)
 src/driver/live.rs         (feature live) LiveDriver over agg_gui_shell::ShellSession
 src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks, C# Click semantics)
@@ -114,7 +116,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | static `TimeToMoveMouse` (0.1), `MouseMoveSteps` (5), `UpDelaySeconds` (0.1) | `config.time_to_move_mouse`, `config.mouse_move_steps`, `config.up_delay`. Same values, Cubic.Out easing and step formula. |
 | `DrawSimulatedMouse` | `RunOptions.draw_simulated_mouse` (`InputType`/`OverrideInputSystem`/static `InputMethod` are `AutomationRunner::set_input_method`, default `SimulatedInput`) |
 | `InterpolationType` (unused) | Dropped as dead code; noted in the port comment. |
-| `GetCurrentScreen()` | `get_current_screen() -> Framebuffer` (exists): headless, a copy of the last software frame; live, a read-back. |
+| `GetCurrentScreen()` | `get_current_screen() -> Framebuffer` (exists): headless, a copy of the painter's last frame (the software framebuffer by default, a plugged-in painter's `capture`, or a blank screen of the window's size from a painter with no pixels); live, a read-back. |
 | `RenderMouse` | `overlay::render_mouse` (slice 31). C# draws it on the window's `AfterDraw` while `DrawSimulatedMouse` (default true) is set, as a watcher's aid: a radius-10 circle stroked black (3) and white (2), filled green while the left button is down with "S"/"C" for held Shift/Control plus the click count above 1. The LiveDriver draws it after `App::paint` on the presented frame only, never into `get_current_screen` captures, so image searches never see it; headless runs have no watcher and draw nothing. |
 | `Dispose`, `KeyDown`/`KeyUp` (throw NotImplemented in C#) | `Drop`. The two key methods are left out. |
 
@@ -138,6 +140,15 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | C# | Rust |
 |---|---|
 | `ShowWindowAndExecuteTests(window, test, secs = 30, images, closeWindow, timeoutIsTheExpectedOutcome)` | `show_window_and_execute_tests(RunOptions, build, body) -> Result<R, AutomationError>` (section 5) |
+
+**An application's own harness** (no C# counterpart; MatterCAD's `TestHarness`, slice M2)
+
+| Rust | What it is |
+|---|---|
+| `AutomationRunner::attach(driver: HeadlessDriver, config: AutomationConfig) -> AutomationRunner` | A runner over a driver the caller owns, on the caller's thread: never cancelled, no close phase, no UI-panic capture (panics reach the thread's own unhandled handler). `driver()`/`driver_mut()`/`app()`/`app_mut()` reach inside; `into_driver(self) -> HeadlessDriver` hands the driver back. |
+| `HeadlessDriver::with_painter(self, Box<dyn HeadlessPainter>) -> Self` | Paint frames through the application's renderer instead of the default `SoftwarePainter`. `HeadlessPainter` is `paint(&mut self, &mut App, width, height)`, `resize(&mut self, width, height)` (default no-op), `screen(&self) -> Option<&Framebuffer>` (pixels kept in memory) and `capture(&self) -> Option<Framebuffer>` (pixels read out on demand, at most once per painted frame). MatterCAD wraps agg-gui-wgpu's `HeadlessFrame`, or a painter with no pixels without a GPU adapter. |
+| `HeadlessDriver::set_background_busy(&mut self, Box<dyn Fn(&App) -> bool>)`, `clear_background_busy`, `background_busy() -> bool`, `is_idle() -> bool` | Work running off the UI thread (compute workers) keeps the driver from being idle. |
+| `AutomationRunner::wait_for_idle(max_seconds) -> bool` | Pump frames until a frame that did not paint leaves the driver idle (no background work, no due idle work, no draw requested), or until `max_seconds` of UI time has passed. `wait_for_pending_ui_work` also keeps pumping, up to its `max_milliseconds`, while background work runs. |
 
 **Supporting types**
 - `InputMethod` (= `IInputMethod`) gains `current_screen` (slice 23).
@@ -198,12 +209,15 @@ pub fn show_window_and_execute_tests<S, R>(
 2. drain `ui_thread` (the idle queue)
 3. if `app.wants_draw()` or a draw is forced: lay out when the layout key (size, scale, invalidation epoch) changed or layout was requested, then paint.
 
-Headless paints into a software `Framebuffer`, so paint is exercised and `get_current_screen` works. The policy is `agg_gui::frame_policy` (`LayoutKey`, `LayoutTracker::tick` with `TickMode::Reactive`/`Forced`, `wants_frame`), which the native and web shells already use; the headless driver uses it too.
+Headless paints through the driver's `HeadlessPainter`: a software `Framebuffer` (`SoftwarePainter`) by default, so paint is exercised and `get_current_screen` works; an application plugs in its own renderer with `with_painter` (section 3). The policy is `agg_gui::frame_policy` (`LayoutKey`, `LayoutTracker::tick` with `TickMode::Reactive`/`Forced`, `wants_frame`), which the native and web shells already use; the headless driver uses it too.
 
 **Clocks**
 - **`agg_gui::clock`** is a thread-local UI clock, real by default or virtual (`scoped_virtual`/`set_virtual`, `advance`), behind every behavioural time read in agg-gui and the node editor.
 - **Headless default (`ClockPolicy::Virtual`):** each pumped frame advances `frame_interval` = 10 ms, the RunOnIdle tick C# cites. `ClockPolicy::Real` is available for tests whose background workers run in real time (MatterCAD's `with_compute_workers`).
 - **Live:** the real clock always.
+- **Several drivers on one thread** (MatterCAD's restart tests hold two harnesses) share the thread's clock. The first virtual driver puts the thread on the virtual clock, later ones join it, and the clock the thread had before comes back when the last of them drops, in any order; each virtual driver's frame advances the shared clock. Drivers alive on one thread must use the same `ClockPolicy`: a real-clock driver beside a virtual one would wait on time only the other advances, so creating one panics.
+- **The UI-thread mark.** A driver marks its thread as a UI thread and never unbinds it: it cannot know whether the thread was a UI thread before it or still serves another driver. The thread's owner calls `ui_thread::unbind_current_thread` once its last driver is gone (a test harness at the end of its test, so a main queue it adopted passes to the next test at once). `show_window_and_execute_tests` needs none: its thread ends with the run.
+- **Background work.** `HeadlessDriver::set_background_busy` takes a hook that reports work running off the UI thread; while it reports true, `wait_for_idle` and `wait_for_pending_ui_work` keep pumping frames (up to their ceilings). The other waits pump frames anyway, and their answers stay the condition's.
 
 **How each C# wait maps to frames:**
 
@@ -324,7 +338,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Slice | Notes |
 |---|---|---|
-| M2 | Back `TestHarness` with the runner | `TestHarness` owns a `HeadlessDriver` (settings isolation, sample part, compute workers move to a `MatterCadAppWindow` builder) and exposes `runner()`. `frame`/`settle`/`pump_until_idle` use the driver's frame and `ClockPolicy::Real` when workers are on. Existing helpers delegate. |
+| M2 | Back `TestHarness` with the runner | Built on `AutomationRunner::attach`, `HeadlessDriver::with_painter` (the wgpu `HeadlessFrame`, or no pixels), `set_background_busy` and `wait_for_idle` (section 3). `TestHarness` owns a `HeadlessDriver` (settings isolation, sample part, compute workers move to a `MatterCadAppWindow` builder) and exposes `runner()`. `frame`/`settle`/`pump_until_idle` use the driver's frame and `ClockPolicy::Real` when workers are on. Existing helpers delegate. |
 | M3 | Delete the name hacks | mattercad-app's View3D and design page implement `find_named_targets` (Object3D controls by C# name, scene children); `CONTROL_KEYS` and `scene_objects`/`controls` string parsing go. `menu_automation` uses menu-row named targets. |
 | M4 | `run_test` and `new_part_tab_test` | Equivalents of C# `MatterCADUtilities.RunTest`/`NewPartTabTest` over `show_window_and_execute_tests`, with automatic `mark_test_complete`, C#'s 1280×720 default, and `AutomationFileService` (dialog provider) installed. `complete_dialog`, `add_item_to_bed`, `navigate_to_folder` and friends become extension traits on `AutomationRunner`. |
 | M5–M9 | Move the 14 ported test files to the runner API, about 3 files per slice | `click_by_name`/`drag_drop_by_name`/`type_text`/`wait_for_name`/`assert` replace harness calls; `MAX_WAIT_FRAMES` becomes C#'s seconds; teleporting clicks become stepped moves (fix whatever this exposes, test-first). |
@@ -333,7 +347,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 ## 10. Risks
 
 - **Workers that serve a non-main UI thread** must wake it through that thread's queue (`ui_thread::current_queue()` captured on the UI thread, then `UiQueue::run_on_idle` / `UiQueue::signal_async_state_change`); an unbound worker's `animation::signal_async_state_change` wakes only the main queue's owner. MatterCAD's workers (`running_tasks`, `design_scene`, `library_executor`) call the free function, so a headless test on a non-main thread sees their wakeups only through its own pumping (M2 should capture the queue).
-- **Virtual time vs. real worker threads.** Covered by `ClockPolicy::Real` and the `background_busy` hook, so `settle` keeps working.
+- **Virtual time vs. real worker threads.** Covered by `ClockPolicy::Real` and the driver's background-busy hook (`set_background_busy`), which `wait_for_idle` and `wait_for_pending_ui_work` honour, so `settle` keeps working. Idle detection reads the thread's queue through `ui_thread::count_expired`, which does not see work no drain has stamped yet; such work is posted with a draw request, which keeps `is_idle` false until the next frame drains it.
 - **A timed-out body thread keeps running.** It only touches its own thread-locals, and it unwinds at its next runner call.
 - **Process-global agg-gui state** (input profile, tilt, fullscreen). It needs thread-local overrides, as the platform has, or `serial_test` for the few tests that touch it.
 - **Headless software paint can be slow on MatterCAD's tree.** Frames paint only when `wants_draw`, so idle `delay`/`wait_for` frames are cheap.

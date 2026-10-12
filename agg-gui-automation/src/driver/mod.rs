@@ -3,8 +3,10 @@
 //! the test thread *is* the UI thread and every runner call pumps frames
 //! itself (design: `docs/design/gui-automation.md`, section 5).
 //!
-//! - [`HeadlessDriver`] — no window, no GPU: a software framebuffer and, by
-//!   default, a virtual clock that advances one [`FRAME_INTERVAL`] per frame.
+//! - [`HeadlessDriver`] — no window: frames painted by a [`HeadlessPainter`]
+//!   ([`SoftwarePainter`], a software framebuffer, by default) and, by
+//!   default, a virtual clock that advances one [`FRAME_INTERVAL`] per frame;
+//!   several drivers on one thread share its clock (`thread_clock.rs`).
 //! - [`HeadlessWindow`] — a [`HeadlessDriver`] around a root
 //!   [`ProbeWidget`](crate::probe::ProbeWidget): the "SystemWindow" for ported
 //!   tests that build widgets and send them input without the runner, with
@@ -13,11 +15,14 @@
 //! The live (winit) driver is a later slice.
 
 mod headless;
+mod painter;
+mod thread_clock;
 mod window;
 
 use std::time::Duration;
 
-pub use headless::HeadlessDriver;
+pub use headless::{BackgroundBusy, HeadlessDriver};
+pub use painter::{HeadlessPainter, SoftwarePainter};
 pub use window::HeadlessWindow;
 
 /// One frame's worth of UI time: the RunOnIdle tick C# cites (10 ms).

@@ -13,6 +13,11 @@
 //! pumps frames itself. When the run's wall-clock budget expires the caller
 //! cancels the run; the body's next runner call then panics with
 //! [`TEST_TIMED_OUT`], which unwinds a body that was stuck between calls.
+//!
+//! A caller that owns its driver and its thread (an application's own test
+//! harness) wraps it in a runner with [`AutomationRunner::attach`] instead:
+//! no run, so no budget, no close phase and no UI-panic capture, and the
+//! driver comes back out with [`AutomationRunner::into_driver`].
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -131,6 +136,16 @@ impl AutomationRunner {
         }
     }
 
+    /// A runner over a driver the caller owns, on the caller's thread, outside
+    /// any [`show_window_and_execute_tests`](crate::show_window_and_execute_tests)
+    /// run: it is never cancelled, captures no UI-thread panics (they reach
+    /// the thread's own `agg_gui::set_unhandled_handler`, or are re-raised),
+    /// and loads named needles from the default images folder until
+    /// [`set_image_source`](Self::set_image_source) says otherwise.
+    pub fn attach(driver: HeadlessDriver, config: AutomationConfig) -> Self {
+        Self::new(driver, config, Arc::new(AtomicBool::new(false)))
+    }
+
     /// Unwind the body if its run has timed out. Every public runner call
     /// starts with this, so a body that overstayed its budget stops at its
     /// next call instead of driving a window its caller has given up on.
@@ -149,9 +164,10 @@ impl AutomationRunner {
         self.ui_fault = ui_fault;
     }
 
-    /// The window's driver, once the body is done with the runner (the
-    /// close phase takes it over).
-    pub(crate) fn into_driver(self) -> HeadlessDriver {
+    /// The window's driver back, once the runner is done with it (a run's
+    /// close phase takes it over; an [`attach`](Self::attach)ed runner's
+    /// caller gets its driver back).
+    pub fn into_driver(self) -> HeadlessDriver {
         self.driver
     }
 
