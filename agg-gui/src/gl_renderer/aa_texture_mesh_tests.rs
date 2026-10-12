@@ -5,7 +5,7 @@
 //! `agg-gui-wgpu/src/golden/golden_2d_primitive_tests.rs` check the same
 //! shapes against the software renderer.
 
-use super::aa_texture_mesh::{tessellate_path_aa_texture, AaTexVertex};
+use super::aa_texture_mesh::{draw_1_edge_triangle, tessellate_path_aa_texture, AaTexVertex};
 use crate::draw_ctx::FillRule;
 use agg_rust::path_storage::PathStorage;
 
@@ -143,4 +143,28 @@ fn rust_only_acute_corners_ramp_on_the_inside() {
     let tip = coverage(&mesh, [70.1, 33.6]);
     assert!(tip < 0.9, "barb tip alpha {tip}");
     assert_opaque_inside(&arrow, 0.6);
+}
+
+/// tess2 can emit a sliver whose third vertex sits one f32 step past the end
+/// of its outline edge (seen drawing MatterCAD's tab bar).  The obtuse-angle
+/// split fans the edge to the sliver's incentre, which rounds to that same
+/// third vertex; the split must still happen only once, not recurse on
+/// identical arguments until the stack overflows.
+#[test]
+fn rust_only_a_sliver_past_its_edge_end_splits_once() {
+    let mut verts = Vec::new();
+    let mut indices = Vec::new();
+    draw_1_edge_triangle(
+        &mut verts,
+        &mut indices,
+        [410.5, 694.0],
+        [417.5, 679.0],
+        [417.500_03, 679.0],
+    );
+    // One five-vertex fan to the incentre and two opaque fill triangles.
+    assert_eq!(verts.len(), 5 + 3 + 3);
+    assert_eq!(indices.len(), 9 + 3 + 3);
+    assert!(verts
+        .iter()
+        .all(|v| v.pos.iter().chain(&v.uv).all(|c| c.is_finite())));
 }

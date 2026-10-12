@@ -196,7 +196,7 @@ fn draw_non_aa_triangle(
 ///
 /// Texcoords are arranged so the alpha-step texture's α = 0 column lands
 /// at the extruded edge and the α = opaque columns cover the interior.
-fn draw_1_edge_triangle(
+pub(super) fn draw_1_edge_triangle(
     verts: &mut Vec<AaTexVertex>,
     indices: &mut Vec<u32>,
     aa_p0: [f32; 2],
@@ -225,15 +225,44 @@ fn draw_1_edge_triangle(
     // `Draw1EdgeTriangle` has the same flaw.  Such a triangle instead ramps
     // toward its incentre, which always projects inside the edge, and the
     // two triangles from the incentre to the third point are opaque.
+    //
+    // The incentre's fan is emitted directly, never split again: in a sliver
+    // whose third point lies one f32 step past the edge's end, the incentre
+    // rounds to that same point, and splitting again would recurse on
+    // identical arguments until the stack overflows.  Where rounding leaves
+    // the incentre a hair outside the edge, the unsplit fan's ramp is off by
+    // that hair, which no pixel can show.
     let along =
         (edge_n[0] * (non_aa_point[0] - aa_p0[0]) + edge_n[1] * (non_aa_point[1] - aa_p0[1])) / len;
     if !(0.0..=1.0).contains(&along) {
         let centre = incentre(aa_p0, aa_p1, non_aa_point);
-        draw_1_edge_triangle(verts, indices, aa_p0, aa_p1, centre);
+        emit_1_edge_fan(verts, indices, aa_p0, aa_p1, centre);
         draw_non_aa_triangle(verts, indices, aa_p1, non_aa_point, centre);
         draw_non_aa_triangle(verts, indices, non_aa_point, aa_p0, centre);
         return;
     }
+    emit_1_edge_fan(verts, indices, aa_p0, aa_p1, non_aa_point);
+}
+
+/// The fan [`draw_1_edge_triangle`] emits once it has chosen the point to
+/// ramp toward: the AA edge extruded one unit away from `non_aa_point`, and
+/// the interior triangle to it.
+fn emit_1_edge_fan(
+    verts: &mut Vec<AaTexVertex>,
+    indices: &mut Vec<u32>,
+    aa_p0: [f32; 2],
+    aa_p1: [f32; 2],
+    non_aa_point: [f32; 2],
+) {
+    if aa_p0 == aa_p1 || aa_p1 == non_aa_point || non_aa_point == aa_p0 {
+        return;
+    }
+    let edge = [aa_p1[0] - aa_p0[0], aa_p1[1] - aa_p0[1]];
+    let len = (edge[0] * edge[0] + edge[1] * edge[1]).sqrt();
+    if len < 1e-6 {
+        return;
+    }
+    let edge_n = [edge[0] / len, edge[1] / len];
 
     // PerpendicularRight in agg-sharp Vector2 convention: (x, y) → (y, -x).
     let mut normal = [edge_n[1], -edge_n[0]];
