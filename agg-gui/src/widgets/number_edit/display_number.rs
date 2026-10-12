@@ -2,16 +2,68 @@
 //! `agg/Helpers/DisplayNumber.cs`, the one place that decides both for
 //! [`NumberEdit`](super::NumberEdit).
 //!
-//! agg-gui has no per-user number culture, so this is C#'s `DisplayNumber`
-//! under the invariant culture: shown with a `.` decimal and never grouped,
-//! read with `.` as the decimal, and a thousands-grouped whole number
-//! (`"1,000"`) refused rather than guessed — C# reads typed text invariant
-//! first, and under the invariant culture its group separator is `,`.
+//! agg-gui has no culture layer, so the number part of C#'s
+//! `CultureInfo.CurrentCulture` is passed in as a [`NumberFormat`] (its
+//! decimal and group separators); the default is the invariant culture.
+//! Shown text is C#'s `"R"` / `"0.###"` in that culture: the invariant text
+//! with its `.` made the format's decimal separator, never grouped. Typed
+//! text is read invariant first (`"1.5"` is 1.5 for everyone), then in the
+//! format (`"1,5"` is 1.5 where `,` is the decimal), neither read allowing
+//! group separators; a thousands-grouped whole number in the format
+//! (`"1.000"` with a `.` group, `"1,000"` with a `,` one) is refused rather
+//! than guessed.
 
-/// C# `DisplayNumber.Format(value, format)`: the shortest round-trip text
-/// (`"R"`) when `max_decimal_places <= 0`, otherwise C#'s custom
-/// `"0.###…"` pattern with `min(10, max_decimal_places)` optional decimals.
+/// The number part of a C# `CultureInfo` that [`NumberEdit`](super::NumberEdit)
+/// shows and reads numbers in: C#'s `NumberFormat.NumberDecimalSeparator`
+/// and `NumberGroupSeparator` (`None` where the culture has none).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NumberFormat {
+    pub decimal_separator: char,
+    pub group_separator: Option<char>,
+}
+
+impl NumberFormat {
+    /// A format with these separators.
+    pub const fn new(decimal_separator: char, group_separator: Option<char>) -> Self {
+        Self {
+            decimal_separator,
+            group_separator,
+        }
+    }
+
+    /// C# `CultureInfo.InvariantCulture`'s numbers: `.` decimal, `,` groups.
+    pub const fn invariant() -> Self {
+        Self::new('.', Some(','))
+    }
+}
+
+impl Default for NumberFormat {
+    fn default() -> Self {
+        Self::invariant()
+    }
+}
+
+/// C# `DisplayNumber.Format(value, format)` under the invariant culture; see
+/// [`format_in`].
 pub fn format(value: f64, max_decimal_places: i32) -> String {
+    format_invariant(value, max_decimal_places)
+}
+
+/// C# `DisplayNumber.Format(value, format)` in `number_format`: the shortest
+/// round-trip text (`"R"`) when `max_decimal_places <= 0`, otherwise C#'s
+/// custom `"0.###…"` pattern with `min(10, max_decimal_places)` optional
+/// decimals, written with the format's decimal separator and never grouped.
+pub fn format_in(value: f64, max_decimal_places: i32, number_format: &NumberFormat) -> String {
+    let text = format_invariant(value, max_decimal_places);
+    // the invariant text has no group separators, so its only '.' is the decimal point
+    if number_format.decimal_separator == '.' {
+        text
+    } else {
+        text.replace('.', &number_format.decimal_separator.to_string())
+    }
+}
+
+fn format_invariant(value: f64, max_decimal_places: i32) -> String {
     if max_decimal_places > 0 && value.is_finite() {
         let places = max_decimal_places.min(10) as usize;
         let mut text = format!("{value:.places$}");
@@ -84,15 +136,34 @@ pub fn format_round_trip(value: f64) -> String {
     text
 }
 
-/// C# `DisplayNumber.TryRead(text, out value)` under the invariant culture:
-/// `double.TryParse(text, NumberStyles.Float, InvariantCulture)` — optional
-/// surrounding white space, an optional sign, digits with at most one `.`,
-/// an optional exponent; `Infinity` / `NaN` in any case — refusing text that
-/// [`is_ambiguous_grouping`].
+/// C# `DisplayNumber.TryRead(text, out value)` under the invariant culture;
+/// see [`try_read_in`].
 pub fn try_read(text: &str) -> Option<f64> {
-    if is_ambiguous_grouping(text) {
+    try_read_in(text, &NumberFormat::invariant())
+}
+
+/// C# `DisplayNumber.TryRead(text, culture, out value)`: text that
+/// [`is_ambiguous_grouping_in`] the format is refused; otherwise it is read
+/// invariant first, then with the format's decimal separator
+/// (`double.TryParse(text, NumberStyles.Float, culture)`, which takes no
+/// group separators and, where the decimal is not a point, no point at all).
+pub fn try_read_in(text: &str, number_format: &NumberFormat) -> Option<f64> {
+    if is_ambiguous_grouping_in(text, number_format) {
         return None;
     }
+    parse_invariant(text).or_else(|| {
+        let decimal = number_format.decimal_separator;
+        if decimal == '.' || text.contains('.') {
+            return None;
+        }
+        parse_invariant(&text.replace(decimal, "."))
+    })
+}
+
+/// `double.TryParse(text, NumberStyles.Float, InvariantCulture)` — optional
+/// surrounding white space, an optional sign, digits with at most one `.`,
+/// an optional exponent; `Infinity` / `NaN` in any case.
+fn parse_invariant(text: &str) -> Option<f64> {
     // C#'s NumberStyles white space: U+0009..U+000D and the space.
     let trimmed = text.trim_matches(|c: char| c == ' ' || ('\u{9}'..='\u{d}').contains(&c));
     let (negative, body) = match trimmed.as_bytes().first() {
@@ -151,18 +222,26 @@ fn is_float_body(body: &str) -> bool {
     i == bytes.len()
 }
 
-/// C# `DisplayNumber.IsAmbiguousGrouping(text, InvariantCulture)`: text that
-/// is exactly a thousands-grouped whole number — one to three digits not
-/// starting with 0, then one or more groups of `,` and exactly three digits
-/// (`"1,000"`, `"12,500,000"`), optionally signed, surrounding white space
-/// ignored (C# `Trim()`).
-pub fn is_ambiguous_grouping(text: &str) -> bool {
+/// C# `DisplayNumber.IsAmbiguousGrouping(text, culture)`: text that is
+/// exactly a thousands-grouped whole number in the format — one to three
+/// digits not starting with 0, then one or more groups of its group
+/// separator and exactly three digits (`"1,000"`, `"12,500,000"` invariant;
+/// `"1.000"` with a `.` group), optionally signed, surrounding white space
+/// ignored (C# `Trim()`). Never true for a format without a group separator
+/// or with the same one as its decimal.
+pub fn is_ambiguous_grouping_in(text: &str, number_format: &NumberFormat) -> bool {
+    let Some(group) = number_format.group_separator else {
+        return false;
+    };
+    if group == number_format.decimal_separator {
+        return false;
+    }
     let text = text.trim();
     let text = text
         .strip_prefix('+')
         .or_else(|| text.strip_prefix('-'))
         .unwrap_or(text);
-    let mut groups = text.split(',');
+    let mut groups = text.split(group);
     let Some(lead) = groups.next() else {
         return false;
     };
@@ -229,10 +308,16 @@ mod tests {
     #[test]
     fn rust_only_ambiguous_grouping_is_exactly_whole_thousands() {
         for grouped in ["1,000", "12,500", "-1,000,000", " 999,999 "] {
-            assert!(is_ambiguous_grouping(grouped), "{grouped:?}");
+            assert!(
+                is_ambiguous_grouping_in(grouped, &NumberFormat::invariant()),
+                "{grouped:?}"
+            );
         }
         for plain in ["1,5", "1,0000", "0,500", "1000", "1.000", ",000", "1,000.5"] {
-            assert!(!is_ambiguous_grouping(plain), "{plain:?}");
+            assert!(
+                !is_ambiguous_grouping_in(plain, &NumberFormat::invariant()),
+                "{plain:?}"
+            );
         }
     }
 }

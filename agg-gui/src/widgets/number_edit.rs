@@ -15,11 +15,16 @@
 //!   unreadable (C# `OnEditComplete`), then fires `on_edit_complete`.
 //!
 //! Numbers are shown and read through `display_number.rs` (C#'s
-//! `DisplayNumber`, invariant culture). Unit tests are in
-//! `number_edit/tests.rs`; TextEditTests' NumEdit tests are in
-//! agg-gui-automation's `tests/text_edit/num_edit.rs`.
+//! `DisplayNumber`) in the box's [`NumberFormat`] — the separators of the
+//! user's culture, invariant by default — so a comma-decimal user types
+//! `"1,5"` (or `"1.5"`) and sees `"2,5"` after a step. Unit tests are in
+//! `number_edit/tests.rs` and `number_edit/invariant_culture_tests.rs`;
+//! TextEditTests' NumEdit tests are in agg-gui-automation's
+//! `tests/text_edit/num_edit.rs`.
 
 mod display_number;
+#[cfg(test)]
+mod invariant_culture_tests;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -28,7 +33,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub use display_number::{format as format_display_number, try_read as read_display_number};
+pub use display_number::{
+    format as format_display_number, format_in as format_display_number_in,
+    is_ambiguous_grouping_in, try_read as read_display_number,
+    try_read_in as read_display_number_in, NumberFormat,
+};
 pub use state::{NumberEditError, TextValueParser};
 
 use crate::draw_ctx::DrawCtx;
@@ -128,6 +137,7 @@ impl NumberEdit {
             parser: None,
             last_parsed_text: None,
             last_value: options.starting_value,
+            number_format: NumberFormat::invariant(),
         }));
         let commit_pending = Rc::new(RefCell::new(false));
         let judge = Rc::clone(&state);
@@ -192,14 +202,13 @@ impl NumberEdit {
     /// value and show it. A programmatic write fires no callback.
     pub fn set_value(&mut self, value: f64) {
         let new_value = self.state.borrow().validate_range(value);
-        let old_readable = display_number::try_read(&self.text()).is_some();
+        let old_readable = self.state.borrow().reads_as_number(&self.text());
         let current = self.value();
-        let places = {
+        let text = {
             let mut st = self.state.borrow_mut();
             st.last_value = new_value;
-            st.max_decimal_places
+            st.format_value(new_value)
         };
-        let text = display_number::format(new_value, places);
         if let Some(field) = self.text_field_mut() {
             field.set_text(text.as_str());
             // C#: when the text could not be read, the caret goes to the end
@@ -252,6 +261,35 @@ impl NumberEdit {
     /// Builder form of [`set_max_decimal_places`](Self::set_max_decimal_places).
     pub fn with_max_decimal_places(mut self, places: i32) -> Self {
         self.set_max_decimal_places(places);
+        self
+    }
+
+    /// The separators the box shows and reads numbers with.
+    pub fn number_format(&self) -> NumberFormat {
+        self.state.borrow().number_format
+    }
+
+    /// The number part of C#'s `CultureInfo.CurrentCulture`: the decimal
+    /// separator the box shows (and accepts while typing, besides the `.`
+    /// every culture reads) and the group separator it refuses. A box whose
+    /// text reads as a number re-shows it in the new format; text it cannot
+    /// read is left as typed.
+    pub fn set_number_format(&mut self, number_format: NumberFormat) {
+        let text = self.text();
+        let readable = self.state.borrow().reads_as_number(&text);
+        let value = self.value();
+        self.state.borrow_mut().number_format = number_format;
+        if readable {
+            let shown = self.state.borrow().format_value(value);
+            if let Some(field) = self.text_field_mut() {
+                field.set_text(shown.as_str());
+            }
+        }
+    }
+
+    /// Builder form of [`set_number_format`](Self::set_number_format).
+    pub fn with_number_format(mut self, number_format: NumberFormat) -> Self {
+        self.set_number_format(number_format);
         self
     }
 

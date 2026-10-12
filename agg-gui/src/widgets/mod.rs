@@ -121,7 +121,7 @@ pub use menu::{
 pub use modal_sheet::ModalSheet;
 pub use named::Named;
 pub use number_edit::{
-    NumberCommit, NumberEdit, NumberEditError, NumberEditOptions, TextValueParser,
+    NumberCommit, NumberEdit, NumberEditError, NumberEditOptions, NumberFormat, TextValueParser,
 };
 pub use performance::{
     paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView, RunMode,

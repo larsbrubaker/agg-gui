@@ -74,7 +74,7 @@ wgpu renderer); the demo crates (`demo-native`, `demo-wasm`, `demo-wgpu`,
 | `Spinner` | Small / regular indeterminate circular activity indicator |
 | `ToggleSwitch` | Animated on/off toggle |
 | `TextField` | Full text editing: cursor, selection, clipboard, undo/redo |
-| `NumberEdit` | Number box over `TextField`: refuses keys it cannot read, Up/Down stepping, range, pluggable text parser, commit falls back to the last good value |
+| `NumberEdit` | Number box over `TextField`: refuses keys it cannot read, Up/Down stepping, range, pluggable text parser, commit falls back to the last good value, `NumberFormat` (decimal and group separators of the user's culture, invariant by default) |
 | `TextArea` | Multi-line text editing |
 | `RichTextEdit` / `RichTextToolbar` | Styled text editing with a builder-configurable formatting toolbar (bold/italic/lists/colors/history) and programmatic `RichEditHandle` APIs |
 | `Hyperlink` | Underlined link text with click callback |

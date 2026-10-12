@@ -10,7 +10,7 @@
 //! ([`with_text_filter`](crate::widgets::TextField::with_text_filter)), so
 //! the judge sees the parser and options of the moment.
 
-use super::display_number;
+use super::display_number::{self, NumberFormat};
 
 /// C# `TextValueParser`: reads text a plain number parse cannot (a unit
 /// written on the number, say); `None` means "not mine".
@@ -29,16 +29,20 @@ pub(super) struct NumberState {
     pub(super) last_parsed_text: Option<String>,
     /// The last value set or committed; an unreadable entry falls back to it.
     pub(super) last_value: f64,
+    /// The separators numbers are shown and read with (C#'s
+    /// `CultureInfo.CurrentCulture`).
+    pub(super) number_format: NumberFormat,
 }
 
 impl NumberState {
-    /// C#'s `allowedChars`: the digits, `-` with negatives, `.` with
-    /// decimals (agg-gui reads numbers invariant, so `.` is the only
-    /// decimal separator; see `display_number.rs`).
+    /// C#'s `allowedChars`: the digits, `-` with negatives, and with
+    /// decimals both `.` (read invariant everywhere) and the format's own
+    /// decimal separator (a comma-decimal keyboard writes `,`). A group
+    /// separator is never typeable.
     fn is_allowed_char(&self, c: char) -> bool {
         c.is_ascii_digit()
             || (c == '-' && self.allow_negatives)
-            || (c == '.' && self.allow_decimals)
+            || ((c == '.' || c == self.number_format.decimal_separator) && self.allow_decimals)
     }
 
     /// C# `CanType`, for an insertion of `inserted` that would leave `typed`
@@ -62,13 +66,22 @@ impl NumberState {
         }
 
         // the starts of a number, on their way to being one
-        if typed == "." && self.allow_decimals {
+        let decimal = self.number_format.decimal_separator;
+        let mut chars = typed.chars();
+        let lone_decimal = |c: Option<char>| c == Some('.') || c == Some(decimal);
+        let (first, second, rest) = (chars.next(), chars.next(), chars.next());
+        if lone_decimal(first) && second.is_none() && self.allow_decimals {
             return true;
         }
         if typed == "-" && self.allow_negatives {
             return true;
         }
-        if typed == "-." && self.allow_decimals && self.allow_negatives {
+        if first == Some('-')
+            && lone_decimal(second)
+            && rest.is_none()
+            && self.allow_decimals
+            && self.allow_negatives
+        {
             return true;
         }
 
@@ -80,7 +93,11 @@ impl NumberState {
             return true;
         }
 
-        display_number::try_read(typed).is_some() || display_number::is_ambiguous_grouping(typed)
+        // "1.000" under a '.' group is refused when committed, but has to be
+        // typeable on the way to "1.0005"
+        let format = &self.number_format;
+        display_number::try_read_in(typed, format).is_some()
+            || display_number::is_ambiguous_grouping_in(typed, format)
     }
 
     /// C#'s `Value` getter: the parser's reading, else the plain numeric one,
@@ -96,7 +113,7 @@ impl NumberState {
         if matches!(text, "" | "." | "-" | "-.") {
             return error_return;
         }
-        display_number::try_read(text).unwrap_or(error_return)
+        display_number::try_read_in(text, &self.number_format).unwrap_or(error_return)
     }
 
     /// C# `ValidateRange`.
@@ -118,7 +135,18 @@ impl NumberState {
     pub(super) fn commit_is_readable(&self, text: &str) -> bool {
         (self.allow_expression_entry && text.trim_start().starts_with('='))
             || self.parser.as_ref().and_then(|parse| parse(text)).is_some()
-            || display_number::try_read(text).is_some()
+            || self.reads_as_number(text)
+    }
+
+    /// C# `ReadsAsNumber`: `text` read in the box's number format.
+    pub(super) fn reads_as_number(&self, text: &str) -> bool {
+        display_number::try_read_in(text, &self.number_format).is_some()
+    }
+
+    /// C# `DisplayNumber.Format(value, format)` with the box's decimal places
+    /// and number format.
+    pub(super) fn format_value(&self, value: f64) -> String {
+        display_number::format_in(value, self.max_decimal_places, &self.number_format)
     }
 
     /// C#'s `MinValue` / `MaxValue` setter checks.
