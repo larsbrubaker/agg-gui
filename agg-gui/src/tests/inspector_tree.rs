@@ -31,6 +31,7 @@ fn test_inspector_row0_at_top() {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
         InspectorNode {
             type_name: "Child",
@@ -45,6 +46,7 @@ fn test_inspector_row0_at_top() {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
     ]));
 
@@ -131,6 +133,7 @@ fn test_inspector_tree_populates_from_nodes() {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
         InspectorNode {
             type_name: "Child",
@@ -145,6 +148,7 @@ fn test_inspector_tree_populates_from_nodes() {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
         InspectorNode {
             type_name: "Sibling",
@@ -159,6 +163,7 @@ fn test_inspector_tree_populates_from_nodes() {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
     ]));
 
@@ -228,6 +233,7 @@ fn test_inspector_tree_default_expanded() {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
         InspectorNode {
             type_name: "Child",
@@ -242,6 +248,7 @@ fn test_inspector_tree_default_expanded() {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
     ]));
 
@@ -279,6 +286,7 @@ fn test_inspector_tree_drag_disabled() {
         visible: true,
         enabled: true,
         child_count: 0,
+        scale: 1.0,
     }]));
 
     let panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
@@ -413,6 +421,7 @@ fn test_inspector_top_row_appears_at_top_of_tree_area() {
         visible: true,
         enabled: true,
         child_count: 0,
+        scale: 1.0,
     }]));
     let hovered = Rc::new(RefCell::new(None));
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), Rc::clone(&hovered));
@@ -621,74 +630,6 @@ fn test_button_inspector_hierarchy() {
     assert_eq!(nodes[0].depth, 0);
     assert_eq!(nodes[1].type_name, "Label");
     assert_eq!(nodes[1].depth, 1);
-}
-
-/// Invisible widgets must be excluded from the inspector snapshot (and their
-/// entire subtrees must be omitted).  A closed Window should disappear from
-/// the inspector just as it disappears from the rendered scene.
-#[test]
-fn test_invisible_widget_excluded_from_inspector() {
-    use crate::draw_ctx::DrawCtx;
-    use crate::event::{Event, EventResult};
-    use crate::geometry::{Point, Rect, Size};
-    use crate::widget::{collect_inspector_nodes, Widget};
-
-    /// Minimal widget whose visibility can be toggled.
-    struct ToggleWidget {
-        bounds: Rect,
-        visible: bool,
-        children: Vec<Box<dyn Widget>>,
-    }
-    impl Widget for ToggleWidget {
-        fn type_name(&self) -> &'static str {
-            "ToggleWidget"
-        }
-        fn is_visible(&self) -> bool {
-            self.visible
-        }
-        fn bounds(&self) -> Rect {
-            self.bounds
-        }
-        fn set_bounds(&mut self, b: Rect) {
-            self.bounds = b;
-        }
-        fn children(&self) -> &[Box<dyn Widget>] {
-            &self.children
-        }
-        fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-            &mut self.children
-        }
-        fn layout(&mut self, available: Size) -> Size {
-            available
-        }
-        fn paint(&mut self, _: &mut dyn DrawCtx) {}
-        fn on_event(&mut self, _: &Event) -> EventResult {
-            EventResult::Ignored
-        }
-    }
-
-    let visible = ToggleWidget {
-        bounds: Rect::new(0.0, 0.0, 100.0, 40.0),
-        visible: true,
-        children: Vec::new(),
-    };
-    let hidden = ToggleWidget {
-        bounds: Rect::new(0.0, 50.0, 100.0, 40.0),
-        visible: false,
-        children: Vec::new(),
-    };
-
-    let mut nodes = Vec::new();
-    collect_inspector_nodes(&visible, 0, Point::ORIGIN, &mut nodes);
-    assert_eq!(nodes.len(), 1, "visible widget appears once");
-    assert_eq!(nodes[0].type_name, "ToggleWidget");
-
-    nodes.clear();
-    collect_inspector_nodes(&hidden, 0, Point::ORIGIN, &mut nodes);
-    assert!(
-        nodes.is_empty(),
-        "invisible widget produces no inspector nodes"
-    );
 }
 
 /// `toggle_on_row_click = false` (the inspector's mode): clicking a row

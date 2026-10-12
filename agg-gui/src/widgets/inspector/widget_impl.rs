@@ -149,6 +149,9 @@ impl Widget for InspectorPanel {
                         old_selected.get(orig_idx).copied().unwrap_or(false),
                     ),
                 };
+                // agg-sharp's InspectorTreeView: a hidden or disabled
+                // widget's row reads in the dim text colour.
+                self.tree_view.nodes[tv_idx].dimmed = !(node.visible && node.enabled);
                 self.tree_view.nodes[tv_idx].is_expanded = expanded;
                 self.tree_view.nodes[tv_idx].is_selected = selected;
                 if depth_stack.len() <= node.depth {
@@ -169,6 +172,7 @@ impl Widget for InspectorPanel {
         *self.hovered_bounds.borrow_mut() = self
             .tree_view
             .hovered_node_idx()
+            .filter(|&i| crate::widget::inspector_node_on_screen(&nodes, i))
             .and_then(|i| nodes.get(i))
             .map(|n| InspectorOverlay {
                 bounds: n.screen_bounds,

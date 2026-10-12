@@ -241,6 +241,10 @@ impl Label {
         self.dim = dim;
         self
     }
+    /// Setter form of [`with_dim`](Label::with_dim).
+    pub fn set_dim(&mut self, dim: bool) {
+        self.dim = dim;
+    }
     /// Emphasise this label with a "strong" text colour, agg-gui's analog
     /// of egui's `ui.strong(...)`.  Has no effect when an explicit
     /// [`with_color`](Label::with_color) is also set.  Like the default

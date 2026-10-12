@@ -44,6 +44,9 @@ pub struct TreeNode {
     pub is_selected: bool,
     /// Sibling ordering key. Lower values appear first (visually higher).
     pub order: u32,
+    /// Draw the row's name in the dim text colour (a hidden or disabled
+    /// item, as the inspector lists hidden widgets).
+    pub dimmed: bool,
 }
 
 impl TreeNode {
@@ -66,6 +69,7 @@ impl TreeNode {
             is_expanded: false,
             is_selected: false,
             order,
+            dimmed: false,
         }
     }
 }

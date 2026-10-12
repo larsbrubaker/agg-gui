@@ -78,11 +78,15 @@ pub(super) fn paint_properties(
 
     // ── geometry rows: position and depth read-only, sizes editable ─────────
     let b = &node.screen_bounds;
+    // Sizes and margins show, and edit, in the widget's own logical units
+    // (agg-sharp's `GuiWidget.Width` / `Margin`); under a scaling ancestor
+    // the on-screen bounds are larger or smaller by `node.scale`.
+    let (width, height) = (node.to_logical(b.width), node.to_logical(b.height));
     let geom_rows: &[(&str, String, Option<SizeAxis>)] = &[
         ("x", format!("{:.1}", b.x), None),
         ("y", format!("{:.1}", b.y), None),
-        ("width", format!("{:.1}", b.width), Some(SizeAxis::Width)),
-        ("height", format!("{:.1}", b.height), Some(SizeAxis::Height)),
+        ("width", format!("{:.1}", width), Some(SizeAxis::Width)),
+        ("height", format!("{:.1}", height), Some(SizeAxis::Height)),
         ("depth", format!("{}", node.depth), None),
     ];
     for (label, value, axis) in geom_rows {
@@ -92,8 +96,8 @@ pub(super) fn paint_properties(
         match axis {
             Some(axis) => {
                 let current = match axis {
-                    SizeAxis::Width => b.width,
-                    SizeAxis::Height => b.height,
+                    SizeAxis::Width => width,
+                    SizeAxis::Height => height,
                 };
                 let hit = paint_row_editable(ctx, w, ry, label, value, &v, EDITABLE_TINT);
                 hits.push(PropHit {
@@ -113,7 +117,12 @@ pub(super) fn paint_properties(
     }
 
     // ── editable margin rows (per side) ──────────────────────────────────────
-    let m = &node.margin;
+    let m = crate::layout_props::Insets {
+        left: node.to_logical(node.margin.left),
+        right: node.to_logical(node.margin.right),
+        top: node.to_logical(node.margin.top),
+        bottom: node.to_logical(node.margin.bottom),
+    };
     let margin_sides: &[(&str, InsetsSide, f64)] = &[
         ("margin.left", InsetsSide::Left, m.left),
         ("margin.right", InsetsSide::Right, m.right),
@@ -140,7 +149,12 @@ pub(super) fn paint_properties(
     }
 
     // ── read-only padding rows (nonzero sides only) ───────────────────────────
-    let p = &node.padding;
+    let p = crate::layout_props::Insets {
+        left: node.to_logical(node.padding.left),
+        right: node.to_logical(node.padding.right),
+        top: node.to_logical(node.padding.top),
+        bottom: node.to_logical(node.padding.bottom),
+    };
     if p.left != 0.0 || p.right != 0.0 || p.top != 0.0 || p.bottom != 0.0 {
         let pad_sides: &[(&str, f64)] = &[
             ("pad.left", p.left),

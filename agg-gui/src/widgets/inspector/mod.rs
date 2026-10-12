@@ -480,6 +480,7 @@ impl InspectorPanel {
         let next = self
             .tree_view
             .hovered_node_idx()
+            .filter(|&i| crate::widget::inspector_node_on_screen(&nodes, i))
             .and_then(|i| nodes.get(i))
             .map(|n| InspectorOverlay {
                 bounds: n.screen_bounds,

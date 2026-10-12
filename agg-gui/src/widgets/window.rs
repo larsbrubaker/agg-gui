@@ -438,6 +438,19 @@ impl Window {
         }
     }
 
+    /// Show or hide through [`show`](Self::show) / [`hide`](Self::hide) and
+    /// the wired `visible_cell`, the generic visibility hook's body.
+    pub(crate) fn set_requested_visible(&mut self, visible: bool) {
+        if visible {
+            self.show();
+        } else {
+            self.hide();
+        }
+        if let Some(ref cell) = self.visible_cell {
+            cell.set(visible);
+        }
+    }
+
     fn layer_outsets() -> (f64, f64, f64, f64) {
         let left = (SHADOW_BLUR - SHADOW_DX).max(0.0).ceil();
         let bottom = (SHADOW_BLUR + SHADOW_DY).ceil();

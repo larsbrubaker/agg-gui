@@ -407,6 +407,17 @@ impl TreeRow {
         self
     }
 
+    /// Draw the name in the dim text colour (see `TreeNode::dimmed`).
+    pub fn with_name_dimmed(mut self, dimmed: bool) -> Self {
+        if let Some(label) = self.children[3]
+            .as_any_mut()
+            .and_then(|a| a.downcast_mut::<Label>())
+        {
+            label.set_dim(dimmed);
+        }
+        self
+    }
+
     /// The node's own tooltip; an empty string counts as none.
     pub fn with_node_tooltip(mut self, tooltip: Option<String>) -> Self {
         self.node_tooltip = tooltip.filter(|t| !t.is_empty());

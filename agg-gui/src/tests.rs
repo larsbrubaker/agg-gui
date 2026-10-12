@@ -74,6 +74,7 @@ mod image_icons;
 mod inspector_hover;
 mod inspector_tree;
 mod inspector_tests;
+mod inspector_widget_hooks;
 mod keyboard_lift;
 mod keyboard_lift_harness;
 mod keyboard_lift_offscreen;

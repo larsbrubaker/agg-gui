@@ -244,6 +244,13 @@ impl Widget for Clickable {
     fn is_enabled(&self) -> bool {
         self.enabled_fn.as_ref().map(|f| f()).unwrap_or(true)
     }
+
+    /// The inspector's `enabled` row (C# `Enabled = …`): pins the flag,
+    /// replacing any bound enabled closure.
+    fn try_set_enabled(&mut self, enabled: bool) -> bool {
+        self.enabled_fn = Some(Rc::new(move || enabled));
+        true
+    }
     fn is_focusable(&self) -> bool {
         self.is_enabled()
     }

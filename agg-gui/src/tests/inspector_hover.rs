@@ -41,6 +41,7 @@ fn make_nodes() -> Rc<RefCell<Vec<InspectorNode>>> {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
         InspectorNode {
             type_name: "Child",
@@ -55,6 +56,7 @@ fn make_nodes() -> Rc<RefCell<Vec<InspectorNode>>> {
             visible: true,
             enabled: true,
             child_count: 0,
+            scale: 1.0,
         },
     ]))
 }

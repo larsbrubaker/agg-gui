@@ -10,8 +10,8 @@
 //! test drives that real pipeline: a sample tree of `Fixed` widgets (the C#
 //! `GuiWidget` page, box, leaf, hidden and disabled widgets), a real
 //! `InspectorPanel`, and synthetic events in panel-local coordinates.  Where the
-//! two differ the comment at the assertion says how.  Invisible widgets are left
-//! out of agg-gui's snapshot, so the C# five nodes are four here (no "Hidden").
+//! two differ the comment at the assertion says how.  The snapshot lists hidden
+//! widgets too, as C#'s, so the sample's five nodes match C#'s.
 //! `Fixed` carries its own padding, visible and enabled flags and honours its
 //! `WidgetBase` size constraints, so it overrides the `Widget` trait's
 //! `try_set_padding` / `try_set_visible` / `try_set_enabled` hooks the padding,
@@ -468,7 +468,7 @@ fn clicking_a_value_queues_an_edit_that_lands_on_idle() {
     click_value(&mut panel, "margin.top", false);
     click_value(&mut panel, "h_anchor", false);
     click_value(&mut panel, "visible", true);
-    land(&mut page, &mut panel);
+    let rec = land(&mut page, &mut panel);
     assert_eq!(page.children[0].margin().top, 4.0 - inset_step(4.0));
     assert_eq!(
         page.children[0].h_anchor(),
@@ -476,14 +476,8 @@ fn clicking_a_value_queues_an_edit_that_lands_on_idle() {
     );
     assert!(!page.children[0].is_visible());
 
-    // agg-gui's snapshot leaves a hidden widget out, so its rows are gone
-    // until it shows again (C# keeps listing it); show it to go on.
-    assert!(page.children[0].try_set_visible(true));
-    refresh(&mut page, &nodes, &mut panel);
-    panel.select(Some(BOX));
-
-    // A read-only row (x, and padding, as agg-gui's) queues nothing.
-    let rec = paint(&mut panel);
+    // A read-only row (x, and padding, as agg-gui's) queues nothing.  The
+    // hidden box stays listed and selected, as in C#.
     for row in ["x", "pad.right"] {
         assert!(panel.value_bounds(row).is_none());
         let (_, _, y) = rec
@@ -674,9 +668,8 @@ fn saved_state_restores_expansion_selection_and_split_by_position() {
     panel.set_expanded(PAGE, false);
     panel.set_properties_height(150.0);
     let saved = panel.saved_state();
-    // Everything but the collapsed page starts open (agg-gui's snapshot
-    // leaves the hidden widget out, so C#'s first five are four here).
-    assert_eq!(&saved.expanded[..4], &[false, true, true, true]);
+    // The sample's five widgets: everything but the collapsed page starts open.
+    assert_eq!(&saved.expanded[..5], &[false, true, true, true, true]);
     assert_eq!(saved.selected, Some(LEAF));
 
     // A new run: new widgets, same shape. The state waits for the first collection.

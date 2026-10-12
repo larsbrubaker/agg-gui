@@ -106,6 +106,12 @@ impl Widget for Conditional {
         self.visible.get()
     }
 
+    /// The inspector's `visible` row: sets the shared visibility cell.
+    fn try_set_visible(&mut self, visible: bool) -> bool {
+        self.visible.set(visible);
+        true
+    }
+
     fn on_event(&mut self, _e: &Event) -> EventResult {
         EventResult::Ignored
     }

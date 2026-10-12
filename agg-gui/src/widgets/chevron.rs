@@ -125,6 +125,12 @@ impl Widget for ChevronWidget {
         self.enabled.get()
     }
 
+    /// The inspector's `enabled` row: sets the (possibly shared) cell.
+    fn try_set_enabled(&mut self, enabled: bool) -> bool {
+        self.enabled.set(enabled);
+        true
+    }
+
     fn hit_test(&self, local: Point) -> bool {
         self.enabled.get()
             && local.x >= 0.0

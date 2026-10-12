@@ -217,6 +217,11 @@ impl Widget for Container {
     fn padding(&self) -> Insets {
         self.props.inner_padding
     }
+    /// The inspector's padding edits (C# `Padding = …`).
+    fn try_set_padding(&mut self, padding: Insets) -> bool {
+        self.props.inner_padding = padding;
+        true
+    }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor
     }

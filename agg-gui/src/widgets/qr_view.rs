@@ -132,6 +132,16 @@ impl Widget for QrView {
         self.is_shown()
     }
 
+    /// The inspector's `visible` row: sets the bound visibility cell, or
+    /// gives the view one when it had none (it was always shown).
+    fn try_set_visible(&mut self, visible: bool) -> bool {
+        match &self.visible {
+            Some(cell) => cell.set(visible),
+            None => self.visible = Some(Rc::new(Cell::new(visible))),
+        }
+        true
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
         available

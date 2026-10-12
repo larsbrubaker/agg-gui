@@ -14,6 +14,15 @@ impl Widget for Window {
         self.requested_visible() || self.fade_out_active.get()
     }
 
+    /// The inspector's `visible` row (C# `Visible = …`): shows or hides the
+    /// window as [`Window::show`] / [`Window::hide`] do, keeping a wired
+    /// `visible_cell` in step (it is what [`is_visible`](Self::is_visible)
+    /// reads).  Hiding is not closing: `on_close` does not run.
+    fn try_set_visible(&mut self, visible: bool) -> bool {
+        self.set_requested_visible(visible);
+        true
+    }
+
     /// Collapsed or closed windows should not keep the host loop awake.
     fn needs_draw(&self) -> bool {
         if !self.is_visible() || self.collapsed {

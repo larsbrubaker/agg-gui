@@ -45,6 +45,7 @@ fn row_signature(tree: &TreeView, node: &TreeNode, flat: &FlatRow) -> u64 {
     node.secondary_text.hash(&mut h);
     node.fraction.map(f32::to_bits).hash(&mut h);
     node.tooltip.hash(&mut h);
+    node.dimmed.hash(&mut h);
     Arc::as_ptr(&tree.font).hash(&mut h);
     tree.icon_font.as_ref().map(Arc::as_ptr).hash(&mut h);
     tree.font_size.to_bits().hash(&mut h);
@@ -77,6 +78,7 @@ impl TreeView {
         .with_icon_glyph(node.icon_glyph.map(|g| (g, Arc::clone(glyph_font))))
         .with_trailing(node.secondary_text.clone(), node.fraction)
         .with_name_ellipsis(self.name_ellipsis)
+        .with_name_dimmed(node.dimmed)
         .with_node_tooltip(node.tooltip.clone())
     }
 

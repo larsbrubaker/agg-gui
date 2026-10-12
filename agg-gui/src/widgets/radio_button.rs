@@ -366,6 +366,11 @@ impl Widget for RadioButton {
     fn is_enabled(&self) -> bool {
         self.enabled
     }
+    /// The inspector's `enabled` row: [`RadioButton::set_enabled`].
+    fn try_set_enabled(&mut self, enabled: bool) -> bool {
+        self.set_enabled(enabled);
+        true
+    }
     fn is_focusable(&self) -> bool {
         self.enabled
     }

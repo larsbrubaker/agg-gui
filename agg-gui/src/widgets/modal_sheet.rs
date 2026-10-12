@@ -335,6 +335,12 @@ impl Widget for ModalSheet {
         self.visible.get()
     }
 
+    /// The inspector's `visible` row: sets the shared visibility cell.
+    fn try_set_visible(&mut self, visible: bool) -> bool {
+        self.visible.set(visible);
+        true
+    }
+
     fn has_active_modal(&self) -> bool {
         self.visible.get()
     }

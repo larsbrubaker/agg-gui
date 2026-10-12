@@ -286,6 +286,11 @@ impl Widget for AbsoluteLayout {
     fn padding(&self) -> Insets {
         self.padding
     }
+    /// The inspector's padding edits (C# `Padding = …`).
+    fn try_set_padding(&mut self, padding: Insets) -> bool {
+        self.padding = padding;
+        true
+    }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor
     }

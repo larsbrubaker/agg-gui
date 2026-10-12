@@ -271,6 +271,14 @@ impl Checkbox {
 
 impl Widget for Checkbox {
     crate::widgets::widget_as_any!();
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+    /// The inspector's `enabled` row: [`Checkbox::set_enabled`].
+    fn try_set_enabled(&mut self, enabled: bool) -> bool {
+        self.set_enabled(enabled);
+        true
+    }
     fn type_name(&self) -> &'static str {
         "Checkbox"
     }
